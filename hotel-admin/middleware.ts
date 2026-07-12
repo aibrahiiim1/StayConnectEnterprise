@@ -16,7 +16,11 @@ export function middleware(req: NextRequest) {
   const hasSession = req.cookies.has("sc_edge_session");
 
   const isLogin = pathname === "/login";
-  const isPublic = isLogin || pathname.startsWith("/_next") || pathname.startsWith("/favicon");
+  const isPublic =
+    isLogin ||
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon") ||
+    pathname.startsWith("/icon"); // app/icon.svg — the tab favicon, must not redirect
 
   if (!hasSession && !isPublic) {
     const url = req.nextUrl.clone();
@@ -34,5 +38,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icon.svg).*)"],
 };

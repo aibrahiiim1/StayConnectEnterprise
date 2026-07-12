@@ -10,11 +10,14 @@ vendor-signed assignment you issue after claiming it.
 | Console | URL | Login |
 |---------|-----|-------|
 | **Central Control Center** (cloud-admin) | `https://150.0.0.252` | `admin@stayconnect.local` / `ProofAdmin2026!` (change this) |
-| **Appliance Hotel Admin** | `https://admin.stayconnect.local` | your local Hotel-IT operator |
+| **Appliance Hotel Admin** | `https://hotel.stayconnect.local` | your local Hotel-IT operator |
 
-`admin.stayconnect.local` is a Caddy vhost on the appliance. If your workstation
-can't resolve it, add a hosts entry pointing at the appliance's management IP, e.g.
-`172.21.60.23  admin.stayconnect.local`, or use the appliance's DNS.
+`hotel.stayconnect.local` is a Caddy vhost on the appliance (it fronts the Hotel
+Admin UI on `:3100`, which proxies its own `/api/edge/*` calls to `edged` on
+`:8090`). If your workstation can't resolve it, add a hosts entry pointing at the
+appliance's management IP, e.g. `172.21.60.23  hotel.stayconnect.local`, or use the
+appliance's DNS. (Note: `admin.stayconnect.local` is a *different*, legacy vhost and
+is not the Hotel Admin.)
 
 Reference values for this environment: serial **APP-DEV-0001**, tenant **Harborview
 Hotels Group**, site **Harborview Marina Hotel**.
@@ -31,7 +34,7 @@ Hotels Group**, site **Harborview Marina Hotel**.
 
 ## Step 2 — Enroll the appliance (Hotel Admin, on the box)
 
-1. Open `https://admin.stayconnect.local` and go to **Setup → Enrollment**.
+1. Open `https://hotel.stayconnect.local` and go to **Setup → Enrollment**.
 2. Step 3 "Enrollment": paste the token, confirm the **Serial** (pre-filled with
    `APP-DEV-0001`), and click **Enroll**.
 3. The appliance generates its Ed25519 identity, enrols with Central, and restarts
