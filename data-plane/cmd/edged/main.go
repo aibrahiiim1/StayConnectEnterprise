@@ -163,6 +163,14 @@ func main() {
 			r.With(s.requireRole("license", permWrite)).Post("/license", s.licenseInstall)
 			r.With(s.requireRole("license", permWrite)).Post("/license/refresh", s.licenseRefresh)
 
+			// Local enrollment wizard. These also exist under /network/setup/* for
+			// backwards compatibility, but the wizard is a SETUP concern, not a
+			// networking one, and the Hotel Admin UI calls them here — without this
+			// the whole wizard renders "Could not read setup status: HTTP 404".
+			r.Get("/setup/status", s.setupStatus)
+			r.With(s.requireRole("network", permWrite)).Post("/setup/enroll", s.setupEnroll)
+			r.With(s.requireRole("network", permWrite)).Post("/setup/offline-import", s.setupOfflineImport)
+
 			mountResource(r, s, "operators", s.operatorsRoutes)
 			mountResource(r, s, "guest-access-plans", s.guestAccessPlansRoutes)
 			mountResource(r, s, "voucher-batches", s.voucherBatchesRoutes)

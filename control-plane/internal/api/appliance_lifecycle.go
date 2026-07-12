@@ -92,12 +92,16 @@ func (b *Base) tenantRequest(kind string) http.HandlerFunc {
 func (b *Base) listPendingAppliances(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
+	// Everything AWAITING ASSIGNMENT, not merely awaiting claim. A claimed-but-
+	// unassigned appliance has no tenant yet, so it appears in no tenant-scoped
+	// list — without 'claimed' here it would vanish from the console after being
+	// claimed and could never be assigned.
 	rows, err := b.DB.Query(ctx, `
         SELECT id::text, serial, COALESCE(hardware_fingerprint,''), COALESCE(public_key,''),
                COALESCE(last_public_ip,''), COALESCE(version,''), lifecycle_state,
                COALESCE(first_seen_at,created_at), last_seen_at
           FROM appliances
-         WHERE lifecycle_state IN ('pending_approval','pending_enrollment')
+         WHERE lifecycle_state IN ('pending_approval','pending_enrollment','claimed')
          ORDER BY created_at DESC LIMIT 200`)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")

@@ -55,6 +55,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "gen-assignment-key":
+			if err := runGenAssignmentKey(os.Args[2:]); err != nil {
+				slog.Error("gen-assignment-key failed", "err", err)
+				os.Exit(1)
+			}
+			return
 		case "serve", "":
 			// fallthrough to default
 		default:
@@ -237,16 +243,31 @@ func main() {
 			"path", vendorKeyPath, "err", err)
 	}
 
-	// Assignment-signing key: reuse the vendor key the appliance already trusts.
-	// Used to sign appliance-assignment documents delivered over the appliance
-	// channel. Absent/invalid → signed assignments disabled (assign still updates
-	// the Central DB, but the appliance won't receive a signed assignment).
+	// DEDICATED assignment-signing key. Deliberately a separate key from the
+	// license / command / update / CA / auth-callout keys: an assignment must never
+	// be signable by any of those, and the appliance enforces this by trusting only
+	// the keys in its local assignment trust registry. Absent/invalid → signed
+	// assignments disabled (assign still updates Central's DB, but no signed doc).
+	assignKeyPath := envOrDefault("CTRLAPI_ASSIGN_KEY", "/etc/stayconnect/assignment-signing.key")
 	var assignKey ed25519.PrivateKey
-	if raw, err := os.ReadFile(vendorKeyPath); err == nil && len(raw) == ed25519.PrivateKeySize {
+	if raw, err := os.ReadFile(assignKeyPath); err == nil && len(raw) == ed25519.PrivateKeySize {
 		assignKey = ed25519.PrivateKey(raw)
-		slog.Info("assignment signing key loaded", "key_id", assignment.KeyID(assignKey.Public().(ed25519.PublicKey)))
+		assignPub := assignKey.Public().(ed25519.PublicKey)
+		if vraw, verr := os.ReadFile(vendorKeyPath); verr == nil && len(vraw) == ed25519.PrivateKeySize &&
+			string(vraw) == string(raw) {
+			slog.Error("assignment signing key MUST NOT be the vendor license key — refusing to sign assignments",
+				"path", assignKeyPath)
+			assignKey = nil
+		} else {
+			slog.Info("dedicated assignment signing key loaded",
+				"key_id", assignment.KeyID(assignPub), "path", assignKeyPath)
+			if err := api.RegisterActiveKey(rootCtx, &api.Base{DB: pool}, assignPub, "ctrlapi boot"); err != nil {
+				slog.Warn("assignment signing key registration failed", "err", err)
+			}
+		}
 	} else {
-		slog.Warn("assignment signing key unavailable — signed assignments disabled", "path", vendorKeyPath)
+		slog.Warn("dedicated assignment signing key unavailable — signed assignments disabled",
+			"path", assignKeyPath, "hint", "run: ctrlapi gen-assignment-key --out "+assignKeyPath)
 	}
 
 	// Appliance certificate authority (Phase 3 PKI/mTLS). The CA private key

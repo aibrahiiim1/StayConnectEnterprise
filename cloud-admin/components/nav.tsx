@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, MapPin, Server, Radar, Users, LogOut,
-  CreditCard, BadgeCheck, ScrollText, Building2, PlugZap,
+  CreditCard, BadgeCheck, ScrollText, Building2, PlugZap, SlidersHorizontal,
 } from "lucide-react";
 
 type Item = { href: string; label: string; icon: any };
@@ -30,6 +30,7 @@ const SECTIONS: Section[] = [
     title: "Commercial",
     items: [
       { href: "/tenants",      label: "Customers",       icon: Building2 },
+      { href: "/commercial",   label: "Plans & limits",  icon: SlidersHorizontal },
       { href: "/subscription", label: "Commercial plan", icon: CreditCard },
       { href: "/licenses",     label: "Licenses",        icon: BadgeCheck },
     ],

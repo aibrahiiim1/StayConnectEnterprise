@@ -442,7 +442,13 @@ func main() {
 		if c.Serial == "" {
 			c.Serial = ident.Serial
 		}
-		if aTen, aSite, aState, aVer := asgStore.Resolved(); aTen != "" && aSite != "" {
+		// The persisted assignment is RE-VERIFIED on every boot against the local
+		// trust registry (signature by an ACTIVE dedicated assignment key + binding
+		// to this appliance). An appliance never operates under an assignment it
+		// cannot verify — e.g. one signed by a retired key, or by the license /
+		// command / update key, which are absent from the registry.
+		aTen, aSite, aState, aVer := verifiedAssignment(asgStore, ident)
+		if aTen != "" && aSite != "" {
 			c.TenantID, c.SiteID = aTen, aSite
 			slog.Info("assignment resolved", "tenant_id", aTen, "site_id", aSite, "version", aVer)
 		} else if aState == "" && c.TenantID != "" && c.SiteID != "" {

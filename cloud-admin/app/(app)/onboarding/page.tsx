@@ -58,14 +58,24 @@ export default function OnboardingPage() {
   const load = useCallback(async () => {
     setErr(null);
     try {
-      const [p, t, a] = await Promise.all([
+      const [p, t] = await Promise.all([
         api.get<{ data: Pending[] }>("/cloud/v1/appliances-admin/pending"),
         api.get<{ data: Tenant[] }>("/v1/tenants"),
-        api.get<{ data: Appliance[] }>("/cloud/v1/appliances").catch(() => ({ data: [] as Appliance[] })),
       ]);
       setPending(p.data ?? []);
-      setTenants(t.data ?? []);
-      setAppliances(a.data ?? []);
+      const tl = t.data ?? [];
+      setTenants(tl);
+      // The appliances endpoint is tenant-scoped (it 400s without one), so a
+      // platform-wide view has to fan out across tenants and merge.
+      const perTenant = await Promise.all(
+        tl.map((tn) =>
+          api.get<{ data: Appliance[] }>(`/v1/appliances?tenant_id=${tn.id}`)
+            .then((r) => r.data ?? [])
+            .catch(() => [] as Appliance[])
+        )
+      );
+      const a = { data: perTenant.flat() };
+      setAppliances(a.data);
       // assignment status for every known appliance
       const all = [...(p.data ?? []).map((x) => x.id), ...(a.data ?? []).map((x) => x.id)];
       const uniq = Array.from(new Set(all));

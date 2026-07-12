@@ -45,6 +45,8 @@ export default function LicensesPage() {
     if (!tenantID) return;
     setBusy(true); setErr(null); setIssued(null);
     const form = new FormData(e.currentTarget);
+    // Capture before awaiting: React nulls e.currentTarget after the first await.
+    const el = e.currentTarget;
     try {
       const res = await withStepUp(() => api.post<unknown>(`/cloud/v1/licenses`, {
         tenant_id: tenantID,
@@ -54,7 +56,7 @@ export default function LicensesPage() {
       }));
       setIssued(JSON.stringify(res, null, 2));
       setShowNew(false);
-      (e.currentTarget as HTMLFormElement).reset();
+      el.reset();
       load();
     } catch (e) { setErr(errMsg(e)); }
     finally { setBusy(false); }

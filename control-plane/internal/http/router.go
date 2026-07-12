@@ -157,14 +157,17 @@ func NewRouter(d Deps) http.Handler {
 			r.Get("/auth/whoami", adeps.whoami)
 			r.Post("/auth/reauth", adeps.reauth)
 
-			base := &api.Base{DB: d.DB}
+			// Redis is REQUIRED here: RequireReauth fails closed without it, so any
+			// step-up-gated route on /v1 (plan limits, tenant limit overrides,
+			// subscription terms) would 403 forever even after a successful reauth.
+			base := &api.Base{DB: d.DB, Redis: d.Redis}
 			// gbase: DEPRECATED guest-domain compatibility adapters — rows
 			// live in the site database post-cutover (Deps.GuestDB) while
 			// commercial limits stay in the cloud schema (LimitsDB).
-			gbase := &api.Base{DB: guestDB, LimitsDB: d.DB}
+			gbase := &api.Base{DB: guestDB, LimitsDB: d.DB, Redis: d.Redis}
 			// Appliance routes are cloud-domain but effective-config reads
 			// site-owned tables (PMS providers, walled garden) → GuestDB.
-			abase := &api.Base{DB: d.DB, GuestDB: guestDB}
+			abase := &api.Base{DB: d.DB, GuestDB: guestDB, Redis: d.Redis}
 			r.Mount("/tenants", base.TenantsRoutes())
 			r.Mount("/sites", base.SitesRoutes())
 			r.Mount("/appliances", abase.AppliancesRoutes())
@@ -216,6 +219,8 @@ func NewRouter(d Deps) http.Handler {
 			// Platform-only appliance enrollment lifecycle (pending, claim,
 			// assign, revoke, security alerts) — permission-gated, no tenant scope.
 			r.Mount("/appliances-admin", abase.LifecycleRoutes())
+			// Dedicated assignment-signing key lifecycle (list, retire/rotate).
+			r.Mount("/assignment-keys", (&api.AssignmentKeysBase{Base: base}).Routes())
 			// Platform certificate lifecycle (list, issue, revoke, CA).
 			if d.CA != nil {
 				certBase := &api.CertBase{Base: base, CA: d.CA, ClientValid: 90 * 24 * time.Hour}

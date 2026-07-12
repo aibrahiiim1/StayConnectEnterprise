@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -13,11 +14,53 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 )
 
 // assignmentStore is the appliance-local source of truth for tenant/site.
 func (s *server) assignmentStore() *assignment.Store {
 	return &assignment.Store{Dir: envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
+}
+
+func assignmentTrustPath() string {
+	return envOr("SCD_ASSIGNMENT_TRUST", "/etc/stayconnect/assignment-trust.json")
+}
+
+// verifiedAssignment loads the persisted assignment and RE-VERIFIES it on boot
+// against the local trust registry: the signature must come from an ACTIVE
+// dedicated assignment-signing key, and the document must be bound to THIS
+// appliance. A document signed by a retired key — or by the license / command /
+// update / CA key, none of which are in the registry — is refused, and the
+// appliance falls back to awaiting-assignment rather than operating on an
+// unverifiable identity.
+//
+// Returns (tenantID, siteID, state, version); tenant/site are non-empty only for a
+// verified 'assigned' document.
+func verifiedAssignment(store *assignment.Store, ident *identity.Identity) (string, string, string, int64) {
+	d, err := store.Load()
+	if err != nil || d == nil {
+		return "", "", "", 0
+	}
+	reg, err := assignment.LoadRegistry(assignmentTrustPath())
+	if err != nil {
+		slog.Error("assignment: trust registry unavailable — refusing to trust the persisted assignment",
+			"path", assignmentTrustPath(), "err", err)
+		return "", "", "", 0
+	}
+	fpr := ""
+	if raw, e := base64.RawStdEncoding.DecodeString(ident.PublicKeyB64); e == nil && len(raw) == ed25519.PublicKeySize {
+		fpr = applianceauth.KeyID(ed25519.PublicKey(raw))
+	}
+	// haveVersion = d.Version-1 so the persisted document itself is admissible.
+	if reason := assignment.AcceptForRegistry(reg, d, ident.ApplianceID, ident.Serial, fpr, d.Version-1, time.Now()); reason != "" {
+		slog.Error("assignment: persisted assignment FAILED verification — ignoring it",
+			"reason", reason, "signer_key_id", d.SignerKeyID, "version", d.Version)
+		return "", "", "", 0
+	}
+	if d.State == assignment.StateAssigned {
+		return d.TenantID, d.SiteID, d.State, d.Version
+	}
+	return "", "", d.State, d.Version
 }
 
 // cloudHTTPClient is the plain-HTTPS client used before an mTLS client cert
@@ -34,12 +77,17 @@ func (s *server) cloudHTTPClient() *http.Client {
 // new assignment. This is the ONLY channel by which an appliance adopts a
 // tenant/site; there is no env/identity hard-wiring.
 func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
-	raw, err := os.ReadFile(envOr("SCD_VENDOR_PUB", "/etc/stayconnect/vendor-license.pub"))
-	if err != nil || len(raw) != ed25519.PublicKeySize {
-		slog.Warn("assignment: vendor public key unavailable — assignment agent disabled")
+	// The assignment trust registry is the appliance's LOCAL list of assignment-
+	// signing public keys. It is re-read on every poll so a rotated registry takes
+	// effect without a restart. It holds ONLY assignment keys — the license,
+	// command, update, CA and auth-callout keys are absent, so a document signed by
+	// any of those is rejected as an unknown signer.
+	trustPath := envOr("SCD_ASSIGNMENT_TRUST", "/etc/stayconnect/assignment-trust.json")
+	if _, err := assignment.LoadRegistry(trustPath); err != nil {
+		slog.Warn("assignment: trust registry unavailable — assignment agent disabled",
+			"path", trustPath, "err", err)
 		return
 	}
-	pub := ed25519.PublicKey(raw)
 	store := s.assignmentStore()
 
 	// currentVersion = the version already applied on disk (0 if none).
@@ -48,14 +96,20 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 		currentVersion = d.Version
 	}
 	slog.Info("assignment: agent started", "appliance_id", s.applID, "serial", s.serial,
-		"identity_fpr", s.identityKeyFpr, "applied_version", currentVersion, "ctrl_base", ctrlBase)
+		"identity_fpr", s.identityKeyFpr, "applied_version", currentVersion,
+		"ctrl_base", ctrlBase, "trust_registry", trustPath)
 
 	poll := func() {
 		doc, ok := s.fetchAssignment(ctx, ctrlBase)
 		if !ok || doc == nil {
 			return
 		}
-		reason := assignment.AcceptFor(pub, doc, s.applID, s.serial, s.identityKeyFpr, currentVersion, time.Now())
+		reg, err := assignment.LoadRegistry(trustPath) // re-read: supports live rotation
+		if err != nil {
+			slog.Error("assignment: trust registry unreadable", "err", err)
+			return
+		}
+		reason := assignment.AcceptForRegistry(reg, doc, s.applID, s.serial, s.identityKeyFpr, currentVersion, time.Now())
 		if reason != "" {
 			// Not newer / not for us / bad signature — ignore quietly (a same or
 			// older version is the steady state between reassignments).
