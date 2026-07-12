@@ -47,8 +47,8 @@ func waitForAssignment(ctx context.Context, store *assignment.Store) {
 // to attribute usage to the previous one.
 func watchAssignmentReexec(ctx context.Context, store *assignment.Store) {
 	baseline := int64(0)
-	if d, err := store.Load(); err == nil && d != nil {
-		baseline = d.Version
+	if r, err := store.Load(); err == nil && r != nil {
+		baseline = r.Version
 	}
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()
@@ -57,13 +57,13 @@ func watchAssignmentReexec(ctx context.Context, store *assignment.Store) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			d, err := store.Load()
-			if err != nil || d == nil {
+			r, err := store.Load()
+			if err != nil || r == nil {
 				continue
 			}
-			if d.Version != baseline {
+			if r.Version != baseline {
 				slog.Info("acctd: assignment changed; re-executing to adopt it",
-					"from_version", baseline, "to_version", d.Version)
+					"from_version", baseline, "to_version", r.Version)
 				reexecSelf()
 			}
 		}

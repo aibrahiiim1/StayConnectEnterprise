@@ -205,15 +205,23 @@ func (b *Base) assignAppliance(w http.ResponseWriter, r *http.Request) {
 		id, in.TenantID, in.SiteID, prevT, prevS, operatorID, clientIPFromReq(r), in.Reason)
 	recordLifecycle(ctx, b.DB, id, prevState, "assigned", emailOf(sess), clientIPFromReq(r), in.Reason)
 	// Deliver the assignment to the appliance as a vendor-signed document it can
-	// verify + persist as its local source of truth (replaces env/identity IDs).
+	// verify + persist as its local source of truth.
+	//
+	// If we cannot SIGN it, the assign has FAILED — a Central-only assignment the
+	// appliance can never receive is exactly the broken behavior this design
+	// removes. Revert the row and tell the operator, rather than reporting success
+	// for a box that will never hear about it. (Most common cause: the configured
+	// assignment key is verify_only/revoked, i.e. a rotation is half-finished.)
 	assignVersion := int64(0)
 	if err := b.issueAssignment(ctx, id, "assigned"); err != nil {
-		// Non-fatal to the operator action, but visible: the appliance will keep
-		// polling and pick up the assignment once issuance succeeds.
+		_, _ = b.DB.Exec(ctx, `UPDATE appliances SET tenant_id=NULLIF($2,'')::uuid, site_id=NULLIF($3,'')::uuid,
+		    lifecycle_state=$4, updated_at=now() WHERE id=$1`, id, prevT, prevS, prevState)
 		audit.Op(ctx, b.DB, r, "appliance.assignment_sign_failed", "appliance", id, map[string]any{"error": err.Error()})
-	} else {
-		_ = b.DB.QueryRow(ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1`, id).Scan(&assignVersion)
+		Fail(w, r, http.StatusServiceUnavailable, "assignment_unsignable",
+			"assignment could not be signed, so the appliance could never receive it — the assign was rolled back: "+err.Error())
+		return
 	}
+	_ = b.DB.QueryRow(ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1`, id).Scan(&assignVersion)
 	audit.Op(ctx, b.DB, r, "appliance.assigned", "appliance", id, map[string]any{
 		"_tenant_id": in.TenantID, "site_id": in.SiteID, "prev_tenant_id": prevT, "reason": in.Reason,
 		"assignment_version": assignVersion})

@@ -58,12 +58,18 @@ func TestAcceptForMatrix(t *testing.T) {
 	if r := AcceptFor(pub, base(), "app-1", "SN-1", "fpr-1", 5, now); r == "" {
 		t.Fatal("older version accepted")
 	}
-	// expired
+	// EXPIRED IS NOT A REJECTION. The assignment is durable configuration, not an
+	// auth token: rejecting it on expiry would strand a hotel whenever Central is
+	// unreachable. Expiry only marks the assignment stale (see IsExpired /
+	// Store.Status). See offline_test.go.
 	exp := mkDoc()
 	exp.ExpiresAt = now.Add(-time.Hour).Unix()
 	Sign(priv, exp)
-	if r := AcceptFor(pub, exp, "app-1", "SN-1", "fpr-1", 1, now); r == "" {
-		t.Fatal("expired assignment accepted")
+	if r := AcceptFor(pub, exp, "app-1", "SN-1", "fpr-1", 1, now); r != "" {
+		t.Fatalf("expired assignment rejected (%s) — this would unassign a hotel during an outage", r)
+	}
+	if !IsExpired(exp, now) {
+		t.Fatal("expired document not reported as expired")
 	}
 	// assigned without tenant/site
 	bad := mkDoc()

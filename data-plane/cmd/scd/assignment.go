@@ -37,10 +37,11 @@ func assignmentTrustPath() string {
 // Returns (tenantID, siteID, state, version); tenant/site are non-empty only for a
 // verified 'assigned' document.
 func verifiedAssignment(store *assignment.Store, ident *identity.Identity) (string, string, string, int64) {
-	d, err := store.Load()
-	if err != nil || d == nil {
+	rec, err := store.Load()
+	if err != nil || rec == nil || rec.Current == nil {
 		return "", "", "", 0
 	}
+	d := rec.Current
 	reg, err := assignment.LoadRegistry(assignmentTrustPath())
 	if err != nil {
 		slog.Error("assignment: trust registry unavailable — refusing to trust the persisted assignment",
@@ -52,12 +53,21 @@ func verifiedAssignment(store *assignment.Store, ident *identity.Identity) (stri
 		fpr = applianceauth.KeyID(ed25519.PublicKey(raw))
 	}
 	// haveVersion = d.Version-1 so the persisted document itself is admissible.
+	// A verify_only signer still verifies here — that is what lets an appliance
+	// holding an older-key assignment reboot cleanly mid-rotation.
 	if reason := assignment.AcceptForRegistry(reg, d, ident.ApplianceID, ident.Serial, fpr, d.Version-1, time.Now()); reason != "" {
 		slog.Error("assignment: persisted assignment FAILED verification — ignoring it",
 			"reason", reason, "signer_key_id", d.SignerKeyID, "version", d.Version)
 		return "", "", "", 0
 	}
-	if d.State == assignment.StateAssigned {
+	// Expiry is NOT a de-authorisation: a stale assignment keeps the hotel running
+	// through a Central outage. Warn, but keep operating on the last known good.
+	if assignment.IsExpired(d, time.Now()) {
+		slog.Warn("assignment: STALE (past expires_at, not refreshed) — retaining last-known-good tenant/site; guest operation continues",
+			"version", d.Version, "expired_at", d.ExpiresAt, "stale_since", rec.StaleSince,
+			"last_refresh_success", rec.LastRefreshSuccess)
+	}
+	if assignment.Grants(d.State) {
 		return d.TenantID, d.SiteID, d.State, d.Version
 	}
 	return "", "", d.State, d.Version
@@ -68,6 +78,38 @@ func verifiedAssignment(store *assignment.Store, ident *identity.Identity) (stri
 // default roots verify it (same approach as the license fetcher).
 func (s *server) cloudHTTPClient() *http.Client {
 	return &http.Client{Timeout: 10 * time.Second}
+}
+
+// assignmentStatus surfaces the durable assignment record for the setup wizard and
+// the Platform. `status: stale` means the document is past expires_at and Central
+// has not refreshed it — the appliance KEEPS operating on it; this is a warning for
+// operators, not a loss of authority.
+func (s *server) assignmentStatus() map[string]any {
+	store := s.assignmentStore()
+	rec, err := store.Load()
+	if err != nil || rec == nil || rec.Current == nil {
+		return map[string]any{"status": assignment.StatusNone, "assigned": false}
+	}
+	d := rec.Current
+	out := map[string]any{
+		"status":               store.Status(), // current | stale
+		"assigned":             assignment.Grants(d.State),
+		"lifecycle_state":      d.State,
+		"version":              rec.Version,
+		"signer_key_id":        rec.SignerKeyID,
+		"tenant_id":            d.TenantID,
+		"site_id":              d.SiteID,
+		"adopted_at":           rec.AdoptedAt,
+		"last_refresh_success": rec.LastRefreshSuccess,
+		"last_refresh_attempt": rec.LastRefreshAttempt,
+		"stale_since":          rec.StaleSince,
+		"expires_at":           d.ExpiresAt,
+		"expired":              assignment.IsExpired(d, time.Now()),
+	}
+	if rec.Previous != nil {
+		out["previous_version"] = rec.Previous.Version
+	}
+	return out
 }
 
 // startAssignmentAgent polls Central for this appliance's signed assignment,
@@ -92,18 +134,26 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 
 	// currentVersion = the version already applied on disk (0 if none).
 	currentVersion := int64(0)
-	if d, e := store.Load(); e == nil && d != nil {
-		currentVersion = d.Version
+	if rec, e := store.Load(); e == nil && rec != nil {
+		currentVersion = rec.Version
 	}
 	slog.Info("assignment: agent started", "appliance_id", s.applID, "serial", s.serial,
 		"identity_fpr", s.identityKeyFpr, "applied_version", currentVersion,
-		"ctrl_base", ctrlBase, "trust_registry", trustPath)
+		"ctrl_base", ctrlBase, "trust_registry", trustPath, "status", store.Status())
 
 	poll := func() {
 		doc, ok := s.fetchAssignment(ctx, ctrlBase)
 		if !ok || doc == nil {
+			// Central unreachable, or nothing to hand us. Record the attempt so an
+			// operator can see refresh is failing. This NEVER downgrades or clears
+			// the assignment — an unreachable Central must not unassign a hotel.
+			store.NoteRefresh(false)
 			return
 		}
+		// Central answered: refresh succeeded, so we are no longer stale even if the
+		// document we hold is the same one.
+		store.NoteRefresh(true)
+
 		reg, err := assignment.LoadRegistry(trustPath) // re-read: supports live rotation
 		if err != nil {
 			slog.Error("assignment: trust registry unreadable", "err", err)
@@ -118,18 +168,21 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 			}
 			return
 		}
-		if err := store.Save(doc); err != nil {
+		// Adopt: rotates the outgoing document into `previous` (rollback-safe) and
+		// resets staleness.
+		if err := store.Adopt(doc); err != nil {
 			slog.Error("assignment: persist failed", "err", err)
 			return
 		}
 		slog.Info("assignment: applied signed assignment", "version", doc.Version, "state", doc.State,
-			"tenant_id", doc.TenantID, "site_id", doc.SiteID)
+			"signer_key_id", doc.SignerKeyID, "tenant_id", doc.TenantID, "site_id", doc.SiteID)
 		s.repointGuestNetworks(ctx, doc)
 		prevVersion := currentVersion
 		currentVersion = doc.Version
 
-		// Decide whether the operational identity changed enough to re-exec.
-		operationalChanged := doc.State != assignment.StateAssigned ||
+		// Re-exec when the operational identity actually changes (including an
+		// explicit unassign/revoke/decommission, which removes tenant/site).
+		operationalChanged := !assignment.Grants(doc.State) ||
 			doc.TenantID != s.tenID || doc.SiteID != s.siteID
 		if prevVersion == 0 || operationalChanged {
 			slog.Info("assignment: re-executing scd to adopt new assignment", "version", doc.Version)
@@ -206,7 +259,7 @@ func (s *server) fetchAssignment(ctx context.Context, ctrlBase string) (*assignm
 // consistency correction (proves zero stale UUIDs after onboarding); it never
 // touches the WAN/LAN/management network. Best-effort, in one transaction.
 func (s *server) repointGuestNetworks(ctx context.Context, doc *assignment.Document) {
-	if s.db == nil || doc.State != assignment.StateAssigned || doc.TenantID == "" || doc.SiteID == "" {
+	if s.db == nil || !assignment.Grants(doc.State) || doc.TenantID == "" || doc.SiteID == "" {
 		return
 	}
 	tx, err := s.db.Begin(ctx)

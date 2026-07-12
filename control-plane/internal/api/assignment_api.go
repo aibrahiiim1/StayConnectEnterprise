@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -24,6 +26,16 @@ import (
 type AssignmentBase struct {
 	*Base
 	SignKey ed25519.PrivateKey
+}
+
+// assignTTLSeconds is the fleet-wide assignment refresh horizon (0 = none).
+// Reaching it marks an appliance's assignment STALE; it never unassigns it.
+func assignTTLSeconds() int64 {
+	v, err := strconv.ParseInt(os.Getenv("CTRLAPI_ASSIGN_TTL_SECONDS"), 10, 64)
+	if err != nil || v < 0 {
+		return 0
+	}
+	return v
 }
 
 func assignUUID() string {
@@ -57,6 +69,13 @@ func (b *AssignmentBase) Issue(ctx context.Context, applianceID, state string) (
 	if b.SignKey == nil {
 		return nil, errors.New("assignment signing key not configured")
 	}
+	// SIGNING GUARD: only an ACTIVE key may mint new assignments. A verify_only key
+	// (rotated out) or a revoked key must never produce a new document, even if
+	// ctrlapi is still configured with it.
+	signerKeyID := assignment.KeyID(b.SignKey.Public().(ed25519.PublicKey))
+	if st, err := SigningKeyState(ctx, b.Base, signerKeyID); err == nil && !assignment.CanSign(st) {
+		return nil, fmt.Errorf("refusing to sign: assignment key %s is %s and may not sign new assignments", signerKeyID, st)
+	}
 	var tenantID, siteID, serial, pubB64, tenantName, siteName string
 	err := b.DB.QueryRow(ctx, `
         SELECT COALESCE(a.tenant_id::text,''), COALESCE(a.site_id::text,''),
@@ -74,6 +93,13 @@ func (b *AssignmentBase) Issue(ctx context.Context, applianceID, state string) (
 	_ = b.DB.QueryRow(ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1`, applianceID).Scan(&prevVersion)
 	now := time.Now().UTC().Truncate(time.Second)
 
+	// expires_at is a REFRESH horizon, not a kill switch: past it the appliance marks
+	// the assignment stale but keeps operating on it (a hotel must survive a Central
+	// outage). 0 = no expiry. CTRLAPI_ASSIGN_TTL_SECONDS sets a fleet-wide horizon.
+	var expiresAt int64
+	if ttl := assignTTLSeconds(); ttl > 0 {
+		expiresAt = now.Add(time.Duration(ttl) * time.Second).Unix()
+	}
 	doc := &assignment.Document{
 		AssignmentID:   assignUUID(),
 		ApplianceID:    applianceID,
@@ -82,9 +108,9 @@ func (b *AssignmentBase) Issue(ctx context.Context, applianceID, state string) (
 		Version:        prevVersion + 1,
 		State:          state,
 		IssuedAt:       now.Unix(),
-		ExpiresAt:      0, // revision-governed; superseded by a higher version
+		ExpiresAt:      expiresAt,
 	}
-	if state == assignment.StateAssigned {
+	if assignment.Grants(state) {
 		doc.TenantID, doc.SiteID, doc.TenantName, doc.SiteName = tenantID, siteID, tenantName, siteName
 	}
 	assignment.Sign(b.SignKey, doc)
@@ -142,10 +168,19 @@ func (b *Base) PlatformAssignmentStatus(w http.ResponseWriter, r *http.Request) 
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "assignment lookup failed")
 		return
 	}
+	// Surface the refresh horizon so the Platform can warn that an appliance's
+	// assignment is stale. Stale = past expires_at; the appliance KEEPS operating.
+	var expiresAt int64
+	_ = b.DB.QueryRow(ctx,
+		`SELECT COALESCE((signed_doc->>'expires_at')::bigint,0) FROM appliance_signed_assignments WHERE appliance_id=$1`,
+		id).Scan(&expiresAt)
+	expired := expiresAt != 0 && time.Now().Unix() > expiresAt
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"issued": true, "version": version, "state": state,
 		"tenant_id": tenantID, "site_id": siteID,
 		"identity_key_fingerprint": fpr, "issued_at": issuedAt, "updated_at": updatedAt,
+		"signer_key_id": signerKeyID(b, ctx, id),
+		"expires_at": expiresAt, "expired": expired,
 	})
 }
 
@@ -174,4 +209,14 @@ func (b *AssignmentBase) ApplianceAssignmentHandler(w http.ResponseWriter, r *ht
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(signedDoc)
+}
+
+// signerKeyID reports which assignment key signed an appliance's current
+// assignment — used to verify a rotation left no appliance on the old signer.
+func signerKeyID(b *Base, ctx context.Context, applianceID string) string {
+	var k string
+	_ = b.DB.QueryRow(ctx,
+		`SELECT COALESCE(signed_doc->>'signer_key_id','') FROM appliance_signed_assignments WHERE appliance_id=$1`,
+		applianceID).Scan(&k)
+	return k
 }

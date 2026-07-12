@@ -19,12 +19,41 @@ import (
 	"time"
 )
 
-// States a signed assignment can carry.
+// States a signed assignment can carry. Ownership only ever CHANGES through one
+// of these, delivered in a newer, validly-signed document. An expired, missing or
+// unreachable Central response must never implicitly unassign an appliance.
 const (
-	StateAssigned   = "assigned"   // bound to tenant+site, operational
-	StateUnassigned = "unassigned" // returned to inventory; tenant/site cleared
-	StateRevoked    = "revoked"    // identity revoked; appliance must stop
+	StateAssigned       = "assigned"       // bound to tenant+site, operational
+	StateReassigned     = "reassigned"     // moved to a different tenant+site (still owning)
+	StateUnassigned     = "unassigned"     // returned to inventory; tenant/site cleared
+	StateRevoked        = "revoked"        // identity revoked; appliance must stop
+	StateDecommissioned = "decommissioned" // retired for good; tenant/site cleared
 )
+
+// Grants reports whether a document CONFERS ownership (a tenant/site the
+// appliance should operate as). Only these states carry tenant/site.
+func Grants(state string) bool {
+	return state == StateAssigned || state == StateReassigned
+}
+
+// Clears reports whether a document explicitly REMOVES ownership. Only an
+// explicit, signed, newer document may do this.
+func Clears(state string) bool {
+	return state == StateUnassigned || state == StateRevoked || state == StateDecommissioned
+}
+
+func knownState(s string) bool { return Grants(s) || Clears(s) }
+
+// IsExpired reports whether the document is past its expires_at.
+//
+// Expiry is a STALENESS signal, never a de-authorisation. The signed assignment
+// is durable CONFIGURATION, not a short-lived auth token: a hotel must keep
+// serving guests through a Central outage. Passing expires_at therefore does not
+// clear tenant/site or return the appliance to awaiting-assignment — it only
+// marks the assignment stale so operators can see refresh has not succeeded.
+func IsExpired(d *Document, now time.Time) bool {
+	return d != nil && d.ExpiresAt != 0 && now.Unix() > d.ExpiresAt
+}
 
 // Document is the vendor-signed assignment envelope. Version is monotonic per
 // appliance: the edge accepts only a version STRICTLY GREATER than the one it
@@ -94,9 +123,13 @@ func Verify(pub ed25519.PublicKey, d *Document) bool {
 	return ed25519.Verify(pub, signingBytes(d), sig)
 }
 
-// AcceptFor validates a freshly-fetched assignment against THIS appliance's
-// identity and its currently-applied version. Returns "" if acceptable, else a
-// rejection reason. haveVersion is the version already persisted (0 if none).
+// AcceptFor validates an assignment against THIS appliance's identity and its
+// currently-applied version. Returns "" if acceptable, else a rejection reason.
+// haveVersion is the version already persisted (0 if none).
+//
+// NOTE: expiry is deliberately NOT a rejection. The assignment is durable
+// configuration; a stale document keeps the hotel running (see IsExpired). Only a
+// bad signature, wrong binding, unknown state or a non-newer version rejects.
 func AcceptFor(pub ed25519.PublicKey, d *Document, applianceID, serial, identityFpr string, haveVersion int64, now time.Time) string {
 	if !Verify(pub, d) {
 		return "signature invalid (modified or unknown signer)"
@@ -110,18 +143,13 @@ func AcceptFor(pub ed25519.PublicKey, d *Document, applianceID, serial, identity
 	if d.IdentityKeyFpr != "" && identityFpr != "" && d.IdentityKeyFpr != identityFpr {
 		return "identity key mismatch"
 	}
-	if d.ExpiresAt != 0 && now.Unix() > d.ExpiresAt {
-		return "assignment expired"
-	}
 	if d.Version <= haveVersion {
 		return "assignment version is not newer than the applied one (replay/superseded)"
 	}
-	switch d.State {
-	case StateAssigned, StateUnassigned, StateRevoked:
-	default:
+	if !knownState(d.State) {
 		return "unknown assignment state"
 	}
-	if d.State == StateAssigned && (d.TenantID == "" || d.SiteID == "") {
+	if Grants(d.State) && (d.TenantID == "" || d.SiteID == "") {
 		return "assigned document missing tenant/site"
 	}
 	return ""

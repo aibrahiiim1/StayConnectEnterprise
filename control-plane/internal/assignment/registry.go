@@ -9,11 +9,29 @@ import (
 	"time"
 )
 
-// Key lifecycle states in the appliance-side trust registry.
+// Key lifecycle states.
+//
+// The critical distinction is between "stop signing with it" and "stop trusting
+// it". Collapsing those into one flag strands appliances: an appliance holding an
+// assignment signed by the old key must still be able to reboot and re-verify it
+// while the fleet migrates. So retirement is a TWO-STEP process.
 const (
-	KeyActive  = "active"  // may sign assignments the appliance will adopt
-	KeyRetired = "retired" // rotated out — assignments signed by it are REJECTED
+	// KeyActive may sign NEW assignments and verify existing ones.
+	KeyActive = "active"
+	// KeyVerifyOnly must NOT sign new assignments, but still verifies documents
+	// already issued under it. This is where a rotated-out key lives until every
+	// appliance has adopted an assignment signed by the new key.
+	KeyVerifyOnly = "verify_only"
+	// KeyRevoked is rejected for ALL verification. Only for confirmed key
+	// compromise, or after the whole fleet has migrated off the key.
+	KeyRevoked = "revoked"
 )
+
+// CanSign — only an active key may produce new assignments.
+func CanSign(state string) bool { return state == KeyActive }
+
+// CanVerify — active and verify_only both verify; revoked never does.
+func CanVerify(state string) bool { return state == KeyActive || state == KeyVerifyOnly }
 
 // TrustedKey is one assignment-signing public key the appliance trusts.
 type TrustedKey struct {
@@ -80,12 +98,19 @@ func PublicKeyOf(k TrustedKey) (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(raw), nil
 }
 
-// AddOrRotate inserts/updates a key as ACTIVE. Rotation procedure:
-//  1. distribute the registry with the NEW key active (old one still active),
-//  2. switch Central to sign with the new key,
-//  3. Retire() the old key and distribute again.
+// AddOrRotate inserts/updates a key as ACTIVE.
 //
-// Both keys are active during the overlap, so no assignment is ever unverifiable.
+// Rotation sequence (each step is safe to stop at):
+//  1. generate + register the new key, add it here as ACTIVE,
+//  2. distribute the registry (old key still ACTIVE — nothing breaks),
+//  3. confirm appliances acknowledge the new registry,
+//  4. switch Central signing to the new key,
+//  5. re-sign every current assignment at a HIGHER version,
+//  6. confirm every appliance adopted the new assignment,
+//  7. verify no current assignment references the old signer,
+//  8. VerifyOnly() the old key — it can no longer sign, but any straggler holding
+//     an old document can still boot and verify it,
+//  9. Revoke() only on confirmed compromise or after the retention period.
 func (r *Registry) AddOrRotate(k TrustedKey) {
 	k.State = KeyActive
 	if k.AddedAt == "" {
@@ -100,12 +125,25 @@ func (r *Registry) AddOrRotate(k TrustedKey) {
 	r.Keys = append(r.Keys, k)
 }
 
-// Retire marks a key retired: assignments signed by it are rejected from then on.
-func (r *Registry) Retire(keyID string) bool {
+// VerifyOnly stops a key signing new assignments while KEEPING it trusted for
+// documents already issued under it. This is what makes rotation non-stranding.
+func (r *Registry) VerifyOnly(keyID string) bool {
+	return r.setState(keyID, KeyVerifyOnly)
+}
+
+// Revoke removes all trust in a key: documents signed by it stop verifying.
+// Only for confirmed compromise, or once the fleet has fully migrated.
+func (r *Registry) Revoke(keyID string) bool {
+	return r.setState(keyID, KeyRevoked)
+}
+
+func (r *Registry) setState(keyID, state string) bool {
 	for i := range r.Keys {
 		if r.Keys[i].KeyID == keyID {
-			r.Keys[i].State = KeyRetired
-			r.Keys[i].RetiredAt = time.Now().UTC().Format(time.RFC3339)
+			r.Keys[i].State = state
+			if state != KeyActive {
+				r.Keys[i].RetiredAt = time.Now().UTC().Format(time.RFC3339)
+			}
 			return true
 		}
 	}
@@ -113,8 +151,12 @@ func (r *Registry) Retire(keyID string) bool {
 }
 
 // AcceptForRegistry is the production acceptance check: it resolves the document's
-// signer_key_id against the LOCAL trust registry (rejecting unknown or retired
-// signers) and then applies the full binding/version checks.
+// signer_key_id against the LOCAL trust registry and then applies the full
+// binding/version checks.
+//
+// A verify_only signer is ACCEPTED (that is the whole point — a rotated-out key
+// must still let an appliance boot on the assignment it already holds). Only an
+// unknown or REVOKED signer is refused.
 //
 // Because the registry holds only assignment-signing keys, a document signed with
 // the license / command / update / CA / auth-callout key is rejected as an unknown
@@ -127,8 +169,8 @@ func AcceptForRegistry(reg *Registry, d *Document, applianceID, serial, identity
 	if !ok {
 		return "unknown assignment signer (key not in the appliance trust registry)"
 	}
-	if k.State != KeyActive {
-		return "assignment signed by a " + k.State + " key (rotation policy: retired keys are not accepted)"
+	if !CanVerify(k.State) {
+		return "assignment signed by a " + k.State + " key (revoked signers are never trusted)"
 	}
 	pub, err := PublicKeyOf(k)
 	if err != nil {
