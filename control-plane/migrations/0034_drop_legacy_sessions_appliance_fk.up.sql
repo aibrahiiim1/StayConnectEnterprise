@@ -1,0 +1,11 @@
+-- The archived, read-only legacy public.sessions table carries an ON DELETE
+-- CASCADE foreign key to appliances(id). A legacy_archive trigger blocks ALL
+-- writes to the archived table, so when an appliance is deleted the cascade
+-- (DELETE FROM sessions ...) is rejected and the whole appliance delete fails
+-- with a 500 — making it impossible to remove an appliance that has any
+-- historical session rows via the control panel.
+--
+-- Guest sessions now live in the per-site edge database; the archived table is
+-- historical and needs no referential integrity to the live appliances table.
+-- Dropping the FK unblocks appliance deletion without touching archived data.
+ALTER TABLE sessions DROP CONSTRAINT IF EXISTS sessions_appliance_id_fkey;
