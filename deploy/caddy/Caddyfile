@@ -149,26 +149,9 @@ admin.stayconnect.local {
 #
 # Auth cookies are host-only (no Domain), so the same session logic works
 # unchanged for both the DNS name and the IP; redirects are host-relative.
-hotel.stayconnect.local, 172.21.60.23 {
-	tls /etc/caddy/hotel-admin/hotel-admin.fullchain.crt /etc/caddy/hotel-admin/hotel-admin.key
-
-	import security_headers
-
-	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
-
-	encode zstd gzip
-
-	reverse_proxy 127.0.0.1:3100 {
-		# Next may emit an absolute Location to its internal bind host; strip it
-		# so the browser keeps the external origin (DNS name OR the IP alias).
-		header_down Location "^https?://localhost:3100(/.*)$" "$1"
-		header_up X-Forwarded-Host  {host}
-		header_up X-Forwarded-Proto {scheme}
-		header_up X-Real-IP         {remote_host}
-	}
-
-	log {
-		output file /var/log/caddy/hotel-admin.log
-		format json
-	}
-}
+# The hotel vhost is MANAGED: its site address (DNS name + current management IP),
+# tls cert/key and reverse_proxy live in an imported file that the certificate
+# lifecycle manager rewrites atomically on renewal / IP change
+# (deploy/scripts/hotel-admin-cert-manager.sh, run by a systemd timer). The file
+# is in the scd-writable cert directory; this main Caddyfile only imports it.
+import /etc/caddy/hotel-admin/vhost.caddy

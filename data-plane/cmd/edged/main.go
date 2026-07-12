@@ -171,6 +171,13 @@ func main() {
 			r.With(s.requireRole("network", permWrite)).Post("/setup/enroll", s.setupEnroll)
 			r.With(s.requireRole("network", permWrite)).Post("/setup/offline-import", s.setupOfflineImport)
 
+			// Hotel Admin TLS certificate: status (read), diagnostic Check, and the
+			// manual Rotate (step-up inside the handler). Same "network" role as the
+			// system-network settings that own the management IP.
+			r.With(s.requireRole("network", permRead)).Get("/hotel-admin-cert", s.hotelAdminCertGet)
+			r.With(s.requireRole("network", permWrite)).Post("/hotel-admin-cert/check", s.hotelAdminCertCheck)
+			r.With(s.requireRole("network", permWrite)).Post("/hotel-admin-cert/rotate", s.hotelAdminCertRotate)
+
 			mountResource(r, s, "operators", s.operatorsRoutes)
 			mountResource(r, s, "guest-access-plans", s.guestAccessPlansRoutes)
 			mountResource(r, s, "voucher-batches", s.voucherBatchesRoutes)

@@ -623,6 +623,12 @@ func main() {
 	r.Post("/v1/admin/pms/reload", s.pmsAdminReload)
 	r.Post("/v1/admin/walled-garden/reload", s.gardenReload)
 	r.Get("/v1/admin/outbox/stats", s.outboxStats)
+	// Hotel Admin TLS cert lifecycle: scd runs as root and drives the privileged
+	// manager here (edged is sandboxed with NoNewPrivileges and cannot). edged
+	// already enforced Hotel-IT permission + step-up before proxying to us.
+	r.Post("/v1/hotel-admin-cert/check", s.hotelAdminCertCheck)
+	r.Post("/v1/hotel-admin-cert/rotate", s.hotelAdminCertRotate)
+	r.Post("/v1/hotel-admin-cert/renew", s.hotelAdminCertRenew)
 	r.Get("/v1/cloud/info", s.cloudInfo)
 	r.Get("/v1/setup/status", s.setupStatus)
 	r.Post("/v1/setup/enroll", s.setupEnroll)

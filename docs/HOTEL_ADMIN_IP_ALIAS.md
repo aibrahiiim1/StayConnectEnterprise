@@ -28,9 +28,13 @@ Caddy serves it explicitly (`tls <fullchain> <key>` in the vhost) instead of
 letting `local_certs` auto-issue two separate single-SAN certs. Files live in
 `/etc/caddy/hotel-admin/` (key `0600`, owned by `caddy`).
 
-**Mint / renew** (2-year validity, no auto-renewal): run
-`deploy/scripts/hotel-admin-mint-cert.sh` on the appliance (installed there as
-`/etc/caddy/hotel-admin/mint-cert.sh`), then `systemctl reload stayconnect-caddy`.
+**Renewal is now fully automated** — a systemd-timed manager renews at 45 days, on
+management-IP change, or on SAN drift, with staged validation, atomic swap and
+rollback. See **`docs/HOTEL_ADMIN_CERT_LIFECYCLE.md`**. The vhost (site address +
+`tls` + proxy) lives in `/etc/caddy/hotel-admin/vhost.caddy`, imported by the main
+Caddyfile and rewritten by the manager. `deploy/scripts/hotel-admin-mint-cert.sh`
+remains only as an internal helper; production operation does not depend on anyone
+running it.
 
 **No TLS warnings:** a workstation that trusts the Caddy local root
 (`/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt`, distributed as

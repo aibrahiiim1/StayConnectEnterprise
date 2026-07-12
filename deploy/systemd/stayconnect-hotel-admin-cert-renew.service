@@ -1,0 +1,20 @@
+[Unit]
+Description=StayConnect Hotel Admin TLS certificate renewal (managed dual-SAN lifecycle)
+Documentation=file:/etc/caddy/hotel-admin
+# Renewal is a background maintenance job. It is deliberately NOT a dependency of
+# caddy/edged/scd/netd/portald, so a renewal failure can never stop DHCP, DNS,
+# the captive portal, guest auth, sessions, PMS, accounting or the data plane.
+After=network-online.target stayconnect-caddy.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/stayconnect-hotel-admin-cert-manager renew
+# Exit codes: 0 = ok/no-op, 2 = renewed (both are success); 10/20 = handled failure
+# (existing cert keeps serving, alert raised) surfaced in `systemctl --failed`.
+SuccessExitStatus=0 2
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=yes
+ProtectHome=yes
+TimeoutStartSec=180
