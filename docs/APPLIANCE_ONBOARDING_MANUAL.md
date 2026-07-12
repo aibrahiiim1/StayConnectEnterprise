@@ -86,6 +86,26 @@ API (`:9443`) and NATS (`:4223`) channels come online.
 
 ---
 
+## Provisioning the Hotel Admin login (per appliance)
+
+The Hotel Admin login is a local operator in the appliance's site database. Seed or
+reset it with one command on the appliance (root) — run it at provisioning / first
+boot for a consistent login across your fleet:
+
+```
+/opt/stayconnect/bin/edged seed-admin --email <user> --password <pass> --name "Hotel Admin"
+```
+
+Passwords must be ≥10 chars by default. To set a deliberately weak one (e.g.
+`admin`/`admin`) on a management-network-only box, add `--allow-weak`:
+
+```
+/opt/stayconnect/bin/edged seed-admin --email admin --password admin --allow-weak
+```
+
+This is a per-appliance provisioning choice, not a compiled-in credential — do NOT
+use a weak/shared password on production or guest-reachable deployments.
+
 ## Removing an appliance completely (for reference)
 
 Two parts — the control panel record and the physical box:
