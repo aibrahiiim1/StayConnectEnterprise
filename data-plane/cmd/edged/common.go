@@ -62,9 +62,12 @@ func (s *server) audit(r *http.Request, action, targetType, targetID string, pay
 	raw, _ := json.Marshal(payload)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	// tenant_id may be empty before enrollment (factory-clean box). It is a
+	// nullable uuid, so map "" -> NULL; otherwise the insert fails and pre-
+	// enrollment attempts (e.g. setup.enroll_*) would go unaudited.
 	_, err := s.db.Exec(ctx, `
         INSERT INTO audit_log (tenant_id, actor_type, actor_id, action, target_type, target_id, ip, user_agent, payload)
-        VALUES ($1, 'operator', NULLIF($2,''), $3, NULLIF($4,''), NULLIF($5,''),
+        VALUES (NULLIF($1,'')::uuid, 'operator', NULLIF($2,''), $3, NULLIF($4,''), NULLIF($5,''),
                 CASE WHEN $6 = '' THEN NULL ELSE $6::inet END, NULLIF($7,''), $8::jsonb)
     `, s.tenantID, actorID, action, targetType, targetID, clientIP(r), r.UserAgent(), string(raw))
 	if err != nil {

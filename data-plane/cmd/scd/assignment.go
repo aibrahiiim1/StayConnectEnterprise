@@ -150,6 +150,8 @@ func (s *server) assignmentStatus() map[string]any {
 		"signer_key_id":        rec.SignerKeyID,
 		"tenant_id":            d.TenantID,
 		"site_id":              d.SiteID,
+		"tenant_name":          d.TenantName,
+		"site_name":            d.SiteName,
 		"adopted_at":           rec.AdoptedAt,
 		"last_refresh_success": rec.LastRefreshSuccess,
 		"last_refresh_attempt": rec.LastRefreshAttempt,

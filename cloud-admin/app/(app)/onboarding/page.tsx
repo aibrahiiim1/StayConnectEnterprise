@@ -92,7 +92,14 @@ export default function OnboardingPage() {
       setErr(e?.message ?? "Failed to load");
     }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  // Auto-refresh: the onboarding lifecycle (pending → claimed → assigned → adopted
+  // → certificate → online/licensed) advances on both Central and the appliance, so
+  // poll every 5s. No manual reload needed; the Refresh button stays as a diagnostic.
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, [load]);
 
   async function loadSites(tenantID: string) {
     if (!tenantID || sitesByTenant[tenantID]) return;

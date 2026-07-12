@@ -32,6 +32,12 @@ func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 			lic = map[string]any{"state": string(s.lic.State())}
 		}
 	}
+	outbox := map[string]any{"pending": 0, "dead": 0}
+	if s.obx != nil {
+		if p, d, _, err := s.obx.Stats(r.Context()); err == nil {
+			outbox = map[string]any{"pending": p, "dead": d}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"serial":                  s.serial,
 		"appliance_id":            s.applID,
@@ -46,6 +52,7 @@ func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 		"license":                 lic,
 		"assignment":              s.assignmentStatus(),
 		"network":                 s.networkChecks(),
+		"outbox":                  outbox,
 	})
 }
 
