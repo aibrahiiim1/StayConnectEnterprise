@@ -1,0 +1,34 @@
+[Unit]
+Description=StayConnect Session Controller Daemon (scd)
+After=network-online.target postgresql.service nftables.service
+# portald + acctd Require= scd (they talk to its unix socket), so stopping scd
+# stops them too — but without Wants= here, starting scd did NOT bring them back,
+# leaving the guest portal down after any scd stop/start (e.g. re-enrollment or
+# an assignment-driven restart). Wants= makes scd pull its dependents back up.
+Wants=network-online.target stayconnect-portald.service stayconnect-acctd.service
+Requires=nftables.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/stayconnect/scd.env
+ExecStart=/opt/stayconnect/bin/scd
+Restart=on-failure
+RestartSec=2
+# needs CAP_NET_ADMIN to run `nft`; running as root for Phase 1 simplicity
+User=root
+Group=root
+RuntimeDirectory=stayconnect
+RuntimeDirectoryMode=0755
+ProtectSystem=full
+# ProtectSystem=full makes /etc read-only, but three stores must persist there:
+#   identity/   — the appliance's enrollment identity + signing key
+#   license/    — the signed license envelope
+#   assignment/ — the SIGNED ASSIGNMENT document: the appliance-local source of
+#                 truth for tenant/site. Without this path scd cannot adopt an
+#                 assignment ("read-only file system") and stays unassigned.
+#   certs/      — the mTLS client certificate + CA bundle
+ReadWritePaths=/etc/stayconnect/identity /etc/stayconnect/license /etc/stayconnect/assignment /etc/stayconnect/certs
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
