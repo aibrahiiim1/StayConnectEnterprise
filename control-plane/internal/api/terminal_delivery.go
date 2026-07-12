@@ -341,14 +341,25 @@ func ReconcileTerminalTimeouts(ctx context.Context, b *Base) (int64, error) {
 // full mTLS trust rules. It is the ONLY delivery channel for assignment documents
 // (no JWT/bootstrap fallback; that mount is removed from the :443 router).
 func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter, r *http.Request) {
-	ident := auth.ApplianceFromContext(r.Context())
-	if ident == nil {
-		logFetch(r.Context(), b.DB, "", "", "denied:no-identity")
-		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "appliance identity required")
+	// IDENTITY COMES ONLY FROM THE VERIFIED CLIENT CERTIFICATE. This endpoint
+	// consults no appliance JWT, bearer, bootstrap or enrollment token — any
+	// Authorization header on the request is ignored. The mTLS listener has
+	// already verified the certificate chain against the CA; here we bind the
+	// cert's URI-SAN appliance_id, and strictMTLSSelf enforces the exact
+	// fingerprint + serial match to this appliance's active Central record.
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		logFetch(r.Context(), b.DB, "", "", "denied:no-cert")
+		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "client certificate required (mTLS only)")
 		return
 	}
-	if !strictMTLSSelf(w, r, b.DB, ident.ApplianceID) {
-		logFetch(r.Context(), b.DB, ident.ApplianceID, "", "denied:mtls")
+	appID := pki.ApplianceIDFromCert(r.TLS.PeerCertificates[0])
+	if appID == "" {
+		logFetch(r.Context(), b.DB, "", "", "denied:no-uri-san")
+		Fail(w, r, http.StatusForbidden, CodeForbidden, "certificate carries no appliance identity (URI-SAN)")
+		return
+	}
+	if !strictMTLSSelf(w, r, b.DB, appID) {
+		logFetch(r.Context(), b.DB, appID, "", "denied:mtls")
 		return
 	}
 	ctx, cancel := DBCtx(r)
@@ -358,9 +369,9 @@ func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter,
 	var signedDoc []byte
 	err := b.DB.QueryRow(ctx,
 		`SELECT version, last_acked_version, signed_doc FROM appliance_signed_assignments WHERE appliance_id=$1`,
-		ident.ApplianceID).Scan(&version, &lastAcked, &signedDoc)
+		appID).Scan(&version, &lastAcked, &signedDoc)
 	if errors.Is(err, pgx.ErrNoRows) {
-		logFetch(ctx, b.DB, ident.ApplianceID, "", "not-modified:none")
+		logFetch(ctx, b.DB, appID, "", "not-modified:none")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -371,23 +382,23 @@ func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter,
 
 	// Nothing newer than what the appliance already acknowledged.
 	if version <= lastAcked {
-		logFetch(ctx, b.DB, ident.ApplianceID, "", "not-modified:acked")
+		logFetch(ctx, b.DB, appID, "", "not-modified:acked")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
 	var doc assignment.Document
 	if json.Unmarshal(signedDoc, &doc) != nil {
-		logFetch(ctx, b.DB, ident.ApplianceID, "", "denied:corrupt")
+		logFetch(ctx, b.DB, appID, "", "denied:corrupt")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	// Self-scoped + identity-bound: never another appliance's document.
 	idFpr := ""
-	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(public_key,'') FROM appliances WHERE id=$1`, ident.ApplianceID).Scan(&idFpr)
-	if doc.ApplianceID != ident.ApplianceID ||
+	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(public_key,'') FROM appliances WHERE id=$1`, appID).Scan(&idFpr)
+	if doc.ApplianceID != appID ||
 		(doc.IdentityKeyFpr != "" && doc.IdentityKeyFpr != identityFprFromPubB64(idFpr)) {
-		logFetch(ctx, b.DB, ident.ApplianceID, "", "denied:not-self")
+		logFetch(ctx, b.DB, appID, "", "denied:not-self")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -396,12 +407,12 @@ func (b *AssignmentBase) StrictApplianceAssignmentHandler(w http.ResponseWriter,
 	var signerState string
 	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(state,'') FROM assignment_signing_keys WHERE key_id=$1`, doc.SignerKeyID).Scan(&signerState)
 	if !assignment.CanVerify(signerState) {
-		logFetch(ctx, b.DB, ident.ApplianceID, doc.SignerKeyID, "denied:untrusted-signer")
+		logFetch(ctx, b.DB, appID, doc.SignerKeyID, "denied:untrusted-signer")
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	logFetch(ctx, b.DB, ident.ApplianceID, assignment.DocFingerprint(&doc), "served")
+	logFetch(ctx, b.DB, appID, assignment.DocFingerprint(&doc), "served")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(signedDoc)

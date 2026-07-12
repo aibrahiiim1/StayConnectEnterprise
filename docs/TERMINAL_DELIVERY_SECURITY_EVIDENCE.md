@@ -110,6 +110,37 @@ polls log `served`; a document already acknowledged logs `not-modified:acked`
 terminal document could never have reached the box. Corrected to
 `fmt.Sprintf("%x", cert.SerialNumber)`; polls now succeed and §1 delivery completes.
 
+### §3.1 Certificate-only authentication (final closure)
+
+`GET /v1/appliance/assignment` now authenticates **exclusively** from the verified
+client certificate. It is mounted **outside** the `RequireAppliance` group, so no
+appliance JWT, bearer, bootstrap or enrollment token is required or consulted — any
+`Authorization` header is ignored. Identity flows: client cert → URI-SAN
+appliance_id → exact serial → exact fingerprint → Central appliance record
+(`strictMTLSSelf`). Because the appliance_id is taken from the cert, a request can
+only ever address its own document — there is no parameter to name another
+appliance. The production `scd` client was updated to send no bearer on this call.
+The `ack` POST and other endpoints keep JWT + cert-binding as defence in depth.
+
+Full live matrix (genuine cert from the appliance; crafted CA-signed certs and DB
+mutations from Central):
+
+| # | check | result |
+|---|-------|--------|
+| 1 | valid client cert, **no JWT** | `200`, signed doc for self |
+| 2 | JWT bearer, **no client cert** | TLS handshake refused (`http 000`) |
+| 3 | valid cert + **bogus bearer** | `200`, bearer ignored, serves self |
+| 4 | cert-A + `?appliance_id=B` override; and appliance-B's own cert | override ignored → serves A; B's cert `403` |
+| 5 | unknown CA-signed cert (id not in record) | `403` "not an active credential" |
+| 6 | fingerprint mismatch (impostor cert; and isolated DB flip) | `403` |
+| 7 | serial mismatch (isolated DB flip) | `403` |
+| 8 | `terminal_delivery_pending` fetch | `200`, higher-version **terminal** doc (v13, `state=revoked`, tenant/site cleared) |
+| 9 | equal/lower version (`last_acked = version`) | `204` not-modified |
+| 10 | assigned doc via terminal path | never — the served doc is the terminal (revoked) doc, not an assigned one |
+| 11 | after signed ack + cert revocation | `403` |
+| 12 | emergency-compromised appliance | `403` immediately after emergency revoke |
+| 13 | GET-only / read-only / rate-limited / audited | `POST → 405`; 40 rapid GETs → 25×200 + 15×429; every outcome in `appliance_assignment_fetch_log` |
+
 ---
 
 ## §4 — Assignment key private-key custody (`c63f848bf5ded3f6`)

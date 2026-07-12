@@ -276,20 +276,17 @@ func (s *server) mtlsTransport() (*http.Client, string, bool) {
 }
 
 // fetchAssignment GETs the current signed assignment over the mTLS transport ONLY.
+// Identity is carried entirely by the client certificate — Central authenticates
+// this request from the cert alone, so NO appliance JWT/bearer is attached.
 func (s *server) fetchAssignment(ctx context.Context, _ string) (*assignment.Document, bool) {
-	if s.idPriv == nil || s.applID == "" {
+	if s.applID == "" {
 		return nil, false
 	}
 	cl, base, ready := s.mtlsTransport()
 	if !ready || base == "" {
 		return nil, false // mTLS not ready — assignment is mTLS-only, no fallback
 	}
-	tok, err := applianceauth.SignRequest(s.idPriv, s.applID, http.MethodGet, "/v1/appliance/assignment", nil)
-	if err != nil {
-		return nil, false
-	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/appliance/assignment", nil)
-	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := cl.Do(req)
 	if err != nil {
 		slog.Warn("assignment: fetch failed", "base", base, "err", err)
