@@ -45,7 +45,8 @@ type Deps struct {
 	ReplayCache  *applianceauth.ReplayCache // shared jti replay cache (both transports)
 	NATSConn     *nats.Conn         // live NATS (mTLS) for command publish; nil disables commands
 	CommandKey   string             // path to command-signing key
-	AssignKey    ed25519.PrivateKey // vendor key for signing appliance assignments; nil disables signed assignments
+	AssignKey    ed25519.PrivateKey // dedicated key for signing appliance assignments; nil disables signed assignments
+	AssignRegistryRoot ed25519.PrivateKey // registry root key (re-signs the trust registry on key-state change)
 	Version      string
 	AllowOrigins []string // CORS allowlist for dev UI on :3000
 	CookieSecure bool     // set true behind HTTPS
@@ -127,10 +128,10 @@ func NewRouter(d Deps) http.Handler {
 				// A successful fetch doubles as the edge's cloud validation.
 				r.Get("/appliance/license", licBase.ApplianceLicenseHandler)
 			}
-			if d.AssignKey != nil {
-				assignBase := &api.AssignmentBase{Base: &api.Base{DB: d.DB}, SignKey: d.AssignKey}
-				r.Get("/appliance/assignment", assignBase.ApplianceAssignmentHandler)
-			}
+			// NOTE: /appliance/assignment and its /ack + /assignment-registry are
+			// deliberately NOT mounted here. The assignment channel is mTLS-ONLY
+			// (ApplianceMTLSRouter) — no bootstrap-token or JWT-over-:443 fallback —
+			// so a document can only ever reach a box holding a valid client cert.
 			if d.CA != nil {
 				certBase := &api.CertBase{Base: &api.Base{DB: d.DB}, CA: d.CA, ClientValid: 90 * 24 * time.Hour}
 				r.Post("/appliance/csr", certBase.SubmitCSR)
@@ -220,7 +221,7 @@ func NewRouter(d Deps) http.Handler {
 			// assign, revoke, security alerts) — permission-gated, no tenant scope.
 			r.Mount("/appliances-admin", abase.LifecycleRoutes())
 			// Dedicated assignment-signing key lifecycle (list, retire/rotate).
-			r.Mount("/assignment-keys", (&api.AssignmentKeysBase{Base: base}).Routes())
+			r.Mount("/assignment-keys", (&api.AssignmentKeysBase{Base: base, RegRoot: d.AssignRegistryRoot}).Routes())
 			// Platform certificate lifecycle (list, issue, revoke, CA).
 			if d.CA != nil {
 				certBase := &api.CertBase{Base: base, CA: d.CA, ClientValid: 90 * 24 * time.Hour}

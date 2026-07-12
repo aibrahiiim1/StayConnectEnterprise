@@ -61,6 +61,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "gen-registry-key":
+			if err := runGenRegistryKey(os.Args[2:]); err != nil {
+				slog.Error("gen-registry-key failed", "err", err)
+				os.Exit(1)
+			}
+			return
 		case "serve", "":
 			// fallthrough to default
 		default:
@@ -270,6 +276,48 @@ func main() {
 			"path", assignKeyPath, "hint", "run: ctrlapi gen-assignment-key --out "+assignKeyPath)
 	}
 
+	// Registry ROOT-OF-TRUST key: signs the versioned trust registry the appliance
+	// verifies. Distinct from the assignment keys it authorises; its PUBLIC half is
+	// a manufacture-time trust anchor on the appliance.
+	regRootPath := envOrDefault("CTRLAPI_REGISTRY_ROOT_KEY", "/etc/stayconnect/assignment-registry-root.key")
+	var regRoot ed25519.PrivateKey
+	if raw, err := os.ReadFile(regRootPath); err == nil && len(raw) == ed25519.PrivateKeySize {
+		regRoot = ed25519.PrivateKey(raw)
+		slog.Info("assignment registry root key loaded",
+			"key_id", assignment.KeyID(regRoot.Public().(ed25519.PublicKey)), "path", regRootPath)
+		// Publish (or refresh) the signed registry from the current key table.
+		regBase := &api.RegistryBase{Base: &api.Base{DB: pool}, RootKey: regRoot}
+		if sr, err := regBase.Rebuild(rootCtx, "ctrlapi boot"); err != nil {
+			slog.Warn("signed registry rebuild failed", "err", err)
+		} else if sr != nil {
+			slog.Info("signed trust registry published", "registry_version", sr.RegistryVersion, "keys", len(sr.Keys))
+		}
+	} else {
+		slog.Warn("assignment registry root key unavailable — signed registry disabled",
+			"path", regRootPath, "hint", "run: ctrlapi gen-registry-key --out "+regRootPath)
+	}
+
+	// Terminal-delivery timeout reconciler: a Phase-1 delivery that is never
+	// acknowledged within policy becomes terminal_delivery_failed + a security
+	// alert — credentials are NOT revoked and the box is NOT reported decommissioned.
+	go func() {
+		t := time.NewTicker(60 * time.Second)
+		defer t.Stop()
+		tb := &api.Base{DB: pool}
+		for {
+			select {
+			case <-rootCtx.Done():
+				return
+			case <-t.C:
+				if n, err := api.ReconcileTerminalTimeouts(rootCtx, tb); err != nil {
+					slog.Warn("terminal-delivery timeout reconcile failed", "err", err)
+				} else if n > 0 {
+					slog.Warn("terminal delivery failed (no ack within policy)", "count", n)
+				}
+			}
+		}
+	}()
+
 	// Appliance certificate authority (Phase 3 PKI/mTLS). The CA private key
 	// lives only in a file on Central; the CA cert (public) is versioned in DB
 	// and distributed to appliances as a trust anchor. Absent key → PKI routes
@@ -307,7 +355,7 @@ func main() {
 		if mtlsAddr == "" {
 			mtlsAddr = ":9443"
 		}
-		applianceMTLSAPI := api.ApplianceMTLSRouter(pool, sharedReplay, licSvc, ca, assignKey)
+		applianceMTLSAPI := api.ApplianceMTLSRouter(pool, rdb, sharedReplay, licSvc, ca, assignKey, regRoot)
 		go func() {
 			if err := apihttp.StartMTLS(rootCtx, pool, ca, mtlsAddr, applianceMTLSAPI); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				slog.Error("mTLS listener error", "err", err)
@@ -336,7 +384,8 @@ func main() {
 		Metrics:      met,
 		OIDC:         oidcReg,
 		Licensing:    licSvc,
-		AssignKey:    assignKey,
+		AssignKey:          assignKey,
+		AssignRegistryRoot: regRoot,
 		CA:           appCA,
 		ReplayCache:  sharedReplay,
 		NATSConn:     natsConn,

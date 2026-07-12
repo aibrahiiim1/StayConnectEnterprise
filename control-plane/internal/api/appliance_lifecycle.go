@@ -42,9 +42,11 @@ func (b *Base) LifecycleRoutes() http.Handler {
 	// moved (it lives only on the appliance/site DB, never in the Cloud).
 	r.With(auth.RequirePermission("platform.appliances.reassign"), reauth).Post("/{id}/reassign", b.assignAppliance)
 	r.With(auth.RequirePermission("platform.appliances.claim")).Post("/{id}/claim", b.claimAppliance)
-	r.With(auth.RequirePermission("platform.appliances.revoke"), reauth).Post("/{id}/revoke", b.revokeAppliance)
+	r.With(auth.RequirePermission("platform.appliances.revoke"), reauth).Post("/{id}/revoke", b.terminalAction("revoked"))
 	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/replace", b.replaceAppliance)
-	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/decommission", b.decommissionAppliance)
+	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/decommission", b.terminalAction("decommissioned"))
+	// Terminal-delivery status (two-phase progress) for the Platform console.
+	r.With(auth.RequirePermission("platform.appliances.view")).Get("/{id}/terminal-delivery", b.terminalDeliveryStatus)
 	r.With(auth.RequirePermission("platform.appliances.view")).Patch("/security-alerts/{id}", b.updateAlertStatus)
 	return r
 }

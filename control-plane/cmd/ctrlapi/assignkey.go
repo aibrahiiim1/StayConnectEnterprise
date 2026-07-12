@@ -13,6 +13,41 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/assignment"
 )
 
+// runGenRegistryKey generates the registry ROOT-OF-TRUST key. Its private half
+// signs the versioned trust registry on Central; its public half is the trust
+// anchor baked into each appliance (assignment-registry-root.pub). It is a
+// separate key from the assignment-signing keys it authorises.
+//
+//	ctrlapi gen-registry-key --out /etc/stayconnect/assignment-registry-root.key \
+//	                         --pub-out /etc/stayconnect/assignment-registry-root.pub
+func runGenRegistryKey(args []string) error {
+	fs := flag.NewFlagSet("gen-registry-key", flag.ExitOnError)
+	out := fs.String("out", "/etc/stayconnect/assignment-registry-root.key", "private key path")
+	pubOut := fs.String("pub-out", "/etc/stayconnect/assignment-registry-root.pub", "public key path (raw 32 bytes)")
+	force := fs.Bool("force", false, "overwrite an existing key (rotating the root of trust re-anchors the whole fleet)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if _, err := os.Stat(*out); err == nil && !*force {
+		return fmt.Errorf("%s already exists; refusing to overwrite (use --force for a deliberate root rotation)", *out)
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(*out, priv, 0o600); err != nil {
+		return err
+	}
+	if *pubOut != "" {
+		if err := os.WriteFile(*pubOut, pub, 0o644); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("registry root key generated\n  key_id: %s\n  private: %s\n  public (trust anchor): %s\n",
+		assignment.KeyID(pub), *out, *pubOut)
+	return nil
+}
+
 // runGenAssignmentKey generates the DEDICATED Ed25519 assignment-signing key and,
 // optionally, the appliance trust-registry file to ship with it.
 //

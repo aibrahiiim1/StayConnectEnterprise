@@ -29,6 +29,17 @@ import (
 // explicit emergency compromise override is given.
 type AssignmentKeysBase struct {
 	*Base
+	RegRoot ed25519.PrivateKey // registry root key, to re-sign the registry on state change
+}
+
+// resignRegistry rebuilds + re-signs the trust registry after a key-state change,
+// so appliances fetch a new signed registry reflecting the change.
+func (b *AssignmentKeysBase) resignRegistry(ctx context.Context, reason string) {
+	if b.RegRoot == nil {
+		return
+	}
+	rb := &RegistryBase{Base: b.Base, RootKey: b.RegRoot}
+	_, _ = rb.Rebuild(ctx, reason)
 }
 
 // RegisterActiveKey records the key ctrlapi is signing with and audits first use.
@@ -131,6 +142,7 @@ func (b *AssignmentKeysBase) toVerifyOnly(w http.ResponseWriter, r *http.Request
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "no active signing key with that id")
 		return
 	}
+	b.resignRegistry(ctx, "key "+keyID+" -> verify_only")
 	audit.Op(ctx, b.DB, r, "assignment.signing_key_verify_only", "assignment_key", keyID,
 		map[string]any{"key_id": keyID, "reason": in.Reason})
 	WriteJSON(w, http.StatusOK, map[string]any{
@@ -202,6 +214,7 @@ func (b *AssignmentKeysBase) toRevoked(w http.ResponseWriter, r *http.Request) {
 	if in.Emergency {
 		action = "assignment.signing_key_revoked_emergency"
 	}
+	b.resignRegistry(ctx, "key "+keyID+" -> revoked")
 	audit.Op(ctx, b.DB, r, action, "assignment_key", keyID, map[string]any{
 		"key_id": keyID, "reason": in.Reason, "emergency_compromise": in.Emergency,
 		"stranded_assignments": deps,

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -26,6 +27,52 @@ func assignmentTrustPath() string {
 	return envOr("SCD_ASSIGNMENT_TRUST", "/etc/stayconnect/assignment-trust.json")
 }
 
+func assignmentRegistryPath() string {
+	return envOr("SCD_ASSIGNMENT_REGISTRY", "/etc/stayconnect/assignment/registry.json")
+}
+func assignmentRegistryRootPath() string {
+	return envOr("SCD_ASSIGNMENT_REGISTRY_ROOT", "/etc/stayconnect/assignment-registry-root.pub")
+}
+
+// registryStore is the durable store for the SIGNED trust registry, anchored by
+// the manufacture-time registry root public key. nil if no root anchor exists yet
+// (falls back to the legacy plain trust file during rollout).
+func registryStoreOnDisk() *assignment.RegistryStore {
+	rootPub, err := assignment.LoadRootPub(assignmentRegistryRootPath())
+	if err != nil {
+		return nil
+	}
+	return &assignment.RegistryStore{Path: assignmentRegistryPath(), RootPub: rootPub}
+}
+
+// currentRegistryOnDisk returns the trusted assignment-key registry: preferring
+// the verified SIGNED registry (last-known-good survives a Central outage),
+// falling back to the legacy plain trust file only where no signed registry
+// exists yet.
+func currentRegistryOnDisk() (*assignment.Registry, string) {
+	if rs := registryStoreOnDisk(); rs != nil {
+		// Best last-known-good: current if it verifies, else the previous verified
+		// registry — this is what keeps a hotel running through a Central outage.
+		if reg := rs.Trusted(); reg != nil {
+			return reg, "signed"
+		}
+		// Root anchor present AND a signed-registry file already exists on disk = the
+		// signed regime is in force. A file that no longer verifies is tampering or
+		// corruption; REFUSE to downgrade to the unauthenticated legacy plain trust
+		// file (that would let anyone who can write the file authorise a rogue key).
+		if rs.FileExists() {
+			slog.Error("assignment: on-disk signed registry failed verification — refusing to downgrade to the unsigned trust file")
+			return nil, "none"
+		}
+	}
+	// Pre-rollout only: no signed registry has ever been persisted yet.
+	reg, err := assignment.LoadRegistry(assignmentTrustPath())
+	if err != nil {
+		return nil, "none"
+	}
+	return reg, "legacy-plain"
+}
+
 // verifiedAssignment loads the persisted assignment and RE-VERIFIES it on boot
 // against the local trust registry: the signature must come from an ACTIVE
 // dedicated assignment-signing key, and the document must be bound to THIS
@@ -42,11 +89,15 @@ func verifiedAssignment(store *assignment.Store, ident *identity.Identity) (stri
 		return "", "", "", 0
 	}
 	d := rec.Current
-	reg, err := assignment.LoadRegistry(assignmentTrustPath())
-	if err != nil {
-		slog.Error("assignment: trust registry unavailable — refusing to trust the persisted assignment",
-			"path", assignmentTrustPath(), "err", err)
+	// Prefer the verified SIGNED registry (last-known-good survives outages);
+	// fall back to the legacy plain trust file only where none exists yet.
+	reg, src := currentRegistryOnDisk()
+	if reg == nil {
+		slog.Error("assignment: no trusted registry — refusing to trust the persisted assignment")
 		return "", "", "", 0
+	}
+	if src != "signed" {
+		slog.Warn("assignment: verifying against legacy plain trust file (no signed registry yet)")
 	}
 	fpr := ""
 	if raw, e := base64.RawStdEncoding.DecodeString(ident.PublicKeyB64); e == nil && len(raw) == ed25519.PublicKeySize {
@@ -124,10 +175,8 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 	// effect without a restart. It holds ONLY assignment keys — the license,
 	// command, update, CA and auth-callout keys are absent, so a document signed by
 	// any of those is rejected as an unknown signer.
-	trustPath := envOr("SCD_ASSIGNMENT_TRUST", "/etc/stayconnect/assignment-trust.json")
-	if _, err := assignment.LoadRegistry(trustPath); err != nil {
-		slog.Warn("assignment: trust registry unavailable — assignment agent disabled",
-			"path", trustPath, "err", err)
+	if reg, _ := currentRegistryOnDisk(); reg == nil && registryStoreOnDisk() == nil {
+		slog.Warn("assignment: no trusted registry and no root anchor — assignment agent disabled")
 		return
 	}
 	store := s.assignmentStore()
@@ -139,9 +188,13 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 	}
 	slog.Info("assignment: agent started", "appliance_id", s.applID, "serial", s.serial,
 		"identity_fpr", s.identityKeyFpr, "applied_version", currentVersion,
-		"ctrl_base", ctrlBase, "trust_registry", trustPath, "status", store.Status())
+		"ctrl_base", ctrlBase, "status", store.Status())
 
 	poll := func() {
+		// Refresh the SIGNED trust registry first (verify + persist, rollback-safe).
+		// A failure keeps the last-known-good registry — verification continues offline.
+		s.refreshSignedRegistry(ctx)
+
 		doc, ok := s.fetchAssignment(ctx, ctrlBase)
 		if !ok || doc == nil {
 			// Central unreachable, or nothing to hand us. Record the attempt so an
@@ -154,9 +207,9 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 		// document we hold is the same one.
 		store.NoteRefresh(true)
 
-		reg, err := assignment.LoadRegistry(trustPath) // re-read: supports live rotation
-		if err != nil {
-			slog.Error("assignment: trust registry unreadable", "err", err)
+		reg, _ := currentRegistryOnDisk()
+		if reg == nil {
+			slog.Error("assignment: no trusted registry — cannot verify")
 			return
 		}
 		reason := assignment.AcceptForRegistry(reg, doc, s.applID, s.serial, s.identityKeyFpr, currentVersion, time.Now())
@@ -179,6 +232,12 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 		s.repointGuestNetworks(ctx, doc)
 		prevVersion := currentVersion
 		currentVersion = doc.Version
+
+		// TERMINAL adoption: the box has cleared its authority. Send Central a signed
+		// acknowledgment BEFORE re-exec so Phase 2 (cert + NATS shutdown) can proceed.
+		if assignment.Clears(doc.State) {
+			s.sendTerminalAck(ctx, doc)
+		}
 
 		// Re-exec when the operational identity actually changes (including an
 		// explicit unassign/revoke/decommission, which removes tenant/site).
@@ -205,27 +264,28 @@ func (s *server) startAssignmentAgent(ctx context.Context, ctrlBase string) {
 	}()
 }
 
-// fetchAssignment GETs the current signed assignment over the mTLS transport
-// (falling back to the legacy signed-JWT base when mTLS isn't ready).
-func (s *server) fetchAssignment(ctx context.Context, ctrlBase string) (*assignment.Document, bool) {
+// mtlsTransport returns the mTLS client + base, or (nil,"",false) if a client
+// certificate is not yet established. The assignment channel is mTLS-ONLY: there
+// is no JWT-over-:443 fallback, so a document can only reach a box holding a
+// valid client certificate.
+func (s *server) mtlsTransport() (*http.Client, string, bool) {
+	if s.certMgr == nil {
+		return nil, "", false
+	}
+	return s.certMgr.Transport()
+}
+
+// fetchAssignment GETs the current signed assignment over the mTLS transport ONLY.
+func (s *server) fetchAssignment(ctx context.Context, _ string) (*assignment.Document, bool) {
 	if s.idPriv == nil || s.applID == "" {
 		return nil, false
 	}
-	// Prefer the mTLS transport; fall back to the license-fetch client (which
-	// already trusts Central's server CA) over the signed-JWT channel on :443.
-	cl := s.cloudHTTPClient()
-	base := ctrlBase
-	if s.certMgr != nil {
-		if c, b, ready := s.certMgr.Transport(); ready {
-			cl, base = c, b
-		}
-	}
-	if base == "" {
-		return nil, false
+	cl, base, ready := s.mtlsTransport()
+	if !ready || base == "" {
+		return nil, false // mTLS not ready — assignment is mTLS-only, no fallback
 	}
 	tok, err := applianceauth.SignRequest(s.idPriv, s.applID, http.MethodGet, "/v1/appliance/assignment", nil)
 	if err != nil {
-		slog.Warn("assignment: sign request failed", "err", err)
 		return nil, false
 	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/appliance/assignment", nil)
@@ -237,20 +297,99 @@ func (s *server) fetchAssignment(ctx context.Context, ctrlBase string) (*assignm
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
-		return nil, false // no assignment issued yet — normal while awaiting
+		return nil, false
 	}
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		slog.Warn("assignment: fetch non-200", "status", resp.StatusCode, "base", base, "body", string(b))
+		slog.Warn("assignment: fetch non-200", "status", resp.StatusCode, "body", string(b))
 		return nil, false
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var doc assignment.Document
 	if json.Unmarshal(body, &doc) != nil {
-		slog.Warn("assignment: unparseable document")
 		return nil, false
 	}
 	return &doc, true
+}
+
+// refreshSignedRegistry fetches the current signed trust registry over mTLS,
+// verifies it against the baked-in root anchor and its version rules, and
+// persists it (keeping the previous one). A failure keeps the last-known-good
+// registry in force — verification of assignments continues during a Central
+// outage. Rejections are logged (and count as an audit signal).
+func (s *server) refreshSignedRegistry(ctx context.Context) {
+	rs := registryStoreOnDisk()
+	if rs == nil || s.idPriv == nil || s.applID == "" {
+		return
+	}
+	cl, base, ready := s.mtlsTransport()
+	if !ready || base == "" {
+		return
+	}
+	tok, err := applianceauth.SignRequest(s.idPriv, s.applID, http.MethodGet, "/v1/appliance/assignment-registry", nil)
+	if err != nil {
+		return
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/appliance/assignment-registry", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := cl.Do(req)
+	if err != nil {
+		return // outage — keep last-known-good
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	var sr assignment.SignedRegistry
+	if json.Unmarshal(body, &sr) != nil {
+		return
+	}
+	adopted, reason := rs.Adopt(&sr, time.Now())
+	if reason != "" && sr.RegistryVersion > rs.CurrentVersion() {
+		slog.Warn("assignment: signed registry REJECTED (last-known-good retained)",
+			"reason", reason, "offered_version", sr.RegistryVersion, "current_version", rs.CurrentVersion())
+		return
+	}
+	if adopted {
+		slog.Info("assignment: adopted signed trust registry", "registry_version", sr.RegistryVersion,
+			"keys", len(sr.Keys), "signer_key_id", sr.SignerKeyID)
+	}
+}
+
+// sendTerminalAck signs and delivers the appliance's acknowledgment that it has
+// adopted a TERMINAL assignment (over mTLS). This is what authorises Central to
+// run Phase 2 (certificate + NATS shutdown).
+func (s *server) sendTerminalAck(ctx context.Context, doc *assignment.Document) {
+	if s.idPriv == nil || s.applID == "" {
+		return
+	}
+	cl, base, ready := s.mtlsTransport()
+	if !ready || base == "" {
+		slog.Warn("assignment: terminal adopted but mTLS not ready to acknowledge; Central will retry / time out")
+		return
+	}
+	ack := &assignment.Ack{
+		ApplianceID: s.applID, Version: doc.Version, TerminalState: doc.State,
+		Fingerprint: assignment.DocFingerprint(doc), AdoptedAt: time.Now().Unix(),
+	}
+	assignment.SignAck(s.idPriv, ack)
+	body, _ := json.Marshal(ack)
+	tok, err := applianceauth.SignRequest(s.idPriv, s.applID, http.MethodPost, "/v1/appliance/assignment/ack", body)
+	if err != nil {
+		return
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/appliance/assignment/ack", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := cl.Do(req)
+	if err != nil {
+		slog.Warn("assignment: terminal ack send failed", "err", err)
+		return
+	}
+	defer resp.Body.Close()
+	slog.Info("assignment: sent terminal-adoption ack", "version", doc.Version, "state", doc.State,
+		"http", resp.StatusCode)
 }
 
 // repointGuestNetworks updates every appliance-local row that carries a Central

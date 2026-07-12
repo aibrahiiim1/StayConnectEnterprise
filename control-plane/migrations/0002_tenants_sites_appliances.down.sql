@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS operator_roles CASCADE;
+DROP TABLE IF EXISTS operators CASCADE;
+DROP TABLE IF EXISTS walled_garden_rules CASCADE;
+DROP TABLE IF EXISTS networks CASCADE;
+DROP TABLE IF EXISTS appliances CASCADE;
+DROP TABLE IF EXISTS sites CASCADE;
+DROP TABLE IF EXISTS tenants CASCADE;
+DELETE FROM schema_migrations WHERE version = '0002_tenants_sites_appliances';

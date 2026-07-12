@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	redis "github.com/redis/go-redis/v9"
 
 	"github.com/stayconnect/enterprise/control-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
@@ -20,7 +21,7 @@ import (
 // request JWT (application identity, RequireAppliance) — defence in depth. The
 // two identities MUST agree: the cert's bound appliance_id must equal the JWT
 // issuer, and the client cert must not be revoked.
-func ApplianceMTLSRouter(db *pgxpool.Pool, replay *applianceauth.ReplayCache, lic *licensing.Service, ca *pki.CA, assignKey ed25519.PrivateKey) http.Handler {
+func ApplianceMTLSRouter(db *pgxpool.Pool, rdb *redis.Client, replay *applianceauth.ReplayCache, lic *licensing.Service, ca *pki.CA, assignKey, regRoot ed25519.PrivateKey) http.Handler {
 	r := chi.NewRouter()
 	r.Use(auth.RequireAppliance(db, replay))
 	r.Use(mtlsCertBinding(db))
@@ -33,8 +34,19 @@ func ApplianceMTLSRouter(db *pgxpool.Pool, replay *applianceauth.ReplayCache, li
 		r.Get("/v1/appliance/license", licBase.ApplianceLicenseHandler)
 	}
 	if assignKey != nil {
-		assignBase := &AssignmentBase{Base: &Base{DB: db}, SignKey: assignKey}
-		r.Get("/v1/appliance/assignment", assignBase.ApplianceAssignmentHandler)
+		assignBase := &AssignmentBase{Base: &Base{DB: db, Redis: rdb}, SignKey: assignKey}
+		// The assignment channel is mTLS-ONLY (no JWT/bootstrap fallback — that mount
+		// is removed from the :443 router) and rate-limited + audited.
+		r.With(RateLimit(rdb, "assignment-fetch", 30, time.Minute)).
+			Get("/v1/appliance/assignment", assignBase.StrictApplianceAssignmentHandler)
+		// Signed terminal-adoption acknowledgment (Phase-1 completion).
+		r.With(RateLimit(rdb, "assignment-ack", 10, time.Minute)).
+			Post("/v1/appliance/assignment/ack", assignBase.AckHandler)
+	}
+	if regRoot != nil {
+		regBase := &RegistryBase{Base: &Base{DB: db}, RootKey: regRoot}
+		r.With(RateLimit(rdb, "assignment-registry", 30, time.Minute)).
+			Get("/v1/appliance/assignment-registry", regBase.Serve)
 	}
 	if ca != nil {
 		certBase := &CertBase{Base: &Base{DB: db}, CA: ca, ClientValid: 90 * 24 * time.Hour}

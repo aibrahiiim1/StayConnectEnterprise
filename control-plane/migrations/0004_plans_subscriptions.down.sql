@@ -1,0 +1,10 @@
+DROP TABLE IF EXISTS invoice_lines CASCADE;
+DROP TABLE IF EXISTS invoices CASCADE;
+DROP TABLE IF EXISTS subscription_events CASCADE;
+DROP TABLE IF EXISTS usage_counters CASCADE;
+DROP VIEW  IF EXISTS tenant_effective_limits;
+DROP TABLE IF EXISTS tenant_limit_overrides CASCADE;
+DROP TABLE IF EXISTS tenant_subscriptions CASCADE;
+DROP TABLE IF EXISTS plan_limits CASCADE;
+DROP TABLE IF EXISTS plans CASCADE;
+DELETE FROM schema_migrations WHERE version = '0004_plans_subscriptions';
