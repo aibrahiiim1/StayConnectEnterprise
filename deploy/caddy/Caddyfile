@@ -1,0 +1,174 @@
+# StayConnect — Caddyfile template (phase 14).
+#
+# Three public sites terminated here; everything behind is plain HTTP on
+# localhost. Caddy handles TLS (ACME HTTP-01 by default, or `tls internal`
+# on the dev VM) and forwards the `X-Forwarded-*` set ctrlapi already
+# honours from earlier phases.
+#
+# To deploy:
+#   1. cp this file to /etc/caddy/Caddyfile (or /etc/caddy/conf.d/)
+#   2. sed -i "s/stayconnect.local/yourdomain.com/g" /etc/caddy/Caddyfile
+#   3. systemctl reload caddy
+#
+# The dev VM swaps `stayconnect.local` for `stayconnect.local` and switches the
+# global block's `email` line for `tls internal` — see
+# deploy/caddy/README.md for the runbook.
+
+{
+	# Internal-only deployment: issue certs from Caddy's own local CA.
+	# Flip to public ACME by swapping `local_certs` for `email …` (and
+	# uncommenting `acme_ca` for staging).
+	#
+	#   email ops@yourdomain.com
+	#   # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+	local_certs
+
+	# Safer defaults across every site.
+	servers {
+		protocols h1 h2 h3
+		# Trust our own reverse proxy's X-Forwarded-* from 127.0.0.1
+		# (ctrlapi already validates these headers against the set below).
+		trusted_proxies static 127.0.0.1/32 ::1/128
+	}
+}
+
+# -------------------------------------------------------------------------
+# Shared snippet: security headers we want on every response.
+# -------------------------------------------------------------------------
+(security_headers) {
+	header {
+		# HSTS: one year, include subdomains, submit to preload list once
+		# you're confident you'll keep TLS on for good.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options    "nosniff"
+		X-Frame-Options           "DENY"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+		Permissions-Policy        "geolocation=(), microphone=(), camera=()"
+		# Remove Caddy's Server banner.
+		-Server
+	}
+}
+
+# -------------------------------------------------------------------------
+# portal.stayconnect.local — guest captive portal (portald)
+# -------------------------------------------------------------------------
+# No CSP here: the guest portal renders inline JS in the voucher form and
+# the OAuth/social handlers redirect to 3rd-party consent pages.
+portal.stayconnect.local {
+	import security_headers
+
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:8380 {
+		header_up X-Forwarded-Host  {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP         {remote_host}
+	}
+
+	log {
+		output file /var/log/caddy/portal.log
+		format json
+	}
+}
+
+# -------------------------------------------------------------------------
+# api.stayconnect.local — control-plane API + Stripe webhooks
+# -------------------------------------------------------------------------
+# Public endpoints (no operator session): /v1/appliances/enroll,
+# /v1/checkout/create, /v1/checkout/{id}, /v1/webhooks/stripe/{tenant}.
+# Everything else sits behind RequireAuth or RequireAppliance.
+api.stayconnect.local {
+	import security_headers
+
+	# Tighter CSP for a pure JSON API — no inline scripts ever served here.
+	header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-Host  {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP         {remote_host}
+		# Stripe webhook retries can be slow (Stripe waits for 200 before
+		# acking). Allow a generous response timeout.
+		transport http {
+			response_header_timeout 30s
+			dial_timeout 5s
+		}
+	}
+
+	log {
+		output file /var/log/caddy/api.log
+		format json
+	}
+}
+
+# -------------------------------------------------------------------------
+# admin.stayconnect.local — Next.js admin UI
+# -------------------------------------------------------------------------
+admin.stayconnect.local {
+	import security_headers
+
+	# Next.js bundles + emits inline runtime snippets. 'self' + unsafe-
+	# inline on scripts is the common trade-off; switch to a nonce-based
+	# CSP as a hardening pass later.
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.stayconnect.local; frame-ancestors 'none'"
+
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:3000 {
+		header_up X-Forwarded-Host  {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP         {remote_host}
+	}
+
+	log {
+		output file /var/log/caddy/admin.log
+		format json
+	}
+}
+
+# -------------------------------------------------------------------------
+# hotel.stayconnect.local (+ management-IP alias) — Hotel Admin UI
+# -------------------------------------------------------------------------
+# Served ON the appliance for hotel staff via the MANAGEMENT network only.
+# The canonical DNS name and the appliance management IP (172.21.60.23 here)
+# are served from THIS ONE vhost / one Next.js :3100 instance — the IP is an
+# alias, not a second app. The UI proxies its own /api calls to edged (:8090)
+# internally.
+#
+# TLS: one leaf cert carrying BOTH a DNS SAN and an IP SAN, signed by Caddy's
+# own local CA (the chain workstations already trust) — minted/renewed by
+# deploy/scripts/hotel-admin-mint-cert.sh. We pin it explicitly rather than
+# letting `local_certs` auto-issue two separate single-SAN certs.
+#
+# Reachability is enforced at the firewall, NOT here: nftables accepts :443
+# only on the management interface to the management IP, and DNATs guest :443
+# on br-lan to the captive portal — so this is never exposed to br-lan/guests
+# or the public WAN. See deploy/nftables/stayconnect.nft.
+#
+# Auth cookies are host-only (no Domain), so the same session logic works
+# unchanged for both the DNS name and the IP; redirects are host-relative.
+hotel.stayconnect.local, 172.21.60.23 {
+	tls /etc/caddy/hotel-admin/hotel-admin.fullchain.crt /etc/caddy/hotel-admin/hotel-admin.key
+
+	import security_headers
+
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
+
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:3100 {
+		# Next may emit an absolute Location to its internal bind host; strip it
+		# so the browser keeps the external origin (DNS name OR the IP alias).
+		header_down Location "^https?://localhost:3100(/.*)$" "$1"
+		header_up X-Forwarded-Host  {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP         {remote_host}
+	}
+
+	log {
+		output file /var/log/caddy/hotel-admin.log
+		format json
+	}
+}
