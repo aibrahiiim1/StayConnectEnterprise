@@ -121,6 +121,10 @@ func (b *Base) terminalAction(terminalState string) http.HandlerFunc {
 				"could not start terminal delivery: "+err.Error())
 			return
 		}
+		// Commercial authority ends the moment the operator retires the box — it does
+		// NOT wait for the appliance's credential ack (that is only for cert/NATS).
+		// Centralized so revoke/decommission/emergency can never leave the license active.
+		licRevoked, _ := b.revokeApplianceBoundLicenses(ctx, id)
 		sess := auth.FromContext(r.Context())
 		recordLifecycle(ctx, b.DB, id, prev, terminalState, emailOf(sess), clientIPFromReq(r), in.Reason)
 		action := "appliance." + terminalState
@@ -131,7 +135,7 @@ func (b *Base) terminalAction(terminalState string) http.HandlerFunc {
 		}
 		audit.Op(ctx, b.DB, r, action, "appliance", id, map[string]any{
 			"reason": in.Reason, "prev_state": prev, "emergency_compromise": in.Emergency,
-			"assignment_version": ver,
+			"assignment_version": ver, "licenses_revoked": len(licRevoked),
 		})
 		var deliveryState string
 		_ = b.DB.QueryRow(ctx, `SELECT delivery_state FROM appliance_terminal_delivery WHERE appliance_id=$1`, id).Scan(&deliveryState)

@@ -242,16 +242,20 @@ func (b *Base) assignAppliance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = b.DB.QueryRow(ctx, `SELECT version FROM appliance_signed_assignments WHERE appliance_id=$1`, id).Scan(&assignVersion)
+	// Cross-tenant reassignment: the appliance is leaving its previous tenant, so
+	// that tenant's bound entitlement must NOT stay active. A new license is issued
+	// separately for the new owner. (Same-tenant re-assign keeps the license.)
+	reassignRevoked := 0
+	if prevT != "" && prevT != in.TenantID {
+		if rev, _ := b.revokeApplianceBoundLicenses(ctx, id); len(rev) > 0 {
+			reassignRevoked = len(rev)
+		}
+	}
 	audit.Op(ctx, b.DB, r, "appliance.assigned", "appliance", id, map[string]any{
 		"_tenant_id": in.TenantID, "site_id": in.SiteID, "prev_tenant_id": prevT, "reason": in.Reason,
-		"assignment_version": assignVersion})
+		"assignment_version": assignVersion, "prev_licenses_revoked": reassignRevoked})
 	WriteJSON(w, http.StatusOK, map[string]any{"status": "assigned", "tenant_id": in.TenantID, "site_id": in.SiteID,
 		"assignment_version": assignVersion})
-}
-
-// revokeAppliance revokes an appliance: lifecycle=revoked, blocks future auth.
-func (b *Base) revokeAppliance(w http.ResponseWriter, r *http.Request) {
-	b.transition(w, r, "revoked", "platform.appliances.revoke")
 }
 
 func (b *Base) transition(w http.ResponseWriter, r *http.Request, to, _ string) {
@@ -363,40 +367,6 @@ func (b *Base) replaceAppliance(w http.ResponseWriter, r *http.Request) {
 		"tenant_id": tenantID, "site_id": siteID,
 		"note": "Enroll the new appliance with this token, then assign it to the same site. The old certificate/license must be revoked once the new box is online.",
 	})
-}
-
-// decommissionAppliance permanently retires an appliance and revokes its
-// active certificate. Audit + local data are preserved.
-func (b *Base) decommissionAppliance(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	var in struct {
-		Reason string `json:"reason"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&in)
-	ctx, cancel := DBCtx(r)
-	defer cancel()
-	var prev string
-	if err := b.DB.QueryRow(ctx, `SELECT lifecycle_state FROM appliances WHERE id=$1`, id).Scan(&prev); err != nil {
-		Fail(w, r, http.StatusNotFound, CodeNotFound, "appliance not found")
-		return
-	}
-	tx, _ := b.DB.Begin(ctx)
-	defer tx.Rollback(ctx)
-	_, _ = tx.Exec(ctx, `UPDATE appliances SET lifecycle_state='decommissioned', status='retired', current_cert_fingerprint=NULL, updated_at=now() WHERE id=$1`, id)
-	// Revoke any active certificate (record the revocation for the mTLS check).
-	_, _ = tx.Exec(ctx, `
-        INSERT INTO appliance_certificate_revocations (certificate_id, appliance_id, fingerprint_sha256, reason)
-        SELECT c.id, c.appliance_id, c.fingerprint_sha256, 'decommission'
-          FROM appliance_certificates c WHERE c.appliance_id=$1 AND c.status='active'`, id)
-	_, _ = tx.Exec(ctx, `UPDATE appliance_certificates SET status='revoked', revoked_at=now(), revocation_reason='decommission' WHERE appliance_id=$1 AND status='active'`, id)
-	sess := auth.FromContext(r.Context())
-	recordLifecycle(ctx, tx, id, prev, "decommissioned", emailOf(sess), clientIPFromReq(r), in.Reason)
-	if err := tx.Commit(ctx); err != nil {
-		Fail(w, r, http.StatusInternalServerError, CodeInternal, "commit failed")
-		return
-	}
-	audit.Op(ctx, b.DB, r, "appliance.decommissioned", "appliance", id, map[string]any{"reason": in.Reason, "prev_state": prev})
-	WriteJSON(w, http.StatusOK, map[string]any{"status": "decommissioned", "previous": prev})
 }
 
 // updateAlertStatus advances a security alert through its triage lifecycle

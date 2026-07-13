@@ -349,20 +349,10 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 
-	// Revoke any license BOUND to this appliance first, so deleting the appliance
-	// (appliance_ids is an FK-less uuid[]) never leaves an orphaned active license.
-	revoked := 0
-	if b.Lic != nil {
-		if ids, _, err := b.countIDs(ctx,
-			`SELECT id::text FROM licenses WHERE tenant_id=$2 AND $1 = ANY(appliance_ids) AND status IN ('active','suspended')`,
-			id, tenantID); err == nil {
-			for _, lid := range ids {
-				if b.Lic.Revoke(ctx, lid) == nil {
-					revoked++
-				}
-			}
-		}
-	}
+	// Centralized license termination — revoke licenses BOUND to this appliance
+	// first, so deleting it (appliance_ids is an FK-less uuid[]) never leaves an
+	// orphaned active license.
+	revoked, _ := b.revokeApplianceBoundLicenses(ctx, id)
 
 	ct, err := b.DB.Exec(ctx, `DELETE FROM appliances WHERE id = $1 AND tenant_id = $2`, id, tenantID)
 	if err != nil {
@@ -373,6 +363,6 @@ func (b *Base) deleteAppliance(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "appliance not found")
 		return
 	}
-	audit.Op(r.Context(), b.DB, r, "appliance.deleted", "appliance", id, map[string]any{"_tenant_id": tenantID, "licenses_revoked": revoked})
+	audit.Op(r.Context(), b.DB, r, "appliance.deleted", "appliance", id, map[string]any{"_tenant_id": tenantID, "licenses_revoked": len(revoked)})
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -19,34 +19,18 @@ func (b *Base) deactivateAppliance(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 
-	var siteID string
-	if err := b.DB.QueryRow(ctx, `SELECT COALESCE(site_id::text,'') FROM appliances WHERE id=$1`, id).Scan(&siteID); err != nil {
+	var exists bool
+	if err := b.DB.QueryRow(ctx, `SELECT true FROM appliances WHERE id=$1`, id).Scan(&exists); err != nil {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "appliance not found")
 		return
 	}
-	revoked := 0
-	if siteID != "" && b.Lic != nil {
-		rows, err := b.DB.Query(ctx, `SELECT id::text FROM licenses WHERE site_id=$1 AND status IN ('active','suspended')`, siteID)
-		if err == nil {
-			var ids []string
-			for rows.Next() {
-				var lid string
-				if rows.Scan(&lid) == nil {
-					ids = append(ids, lid)
-				}
-			}
-			rows.Close()
-			for _, lid := range ids {
-				if b.Lic.Revoke(ctx, lid) == nil {
-					revoked++
-				}
-			}
-		}
-	}
+	// Centralized license termination — revoke the licenses bound to THIS appliance
+	// (deactivate is reversible: identity/certificate are intentionally preserved).
+	revoked, _ := b.revokeApplianceBoundLicenses(ctx, id)
 	_, _ = b.DB.Exec(ctx, `UPDATE appliances SET lifecycle_state='assigned', updated_at=now()
 	    WHERE id=$1 AND lifecycle_state IN ('activated','licensed','online','offline','grace')`, id)
-	audit.Op(r.Context(), b.DB, r, "appliance.deactivated", "appliance", id, map[string]any{"licenses_revoked": revoked})
-	WriteJSON(w, http.StatusOK, map[string]any{"status": "deactivated", "licenses_revoked": revoked})
+	audit.Op(r.Context(), b.DB, r, "appliance.deactivated", "appliance", id, map[string]any{"licenses_revoked": len(revoked)})
+	WriteJSON(w, http.StatusOK, map[string]any{"status": "deactivated", "licenses_revoked": len(revoked)})
 }
 
 // applianceImpact counts the technical leaf records that will be removed with an
@@ -173,24 +157,17 @@ func (b *Base) deleteApplianceAdmin(w http.ResponseWriter, r *http.Request) {
 	impact := b.applianceImpact(ctx, id)
 
 	// Revoke + mark the appliance's certificates (defence in depth: the cascade
-	// delete below also removes them, terminating mTLS trust).
+	// delete below also removes them, terminating mTLS + NATS trust).
 	_, _ = b.DB.Exec(ctx, `UPDATE appliance_certificates SET status='revoked', revoked_at=now() WHERE appliance_id=$1 AND status='active'`, id)
 
-	revoked := 0
-	if siteID != "" && b.Lic != nil {
-		if ids, _, err := b.countIDs(ctx, `SELECT id::text FROM licenses WHERE site_id=$1 AND status IN ('active','suspended')`, siteID); err == nil {
-			for _, lid := range ids {
-				if b.Lic.Revoke(ctx, lid) == nil {
-					revoked++
-				}
-			}
-		}
-	}
+	// Centralized license termination — revoke licenses BOUND to this appliance
+	// (a site-wide license stays valid while the site exists).
+	revoked, _ := b.revokeApplianceBoundLicenses(ctx, id)
 
 	// Audit BEFORE the delete so the record is durable and complete.
 	audit.Op(r.Context(), b.DB, r, "appliance.deleted", "appliance", id, map[string]any{
 		"serial": serial, "site_id": siteID, "reason": req.Reason,
-		"licenses_revoked": revoked, "technical_records": impact,
+		"licenses_revoked": len(revoked), "technical_records": impact,
 	})
 
 	ct, err := b.DB.Exec(ctx, `DELETE FROM appliances WHERE id=$1`, id)
