@@ -43,6 +43,9 @@ type License struct {
 func (b *LicensesBase) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", b.list)
+	// Ownership-aware roll-up for the Platform dashboard. Registered before
+	// "/{id}" so the literal path is not captured as an id.
+	r.Get("/fleet-summary", b.fleetSummary)
 	r.Get("/{id}", b.get)
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireRole("platform_admin"))
@@ -52,6 +55,9 @@ func (b *LicensesBase) Routes() http.Handler {
 		r.Post("/{id}/suspend", b.suspend)
 		r.Post("/{id}/resume", b.resume)
 		r.Post("/{id}/revoke", b.revoke)
+		// Revoke active/suspended licenses whose ownership no longer exists
+		// (deleted site, or appliance-bound with no surviving appliance).
+		r.Post("/reconcile-orphans", b.reconcileOrphans)
 	})
 	return r
 }
@@ -136,6 +142,105 @@ func (b *LicensesBase) list(w http.ResponseWriter, r *http.Request) {
 		out = append(out, l)
 	}
 	WriteList(w, out, ListMeta{})
+}
+
+// ownershipValidSQL is the single source of truth for "does this license still
+// have a valid owner": its tenant and site must exist, and if it is
+// appliance-bound (non-empty appliance_ids) at least one of those appliances
+// must still exist. A site license (empty appliance_ids) only needs its site.
+const ownershipValidSQL = `(
+    EXISTS (SELECT 1 FROM tenants t WHERE t.id = l.tenant_id)
+    AND EXISTS (SELECT 1 FROM sites s WHERE s.id = l.site_id)
+    AND (
+        COALESCE(cardinality(l.appliance_ids), 0) = 0
+        OR EXISTS (SELECT 1 FROM appliances a WHERE a.id = ANY(l.appliance_ids))
+    )
+)`
+
+// fleetSummary returns the license roll-up for the dashboard, counting ONLY
+// licenses with valid ownership. A license bound to a deleted appliance (or a
+// deleted site) is never counted as Active/Expiring/etc — it is reported under
+// "orphaned" so the integrity issue is visible and can be reconciled.
+func (b *LicensesBase) fleetSummary(w http.ResponseWriter, r *http.Request) {
+	tenantID := auth.EffectiveTenantID(r)
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+
+	where := `l.status <> 'superseded'`
+	args := []any{}
+	if tenantID != "" {
+		where += ` AND l.tenant_id = $1`
+		args = append(args, tenantID)
+	} else if s := auth.FromContext(r.Context()); s == nil || !s.IsSuperAdmin {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "tenant scope required")
+		return
+	}
+
+	q := `
+    WITH scoped AS (
+        SELECT l.status, l.valid_until, ` + ownershipValidSQL + ` AS owner_ok
+          FROM licenses l
+         WHERE ` + where + `
+    )
+    SELECT
+      count(*) FILTER (WHERE owner_ok AND status='active' AND valid_until >  now() + interval '30 days')                                  AS active,
+      count(*) FILTER (WHERE owner_ok AND status='active' AND valid_until >  now() AND valid_until <= now() + interval '30 days')          AS expiring,
+      count(*) FILTER (WHERE owner_ok AND status='active' AND valid_until <= now())                                                       AS expired,
+      count(*) FILTER (WHERE owner_ok AND status='suspended')                                                                             AS suspended,
+      count(*) FILTER (WHERE status='revoked')                                                                                            AS revoked,
+      count(*) FILTER (WHERE status IN ('active','suspended') AND NOT owner_ok)                                                           AS orphaned,
+      count(*) FILTER (WHERE owner_ok)                                                                                                     AS total
+      FROM scoped`
+
+	var active, expiring, expired, suspended, revoked, orphaned, total int
+	if err := b.DB.QueryRow(ctx, q, args...).Scan(&active, &expiring, &expired, &suspended, &revoked, &orphaned, &total); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "summary query failed")
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{
+		"active": active, "expiring": expiring, "expired": expired,
+		"suspended": suspended, "revoked": revoked, "orphaned": orphaned, "total": total,
+	})
+}
+
+// reconcileOrphans revokes every active/suspended license whose ownership no
+// longer exists, so orphaned entitlements never linger silently. Returns the
+// revoked ids. Platform-admin + step-up gated (mounted in the write group).
+func (b *LicensesBase) reconcileOrphans(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+	rows, err := b.DB.Query(ctx, `
+        SELECT l.id::text, COALESCE(l.site_id::text,''), COALESCE(l.tenant_id::text,'')
+          FROM licenses l
+         WHERE l.status IN ('active','suspended') AND NOT `+ownershipValidSQL)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
+		return
+	}
+	type orphan struct{ id, site, tenant string }
+	var orphans []orphan
+	for rows.Next() {
+		var o orphan
+		if rows.Scan(&o.id, &o.site, &o.tenant) == nil {
+			orphans = append(orphans, o)
+		}
+	}
+	rows.Close()
+
+	revoked := []string{}
+	for _, o := range orphans {
+		if err := b.Svc.Revoke(ctx, o.id); err != nil {
+			continue
+		}
+		revoked = append(revoked, o.id)
+		if o.site != "" {
+			b.driveApplianceLifecycle(ctx, o.site, "revoked")
+		}
+		audit.Op(r.Context(), b.DB, r, "license.orphan_reconciled", "license", o.id, map[string]any{
+			"_tenant_id": o.tenant, "site_id": o.site, "reason": "owner (site/appliance) no longer exists",
+		})
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"revoked": len(revoked), "license_ids": revoked})
 }
 
 func (b *LicensesBase) get(w http.ResponseWriter, r *http.Request) {

@@ -174,7 +174,9 @@ func NewRouter(d Deps) http.Handler {
 			gbase := &api.Base{DB: guestDB, LimitsDB: d.DB, Redis: d.Redis}
 			// Appliance routes are cloud-domain but effective-config reads
 			// site-owned tables (PMS providers, walled garden) → GuestDB.
-			abase := &api.Base{DB: d.DB, GuestDB: guestDB, Redis: d.Redis}
+			// Lic wired so the tenant-scoped appliance delete revokes a bound
+			// license (never leaves an orphaned active license).
+			abase := &api.Base{DB: d.DB, GuestDB: guestDB, Redis: d.Redis, Lic: d.Licensing}
 			r.Mount("/tenants", base.TenantsRoutes())
 			r.Mount("/sites", base.SitesRoutes())
 			r.Mount("/appliances", abase.AppliancesRoutes())

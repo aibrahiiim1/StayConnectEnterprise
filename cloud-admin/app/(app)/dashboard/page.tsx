@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, License, Subscription, TopResp, UsageSummary, Whoami } from "@/lib/api";
+import { api, Subscription, TopResp, UsageSummary, Whoami } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { KpiCard } from "@/components/kpi-card";
 import { Badge } from "@/components/ui/badge";
@@ -10,35 +10,20 @@ import { formatBytes } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 
 // FleetLicenseSummary counts the licenses the Platform has ISSUED to managed
-// tenants/sites, by state. The Central Platform is the vendor license issuer and
-// holds no license of its own, so its dashboard never shows a bare "License:
-// Active" — only this ownership-scoped fleet roll-up.
+// tenants/sites, by state. Counting is authoritative and OWNERSHIP-AWARE: it is
+// computed server-side (GET /cloud/v1/licenses/fleet-summary) so a license bound
+// to a deleted appliance or site is NEVER counted as Active — it is reported as
+// "orphaned" instead. The Central Platform is the vendor issuer and holds no
+// license of its own, so its dashboard shows only this fleet roll-up.
 type FleetLicenseSummary = {
   active: number;
   expiring: number;
   expired: number;
   suspended: number;
   revoked: number;
+  orphaned: number;
   total: number;
 };
-
-const EXPIRING_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
-
-function summarizeLicenses(rows: License[]): FleetLicenseSummary {
-  const now = Date.now();
-  const s: FleetLicenseSummary = { active: 0, expiring: 0, expired: 0, suspended: 0, revoked: 0, total: 0 };
-  for (const l of rows) {
-    if (l.status === "superseded") continue; // replaced by a newer license; not a live entitlement
-    s.total++;
-    if (l.status === "revoked") { s.revoked++; continue; }
-    if (l.status === "suspended") { s.suspended++; continue; }
-    const validUntil = l.valid_until ? new Date(l.valid_until).getTime() : 0;
-    if (validUntil && validUntil < now) s.expired++;
-    else if (validUntil && validUntil - now <= EXPIRING_WINDOW_MS) s.expiring++;
-    else s.active++;
-  }
-  return s;
-}
 
 export default function DashboardPage() {
   const [me, setMe] = useState<Whoami | null>(null);
@@ -74,15 +59,14 @@ export default function DashboardPage() {
     })();
   }, []);
 
-  // Platform (super-admin) view: roll up licenses the Platform issued across the
-  // whole fleet. Omitting tenant_id returns every tenant's licenses for a
-  // super-admin (control-plane licenses.list).
+  // Platform (super-admin) view: authoritative ownership-aware roll-up computed
+  // server-side. A license whose bound appliance/site was deleted is counted as
+  // "orphaned", never as Active.
   useEffect(() => {
     if (!isPlatform) return;
     (async () => {
       try {
-        const lic = await api.get<{ data: License[] }>("/cloud/v1/licenses");
-        setFleetLicenses(summarizeLicenses(lic.data ?? []));
+        setFleetLicenses(await api.get<FleetLicenseSummary>("/cloud/v1/licenses/fleet-summary"));
       } catch {
         setFleetLicenses(null);
       }
@@ -211,6 +195,9 @@ function FleetLicenseSummaryCard({ summary }: { summary: FleetLicenseSummary | n
         { label: "Expired", value: summary.expired, tone: "text-warn" },
         { label: "Suspended", value: summary.suspended, tone: "text-warn" },
         { label: "Revoked", value: summary.revoked, tone: "text-err" },
+        // Only surfaced when > 0: licenses whose bound appliance/site no longer
+        // exists. These never count as Active; they should be reconciled.
+        ...(summary.orphaned > 0 ? [{ label: "Orphaned", value: summary.orphaned, tone: "text-err" }] : []),
       ]
     : [];
   return (
@@ -230,7 +217,7 @@ function FleetLicenseSummaryCard({ summary }: { summary: FleetLicenseSummary | n
       <CardBody>
         {summary === null ? (
           <EmptyState title="Loading…" />
-        ) : summary.total === 0 ? (
+        ) : summary.total === 0 && summary.orphaned === 0 ? (
           <EmptyState title="No licenses issued yet" hint="Issue a license to a site to entitle its appliances." />
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
