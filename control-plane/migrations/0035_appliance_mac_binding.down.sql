@@ -1,0 +1,3 @@
+ALTER TABLE appliances
+  DROP COLUMN IF EXISTS wan_mac,
+  DROP COLUMN IF EXISTS lan_mac;

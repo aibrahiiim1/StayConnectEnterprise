@@ -1,0 +1,333 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/stayconnect/enterprise/control-plane/internal/audit"
+	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
+	lic "github.com/stayconnect/enterprise/license"
+)
+
+// LicensesBase serves /cloud/v1/licenses (operator side) and the appliance
+// license-fetch endpoint. Issuing and revoking are platform_admin actions;
+// tenant operators get read access to their own tenant's licenses.
+type LicensesBase struct {
+	*Base
+	Svc *licensing.Service
+}
+
+type License struct {
+	ID                 string          `json:"id"`
+	TenantID           string          `json:"tenant_id"`
+	SiteID             string          `json:"site_id"`
+	CommercialPlanCode string          `json:"commercial_plan_code"`
+	Status             string          `json:"status"`
+	IssuedAt           time.Time       `json:"issued_at"`
+	ValidUntil         time.Time       `json:"valid_until"`
+	OfflineGraceDays   int             `json:"offline_grace_days"`
+	ApplianceIDs       []string        `json:"appliance_ids"`
+	Features           json.RawMessage `json:"features"`
+	Limits             json.RawMessage `json:"limits"`
+	KeyID              string          `json:"key_id"`
+	RevokedAt          *time.Time      `json:"revoked_at,omitempty"`
+	CreatedAt          time.Time       `json:"created_at"`
+}
+
+func (b *LicensesBase) Routes() http.Handler {
+	r := chi.NewRouter()
+	r.Get("/", b.list)
+	r.Get("/{id}", b.get)
+	r.Group(func(r chi.Router) {
+		r.Use(auth.RequireRole("platform_admin"))
+		r.Use(RequireReauth(b.Redis)) // license changes are billing-sensitive → step-up
+		r.Post("/", b.issue)
+		r.Post("/{id}/renew", b.issue) // renew = supersede with a fresh signed doc
+		r.Post("/{id}/suspend", b.suspend)
+		r.Post("/{id}/resume", b.resume)
+		r.Post("/{id}/revoke", b.revoke)
+	})
+	return r
+}
+
+// driveApplianceLifecycle mirrors a license state change onto the commercial
+// lifecycle_state of the site's appliances. Presence (online/offline) lives in
+// the separate legacy `status` column and is driven by heartbeat; this only
+// moves the commercial dimension. It never touches suspended→revoked identity
+// states set by the enrollment/identity path.
+func (b *LicensesBase) driveApplianceLifecycle(ctx context.Context, siteID, to string) {
+	var from []string
+	switch to {
+	case "licensed":
+		from = []string{"assigned", "licensed", "grace", "suspended", "license_expired", "revoked"}
+	case "suspended":
+		from = []string{"licensed", "grace"}
+	case "grace":
+		from = []string{"licensed"}
+	case "license_expired":
+		// Natural expiry only — NOT revocation. Revocation is explicit below.
+		from = []string{"licensed", "grace"}
+	case "revoked":
+		// License explicitly cancelled; cannot resume as the same license.
+		from = []string{"licensed", "grace", "suspended", "license_expired"}
+	default:
+		return
+	}
+	_, _ = b.DB.Exec(ctx, `
+        UPDATE appliances SET lifecycle_state=$2, updated_at=now()
+         WHERE site_id=$1 AND lifecycle_state = ANY($3)`, siteID, to, from)
+}
+
+const licenseCols = `id, tenant_id, site_id, commercial_plan_code, status, issued_at,
+       valid_until, offline_grace_days, appliance_ids, features, limits, key_id,
+       revoked_at, created_at`
+
+func scanLicense(row interface{ Scan(...any) error }) (License, error) {
+	var l License
+	err := row.Scan(&l.ID, &l.TenantID, &l.SiteID, &l.CommercialPlanCode, &l.Status,
+		&l.IssuedAt, &l.ValidUntil, &l.OfflineGraceDays, &l.ApplianceIDs,
+		&l.Features, &l.Limits, &l.KeyID, &l.RevokedAt, &l.CreatedAt)
+	return l, err
+}
+
+func (b *LicensesBase) list(w http.ResponseWriter, r *http.Request) {
+	tenantID := auth.EffectiveTenantID(r)
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+
+	q := `SELECT ` + licenseCols + ` FROM licenses`
+	args := []any{}
+	if tenantID != "" {
+		q += ` WHERE tenant_id = $1`
+		args = append(args, tenantID)
+	} else if s := auth.FromContext(r.Context()); s == nil || !s.IsSuperAdmin {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "tenant scope required")
+		return
+	}
+	if site := r.URL.Query().Get("site_id"); site != "" {
+		if len(args) == 1 {
+			q += ` AND site_id = $2`
+		} else {
+			q += ` WHERE site_id = $1`
+		}
+		args = append(args, site)
+	}
+	q += ` ORDER BY created_at DESC LIMIT 200`
+
+	rows, err := b.DB.Query(ctx, q, args...)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
+		return
+	}
+	defer rows.Close()
+	var out []License
+	for rows.Next() {
+		l, err := scanLicense(rows)
+		if err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "scan failed")
+			return
+		}
+		out = append(out, l)
+	}
+	WriteList(w, out, ListMeta{})
+}
+
+func (b *LicensesBase) get(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+	l, err := scanLicense(b.DB.QueryRow(ctx, `SELECT `+licenseCols+` FROM licenses WHERE id = $1`, id))
+	if IsNoRows(err) {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "license not found")
+		return
+	}
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
+		return
+	}
+	// Tenant scoping: non-super operators only see their own tenant.
+	if s := auth.FromContext(r.Context()); s != nil && !s.IsSuperAdmin && s.DefaultTenantID != l.TenantID {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "license not found")
+		return
+	}
+	WriteJSON(w, http.StatusOK, l)
+}
+
+func (b *LicensesBase) issue(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TenantID         string `json:"tenant_id"`
+		SiteID           string `json:"site_id"`
+		ApplianceID      string `json:"appliance_id"` // when set, bind the license to this appliance's hardware/identity
+		ValidDays        int    `json:"valid_days"`
+		OfflineGraceDays int    `json:"offline_grace_days"`
+	}
+	if err := DecodeJSON(r, &in); err != nil || in.SiteID == "" || in.TenantID == "" {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "tenant_id and site_id are required")
+		return
+	}
+	if in.ValidDays <= 0 {
+		in.ValidDays = 365
+	}
+	if in.OfflineGraceDays <= 0 {
+		in.OfflineGraceDays = 30
+	}
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+
+	createdBy := ""
+	if s := auth.FromContext(r.Context()); s != nil {
+		createdBy = s.OperatorID
+	}
+	var doc *lic.Document
+	var env *lic.Envelope
+	var err error
+	if in.ApplianceID != "" {
+		doc, env, err = b.Svc.IssueForAppliance(ctx, in.TenantID, in.SiteID, in.ApplianceID, createdBy,
+			time.Duration(in.ValidDays)*24*time.Hour, in.OfflineGraceDays)
+	} else {
+		doc, env, err = b.Svc.IssueForSite(ctx, in.TenantID, in.SiteID, createdBy,
+			time.Duration(in.ValidDays)*24*time.Hour, in.OfflineGraceDays)
+	}
+	switch {
+	case errors.Is(err, licensing.ErrNoSubscription):
+		Fail(w, r, http.StatusPaymentRequired, CodePaymentRequired, "tenant has no active subscription")
+		return
+	case errors.Is(err, licensing.ErrNoSigner):
+		Fail(w, r, http.StatusServiceUnavailable, CodeInternal, "vendor signing key not configured")
+		return
+	case err != nil:
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, err.Error())
+		return
+	}
+	// Drive the site's appliances into the 'licensed' commercial state — the
+	// lifecycle now follows the actual signed license, not a manual DB edit.
+	b.driveApplianceLifecycle(ctx, in.SiteID, "licensed")
+	audit.Op(r.Context(), b.DB, r, "license.issued", "license", doc.LicenseID, map[string]any{
+		"_tenant_id": in.TenantID, "site_id": in.SiteID,
+		"plan": doc.CommercialPlanCode, "valid_until": doc.ValidUntil,
+	})
+	WriteJSON(w, http.StatusCreated, map[string]any{
+		"license_id": doc.LicenseID,
+		"document":   doc,
+		"envelope":   env,
+	})
+}
+
+func (b *LicensesBase) suspend(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+	createdBy := ""
+	if s := auth.FromContext(r.Context()); s != nil {
+		createdBy = s.OperatorID
+	}
+	siteID, err := b.Svc.Suspend(ctx, id, createdBy)
+	if err != nil {
+		if errors.Is(err, licensing.ErrNoLicense) {
+			Fail(w, r, http.StatusNotFound, CodeNotFound, "no current license with that id")
+			return
+		}
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, err.Error())
+		return
+	}
+	b.driveApplianceLifecycle(ctx, siteID, "suspended")
+	audit.Op(r.Context(), b.DB, r, "license.suspended", "license", id, map[string]any{"site_id": siteID})
+	WriteJSON(w, http.StatusOK, map[string]any{"status": "suspended", "license_id": id})
+}
+
+func (b *LicensesBase) resume(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+	createdBy := ""
+	if s := auth.FromContext(r.Context()); s != nil {
+		createdBy = s.OperatorID
+	}
+	siteID, err := b.Svc.Resume(ctx, id, createdBy)
+	if err != nil {
+		if errors.Is(err, licensing.ErrNoLicense) {
+			Fail(w, r, http.StatusNotFound, CodeNotFound, "no current license with that id")
+			return
+		}
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, err.Error())
+		return
+	}
+	b.driveApplianceLifecycle(ctx, siteID, "licensed")
+	audit.Op(r.Context(), b.DB, r, "license.resumed", "license", id, map[string]any{"site_id": siteID})
+	WriteJSON(w, http.StatusOK, map[string]any{"status": "active", "license_id": id})
+}
+
+func (b *LicensesBase) revoke(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+	var tenantID, siteID string
+	_ = b.DB.QueryRow(ctx, `SELECT tenant_id::text, site_id::text FROM licenses WHERE id = $1`, id).Scan(&tenantID, &siteID)
+	if err := b.Svc.Revoke(ctx, id); err != nil {
+		if errors.Is(err, licensing.ErrNoLicense) {
+			Fail(w, r, http.StatusNotFound, CodeNotFound, "no current license with that id")
+			return
+		}
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "revoke failed")
+		return
+	}
+	// Revocation drives the distinct 'revoked' state — never 'license_expired'.
+	b.driveApplianceLifecycle(ctx, siteID, "revoked")
+	audit.Op(r.Context(), b.DB, r, "license.revoked", "license", id, map[string]any{"_tenant_id": tenantID, "site_id": siteID})
+	WriteJSON(w, http.StatusOK, map[string]any{"status": "revoked", "license_id": id})
+}
+
+// ApplianceLicenseHandler serves GET /v1/appliance/license (appliance-JWT).
+// Returns the signed envelope for the appliance's site plus a revocation
+// hint. A successful fetch counts as a cloud validation on the edge side.
+func (b *LicensesBase) ApplianceLicenseHandler(w http.ResponseWriter, r *http.Request) {
+	ident := auth.ApplianceFromContext(r.Context())
+	if ident == nil {
+		Fail(w, r, http.StatusUnauthorized, CodeUnauthenticated, "appliance identity required")
+		return
+	}
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+	envelope, licenseID, err := b.Svc.CurrentEnvelopeForAppliance(ctx, ident.ApplianceID)
+	switch {
+	case errors.Is(err, licensing.ErrNoLicense):
+		// No CURRENT license — still a 200: the appliance must receive the
+		// revocation list below so a freshly revoked license takes effect
+		// even before a replacement is issued.
+		envelope, licenseID = "null", ""
+	case err != nil:
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "license lookup failed")
+		return
+	}
+	// Revoked license ids for this site so the edge can populate its local
+	// revocation store even when a new license hasn't been issued yet.
+	var revoked []string
+	rows, err := b.DB.Query(ctx, `
+        SELECT l.id FROM licenses l
+          JOIN appliances a ON a.site_id = l.site_id
+         WHERE a.id = $1 AND l.status = 'revoked'
+    `, ident.ApplianceID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if rows.Scan(&id) == nil {
+				revoked = append(revoked, id)
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"license_id":  licenseID,
+		"envelope":    json.RawMessage(envelope),
+		"revoked":     revoked,
+		"server_time": time.Now().UTC(),
+	})
+}

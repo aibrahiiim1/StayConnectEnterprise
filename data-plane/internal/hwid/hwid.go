@@ -15,6 +15,7 @@ package hwid
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +27,8 @@ import (
 // Info is the appliance's detected hardware identity. Appliance ID is filled in
 // by the caller from the cryptographic identity; everything else is hardware.
 type Info struct {
-	Serial       string `json:"serial"`
+	Serial      string `json:"serial"`
+	Fingerprint string `json:"hardware_fingerprint"`
 	WANInterface string `json:"wan_interface"`
 	WANMAC       string `json:"wan_mac"`
 	LANInterface string `json:"lan_interface"`
@@ -113,6 +115,27 @@ func Serial() string {
 	sum := sha256.Sum256([]byte("stayconnect-serial-v1:" + anchor))
 	s := encodeCrockford(sum[:], 12)
 	return "SC-" + s[0:4] + "-" + s[4:8] + "-" + s[8:12]
+}
+
+// Fingerprint is a stable hardware fingerprint (hex) over the machine's DMI
+// identity fields ONLY — deliberately excluding NIC MACs so a legitimate WAN
+// NIC replacement changes the WAN MAC (a soft rebind signal) without changing
+// the fingerprint (which still proves "same machine"). A clone onto different
+// hardware yields a different product UUID and therefore a different fingerprint.
+func Fingerprint() string {
+	var parts []string
+	for _, p := range []string{"product_uuid", "product_serial", "board_serial", "board_asset_tag", "product_name", "sys_vendor", "chassis_serial"} {
+		if v := readTrim("/sys/class/dmi/id/" + p); !isBadDMI(v) {
+			parts = append(parts, p+"="+v)
+		}
+	}
+	if len(parts) == 0 {
+		if v := readTrim("/etc/machine-id"); v != "" {
+			parts = append(parts, "machine-id="+v)
+		}
+	}
+	sum := sha256.Sum256([]byte("stayconnect-hwfp-v1:" + strings.Join(parts, "|")))
+	return hex.EncodeToString(sum[:16])
 }
 
 // NormalizeMAC lower-cases and colon-normalizes a MAC for storage/comparison.
@@ -259,6 +282,7 @@ func Detect() Info {
 	host, _ := os.Hostname()
 	return Info{
 		Serial:       Serial(),
+		Fingerprint:  Fingerprint(),
 		WANInterface: wan,
 		WANMAC:       permMAC(wan),
 		LANInterface: lan,

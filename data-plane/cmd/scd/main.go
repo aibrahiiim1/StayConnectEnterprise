@@ -35,6 +35,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
+	lic "github.com/stayconnect/enterprise/license"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/mail"
 	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
@@ -575,6 +576,15 @@ func main() {
 	// permissive unlicensed mode (pilot pre-cutover) unless
 	// SCD_LICENSE_REQUIRED=true.
 	s.lic = licstate.New(pool, c.TenantID, c.LicenseDir, c.VendorPub, c.LicenseRequired)
+	// Bind license verification to THIS box: identity key (primary anchor) +
+	// serial / hardware fingerprint / WAN MAC (mismatch + clone signals).
+	s.lic.SetLocalIdentity(lic.LocalIdentity{
+		ApplianceID:            s.applID,
+		IdentityKeyFingerprint: s.identityKeyFpr,
+		Serial:                 s.hw.Serial,
+		HardwareFingerprint:    s.hw.Fingerprint,
+		WANMAC:                 s.hw.WANMAC,
+	})
 	s.lic.Load(rootCtx)
 	if ident != nil && c.CtrlAPIBase != "" {
 		priv := ident.PrivateKey()
