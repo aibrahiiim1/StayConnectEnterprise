@@ -93,11 +93,17 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
 		hwMismatch := (exSerial != "" && exSerial != req.Serial) ||
 			(exHWF != "" && req.HardwareFingerprint != "" && exHWF != req.HardwareFingerprint)
 		if hwMismatch {
+			mmDetail, _ := json.Marshal(map[string]any{
+				"reason":             "a KNOWN identity key was presented from DIFFERENT hardware (serial/fingerprint) — possible cloned/copied identity",
+				"presented_serial":   req.Serial,
+				"known_serial":       exSerial,
+				"known_appliance_id": appID,
+				"operator_action":    "possible clone; the license binds to the original hardware so a clone cannot activate. Investigate.",
+			})
 			_, _ = b.DB.Exec(ctx, `
                 INSERT INTO appliance_security_alerts(appliance_id, serial, kind, detail, source_ip)
                 VALUES ($1, $2, 'identity_hardware_mismatch', $3::jsonb, $4)`,
-				appID, req.Serial,
-				`{"reason":"known identity key presented from different hardware (possible clone)"}`, ip)
+				appID, req.Serial, string(mmDetail), ip)
 			Fail(w, r, http.StatusForbidden, CodeForbidden, "registration rejected: identity/hardware mismatch (possible clone)")
 			return
 		}
@@ -141,12 +147,25 @@ func (b *EnrollmentBase) RegisterHandler(w http.ResponseWriter, r *http.Request)
 		"revoked": true, "decommissioned": true, "retired": true}
 	if reuseID != "" {
 		if !reusable[reuseState] {
+			// Surface the old↔new HARDWARE link explicitly: same physical serial,
+			// a new identity, while the previous (e.g. Offline) appliance still
+			// exists. This is the factory-reset signal for the operator. Local-only:
+			// Central is NOT changed, ownership is NOT transferred, the new identity
+			// is NOT auto-activated — the operator must decommission the old one.
+			hwDetail, _ := json.Marshal(map[string]any{
+				"reason":                "same physical hardware presented a NEW identity key while the previous identity still exists — most likely a local factory reset of this box",
+				"same_hardware_serial":  req.Serial,
+				"previous_appliance_id": reuseID,
+				"previous_state":        reuseState,
+				"factory_reset":         true,
+				"operator_action":       "local-only reset; Central was NOT changed. To let this hardware re-register as a fresh Pending appliance, decommission the previous appliance first (an explicit, audited decision).",
+			})
 			_, _ = b.DB.Exec(ctx, `
                 INSERT INTO appliance_security_alerts(appliance_id, serial, kind, detail, source_ip)
                 VALUES ($1, $2, 'hardware_reused', $3::jsonb, $4)`,
-				reuseID, req.Serial,
-				`{"reason":"new identity key registered on hardware that already has an active appliance"}`, ip)
-			Fail(w, r, http.StatusForbidden, CodeForbidden, "registration rejected: hardware already activated under another identity")
+				reuseID, req.Serial, string(hwDetail), ip)
+			Fail(w, r, http.StatusForbidden, CodeForbidden,
+				"registration rejected: this hardware (serial "+req.Serial+") already has an active appliance under another identity — decommission it first (likely a factory reset)")
 			return
 		}
 		// Re-register after factory reset: adopt the new identity on the existing

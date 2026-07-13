@@ -139,6 +139,11 @@ func (b *Base) activateAppliance(w http.ResponseWriter, r *http.Request) {
 	audit.Op(ctx, b.DB, r, "appliance.activated", "appliance", id, map[string]any{
 		"_tenant_id": in.TenantID, "site_id": in.SiteID, "license_id": doc.LicenseID, "cert_issued": certIssued})
 
+	// If this activation completes a replacement at the site, terminate the
+	// outgoing appliance's authority now (bounded overlap ends the moment the
+	// replacement is Active).
+	b.completeReplacementIfPending(ctx, r, id, in.SiteID)
+
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"status":      "activated",
 		"license_id":  doc.LicenseID,

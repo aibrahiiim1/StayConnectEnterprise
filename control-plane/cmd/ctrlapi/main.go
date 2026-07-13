@@ -314,6 +314,11 @@ func main() {
 				} else if n > 0 {
 					slog.Warn("terminal delivery failed (no ack within policy)", "count", n)
 				}
+				if n, err := api.ReconcileReplacements(rootCtx, tb); err != nil {
+					slog.Warn("replacement window reconcile failed", "err", err)
+				} else if n > 0 {
+					slog.Warn("replacement window elapsed (operator decision required)", "count", n)
+				}
 			}
 		}
 	}()

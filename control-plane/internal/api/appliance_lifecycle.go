@@ -358,14 +358,24 @@ func (b *Base) replaceAppliance(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "replacement token failed")
 		return
 	}
-	_, _ = b.DB.Exec(ctx, `UPDATE appliances SET replacement_pending=true, updated_at=now() WHERE id=$1`, id)
+	// Bounded overlap: the outgoing box stays licensed (service continuity) only
+	// until the deadline. It is auto-terminated when its replacement becomes Active
+	// (completeReplacementIfPending); if the window elapses first, ReconcileReplacements
+	// raises an operational alert for an explicit operator decision.
+	if _, err := b.DB.Exec(ctx, `UPDATE appliances SET replacement_pending=true,
+	    replacement_deadline = now() + make_interval(hours => $2), updated_at=now() WHERE id=$1`,
+		id, int(replacementWindow.Hours())); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "replacement flag failed: "+err.Error())
+		return
+	}
 	recordLifecycle(ctx, b.DB, id, prevState, prevState, emailOf(sess), clientIPFromReq(r), "replacement initiated: "+in.Reason)
 	audit.Op(ctx, b.DB, r, "appliance.replacement_started", "appliance", id, map[string]any{
 		"_tenant_id": tenantID, "site_id": siteID, "token_id": tokID, "reason": in.Reason})
 	WriteJSON(w, http.StatusCreated, map[string]any{
 		"status": "replacement_pending", "replacement_token": plaintext,
 		"tenant_id": tenantID, "site_id": siteID,
-		"note": "Enroll the new appliance with this token, then assign it to the same site. The old certificate/license must be revoked once the new box is online.",
+		"replacement_window_hours": int(replacementWindow.Hours()),
+		"note": "Enroll the new appliance with this token and activate it at the same site. The old appliance is automatically decommissioned (license + credentials revoked) the moment the replacement becomes Active. If the replacement is not completed within the window, an operational alert is raised for an explicit decision.",
 	})
 }
 
