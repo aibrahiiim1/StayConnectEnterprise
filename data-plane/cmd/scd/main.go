@@ -31,8 +31,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
-	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/appliancecert"
+	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/mail"
@@ -174,6 +175,11 @@ type server struct {
 	// matches no configured guest network (pre-Phase-19 / legacy network).
 	legacyBridge string
 
+	// hw is the appliance's stable hardware identity (StayConnect serial derived
+	// from the DMI product UUID + permanent WAN/LAN MACs). Detected once at boot;
+	// deterministic, so it survives reboot / de-enrollment / factory reset.
+	hw hwid.Info
+
 	met *metrics.Registry // phase 7
 
 	// Edge-first refactor: signed-license manager, telemetry outbox and the
@@ -308,7 +314,7 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, "nft allow failed")
 		return
 	}
-	if err := s.shp.AddSession(r.Context(), ip, red.DownKbps, red.UpKbps); err != nil {
+	if err := s.shp.AddSession(r.Context(), nc.Bridge, ip, red.DownKbps, red.UpKbps); err != nil {
 		slog.Error("shape add", "err", err)
 		_ = s.nft.Deny(context.Background(), nc.Bridge, ip)
 		httpErr(w, http.StatusInternalServerError, "shape add failed")
@@ -319,7 +325,7 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Error("session start", "err", err)
 		_ = s.nft.Deny(context.Background(), nc.Bridge, ip)
-		_ = s.shp.DeleteSession(context.Background(), ip)
+		_ = s.shp.DeleteSession(context.Background(), nc.Bridge, ip)
 		httpErr(w, http.StatusInternalServerError, "session start failed")
 		return
 	}
@@ -360,7 +366,7 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 	if err := s.nft.Deny(r.Context(), nc.Bridge, ip); err != nil {
 		slog.Error("nft deny", "err", err)
 	}
-	if err := s.shp.DeleteSession(r.Context(), ip); err != nil {
+	if err := s.shp.DeleteSession(r.Context(), nc.Bridge, ip); err != nil {
 		slog.Warn("shape delete", "err", err)
 	}
 	if req.Reason == "" {
@@ -530,6 +536,7 @@ func main() {
 		natsURL:      c.NATSURL,
 		serial:       c.Serial,
 		legacyBridge: envOr("SCD_LEGACY_BRIDGE", "br-lan"),
+		hw:           hwid.Detect(),
 		met: metrics.New("0.0.3-dev", prometheus.Labels{
 			"tenant_id":    c.TenantID,
 			"site_id":      c.SiteID,
@@ -757,6 +764,19 @@ func main() {
 				slog.Warn("nft reconcile failed", "err", err)
 			} else if applied > 0 {
 				slog.Info("nft reconciled from DB", "entries", applied)
+			}
+			// Re-assert per-session shaping/accounting classes for active
+			// sessions. Kernel tc state is lost on reboot (IFB devices vanish)
+			// and unknown to a freshly-promoted backup; this rebuilds the
+			// download+upload classes so accounting resumes without waiting
+			// for guests to re-authenticate.
+			rctx2, cancel2 := context.WithTimeout(rootCtx, 30*time.Second)
+			shaped, err := s.reconcileShapingFromDB(rctx2, c.SiteID)
+			cancel2()
+			if err != nil {
+				slog.Warn("shaping reconcile failed", "err", err)
+			} else if shaped > 0 {
+				slog.Info("shaping reconciled from DB", "sessions", shaped)
 			}
 		}
 	}

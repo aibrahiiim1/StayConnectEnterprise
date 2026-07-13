@@ -616,6 +616,16 @@ export type CloudStatus = {
 // ever included (the bootstrap/enrollment token is write-only, never returned).
 export type SetupStatus = {
   serial?: string;
+  hardware?: {
+    serial?: string;
+    wan_interface?: string;
+    wan_mac?: string;
+    lan_interface?: string;
+    lan_mac?: string;
+    hostname?: string;
+    model?: string;
+  };
+  activation_status?: "unlicensed" | "pending_activation" | "licensed" | "activated" | string;
   appliance_id?: string;
   identity_key_fingerprint?: string;
   version?: string;
@@ -625,7 +635,7 @@ export type SetupStatus = {
   site_id?: string;
   api_mtls?: { mtls_ready?: boolean; cert_fingerprint?: string; not_after?: string };
   nats_mtls?: { connected?: boolean; mtls?: boolean };
-  license?: { state?: string; plan?: string; valid_until?: string; offline_grace_days?: number };
+  license?: { state?: string; license_id?: string; plan?: string; valid_from?: string; valid_until?: string; offline_grace_days?: number };
   assignment?: {
     status?: string;
     assigned?: boolean;

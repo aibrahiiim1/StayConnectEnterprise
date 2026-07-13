@@ -38,8 +38,48 @@ func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 			outbox = map[string]any{"pending": p, "dead": d}
 		}
 	}
+
+	// Stable hardware identity — shown on the License/Activation screen before
+	// (and after) activation. The StayConnect serial is the operator-facing id;
+	// the WAN MAC is the licensing anchor.
+	hw := map[string]any{
+		"serial":        s.hw.Serial,
+		"wan_interface": s.hw.WANInterface,
+		"wan_mac":       s.hw.WANMAC,
+		"lan_interface": s.hw.LANInterface,
+		"lan_mac":       s.hw.LANMAC,
+		"hostname":      s.hw.Hostname,
+		"model":         s.hw.Model,
+	}
+	// activation_status: the one-word state the operator cares about. A real
+	// signed license (non-empty license_id) is required — the permissive
+	// unlicensed-dev licstate reports state="Active" with no license_id and must
+	// NOT read as licensed.
+	licState, _ := lic["state"].(string)
+	licID, _ := lic["license_id"].(string)
+	licLive := map[string]bool{"active": true, "licensed": true, "grace": true, "graceperiod": true}[strings.ToLower(licState)]
+	realLicensed := licLive && licID != ""
+	mtlsReady, _ := api["mtls_ready"].(bool)
+	activation := "unlicensed"
+	switch {
+	case s.enrolled && realLicensed && mtlsReady:
+		activation = "activated"
+	case s.enrolled && realLicensed:
+		activation = "licensed"
+	case s.enrolled:
+		activation = "pending_activation"
+	}
+
+	// The operator-facing serial IS the hardware serial. Fall back to the
+	// enrolled identity serial only if hardware detection yielded nothing.
+	serial := s.hw.Serial
+	if serial == "" {
+		serial = s.serial
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"serial":                  s.serial,
+		"serial":                  serial,
+		"hardware":                hw,
+		"activation_status":       activation,
 		"appliance_id":            s.applID,
 		"identity_key_fingerprint": s.identityKeyFpr,
 		"version":                 scdVersion,
