@@ -1,0 +1,13 @@
+# Safe retention cleanup for deployment/rollback backups. Runs in --apply mode.
+# Invoked by the daily timer (safety net) and can be called after each deploy:
+#   /opt/stayconnect/bin/stayconnect-backup-cleanup --apply
+[Unit]
+Description=StayConnect backup/rollback artifact retention cleanup
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/stayconnect/bin/stayconnect-backup-cleanup --apply
+Nice=10
+IOSchedulingClass=idle
+# Fail-safe design: the script itself refuses to delete when state is unsafe.

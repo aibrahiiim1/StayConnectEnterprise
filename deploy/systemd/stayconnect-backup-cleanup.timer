@@ -1,0 +1,12 @@
+# Daily safety-net run of the backup retention cleanup, so artifact accumulation
+# can never silently fill the disk even if a deploy forgets to call it.
+[Unit]
+Description=Daily StayConnect backup/rollback retention cleanup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

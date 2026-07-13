@@ -234,6 +234,8 @@ func NewRouter(d Deps) http.Handler {
 				certBase := &api.CertBase{Base: base, CA: d.CA, ClientValid: 90 * 24 * time.Hour}
 				r.Mount("/certificates", certBase.PlatformRoutes())
 			}
+			// Backup/rollback retention health for the Central host (read-only).
+			r.With(auth.RequirePermission("platform.appliances.view")).Get("/backup-health", base.BackupHealthHandler)
 			// Tenant-facing own-appliance support/replacement/reassignment requests.
 			r.Mount("/appliances-support", abase.TenantSupportRoutes())
 			// Signed, allow-listed command channel (platform.commands.issue + reauth).
