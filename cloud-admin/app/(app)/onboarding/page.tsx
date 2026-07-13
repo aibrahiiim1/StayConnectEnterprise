@@ -26,6 +26,7 @@ type Pending = {
 type Tenant = { id: string; slug: string; name: string };
 type Site = { id: string; code: string; name: string };
 type AssignmentStatus = { issued?: boolean; state?: string; adopted_at?: string };
+type ApplianceRow = { id: string; serial: string; lifecycle_state?: string; tenant_id?: string; wan_mac?: string };
 
 const STEPS = [
   { key: "detected", label: "Detected" },
@@ -61,6 +62,11 @@ export default function OnboardingPage() {
   const [runErr, setRunErr] = useState<string | null>(null);
   const trackId = useRef<string | null>(null);
 
+  // Registered (already-activated) appliances, for self-service reset.
+  const [registered, setRegistered] = useState<ApplianceRow[]>([]);
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [manageMsg, setManageMsg] = useState<string | null>(null);
+
   const loadPending = useCallback(async () => {
     try {
       const p = await api.get<{ data: Pending[] }>("/cloud/v1/appliances-admin/pending");
@@ -82,13 +88,45 @@ export default function OnboardingPage() {
     } catch { /* ignore */ }
   }, []);
 
-  useEffect(() => { loadPending(); loadBase(); }, [loadPending, loadBase]);
-  // Poll the Pending list while on the form so newly self-registered appliances appear.
+  // All non-pending appliances (fan out across tenants — the per-tenant list is
+  // tenant-scoped), so activated boxes can be deactivated/deleted here.
+  const loadRegistered = useCallback(async () => {
+    try {
+      const t = await api.get<{ data: Tenant[] }>("/v1/tenants");
+      const per = await Promise.all((t.data ?? []).map((tn) =>
+        api.get<{ data: ApplianceRow[] }>(`/v1/appliances?tenant_id=${tn.id}`).then((r) => r.data ?? []).catch(() => [])));
+      setRegistered(per.flat());
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { loadPending(); loadBase(); loadRegistered(); }, [loadPending, loadBase, loadRegistered]);
+  // Poll the lists while on the form so newly self-registered appliances appear.
   useEffect(() => {
     if (phase) return;
-    const t = setInterval(loadPending, 5000);
+    const t = setInterval(() => { loadPending(); loadRegistered(); }, 5000);
     return () => clearInterval(t);
-  }, [phase, loadPending]);
+  }, [phase, loadPending, loadRegistered]);
+
+  async function onDeactivate(a: ApplianceRow) {
+    if (!confirm(`Deactivate ${a.serial}? Its license is revoked; the appliance can be re-activated.`)) return;
+    setRowBusy(a.id); setManageMsg(null);
+    try {
+      await withStepUp(() => api.post(`/cloud/v1/appliances-admin/${a.id}/deactivate`, {}));
+      setManageMsg(`${a.serial} deactivated (license revoked).`);
+      await loadRegistered();
+    } catch (e) { setManageMsg(e instanceof Error ? e.message : "Deactivate failed"); }
+    finally { setRowBusy(null); }
+  }
+  async function onDelete(a: ApplianceRow) {
+    if (!confirm(`Delete ${a.serial} from the control panel? Its license/assignment/certificate are removed. The physical appliance will re-appear as a fresh Pending on its next check-in.`)) return;
+    setRowBusy(a.id); setManageMsg(null);
+    try {
+      await withStepUp(() => api.del(`/cloud/v1/appliances-admin/${a.id}`));
+      setManageMsg(`${a.serial} deleted — it will re-register as Pending.`);
+      await Promise.all([loadRegistered(), loadPending()]);
+    } catch (e) { setManageMsg(e instanceof Error ? e.message : "Delete failed"); }
+    finally { setRowBusy(null); }
+  }
 
   useEffect(() => {
     if (tenantMode !== "existing" || !tenantId) { setSites([]); return; }
@@ -249,6 +287,38 @@ export default function OnboardingPage() {
                 </div>
                 {formErr && <div className="text-sm text-err">{formErr}</div>}
                 <Button onClick={onActivate} disabled={busy}>{busy ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" /> Activating…</> : "Activate"}</Button>
+              </CardBody>
+            </Card>
+          )}
+
+          {registered.length > 0 && (
+            <Card>
+              <CardHeader><CardTitle>Registered appliances</CardTitle></CardHeader>
+              <CardBody className="p-0">
+                {manageMsg && <div className="px-4 pt-3 text-sm text-muted">{manageMsg}</div>}
+                <Table>
+                  <THead><TR><TH>Serial</TH><TH>State</TH><TH>WAN MAC</TH><TH className="text-right">Reset</TH></TR></THead>
+                  <tbody>
+                    {registered.map((a) => (
+                      <TR key={a.id}>
+                        <TD className="font-mono">{a.serial}</TD>
+                        <TD><Badge tone={a.lifecycle_state === "activated" || a.lifecycle_state === "online" ? "ok" : "default"}>{a.lifecycle_state || "—"}</Badge></TD>
+                        <TD className="font-mono text-xs">{a.wan_mac || "—"}</TD>
+                        <TD className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button size="sm" variant="secondary" disabled={rowBusy === a.id} onClick={() => onDeactivate(a)}>Deactivate</Button>
+                            <Button size="sm" variant="danger" disabled={rowBusy === a.id} onClick={() => onDelete(a)}>Delete</Button>
+                          </div>
+                        </TD>
+                      </TR>
+                    ))}
+                  </tbody>
+                </Table>
+                <p className="px-4 py-3 text-xs text-muted">
+                  <b>Deactivate</b> revokes the license (re-activate to restore). <b>Delete</b> removes the appliance, its
+                  license, assignment and certificate — the box then re-appears above as a fresh Pending. Delete the site or
+                  customer from their own pages if you also want those gone.
+                </p>
               </CardBody>
             </Card>
           )}

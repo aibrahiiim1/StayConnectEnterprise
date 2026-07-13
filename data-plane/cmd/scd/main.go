@@ -12,13 +12,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"os/user"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -135,6 +138,19 @@ func envOr(k, d string) string {
 		return v
 	}
 	return d
+}
+
+// removeDirContents best-effort deletes everything inside dir (used for orphan
+// self-reset), leaving the directory itself in place.
+func removeDirContents(dir string) error {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range ents {
+		_ = os.RemoveAll(dir + "/" + e.Name())
+	}
+	return nil
 }
 
 type server struct {
@@ -830,11 +846,39 @@ func main() {
 				slog.Warn("hello: call failed", "err", err)
 				return
 			}
-			defer resp.Body.Close()
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
 			if resp.StatusCode == 200 {
 				slog.Info("hello: ctrlapi signed-auth ok")
-			} else {
-				slog.Warn("hello: unexpected status", "status", resp.StatusCode)
+				return
+			}
+			slog.Warn("hello: unexpected status", "status", resp.StatusCode, "body", string(body))
+			// Orphan recovery: if Central no longer knows this appliance (its row
+			// was deleted from the control panel for a re-test), our identity is
+			// orphaned. Confirm with a second call, then self-reset so we
+			// re-register as a fresh Pending — no manual factory reset needed.
+			orphan := func(code int, b []byte) bool {
+				l := strings.ToLower(string(b))
+				return code == 401 && (strings.Contains(l, "not enrolled") || strings.Contains(l, "unknown appliance") || strings.Contains(l, "not found"))
+			}
+			if c.AutoRegister && orphan(resp.StatusCode, body) {
+				time.Sleep(3 * time.Second)
+				tok2, _ := applianceauth.SignRequest(ident.PrivateKey(), ident.ApplianceID, "GET", "/v1/appliance/hello", nil)
+				req2, _ := http.NewRequestWithContext(context.Background(), "GET", c.CtrlAPIBase+"/v1/appliance/hello", nil)
+				req2.Header.Set("Authorization", "Bearer "+tok2)
+				if r2, e2 := http.DefaultClient.Do(req2); e2 == nil {
+					b2, _ := io.ReadAll(io.LimitReader(r2.Body, 4096))
+					r2.Body.Close()
+					if orphan(r2.StatusCode, b2) {
+						slog.Warn("hello: appliance unknown to Central (deleted) — self-resetting to re-register as Pending")
+						for _, p := range []string{c.IdentityDir, envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"), c.LicenseDir} {
+							_ = removeDirContents(p)
+						}
+						_ = os.Remove(c.CertDir + "/client.crt")
+						_ = os.Remove(c.CertDir + "/mtls-client.key")
+						_ = exec.Command("systemctl", "restart", "stayconnect-scd").Run()
+					}
+				}
 			}
 		}()
 	}

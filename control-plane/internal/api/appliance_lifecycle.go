@@ -51,6 +51,11 @@ func (b *Base) LifecycleRoutes() http.Handler {
 	r.With(auth.RequirePermission("platform.appliances.revoke"), reauth).Post("/{id}/revoke", b.terminalAction("revoked"))
 	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/replace", b.replaceAppliance)
 	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/decommission", b.terminalAction("decommissioned"))
+	// Self-service reset (testing / re-onboarding): deactivate revokes the
+	// license; delete removes the appliance entirely (it re-registers as a fresh
+	// Pending). Both permission + step-up gated.
+	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/deactivate", b.deactivateAppliance)
+	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Delete("/{id}", b.deleteApplianceAdmin)
 	// Terminal-delivery status (two-phase progress) for the Platform console.
 	r.With(auth.RequirePermission("platform.appliances.view")).Get("/{id}/terminal-delivery", b.terminalDeliveryStatus)
 	r.With(auth.RequirePermission("platform.appliances.view")).Patch("/security-alerts/{id}", b.updateAlertStatus)
