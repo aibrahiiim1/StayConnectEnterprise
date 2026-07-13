@@ -10,7 +10,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { RefreshCw } from "lucide-react";
 
 type Tenant = { id: string; slug: string; name: string };
-type Plan = { id: string; code: string; name: string; billing_cycle: string };
+type Plan = { id: string; code: string; name: string; billing_cycle: string;
+  price_cents?: number; currency?: string; is_active?: boolean; is_public?: boolean };
 type Sub = {
   id: string; plan_code?: string; status: string; billing_cycle: string;
   current_period_start: string; current_period_end: string;
@@ -52,13 +53,69 @@ export default function CommercialPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const [allPlans, setAllPlans] = useState<Plan[]>([]);
+  const loadPlans = useCallback(async () => {
+    const [pub, all] = await Promise.all([
+      api.get<{ data: Plan[] }>("/v1/plans").catch(() => ({ data: [] as Plan[] })),
+      api.get<{ data: Plan[] }>("/v1/plans?all=true").catch(() => ({ data: [] as Plan[] })),
+    ]);
+    setPlans(pub.data ?? []);
+    setAllPlans(all.data ?? []);
+    if (pub.data?.[0]) setPlanID((cur) => cur || pub.data[0].id);
+  }, []);
+
   useEffect(() => {
     api.get<{ data: Tenant[] }>("/v1/tenants").then((r) => setTenants(r.data ?? []));
-    api.get<{ data: Plan[] }>("/v1/plans").then((r) => {
-      setPlans(r.data ?? []);
-      if (r.data?.[0]) setPlanID(r.data[0].id);
-    });
-  }, []);
+    loadPlans();
+  }, [loadPlans]);
+
+  // ---- Plan catalog (platform product definition) ----
+  async function createPlan(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const f = new FormData(e.currentTarget);
+    const el = e.currentTarget;
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      await api.post("/v1/plans", {
+        code: String(f.get("code") || "").trim(),
+        name: String(f.get("name") || "").trim(),
+        billing_cycle: f.get("billing_cycle") || "monthly",
+        price_cents: Number(f.get("price_cents")) || 0,
+        currency: String(f.get("currency") || "USD").trim().toUpperCase(),
+        is_public: f.get("is_public") === "on",
+        is_active: true,
+      });
+      setMsg("Plan created."); el.reset(); await loadPlans();
+    } catch (e: any) { setErr(e?.body?.message ?? e?.message ?? "Create failed"); }
+    finally { setBusy(false); }
+  }
+  async function editPlan(p: Plan) {
+    const name = window.prompt("Plan name:", p.name); if (name === null) return;
+    const price = window.prompt("Price (cents):", String(p.price_cents ?? 0)); if (price === null) return;
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      await api.patch(`/v1/plans/${p.id}`, { name: name.trim() || p.name, price_cents: Number(price) || 0 });
+      setMsg("Plan updated."); await loadPlans();
+    } catch (e: any) { setErr(e?.body?.message ?? e?.message ?? "Update failed"); }
+    finally { setBusy(false); }
+  }
+  async function togglePlanActive(p: Plan) {
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      await api.patch(`/v1/plans/${p.id}`, { is_active: !p.is_active });
+      setMsg(`Plan ${p.is_active ? "deactivated" : "activated"}.`); await loadPlans();
+    } catch (e: any) { setErr(e?.body?.message ?? e?.message ?? "Update failed"); }
+    finally { setBusy(false); }
+  }
+  async function retirePlan(p: Plan) {
+    if (!confirm(`Retire plan "${p.name}"? It can no longer be selected for new subscriptions, but stays visible in history and never changes existing signed licenses.`)) return;
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      await api.post(`/v1/plans/${p.id}/retire`);
+      setMsg("Plan retired."); await loadPlans();
+    } catch (e: any) { setErr(e?.body?.message ?? e?.message ?? "Retire failed"); }
+    finally { setBusy(false); }
+  }
 
   const loadTenant = useCallback(async (id: string) => {
     if (!id) return;
@@ -132,6 +189,19 @@ export default function CommercialPage() {
     } finally { setBusy(false); }
   }
 
+  async function cancelSubscription() {
+    if (!tenantID || !sub) return;
+    const reason = window.prompt("Reason for cancelling this subscription (audited):", "");
+    if (reason === null) return;
+    setBusy(true); setErr(null); setMsg(null);
+    try {
+      await withStepUp(() => api.post(`/v1/tenants/${tenantID}/subscription/cancel`, { reason }));
+      setMsg("Subscription canceled.");
+      await loadTenant(tenantID);
+    } catch (e: any) { setErr(e?.body?.message ?? e?.message ?? "Cancel failed"); }
+    finally { setBusy(false); }
+  }
+
   async function removeOverride(key: string) {
     const reason = window.prompt(`Reason for removing override "${key}"?`);
     if (!reason) return;
@@ -189,6 +259,58 @@ export default function CommercialPage() {
       {err && <div className="text-err text-sm">{err}</div>}
       {msg && <div className="text-sm">{msg}</div>}
 
+      {/* ---------- Plan catalog (platform product definition) ---------- */}
+      <Card>
+        <CardHeader><CardTitle>Plan catalog</CardTitle></CardHeader>
+        <CardBody>
+          <form onSubmit={createPlan} className="grid grid-cols-1 sm:grid-cols-6 gap-3 mb-4">
+            <div><Label>Code</Label><Input name="code" required placeholder="pro" /></div>
+            <div><Label>Name</Label><Input name="name" required placeholder="Professional" /></div>
+            <div>
+              <Label>Billing</Label>
+              <select name="billing_cycle" className="w-full border rounded px-2 py-1 text-sm bg-transparent">
+                <option value="monthly">Monthly</option><option value="yearly">Yearly</option>
+              </select>
+            </div>
+            <div><Label>Price (cents)</Label><Input name="price_cents" type="number" defaultValue={0} min={0} /></div>
+            <div><Label>Currency</Label><Input name="currency" defaultValue="USD" /></div>
+            <div><Label>Public</Label><div className="pt-2"><input type="checkbox" name="is_public" defaultChecked /></div></div>
+            <div className="sm:col-span-6 flex justify-end">
+              <Button type="submit" disabled={busy}>Create plan</Button>
+            </div>
+          </form>
+          {allPlans.length === 0 ? <EmptyState title="No plans" /> : (
+            <Table>
+              <THead><TR><TH>Code</TH><TH>Name</TH><TH>Billing</TH><TH>Price</TH><TH>State</TH><TH className="text-right">Manage</TH></TR></THead>
+              <tbody>
+                {allPlans.map((p) => (
+                  <TR key={p.id}>
+                    <TD className="font-mono text-xs">{p.code}</TD>
+                    <TD>{p.name}</TD>
+                    <TD className="text-muted">{p.billing_cycle}</TD>
+                    <TD className="font-mono">{((p.price_cents ?? 0) / 100).toFixed(2)} {p.currency ?? ""}</TD>
+                    <TD className="text-muted">
+                      {p.is_active ? "active" : "inactive"}{p.is_public ? " · public" : " · private"}
+                    </TD>
+                    <TD className="text-right">
+                      <div className="flex gap-1 justify-end">
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => editPlan(p)}>Edit</Button>
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => togglePlanActive(p)}>{p.is_active ? "Deactivate" : "Activate"}</Button>
+                        {p.is_active && <Button size="sm" variant="secondary" disabled={busy} onClick={() => retirePlan(p)}>Retire</Button>}
+                      </div>
+                    </TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+          )}
+          <p className="text-xs text-muted mt-2">
+            Retiring a plan removes it from new-subscription choices but keeps it in historical records and never
+            rewrites an already-issued signed license. Plans are never physically deleted while history exists.
+          </p>
+        </CardBody>
+      </Card>
+
       <Card>
         <CardHeader><CardTitle>Customer</CardTitle></CardHeader>
         <CardBody>
@@ -207,6 +329,9 @@ export default function CommercialPage() {
               {new Date(sub.current_period_end).toLocaleDateString()}
               {sub.trial_end ? ` · trial ends ${new Date(sub.trial_end).toLocaleDateString()}` : ""}
               {sub.auto_renew === false ? " · auto-renew OFF" : " · auto-renew ON"}
+              {sub.status !== "canceled" && (
+                <Button size="sm" variant="secondary" className="ml-3" disabled={busy} onClick={cancelSubscription}>Cancel subscription</Button>
+              )}
             </div>
           )}
           {tenantID && !sub && <div className="mt-3 text-sm text-muted">No subscription yet.</div>}

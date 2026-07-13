@@ -7,7 +7,8 @@ import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Plus, X } from "lucide-react";
+import { DeleteDialog } from "@/components/delete-dialog";
+import { Plus, X, Archive, ArchiveRestore } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 
 function useTenant() {
@@ -32,13 +33,29 @@ export default function SitesPage() {
   async function load() {
     if (!tenantID) return;
     try {
-      const r = await api.get<ListResp<Site>>(`/v1/sites?tenant_id=${tenantID}`);
+      const r = await api.get<ListResp<Site>>(`/v1/sites?tenant_id=${tenantID}&status=all`);
       setRows(r.data);
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
     }
   }
   useEffect(() => { load(); }, [tenantID]);
+
+  const [delSite, setDelSite] = useState<Site | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function onArchive(s: Site) {
+    if (!tenantID) return;
+    setErr(null); setMsg(null);
+    try { await api.post(`/v1/sites/${s.id}/archive?tenant_id=${tenantID}`); setMsg(`${s.name} archived.`); load(); }
+    catch (e: any) { setErr(e?.message ?? "Archive failed"); }
+  }
+  async function onRestore(s: Site) {
+    if (!tenantID) return;
+    setErr(null); setMsg(null);
+    try { await api.post(`/v1/sites/${s.id}/restore?tenant_id=${tenantID}`); setMsg(`${s.name} restored.`); load(); }
+    catch (e: any) { setErr(e?.message ?? "Restore failed"); }
+  }
 
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -67,17 +84,6 @@ export default function SitesPage() {
       }
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function onDelete(id: string) {
-    if (!tenantID) return;
-    if (!confirm("Delete this site? Appliances under it will cascade.")) return;
-    try {
-      await api.del(`/v1/sites/${id}?tenant_id=${tenantID}`);
-      load();
-    } catch (e: any) {
-      setErr(e?.message ?? "Delete failed");
     }
   }
 
@@ -115,6 +121,7 @@ export default function SitesPage() {
       </div>
 
       {err && <div className="text-err text-sm mb-4">{err}</div>}
+      {msg && <div className="text-ok text-sm mb-4">{msg}</div>}
 
       {showNew && (
         <Card className="mb-6">
@@ -143,31 +150,49 @@ export default function SitesPage() {
             <Table>
               <THead>
                 <TR>
-                  <TH>Code</TH><TH>Name</TH><TH>Timezone</TH><TH>Country</TH>
+                  <TH>Code</TH><TH>Name</TH><TH>Status</TH><TH>Timezone</TH><TH>Country</TH>
                   <TH>Created</TH><TH></TH>
                 </TR>
               </THead>
               <tbody>
-                {rows.map((s) => (
+                {rows.map((s) => {
+                  const archived = (s.status ?? "active") === "archived";
+                  return (
                   <TR key={s.id}>
                     <TD className="font-mono">{s.code}</TD>
                     <TD>{s.name}</TD>
+                    <TD className="text-muted">{s.status ?? "active"}</TD>
                     <TD className="text-muted">{s.timezone}</TD>
                     <TD className="text-muted">{s.country || "—"}</TD>
                     <TD className="text-muted">{formatRelative(s.created_at)}</TD>
                     <TD className="text-right">
                       <div className="flex gap-1 justify-end">
                         <Button size="sm" variant="ghost" onClick={() => onEdit(s)}>Edit</Button>
-                        <Button size="sm" variant="danger" onClick={() => onDelete(s.id)}>Delete</Button>
+                        {archived
+                          ? <Button size="sm" variant="secondary" onClick={() => onRestore(s)}><ArchiveRestore size={13} /> Restore</Button>
+                          : <Button size="sm" variant="secondary" onClick={() => onArchive(s)}><Archive size={13} /> Archive</Button>}
+                        <Button size="sm" variant="danger" onClick={() => setDelSite(s)}>Delete</Button>
                       </div>
                     </TD>
                   </TR>
-                ))}
+                  );
+                })}
               </tbody>
             </Table>
           )}
         </CardBody>
       </Card>
+
+      <DeleteDialog
+        open={!!delSite}
+        onClose={() => setDelSite(null)}
+        onDeleted={() => { setMsg("Site permanently deleted."); load(); }}
+        title={`Delete site "${delSite?.name ?? ""}"`}
+        what="Site"
+        expected={delSite?.code ?? ""}
+        confirmHint="Type the site code"
+        deleteUrl={`/v1/sites/${delSite?.id}?tenant_id=${tenantID}`}
+      />
     </div>
   );
 }

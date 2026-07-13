@@ -43,7 +43,7 @@ export const api = {
   post:  <T>(path: string, body?: any)    => request<T>("POST", path, body),
   put:   <T>(path: string, body?: any)    => request<T>("PUT", path, body),
   patch: <T>(path: string, body?: any)    => request<T>("PATCH", path, body),
-  del:   <T>(path: string)                => request<T>("DELETE", path),
+  del:   <T>(path: string, body?: any)    => request<T>("DELETE", path, body),
 };
 
 // ------- Step-up re-authentication -------
@@ -89,7 +89,7 @@ export type Whoami = {
 
 export type Site = {
   id: string; tenant_id: string; code: string; name: string;
-  timezone: string; country?: string; created_at: string; updated_at: string;
+  timezone: string; country?: string; status?: string; created_at: string; updated_at: string;
 };
 
 export type Appliance = {

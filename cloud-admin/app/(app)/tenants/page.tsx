@@ -7,7 +7,8 @@ import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Plus, X, Pencil, Archive, Trash2 } from "lucide-react";
+import { DeleteDialog } from "@/components/delete-dialog";
+import { Plus, X, Pencil, Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 
 type Tenant = {
@@ -75,20 +76,20 @@ export default function TenantsPage() {
     finally { setRowBusy(null); }
   }
   async function onArchive(t: Tenant) {
-    if (!confirm(`Archive "${t.name}"? It's hidden and inactive but kept for history (sites/licenses remain).`)) return;
+    if (!confirm(`Archive "${t.name}"? It's hidden from active lists but everything (sites, appliances, licenses, audit) is kept. You can restore it later.`)) return;
     setRowBusy(t.id); setErr(null); setMsg(null);
-    try { await api.del(`/v1/tenants/${t.id}`); setMsg(`${t.name} archived.`); await load(); }
+    try { await api.post(`/v1/tenants/${t.id}/archive`); setMsg(`${t.name} archived.`); await load(); }
     catch (e: any) { setErr(e?.message ?? "Archive failed"); }
     finally { setRowBusy(null); }
   }
-  async function onDelete(t: Tenant) {
-    if (!confirm(`DELETE "${t.name}" and EVERYTHING under it — sites, appliances, licenses, subscription, tokens? This cannot be undone.`)) return;
-    if (window.prompt(`Type the customer name to confirm permanent delete:`) !== t.name) { setErr("Name did not match — delete cancelled."); return; }
+  async function onRestore(t: Tenant) {
     setRowBusy(t.id); setErr(null); setMsg(null);
-    try { await api.del(`/v1/tenants/${t.id}?purge=true`); setMsg(`${t.name} permanently deleted.`); await load(); }
-    catch (e: any) { setErr(e?.message ?? "Delete failed"); }
+    try { await api.post(`/v1/tenants/${t.id}/restore`); setMsg(`${t.name} restored.`); await load(); }
+    catch (e: any) { setErr(e?.message ?? "Restore failed"); }
     finally { setRowBusy(null); }
   }
+
+  const [delTenant, setDelTenant] = useState<Tenant | null>(null);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -153,8 +154,10 @@ export default function TenantsPage() {
                     <TD>
                       <div className="flex gap-2 justify-end">
                         <Button size="sm" variant="ghost" disabled={rowBusy === t.id} onClick={() => onRename(t)}><Pencil size={13} /> Rename</Button>
-                        {!archived && <Button size="sm" variant="secondary" disabled={rowBusy === t.id} onClick={() => onArchive(t)}><Archive size={13} /> Archive</Button>}
-                        <Button size="sm" variant="danger" disabled={rowBusy === t.id} onClick={() => onDelete(t)}><Trash2 size={13} /> Delete</Button>
+                        {archived
+                          ? <Button size="sm" variant="secondary" disabled={rowBusy === t.id} onClick={() => onRestore(t)}><ArchiveRestore size={13} /> Restore</Button>
+                          : <Button size="sm" variant="secondary" disabled={rowBusy === t.id} onClick={() => onArchive(t)}><Archive size={13} /> Archive</Button>}
+                        <Button size="sm" variant="danger" disabled={rowBusy === t.id} onClick={() => setDelTenant(t)}><Trash2 size={13} /> Delete</Button>
                       </div>
                     </TD>
                   </TR>
@@ -165,6 +168,17 @@ export default function TenantsPage() {
           )}
         </CardBody>
       </Card>
+
+      <DeleteDialog
+        open={!!delTenant}
+        onClose={() => setDelTenant(null)}
+        onDeleted={() => { setMsg(`Customer permanently deleted.`); load(); }}
+        title={`Delete customer "${delTenant?.name ?? ""}"`}
+        what="Customer"
+        expected={delTenant?.name ?? ""}
+        confirmHint="Type the customer name"
+        deleteUrl={`/v1/tenants/${delTenant?.id}`}
+      />
     </div>
   );
 }

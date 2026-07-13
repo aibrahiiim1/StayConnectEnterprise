@@ -9,6 +9,7 @@ import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { EmptyState } from "@/components/ui/empty-state";
+import { DeleteDialog } from "@/components/delete-dialog";
 import { Check, Loader2, Circle, Plug, ShieldCheck, RotateCcw, RefreshCw } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 
@@ -117,14 +118,27 @@ export default function OnboardingPage() {
     } catch (e) { setManageMsg(e instanceof Error ? e.message : "Deactivate failed"); }
     finally { setRowBusy(null); }
   }
-  async function onDelete(a: ApplianceRow) {
-    if (!confirm(`Delete ${a.serial} from the control panel? Its license/assignment/certificate are removed. The physical appliance will re-appear as a fresh Pending on its next check-in.`)) return;
+  const [delApp, setDelApp] = useState<ApplianceRow | null>(null);
+  const [delImpact, setDelImpact] = useState<any>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  async function openDelete(a: ApplianceRow) {
+    setDelApp(a); setDelImpact(null);
+    try {
+      setDelImpact(await api.get<any>(`/cloud/v1/appliances-admin/${a.id}/delete-impact`));
+    } catch { /* preview is best-effort */ }
+  }
+
+  // Advanced Support: elevated technical actions (step-up + reason + audit).
+  async function advancedAction(a: ApplianceRow, verb: string, url: string) {
+    const reason = window.prompt(`Reason for ${verb} ${a.serial} (audited):`, "");
+    if (reason === null) return;
     setRowBusy(a.id); setManageMsg(null);
     try {
-      await withStepUp(() => api.del(`/cloud/v1/appliances-admin/${a.id}`));
-      setManageMsg(`${a.serial} deleted — it will re-register as Pending.`);
-      await Promise.all([loadRegistered(), loadPending()]);
-    } catch (e) { setManageMsg(e instanceof Error ? e.message : "Delete failed"); }
+      await withStepUp(() => api.post(url, { reason }));
+      setManageMsg(`${a.serial}: ${verb} done.`);
+      await loadRegistered();
+    } catch (e) { setManageMsg(e instanceof Error ? e.message : `${verb} failed`); }
     finally { setRowBusy(null); }
   }
 
@@ -293,7 +307,13 @@ export default function OnboardingPage() {
 
           {registered.length > 0 && (
             <Card>
-              <CardHeader><CardTitle>Registered appliances</CardTitle></CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Registered appliances</CardTitle>
+                <label className="text-xs text-muted flex items-center gap-2 font-normal">
+                  <input type="checkbox" checked={showAdvanced} onChange={(e) => setShowAdvanced(e.target.checked)} />
+                  Advanced Support
+                </label>
+              </CardHeader>
               <CardBody className="p-0">
                 {manageMsg && <div className="px-4 pt-3 text-sm text-muted">{manageMsg}</div>}
                 <Table>
@@ -307,7 +327,10 @@ export default function OnboardingPage() {
                         <TD className="text-right">
                           <div className="flex justify-end gap-2">
                             <Button size="sm" variant="secondary" disabled={rowBusy === a.id} onClick={() => onDeactivate(a)}>Deactivate</Button>
-                            <Button size="sm" variant="danger" disabled={rowBusy === a.id} onClick={() => onDelete(a)}>Delete</Button>
+                            {showAdvanced && <Button size="sm" variant="ghost" disabled={rowBusy === a.id} onClick={() => advancedAction(a, "reissue certificate", `/cloud/v1/certificates/${a.id}/issue`)}>Reissue cert</Button>}
+                            {showAdvanced && <Button size="sm" variant="ghost" disabled={rowBusy === a.id} onClick={() => advancedAction(a, "force reconcile", `/cloud/v1/appliances-admin/${a.id}/force-reconcile`)}>Reconcile</Button>}
+                            {showAdvanced && <Button size="sm" variant="ghost" disabled={rowBusy === a.id} onClick={() => advancedAction(a, "decommission", `/cloud/v1/appliances-admin/${a.id}/decommission`)}>Decommission</Button>}
+                            <Button size="sm" variant="danger" disabled={rowBusy === a.id} onClick={() => openDelete(a)}>Delete</Button>
                           </div>
                         </TD>
                       </TR>
@@ -349,6 +372,29 @@ export default function OnboardingPage() {
           </CardBody>
         </Card>
       )}
+
+      <DeleteDialog
+        open={!!delApp}
+        onClose={() => { setDelApp(null); setDelImpact(null); }}
+        onDeleted={() => { setManageMsg(`${delApp?.serial} deleted — it will re-register as Pending.`); loadRegistered(); loadPending(); }}
+        title={`Delete appliance ${delApp?.serial ?? ""}`}
+        what="Appliance"
+        expected={delApp?.serial ?? ""}
+        confirmHint="Type the appliance serial"
+        deleteUrl={`/cloud/v1/appliances-admin/${delApp?.id}`}
+        extraImpact={delImpact && (
+          <div className="rounded-md border border-border bg-panel2 p-3 text-xs">
+            <div className="mb-1 font-medium text-text">This will remove and terminate:</div>
+            <ul className="space-y-0.5 text-muted">
+              {(delImpact.terminates ?? []).map((t: string) => <li key={t}>• {t}</li>)}
+              {Object.entries(delImpact.technical_records ?? {}).map(([k, v]) => (
+                <li key={k}>• {String(v)} {k.replace(/_/g, " ")}</li>
+              ))}
+              {(delImpact.licenses_revoked ?? []).length > 0 && <li>• {delImpact.licenses_revoked.length} site license(s) revoked</li>}
+            </ul>
+          </div>
+        )}
+      />
     </div>
   );
 }

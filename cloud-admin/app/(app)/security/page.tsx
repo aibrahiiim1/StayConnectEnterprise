@@ -49,9 +49,14 @@ export default function SecurityPage() {
   useEffect(() => { load(); }, []);
 
   async function setStatus(a: Alert, status: string) {
+    // Resolutions carry a reason into the immutable audit trail.
+    let reason = "";
+    if (status === "resolved" || status === "false_positive") {
+      reason = window.prompt(`Reason for marking this alert "${status.replace("_", " ")}":`, "") ?? "";
+    }
     setBusy(a.id); setErr(null);
     try {
-      await api.patch(`/cloud/v1/appliances-admin/security-alerts/${a.id}`, { status });
+      await api.patch(`/cloud/v1/appliances-admin/security-alerts/${a.id}`, { status, reason });
       await load();
     } catch (e: any) {
       setErr(e?.message ?? "Update failed");

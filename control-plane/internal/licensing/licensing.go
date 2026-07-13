@@ -189,7 +189,9 @@ func (s *Service) issue(ctx context.Context, tenantID, siteID, createdBy string,
 		return nil, nil, err
 	}
 	defer rows.Close()
-	var applianceIDs []string
+	// Non-nil so a site license issued before any appliance is enrolled stores an
+	// empty array, not SQL NULL (appliance_ids is NOT NULL).
+	applianceIDs := []string{}
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {

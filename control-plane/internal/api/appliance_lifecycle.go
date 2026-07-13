@@ -51,10 +51,15 @@ func (b *Base) LifecycleRoutes() http.Handler {
 	r.With(auth.RequirePermission("platform.appliances.revoke"), reauth).Post("/{id}/revoke", b.terminalAction("revoked"))
 	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/replace", b.replaceAppliance)
 	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/decommission", b.terminalAction("decommissioned"))
+	// Force reconcile re-asserts the appliance's commercial lifecycle from its
+	// current signed license (Advanced Support: recover a stuck appliance).
+	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/force-reconcile", b.forceReconcile)
 	// Self-service reset (testing / re-onboarding): deactivate revokes the
 	// license; delete removes the appliance entirely (it re-registers as a fresh
 	// Pending). Both permission + step-up gated.
 	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/deactivate", b.deactivateAppliance)
+	// Pre-delete impact preview (read-only) then the permanent delete.
+	r.With(auth.RequirePermission("platform.appliances.view")).Get("/{id}/delete-impact", b.GetApplianceDeleteImpact)
 	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Delete("/{id}", b.deleteApplianceAdmin)
 	// Terminal-delivery status (two-phase progress) for the Platform console.
 	r.With(auth.RequirePermission("platform.appliances.view")).Get("/{id}/terminal-delivery", b.terminalDeliveryStatus)
@@ -394,11 +399,15 @@ func (b *Base) decommissionAppliance(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{"status": "decommissioned", "previous": prev})
 }
 
-// updateAlertStatus advances a security alert through its triage lifecycle.
+// updateAlertStatus advances a security alert through its triage lifecycle
+// (open → investigating → acknowledged → resolved/false_positive → reopen). Every
+// transition records actor, time, the previous and new state, and an optional
+// reason in the immutable audit log.
 func (b *Base) updateAlertStatus(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var in struct {
 		Status string `json:"status"`
+		Reason string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")
@@ -417,6 +426,12 @@ func (b *Base) updateAlertStatus(w http.ResponseWriter, r *http.Request) {
 	if sess != nil {
 		actor = sess.OperatorID
 	}
+	// Capture the previous state for the audit trail.
+	var prev string
+	if err := b.DB.QueryRow(ctx, `SELECT COALESCE(status,'open') FROM appliance_security_alerts WHERE id=$1`, id).Scan(&prev); err != nil {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "alert not found")
+		return
+	}
 	resolved := in.Status == "resolved" || in.Status == "false_positive"
 	tag, err := b.DB.Exec(ctx, `
         UPDATE appliance_security_alerts
@@ -426,8 +441,10 @@ func (b *Base) updateAlertStatus(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "alert not found")
 		return
 	}
-	audit.Op(ctx, b.DB, r, "security_alert.status_changed", "security_alert", id, map[string]any{"status": in.Status})
-	WriteJSON(w, http.StatusOK, map[string]any{"status": in.Status})
+	audit.Op(ctx, b.DB, r, "security_alert.status_changed", "security_alert", id, map[string]any{
+		"from": prev, "to": in.Status, "reason": in.Reason,
+	})
+	WriteJSON(w, http.StatusOK, map[string]any{"status": in.Status, "from": prev})
 }
 
 // fp returns a short fingerprint of a public key string (never the key itself).

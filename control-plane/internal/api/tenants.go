@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 
@@ -36,12 +35,17 @@ func (b *Base) TenantsRoutes() http.Handler {
 	r.Post("/", b.createTenant)
 	r.Get("/{id}", b.getTenant)
 	r.Patch("/{id}", b.patchTenant)
-	r.Delete("/{id}", b.archiveTenant)
+	// Archive is the NORMAL retire action (soft, reversible). Restore reverses it.
+	r.Post("/{id}/archive", b.archiveTenant)
+	r.Post("/{id}/restore", b.restoreTenant)
+	// Permanent delete is empty-only, step-up gated, typed-name + reason confirmed.
+	r.With(RequireReauth(b.Redis)).Delete("/{id}", b.deleteTenantSafe)
 
 	// Subscription + limits endpoints. tenantID param name matches the
 	// shared handlers in subscriptions.go.
 	r.Get("/{tenantID}/subscription", b.getSubscription)
 	r.Post("/{tenantID}/subscription", b.changeSubscription)
+	r.With(RequireReauth(b.Redis)).Post("/{tenantID}/subscription/cancel", b.cancelSubscription)
 	// Explicit commercial terms: the operator CHOOSES active / trial / scheduled,
 	// the billing interval, start + renewal dates and auto-renew. A plan having
 	// trial days never silently forces a trial.
@@ -227,8 +231,9 @@ func (b *Base) patchTenant(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, t)
 }
 
-// archiveTenant soft-deletes by setting status='archived'. Hard-delete is not
-// exposed to avoid accidental loss of accounting data (foreign-keyed).
+// archiveTenant soft-deletes by setting status='archived'. This is the NORMAL
+// action for a Customer that is no longer active: it hides the record from
+// active lists but keeps every Site, Appliance, License and audit record intact.
 func (b *Base) archiveTenant(w http.ResponseWriter, r *http.Request) {
 	sess := auth.FromContext(r.Context())
 	if !sess.IsSuperAdmin {
@@ -238,103 +243,35 @@ func (b *Base) archiveTenant(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := DBCtx(r)
 	defer cancel()
-
-	// ?purge=true → HARD delete: remove the customer and everything under it
-	// (appliances + their assignments/certs, licenses, tokens, subscriptions,
-	// sites) so it can be re-created from scratch. Default = soft archive (keeps
-	// the row + history). Purge is intended for test/reset and is fully audited.
-	if r.URL.Query().Get("purge") == "true" {
-		tx, err := b.DB.Begin(ctx)
-		if err != nil {
-			Fail(w, r, http.StatusInternalServerError, CodeInternal, "tx failed")
-			return
-		}
-		defer tx.Rollback(ctx)
-
-		// accounting_records is a TimescaleDB hypertable with the same read-only
-		// guard but with NO foreign key to tenants — the tenant cascade never
-		// reaches it, so we clear its tenant rows explicitly. Triggers can't be
-		// ALTERed on a hypertable, so suppress the guard via replica role (scoped
-		// to this tx) instead.
-		if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = replica"); err != nil {
-			Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
-			return
-		}
-		if _, err := tx.Exec(ctx, `DELETE FROM accounting_records WHERE tenant_id=$1`, id); err != nil {
-			Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
-			return
-		}
-		if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = origin"); err != nil {
-			Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
-			return
-		}
-
-		// Legacy guest-data tables (guests/sessions/vouchers) carry a
-		// statement-level `legacy_ro` guard that hard-blocks writes — central no
-		// longer owns this data (it moved to the edge). The guard fires even on a
-		// cascade DELETE with zero rows, so it would abort the tenant delete
-		// below. Disable it for the duration of THIS transaction (DDL is
-		// transactional: a rollback reverts the disable too), delete, then
-		// re-enable before commit. FK cascade stays on, so deleting the tenant row
-		// still cleans every child table.
-		legacyGuarded := []string{"guests", "sessions", "vouchers"}
-		var toggled []string
-		for _, t := range legacyGuarded {
-			var has bool
-			if err := tx.QueryRow(ctx,
-				`SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=$1::regclass AND tgname='legacy_ro' AND NOT tgisinternal)`,
-				t).Scan(&has); err != nil {
-				Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
-				return
-			}
-			if !has {
-				continue
-			}
-			if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s DISABLE TRIGGER legacy_ro", t)); err != nil {
-				Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
-				return
-			}
-			toggled = append(toggled, t)
-		}
-
-		for _, stmt := range []string{
-			`DELETE FROM appliance_security_alerts WHERE appliance_id IN (SELECT id FROM appliances WHERE tenant_id=$1)`,
-			`DELETE FROM appliance_signed_assignments WHERE appliance_id IN (SELECT id FROM appliances WHERE tenant_id=$1)`,
-			`DELETE FROM appliance_certificates WHERE appliance_id IN (SELECT id FROM appliances WHERE tenant_id=$1)`,
-			`DELETE FROM appliance_certificate_requests WHERE appliance_id IN (SELECT id FROM appliances WHERE tenant_id=$1)`,
-			`DELETE FROM appliance_assignments WHERE tenant_id=$1`,
-			`DELETE FROM appliances WHERE tenant_id=$1`,
-			`DELETE FROM licenses WHERE tenant_id=$1`,
-			`DELETE FROM appliance_bootstrap_tokens WHERE tenant_id=$1`,
-			`DELETE FROM tenant_subscriptions WHERE tenant_id=$1`,
-			`DELETE FROM tenant_limit_overrides WHERE tenant_id=$1`,
-			`DELETE FROM sites WHERE tenant_id=$1`,
-			`DELETE FROM tenants WHERE id=$1`,
-		} {
-			if _, err := tx.Exec(ctx, stmt, id); err != nil {
-				Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
-				return
-			}
-		}
-
-		// Re-enable the guard before committing so the tables return to
-		// read-only for everyone else.
-		for _, t := range toggled {
-			if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s ENABLE TRIGGER legacy_ro", t)); err != nil {
-				Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
-				return
-			}
-		}
-		if err := tx.Commit(ctx); err != nil {
-			Fail(w, r, http.StatusInternalServerError, CodeInternal, "commit failed")
-			return
-		}
-		audit.Op(r.Context(), b.DB, r, "tenant.purged", "tenant", id, map[string]any{"_tenant_id": id})
-		w.WriteHeader(http.StatusNoContent)
+	ct, err := b.DB.Exec(ctx, `UPDATE tenants SET status='archived', updated_at=now() WHERE id=$1 AND status <> 'archived'`, id)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 		return
 	}
+	if ct.RowsAffected() == 0 {
+		// Either not found or already archived — distinguish for a clean UX.
+		var exists bool
+		_ = b.DB.QueryRow(ctx, `SELECT true FROM tenants WHERE id=$1`, id).Scan(&exists)
+		if !exists {
+			Fail(w, r, http.StatusNotFound, CodeNotFound, "tenant not found")
+			return
+		}
+	}
+	audit.Op(r.Context(), b.DB, r, "tenant.archived", "tenant", id, map[string]any{"_tenant_id": id})
+	WriteJSON(w, http.StatusOK, map[string]any{"status": "archived", "id": id})
+}
 
-	ct, err := b.DB.Exec(ctx, `UPDATE tenants SET status='archived', updated_at=now() WHERE id = $1`, id)
+// restoreTenant returns an archived Customer to active status.
+func (b *Base) restoreTenant(w http.ResponseWriter, r *http.Request) {
+	sess := auth.FromContext(r.Context())
+	if !sess.IsSuperAdmin {
+		Fail(w, r, http.StatusForbidden, CodeForbidden, "platform_admin only")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+	ct, err := b.DB.Exec(ctx, `UPDATE tenants SET status='active', updated_at=now() WHERE id=$1`, id)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")
 		return
@@ -343,6 +280,102 @@ func (b *Base) archiveTenant(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusNotFound, CodeNotFound, "tenant not found")
 		return
 	}
-	audit.Op(r.Context(), b.DB, r, "tenant.archived", "tenant", id, map[string]any{"_tenant_id": id})
+	audit.Op(r.Context(), b.DB, r, "tenant.restored", "tenant", id, map[string]any{"_tenant_id": id})
+	WriteJSON(w, http.StatusOK, map[string]any{"status": "active", "id": id})
+}
+
+// deleteTenantSafe PERMANENTLY deletes a Customer, but ONLY when it is completely
+// empty. It NEVER cascades a subtree away: while any Site, Appliance, License,
+// active Subscription or live Enrollment Token exists the delete is rejected with
+// a 409 listing exactly what must be removed first (in deletion order). The DB
+// ownership RESTRICT constraints (migration 0037) are the final backstop if a
+// caller bypasses this check.
+//
+// Requires super-admin, a password step-up (route middleware), a typed name
+// confirmation and a reason — all recorded in the immutable audit log, which has
+// no foreign key and therefore survives the deletion.
+func (b *Base) deleteTenantSafe(w http.ResponseWriter, r *http.Request) {
+	sess := auth.FromContext(r.Context())
+	if sess == nil || !sess.IsSuperAdmin {
+		Fail(w, r, http.StatusForbidden, CodeForbidden, "platform_admin only")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	ctx, cancel := DBCtx(r)
+	defer cancel()
+
+	var t Tenant
+	err := b.DB.QueryRow(ctx, `SELECT id, slug, name, status FROM tenants WHERE id=$1`, id).
+		Scan(&t.ID, &t.Slug, &t.Name, &t.Status)
+	if IsNoRows(err) {
+		Fail(w, r, http.StatusNotFound, CodeNotFound, "tenant not found")
+		return
+	}
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
+		return
+	}
+
+	var req deleteConfirm
+	_ = DecodeJSON(r, &req)
+	if req.Confirm != t.Name && req.Confirm != t.Slug {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest,
+			"type the exact Customer name to confirm permanent deletion",
+			map[string]any{"expected": t.Name})
+		return
+	}
+
+	blockers, err := b.tenantBlockers(ctx, id)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "dependency check failed: "+err.Error())
+		return
+	}
+	if len(blockers) > 0 {
+		failBlocked(w, r, "Customer", blockers)
+		return
+	}
+
+	// Empty customer: permanent delete. Record the audit event BEFORE the delete
+	// so it is durable even though audit_log has no FK to the tenant.
+	audit.Op(r.Context(), b.DB, r, "tenant.deleted", "tenant", id, map[string]any{
+		"_tenant_id": id, "slug": t.Slug, "name": t.Name, "reason": req.Reason,
+	})
+
+	tx, err := b.DB.Begin(ctx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "tx failed")
+		return
+	}
+	defer tx.Rollback(ctx)
+	// Deleting the tenant row cascades to guest-data tables (guests/sessions/
+	// vouchers) whose statement-level read-only guard fires even at zero rows;
+	// disable it for the tx, then re-enable before commit.
+	toggled, err := disableLegacyGuards(ctx, tx)
+	if err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed: "+err.Error())
+		return
+	}
+	// Clear tenant-scoped leaf rows that block the RESTRICT edges but carry no
+	// standalone meaning for an empty customer (canceled subs, spent tokens,
+	// limit overrides). Sites/appliances/licenses are guaranteed absent above.
+	for _, stmt := range []string{
+		`DELETE FROM appliance_bootstrap_tokens WHERE tenant_id=$1`,
+		`DELETE FROM tenant_subscriptions WHERE tenant_id=$1`,
+		`DELETE FROM tenant_limit_overrides WHERE tenant_id=$1`,
+		`DELETE FROM tenants WHERE id=$1`,
+	} {
+		if _, err := tx.Exec(ctx, stmt, id); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed: "+err.Error())
+			return
+		}
+	}
+	if err := enableLegacyGuards(ctx, tx, toggled); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "delete failed: "+err.Error())
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		Fail(w, r, http.StatusInternalServerError, CodeInternal, "commit failed")
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
