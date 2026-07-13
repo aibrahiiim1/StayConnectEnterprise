@@ -7,7 +7,7 @@ import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Plus, X } from "lucide-react";
+import { Plus, X, Pencil, Archive, Trash2 } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 
 type Tenant = {
@@ -39,6 +39,9 @@ export default function TenantsPage() {
   }
   useEffect(() => { load(); }, []);
 
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true); setErr(null);
@@ -63,6 +66,30 @@ export default function TenantsPage() {
     }
   }
 
+  async function onRename(t: Tenant) {
+    const name = window.prompt(`Rename "${t.name}" to:`, t.name);
+    if (!name || name.trim() === t.name) return;
+    setRowBusy(t.id); setErr(null); setMsg(null);
+    try { await api.patch(`/v1/tenants/${t.id}`, { name: name.trim() }); setMsg(`Renamed to ${name.trim()}.`); await load(); }
+    catch (e: any) { setErr(e?.message ?? "Rename failed"); }
+    finally { setRowBusy(null); }
+  }
+  async function onArchive(t: Tenant) {
+    if (!confirm(`Archive "${t.name}"? It's hidden and inactive but kept for history (sites/licenses remain).`)) return;
+    setRowBusy(t.id); setErr(null); setMsg(null);
+    try { await api.del(`/v1/tenants/${t.id}`); setMsg(`${t.name} archived.`); await load(); }
+    catch (e: any) { setErr(e?.message ?? "Archive failed"); }
+    finally { setRowBusy(null); }
+  }
+  async function onDelete(t: Tenant) {
+    if (!confirm(`DELETE "${t.name}" and EVERYTHING under it — sites, appliances, licenses, subscription, tokens? This cannot be undone.`)) return;
+    if (window.prompt(`Type the customer name to confirm permanent delete:`) !== t.name) { setErr("Name did not match — delete cancelled."); return; }
+    setRowBusy(t.id); setErr(null); setMsg(null);
+    try { await api.del(`/v1/tenants/${t.id}?purge=true`); setMsg(`${t.name} permanently deleted.`); await load(); }
+    catch (e: any) { setErr(e?.message ?? "Delete failed"); }
+    finally { setRowBusy(null); }
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-baseline justify-between mb-4">
@@ -80,6 +107,7 @@ export default function TenantsPage() {
       </p>
 
       {err && <div className="text-err text-sm mb-4">{err}</div>}
+      {msg && <div className="text-ok text-sm mb-4">{msg}</div>}
 
       {showNew && (
         <Card className="mb-6">
@@ -111,17 +139,27 @@ export default function TenantsPage() {
           ) : (
             <Table>
               <THead>
-                <TR><TH>Slug</TH><TH>Name</TH><TH>Status</TH><TH>Created</TH></TR>
+                <TR><TH>Slug</TH><TH>Name</TH><TH>Status</TH><TH>Created</TH><TH className="text-right">Manage</TH></TR>
               </THead>
               <tbody>
-                {rows.map((t) => (
+                {rows.map((t) => {
+                  const archived = (t.status ?? "active") === "archived";
+                  return (
                   <TR key={t.id}>
                     <TD className="font-mono">{t.slug}</TD>
                     <TD>{t.name}</TD>
                     <TD className="text-muted">{t.status ?? "active"}</TD>
                     <TD className="text-muted">{formatRelative(t.created_at)}</TD>
+                    <TD>
+                      <div className="flex gap-2 justify-end">
+                        <Button size="sm" variant="ghost" disabled={rowBusy === t.id} onClick={() => onRename(t)}><Pencil size={13} /> Rename</Button>
+                        {!archived && <Button size="sm" variant="secondary" disabled={rowBusy === t.id} onClick={() => onArchive(t)}><Archive size={13} /> Archive</Button>}
+                        <Button size="sm" variant="danger" disabled={rowBusy === t.id} onClick={() => onDelete(t)}><Trash2 size={13} /> Delete</Button>
+                      </div>
+                    </TD>
                   </TR>
-                ))}
+                  );
+                })}
               </tbody>
             </Table>
           )}

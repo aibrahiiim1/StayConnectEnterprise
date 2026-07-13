@@ -70,6 +70,33 @@ export default function LicensesPage() {
       load();
     } catch (e) { setErr(errMsg(e)); }
   }
+  async function onSuspend(id: string) {
+    if (!confirm("Suspend this license? The appliance keeps working until its next check-in, then loses entitlement until resumed.")) return;
+    setErr(null);
+    try { await withStepUp(() => api.post(`/cloud/v1/licenses/${id}/suspend`)); load(); }
+    catch (e) { setErr(errMsg(e)); }
+  }
+  async function onResume(id: string) {
+    setErr(null);
+    try { await withStepUp(() => api.post(`/cloud/v1/licenses/${id}/resume`)); load(); }
+    catch (e) { setErr(errMsg(e)); }
+  }
+  async function onRenew(l: License) {
+    const days = window.prompt("Renew: issue a fresh license valid for how many days? (supersedes the current one)", "365");
+    if (!days) return;
+    const n = Number(days);
+    if (!Number.isFinite(n) || n <= 0) { setErr("Enter a positive number of days."); return; }
+    setErr(null);
+    try {
+      await withStepUp(() => api.post(`/cloud/v1/licenses/${l.id}/renew`, {
+        tenant_id: l.tenant_id,
+        site_id: l.site_id,
+        valid_days: n,
+        offline_grace_days: l.offline_grace_days,
+      }));
+      load();
+    } catch (e) { setErr(errMsg(e)); }
+  }
 
   const siteName = (sid: string) => sites.find((s) => s.id === sid)?.name ?? sid.slice(0, 8);
 
@@ -151,9 +178,20 @@ export default function LicensesPage() {
                     <TD className="text-muted">{l.offline_grace_days}</TD>
                     <TD className="font-mono text-xs">{l.key_id}</TD>
                     <TD className="text-right">
-                      {l.status !== "revoked" && (
-                        <Button size="sm" variant="ghost" onClick={() => onRevoke(l.id)}>Revoke</Button>
-                      )}
+                      <div className="flex gap-1 justify-end">
+                        {(l.status === "active" || l.status === "suspended") && (
+                          <Button size="sm" variant="ghost" onClick={() => onRenew(l)}>Renew</Button>
+                        )}
+                        {l.status === "active" && (
+                          <Button size="sm" variant="ghost" onClick={() => onSuspend(l.id)}>Suspend</Button>
+                        )}
+                        {l.status === "suspended" && (
+                          <Button size="sm" variant="ghost" onClick={() => onResume(l.id)}>Resume</Button>
+                        )}
+                        {l.status !== "revoked" && (
+                          <Button size="sm" variant="danger" onClick={() => onRevoke(l.id)}>Revoke</Button>
+                        )}
+                      </div>
                     </TD>
                   </TR>
                 ))}

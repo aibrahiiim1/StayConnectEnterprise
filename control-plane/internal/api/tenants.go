@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -237,6 +238,102 @@ func (b *Base) archiveTenant(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	ctx, cancel := DBCtx(r)
 	defer cancel()
+
+	// ?purge=true → HARD delete: remove the customer and everything under it
+	// (appliances + their assignments/certs, licenses, tokens, subscriptions,
+	// sites) so it can be re-created from scratch. Default = soft archive (keeps
+	// the row + history). Purge is intended for test/reset and is fully audited.
+	if r.URL.Query().Get("purge") == "true" {
+		tx, err := b.DB.Begin(ctx)
+		if err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "tx failed")
+			return
+		}
+		defer tx.Rollback(ctx)
+
+		// accounting_records is a TimescaleDB hypertable with the same read-only
+		// guard but with NO foreign key to tenants — the tenant cascade never
+		// reaches it, so we clear its tenant rows explicitly. Triggers can't be
+		// ALTERed on a hypertable, so suppress the guard via replica role (scoped
+		// to this tx) instead.
+		if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = replica"); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
+			return
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM accounting_records WHERE tenant_id=$1`, id); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
+			return
+		}
+		if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = origin"); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
+			return
+		}
+
+		// Legacy guest-data tables (guests/sessions/vouchers) carry a
+		// statement-level `legacy_ro` guard that hard-blocks writes — central no
+		// longer owns this data (it moved to the edge). The guard fires even on a
+		// cascade DELETE with zero rows, so it would abort the tenant delete
+		// below. Disable it for the duration of THIS transaction (DDL is
+		// transactional: a rollback reverts the disable too), delete, then
+		// re-enable before commit. FK cascade stays on, so deleting the tenant row
+		// still cleans every child table.
+		legacyGuarded := []string{"guests", "sessions", "vouchers"}
+		var toggled []string
+		for _, t := range legacyGuarded {
+			var has bool
+			if err := tx.QueryRow(ctx,
+				`SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=$1::regclass AND tgname='legacy_ro' AND NOT tgisinternal)`,
+				t).Scan(&has); err != nil {
+				Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
+				return
+			}
+			if !has {
+				continue
+			}
+			if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s DISABLE TRIGGER legacy_ro", t)); err != nil {
+				Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
+				return
+			}
+			toggled = append(toggled, t)
+		}
+
+		for _, stmt := range []string{
+			`DELETE FROM appliance_security_alerts WHERE appliance_id IN (SELECT id FROM appliances WHERE tenant_id=$1)`,
+			`DELETE FROM appliance_signed_assignments WHERE appliance_id IN (SELECT id FROM appliances WHERE tenant_id=$1)`,
+			`DELETE FROM appliance_certificates WHERE appliance_id IN (SELECT id FROM appliances WHERE tenant_id=$1)`,
+			`DELETE FROM appliance_certificate_requests WHERE appliance_id IN (SELECT id FROM appliances WHERE tenant_id=$1)`,
+			`DELETE FROM appliance_assignments WHERE tenant_id=$1`,
+			`DELETE FROM appliances WHERE tenant_id=$1`,
+			`DELETE FROM licenses WHERE tenant_id=$1`,
+			`DELETE FROM appliance_bootstrap_tokens WHERE tenant_id=$1`,
+			`DELETE FROM tenant_subscriptions WHERE tenant_id=$1`,
+			`DELETE FROM tenant_limit_overrides WHERE tenant_id=$1`,
+			`DELETE FROM sites WHERE tenant_id=$1`,
+			`DELETE FROM tenants WHERE id=$1`,
+		} {
+			if _, err := tx.Exec(ctx, stmt, id); err != nil {
+				Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
+				return
+			}
+		}
+
+		// Re-enable the guard before committing so the tables return to
+		// read-only for everyone else.
+		for _, t := range toggled {
+			if _, err := tx.Exec(ctx, fmt.Sprintf("ALTER TABLE %s ENABLE TRIGGER legacy_ro", t)); err != nil {
+				Fail(w, r, http.StatusInternalServerError, CodeInternal, "purge failed: "+err.Error())
+				return
+			}
+		}
+		if err := tx.Commit(ctx); err != nil {
+			Fail(w, r, http.StatusInternalServerError, CodeInternal, "commit failed")
+			return
+		}
+		audit.Op(r.Context(), b.DB, r, "tenant.purged", "tenant", id, map[string]any{"_tenant_id": id})
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	ct, err := b.DB.Exec(ctx, `UPDATE tenants SET status='archived', updated_at=now() WHERE id = $1`, id)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "update failed")

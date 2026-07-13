@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, MapPin, Server, Radar, Users, LogOut,
   CreditCard, BadgeCheck, ScrollText, Building2, PlugZap, SlidersHorizontal,
+  ShieldAlert,
 } from "lucide-react";
 
 type Item = { href: string; label: string; icon: any };
@@ -39,6 +40,7 @@ const SECTIONS: Section[] = [
     title: "Administration",
     items: [
       { href: "/operators", label: "Operators", icon: Users },
+      { href: "/security",  label: "Security alerts", icon: ShieldAlert },
       { href: "/audit",     label: "Audit log", icon: ScrollText },
     ],
   },

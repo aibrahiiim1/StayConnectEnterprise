@@ -81,6 +81,27 @@ export default function SitesPage() {
     }
   }
 
+  async function onEdit(s: Site) {
+    if (!tenantID) return;
+    const name = window.prompt("Site name:", s.name);
+    if (name === null) return;
+    const timezone = window.prompt("Timezone:", s.timezone || "UTC");
+    if (timezone === null) return;
+    const country = window.prompt("Country (2-letter, blank for none):", s.country || "");
+    if (country === null) return;
+    setErr(null);
+    try {
+      await api.patch(`/v1/sites/${s.id}?tenant_id=${tenantID}`, {
+        name: name.trim() || s.name,
+        timezone: timezone.trim() || "UTC",
+        country: country.trim() || undefined,
+      });
+      load();
+    } catch (e: any) {
+      setErr(e?.message ?? "Update failed");
+    }
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-baseline justify-between mb-4">
@@ -135,7 +156,10 @@ export default function SitesPage() {
                     <TD className="text-muted">{s.country || "—"}</TD>
                     <TD className="text-muted">{formatRelative(s.created_at)}</TD>
                     <TD className="text-right">
-                      <Button size="sm" variant="ghost" onClick={() => onDelete(s.id)}>Delete</Button>
+                      <div className="flex gap-1 justify-end">
+                        <Button size="sm" variant="ghost" onClick={() => onEdit(s)}>Edit</Button>
+                        <Button size="sm" variant="danger" onClick={() => onDelete(s.id)}>Delete</Button>
+                      </div>
                     </TD>
                   </TR>
                 ))}
