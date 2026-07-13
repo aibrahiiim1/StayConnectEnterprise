@@ -1,0 +1,32 @@
+# edged — Hotel Admin API (Edge API) on the appliance.
+# Binds the management loopback only; Caddy exposes it on the management IP.
+[Unit]
+Description=StayConnect Edge API (Hotel Admin backend)
+After=network-online.target stayconnect-scd.service
+Wants=network-online.target
+Requires=stayconnect-scd.service
+# PartOf makes a scd restart RESTART edged too (Requires alone only stops it when
+# scd stops, leaving edged down after `systemctl restart scd` — e.g. runtime
+# enrollment or orphan self-reset). This keeps the Hotel Admin API up.
+PartOf=stayconnect-scd.service
+# edged is Requires= scd; a scd restart cascades here. Widen the burst
+# window so routine scd restarts don't trip the start-limit and wedge edged.
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+ExecStart=/opt/stayconnect/bin/edged serve
+EnvironmentFile=-/etc/stayconnect/edged.env
+User=stayconnect
+Group=stayconnect
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/log/stayconnect
+ReadOnlyPaths=/etc/stayconnect
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
