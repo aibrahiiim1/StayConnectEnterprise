@@ -36,6 +36,12 @@ func (b *Base) LifecycleRoutes() http.Handler {
 	r.With(auth.RequirePermission("platform.appliances.view")).Get("/security-alerts", b.listSecurityAlerts)
 	// What signed assignment (if any) this appliance has been issued.
 	r.With(auth.RequirePermission("platform.appliances.view")).Get("/{id}/assignment", b.PlatformAssignmentStatus)
+	// ONE-CLICK activation: claim -> assign -> signed assignment -> certificate
+	// -> hardware-bound license, in a single permission + step-up.
+	r.With(auth.RequirePermission("platform.appliances.assign"), reauth).Post("/{id}/activate", b.activateAppliance)
+	// WAN-MAC rebind (genuine NIC replacement / VM migration): elevated, audited,
+	// re-issues a hardware-bound license for the new MAC.
+	r.With(auth.RequirePermission("platform.appliances.manage"), reauth).Post("/{id}/rebind-mac", b.rebindMAC)
 	r.With(auth.RequirePermission("platform.appliances.assign"), reauth).Post("/{id}/assign", b.assignAppliance)
 	// Reassignment to a DIFFERENT tenant/site is an elevated action: it needs
 	// the reassign permission on top of a password step-up. Guest data is never
@@ -101,7 +107,8 @@ func (b *Base) listPendingAppliances(w http.ResponseWriter, r *http.Request) {
 	rows, err := b.DB.Query(ctx, `
         SELECT id::text, serial, COALESCE(hardware_fingerprint,''), COALESCE(public_key,''),
                COALESCE(last_public_ip,''), COALESCE(version,''), lifecycle_state,
-               COALESCE(first_seen_at,created_at), last_seen_at
+               COALESCE(first_seen_at,created_at), last_seen_at,
+               COALESCE(wan_mac,''), COALESCE(lan_mac,''), COALESCE(model,''), COALESCE(hostname,'')
           FROM appliances
          WHERE lifecycle_state IN ('pending_approval','pending_enrollment','claimed')
          ORDER BY created_at DESC LIMIT 200`)
@@ -112,12 +119,13 @@ func (b *Base) listPendingAppliances(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, serial, hw, pk, ip, ver, state string
+		var id, serial, hw, pk, ip, ver, state, wan, lan, model, host string
 		var first, last any
-		_ = rows.Scan(&id, &serial, &hw, &pk, &ip, &ver, &state, &first, &last)
+		_ = rows.Scan(&id, &serial, &hw, &pk, &ip, &ver, &state, &first, &last, &wan, &lan, &model, &host)
 		out = append(out, map[string]any{"id": id, "serial": serial, "hardware_fingerprint": hw,
 			"public_key_fingerprint": fp(pk), "source_ip": ip, "version": ver, "state": state,
-			"first_seen": first, "last_seen": last})
+			"first_seen": first, "last_seen": last,
+			"wan_mac": wan, "lan_mac": lan, "model": model, "hostname": host})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"data": out})
 }

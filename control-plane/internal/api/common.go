@@ -15,6 +15,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	redis "github.com/redis/go-redis/v9"
+
+	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
+	"github.com/stayconnect/enterprise/control-plane/internal/pki"
 )
 
 type Base struct {
@@ -37,6 +40,12 @@ type Base struct {
 	// assignment documents. nil disables signed-assignment issuance (the
 	// lifecycle handlers then only update the Central DB, legacy behavior).
 	AssignKey ed25519.PrivateKey
+
+	// One-click activation composes assign + certificate + license. These are
+	// nil/zero unless wired for the lifecycle routes.
+	CA          *pki.CA
+	ClientValid time.Duration      // issued client-cert lifetime
+	Lic         *licensing.Service // hardware-bound license issuance
 }
 
 // issueAssignment signs + persists a new current assignment for the appliance

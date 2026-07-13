@@ -110,6 +110,12 @@ func NewRouter(d Deps) http.Handler {
 		r.With(api.RateLimit(d.Redis, "enroll", 20, time.Minute)).
 			Post("/appliances/enroll", enrollBase.EnrollHandler)
 
+		// Public TOKEN-LESS registration — a factory-clean appliance self-signs
+		// with its locally generated identity key (TOFU) and appears as Pending
+		// Activation. No bootstrap token required for the normal online flow.
+		r.With(api.RateLimit(d.Redis, "register", 30, time.Minute)).
+			Post("/appliances/register", enrollBase.RegisterHandler)
+
 		// Public payments flow (phase 12) — guests are anonymous at the
 		// portal; Stripe webhooks are authenticated by HMAC signature.
 		// Uses the guest-domain pool: issued vouchers must land in the SITE
@@ -213,7 +219,8 @@ func NewRouter(d Deps) http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(auth.RequireAuth(store))
 			base := &api.Base{DB: d.DB, Redis: d.Redis}
-			abase := &api.Base{DB: d.DB, GuestDB: guestDB, Redis: d.Redis, AssignKey: d.AssignKey}
+			abase := &api.Base{DB: d.DB, GuestDB: guestDB, Redis: d.Redis, AssignKey: d.AssignKey,
+				CA: d.CA, ClientValid: 90 * 24 * time.Hour, Lic: d.Licensing}
 			r.Mount("/tenants", base.TenantsRoutes())
 			r.Mount("/sites", base.SitesRoutes())
 			r.Mount("/appliances", abase.AppliancesRoutes())

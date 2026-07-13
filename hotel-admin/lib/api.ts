@@ -625,7 +625,8 @@ export type SetupStatus = {
     hostname?: string;
     model?: string;
   };
-  activation_status?: "unlicensed" | "pending_activation" | "licensed" | "activated" | string;
+  activation_status?: "unlicensed" | "pending_activation" | "licensed" | "activated" | "mismatch" | string;
+  hardware_mismatch?: string;
   appliance_id?: string;
   identity_key_fingerprint?: string;
   version?: string;

@@ -69,6 +69,10 @@ type cfg struct {
 	CtrlAPIBase    string
 	BootstrapToken string
 	Serial         string
+	// AutoRegister: a factory-clean appliance self-registers (token-less) with
+	// Central using its signed identity so it appears as Pending Activation.
+	// Default true; set SCD_AUTO_REGISTER=false to require a bootstrap token.
+	AutoRegister bool
 
 	// Phase 5.2 — remote transport. When set, scd subscribes to
 	// scd.{applianceID}.> and serves ctrlapi RPCs over NATS.
@@ -110,6 +114,7 @@ func loadCfg() cfg {
 		CtrlAPIBase:    os.Getenv("SCD_CTRLAPI_BASE"),
 		BootstrapToken: os.Getenv("SCD_BOOTSTRAP_TOKEN"),
 		Serial:         os.Getenv("SCD_SERIAL"),
+		AutoRegister:   os.Getenv("SCD_AUTO_REGISTER") != "false",
 
 		NATSURL: os.Getenv("SCD_NATS_URL"),
 
@@ -430,7 +435,7 @@ func main() {
 	//      run un-enrolled (no signed calls to ctrlapi) with a warning
 	//   4. otherwise fatal
 	idStore := &identity.Store{Dir: c.IdentityDir}
-	ident, err := idStore.LoadOrEnroll(rootCtx, c.CtrlAPIBase, c.BootstrapToken, c.Serial)
+	ident, err := idStore.LoadOrEnroll(rootCtx, c.CtrlAPIBase, c.BootstrapToken, c.Serial, c.AutoRegister)
 	if err != nil {
 		slog.Error("identity: load/enroll failed", "err", err)
 		os.Exit(1)
@@ -446,7 +451,11 @@ func main() {
 	if ident != nil {
 		slog.Info("identity loaded", "appliance_id", ident.ApplianceID, "serial", ident.Serial)
 		c.ApplianceID = ident.ApplianceID
-		if c.Serial == "" {
+		// The identity serial is the authoritative hardware-derived StayConnect
+		// serial that Central bound the signed assignment + license to. It MUST
+		// win over any stale SCD_SERIAL env, otherwise assignment adoption fails
+		// with "serial mismatch" and the box never converges.
+		if ident.Serial != "" {
 			c.Serial = ident.Serial
 		}
 		// The persisted assignment is RE-VERIFIED on every boot against the local

@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 )
 
@@ -57,13 +58,27 @@ func (s *Store) keyPath() string { return filepath.Join(s.Dir, "ed25519.key") }
 //
 // Returns (nil, nil) if no identity is present AND no bootstrapToken was
 // given — scd can choose whether that's a soft or hard failure.
-func (s *Store) LoadOrEnroll(ctx context.Context, ctrlBase, bootstrapToken, serial string) (*Identity, error) {
+func (s *Store) LoadOrEnroll(ctx context.Context, ctrlBase, bootstrapToken, serial string, autoRegister bool) (*Identity, error) {
 	if id, err := s.load(); err == nil {
 		return id, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("identity load: %w", err)
 	}
 	if bootstrapToken == "" {
+		// Token-less activation: a factory-clean appliance with Central
+		// connectivity generates its identity and self-registers with a
+		// cryptographically signed request (manufacturing/identity trust). It
+		// appears as Pending Activation; no token is required for the normal
+		// online flow. Falls through to awaiting-enrollment if registration
+		// can't complete (e.g. no Central reachability yet) — retried next boot
+		// or by the periodic re-register loop.
+		if autoRegister && ctrlBase != "" {
+			if id, err := s.register(ctx, ctrlBase); err != nil {
+				return nil, err
+			} else if id != nil {
+				return id, nil
+			}
+		}
 		return nil, nil // caller decides whether to fail hard
 	}
 	if ctrlBase == "" {
@@ -138,6 +153,82 @@ func (s *Store) LoadOrEnroll(ctx context.Context, ctrlBase, bootstrapToken, seri
 	// would fail (consumed), but the admin can mint a new token. Both writes
 	// are atomic (temp file + fsync + rename) so a crash never leaves a
 	// truncated private key on disk.
+	if err := writeFileAtomic(s.keyPath(), priv, 0o600); err != nil {
+		return nil, fmt.Errorf("write key: %w", err)
+	}
+	js, _ := json.MarshalIndent(id, "", "  ")
+	if err := writeFileAtomic(s.idPath(), js, 0o644); err != nil {
+		return nil, fmt.Errorf("write identity.json: %w", err)
+	}
+	return id, nil
+}
+
+// register performs token-less self-registration: it generates the appliance's
+// Ed25519 identity keypair, signs a registration request WITH that key (proving
+// key possession — trust-on-first-use), and POSTs the hardware facts to Central.
+// On success Central creates a Pending Activation appliance row and returns its
+// id, which is persisted alongside the key. Returns (nil,nil) if Central is
+// unreachable so the caller can retry rather than fail hard.
+func (s *Store) register(ctx context.Context, ctrlBase string) (*Identity, error) {
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return nil, fmt.Errorf("mkdir %s: %w", s.Dir, err)
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate key: %w", err)
+	}
+	pubB64 := base64.RawStdEncoding.EncodeToString(pub)
+	hw := hwid.Detect()
+	body, _ := json.Marshal(map[string]string{
+		"serial":               hw.Serial,
+		"wan_mac":              hw.WANMAC,
+		"lan_mac":              hw.LANMAC,
+		"hardware_fingerprint": hw.Fingerprint,
+		"hostname":             hw.Hostname,
+		"model":                hw.Model,
+		"public_key":           pubB64,
+	})
+	kid := applianceauth.KeyID(pub)
+	tok, err := applianceauth.SignRequest(priv, kid, http.MethodPost, "/v1/appliances/register", body)
+	if err != nil {
+		return nil, fmt.Errorf("sign register: %w", err)
+	}
+	rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(rctx, http.MethodPost, ctrlBase+"/v1/appliances/register", bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		// Central unreachable — not fatal; retry on a later boot/loop.
+		return nil, nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		b := make([]byte, 512)
+		n, _ := resp.Body.Read(b)
+		return nil, fmt.Errorf("register status=%d body=%s", resp.StatusCode, string(b[:n]))
+	}
+	var r struct {
+		ApplianceID string `json:"appliance_id"`
+		TenantID    string `json:"tenant_id"`
+		SiteID      string `json:"site_id"`
+		Serial      string `json:"serial"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return nil, fmt.Errorf("register decode: %w", err)
+	}
+	id := &Identity{
+		ApplianceID:  r.ApplianceID,
+		TenantID:     r.TenantID,
+		SiteID:       r.SiteID,
+		Serial:       hw.Serial,
+		PublicKeyB64: pubB64,
+		privKey:      priv,
+	}
 	if err := writeFileAtomic(s.keyPath(), priv, 0o600); err != nil {
 		return nil, fmt.Errorf("write key: %w", err)
 	}

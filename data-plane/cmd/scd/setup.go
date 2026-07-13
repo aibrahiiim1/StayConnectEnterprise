@@ -60,8 +60,18 @@ func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 	licLive := map[string]bool{"active": true, "licensed": true, "grace": true, "graceperiod": true}[strings.ToLower(licState)]
 	realLicensed := licLive && licID != ""
 	mtlsReady, _ := api["mtls_ready"].(bool)
+	// Hardware Binding Mismatch (WAN NIC replaced / VM migration): the license is
+	// bound to this identity but a different WAN MAC. A time-limited, audited
+	// grace keeps the hotel running until an authorized rebind; surfaced here so
+	// the operator sees a clear Mismatch state.
+	hwMismatch := ""
+	if s.lic != nil {
+		hwMismatch = s.lic.HardwareMismatch()
+	}
 	activation := "unlicensed"
 	switch {
+	case s.enrolled && realLicensed && hwMismatch != "":
+		activation = "mismatch"
 	case s.enrolled && realLicensed && mtlsReady:
 		activation = "activated"
 	case s.enrolled && realLicensed:
@@ -80,6 +90,7 @@ func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 		"serial":                  serial,
 		"hardware":                hw,
 		"activation_status":       activation,
+		"hardware_mismatch":       hwMismatch,
 		"appliance_id":            s.applID,
 		"identity_key_fingerprint": s.identityKeyFpr,
 		"version":                 scdVersion,
@@ -150,7 +161,7 @@ func (s *server) setupEnroll(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusServiceUnavailable, "identity store unavailable")
 		return
 	}
-	id, err := s.idStore.LoadOrEnroll(r.Context(), s.ctrlBase, req.Token, req.Serial)
+	id, err := s.idStore.LoadOrEnroll(r.Context(), s.ctrlBase, req.Token, req.Serial, false)
 	if err != nil || id == nil {
 		msg := "enrollment failed"
 		if err != nil {

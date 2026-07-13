@@ -21,16 +21,17 @@ function fp(s?: string): string {
 function activationTone(a?: string): "ok" | "warn" | "err" | "default" {
   switch (a) {
     case "activated": case "licensed": return "ok";
-    case "pending_activation": return "warn";
+    case "pending_activation": case "mismatch": return "warn";
     case "unlicensed": return "err";
     default: return "default";
   }
 }
 function activationLabel(a?: string): string {
   switch (a) {
-    case "activated": return "Activated";
+    case "activated": return "Active";
     case "licensed": return "Licensed";
-    case "pending_activation": return "Pending activation";
+    case "pending_activation": return "Pending";
+    case "mismatch": return "Hardware mismatch";
     case "unlicensed": return "Not activated";
     default: return a || "unknown";
   }
@@ -149,6 +150,14 @@ export default function LicensePage() {
       </div>
 
       {err && <div className="rounded border border-[#6b2128] bg-[#3a1418] p-3 text-sm text-err">Couldn&apos;t read status (retrying): {err}</div>}
+
+      {activation === "mismatch" && (
+        <div className="rounded border border-[#6b4e1c] bg-[#3a2a0e] p-3 text-sm text-warn">
+          <b>Hardware Binding Mismatch.</b> This license is bound to a different WAN network adapter than the one now present
+          {st?.hardware_mismatch ? <> ({st.hardware_mismatch})</> : null}. The hotel keeps running on a time-limited grace.
+          If the WAN NIC was genuinely replaced, ask StayConnect to authorize a <b>Rebind</b> — a new license will be issued.
+        </div>
+      )}
 
       {/* ---- Activate: the two values the operator sends to StayConnect ---- */}
       <Card>
