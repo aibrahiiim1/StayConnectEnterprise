@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -143,13 +144,23 @@ func (b *CertBase) PlatformRoutes() http.Handler {
 	return r
 }
 
+// list returns the appliance-certificate inventory as METADATA ONLY. It never
+// includes cert_pem, private keys, or any secret material — only the public
+// fingerprint, issuer/CA version, validity window, status and revocation reason.
 func (b *CertBase) list(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 	rows, err := b.DB.Query(ctx, `
-        SELECT c.id::text, c.appliance_id::text, a.serial, c.fingerprint_sha256, c.cert_serial,
-               c.ca_version, c.not_before, c.not_after, c.status, c.created_at
-          FROM appliance_certificates c JOIN appliances a ON a.id=c.appliance_id
+        SELECT c.id::text, c.appliance_id::text, a.serial,
+               COALESCE(t.name,''), COALESCE(s.name,''),
+               c.fingerprint_sha256, c.cert_serial, c.ca_version,
+               c.not_before, c.not_after, c.status, c.created_at,
+               c.revoked_at, COALESCE(c.revocation_reason,''),
+               MAX(c.created_at) OVER (PARTITION BY c.appliance_id) AS last_rotation
+          FROM appliance_certificates c
+          JOIN appliances a ON a.id=c.appliance_id
+          LEFT JOIN tenants t ON t.id=c.tenant_id
+          LEFT JOIN sites   s ON s.id=c.site_id
          ORDER BY c.created_at DESC LIMIT 500`)
 	if err != nil {
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "query failed")
@@ -158,13 +169,20 @@ func (b *CertBase) list(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	out := []map[string]any{}
 	for rows.Next() {
-		var id, appID, serial, fpr, cser, status string
+		var id, appID, serial, tenant, site, fpr, cser, status, revReason string
 		var caVer int
-		var nb, na, created time.Time
-		_ = rows.Scan(&id, &appID, &serial, &fpr, &cser, &caVer, &nb, &na, &status, &created)
-		out = append(out, map[string]any{"id": id, "appliance_id": appID, "serial": serial,
-			"fingerprint_sha256": fpr, "cert_serial": cser, "ca_version": caVer,
-			"not_before": nb, "not_after": na, "status": status, "created_at": created})
+		var nb, na, created, lastRot time.Time
+		var revokedAt *time.Time
+		_ = rows.Scan(&id, &appID, &serial, &tenant, &site, &fpr, &cser, &caVer,
+			&nb, &na, &status, &created, &revokedAt, &revReason, &lastRot)
+		out = append(out, map[string]any{
+			"id": id, "appliance_id": appID, "serial": serial,
+			"tenant_name": tenant, "site_name": site,
+			"fingerprint_sha256": fpr, "cert_serial": cser,
+			"issuer": fmt.Sprintf("StayConnect Internal CA v%d", caVer), "ca_version": caVer,
+			"not_before": nb, "not_after": na, "status": status, "created_at": created,
+			"revoked_at": revokedAt, "revocation_reason": revReason, "last_rotation": lastRot,
+		})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"data": out})
 }

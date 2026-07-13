@@ -3,7 +3,8 @@ package api
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"time"
 
@@ -81,7 +82,7 @@ func (b *AssignmentKeysBase) list(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	rows, err := b.DB.Query(ctx, `
         SELECT k.key_id, k.public_key, k.state, k.activated_at, k.verify_only_at, k.revoked_at,
-               COALESCE(k.reason,''), COALESCE(k.note,''), k.emergency,
+               k.retired_at, COALESCE(k.reason,''), COALESCE(k.note,''), k.emergency,
                COALESCE(u.current_assignments, 0)
           FROM assignment_signing_keys k
           LEFT JOIN assignment_signer_usage u ON u.key_id = k.key_id
@@ -98,17 +99,29 @@ func (b *AssignmentKeysBase) list(w http.ResponseWriter, r *http.Request) {
 		var emergency bool
 		var deps int64
 		var activated time.Time
-		var verifyOnlyAt, revokedAt *time.Time
+		var verifyOnlyAt, revokedAt, retiredAt *time.Time
 		if rows.Scan(&keyID, &pub, &state, &activated, &verifyOnlyAt, &revokedAt,
-			&reason, &note, &emergency, &deps) != nil {
+			&retiredAt, &reason, &note, &emergency, &deps) != nil {
 			continue
 		}
+		// A public-key fingerprint for display. NEVER the private key — that lives
+		// only in ctrlapi's signer and is never persisted or returned here.
+		sum := sha256.Sum256(pub)
+		fingerprint := hex.EncodeToString(sum[:16])
+		rotation := "current signer"
+		switch state {
+		case "verify_only":
+			rotation = "rotated out — verify only"
+		case "revoked":
+			rotation = "revoked — not trusted"
+		}
 		out = append(out, map[string]any{
-			"key_id": keyID, "public_key": base64.StdEncoding.EncodeToString(pub),
-			"state": state, "purpose": "assignment",
+			"key_id": keyID, "fingerprint": fingerprint,
+			"state": state, "purpose": "assignment", "rotation_status": rotation,
 			"can_sign": assignment.CanSign(state), "can_verify": assignment.CanVerify(state),
 			"current_assignments": deps, // appliances that would be stranded by revocation
-			"activated_at":        activated, "verify_only_at": verifyOnlyAt, "revoked_at": revokedAt,
+			"activated_at":        activated, "verify_only_at": verifyOnlyAt,
+			"revoked_at": revokedAt, "retired_at": retiredAt,
 			"reason": reason, "note": note, "emergency": emergency,
 		})
 	}

@@ -12,12 +12,6 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Plus, X, Copy } from "lucide-react";
 import { formatDate, errMsg } from "@/lib/utils";
 
-const statusTone = (s: string) =>
-  s === "active" ? "ok" :
-  s === "suspended" ? "warn" :
-  s === "revoked" ? "err" :
-  s === "superseded" ? "default" : "default";
-
 export default function LicensesPage() {
   const tenantID = useTenant();
   const [rows, setRows] = useState<License[] | null>(null);
@@ -27,15 +21,25 @@ export default function LicensesPage() {
   const [busy, setBusy] = useState(false);
   const [issued, setIssued] = useState<string | null>(null);
 
+  const [appliances, setAppliances] = useState<{ id: string; serial: string }[]>([]);
+  const [sub, setSub] = useState<{ plan_code?: string; status: string } | null>(null);
+  const [customer, setCustomer] = useState<string>("");
+
   async function load() {
     if (!tenantID) return;
     try {
-      const [lic, st] = await Promise.all([
+      const [lic, st, ap, s, tn] = await Promise.all([
         api.get<ListResp<License>>(`/cloud/v1/licenses?tenant_id=${tenantID}`),
         api.get<ListResp<Site>>(`/v1/sites?tenant_id=${tenantID}`),
+        api.get<ListResp<{ id: string; serial: string }>>(`/v1/appliances?tenant_id=${tenantID}`).catch(() => ({ data: [] })),
+        api.get<{ plan_code?: string; status: string }>(`/v1/tenants/${tenantID}/subscription`).catch(() => null),
+        api.get<{ data: { id: string; name: string }[] }>(`/v1/tenants`).catch(() => ({ data: [] })),
       ]);
       setRows(lic.data ?? []);
       setSites(st.data ?? []);
+      setAppliances(ap.data ?? []);
+      setSub(s);
+      setCustomer((tn.data ?? []).find((t) => t.id === tenantID)?.name ?? "");
     } catch (e) { setErr(errMsg(e)); }
   }
   useEffect(() => { load(); }, [tenantID]);
@@ -99,6 +103,21 @@ export default function LicensesPage() {
   }
 
   const siteName = (sid: string) => sites.find((s) => s.id === sid)?.name ?? sid.slice(0, 8);
+  const applianceSerial = (id: string) => appliances.find((a) => a.id === id)?.serial ?? id.slice(0, 8);
+
+  // Binding + effective status. An UNBOUND active license is a Site License still
+  // awaiting an appliance — it must NOT read as an activated appliance.
+  function binding(l: License): { label: string; tone: string; appliance: string | null } {
+    const boundId = (l.appliance_ids && l.appliance_ids.length > 0) ? l.appliance_ids[0] : null;
+    const expired = new Date(l.valid_until).getTime() < Date.now();
+    if (l.status === "revoked") return { label: "Revoked", tone: "err", appliance: boundId ? applianceSerial(boundId) : null };
+    if (l.status === "superseded") return { label: "Superseded", tone: "default", appliance: boundId ? applianceSerial(boundId) : null };
+    if (l.status === "suspended") return { label: "Suspended", tone: "warn", appliance: boundId ? applianceSerial(boundId) : null };
+    if (expired) return { label: "Expired", tone: "warn", appliance: boundId ? applianceSerial(boundId) : null };
+    // active
+    if (!boundId) return { label: "Site license — awaiting appliance binding", tone: "warn", appliance: null };
+    return { label: "Appliance-bound — Active", tone: "ok", appliance: applianceSerial(boundId) };
+  }
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -164,19 +183,29 @@ export default function LicensesPage() {
             <Table>
               <THead>
                 <TR>
-                  <TH>Site</TH><TH>Plan</TH><TH>Status</TH>
-                  <TH>Valid until</TH><TH>Grace days</TH><TH>Key</TH><TH></TH>
+                  <TH>Customer</TH><TH>Site</TH><TH>Appliance</TH><TH>Plan</TH>
+                  <TH>Binding status</TH><TH>Valid until</TH><TH>Grace</TH><TH></TH>
                 </TR>
               </THead>
               <tbody>
-                {rows.map((l) => (
+                {rows.map((l) => {
+                  const b = binding(l);
+                  return (
                   <TR key={l.id}>
+                    <TD>{customer || "—"}</TD>
                     <TD>{siteName(l.site_id)}</TD>
-                    <TD className="font-mono text-xs">{l.commercial_plan_code}</TD>
-                    <TD><Badge tone={statusTone(l.status) as any}>{l.status}</Badge></TD>
+                    <TD className="font-mono text-xs">
+                      {b.appliance ?? <span className="text-muted italic">not bound</span>}
+                    </TD>
+                    <TD className="font-mono text-xs">
+                      {l.commercial_plan_code}
+                      {sub?.plan_code && sub.plan_code !== l.commercial_plan_code && (
+                        <span className="text-muted"> (sub: {sub.plan_code})</span>
+                      )}
+                    </TD>
+                    <TD><Badge tone={b.tone as any}>{b.label}</Badge></TD>
                     <TD className="text-muted">{formatDate(l.valid_until)}</TD>
-                    <TD className="text-muted">{l.offline_grace_days}</TD>
-                    <TD className="font-mono text-xs">{l.key_id}</TD>
+                    <TD className="text-muted">{l.offline_grace_days}d</TD>
                     <TD className="text-right">
                       <div className="flex gap-1 justify-end">
                         {(l.status === "active" || l.status === "suspended") && (
@@ -194,7 +223,8 @@ export default function LicensesPage() {
                       </div>
                     </TD>
                   </TR>
-                ))}
+                  );
+                })}
               </tbody>
             </Table>
           )}
