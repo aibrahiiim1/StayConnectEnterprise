@@ -592,6 +592,16 @@ func main() {
 	// were constructed before s existed (nft wrapper).
 	s.nft.SetMetrics(s.met)
 
+	// Ensure the appliance-local tenant/site mirror rows exist for the current
+	// assignment on EVERY boot (idempotent). Guest-domain tables FK to these, so a
+	// (re)assigned appliance whose tenant/site was not previously mirrored locally
+	// would otherwise 500 on any tenant-scoped insert (plans, vouchers, …). The
+	// assignment-adoption path also seeds them, but adoption only fires on a
+	// version change, so a plain restart / re-exec must reconcile too.
+	if s.db != nil && s.tenID != "" && s.siteID != "" {
+		s.seedTenantSiteMirror(rootCtx, s.tenID, s.siteID, "", "")
+	}
+
 	// Setup-wizard state: identity store (for runtime enrollment) + identity
 	// key fingerprint (distinct from the mTLS cert fingerprint).
 	s.idStore = idStore

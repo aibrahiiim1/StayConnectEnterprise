@@ -400,18 +400,67 @@ func (s *server) repointGuestNetworks(ctx context.Context, doc *assignment.Docum
 	if s.db == nil || !assignment.Grants(doc.State) || doc.TenantID == "" || doc.SiteID == "" {
 		return
 	}
+	// Ensure the appliance-local tenant/site mirror rows exist first (guest-domain
+	// tables FK to them).
+	s.seedTenantSiteMirror(ctx, doc.TenantID, doc.SiteID, doc.TenantName, doc.SiteName)
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return
 	}
 	defer tx.Rollback(ctx)
-	// The single site/tenant mirror rows + guest_networks ownership columns.
 	_, _ = tx.Exec(ctx, `UPDATE guest_networks SET tenant_id=$1, site_id=$2`, doc.TenantID, doc.SiteID)
 	if err := tx.Commit(ctx); err != nil {
 		slog.Warn("assignment: guest-network repoint failed", "err", err)
 		return
 	}
 	slog.Info("assignment: guest-network ownership repointed", "tenant_id", doc.TenantID, "site_id", doc.SiteID)
+}
+
+// seedTenantSiteMirror upserts the appliance-local tenant + site MIRROR rows for
+// the current assignment. The guest-domain tables (ticket_templates/plans,
+// voucher_batches, sessions, guests, …) carry a tenant_id/site_id FOREIGN KEY to
+// these local mirror tables, so without this a freshly (re)assigned appliance
+// cannot create ANY tenant-scoped resource — the insert fails the FK because the
+// current tenant/site is not present locally. This is idempotent and safe to run
+// on every boot and on every assignment adoption. slug/code use the UUIDs to
+// guarantee uniqueness; name is cosmetic. NOT-NULL columns that have DB defaults
+// (status/metadata/auth_methods/timezone/timestamps) are left to those defaults.
+func (s *server) seedTenantSiteMirror(ctx context.Context, tenantID, siteID, tenantName, siteName string) {
+	if s.db == nil || tenantID == "" || siteID == "" {
+		return
+	}
+	if tenantName == "" {
+		tenantName = tenantID
+	}
+	if siteName == "" {
+		siteName = siteID
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `
+        INSERT INTO tenants (id, slug, name)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
+    `, tenantID, tenantID, tenantName); err != nil {
+		slog.Warn("assignment: tenant mirror upsert failed", "err", err)
+		return
+	}
+	if _, err := tx.Exec(ctx, `
+        INSERT INTO sites (id, tenant_id, code, name, timezone)
+        VALUES ($1, $2, $3, $4, 'UTC')
+        ON CONFLICT (id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, name = EXCLUDED.name, updated_at = now()
+    `, siteID, tenantID, siteID, siteName); err != nil {
+		slog.Warn("assignment: site mirror upsert failed", "err", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("assignment: tenant/site mirror commit failed", "err", err)
+		return
+	}
+	slog.Info("assignment: tenant/site mirror upserted", "tenant_id", tenantID, "site_id", siteID)
 }
 
 // reexec replaces the current process image with a fresh scd, so all subsystems
