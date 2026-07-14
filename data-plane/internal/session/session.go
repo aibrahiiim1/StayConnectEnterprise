@@ -38,11 +38,14 @@ func (e *CapacityError) Error() string {
 	return fmt.Sprintf("LICENSE_CAPACITY_REACHED: %d of %d concurrent online guests in use", e.Current, e.Limit)
 }
 
-// gateCapacity enforces the licensed cap ATOMICALLY: it takes a per-tenant
-// advisory lock inside tx (serializing concurrent authorizations — the second
-// login waits for the first to commit, then sees its row), counts currently
-// active sessions across ALL guest VLANs/networks, and fails when the cap is
-// reached. Enforcement is fully local — no Central round-trip.
+// gateCapacity enforces the licensed cap ATOMICALLY: it takes a per-APPLIANCE
+// advisory lock inside tx (serializing concurrent authorizations for THIS
+// appliance only — the second login waits for the first to commit, then sees
+// its row), counts this appliance's currently active sessions across ALL its
+// guest VLANs/networks, and fails when the cap is reached. The lock/count key
+// is the appliance_id (the license scope), so two appliances under the same
+// customer never block each other or leak capacity. Fully local — no Central
+// round-trip.
 func (m *Manager) gateCapacity(ctx context.Context, tx pgx.Tx) error {
 	if m.LicensedLimit == nil {
 		return nil
@@ -51,13 +54,17 @@ func (m *Manager) gateCapacity(ctx context.Context, tx pgx.Tx) error {
 	if limit < 0 {
 		return nil // unlimited
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 7))`, m.TenantID); err != nil {
+	// The licensed cap is per-APPLIANCE (one license per appliance). Lock and
+	// count on THIS appliance's id so two appliances under the same customer
+	// authorize guests concurrently, each enforcing only its own limit — no
+	// cross-appliance serialization or capacity leakage.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 7))`, m.ApplianceID); err != nil {
 		return fmt.Errorf("capacity lock: %w", err)
 	}
 	var current int64
 	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM sessions WHERE tenant_id = $1 AND state = 'active'`,
-		m.TenantID).Scan(&current); err != nil {
+		`SELECT count(*) FROM sessions WHERE appliance_id = $1 AND state = 'active'`,
+		m.ApplianceID).Scan(&current); err != nil {
 		return fmt.Errorf("capacity count: %w", err)
 	}
 	if current >= limit {
@@ -71,7 +78,7 @@ func (m *Manager) gateCapacity(ctx context.Context, tx pgx.Tx) error {
 func (m *Manager) ActiveCount(ctx context.Context) (int64, error) {
 	var n int64
 	err := m.DB.QueryRow(ctx,
-		`SELECT count(*) FROM sessions WHERE tenant_id = $1 AND state = 'active'`, m.TenantID).Scan(&n)
+		`SELECT count(*) FROM sessions WHERE appliance_id = $1 AND state = 'active'`, m.ApplianceID).Scan(&n)
 	return n, err
 }
 

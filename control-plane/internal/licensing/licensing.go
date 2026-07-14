@@ -270,24 +270,43 @@ func (s *Service) issue(ctx context.Context, p IssueParams) (*lic.Document, *lic
 	}
 	defer tx.Rollback(ctx)
 
-	// Serialize version assignment per site (one appliance per site in the
-	// product; the appliance key is covered by the site scope).
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, p.SiteID); err != nil {
+	// The license is scoped to ONE APPLIANCE (Site is organizational only and
+	// never limits license count). Serialize version assignment + supersede on
+	// the appliance key so two appliances under the same site are fully
+	// independent; fall back to the site key only for a legacy unbound
+	// (site-wide) license with no appliance binding.
+	scopeByAppliance := p.ApplianceID != ""
+	lockKey := p.SiteID
+	if scopeByAppliance {
+		lockKey = p.ApplianceID
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 42))`, lockKey); err != nil {
 		return nil, nil, err
 	}
 	var prevID *string
 	var maxVer int64
-	if err := tx.QueryRow(ctx, `
-        SELECT COALESCE(MAX(license_version), 0)
-          FROM licenses
-         WHERE site_id = $1 OR ($2 <> '' AND $2::uuid = ANY(appliance_ids))
-    `, p.SiteID, p.ApplianceID).Scan(&maxVer); err != nil {
-		return nil, nil, err
+	if scopeByAppliance {
+		if err := tx.QueryRow(ctx, `
+            SELECT COALESCE(MAX(license_version), 0)
+              FROM licenses WHERE $1::uuid = ANY(appliance_ids)
+        `, p.ApplianceID).Scan(&maxVer); err != nil {
+			return nil, nil, err
+		}
+		_ = tx.QueryRow(ctx, `
+            SELECT id::text FROM licenses
+             WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')
+             ORDER BY issued_at DESC LIMIT 1`, p.ApplianceID).Scan(&prevID)
+	} else {
+		if err := tx.QueryRow(ctx, `
+            SELECT COALESCE(MAX(license_version), 0) FROM licenses WHERE site_id = $1
+        `, p.SiteID).Scan(&maxVer); err != nil {
+			return nil, nil, err
+		}
+		_ = tx.QueryRow(ctx, `
+            SELECT id::text FROM licenses
+             WHERE site_id = $1 AND status IN ('active','suspended')
+             ORDER BY issued_at DESC LIMIT 1`, p.SiteID).Scan(&prevID)
 	}
-	_ = tx.QueryRow(ctx, `
-        SELECT id::text FROM licenses
-         WHERE site_id = $1 AND status IN ('active','suspended')
-         ORDER BY issued_at DESC LIMIT 1`, p.SiteID).Scan(&prevID)
 
 	doc := &lic.Document{
 		LicenseID:          newUUID(),
@@ -327,8 +346,15 @@ func (s *Service) issue(ctx context.Context, p IssueParams) (*lic.Document, *lic
 		return nil, nil, err
 	}
 
-	// Atomically supersede the previous current license and insert the new one.
-	if _, err := tx.Exec(ctx,
+	// Atomically supersede the previous current license for THIS APPLIANCE and
+	// insert the new one. Other appliances at the same site are untouched.
+	if scopeByAppliance {
+		if _, err := tx.Exec(ctx,
+			`UPDATE licenses SET status = 'superseded' WHERE $1::uuid = ANY(appliance_ids) AND status IN ('active','suspended')`,
+			p.ApplianceID); err != nil {
+			return nil, nil, err
+		}
+	} else if _, err := tx.Exec(ctx,
 		`UPDATE licenses SET status = 'superseded' WHERE site_id = $1 AND status IN ('active','suspended')`,
 		p.SiteID); err != nil {
 		return nil, nil, err
@@ -378,21 +404,29 @@ func (s *Service) issue(ctx context.Context, p IssueParams) (*lic.Document, *lic
 // suspended, revoked, decommissioned, or pre-license states — those are set
 // explicitly and must not be overridden by the time reconcile. Run on a ticker.
 func (s *Service) ReconcileStates(ctx context.Context) (int64, error) {
+	// Per-APPLIANCE reconcile: each appliance's commercial state follows ITS OWN
+	// current license (not the site's). Two appliances at one site can be in
+	// different states (e.g. one licensed, one in grace).
 	tag, err := s.DB.Exec(ctx, `
         WITH cur AS (
-          SELECT DISTINCT ON (site_id) site_id, valid_until,
-                 CASE WHEN COALESCE(grace_period_days,0) > 0
-                      THEN grace_period_days ELSE offline_grace_days END AS eff_grace
-            FROM licenses WHERE status IN ('active','suspended')
-            ORDER BY site_id, issued_at DESC
+          SELECT a.id AS appliance_id, l.valid_until,
+                 CASE WHEN COALESCE(l.grace_period_days,0) > 0
+                      THEN l.grace_period_days ELSE l.offline_grace_days END AS eff_grace
+            FROM appliances a
+            JOIN LATERAL (
+              SELECT valid_until, grace_period_days, offline_grace_days
+                FROM licenses l
+               WHERE a.id = ANY(l.appliance_ids) AND l.status IN ('active','suspended')
+               ORDER BY issued_at DESC LIMIT 1
+            ) l ON true
         ), want AS (
-          SELECT a.id,
+          SELECT c.appliance_id AS id,
                  CASE
                    WHEN now() <= c.valid_until THEN 'licensed'
                    WHEN now() <= c.valid_until + make_interval(days => c.eff_grace) THEN 'grace'
                    ELSE 'license_expired'
                  END AS target
-            FROM appliances a JOIN cur c ON c.site_id = a.site_id
+            FROM cur c JOIN appliances a ON a.id = c.appliance_id
            WHERE a.lifecycle_state IN ('licensed','grace','license_expired')
         )
         UPDATE appliances a SET lifecycle_state = w.target, updated_at = now()
@@ -405,14 +439,15 @@ func (s *Service) ReconcileStates(ctx context.Context) (int64, error) {
 }
 
 // CurrentEnvelopeForAppliance returns the signed envelope of the current
-// license covering the given appliance (via its site).
+// license bound to THIS appliance. Binding is per-appliance (its id in
+// licenses.appliance_ids), NOT per-site: two appliances at the same site each
+// fetch their own current license.
 func (s *Service) CurrentEnvelopeForAppliance(ctx context.Context, applianceID string) (string, string, error) {
 	var envelope, licenseID string
 	err := s.DB.QueryRow(ctx, `
         SELECT l.signed_envelope, l.id
           FROM licenses l
-          JOIN appliances a ON a.site_id = l.site_id
-         WHERE a.id = $1 AND l.status IN ('active','suspended')
+         WHERE $1::uuid = ANY(l.appliance_ids) AND l.status IN ('active','suspended')
          ORDER BY l.issued_at DESC LIMIT 1
     `, applianceID).Scan(&envelope, &licenseID)
 	if errors.Is(err, pgx.ErrNoRows) {

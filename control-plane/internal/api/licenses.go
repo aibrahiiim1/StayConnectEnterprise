@@ -439,13 +439,12 @@ func (b *LicensesBase) ApplianceLicenseHandler(w http.ResponseWriter, r *http.Re
 		Fail(w, r, http.StatusInternalServerError, CodeInternal, "license lookup failed")
 		return
 	}
-	// Revoked license ids for this site so the edge can populate its local
-	// revocation store even when a new license hasn't been issued yet.
+	// Revoked license ids bound to THIS appliance so the edge can populate its
+	// local revocation store even when a new license hasn't been issued yet.
 	var revoked []string
 	rows, err := b.DB.Query(ctx, `
         SELECT l.id FROM licenses l
-          JOIN appliances a ON a.site_id = l.site_id
-         WHERE a.id = $1 AND l.status = 'revoked'
+         WHERE $1::uuid = ANY(l.appliance_ids) AND l.status = 'revoked'
     `, ident.ApplianceID)
 	if err == nil {
 		defer rows.Close()
