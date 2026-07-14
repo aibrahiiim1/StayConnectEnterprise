@@ -86,17 +86,33 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 	}
 	a.st.Event(ctx, revID, "kea", true, nil)
 
-	// Unbound fragment + reload.
+	// Unbound fragment + apply.
 	if err := os.WriteFile(a.unboundFrag, netcfg.RenderUnbound(intent), 0o644); err != nil {
 		return fmt.Errorf("write unbound: %w", err)
 	}
-	if !a.dryRun {
-		if err := a.run(ctx, "unbound-checkconf"); err == nil {
-			_ = a.run(ctx, "unbound-control", "reload")
-		}
-	}
+	a.applyUnbound(ctx)
 	a.st.Event(ctx, revID, "unbound", true, nil)
 	return nil
+}
+
+// applyUnbound makes unbound serve the current guest fragment. It RESTARTS
+// unbound rather than `unbound-control reload`, because reload re-reads the config
+// and flushes the cache but does NOT bind newly-added listen interfaces — so a
+// guest network on a NEW gateway IP would get its config written yet never gain a
+// DNS listener, leaving guests unable to resolve (DHCP works, but the captive
+// portal never triggers because captive-detection DNS fails). Guarded by
+// unbound-checkconf so a bad fragment never takes DNS down; falls back to a reload
+// if the restart command is unavailable.
+func (a *applier) applyUnbound(ctx context.Context) {
+	if a.dryRun {
+		return
+	}
+	if err := a.run(ctx, "unbound-checkconf"); err != nil {
+		return
+	}
+	if err := a.run(ctx, "systemctl", "restart", "unbound"); err != nil {
+		_ = a.run(ctx, "unbound-control", "reload")
+	}
 }
 
 // createNetwork brings up one guest network's L2/L3 surgically.
@@ -189,7 +205,7 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 	// Re-install the Unbound fragment.
 	if raw, err := os.ReadFile(filepath.Join(bundle, "stayconnect-guest.conf")); err == nil {
 		_ = os.WriteFile(a.unboundFrag, raw, 0o644)
-		_ = a.run(ctx, "unbound-control", "reload")
+		a.applyUnbound(ctx)
 	}
 	a.st.Event(ctx, id, "boot_reconcile", true, map[string]any{"bundle": bundle})
 }
@@ -231,7 +247,7 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		}
 		if raw, err := os.ReadFile(filepath.Join(prevBundle, "stayconnect-guest.conf")); err == nil {
 			_ = os.WriteFile(a.unboundFrag, raw, 0o644)
-			_ = a.run(ctx, "unbound-control", "reload")
+			a.applyUnbound(ctx)
 		}
 	}
 	if raw, err := os.ReadFile(filepath.Join(prevBundle, "50-stayconnect-guest.yaml")); err == nil {
