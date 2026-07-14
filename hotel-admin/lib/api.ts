@@ -89,9 +89,24 @@ export type GuestAccessPlan = {
   price_cents?: number | null; currency?: string | null;
 };
 
+export type VoucherTotals = {
+  unused: number; active: number; exhausted: number; expired: number; revoked: number;
+};
 export type VoucherBatch = {
   id: string; tenant_id: string; template_id: string; name?: string | null;
   count: number; created_by?: string | null; created_at: string;
+  code_length?: number | null; char_mode?: string | null;
+  code_prefix?: string | null; exclude_ambiguous?: boolean | null;
+  totals?: VoucherTotals | null;
+};
+
+// Guest Username/Password account (password is never returned).
+export type GuestAccount = {
+  id: string; username: string; display_name?: string | null; notes?: string | null;
+  template_id: string; enabled: boolean;
+  valid_from?: string | null; valid_until?: string | null;
+  last_login_at?: string | null; login_count: number;
+  created_at: string; updated_at: string;
 };
 
 export type Voucher = {

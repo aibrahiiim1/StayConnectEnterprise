@@ -26,6 +26,7 @@ const SECTIONS: Section[] = [
     items: [
       { href: "/guest-access-plans", label: "Guest access plans", icon: FileText, resource: "guest-access-plans" },
       { href: "/voucher-batches",    label: "Voucher batches",    icon: Ticket,   resource: "voucher-batches" },
+      { href: "/guest-accounts",     label: "Guest accounts",     icon: KeyRound, resource: "guest-accounts" },
       { href: "/sessions",           label: "Sessions",           icon: Monitor,  resource: "sessions" },
     ],
   },

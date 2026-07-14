@@ -32,7 +32,7 @@ type Matrix = Record<string, Record<string, Perm>>;
 
 const MATRIX: Matrix = {
   hotel_it_manager: {
-    "guest-access-plans": "write", "voucher-batches": "write",
+    "guest-access-plans": "write", "voucher-batches": "write", "guest-accounts": "write",
     vouchers: "write", sessions: "write", "pms-providers": "write",
     "auth-methods": "write", "walled-garden": "write",
     "portal-branding": "write", "notification-providers": "write",
@@ -42,19 +42,19 @@ const MATRIX: Matrix = {
     reports: "read", backups: "read", license: "read", diagnostics: "write",
   },
   front_office_operator: {
-    "voucher-batches": "write", vouchers: "write", sessions: "write",
+    "voucher-batches": "write", "guest-accounts": "write", vouchers: "write", sessions: "write",
     "guest-access-plans": "read", "pms-providers": "read",
     "auth-methods": "read", "walled-garden": "read", payments: "read",
     reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
-    "voucher-batches": "write", vouchers: "write", sessions: "write",
+    "voucher-batches": "write", "guest-accounts": "write", vouchers: "write", sessions: "write",
     "guest-access-plans": "read", "pms-providers": "read",
     "auth-methods": "read", payments: "read", reports: "read",
     audit: "read", license: "read", backups: "read", "walled-garden": "read", diagnostics: "read",
   },
   voucher_operator: {
-    "voucher-batches": "write", vouchers: "write",
+    "voucher-batches": "write", "guest-accounts": "write", vouchers: "write",
     "guest-access-plans": "read", sessions: "read", reports: "read",
     license: "read", diagnostics: "read",
   },
@@ -63,7 +63,7 @@ const MATRIX: Matrix = {
     sessions: "read", reports: "read", audit: "read", license: "read", diagnostics: "read",
   },
   site_viewer: {
-    "guest-access-plans": "read", "voucher-batches": "read", vouchers: "read",
+    "guest-access-plans": "read", "voucher-batches": "read", "guest-accounts": "read", vouchers: "read",
     sessions: "read", "pms-providers": "read", "auth-methods": "read",
     "walled-garden": "read", "portal-branding": "read", payments: "read",
     "notification-providers": "read", "social-providers": "read",
