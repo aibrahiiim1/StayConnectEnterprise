@@ -39,28 +39,28 @@ const MATRIX: Matrix = {
     "social-providers": "write", "stripe-accounts": "write",
     network: "write",
     payments: "read", operators: "read", audit: "read",
-    reports: "read", backups: "read", license: "read",
+    reports: "read", backups: "read", license: "read", health: "write",
   },
   front_office_operator: {
     "voucher-batches": "write", vouchers: "write", sessions: "write",
     "guest-access-plans": "read", "pms-providers": "read",
     "auth-methods": "read", "walled-garden": "read", payments: "read",
-    reports: "read", audit: "read", license: "read", backups: "read",
+    reports: "read", audit: "read", license: "read", backups: "read", health: "read",
   },
   guest_relations_operator: {
     "voucher-batches": "write", vouchers: "write", sessions: "write",
     "guest-access-plans": "read", "pms-providers": "read",
     "auth-methods": "read", payments: "read", reports: "read",
-    audit: "read", license: "read", backups: "read", "walled-garden": "read",
+    audit: "read", license: "read", backups: "read", "walled-garden": "read", health: "read",
   },
   voucher_operator: {
     "voucher-batches": "write", vouchers: "write",
     "guest-access-plans": "read", sessions: "read", reports: "read",
-    license: "read",
+    license: "read", health: "read",
   },
   payments_operator: {
     payments: "write", "stripe-accounts": "read",
-    sessions: "read", reports: "read", audit: "read", license: "read",
+    sessions: "read", reports: "read", audit: "read", license: "read", health: "read",
   },
   site_viewer: {
     "guest-access-plans": "read", "voucher-batches": "read", vouchers: "read",
@@ -68,7 +68,7 @@ const MATRIX: Matrix = {
     "walled-garden": "read", "portal-branding": "read", payments: "read",
     "notification-providers": "read", "social-providers": "read",
     "stripe-accounts": "read", audit: "read", reports: "read",
-    backups: "read", license: "read", network: "read",
+    backups: "read", license: "read", network: "read", health: "read",
   },
 };
 

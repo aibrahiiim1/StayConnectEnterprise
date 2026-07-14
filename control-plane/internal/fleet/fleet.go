@@ -73,7 +73,7 @@ type Message struct {
 var allowedKinds = map[string]bool{
 	"heartbeat": true, "health": true, "usage": true, "auth_counts": true,
 	"pms_health": true, "license_ack": true, "backup": true, "sync": true,
-	"update_progress": true,
+	"update_progress": true, "service_health": true,
 }
 
 type Consumer struct {
@@ -116,11 +116,11 @@ func (c *Consumer) handle(ctx context.Context, m *nats.Msg) {
 	dbctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// Resolve tenant/site from the appliance registry (never trust payload).
-	var tenantID, siteID string
+	// Resolve tenant/site/serial from the appliance registry (never trust payload).
+	var tenantID, siteID, serial string
 	err := c.DB.QueryRow(dbctx,
-		`SELECT tenant_id, COALESCE(site_id::text,'') FROM appliances WHERE id = $1`,
-		msg.ApplianceID).Scan(&tenantID, &siteID)
+		`SELECT tenant_id, COALESCE(site_id::text,''), COALESCE(serial,'') FROM appliances WHERE id = $1`,
+		msg.ApplianceID).Scan(&tenantID, &siteID, &serial)
 	if err != nil {
 		respond(m, http404)
 		return
@@ -159,6 +159,12 @@ func (c *Consumer) handle(ctx context.Context, m *nats.Msg) {
 			msg.ApplianceID, msg.Seq)
 		respond(m, http500)
 		return
+	}
+	// Service-health telemetry drives the deduplicated, lifecycle-aware fleet
+	// alerts (crash loop / unavailable / dependency / boot-not-converged), which
+	// auto-resolve when the appliance reports recovery.
+	if msg.Kind == "service_health" {
+		c.reconcileHealthAlerts(dbctx, msg.ApplianceID, serial, msg.Payload)
 	}
 	respond(m, http200)
 }

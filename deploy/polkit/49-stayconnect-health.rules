@@ -1,0 +1,36 @@
+// Allow the unprivileged `stayconnect` user (which runs edged, the appliance
+// health supervisor) to start/stop/restart ONLY the appliance's own service
+// units and its DHCP/DNS dependencies — for the operator-initiated, step-up +
+// audited "Restart service" action in the Hotel Admin Health page.
+//
+// Nothing else is granted: this is not general systemd management. Install to
+// /etc/polkit-1/rules.d/49-stayconnect-health.rules.
+polkit.addRule(function(action, subject) {
+    if (subject.user !== "stayconnect") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    if (action.id !== "org.freedesktop.systemd1.manage-units") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var unit = action.lookup("unit");
+    if (unit === undefined) {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var allowed = [
+        "stayconnect-scd.service",
+        "stayconnect-edged.service",
+        "stayconnect-netd.service",
+        "stayconnect-portald.service",
+        "stayconnect-acctd.service",
+        "stayconnect-hotel-admin.service",
+        "stayconnect-caddy.service",
+        "kea-dhcp4-server.service",
+        "unbound.service"
+    ];
+    for (var i = 0; i < allowed.length; i++) {
+        if (unit === allowed[i]) {
+            return polkit.Result.YES;
+        }
+    }
+    return polkit.Result.NOT_HANDLED;
+});

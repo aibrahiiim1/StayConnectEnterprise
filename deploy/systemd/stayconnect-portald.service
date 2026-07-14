@@ -19,7 +19,8 @@ Group=stayconnect
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ProtectSystem=strict
-ReadWritePaths=/var/log/stayconnect
+# /run/stayconnect/health holds the adaptive-backoff tracker portald writes.
+ReadWritePaths=/var/log/stayconnect /run/stayconnect/health
 ReadOnlyPaths=/etc/stayconnect
 PrivateTmp=yes
 NoNewPrivileges=yes

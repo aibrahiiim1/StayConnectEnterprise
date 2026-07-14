@@ -384,6 +384,8 @@ export type FleetAppliance = {
   last_health?: unknown;
   last_usage?: any;
   last_usage_at?: string | null;
+  last_service_health?: any;
+  last_service_health_at?: string | null;
 };
 
 export type TelemetryRow = {

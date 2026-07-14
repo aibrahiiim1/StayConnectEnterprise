@@ -28,7 +28,9 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
+	"github.com/stayconnect/enterprise/data-plane/internal/livez"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
+	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
 type cfg struct {
@@ -85,6 +87,9 @@ type acctd struct {
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+
+	// Adaptive crash-loop backoff (see internal/startupbackoff).
+	startupbackoff.Guard("acctd")
 
 	c := loadCfg()
 
@@ -147,6 +152,9 @@ func main() {
 			if err := a.loop(rootCtx); err != nil {
 				slog.Error("loop", "err", err)
 			}
+			// Liveness heartbeat: proves the accounting loop is PROGRESSING (not
+			// just that the process is up) for the edged health supervisor.
+			livez.Touch("acctd")
 		}
 	}
 }

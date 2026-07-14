@@ -51,6 +51,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/sms"
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
+	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/voucher"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -433,6 +434,12 @@ func httpErr(w http.ResponseWriter, code int, msg string) {
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+
+	// Adaptive crash-loop backoff: if scd is restarting rapidly (a persistent
+	// config/software fault) this sleeps with bounded jittered exponential
+	// backoff before doing any work, so a broken scd never becomes a restart
+	// storm. A transient failure returns immediately (fast recovery).
+	startupbackoff.Guard("scd")
 
 	c := loadCfg()
 

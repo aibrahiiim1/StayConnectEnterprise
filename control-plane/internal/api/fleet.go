@@ -34,6 +34,10 @@ type FleetAppliance struct {
 	// feeds the Central license usage columns (current online guests, last sync).
 	LastUsage   json.RawMessage `json:"last_usage,omitempty"`
 	LastUsageAt *time.Time      `json:"last_usage_at,omitempty"`
+	// Latest 'service_health' telemetry (overall + per-service state) + when it
+	// arrived — feeds the Fleet appliance-health column.
+	LastServiceHealth   json.RawMessage `json:"last_service_health,omitempty"`
+	LastServiceHealthAt *time.Time      `json:"last_service_health_at,omitempty"`
 }
 
 func (b *FleetBase) Routes() http.Handler {
@@ -66,10 +70,16 @@ func (b *FleetBase) list(w http.ResponseWriter, r *http.Request) {
                  ORDER BY ft.ts DESC LIMIT 1),
                (SELECT ts FROM fleet_telemetry ft
                  WHERE ft.appliance_id = a.id AND ft.kind = 'usage'
+                 ORDER BY ft.ts DESC LIMIT 1),
+               (SELECT payload FROM fleet_telemetry ft
+                 WHERE ft.appliance_id = a.id AND ft.kind = 'service_health'
+                 ORDER BY ft.ts DESC LIMIT 1),
+               (SELECT ts FROM fleet_telemetry ft
+                 WHERE ft.appliance_id = a.id AND ft.kind = 'service_health'
                  ORDER BY ft.ts DESC LIMIT 1)
           FROM appliances a
           LEFT JOIN licenses l
-                 ON l.site_id = a.site_id AND l.status IN ('active','suspended')
+                 ON a.id = ANY(l.appliance_ids) AND l.status IN ('active','suspended')
          WHERE ($1 = '' OR a.tenant_id::text = $1)
          ORDER BY a.tenant_id, a.site_id, a.name
     `, tenantID)
@@ -83,7 +93,8 @@ func (b *FleetBase) list(w http.ResponseWriter, r *http.Request) {
 		var f FleetAppliance
 		if err := rows.Scan(&f.ApplianceID, &f.TenantID, &f.SiteID, &f.Name, &f.Serial,
 			&f.Status, &f.Version, &f.LastSeenAt, &f.LicenseState, &f.LicenseValid,
-			&f.LastHealth, &f.LastUsage, &f.LastUsageAt); err != nil {
+			&f.LastHealth, &f.LastUsage, &f.LastUsageAt,
+			&f.LastServiceHealth, &f.LastServiceHealthAt); err != nil {
 			Fail(w, r, http.StatusInternalServerError, CodeInternal, "scan failed")
 			return
 		}

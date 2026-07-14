@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
 var version = "0.1.0-netd"
@@ -43,6 +44,10 @@ func envOr(k, d string) string {
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
+	// Adaptive crash-loop backoff (see internal/startupbackoff): a persistently
+	// broken netd backs off exponentially instead of a fixed 2s restart storm.
+	startupbackoff.Guard("netd")
 
 	sock := envOr("NETD_SOCKET", "/run/stayconnect/netd.sock")
 	dbURL := envOr("NETD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_site?sslmode=disable")

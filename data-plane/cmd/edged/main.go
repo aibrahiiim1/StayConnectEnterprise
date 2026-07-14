@@ -34,6 +34,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
 var version = "0.1.0-edge"
@@ -97,6 +98,10 @@ func main() {
 			os.Exit(2)
 		}
 	}
+
+	// Adaptive crash-loop backoff (see internal/startupbackoff): a persistently
+	// broken edged backs off exponentially instead of a 2s restart storm.
+	startupbackoff.Guard("edged")
 
 	c := loadCfg()
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -167,6 +172,12 @@ func main() {
 		secure:   c.CookieSecure,
 	}
 
+	// Appliance Health Supervisor: observe/diagnose every critical service,
+	// persist the authoritative health model, track boot convergence and push
+	// sanitized telemetry. It never controls restarts (systemd + adaptive
+	// startup backoff own recovery), so it cannot fight the service manager.
+	go s.healthMonitorLoop(rootCtx)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -221,6 +232,7 @@ func main() {
 			mountResource(r, s, "reports", s.reportsRoutes)
 			mountResource(r, s, "backups", s.backupsRoutes)
 			mountResource(r, s, "network", s.networkRoutes)
+			mountResource(r, s, "health", s.healthRoutes)
 		})
 	})
 

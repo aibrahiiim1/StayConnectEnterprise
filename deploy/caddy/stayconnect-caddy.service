@@ -19,6 +19,9 @@ StartLimitIntervalSec=0
 Type=notify
 User=caddy
 Group=caddy
+# Adaptive crash-loop backoff (see internal/startupbackoff): sleeps before start
+# if Caddy is restarting rapidly, so a bad Caddyfile never becomes a storm.
+ExecStartPre=/opt/stayconnect/bin/svc-run caddy
 ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
 ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
 # The stock unit shipped with no Restart policy — a Caddy crash left the portal

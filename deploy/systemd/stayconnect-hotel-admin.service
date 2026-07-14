@@ -17,6 +17,8 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 WorkingDirectory=/opt/stayconnect/hotel-admin
+# Adaptive crash-loop backoff (see internal/startupbackoff).
+ExecStartPre=/opt/stayconnect/bin/svc-run hotel-admin
 ExecStart=/usr/bin/node server.js
 Environment=NODE_ENV=production
 Environment=PORT=3100

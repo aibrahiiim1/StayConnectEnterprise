@@ -161,27 +161,32 @@ var rolePerms = map[string]map[string]perm{
 		"network":  permWrite,
 		"payments": permRead, "operators": permRead, "audit": permRead,
 		"reports": permRead, "backups": permRead, "license": permRead,
+		// Health & diagnostics: managers may run Recheck/Restart (write, step-up).
+		"health": permWrite,
 	},
 	"front_office_operator": {
 		"voucher-batches": permWrite, "vouchers": permWrite, "sessions": permWrite,
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "walled-garden": permRead, "payments": permRead,
 		"reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
+		"health": permRead,
 	},
 	"guest_relations_operator": {
 		"voucher-batches": permWrite, "vouchers": permWrite, "sessions": permWrite,
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "payments": permRead, "reports": permRead,
 		"audit": permRead, "license": permRead, "backups": permRead, "walled-garden": permRead,
+		"health": permRead,
 	},
 	"voucher_operator": {
 		"voucher-batches": permWrite, "vouchers": permWrite,
 		"guest-access-plans": permRead, "sessions": permRead, "reports": permRead,
-		"license": permRead,
+		"license": permRead, "health": permRead,
 	},
 	"payments_operator": {
 		"payments": permWrite, "stripe-accounts": permRead,
 		"sessions": permRead, "reports": permRead, "audit": permRead, "license": permRead,
+		"health": permRead,
 	},
 	"site_viewer": {
 		"guest-access-plans": permRead, "voucher-batches": permRead, "vouchers": permRead,
@@ -189,7 +194,7 @@ var rolePerms = map[string]map[string]perm{
 		"walled-garden": permRead, "portal-branding": permRead, "payments": permRead,
 		"notification-providers": permRead, "social-providers": permRead,
 		"stripe-accounts": permRead, "audit": permRead, "reports": permRead,
-		"backups": permRead, "license": permRead, "network": permRead,
+		"backups": permRead, "license": permRead, "network": permRead, "health": permRead,
 	},
 	// Legacy tenant roles accepted for migrated operators.
 	"tenant_admin":    nil, // treated like site_admin below

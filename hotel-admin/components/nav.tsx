@@ -6,7 +6,7 @@ import { canRead } from "@/lib/roles";
 import {
   LayoutDashboard, Ticket, Users, LogOut, Monitor, FileText,
   Shield, ScrollText, Hotel, Send, KeyRound, Wallet, BadgeCheck,
-  Paintbrush, Archive, Network, Wifi, History, Router, Cloud, ServerCog, Lock,
+  Paintbrush, Archive, Network, Wifi, History, Router, Cloud, ServerCog, Lock, Activity,
 } from "lucide-react";
 
 // Each item names the edged resource that gates its visibility. Items the
@@ -61,6 +61,7 @@ const SECTIONS: Section[] = [
   {
     title: "System",
     items: [
+      { href: "/health",  label: "Diagnostics", icon: Activity, resource: "health" },
       { href: "/license", label: "License",   icon: BadgeCheck, resource: "license" },
       { href: "/backups", label: "Backups",   icon: Archive,    resource: "backups" },
       { href: "/audit",   label: "Audit log", icon: ScrollText, resource: "audit" },

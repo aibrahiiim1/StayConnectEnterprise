@@ -31,7 +31,9 @@ Restart=always
 RestartSec=2
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/var/log/stayconnect
+# /run/stayconnect/health holds the health supervisor's adaptive-backoff
+# trackers (pre-created by tmpfiles.d); edged writes its own tracker + reads all.
+ReadWritePaths=/var/log/stayconnect /run/stayconnect/health
 ReadOnlyPaths=/etc/stayconnect
 PrivateTmp=yes
 

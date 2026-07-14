@@ -24,6 +24,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
 type cfg struct {
@@ -54,11 +56,11 @@ func envOr(k, d string) string {
 }
 
 type handler struct {
-	cfg        cfg
-	scd        *http.Client
-	tmplLand   *template.Template
-	tmplSucc   *template.Template
-	arpCache   arpLookup
+	cfg      cfg
+	scd      *http.Client
+	tmplLand *template.Template
+	tmplSucc *template.Template
+	arpCache arpLookup
 }
 
 func newHandler(c cfg) (*handler, error) {
@@ -145,7 +147,9 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 	payload, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
 		msg := "Invalid voucher."
-		var e struct{ Error string `json:"error"` }
+		var e struct {
+			Error string `json:"error"`
+		}
 		if json.Unmarshal(payload, &e) == nil && e.Error != "" {
 			msg = "Voucher " + e.Error + "."
 		}
@@ -253,6 +257,9 @@ func (h *handler) routes() http.Handler {
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+
+	// Adaptive crash-loop backoff (see internal/startupbackoff).
+	startupbackoff.Guard("portald")
 
 	c := loadCfg()
 	h, err := newHandler(c)
