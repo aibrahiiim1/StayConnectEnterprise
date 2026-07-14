@@ -57,6 +57,10 @@ backup-cleanup-install:
 	systemctl daemon-reload
 	systemctl enable --now stayconnect-backup-cleanup.timer
 
+# PRODUCTION BUILD (default): no build tags => internal/buildprofile.Production
+# is true => permissive unlicensed-dev mode is physically absent from the binary.
+# NEVER pass `-tags devlicense` for an appliance build. A dev binary is produced
+# only via the explicit *-build-dev targets below and must not be shipped.
 scd-build:
 	cd data-plane && go build -o ../bin/scd ./cmd/scd
 
@@ -67,6 +71,17 @@ acctd-build:
 	cd data-plane && go build -o ../bin/acctd ./cmd/acctd
 
 dataplane-build: scd-build portald-build acctd-build
+
+# Explicit DEVELOPMENT build — permits permissive unlicensed mode. Dev/test only.
+scd-build-dev:
+	cd data-plane && go build -tags devlicense -o ../bin/scd ./cmd/scd
+
+# Build guard: fail if the compiled scd is NOT a production binary. Uses the
+# binary's own self-report (it embeds buildprofile.Name). Run before shipping.
+verify-production-build:
+	@cd data-plane && go run ./cmd/scd --print-build-profile 2>/dev/null | grep -qx production \
+	  && echo "OK: scd is a production build" \
+	  || { echo "FAIL: scd is NOT a production build (permissive mode present)"; exit 1; }
 
 phase1-install: dataplane-build
 	@mkdir -p /opt/stayconnect/bin

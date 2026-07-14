@@ -172,6 +172,16 @@ func TestStateBehavior(t *testing.T) {
 	if StateExpired.AllowsNewSessions() || StateRevoked.AllowsNewSessions() {
 		t.Fatal("Expired/Revoked must refuse new sessions")
 	}
+	// Production safety: no signed license at all must NEVER authorize a guest.
+	if StateUnlicensed.AllowsNewSessions() {
+		t.Fatal("Unlicensed must refuse new sessions (production safety)")
+	}
+	if StateUnlicensed.AllowsProvisioning() {
+		t.Fatal("Unlicensed must refuse provisioning")
+	}
+	if FeatureEnabled(StateUnlicensed, true) {
+		t.Fatal("Unlicensed must not enable any feature")
+	}
 	if StateRestricted.AllowsProvisioning() {
 		t.Fatal("Restricted must block provisioning")
 	}

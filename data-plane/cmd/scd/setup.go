@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
 )
 
 // setupStatus backs the local /setup/enrollment wizard. It reports the full
@@ -122,6 +124,8 @@ func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 		"api_mtls":                 api,
 		"nats_mtls":                nats,
 		"license":                  lic,
+		"build_profile":            buildprofile.Name,
+		"permissive_blocked":       s.permissiveBlocked,
 		"assignment":               s.assignmentStatus(),
 		"network":                  s.networkChecks(),
 		"outbox":                   outbox,

@@ -151,6 +151,15 @@ export default function LicensePage() {
 
       {err && <div className="rounded border border-[#6b2128] bg-[#3a1418] p-3 text-sm text-err">Couldn&apos;t read status (retrying): {err}</div>}
 
+      {st?.permissive_blocked && (
+        <div className="rounded border border-[#6b2128] bg-[#3a1418] p-3 text-sm text-err">
+          <b>Critical: blocked attempt to disable license enforcement.</b> This production appliance
+          rejected an attempt to run in permissive/unlicensed mode ({st.permissive_blocked}). Guest
+          Internet authorization remains gated on a real signed license. Remove the misconfiguration
+          and investigate — this was audited and reported to Central.
+        </div>
+      )}
+
       {activation === "mismatch" && (
         <div className="rounded border border-[#6b4e1c] bg-[#3a2a0e] p-3 text-sm text-warn">
           <b>Hardware Binding Mismatch.</b> This license is bound to a different WAN network adapter than the one now present

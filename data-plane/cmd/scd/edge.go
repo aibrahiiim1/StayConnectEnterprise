@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
@@ -30,12 +31,23 @@ import (
 // permits new sessions. Returns true when the request may proceed.
 func (s *server) licenseGate(w http.ResponseWriter, feature string) bool {
 	if s.lic == nil {
-		return true
+		// Fail CLOSED: a missing license manager is a startup/config fault, never
+		// a reason to authorize a guest. (In practice s.lic is always set before
+		// the listener starts; this is defence in depth.)
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error": "unlicensed", "license_state": string(lic.StateUnlicensed),
+		})
+		return false
 	}
 	if !s.lic.AllowsNewSessions() {
+		st := string(s.lic.State())
+		errCode := "license_expired"
+		if st == string(lic.StateUnlicensed) {
+			errCode = "unlicensed"
+		}
 		writeJSON(w, http.StatusForbidden, map[string]any{
-			"error":         "license_expired",
-			"license_state": string(s.lic.State()),
+			"error":         errCode,
+			"license_state": st,
 		})
 		return false
 	}
@@ -92,14 +104,22 @@ func maskCreds(u string) string {
 
 func (s *server) licenseStatus(w http.ResponseWriter, r *http.Request) {
 	if s.lic == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"state": "Active", "mode": "unlicensed-dev"})
+		// Fail safe: report UNLICENSED, never a false "Active".
+		writeJSON(w, http.StatusOK, map[string]any{
+			"state": string(lic.StateUnlicensed), "installed": false, "license_id": "",
+		})
 		return
 	}
 	ev, loaded := s.lic.Evaluation()
 	if !loaded {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"state": string(s.lic.State()), "installed": false,
-		})
+		out := map[string]any{
+			"state": string(s.lic.State()), "installed": false, "license_id": "",
+		}
+		if s.permissiveBlocked != "" {
+			out["permissive_blocked"] = s.permissiveBlocked
+			out["build_profile"] = buildprofile.Name
+		}
+		writeJSON(w, http.StatusOK, out)
 		return
 	}
 	// Live usage against the licensed concurrent-online-guest cap.
@@ -142,6 +162,8 @@ func (s *server) licenseStatus(w http.ResponseWriter, r *http.Request) {
 		"cloud_stale":                  ev.CloudStale,
 		"clock_rollback":               ev.ClockRollback,
 		"last_cloud_validation":        ev.LastCloudValidation,
+		"build_profile":                buildprofile.Name,
+		"permissive_blocked":           s.permissiveBlocked,
 	})
 }
 

@@ -158,6 +158,14 @@ const (
 	// license_id. New sessions refused immediately; admin locked to the
 	// license page. Strongest state; never entered by time alone.
 	StateRevoked State = "Revoked"
+	// StateUnlicensed — NO valid signed license is installed at all (factory-
+	// clean / missing / invalid / config error). On a production appliance this
+	// is the safe default: it never authorizes new guest sessions. It is
+	// distinct from Expired (a real license that lapsed) so the UI can show
+	// "pending activation" rather than implying a license existed. Only a
+	// development build may instead run permissively (StateActive) with no
+	// license — production builds can never reach that path.
+	StateUnlicensed State = "unlicensed"
 )
 
 // AllowsNewSessions reports whether new guest sessions may be created.

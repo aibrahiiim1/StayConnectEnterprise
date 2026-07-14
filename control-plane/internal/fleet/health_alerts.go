@@ -102,6 +102,28 @@ func (c *Consumer) reconcileHealthAlerts(ctx context.Context, applianceID, seria
 	}
 }
 
+// raiseSecurityAlert raises a deduplicated appliance security alert from a
+// sanitized "security" telemetry event (e.g. a blocked attempt to enable
+// permissive/dev licensing on a production appliance). These are point-in-time
+// integrity events: they stay open until an operator triages them (no
+// auto-resolve). Payload carries no secrets/PII (sanitized on the appliance).
+func (c *Consumer) raiseSecurityAlert(ctx context.Context, applianceID, serial string, payload map[string]any) {
+	kind, _ := payload["kind"].(string)
+	if kind == "" {
+		kind = "appliance_security_event"
+	}
+	det, _ := json.Marshal(payload)
+	// Dedupe: one open alert per (appliance, kind) — repeated reports (e.g. on
+	// every reboot while the misconfiguration persists) do not pile up.
+	_, _ = c.DB.Exec(ctx, `
+		INSERT INTO appliance_security_alerts (appliance_id, serial, kind, detail, status, resolved)
+		SELECT $1, $2, $3, $4::jsonb, 'open', false
+		WHERE NOT EXISTS (
+		  SELECT 1 FROM appliance_security_alerts s
+		   WHERE s.appliance_id = $1 AND s.kind = $3 AND s.resolved = false)
+	`, applianceID, serial, kind, string(det))
+}
+
 // deriveConditions extracts the active alert conditions from a health payload.
 func deriveConditions(payload map[string]any) []condition {
 	var out []condition

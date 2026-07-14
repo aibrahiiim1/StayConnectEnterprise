@@ -631,6 +631,10 @@ export type SetupStatus = {
   };
   activation_status?: "unlicensed" | "pending_activation" | "licensed" | "activated" | "mismatch" | string;
   hardware_mismatch?: string;
+  // Non-empty when a production appliance REJECTED an attempt to enable
+  // permissive/dev licensing (critical security event).
+  permissive_blocked?: string;
+  build_profile?: string;
   appliance_id?: string;
   identity_key_fingerprint?: string;
   version?: string;

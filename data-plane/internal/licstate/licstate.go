@@ -153,9 +153,14 @@ func (m *Manager) State() lic.State {
 	defer m.mu.RUnlock()
 	if !m.loaded {
 		if m.required {
-			return lic.StateExpired
+			// No valid signed license on a production appliance: the SAFE state.
+			// Never Active — AllowsNewSessions() is false, so no guest auth,
+			// nft, shaping, accounting or session is ever created. This is the
+			// only path a config error (missing/invalid vendor key) can take —
+			// it fails closed, never to permissive.
+			return lic.StateUnlicensed
 		}
-		return lic.StateActive // unlicensed dev mode
+		return lic.StateActive // permissive unlicensed-dev (development builds only)
 	}
 	return m.current.State
 }
@@ -170,7 +175,10 @@ func (m *Manager) MaxConcurrentOnlineGuests() int64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if !m.loaded || m.current.Doc == nil {
-		return -1
+		if m.required {
+			return 0 // unlicensed production: cap 0 (defence in depth; gate denies first)
+		}
+		return -1 // permissive dev only
 	}
 	if v := m.current.Doc.EffectiveMaxConcurrentOnlineGuests(); v > 0 {
 		return int64(v)
@@ -200,7 +208,8 @@ func (m *Manager) Info() LicenseInfo {
 	out := LicenseInfo{Installed: m.loaded, MaxGuests: -1}
 	if !m.loaded {
 		if m.required {
-			out.State = string(lic.StateExpired)
+			out.State = string(lic.StateUnlicensed)
+			out.MaxGuests = 0
 		} else {
 			out.State = string(lic.StateActive)
 		}

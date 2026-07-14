@@ -73,7 +73,7 @@ type Message struct {
 var allowedKinds = map[string]bool{
 	"heartbeat": true, "health": true, "usage": true, "auth_counts": true,
 	"pms_health": true, "license_ack": true, "backup": true, "sync": true,
-	"update_progress": true, "service_health": true,
+	"update_progress": true, "service_health": true, "security": true,
 }
 
 type Consumer struct {
@@ -165,6 +165,9 @@ func (c *Consumer) handle(ctx context.Context, m *nats.Msg) {
 	// auto-resolve when the appliance reports recovery.
 	if msg.Kind == "service_health" {
 		c.reconcileHealthAlerts(dbctx, msg.ApplianceID, serial, msg.Payload)
+	}
+	if msg.Kind == "security" {
+		c.raiseSecurityAlert(dbctx, msg.ApplianceID, serial, msg.Payload)
 	}
 	respond(m, http200)
 }

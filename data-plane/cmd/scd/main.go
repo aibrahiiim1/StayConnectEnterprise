@@ -36,6 +36,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/applianceauth"
 	"github.com/stayconnect/enterprise/data-plane/internal/appliancecert"
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
@@ -210,6 +211,11 @@ type server struct {
 	lic      *licstate.Manager
 	obx      *outbox.Outbox
 	licFetch func(context.Context) error
+
+	// permissiveBlocked is non-empty when a production appliance rejected an
+	// attempt to enable permissive/dev licensing (env var or dev-mode marker).
+	// Surfaced in the license status so Hotel Admin shows the critical alert.
+	permissiveBlocked string
 }
 
 func (s *server) currentPMSReg() *pms.Registry {
@@ -432,6 +438,14 @@ func httpErr(w http.ResponseWriter, code int, msg string) {
 }
 
 func main() {
+	// Build guard: `scd --print-build-profile` prints the compiled licensing
+	// profile ("production"/"development") and exits, so CI/deploy can refuse to
+	// ship a non-production binary.
+	if len(os.Args) > 1 && os.Args[1] == "--print-build-profile" {
+		fmt.Println(buildprofile.Name)
+		return
+	}
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
@@ -602,10 +616,22 @@ func main() {
 
 	// Edge-first refactor: signed-license manager. Evaluates the on-disk
 	// envelope offline; bridges limits into tenant_effective_limits; gates
-	// auth methods per entitlement. Without vendor key material it runs in
-	// permissive unlicensed mode (pilot pre-cutover) unless
-	// SCD_LICENSE_REQUIRED=true.
-	s.lic = licstate.New(pool, c.TenantID, c.LicenseDir, c.VendorPub, c.LicenseRequired)
+	// auth methods per entitlement.
+	//
+	// PRODUCTION SAFETY: on a production build (the default — see
+	// internal/buildprofile) a real signed license is ALWAYS required; there is
+	// no permissive unlicensed-dev path in the binary and no environment variable
+	// or config file can enable one. Permissive mode is possible only in an
+	// explicit `-tags devlicense` build. An /etc/stayconnect/production marker
+	// also forces production even on a dev binary (defence in depth).
+	licRequired, devAttempt := resolveLicenseRequired(c.LicenseRequired)
+	s.lic = licstate.New(pool, c.TenantID, c.LicenseDir, c.VendorPub, licRequired)
+	s.permissiveBlocked = devAttempt
+	if devAttempt != "" {
+		// Rejected: enforcement stays ON (licRequired is already true). Raise a
+		// local critical alert + audit + sanitized Central telemetry.
+		s.reportPermissiveAttempt(rootCtx, devAttempt)
+	}
 	// Bind license verification to THIS box: identity key (primary anchor) +
 	// serial / hardware fingerprint / WAN MAC (mismatch + clone signals).
 	s.lic.SetLocalIdentity(lic.LocalIdentity{
