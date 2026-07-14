@@ -304,19 +304,31 @@ export default function LicensePage() {
 
           {ls?.features && (
             <Card>
-              <CardHeader><CardTitle>Entitlements</CardTitle></CardHeader>
-              <CardBody className="p-0">
-                <Table>
-                  <THead><TR><TH>Feature</TH><TH>Enabled</TH></TR></THead>
-                  <tbody>
-                    {(Object.keys(FEATURE_LABELS) as (keyof LicenseFeatures)[]).map((k) => (
-                      <TR key={k}>
-                        <TD>{FEATURE_LABELS[k]}</TD>
-                        <TD>{ls.features?.[k] ? <Badge tone="ok">yes</Badge> : <span className="text-muted">—</span>}</TD>
-                      </TR>
-                    ))}
-                  </tbody>
-                </Table>
+              <CardBody>
+                <details>
+                  <summary className="cursor-pointer text-sm font-medium select-none">
+                    Technical details — feature entitlements
+                  </summary>
+                  <p className="mt-2 text-xs text-muted">
+                    A standard StayConnect license includes <strong>all product features</strong>. The commercial
+                    controls are the concurrent-guest capacity, validity window and grace period above — you do
+                    not configure features. This table is shown for support/diagnostics; per-feature entitlements
+                    exist in the signed-license format for future editions.
+                  </p>
+                  <div className="mt-3">
+                    <Table>
+                      <THead><TR><TH>Feature</TH><TH>Included</TH></TR></THead>
+                      <tbody>
+                        {(Object.keys(FEATURE_LABELS) as (keyof LicenseFeatures)[]).map((k) => (
+                          <TR key={k}>
+                            <TD>{FEATURE_LABELS[k]}</TD>
+                            <TD>{ls.features?.[k] ? <Badge tone="ok">yes</Badge> : <span className="text-muted">—</span>}</TD>
+                          </TR>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </div>
+                </details>
               </CardBody>
             </Card>
           )}

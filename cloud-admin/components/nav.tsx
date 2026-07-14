@@ -7,6 +7,7 @@ import {
   BadgeCheck, ScrollText, Building2, PlugZap,
   ShieldAlert, FileBadge, KeyRound, HardDrive,
 } from "lucide-react";
+import { CustomerSelector } from "@/components/customer-selector";
 
 type Item = { href: string; label: string; icon: any };
 type Section = { title: string; items: Item[] };
@@ -57,6 +58,9 @@ export function Nav({ onLogout, email }: { onLogout: () => void; email?: string 
       <div className="px-5 py-5 border-b border-border">
         <div className="text-xs text-muted uppercase tracking-widest">StayConnect</div>
         <div className="text-sm font-semibold">Cloud Admin</div>
+      </div>
+      <div className="border-b border-border py-1">
+        <CustomerSelector />
       </div>
       <nav className="flex-1 p-2 text-sm overflow-y-auto">
         {SECTIONS.map((sec) => (

@@ -21,8 +21,21 @@ why you'd use it. For step-by-step "how do I create X" instructions, see
   your password** even if the page shows no password box — a small prompt appears
   saying "This action requires confirming your password." This is a safety
   confirmation and is recorded in the audit log.
-- **Customer (tenant) context.** Most pages show data for one customer at a time.
-  Platform super-admins see fleet-wide roll-ups on the Dashboard and Fleet pages.
+- **Customer context (Global Customer Selector).** At the top of the sidebar,
+  platform admins have a **Customer context** selector: **All Customers** or one
+  specific customer. The choice **persists across navigation and refresh** (stored
+  in your browser). It scopes every customer-owned page — **Sites, Appliances,
+  Licenses, Operators, Audit** and the Dashboard — to the selected customer.
+  Fleet-wide pages (Fleet, Security alerts, Certificates, Assignment keys, Backup
+  health, and the Customers list itself) stay global.
+  - In **All Customers** mode, list pages show every customer's rows (with a
+    **Customer** column) but **creating** a resource is disabled — you must first
+    pick the owning customer. This prevents accidentally creating a Site or
+    Appliance under the wrong customer.
+  - When a customer is selected, create forms show **"Owner: <Customer>"** so the
+    owning customer is always explicit.
+  - A **tenant operator** (not a platform admin) has no switcher — they are pinned
+    to their own customer, and the server enforces that regardless of the UI.
 - **The menu adapts to your role.** You only see the items your role can use.
 
 The sidebar has four groups: **Overview**, **Infrastructure**, **Commercial**,

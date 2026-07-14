@@ -5,14 +5,14 @@ import {
   api, ApiError, Appliance, ListResp, Site,
   BootstrapToken, BootstrapTokenCreated, EffectiveConfig,
 } from "@/lib/api";
-import { useTenant } from "@/lib/use-tenant";
+import { useCustomer } from "@/lib/customer-context";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Plus, X, Key, Copy, Trash2, Eye } from "lucide-react";
+import { Plus, X, Key, Copy, Trash2, Eye, Building2 } from "lucide-react";
 import { formatRelative, errMsg } from "@/lib/utils";
 
 const toneFor = (status: string) =>
@@ -36,7 +36,12 @@ function LivePulse({ status, lastSeen }: { status: string; lastSeen?: string }) 
 }
 
 export default function AppliancesPage() {
-  const tenantID = useTenant();
+  // Appliances are owned via Site → Customer. The Global Customer Context scopes
+  // the list; "All Customers" ("") fans out. Manual create / token mint require a
+  // concrete customer (and a Site under it).
+  const { selectedTenantId, selectedTenantName, ready, tenants } = useCustomer();
+  const allCustomers = selectedTenantId === "";
+  const custName = (tid?: string) => tenants.find((t) => t.id === tid)?.name ?? tid ?? "—";
   const [rows, setRows] = useState<Appliance[] | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [tokens, setTokens] = useState<BootstrapToken[] | null>(null);
@@ -59,25 +64,26 @@ export default function AppliancesPage() {
   }, []);
 
   async function load() {
-    if (!tenantID) return;
+    if (!ready) return;
+    setRows(null);
     try {
       const [apps, st, tk] = await Promise.all([
-        api.get<ListResp<Appliance>>(`/v1/appliances?tenant_id=${tenantID}`),
-        api.get<ListResp<Site>>(`/v1/sites?tenant_id=${tenantID}`),
-        api.get<ListResp<BootstrapToken>>(`/v1/appliance-bootstrap-tokens?tenant_id=${tenantID}`),
+        api.get<ListResp<Appliance>>(`/v1/appliances?tenant_id=${selectedTenantId}`),
+        api.get<ListResp<Site>>(`/v1/sites?tenant_id=${selectedTenantId}`),
+        api.get<ListResp<BootstrapToken>>(`/v1/appliance-bootstrap-tokens?tenant_id=${selectedTenantId}`),
       ]);
       setRows(apps.data);
-      setSites(st.data);
+      setSites(st.data ?? []);
       setTokens(tk.data ?? []);
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
     }
   }
-  useEffect(() => { load(); }, [tenantID]);
+  useEffect(() => { setShowNew(false); setShowMint(false); load(); }, [ready, selectedTenantId]);
 
   async function onMintToken(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!tenantID) return;
+    if (allCustomers) return;
     setBusy(true); setErr(null);
     const form = new FormData(e.currentTarget);
     // Capture before awaiting: React nulls e.currentTarget after the first await,
@@ -85,7 +91,7 @@ export default function AppliancesPage() {
     const el = e.currentTarget;
     try {
       const res = await api.post<BootstrapTokenCreated>(
-        `/v1/appliance-bootstrap-tokens?tenant_id=${tenantID}`,
+        `/v1/appliance-bootstrap-tokens?tenant_id=${selectedTenantId}`,
         {
           site_id: form.get("site_id"),
           expected_serial: (form.get("expected_serial") as string) || undefined,
@@ -101,21 +107,19 @@ export default function AppliancesPage() {
   }
 
   async function onRevokeToken(id: string) {
-    if (!tenantID) return;
     if (!confirm("Revoke this bootstrap token?")) return;
     try {
-      await api.del(`/v1/appliance-bootstrap-tokens/${id}?tenant_id=${tenantID}`);
+      await api.del(`/v1/appliance-bootstrap-tokens/${id}?tenant_id=${selectedTenantId}`);
       load();
     } catch (e) { setErr(errMsg(e)); }
   }
 
   async function onShowEffective(a: Appliance) {
-    if (!tenantID) return;
     setEffOpen(a);
     setEffData(null);
     try {
       const res = await api.get<EffectiveConfig>(
-        `/v1/appliances/${a.id}/effective-config?tenant_id=${tenantID}`,
+        `/v1/appliances/${a.id}/effective-config?tenant_id=${a.tenant_id ?? selectedTenantId}`,
       );
       setEffData(res);
     } catch (e) { setErr(errMsg(e)); setEffOpen(null); }
@@ -124,14 +128,14 @@ export default function AppliancesPage() {
 
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!tenantID) return;
+    if (allCustomers) return;
     setBusy(true); setErr(null);
     const form = new FormData(e.currentTarget);
     // Capture before awaiting: React nulls e.currentTarget after the first await,
     // so a later .reset() throws and shows a bogus error on a successful action.
     const el = e.currentTarget;
     try {
-      await api.post(`/v1/appliances?tenant_id=${tenantID}`, {
+      await api.post(`/v1/appliances?tenant_id=${selectedTenantId}`, {
         site_id: form.get("site_id"),
         serial: form.get("serial"),
         name: form.get("name"),
@@ -147,11 +151,10 @@ export default function AppliancesPage() {
     } finally { setBusy(false); }
   }
 
-  async function onDelete(id: string) {
-    if (!tenantID) return;
+  async function onDelete(a: Appliance) {
     if (!confirm("Delete this appliance?")) return;
     try {
-      await api.del(`/v1/appliances/${id}?tenant_id=${tenantID}`);
+      await api.del(`/v1/appliances/${a.id}?tenant_id=${a.tenant_id ?? selectedTenantId}`);
       load();
     } catch (e: any) { setErr(e?.message ?? "Delete failed"); }
   }
@@ -164,12 +167,15 @@ export default function AppliancesPage() {
         <div>
           <div className="text-xs text-muted uppercase tracking-wider">Infrastructure</div>
           <h1 className="text-2xl font-semibold">Appliances</h1>
+          <div className="mt-1 flex items-center gap-1.5 text-sm text-muted">
+            <Building2 size={13} /> {allCustomers ? "All Customers" : <>Customer: <span className="text-text font-medium">{selectedTenantName}</span></>}
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={() => { setShowMint((s) => !s); setShowNew(false); }} disabled={sites.length === 0}>
+          <Button variant="secondary" onClick={() => { setShowMint((s) => !s); setShowNew(false); }} disabled={allCustomers || sites.length === 0}>
             {showMint ? <><X size={14} /> Cancel</> : <><Key size={14} /> Enrollment token</>}
           </Button>
-          <Button onClick={() => { setShowNew((s) => !s); setShowMint(false); }} disabled={sites.length === 0}>
+          <Button onClick={() => { setShowNew((s) => !s); setShowMint(false); }} disabled={allCustomers || sites.length === 0}>
             {showNew ? <><X size={14} /> Cancel</> : <><Plus size={14} /> New appliance</>}
           </Button>
         </div>
@@ -182,9 +188,15 @@ export default function AppliancesPage() {
         Mint an <strong>enrollment token</strong> below only for the advanced / manual install path (pre-registering a
         box, or an offline installer who will type a code).
       </p>
-      {sites.length === 0 && (
+      {allCustomers && (
         <div className="text-sm text-warn mb-4">
-          Create a site first — appliances belong to a site.
+          Select a customer in the <strong>Customer context</strong> selector (top-left) to add or enroll an appliance —
+          an appliance is created under a Site that belongs to one customer.
+        </div>
+      )}
+      {!allCustomers && sites.length === 0 && (
+        <div className="text-sm text-warn mb-4">
+          Create a site under <strong>{selectedTenantName}</strong> first — appliances belong to a site.
         </div>
       )}
       {err && <div className="text-err text-sm mb-4">{err}</div>}
@@ -283,6 +295,7 @@ export default function AppliancesPage() {
             <Table>
               <THead>
                 <TR>
+                  {allCustomers && <TH>Customer</TH>}
                   <TH>Name</TH><TH>Site</TH><TH>Serial</TH>
                   <TH>Status</TH><TH>Version</TH><TH>Last seen</TH><TH></TH>
                 </TR>
@@ -290,8 +303,9 @@ export default function AppliancesPage() {
               <tbody>
                 {rows.map((a) => (
                   <TR key={a.id}>
+                    {allCustomers && <TD className="text-muted">{custName(a.tenant_id)}</TD>}
                     <TD>{a.name}<div className="text-xs text-muted font-mono">{a.id.slice(0, 8)}</div></TD>
-                    <TD className="text-muted">{siteName(a.site_id)}</TD>
+                    <TD className="text-muted">{a.site_id ? siteName(a.site_id) : <span className="text-warn">unassigned</span>}</TD>
                     <TD className="font-mono">{a.serial}</TD>
                     <TD>
                       <LivePulse status={a.status} lastSeen={a.last_seen_at} />
@@ -301,7 +315,7 @@ export default function AppliancesPage() {
                     <TD className="text-muted">{a.last_seen_at ? formatRelative(a.last_seen_at) : "—"}</TD>
                     <TD className="text-right whitespace-nowrap">
                       <Button size="sm" variant="ghost" onClick={() => onShowEffective(a)}><Eye size={12} /> Config</Button>
-                      <Button size="sm" variant="ghost" onClick={() => onDelete(a.id)}>Delete</Button>
+                      <Button size="sm" variant="ghost" onClick={() => onDelete(a)}>Delete</Button>
                     </TD>
                   </TR>
                 ))}

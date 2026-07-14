@@ -80,7 +80,8 @@ func (b *FleetBase) list(w http.ResponseWriter, r *http.Request) {
           FROM appliances a
           LEFT JOIN licenses l
                  ON a.id = ANY(l.appliance_ids) AND l.status IN ('active','suspended')
-         WHERE ($1 = '' OR a.tenant_id::text = $1)
+         WHERE a.tenant_id IS NOT NULL
+           AND ($1 = '' OR a.tenant_id::text = $1)
          ORDER BY a.tenant_id, a.site_id, a.name
     `, tenantID)
 	if err != nil {

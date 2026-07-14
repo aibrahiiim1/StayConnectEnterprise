@@ -34,16 +34,22 @@ The customer appears in the table with status **active**.
 
 ## 2. Create a Site
 
-A **site** is a physical location that owns appliances (a hotel, building, or
-floor).
+A **Site** is **one physical property** — a single hotel/resort/deployment
+location — that belongs to exactly one Customer and can contain one or more
+Appliances. Buildings, floors, wings, SSIDs and guest VLANs are configured on the
+appliance; they are **not** Sites. A hotel with two buildings on one uplink is
+still one Site.
 
-1. Make sure the correct customer is selected.
+1. **Select the owning Customer** in the **Customer context** selector (top-left).
+   A Site is always created under the customer shown there — the Sites page states
+   "Owner: <Customer>". (If "All Customers" is selected, the page will ask you to
+   pick one first — a Site must have an explicit owner.)
 2. Go to **Sites** (`/sites`).
 3. Click **New site**.
 4. Fill in:
-   - **Code** — short identifier, e.g. `hq` or `marina`.
-   - **Name** — e.g. `Headquarters` or `Marina Hotel`.
-   - **Timezone** — optional, defaults to `UTC` (e.g. `Europe/London`).
+   - **Code** — short identifier, e.g. `hurghada` or `marina`.
+   - **Name** — the property name, e.g. `Coral Sea Resort Hurghada`.
+   - **Timezone** — optional, defaults to `UTC` (e.g. `Africa/Cairo`).
    - **Country** — optional (e.g. `US`).
 5. Click **Create**.
 

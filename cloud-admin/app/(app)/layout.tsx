@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Nav } from "@/components/nav";
 import { api, Whoami } from "@/lib/api";
+import { CustomerProvider } from "@/lib/customer-context";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -35,9 +36,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!me) return null;
 
   return (
-    <div className="min-h-screen flex">
-      <Nav email={me.email} onLogout={onLogout} />
-      <main className="flex-1 min-w-0">{children}</main>
-    </div>
+    <CustomerProvider me={me}>
+      <div className="min-h-screen flex">
+        <Nav email={me.email} onLogout={onLogout} />
+        <main className="flex-1 min-w-0">{children}</main>
+      </div>
+    </CustomerProvider>
   );
 }

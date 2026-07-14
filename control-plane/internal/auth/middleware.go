@@ -104,6 +104,25 @@ func RequireTenant(next http.Handler) http.Handler {
 	})
 }
 
+// RequireTenantOrPlatform is like RequireTenant but lets a super-admin (platform
+// admin) through with an EMPTY tenant scope, enabling the Global Customer Context
+// "All Customers" fan-out on list endpoints. A regular operator still must have a
+// tenant (their DefaultTenantID is authoritative; an empty scope is rejected).
+// Handlers behind this middleware are responsible for honoring an empty scope
+// safely — list handlers fan out; create handlers must still require an explicit
+// customer.
+func RequireTenantOrPlatform(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if EffectiveTenantID(r) == "" {
+			if s := FromContext(r.Context()); s == nil || !s.IsSuperAdmin {
+				jsonErr(w, http.StatusBadRequest, "bad_request", "tenant scope required (pass ?tenant_id=... as platform_admin)", r)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // jsonErr writes the standard StayConnect error envelope. Codes here are
 // intentionally string-literal (we don't import api to avoid a cycle).
 func jsonErr(w http.ResponseWriter, status int, code, msg string, r *http.Request) {

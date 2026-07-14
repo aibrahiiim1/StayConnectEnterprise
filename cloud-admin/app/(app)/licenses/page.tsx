@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api, withStepUp, ListResp, License, Site, FleetAppliance } from "@/lib/api";
-import { useTenant } from "@/lib/use-tenant";
+import { useCustomer } from "@/lib/customer-context";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,8 @@ type ApplianceRow = { id: string; site_id: string; serial: string; name: string 
  * silent mutation of the active document.
  */
 export default function LicensesPage() {
-  const tenantID = useTenant();
+  const { selectedTenantId: tenantID, ready } = useCustomer();
+  const allCustomers = tenantID === "";
   const [rows, setRows] = useState<License[] | null>(null);
   const [sites, setSites] = useState<Site[]>([]);
   const [appliances, setAppliances] = useState<ApplianceRow[]>([]);
@@ -35,7 +36,7 @@ export default function LicensesPage() {
   const [formSite, setFormSite] = useState("");
 
   async function load() {
-    if (!tenantID) return;
+    if (!ready) return;
     try {
       const [lic, st, ap, fl, tn] = await Promise.all([
         api.get<ListResp<License>>(`/cloud/v1/licenses?tenant_id=${tenantID}`),
@@ -51,7 +52,7 @@ export default function LicensesPage() {
       setCustomer((tn.data ?? []).find((t) => t.id === tenantID)?.name ?? "");
     } catch (e) { setErr(errMsg(e)); }
   }
-  useEffect(() => { load(); }, [tenantID]);
+  useEffect(() => { setRows(null); load(); }, [ready, tenantID]);
 
   const siteName = (sid: string) => sites.find((s) => s.id === sid)?.name ?? sid.slice(0, 8);
   const applianceOf = (l: License) => {
@@ -75,7 +76,7 @@ export default function LicensesPage() {
 
   async function onIssue(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!tenantID) return;
+    if (allCustomers) { setErr("Select a customer (top-left) to issue a license."); return; }
     setBusy(true); setErr(null); setMsg(null);
     const form = new FormData(e.currentTarget);
     const el = e.currentTarget;
@@ -164,11 +165,17 @@ export default function LicensesPage() {
         <div>
           <div className="text-xs text-muted uppercase tracking-wider">Commercial</div>
           <h1 className="text-2xl font-semibold">Licenses</h1>
+          <div className="mt-1 text-sm text-muted">{allCustomers ? "All Customers" : <>Customer: <span className="text-text font-medium">{customer || "—"}</span></>}</div>
         </div>
-        <Button onClick={() => setShowNew((s) => !s)} disabled={sites.length === 0}>
+        <Button onClick={() => setShowNew((s) => !s)} disabled={allCustomers || sites.length === 0}>
           {showNew ? <><X size={14} /> Cancel</> : <><Plus size={14} /> Issue license</>}
         </Button>
       </div>
+      {allCustomers && (
+        <div className="text-sm text-warn mb-4">
+          Viewing licenses across all customers. Select a customer (top-left) to issue a new license.
+        </div>
+      )}
 
       <p className="text-sm text-muted mb-4">
         A license binds to <strong>one appliance</strong> and carries exactly three commercial controls:

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, AuditEntry, ListResp } from "@/lib/api";
-import { useTenant } from "@/lib/use-tenant";
+import { useCustomer } from "@/lib/customer-context";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -32,13 +32,17 @@ function tone(action: string) {
 }
 
 export default function AuditPage() {
-  const tenantID = useTenant();
+  // The audit log is per-customer. Requires a concrete customer in the Global
+  // Customer Context; "All Customers" shows a prompt.
+  const { selectedTenantId: tenantID, selectedTenantName, ready } = useCustomer();
+  const allCustomers = tenantID === "";
   const [rows, setRows] = useState<AuditEntry[] | null>(null);
   const [err, setErr] = useState<unknown>(null);
   const [actionFilter, setActionFilter] = useState("");
 
   async function load() {
-    if (!tenantID) return;
+    if (!ready) return;
+    if (allCustomers) { setRows(null); return; }
     setRows(null);
     const q = new URLSearchParams();
     if (actionFilter) q.set("action", actionFilter);
@@ -47,17 +51,28 @@ export default function AuditPage() {
       setRows(r.data);
     } catch (e) { setErr(e); }
   }
-  useEffect(() => { load(); }, [tenantID]);
+  useEffect(() => { load(); }, [ready, tenantID]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-4">
         <div className="text-xs text-muted uppercase tracking-wider">Compliance</div>
         <h1 className="text-2xl font-semibold">Audit log</h1>
+        <div className="mt-1 text-sm text-muted">{allCustomers ? "All Customers" : <>Customer: <span className="text-text font-medium">{selectedTenantName}</span></>}</div>
       </div>
 
       <ErrorBanner err={err} />
 
+      {allCustomers && (
+        <Card><CardBody>
+          <div className="text-sm text-muted">
+            The audit log is per-customer. Select a customer in the <strong>Customer context</strong> selector
+            {" "}(top-left) to view its audit events.
+          </div>
+        </CardBody></Card>
+      )}
+
+      {!allCustomers && (<>
       <Card className="mb-4">
         <CardBody>
           <form onSubmit={(e) => { e.preventDefault(); load(); }} className="flex items-end gap-3">
@@ -125,6 +140,7 @@ export default function AuditPage() {
           )}
         </CardBody>
       </Card>
+      </>)}
     </div>
   );
 }

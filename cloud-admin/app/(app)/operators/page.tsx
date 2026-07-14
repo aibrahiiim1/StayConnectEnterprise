@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ApiError, ListResp, Operator, Whoami } from "@/lib/api";
-import { useTenant } from "@/lib/use-tenant";
+import { api, ApiError, ListResp, Operator } from "@/lib/api";
+import { useCustomer } from "@/lib/customer-context";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -14,31 +14,31 @@ import { Plus, X, KeyRound } from "lucide-react";
 const ROLES = ["tenant_admin", "tenant_operator", "viewer", "billing"] as const;
 
 export default function OperatorsPage() {
-  const tenantID = useTenant();
-  const [me, setMe] = useState<Whoami | null>(null);
+  // Operators are per-customer staff. Management requires a concrete customer in
+  // the Global Customer Context (choose one top-left); "All Customers" shows a
+  // prompt rather than allowing accidental cross-customer staff changes.
+  const { me, selectedTenantId: tenantID, selectedTenantName, ready } = useCustomer();
+  const allCustomers = tenantID === "";
   const [rows, setRows] = useState<Operator[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function load() {
-    if (!tenantID) return;
+    if (!ready) return;
+    if (allCustomers) { setRows(null); return; }
     try {
-      const [w, r] = await Promise.all([
-        me ? Promise.resolve(me) : api.get<Whoami>("/v1/auth/whoami"),
-        api.get<ListResp<Operator>>(`/v1/operators?tenant_id=${tenantID}`),
-      ]);
-      setMe(w);
+      const r = await api.get<ListResp<Operator>>(`/v1/operators?tenant_id=${tenantID}`);
       setRows(r.data);
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
     }
   }
-  useEffect(() => { load(); }, [tenantID]);
+  useEffect(() => { setShowNew(false); load(); }, [ready, tenantID]);
 
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!tenantID) return;
+    if (allCustomers) return;
     setBusy(true); setErr(null);
     const form = new FormData(e.currentTarget);
     try {
@@ -59,7 +59,7 @@ export default function OperatorsPage() {
   }
 
   async function onDisable(id: string) {
-    if (!tenantID) return;
+    if (allCustomers) return;
     if (!confirm("Disable this operator? They won't be able to sign in.")) return;
     try {
       await api.del(`/v1/operators/${id}?tenant_id=${tenantID}`);
@@ -68,7 +68,7 @@ export default function OperatorsPage() {
   }
 
   async function onResetPassword(id: string) {
-    if (!tenantID) return;
+    if (allCustomers) return;
     const pw = prompt("New password (min 10 chars):");
     if (!pw) return;
     try {
@@ -78,7 +78,7 @@ export default function OperatorsPage() {
   }
 
   async function onAddRole(id: string) {
-    if (!tenantID) return;
+    if (allCustomers) return;
     const role = prompt(`Role to add — one of: ${ROLES.join(", ")}`);
     if (!role || !ROLES.includes(role as any)) return;
     try {
@@ -88,7 +88,7 @@ export default function OperatorsPage() {
   }
 
   async function onRemoveRole(id: string, role: string) {
-    if (!tenantID) return;
+    if (allCustomers) return;
     if (!confirm(`Remove role "${role}"?`)) return;
     try {
       await api.del(`/v1/operators/${id}/roles/${role}?tenant_id=${tenantID}`);
@@ -102,13 +102,25 @@ export default function OperatorsPage() {
         <div>
           <div className="text-xs text-muted uppercase tracking-wider">Administration</div>
           <h1 className="text-2xl font-semibold">Operators</h1>
+          <div className="mt-1 text-sm text-muted">{allCustomers ? "All Customers" : <>Customer: <span className="text-text font-medium">{selectedTenantName}</span></>}</div>
         </div>
-        <Button onClick={() => setShowNew((s) => !s)}>
+        <Button onClick={() => setShowNew((s) => !s)} disabled={allCustomers}>
           {showNew ? <><X size={14} /> Cancel</> : <><Plus size={14} /> New operator</>}
         </Button>
       </div>
 
       {err && <div className="text-err text-sm mb-4">{err}</div>}
+
+      {allCustomers && (
+        <Card>
+          <CardBody>
+            <div className="text-sm text-muted">
+              Operators are a customer&apos;s own staff. Select a customer in the <strong>Customer context</strong>
+              {" "}selector (top-left) to view and manage its operators.
+            </div>
+          </CardBody>
+        </Card>
+      )}
 
       {showNew && (
         <Card className="mb-6">
@@ -135,6 +147,7 @@ export default function OperatorsPage() {
         </Card>
       )}
 
+      {!allCustomers && (
       <Card>
         <CardBody className="p-0">
           {rows === null ? <EmptyState title="Loading…" /> : rows.length === 0 ? (
@@ -190,6 +203,7 @@ export default function OperatorsPage() {
           )}
         </CardBody>
       </Card>
+      )}
     </div>
   );
 }

@@ -34,7 +34,7 @@ type siteWriteReq struct {
 
 func (b *Base) SitesRoutes() http.Handler {
 	r := chi.NewRouter()
-	r.Use(auth.RequireTenant)
+	r.Use(auth.RequireTenantOrPlatform)
 	r.Get("/", b.listSites)
 	r.Post("/", b.createSite)
 	r.Get("/{id}", b.getSite)
@@ -46,7 +46,12 @@ func (b *Base) SitesRoutes() http.Handler {
 }
 
 func (b *Base) listSites(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.EffectiveTenantID(r)
+	// Global Customer Context: a super-admin may omit tenant_id to list sites
+	// across ALL customers (fan-out); a regular operator is pinned to their own.
+	tenantID, ok := b.tenantScopeForList(w, r)
+	if !ok {
+		return
+	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 
@@ -70,7 +75,7 @@ func (b *Base) listSites(w http.ResponseWriter, r *http.Request) {
 	rows, err := b.DB.Query(ctx, `
         SELECT id, tenant_id, code, name, timezone, COALESCE(country,''), status, metadata, created_at, updated_at
           FROM sites
-         WHERE tenant_id = $1
+         WHERE ($1 = '' OR tenant_id::text = $1)
            AND ($5 OR status <> 'archived')
            AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3::uuid))
          ORDER BY created_at DESC, id DESC
@@ -102,7 +107,15 @@ func (b *Base) listSites(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Base) createSite(w http.ResponseWriter, r *http.Request) {
+	// A Site must always belong to exactly one explicit Customer. For a
+	// super-admin the owning customer is the ?tenant_id= (the Control Panel's
+	// selected Customer Context); refuse a create with no customer chosen rather
+	// than silently attaching the site to a default/first tenant.
 	tenantID := auth.EffectiveTenantID(r)
+	if tenantID == "" {
+		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "select a customer before creating a site")
+		return
+	}
 	var req siteWriteReq
 	if err := DecodeJSON(r, &req); err != nil {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "bad body")

@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState } from "react";
 import { api, ListResp, FleetAppliance, TelemetryRow } from "@/lib/api";
-import { useTenant } from "@/lib/use-tenant";
+import { useCustomer } from "@/lib/customer-context";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
@@ -46,20 +46,20 @@ function certHealth(last_health: unknown): { label: string; tone: "ok" | "info" 
 }
 
 export default function FleetPage() {
-  const tenantID = useTenant();
+  const { selectedTenantId: tenantID, ready } = useCustomer();
   const [rows, setRows] = useState<FleetAppliance[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [telemetry, setTelemetry] = useState<Record<string, TelemetryRow[] | "loading">>({});
 
   async function load() {
-    if (!tenantID) return;
+    if (!ready) return;
     try {
       const r = await api.get<ListResp<FleetAppliance>>(`/cloud/v1/fleet?tenant_id=${tenantID}`);
       setRows(r.data ?? []);
     } catch (e) { setErr(errMsg(e)); }
   }
-  useEffect(() => { load(); }, [tenantID]);
+  useEffect(() => { setRows(null); load(); }, [ready, tenantID]);
 
   async function loadTelemetry(id: string) {
     setTelemetry((t) => ({ ...t, [id]: "loading" }));

@@ -41,7 +41,7 @@ type appWriteReq struct {
 
 func (b *Base) AppliancesRoutes() http.Handler {
 	r := chi.NewRouter()
-	r.Use(auth.RequireTenant)
+	r.Use(auth.RequireTenantOrPlatform)
 	r.Get("/", b.listAppliances)
 	r.Post("/", b.createAppliance)
 	r.Get("/{id}", b.getAppliance)
@@ -154,7 +154,12 @@ func (b *Base) effectiveConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Base) listAppliances(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.EffectiveTenantID(r)
+	// Global Customer Context: super-admin may omit tenant_id for an all-customers
+	// fan-out; a regular operator stays pinned to their own tenant.
+	tenantID, ok := b.tenantScopeForList(w, r)
+	if !ok {
+		return
+	}
 	siteFilter := r.URL.Query().Get("site_id")
 	ctx, cancel := DBCtx(r)
 	defer cancel()
@@ -183,7 +188,8 @@ func (b *Base) listAppliances(w http.ResponseWriter, r *http.Request) {
                enrolled_at, last_seen_at, status,
                COALESCE(public_key,''), metadata, created_at, updated_at
           FROM appliances
-         WHERE tenant_id = $1
+         WHERE tenant_id IS NOT NULL
+           AND ($1 = '' OR tenant_id::text = $1)
            AND ($2::uuid IS NULL OR site_id = $2)
            AND ($3::timestamptz IS NULL OR (created_at, id) < ($3, $4::uuid))
          ORDER BY created_at DESC, id DESC

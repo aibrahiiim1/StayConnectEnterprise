@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, TopResp, UsageSummary, Whoami } from "@/lib/api";
+import { api, TopResp, UsageSummary } from "@/lib/api";
+import { useCustomer } from "@/lib/customer-context";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { KpiCard } from "@/components/kpi-card";
 import { Badge } from "@/components/ui/badge";
@@ -26,38 +27,17 @@ type FleetLicenseSummary = {
 };
 
 export default function DashboardPage() {
-  const [me, setMe] = useState<Whoami | null>(null);
+  // Dashboard follows the Global Customer Context: a concrete customer shows that
+  // customer's usage; "All Customers" (platform) shows the fleet-wide license
+  // roll-up and no single-customer usage.
+  const { me, isPlatform, selectedTenantId, selectedTenantName, ready } = useCustomer();
   const [summary, setSummary] = useState<UsageSummary | null>(null);
-
   const [top, setTop] = useState<TopResp | null>(null);
-  const [tenantID, setTenantID] = useState<string | null>(null);
   const [fleetLicenses, setFleetLicenses] = useState<FleetLicenseSummary | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const isPlatform = !!me?.is_super_admin;
-
-  // Resolve the tenant context. Platform admins default to dev; tenant users
-  // use their DefaultTenantID.
-  useEffect(() => {
-    (async () => {
-      try {
-        const who = await api.get<Whoami>("/v1/auth/whoami");
-        setMe(who);
-        let t = who.default_tenant_id;
-        if (!t && who.is_super_admin) {
-          const ts = await api.get<{ data: { id: string; slug: string }[] }>("/v1/tenants");
-          t = ts.data.find((x) => x.slug === "dev")?.id ?? ts.data[0]?.id;
-        }
-        if (!t) {
-          setErr("No tenant scope available.");
-          return;
-        }
-        setTenantID(t);
-      } catch (e: any) {
-        setErr(e?.message ?? "Failed to load identity");
-      }
-    })();
-  }, []);
+  const tenantID = selectedTenantId; // "" = All Customers
+  const allCustomers = tenantID === "";
 
   // Platform (super-admin) view: authoritative ownership-aware roll-up computed
   // server-side. A license whose bound appliance/site was deleted is counted as
@@ -74,7 +54,7 @@ export default function DashboardPage() {
   }, [isPlatform]);
 
   useEffect(() => {
-    if (!tenantID) return;
+    if (!ready || allCustomers) { setSummary(null); setTop(null); return; }
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     const q = `tenant_id=${tenantID}&tz=${encodeURIComponent(tz)}`;
     (async () => {
@@ -89,7 +69,7 @@ export default function DashboardPage() {
         setErr(e?.message ?? "Failed to load dashboard");
       }
     })();
-  }, [tenantID]);
+  }, [ready, tenantID, allCustomers]);
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -97,6 +77,7 @@ export default function DashboardPage() {
         <div>
           <div className="text-xs text-muted uppercase tracking-wider">Overview</div>
           <h1 className="text-2xl font-semibold">Dashboard</h1>
+          <div className="mt-1 text-sm text-muted">{allCustomers ? "All Customers — fleet-wide view" : <>Customer: <span className="text-text font-medium">{selectedTenantName}</span></>}</div>
         </div>
         {/* Simple license model: no plan/subscription is surfaced anywhere in
             the normal workflow — the license itself is the entitlement. */}
@@ -138,7 +119,9 @@ export default function DashboardPage() {
           <CardTitle>Top sites (this month)</CardTitle>
         </CardHeader>
         <CardBody>
-          {!top ? (
+          {allCustomers ? (
+            <EmptyState title="Select a customer" hint="Pick a customer (top-left) to see its per-site usage. The fleet license roll-up above spans all customers." />
+          ) : !top ? (
             <EmptyState title="Loading…" />
           ) : top.rows.length === 0 ? (
             <EmptyState title="No usage yet" hint="Activity will appear here as guests connect." />
