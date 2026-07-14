@@ -26,7 +26,7 @@ type Pending = {
 };
 type Tenant = { id: string; slug: string; name: string };
 type Site = { id: string; code: string; name: string };
-type AssignmentStatus = { issued?: boolean; state?: string; adopted_at?: string };
+type AssignmentStatus = { issued?: boolean; state?: string; adopted_at?: string; online?: boolean; license_active?: boolean; converged?: boolean };
 type ApplianceRow = { id: string; serial: string; lifecycle_state?: string; tenant_id?: string; wan_mac?: string };
 
 const STEPS = [
@@ -208,7 +208,9 @@ export default function OnboardingPage() {
     if (!id || phase === "" || phase === "active") return;
     try {
       const a = await api.get<AssignmentStatus>(`/cloud/v1/appliances-admin/${id}/assignment`);
-      if (a.adopted_at) setPhase("active");
+      // "Active" = the appliance has converged: it is online (heartbeating over
+      // mTLS) and holds an active license. (adopted_at is legacy/never populated.)
+      if (a.converged || a.adopted_at) setPhase("active");
     } catch { /* keep polling */ }
   }, [phase]);
   useEffect(() => {

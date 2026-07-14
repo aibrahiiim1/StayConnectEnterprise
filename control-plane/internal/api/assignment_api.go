@@ -175,12 +175,30 @@ func (b *Base) PlatformAssignmentStatus(w http.ResponseWriter, r *http.Request) 
 		`SELECT COALESCE((signed_doc->>'expires_at')::bigint,0) FROM appliance_signed_assignments WHERE appliance_id=$1`,
 		id).Scan(&expiresAt)
 	expired := expiresAt != 0 && time.Now().Unix() > expiresAt
+
+	// Convergence signals for the onboarding wizard: has the appliance actually
+	// come online (heartbeating over mTLS) and does it hold an active license?
+	// This is the real "Active" state to wait for — the assignment ack columns
+	// (adopted_at / last_acked_version) are not reliably populated by the current
+	// adoption path, so the wizard must not gate on them.
+	var appStatus string
+	_ = b.DB.QueryRow(ctx, `SELECT COALESCE(status,'') FROM appliances WHERE id=$1`, id).Scan(&appStatus)
+	online := appStatus == "online"
+	var licenseActive bool
+	_ = b.DB.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM licenses
+		    WHERE $1 = ANY(appliance_ids) AND status='active'
+		      AND (valid_until IS NULL OR valid_until > now()))`, id).Scan(&licenseActive)
+
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"issued": true, "version": version, "state": state,
 		"tenant_id": tenantID, "site_id": siteID,
 		"identity_key_fingerprint": fpr, "issued_at": issuedAt, "updated_at": updatedAt,
 		"signer_key_id": signerKeyID(b, ctx, id),
 		"expires_at": expiresAt, "expired": expired,
+		// Real convergence state (see comment above).
+		"online": online, "license_active": licenseActive,
+		"converged": online && licenseActive,
 	})
 }
 
