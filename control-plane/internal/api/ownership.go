@@ -110,12 +110,12 @@ func (b *Base) tenantBlockers(ctx context.Context, tenantID string) ([]blocker, 
 	} else if n > 0 {
 		out = append(out, blocker{Type: "license", Label: "Licenses", Count: n, Resource: "licenses", IDs: ids})
 	}
-	// Active (non-canceled) subscription.
-	if ids, n, err := b.countIDs(ctx, `SELECT id::text FROM tenant_subscriptions WHERE tenant_id=$1 AND status <> 'canceled' AND ended_at IS NULL`, tenantID); err != nil {
-		return nil, err
-	} else if n > 0 {
-		out = append(out, blocker{Type: "subscription", Label: "Active Subscription", Count: n, Resource: "subscription", IDs: ids})
-	}
+	// NOTE: tenant_subscriptions is intentionally NOT a blocker. Subscriptions
+	// were retired in the simple-license model (the license is the entitlement),
+	// so an "active" subscription row is vestigial legacy data with no UI to
+	// cancel it — blocking on it created a dead-end where a Customer could never
+	// be deleted. The delete transaction purges tenant_subscriptions directly
+	// (see deleteTenantSafe), so nothing is orphaned.
 	// Live enrollment tokens.
 	if ids, n, err := b.countIDs(ctx, `SELECT id::text FROM appliance_bootstrap_tokens WHERE tenant_id=$1 AND consumed_at IS NULL AND (expires_at IS NULL OR expires_at > now())`, tenantID); err != nil {
 		return nil, err
