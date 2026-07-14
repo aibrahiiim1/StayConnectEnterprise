@@ -153,7 +153,7 @@ const (
 // has permWrite everywhere. Matrix per docs/ROLE_AND_SCOPE_MATRIX.md.
 var rolePerms = map[string]map[string]perm{
 	"hotel_it_manager": {
-		"guest-access-plans": permWrite, "voucher-batches": permWrite,
+		"guest-access-plans": permWrite, "voucher-batches": permWrite, "guest-accounts": permWrite,
 		"vouchers": permWrite, "sessions": permWrite, "pms-providers": permWrite,
 		"auth-methods": permWrite, "walled-garden": permWrite,
 		"portal-branding": permWrite, "notification-providers": permWrite,
@@ -165,21 +165,21 @@ var rolePerms = map[string]map[string]perm{
 		"diagnostics": permWrite,
 	},
 	"front_office_operator": {
-		"voucher-batches": permWrite, "vouchers": permWrite, "sessions": permWrite,
+		"voucher-batches": permWrite, "guest-accounts": permWrite, "vouchers": permWrite, "sessions": permWrite,
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "walled-garden": permRead, "payments": permRead,
 		"reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
 		"diagnostics": permRead,
 	},
 	"guest_relations_operator": {
-		"voucher-batches": permWrite, "vouchers": permWrite, "sessions": permWrite,
+		"voucher-batches": permWrite, "guest-accounts": permWrite, "vouchers": permWrite, "sessions": permWrite,
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "payments": permRead, "reports": permRead,
 		"audit": permRead, "license": permRead, "backups": permRead, "walled-garden": permRead,
 		"diagnostics": permRead,
 	},
 	"voucher_operator": {
-		"voucher-batches": permWrite, "vouchers": permWrite,
+		"voucher-batches": permWrite, "guest-accounts": permWrite, "vouchers": permWrite,
 		"guest-access-plans": permRead, "sessions": permRead, "reports": permRead,
 		"license": permRead, "diagnostics": permRead,
 	},
@@ -189,7 +189,7 @@ var rolePerms = map[string]map[string]perm{
 		"diagnostics": permRead,
 	},
 	"site_viewer": {
-		"guest-access-plans": permRead, "voucher-batches": permRead, "vouchers": permRead,
+		"guest-access-plans": permRead, "voucher-batches": permRead, "guest-accounts": permRead, "vouchers": permRead,
 		"sessions": permRead, "pms-providers": permRead, "auth-methods": permRead,
 		"walled-garden": permRead, "portal-branding": permRead, "payments": permRead,
 		"notification-providers": permRead, "social-providers": permRead,

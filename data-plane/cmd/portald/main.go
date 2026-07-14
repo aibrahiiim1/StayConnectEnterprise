@@ -164,6 +164,61 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/success?s="+ok2.SessionID+"&t="+fmt.Sprint(ok2.DurationSeconds), http.StatusSeeOther)
 }
 
+func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		h.landing(w, r, "Bad request.")
+		return
+	}
+	username := strings.TrimSpace(r.FormValue("username"))
+	password := r.FormValue("password")
+	if username == "" || password == "" {
+		h.landing(w, r, "Please enter your username and password.")
+		return
+	}
+	ip := clientIP(r)
+	if ip == nil {
+		h.landing(w, r, "Unable to detect your device address.")
+		return
+	}
+	mac, ok := h.arpCache(ip)
+	if !ok {
+		h.landing(w, r, "Your device isn't on the guest network.")
+		return
+	}
+	body, _ := json.Marshal(map[string]string{
+		"ip": ip.String(), "mac": mac.String(), "username": username, "password": password,
+	})
+	req, _ := http.NewRequestWithContext(r.Context(), "POST",
+		"http://unix/v1/sessions/authorize-credentials", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.scd.Do(req)
+	if err != nil {
+		slog.Error("scd authorize-credentials", "err", err)
+		h.landing(w, r, "Service unavailable. Please try again.")
+		return
+	}
+	defer resp.Body.Close()
+	payload, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		var e struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(payload, &e)
+		msg := "Invalid username or password."
+		if e.Error == "LICENSE_CAPACITY_REACHED" {
+			msg = "The guest network is at capacity. Please try again shortly."
+		}
+		h.landing(w, r, msg)
+		return
+	}
+	var ok2 struct {
+		SessionID       string `json:"session_id"`
+		DurationSeconds int    `json:"duration_seconds"`
+	}
+	_ = json.Unmarshal(payload, &ok2)
+	http.Redirect(w, r, "/success?s="+ok2.SessionID+"&t="+fmt.Sprint(ok2.DurationSeconds), http.StatusSeeOther)
+}
+
 func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	dur, _ := time.ParseDuration(r.URL.Query().Get("t") + "s")
@@ -229,6 +284,7 @@ func (h *handler) routes() http.Handler {
 
 	r.Get("/", h.index)
 	r.Post("/auth/voucher", h.authVoucher)
+	r.Post("/auth/credentials", h.authCredentials)
 	r.Post("/auth/otp/request", h.authOTPRequest)
 	r.Post("/auth/otp/verify", h.authOTPVerify)
 	r.Get("/auth/social/start", h.socialStart)

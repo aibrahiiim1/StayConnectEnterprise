@@ -717,6 +717,7 @@ func main() {
 	r.Method("GET", "/metrics", s.met.Handler())
 	r.Post("/v1/sessions/authorize", s.authorize)
 	r.Post("/v1/sessions/authorize-otp", s.authorizeOTP)
+	r.Post("/v1/sessions/authorize-credentials", s.authorizeGuestAccount)
 	r.Post("/v1/sessions/revoke", s.revoke)
 	r.Get("/v1/sessions/status", s.status)
 	r.Post("/v1/auth/otp/issue", s.otpIssue)

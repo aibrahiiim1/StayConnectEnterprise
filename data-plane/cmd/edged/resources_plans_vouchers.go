@@ -5,6 +5,7 @@ package main
 // site scope, the license-provisioning gate and edged response conventions.
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"net/http"
@@ -13,8 +14,65 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/codegen"
 	"github.com/stayconnect/enterprise/data-plane/internal/crockford"
 )
+
+// generateUniqueCodes produces n codes per opts, then guarantees they do not
+// already exist anywhere in the vouchers table (the global unique index),
+// regenerating any collisions. Bounded retries; returns a clear error if the
+// configured space is too small.
+func (s *server) generateUniqueCodes(ctx context.Context, n int, opts codegen.Options) ([]string, error) {
+	codes, err := codegen.GenerateN(n, opts)
+	if err != nil {
+		return nil, err
+	}
+	for round := 0; round < 12; round++ {
+		var clash []string
+		rows, err := s.db.Query(ctx, `SELECT code FROM vouchers WHERE code = ANY($1)`, codes)
+		if err != nil {
+			return nil, fmt.Errorf("uniqueness check failed")
+		}
+		for rows.Next() {
+			var c string
+			if err := rows.Scan(&c); err == nil {
+				clash = append(clash, c)
+			}
+		}
+		rows.Close()
+		if len(clash) == 0 {
+			return codes, nil
+		}
+		// Replace only the clashing codes with fresh ones (kept unique in-set).
+		existing := map[string]struct{}{}
+		for _, c := range codes {
+			existing[c] = struct{}{}
+		}
+		clashSet := map[string]struct{}{}
+		for _, c := range clash {
+			clashSet[c] = struct{}{}
+		}
+		repl, err := codegen.GenerateN(len(clash)*2+8, opts)
+		if err != nil {
+			return nil, err
+		}
+		ri := 0
+		for i, c := range codes {
+			if _, bad := clashSet[c]; !bad {
+				continue
+			}
+			for ; ri < len(repl); ri++ {
+				if _, dup := existing[repl[ri]]; !dup {
+					codes[i] = repl[ri]
+					existing[repl[ri]] = struct{}{}
+					ri++
+					break
+				}
+			}
+		}
+	}
+	return nil, fmt.Errorf("could not generate unique codes — increase length or character set")
+}
 
 // ----- guest access plans ----------------------------------------------------
 
@@ -318,6 +376,21 @@ type edgeVoucherBatch struct {
 	Name       *string   `json:"name,omitempty"`
 	Count      int       `json:"count"`
 	CreatedAt  time.Time `json:"created_at"`
+	// Generation metadata (null for legacy batches).
+	CodeLength       *int    `json:"code_length,omitempty"`
+	CharMode         *string `json:"char_mode,omitempty"`
+	CodePrefix       *string `json:"code_prefix,omitempty"`
+	ExcludeAmbiguous *bool   `json:"exclude_ambiguous,omitempty"`
+	// State totals across the batch (filled by list/get).
+	Totals *voucherTotals `json:"totals,omitempty"`
+}
+
+type voucherTotals struct {
+	Unused    int `json:"unused"`
+	Active    int `json:"active"`
+	Exhausted int `json:"exhausted"`
+	Expired   int `json:"expired"`
+	Revoked   int `json:"revoked"`
 }
 
 type edgeVoucher struct {
@@ -356,10 +429,18 @@ func (s *server) listVoucherBatches(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
-        SELECT id, template_id, name, count, created_at
-          FROM voucher_batches
-         WHERE tenant_id = $1
-         ORDER BY created_at DESC, id DESC
+        SELECT b.id, b.template_id, b.name, b.count, b.created_at,
+               b.code_length, b.char_mode, b.code_prefix, b.exclude_ambiguous,
+               COUNT(*) FILTER (WHERE v.state='unused'),
+               COUNT(*) FILTER (WHERE v.state='active'),
+               COUNT(*) FILTER (WHERE v.state='exhausted'),
+               COUNT(*) FILTER (WHERE v.state='expired'),
+               COUNT(*) FILTER (WHERE v.state='revoked')
+          FROM voucher_batches b
+          LEFT JOIN vouchers v ON v.batch_id = b.id AND v.tenant_id = b.tenant_id
+         WHERE b.tenant_id = $1
+         GROUP BY b.id
+         ORDER BY b.created_at DESC, b.id DESC
     `, s.tenantID)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
@@ -369,10 +450,14 @@ func (s *server) listVoucherBatches(w http.ResponseWriter, r *http.Request) {
 	var out []edgeVoucherBatch
 	for rows.Next() {
 		var vb edgeVoucherBatch
-		if err := rows.Scan(&vb.ID, &vb.TemplateID, &vb.Name, &vb.Count, &vb.CreatedAt); err != nil {
+		var t voucherTotals
+		if err := rows.Scan(&vb.ID, &vb.TemplateID, &vb.Name, &vb.Count, &vb.CreatedAt,
+			&vb.CodeLength, &vb.CharMode, &vb.CodePrefix, &vb.ExcludeAmbiguous,
+			&t.Unused, &t.Active, &t.Exhausted, &t.Expired, &t.Revoked); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
+		vb.Totals = &t
 		out = append(out, vb)
 	}
 	writeList(w, out)
@@ -400,10 +485,14 @@ func (s *server) getVoucherBatch(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) createVoucherBatch(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		TemplateID string  `json:"template_id"`
-		Count      int     `json:"count"`
-		Name       *string `json:"name,omitempty"`
-		Note       *string `json:"note,omitempty"`
+		TemplateID       string  `json:"template_id"`
+		Count            int     `json:"count"`
+		Name             *string `json:"name,omitempty"`
+		Note             *string `json:"note,omitempty"`
+		CodeLength       int     `json:"code_length,omitempty"`
+		CharMode         string  `json:"char_mode,omitempty"`
+		CodePrefix       string  `json:"code_prefix,omitempty"`
+		ExcludeAmbiguous *bool   `json:"exclude_ambiguous,omitempty"`
 	}
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
@@ -416,6 +505,23 @@ func (s *server) createVoucherBatch(w http.ResponseWriter, r *http.Request) {
 	if in.Count < 1 || in.Count > 10000 {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "count must be 1..10000")
 		return
+	}
+	// Ambiguous-character exclusion defaults ON.
+	excludeAmbiguous := true
+	if in.ExcludeAmbiguous != nil {
+		excludeAmbiguous = *in.ExcludeAmbiguous
+	}
+	if in.CharMode == "" {
+		in.CharMode = codegen.ModeAlnum
+	}
+	if in.CodeLength == 0 {
+		in.CodeLength = 8
+	}
+	opts := codegen.Options{
+		Length:           in.CodeLength,
+		Mode:             in.CharMode,
+		Prefix:           in.CodePrefix,
+		ExcludeAmbiguous: excludeAmbiguous,
 	}
 
 	ctx, cancel := dbCtx(r)
@@ -433,9 +539,12 @@ func (s *server) createVoucherBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	codes, err := crockford.GenerateN(in.Count)
+	// Generate, then GUARANTEE global uniqueness against the DB before insert:
+	// vouchers has a global unique index, so regenerate any code that already
+	// exists (bounded retries) instead of failing the batch on a rare collision.
+	codes, err := s.generateUniqueCodes(ctx, in.Count, opts)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "code generation failed")
+		jsonErr(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
 
@@ -453,10 +562,12 @@ func (s *server) createVoucherBatch(w http.ResponseWriter, r *http.Request) {
 
 	var vb edgeVoucherBatch
 	err = tx.QueryRow(ctx, `
-        INSERT INTO voucher_batches (tenant_id, template_id, name, note, count, created_by)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO voucher_batches (tenant_id, template_id, name, note, count, created_by,
+                                     code_length, char_mode, code_prefix, exclude_ambiguous)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9,''), $10)
         RETURNING id, template_id, name, count, created_at
-    `, s.tenantID, in.TemplateID, in.Name, in.Note, in.Count, createdBy).Scan(
+    `, s.tenantID, in.TemplateID, in.Name, in.Note, in.Count, createdBy,
+		opts.Length, opts.Mode, opts.Prefix, opts.ExcludeAmbiguous).Scan(
 		&vb.ID, &vb.TemplateID, &vb.Name, &vb.Count, &vb.CreatedAt)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "batch insert failed")

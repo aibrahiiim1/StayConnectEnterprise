@@ -225,6 +225,46 @@ func (m *Manager) StartOTP(ctx context.Context, mac net.HardwareAddr, ip net.IP,
 	return &Authorized{SessionID: sessionID, GuestID: guestID, ExpiresAt: expiresAt}, nil
 }
 
+// StartGuestAccount creates a session for a guest validated by username/password.
+// Mirrors StartOTP: upsert guest by MAC, atomic licensed-capacity gate, insert the
+// session with guest_account_id set (and no voucher). Uses the exact same
+// production pipeline and capacity reservation as every other method.
+func (m *Manager) StartGuestAccount(ctx context.Context, mac net.HardwareAddr, ip net.IP, accountID, displayName string, durationSeconds int) (*Authorized, error) {
+	tx, err := m.DB.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var guestID string
+	if err := tx.QueryRow(ctx, `
+        INSERT INTO guests (tenant_id, mac, display_name, last_seen_at)
+        VALUES ($1, $2::macaddr, NULLIF($3,''), now())
+        ON CONFLICT (tenant_id, mac) DO UPDATE
+          SET display_name = COALESCE(NULLIF(EXCLUDED.display_name,''), guests.display_name),
+              last_seen_at = now()
+        RETURNING id
+    `, m.TenantID, mac.String(), displayName).Scan(&guestID); err != nil {
+		return nil, fmt.Errorf("upsert guest (account): %w", err)
+	}
+	if err := m.gateCapacity(ctx, tx); err != nil {
+		return nil, err
+	}
+	expiresAt := computeExpiresAt(durationSeconds)
+	var sessionID string
+	if err := tx.QueryRow(ctx, `
+        INSERT INTO sessions (tenant_id, site_id, appliance_id, guest_id, guest_account_id, ip, mac, state, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6::inet, $7::macaddr, 'active', $8)
+        RETURNING id
+    `, m.TenantID, m.SiteID, m.ApplianceID, guestID, accountID, ip.String(), mac.String(), expiresAt).Scan(&sessionID); err != nil {
+		return nil, fmt.Errorf("insert session: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &Authorized{SessionID: sessionID, GuestID: guestID, ExpiresAt: expiresAt}, nil
+}
+
 // StartPMS creates a session for a guest validated against a PMS. Updates
 // guest row by MAC; if reservationID is non-empty we also store it in
 // metadata for the audit trail / future loyalty hooks.

@@ -27,6 +27,7 @@ import (
 var tenantOwnedTables = []string{
 	// children / leaves first (FK dependents)
 	"sessions",
+	"guest_accounts",
 	"auth_otps",
 	"pms_attempts",
 	"accounting_records",

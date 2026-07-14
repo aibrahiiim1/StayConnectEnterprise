@@ -219,6 +219,7 @@ func main() {
 			mountResource(r, s, "guest-access-plans", s.guestAccessPlansRoutes)
 			mountResource(r, s, "voucher-batches", s.voucherBatchesRoutes)
 			mountResource(r, s, "vouchers", s.vouchersRoutes)
+			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
 			mountResource(r, s, "sessions", s.sessionsRoutes)
 			mountResource(r, s, "pms-providers", s.pmsProvidersRoutes)
 			mountResource(r, s, "auth-methods", s.authMethodsRoutes)

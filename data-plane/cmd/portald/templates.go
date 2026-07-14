@@ -47,6 +47,18 @@ const landingHTML = `<!doctype html>
     </form>
   </div>
 
+  <!-- Guest account (username + password) panel -->
+  <div class="panel" id="panel-account">
+    <form method="POST" action="/auth/credentials" autocomplete="off">
+      <label for="ga-username">Username</label>
+      <input id="ga-username" name="username" type="text" autocomplete="username" required maxlength="64" placeholder="username">
+      <label for="ga-password" style="margin-top:10px">Password</label>
+      <input id="ga-password" name="password" type="password" autocomplete="current-password" required maxlength="128" placeholder="password">
+      <button type="submit" style="margin-top:10px">Connect</button>
+      <div class="err">{{.Error}}</div>
+    </form>
+  </div>
+
   <!-- Email panel -->
   <div class="panel" id="panel-email">
     <form data-otp="email" data-stage="dest" autocomplete="off">
@@ -105,6 +117,7 @@ const landingHTML = `<!doctype html>
   <script>
     const Tabs = {
       voucher: { id:'voucher', label:'Voucher', panel:'panel-voucher' },
+      account: { id:'account', label:'Username', panel:'panel-account' },
       email:   { id:'email',   label:'Email',   panel:'panel-email' },
       sms:     { id:'sms',     label:'Phone',   panel:'panel-sms' },
       pms:     { id:'pms',     label:'Room',    panel:'panel-pms' },
@@ -129,6 +142,7 @@ const landingHTML = `<!doctype html>
       const tabsEl = document.getElementById('tabs');
       const enabled = [];
       if (cfg.voucher && cfg.voucher.enabled) enabled.push('voucher');
+      if (cfg.guest_account && cfg.guest_account.enabled) enabled.push('account');
       if (cfg.email   && cfg.email.enabled)   enabled.push('email');
       if (cfg.sms     && cfg.sms.enabled)     enabled.push('sms');
       if (cfg.pms     && cfg.pms.enabled) {

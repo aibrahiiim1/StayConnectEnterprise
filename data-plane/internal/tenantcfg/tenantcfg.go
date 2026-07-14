@@ -25,6 +25,9 @@ type AuthMethods struct {
 	// independently and route to different ticket templates if desired.
 	Social map[string]*AuthMethod `json:"social,omitempty"`
 	PMS    *PMSConfig             `json:"pms,omitempty"`
+	// GuestAccount is the username/password method. Basic-access (never license-
+	// gated); shown on the portal only when enabled.
+	GuestAccount *AuthMethod `json:"guest_account,omitempty"`
 }
 
 // PMSConfig configures the room-number-based guest auth flow. See migration
@@ -32,8 +35,8 @@ type AuthMethods struct {
 type PMSConfig struct {
 	Enabled              bool   `json:"enabled"`
 	TemplateID           string `json:"template_id,omitempty"`
-	Provider             string `json:"provider,omitempty"`             // "stub" | "protel-fias" | ...
-	Mode                 string `json:"mode,omitempty"`                 // "room_lastname" | "room_firstname" | "room_reservation" | "either"
+	Provider             string `json:"provider,omitempty"`              // "stub" | "protel-fias" | ...
+	Mode                 string `json:"mode,omitempty"`                  // "room_lastname" | "room_firstname" | "room_reservation" | "either"
 	MaxFailuresPerRoom   int    `json:"max_failures_per_room,omitempty"` // 0 = use guard default
 	LockoutWindowMinutes int    `json:"lockout_window_minutes,omitempty"`
 }
