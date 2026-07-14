@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/data-plane/internal/livez"
 )
 
 // reexecSelf replaces the process image so acctd re-reads the appliance's
@@ -27,12 +28,20 @@ func reexecSelf() {
 // signed assignment appears, then re-execs into the normal path. An appliance
 // with no customer must not attribute usage to anyone.
 func waitForAssignment(ctx context.Context, store *assignment.Store) {
+	// Beat the liveness heartbeat while paused: acctd IS alive and doing its job
+	// (waiting for an assignment), so the health supervisor must see it as
+	// healthy-idle, not degraded. Beat immediately, then on a short cadence.
+	livez.Touch("acctd")
+	beat := time.NewTicker(5 * time.Second)
+	defer beat.Stop()
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-beat.C:
+			livez.Touch("acctd")
 		case <-t.C:
 			if ten, _, _, _ := store.Resolved(); ten != "" {
 				slog.Info("acctd: assignment arrived; re-executing to start accounting", "tenant_id", ten)
