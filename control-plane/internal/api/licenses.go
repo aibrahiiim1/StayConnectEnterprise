@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -117,24 +119,24 @@ func (b *LicensesBase) list(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := DBCtx(r)
 	defer cancel()
 
-	q := `SELECT ` + licenseCols + ` FROM licenses`
+	// Simple license model: superseded documents are immutable history and are
+	// NEVER returned from the normal fetch — only the current effective license
+	// per site is listed (plus revoked, which the UI still surfaces for audit).
+	conds := []string{`status <> 'superseded'`}
 	args := []any{}
 	if tenantID != "" {
-		q += ` WHERE tenant_id = $1`
 		args = append(args, tenantID)
+		conds = append(conds, `tenant_id = $`+strconv.Itoa(len(args)))
 	} else if s := auth.FromContext(r.Context()); s == nil || !s.IsSuperAdmin {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "tenant scope required")
 		return
 	}
 	if site := r.URL.Query().Get("site_id"); site != "" {
-		if len(args) == 1 {
-			q += ` AND site_id = $2`
-		} else {
-			q += ` WHERE site_id = $1`
-		}
 		args = append(args, site)
+		conds = append(conds, `site_id = $`+strconv.Itoa(len(args)))
 	}
-	q += ` ORDER BY created_at DESC LIMIT 200`
+	q := `SELECT ` + licenseCols + ` FROM licenses WHERE ` + strings.Join(conds, " AND ") +
+		` ORDER BY created_at DESC LIMIT 200`
 
 	rows, err := b.DB.Query(ctx, q, args...)
 	if err != nil {
