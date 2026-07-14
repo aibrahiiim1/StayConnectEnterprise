@@ -66,27 +66,46 @@ Generate and manage batches of guest WiFi voucher codes from a plan.
   **Totals** (unused/active/used/revoked) · Created · (View codes · CSV · Revoke
   unused).
 - **New batch** form: **Plan**, **Count** (1–10000), **Label**, **Code length**
-  (6–10), **Character mode** (numbers / letters / letters+numbers / complex),
-  **Prefix** (optional, A–Z/0–9), **Exclude ambiguous** (on by default). Codes use
-  secure random generation, are globally unique, and always exclude I/L/O/U.
+  (6–10; the **random portion** only), **Character mode** (Numbers / Uppercase
+  letters / Uppercase letters and numbers / Uppercase-lowercase letters and
+  numbers), **Prefix** (optional, A–Z/0–9; *additional* to the random portion),
+  **Exclude ambiguous** (on by default). A live **example** and the exact
+  **character set** are shown. Codes use secure random generation, are globally
+  unique, and always exclude I/L/O/U (so a printed code matches what is typed).
 - **Batch detail** (`/voucher-batches/{id}`): search/filter codes by text and
-  state; **copy** an individual code; **print**; **download CSV**; **revoke** an
-  individual unused code. Shows the generation format and state totals.
+  state; click a code for its **Details** (state, plan, duration, speed, data
+  cap, **max devices**, **active devices**, dates); **copy**; **print**;
+  **download CSV**; **revoke** an unused code. **Change plan** for one voucher or
+  the whole batch (*Unused only* / *All eligible*) from a plan dropdown — unused
+  vouchers change immediately, vouchers with a live session are skipped, and
+  revoked/expired/exhausted vouchers are never changed. The code and history are
+  preserved; each change is audited (previous plan, new plan, operator, reason).
 
 ### Guest accounts — `/guest-accounts`
 Username & Password guest sign-in — an alternative to vouchers, bound to a Guest
-Access Plan.
+Access Plan. **License capacity is appliance-wide; the plan's max devices is
+per account** — both are enforced on every login.
 
-- **Columns:** Username · Name · Plan · Status (enabled/disabled) · Valid until ·
-  Last login · Logins.
-- **New account:** Username (3–64), Password (min 6, write-only), **Plan**,
-  optional display name / valid-until / notes.
-- **Per-account actions:** change **Plan**, **Reset** password (invalidates the
-  old one), **Enable/Disable**, **Delete**.
-- **Portal toggle:** *Show Username & Password tab on the captive portal* —
-  controls whether guests see the method. Passwords are argon2id-hashed and never
-  displayed/exported; wrong credentials return one generic error and create no
-  session; repeated failures lock the account temporarily.
+- **Columns:** Username · Name · Plan (inactive badge if retired) · **Devices**
+  (active *of* max) · Status · **Locked** · Validity · Last login · Logins.
+- **New account:** Username (1–64; one letter/digit allowed; case-insensitive,
+  unique per property), Password (1–128, case-sensitive; short allowed with a
+  non-blocking weak-password warning; **write-only**), **Plan** (dropdown with
+  duration/speed/max-devices), optional display name / valid-from / valid-until /
+  notes. Password can be typed (show/hide) or **Generated**.
+- **One-time password:** after create/reset the exact password is shown **once**
+  with **Copy**, then never retrievable. Only an Argon2id hash is stored; no API,
+  list, export, log or audit payload returns the password or hash.
+- **Edit** (pre-filled form): username, plan, display name, valid-from/until,
+  enabled, notes — no delete/recreate. Plan changes apply to future logins only;
+  a running session keeps its policy.
+- **Per-account actions:** **Edit**, **Password** (set/reset with optional
+  *Generate* and *Disconnect existing sessions after reset*), **Enable/Disable**,
+  **Disconnect** active devices, **Delete**.
+- **Portal toggle:** *Show Username & Password tab on the captive portal*.
+  Wrong/unknown/disabled/expired/locked all return one **generic** error and
+  create no session; per-account lockout plus layered throttling (username+IP,
+  username+device, endpoint-wide) damps brute force.
 
 ### Sessions — `/sessions`
 See connected/recent guest devices and force-disconnect them.

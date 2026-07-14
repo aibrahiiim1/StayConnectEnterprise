@@ -164,6 +164,7 @@ type server struct {
 	mail      mail.Mailer
 	sms       sms.Sender
 	socialReg *social.Registry
+	loginRL   *loginLimiter // layered throttling for guest username/password logins
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -335,8 +336,14 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	// never exceed the licensed limit. A rejected guest gets a clear
 	// LICENSE_CAPACITY_REACHED and NO nft/shaping/accounting/session state —
 	// portal, DHCP and DNS keep working and existing sessions are untouched.
-	au, err := s.sess.Start(r.Context(), mac, ip, red.VoucherID, red.DurationSeconds)
+	au, err := s.sess.Start(r.Context(), mac, ip, red.VoucherID, red.MaxDevices, red.DurationSeconds)
 	if err != nil {
+		if devErr := (*session.MaxDevicesError)(nil); errors.As(err, &devErr) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": "MAX_DEVICES_REACHED", "limit": devErr.Limit, "current": devErr.Current,
+			})
+			return
+		}
 		if capErr := (*session.CapacityError)(nil); errors.As(err, &capErr) {
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"error":   "LICENSE_CAPACITY_REACHED",
@@ -583,6 +590,7 @@ func main() {
 		mail:         mail.NewStub(c.MailLogPath),
 		sms:          sms.NewStub(c.SMSLogPath),
 		socialReg:    socialReg,
+		loginRL:      newLoginLimiter(),
 		pmsReg:       pmsReg,
 		pmsBuilt:     pmsBuilt,
 		db:           pool,

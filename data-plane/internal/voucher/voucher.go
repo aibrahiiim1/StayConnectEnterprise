@@ -56,6 +56,7 @@ type Redeemed struct {
 	DataCapBytes    int64
 	DownKbps        int
 	UpKbps          int
+	MaxDevices      int // plan max_concurrent_devices (<=0 = unlimited)
 }
 
 type Store struct {
@@ -70,23 +71,25 @@ func (s *Store) Validate(ctx context.Context, tenantID, code string) (*Redeemed,
 	row := s.DB.QueryRow(ctx, `
         SELECT v.id, v.template_id, v.tenant_id, v.state, v.expires_at,
                v.bytes_used, v.seconds_used,
-               t.duration_seconds, t.data_cap_bytes, t.down_kbps, t.up_kbps
+               t.duration_seconds, t.data_cap_bytes, t.down_kbps, t.up_kbps,
+               t.max_concurrent_devices
           FROM vouchers v
           JOIN ticket_templates t ON t.id = v.template_id
          WHERE v.tenant_id = $1 AND v.code = $2
     `, tenantID, code)
 
 	var (
-		id, tplID, tenID, state   string
-		expiresAt                 *time.Time
-		bytesUsed                 int64
-		secondsUsed               int
-		duration                  *int
-		dataCap                   *int64
-		down, up                  *int
+		id, tplID, tenID, state string
+		expiresAt               *time.Time
+		bytesUsed               int64
+		secondsUsed             int
+		duration                *int
+		dataCap                 *int64
+		down, up                *int
+		maxDevices              int
 	)
 	if err := row.Scan(&id, &tplID, &tenID, &state, &expiresAt,
-		&bytesUsed, &secondsUsed, &duration, &dataCap, &down, &up); err != nil {
+		&bytesUsed, &secondsUsed, &duration, &dataCap, &down, &up, &maxDevices); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -114,6 +117,7 @@ func (s *Store) Validate(ctx context.Context, tenantID, code string) (*Redeemed,
 		TemplateID:      tplID,
 		TenantID:        tenID,
 		DurationSeconds: remaining,
+		MaxDevices:      maxDevices,
 	}
 	if dataCap != nil {
 		r.DataCapBytes = *dataCap - bytesUsed
@@ -135,21 +139,22 @@ func (s *Store) Validate(ctx context.Context, tenantID, code string) (*Redeemed,
 // template's duration/data/bandwidth caps to the resulting session.
 func (s *Store) LoadTemplate(ctx context.Context, templateID string) (*Redeemed, error) {
 	var (
-		duration *int
-		dataCap  *int64
-		down, up *int
+		duration   *int
+		dataCap    *int64
+		down, up   *int
+		maxDevices int
 	)
 	err := s.DB.QueryRow(ctx, `
-        SELECT duration_seconds, data_cap_bytes, down_kbps, up_kbps
+        SELECT duration_seconds, data_cap_bytes, down_kbps, up_kbps, max_concurrent_devices
           FROM ticket_templates WHERE id = $1
-    `, templateID).Scan(&duration, &dataCap, &down, &up)
+    `, templateID).Scan(&duration, &dataCap, &down, &up, &maxDevices)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
-	r := &Redeemed{TemplateID: templateID}
+	r := &Redeemed{TemplateID: templateID, MaxDevices: maxDevices}
 	if duration != nil {
 		r.DurationSeconds = *duration
 	}

@@ -38,6 +38,78 @@ func (e *CapacityError) Error() string {
 	return fmt.Sprintf("LICENSE_CAPACITY_REACHED: %d of %d concurrent online guests in use", e.Current, e.Limit)
 }
 
+// MaxDevicesError is returned when the per-credential Access Plan max_devices
+// limit is reached. Handlers surface it as MAX_DEVICES_REACHED; like
+// CapacityError, nothing (nft, shaping, accounting, session row, voucher
+// activation) is created for the rejected device.
+type MaxDevicesError struct {
+	Limit   int64
+	Current int64
+}
+
+func (e *MaxDevicesError) Error() string {
+	return fmt.Sprintf("MAX_DEVICES_REACHED: %d of %d devices already active for this credential", e.Current, e.Limit)
+}
+
+// reserveDeviceSlot enforces the Access Plan max_devices limit for one
+// credential (a voucher or a guest account) ATOMICALLY, inside tx.
+//
+// Canonical device identity is the guest MAC. The steps, all under a
+// per-credential advisory lock so two concurrent logins for the SAME
+// credential are serialized (a race can never exceed the limit):
+//
+//  1. Take a per-credential xact advisory lock (a different key namespace than
+//     the appliance-capacity lock, and always acquired BEFORE it, so lock
+//     ordering is identical on every path — no deadlock).
+//  2. Close any existing active session for THIS credential on THIS device — a
+//     reconnect/retry from an already-authorized device replaces its own
+//     session and does NOT consume a second slot (idempotent).
+//  3. Count the DISTINCT other devices still active on this credential. If that
+//     already meets the limit, a genuinely new device is rejected.
+//
+// credCol is a fixed internal identifier ("voucher_id" or "guest_account_id"),
+// never user input, so interpolating it is safe. maxDevices <= 0 means the plan
+// does not cap devices (unlimited) and the check is skipped.
+func (m *Manager) reserveDeviceSlot(ctx context.Context, tx pgx.Tx, credCol, credID string, mac net.HardwareAddr, maxDevices int64) error {
+	if maxDevices <= 0 || credID == "" {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 11))`, credID); err != nil {
+		return fmt.Errorf("device-slot lock: %w", err)
+	}
+	// A reconnect from the same device replaces its own prior session so it is
+	// not double-counted. Rolled back with the tx if we then reject.
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`
+        UPDATE sessions SET state='closed', ended_at=now(), end_reason='policy'
+         WHERE %s = $1 AND mac = $2::macaddr AND state='active'`, credCol),
+		credID, mac.String()); err != nil {
+		return fmt.Errorf("device-slot reconcile: %w", err)
+	}
+	var current int64
+	if err := tx.QueryRow(ctx, fmt.Sprintf(
+		`SELECT count(DISTINCT mac) FROM sessions WHERE %s = $1 AND state='active'`, credCol),
+		credID).Scan(&current); err != nil {
+		return fmt.Errorf("device-slot count: %w", err)
+	}
+	if current >= maxDevices {
+		return &MaxDevicesError{Limit: maxDevices, Current: current}
+	}
+	return nil
+}
+
+// ActiveDevices counts the DISTINCT devices (MACs) currently active for a
+// credential. credCol must be "voucher_id" or "guest_account_id".
+func (m *Manager) ActiveDevices(ctx context.Context, credCol, credID string) (int64, error) {
+	if credCol != "voucher_id" && credCol != "guest_account_id" {
+		return 0, fmt.Errorf("bad credential column")
+	}
+	var n int64
+	err := m.DB.QueryRow(ctx, fmt.Sprintf(
+		`SELECT count(DISTINCT mac) FROM sessions WHERE %s = $1 AND state='active'`, credCol),
+		credID).Scan(&n)
+	return n, err
+}
+
 // gateCapacity enforces the licensed cap ATOMICALLY: it takes a per-APPLIANCE
 // advisory lock inside tx (serializing concurrent authorizations for THIS
 // appliance only — the second login waits for the first to commit, then sees
@@ -127,7 +199,9 @@ type Authorized struct {
 }
 
 // Start upserts the guest, creates a session, and returns identifiers.
-func (m *Manager) Start(ctx context.Context, mac net.HardwareAddr, ip net.IP, voucherID string, durationSeconds int) (*Authorized, error) {
+// maxDevices is the voucher's Access Plan max_concurrent_devices (<=0 =
+// unlimited); it is enforced atomically alongside the licensed capacity.
+func (m *Manager) Start(ctx context.Context, mac net.HardwareAddr, ip net.IP, voucherID string, maxDevices, durationSeconds int) (*Authorized, error) {
 	tx, err := m.DB.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -144,7 +218,12 @@ func (m *Manager) Start(ctx context.Context, mac net.HardwareAddr, ip net.IP, vo
 		return nil, fmt.Errorf("upsert guest: %w", err)
 	}
 
-	// Licensed-capacity gate + session creation are one atomic unit.
+	// Per-credential max-devices gate, then licensed-capacity gate, then session
+	// creation — all one atomic unit. Locks are always acquired credential-first,
+	// appliance-second, so ordering is identical on every path.
+	if err := m.reserveDeviceSlot(ctx, tx, "voucher_id", voucherID, mac, int64(maxDevices)); err != nil {
+		return nil, err
+	}
 	if err := m.gateCapacity(ctx, tx); err != nil {
 		return nil, err
 	}
@@ -229,7 +308,7 @@ func (m *Manager) StartOTP(ctx context.Context, mac net.HardwareAddr, ip net.IP,
 // Mirrors StartOTP: upsert guest by MAC, atomic licensed-capacity gate, insert the
 // session with guest_account_id set (and no voucher). Uses the exact same
 // production pipeline and capacity reservation as every other method.
-func (m *Manager) StartGuestAccount(ctx context.Context, mac net.HardwareAddr, ip net.IP, accountID, displayName string, durationSeconds int) (*Authorized, error) {
+func (m *Manager) StartGuestAccount(ctx context.Context, mac net.HardwareAddr, ip net.IP, accountID, displayName string, maxDevices, durationSeconds int) (*Authorized, error) {
 	tx, err := m.DB.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -246,6 +325,11 @@ func (m *Manager) StartGuestAccount(ctx context.Context, mac net.HardwareAddr, i
         RETURNING id
     `, m.TenantID, mac.String(), displayName).Scan(&guestID); err != nil {
 		return nil, fmt.Errorf("upsert guest (account): %w", err)
+	}
+	// Per-credential max-devices gate, then licensed-capacity gate (same lock
+	// order as the voucher path).
+	if err := m.reserveDeviceSlot(ctx, tx, "guest_account_id", accountID, mac, int64(maxDevices)); err != nil {
+		return nil, err
 	}
 	if err := m.gateCapacity(ctx, tx); err != nil {
 		return nil, err

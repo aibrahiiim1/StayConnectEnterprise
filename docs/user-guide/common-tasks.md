@@ -43,7 +43,7 @@ If no OS auto-pops the portal at all on any device, the appliance's DHCP option 
 3. **Used** → already redeemed. If by a different MAC, the code was shared or guessed. Reissue a fresh code.
 4. **Expired** → generate a new one.
 5. **Revoked** → the whole batch is gone. Generate a new batch or hand them a code from a live batch.
-6. **Valid but not letting them in** → check quota/data cap on the batch; check concurrent-device limit on the subscription plan.
+6. **Valid but not letting them in** → check quota/data cap on the batch. If the guest sees **"device limit reached"** (`MAX_DEVICES_REACHED`), the voucher/account is at its **plan Max devices** — disconnect one of its devices, move it to a higher plan, or hand them a separate code. A reconnect from the *same* device never uses an extra slot. `LICENSE_CAPACITY_REACHED` instead means the whole appliance is at its licensed concurrent-guest cap.
 
 ## PMS verification failed
 

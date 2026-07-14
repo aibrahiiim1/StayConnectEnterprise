@@ -151,7 +151,14 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(payload, &e) == nil && e.Error != "" {
-			msg = "Voucher " + e.Error + "."
+			switch e.Error {
+			case "MAX_DEVICES_REACHED":
+				msg = "This voucher has reached its device limit. Disconnect another device and try again."
+			case "LICENSE_CAPACITY_REACHED":
+				msg = "The guest network is at capacity. Please try again shortly."
+			default:
+				msg = "Voucher " + e.Error + "."
+			}
 		}
 		h.landing(w, r, msg)
 		return
@@ -205,8 +212,13 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.Unmarshal(payload, &e)
 		msg := "Invalid username or password."
-		if e.Error == "LICENSE_CAPACITY_REACHED" {
+		switch e.Error {
+		case "LICENSE_CAPACITY_REACHED":
 			msg = "The guest network is at capacity. Please try again shortly."
+		case "MAX_DEVICES_REACHED":
+			msg = "This account has reached its device limit. Disconnect another device and try again."
+		case "TOO_MANY_ATTEMPTS":
+			msg = "Too many attempts. Please wait a minute and try again."
 		}
 		h.landing(w, r, msg)
 		return

@@ -106,14 +106,26 @@ export type GuestAccount = {
   template_id: string; enabled: boolean;
   valid_from?: string | null; valid_until?: string | null;
   last_login_at?: string | null; login_count: number;
+  locked_until?: string | null;
+  // Derived (list/get): plan device cap + live distinct active devices.
+  max_devices?: number | null; active_devices?: number;
   created_at: string; updated_at: string;
 };
+
+// Response of create / set-password: password reveal is one-time only.
+export type GuestAccountCreateResp = { account: GuestAccount; generated_password?: string };
+export type GuestAccountPasswordResp = { status: string; disconnected_sessions?: number; generated_password?: string };
 
 export type Voucher = {
   id: string; tenant_id: string; template_id: string; batch_id?: string | null;
   code: string; code_display: string; state: string; issued_at: string;
   activated_at?: string; expires_at?: string;
   bytes_used: number; seconds_used: number;
+  // Enriched on the detail view (GET /vouchers/{id}).
+  plan_name?: string | null; plan_code?: string | null;
+  duration_seconds?: number | null; data_cap_bytes?: number | null;
+  down_kbps?: number | null; up_kbps?: number | null;
+  max_devices?: number | null; active_devices?: number | null;
 };
 
 export type Session = {

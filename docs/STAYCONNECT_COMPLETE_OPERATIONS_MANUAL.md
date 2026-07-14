@@ -452,30 +452,55 @@ login via the **Walled garden** (§17).
 Description, **Duration (s)** (blank = unlimited time), **Data cap (bytes)** (blank
 = unlimited), **Down/Up kbps**, **Max devices**, **Price (cents)**, **Currency**.
 
-> "Max devices" on an access plan is a **per-voucher device limit** — a different
-> concept from the license's appliance-wide concurrent-guest capacity (§10).
+> "Max devices" on an access plan is a **per-credential device limit** — the
+> concurrent devices allowed on one voucher or one guest account — a different
+> concept from the license's appliance-wide concurrent-guest capacity (§10). Both
+> are enforced on **every** login, atomically and concurrency-safe: a device
+> rejected for either reason gets `MAX_DEVICES_REACHED` / `LICENSE_CAPACITY_REACHED`
+> and no session/nft/shaping/accounting/voucher-activation is created. A reconnect
+> from a device already signed in on the same credential does **not** consume a
+> second slot; disconnect/expiry/reap frees the slot. Guest Access Plans are the
+> per-guest tiers here — not the retired commercial *License Plans*.
 
 **Voucher batch** (**Voucher batches** → **New batch**): choose an active **Plan**,
 a **Count** (1–10000), a **Label**, and the **code generation options**:
-- **Code length** 6–10.
-- **Character mode**: numbers only · uppercase letters · letters + numbers ·
-  complex (letters + numbers).
-- **Optional prefix** (A–Z/0–9, e.g. `PARTY`).
+- **Code length** 6–10 — the **random portion** only.
+- **Character mode**: **Numbers** · **Uppercase letters** · **Uppercase letters
+  and numbers** · **Uppercase/lowercase letters and numbers**. The form shows a
+  live **example** and the exact **character set**.
+- **Optional prefix** (A–Z/0–9, e.g. `PARTY`) — **additional** to the random
+  portion.
 - **Exclude ambiguous characters** (on by default): drops `0/O`, `1/I/L`, `5/S`.
   (`I, L, O, U` are *always* excluded so a code matches exactly what the guest
   types.) Codes use secure random generation and are globally unique; a batch too
   large for the chosen space is rejected rather than weakening randomness.
 
-Then **view the codes** (search/filter, copy a code, print, or **download the
-CSV**), **revoke** an individual unused code, or **Revoke unused** for the whole
-batch. Each batch shows its generation format and unused/active/used/revoked
-totals. Existing legacy (12-char) batches keep working unchanged.
+Then **view the codes** (search/filter, copy, print, **download CSV**), open a
+code for its **Details** (state, plan, duration, speed, data cap, max devices,
+active devices, dates), **revoke** an unused code, or **Revoke unused** for the
+batch. **Change a voucher's plan** from a dropdown — for one voucher or the batch
+(*Unused only* / *All eligible*): unused vouchers change at once, a voucher with a
+**live session** is never repointed (end it first), and revoked/expired/exhausted
+vouchers can't be changed. The code, usage history and audit trail are preserved;
+each change records previous plan, new plan, operator and reason. Legacy (12-char)
+batches keep working unchanged.
 
-**Guest accounts** (**Guest accounts** → **New account**): username, password
-(min 6), an active **Plan**, optional display name / valid-until / notes. Manage
-each account (change plan, **reset password**, enable/disable, delete) and see its
-last-login/usage. Toggle **Show Username & Password tab on the captive portal** to
-expose the method to guests.
+**Guest accounts** (**Guest accounts** → **New account**): **username** (1–64;
+one letter/digit allowed; case-**insensitive**, unique per property), **password**
+(1–128, case-**sensitive**; short is allowed with a non-blocking weak-password
+warning), an active **Plan** (dropdown showing duration/speed/max-devices), and
+optional display name / valid-from / valid-until / notes. The password can be typed
+(show/hide) or **Generated**, and is shown **once** afterwards with **Copy** — it
+can never be retrieved later (only an Argon2id hash is stored; no read/list/export/
+log/audit ever returns it). **Edit** any account in place (username, password,
+plan, display name, validity, enabled, notes — no delete/recreate); plan changes
+apply to **future** logins while a running session keeps its policy. The list shows
+**active devices** (e.g. `1 of 2`), locked status, validity and login history; per
+account you can **Disconnect** active devices and (on reset) optionally disconnect
+existing sessions. Toggle **Show Username & Password tab on the captive portal** to
+expose the method. Wrong/unknown/disabled/expired/locked all return one **generic**
+error and create no session; per-account lockout plus layered throttling
+(username+IP, username+device, endpoint-wide) damps brute force.
 
 New plans/voucher batches/guest accounts require the license to permit
 provisioning — if the license is Expired/Suspended/Revoked/Unlicensed you'll get a
@@ -746,9 +771,15 @@ Notes verified in code:
 | Stuck at Pending activation | Not activated yet | Activate it (§7) |
 | Stuck activating / no license | CSR/license not yet pulled, or Central briefly unreachable | Wait; check Diagnostics; confirm Central reachability |
 | Guests denied, License shows Expired | Past valid-until + grace | Renew the license (§20) |
-| Guests denied, `LICENSE_CAPACITY_REACHED` | At concurrent capacity | Wait for a slot, or raise Max Concurrent Online Guests (§20) |
+| Guests denied, `LICENSE_CAPACITY_REACHED` | At appliance-wide concurrent capacity | Wait for a slot, or raise Max Concurrent Online Guests (§20) |
+| Guest denied, `MAX_DEVICES_REACHED` | The voucher/account is at its **plan max devices** | Disconnect a device (Hotel Admin → Guest accounts / Sessions), raise the plan's Max devices, or use another credential |
+| A device's reconnect seems to "use up" a slot | It doesn't — same credential + same device reuses its slot | Confirm the extra slot is a *different* device (MAC); check active devices on the account/voucher Details |
+| Guest login says "Invalid username or password" for a known-good account | Disabled, outside valid-from/until, or locked after failed attempts | Check enabled + validity; reset the password (clears the lockout); short-wait if throttled |
+| Guest login says "Too many attempts" | Brute-force throttle tripped (username+IP/device or endpoint-wide) | Wait ~1 minute and retry |
+| Lost a guest password | Passwords are shown once and never stored in plaintext | Set a new password (Guest accounts → Password); it's shown once again |
+| Can't change a voucher's plan | Voucher is revoked/expired/exhausted, or has a live session | Only unused/idle vouchers can be repointed; disconnect the session first |
 | Guests denied, state Unlicensed | No valid license (fail-closed) | Activate / import license (§7, §34) |
-| Can't create plans/vouchers | License not Active | Renew/activate |
+| Can't create plans/vouchers/accounts | License not Active | Renew/activate |
 | Portal doesn't auto-pop | DHCP option 114 / walled garden | Verify network settings and walled garden (§13, §17) |
 | Locked out after a WAN/LAN change | Confirmation window elapsed | It auto-rolled-back; reconnect to the old IP (§5) |
 | "Cloud validation stale" warning | Central unreachable | Informational only; guests keep working (§22) |

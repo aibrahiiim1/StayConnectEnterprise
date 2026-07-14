@@ -405,6 +405,15 @@ type edgeVoucher struct {
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 	BytesUsed   int64      `json:"bytes_used"`
 	SecondsUsed int        `json:"seconds_used"`
+	// Plan snapshot + live device usage (detail view only).
+	PlanName        *string `json:"plan_name,omitempty"`
+	PlanCode        *string `json:"plan_code,omitempty"`
+	DurationSeconds *int    `json:"duration_seconds,omitempty"`
+	DataCapBytes    *int64  `json:"data_cap_bytes,omitempty"`
+	DownKbps        *int    `json:"down_kbps,omitempty"`
+	UpKbps          *int    `json:"up_kbps,omitempty"`
+	MaxDevices      *int    `json:"max_devices,omitempty"`
+	ActiveDevices   *int    `json:"active_devices,omitempty"`
 }
 
 func (s *server) voucherBatchesRoutes() http.Handler {
@@ -415,6 +424,7 @@ func (s *server) voucherBatchesRoutes() http.Handler {
 	r.Get("/{id}/codes", s.listBatchCodes)
 	r.Get("/{id}/codes.csv", s.exportBatchCSV)
 	r.Post("/{id}/revoke", s.revokeBatch)
+	r.Post("/{id}/change-plan", s.changeBatchPlan)
 	return r
 }
 
@@ -422,7 +432,79 @@ func (s *server) vouchersRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/{id}", s.getVoucher)
 	r.Post("/{id}/revoke", s.revokeVoucher)
+	r.Post("/{id}/change-plan", s.changeVoucherPlan)
 	return r
+}
+
+// changeBatchPlan reassigns the Guest Access Plan across a batch. scope:
+//   - "unused" (default): only vouchers still in state 'unused'.
+//   - "eligible": unused + activated-but-idle vouchers that have NO active
+//     session. Revoked/expired/exhausted vouchers and any voucher with a live
+//     session are always skipped (never silently mutates a running policy).
+//
+// The target plan must be an active plan owned by THIS tenant. Codes and usage
+// history are unchanged; the count changed is audited.
+func (s *server) changeBatchPlan(w http.ResponseWriter, r *http.Request) {
+	batchID := chi.URLParam(r, "id")
+	var in struct {
+		TemplateID string `json:"template_id"`
+		Scope      string `json:"scope,omitempty"`
+		Reason     string `json:"reason,omitempty"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	if in.TemplateID == "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "template_id (target plan) required")
+		return
+	}
+	scope := in.Scope
+	if scope == "" {
+		scope = "unused"
+	}
+	if scope != "unused" && scope != "eligible" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "scope must be 'unused' or 'eligible'")
+		return
+	}
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+
+	var exists bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM voucher_batches WHERE id=$1 AND tenant_id=$2)`,
+		batchID, s.tenantID).Scan(&exists); err != nil || !exists {
+		jsonErr(w, http.StatusNotFound, "not_found", "batch not found")
+		return
+	}
+	var ok bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ticket_templates WHERE id=$1 AND tenant_id=$2 AND is_active)`,
+		in.TemplateID, s.tenantID).Scan(&ok); err != nil || !ok {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "target plan not found, inactive, or not owned by this tenant")
+		return
+	}
+	// Only unused, or (for 'eligible') unused+active vouchers WITHOUT a live
+	// session. Vouchers with an active session are excluded so we never mutate a
+	// running policy.
+	stateFilter := "v.state = 'unused'"
+	if scope == "eligible" {
+		stateFilter = "v.state IN ('unused','active')"
+	}
+	ct, err := s.db.Exec(ctx, `
+        UPDATE vouchers v SET template_id=$3
+         WHERE v.tenant_id=$1 AND v.batch_id=$2
+           AND `+stateFilter+`
+           AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.voucher_id = v.id AND s.state='active')
+    `, s.tenantID, batchID, in.TemplateID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "update failed")
+		return
+	}
+	s.audit(r, "voucher_batch.plan_changed", "voucher_batch", batchID, map[string]any{
+		"new_template_id": in.TemplateID, "scope": scope, "vouchers_changed": ct.RowsAffected(), "reason": in.Reason,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"batch_id": batchID, "template_id": in.TemplateID, "scope": scope, "vouchers_changed": ct.RowsAffected(),
+	})
 }
 
 func (s *server) listVoucherBatches(w http.ResponseWriter, r *http.Request) {
@@ -731,12 +813,20 @@ func (s *server) getVoucher(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var v edgeVoucher
+	var active int64
 	err := s.db.QueryRow(ctx, `
-        SELECT id, template_id, batch_id, code, state,
-               issued_at, activated_at, expires_at, bytes_used, seconds_used
-          FROM vouchers WHERE id = $1 AND tenant_id = $2
+        SELECT v.id, v.template_id, v.batch_id, v.code, v.state,
+               v.issued_at, v.activated_at, v.expires_at, v.bytes_used, v.seconds_used,
+               t.name, t.code, t.duration_seconds, t.data_cap_bytes, t.down_kbps, t.up_kbps,
+               t.max_concurrent_devices,
+               (SELECT count(DISTINCT s.mac) FROM sessions s
+                 WHERE s.voucher_id = v.id AND s.state='active')
+          FROM vouchers v JOIN ticket_templates t ON t.id = v.template_id
+         WHERE v.id = $1 AND v.tenant_id = $2
     `, id, s.tenantID).Scan(&v.ID, &v.TemplateID, &v.BatchID, &v.Code, &v.State,
-		&v.IssuedAt, &v.ActivatedAt, &v.ExpiresAt, &v.BytesUsed, &v.SecondsUsed)
+		&v.IssuedAt, &v.ActivatedAt, &v.ExpiresAt, &v.BytesUsed, &v.SecondsUsed,
+		&v.PlanName, &v.PlanCode, &v.DurationSeconds, &v.DataCapBytes, &v.DownKbps, &v.UpKbps,
+		&v.MaxDevices, &active)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "voucher not found")
 		return
@@ -745,8 +835,76 @@ func (s *server) getVoucher(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
+	ai := int(active)
+	v.ActiveDevices = &ai
 	v.CodeDisplay = crockford.Format(v.Code)
 	writeJSON(w, http.StatusOK, v)
+}
+
+// changeVoucherPlan reassigns the Guest Access Plan of a SINGLE voucher.
+// Lifecycle rules:
+//   - revoked / expired / exhausted vouchers cannot be edited (409).
+//   - a voucher with an ACTIVE guest session cannot be repointed, because acctd
+//     derives that running session's quota live from the voucher's plan — the
+//     operator must end the session first (or the change would silently mutate
+//     a running policy). Unused / activated-but-idle vouchers change immediately
+//     and the new plan governs all FUTURE authorizations.
+//   - the target plan must be an ACTIVE plan owned by THIS tenant (never cross-
+//     tenant). The code, usage history and audit trail are unchanged.
+func (s *server) changeVoucherPlan(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	var in struct {
+		TemplateID string `json:"template_id"`
+		Reason     string `json:"reason,omitempty"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	if in.TemplateID == "" {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "template_id (target plan) required")
+		return
+	}
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+
+	var state, oldPlan string
+	if err := s.db.QueryRow(ctx, `SELECT state, template_id FROM vouchers WHERE id=$1 AND tenant_id=$2`,
+		id, s.tenantID).Scan(&state, &oldPlan); err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "voucher not found")
+		return
+	}
+	if state == "revoked" || state == "expired" || state == "exhausted" {
+		jsonErr(w, http.StatusConflict, "conflict", "voucher is "+state+"; its plan cannot be changed")
+		return
+	}
+	// Target plan must be active and owned by this tenant (blocks cross-tenant).
+	var ok bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ticket_templates WHERE id=$1 AND tenant_id=$2 AND is_active)`,
+		in.TemplateID, s.tenantID).Scan(&ok); err != nil || !ok {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "target plan not found, inactive, or not owned by this tenant")
+		return
+	}
+	// Block if the voucher currently has an active session (would mutate a
+	// running policy). The operator ends the session first.
+	var activeSessions int
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE voucher_id=$1 AND state='active'`, id).Scan(&activeSessions); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	if activeSessions > 0 {
+		jsonErr(w, http.StatusConflict, "active_sessions", "voucher has an active guest session; disconnect it before changing the plan")
+		return
+	}
+	if _, err := s.db.Exec(ctx, `UPDATE vouchers SET template_id=$3 WHERE id=$1 AND tenant_id=$2`,
+		id, s.tenantID, in.TemplateID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "update failed")
+		return
+	}
+	s.audit(r, "voucher.plan_changed", "voucher", id, map[string]any{
+		"previous_template_id": oldPlan, "new_template_id": in.TemplateID, "reason": in.Reason,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"id": id, "template_id": in.TemplateID})
 }
 
 func (s *server) revokeVoucher(w http.ResponseWriter, r *http.Request) {

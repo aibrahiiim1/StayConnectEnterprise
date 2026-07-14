@@ -12,12 +12,29 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Plus, X, Download } from "lucide-react";
 import { formatRelative } from "@/lib/utils";
 
+// Character modes. Labels describe the exact set; `charset` is shown so the
+// operator sees precisely which characters a mode can produce.
 const CHAR_MODES = [
-  { v: "numbers", label: "Numbers only" },
-  { v: "letters", label: "Uppercase letters" },
-  { v: "alnum", label: "Letters + numbers" },
-  { v: "complex", label: "Complex (letters + numbers)" },
+  { v: "numbers", label: "Numbers", charset: "0–9 (ambiguous 0/1/5 removed when excluded)" },
+  { v: "letters", label: "Uppercase letters", charset: "A–Z (minus I/L/O/U)" },
+  { v: "alnum", label: "Uppercase letters and numbers", charset: "A–Z + 0–9 (minus I/L/O/U and ambiguous)" },
+  { v: "complex", label: "Uppercase/lowercase letters and numbers", charset: "a–z + A–Z + 0–9 (minus I/L/O/U and ambiguous)" },
 ];
+
+// exampleCode builds a representative sample so the operator can preview the
+// shape before generating. Digits/letters shown are illustrative only.
+function exampleCode(mode: string, len: number, prefix: string): string {
+  const pools: Record<string, string> = {
+    numbers: "234679",
+    letters: "ABCDEFGHJKMNPQR",
+    alnum: "A2B4C6D8EFGHJK",
+    complex: "a2B4c6D8efGhJk",
+  };
+  const pool = pools[mode] ?? pools.alnum;
+  let s = "";
+  for (let i = 0; i < Math.max(4, len); i++) s += pool[i % pool.length];
+  return (prefix ? prefix.toUpperCase() + "-" : "") + s;
+}
 
 function fmtGeneration(b: VoucherBatch): string {
   if (!b.char_mode) return "legacy (12-char)";
@@ -32,6 +49,10 @@ export default function VoucherBatchesPage() {
   const [err, setErr] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Live-preview state for the generation options.
+  const [mode, setMode] = useState("alnum");
+  const [len, setLen] = useState(8);
+  const [prefix, setPrefix] = useState("");
 
   async function load() {
     try {
@@ -121,23 +142,26 @@ export default function VoucherBatchesPage() {
               <div><Label>Count</Label><Input name="count" type="number" min={1} max={10000} required defaultValue={50} /></div>
               <div><Label>Label (optional)</Label><Input name="name" placeholder="Gold tournament" /></div>
               <div>
-                <Label>Code length</Label>
-                <select name="code_length" defaultValue="8" className="h-9 w-full rounded-md bg-panel2 border border-border px-3 text-sm">
+                <Label>Code length (random portion)</Label>
+                <select name="code_length" value={len} onChange={(e) => setLen(Number(e.target.value))} className="h-9 w-full rounded-md bg-panel2 border border-border px-3 text-sm">
                   {[6, 7, 8, 9, 10].map((n) => <option key={n} value={n}>{n}</option>)}
                 </select>
               </div>
               <div>
                 <Label>Character mode</Label>
-                <select name="char_mode" defaultValue="alnum" className="h-9 w-full rounded-md bg-panel2 border border-border px-3 text-sm">
+                <select name="char_mode" value={mode} onChange={(e) => setMode(e.target.value)} className="h-9 w-full rounded-md bg-panel2 border border-border px-3 text-sm">
                   {CHAR_MODES.map((m) => <option key={m.v} value={m.v}>{m.label}</option>)}
                 </select>
               </div>
-              <div><Label>Prefix (optional, A-Z/0-9)</Label><Input name="code_prefix" maxLength={8} placeholder="e.g. PARTY" /></div>
+              <div><Label>Prefix (optional, A-Z/0-9)</Label><Input name="code_prefix" maxLength={8} value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="e.g. PARTY" /></div>
               <label className="sm:col-span-3 flex items-center gap-2 text-sm text-muted">
                 <input type="checkbox" name="exclude_ambiguous" defaultChecked /> Exclude ambiguous characters (0/O, 1/I/L, 5/S) — recommended
               </label>
-              <div className="sm:col-span-3 text-xs text-muted">
-                I, L, O and U are always excluded so codes are unambiguous and match exactly what the guest types.
+              <div className="sm:col-span-3 text-xs text-muted space-y-0.5">
+                <div><span className="text-text">Example:</span> <code className="font-mono">{exampleCode(mode, len, prefix)}</code>
+                  {" "}— the prefix is <strong>additional</strong> to the {len}-character random portion.</div>
+                <div><span className="text-text">Character set:</span> {CHAR_MODES.find((m) => m.v === mode)?.charset}</div>
+                <div>I, L, O and U are always excluded so codes are unambiguous and match exactly what the guest types.</div>
               </div>
               <div className="sm:col-span-3 flex justify-end">
                 <Button type="submit" disabled={busy}>{busy ? "Generating…" : "Generate"}</Button>

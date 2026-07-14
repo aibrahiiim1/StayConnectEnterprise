@@ -149,26 +149,63 @@ Make sure the portal endpoints are reachable pre-login via the **Walled garden**
   (bytes)** (blank = unlimited), **Down/Up kbps**, **Max devices**, **Price
   (cents)**, **Currency**.
 
+> **License capacity vs. plan max devices.** The signed license caps the total
+> concurrent guests **across the whole appliance**. A plan's **Max devices** caps
+> the concurrent devices **per voucher or per guest account**. Both are enforced
+> on every login, atomically: a device rejected for either reason gets a clear
+> error (`MAX_DEVICES_REACHED` / `LICENSE_CAPACITY_REACHED`) and no session is
+> created. A reconnect from a device that is already signed in on the same
+> credential does not consume a second slot; freeing a device (disconnect/expiry)
+> frees its slot.
+
 **Voucher batch** (**Voucher batches** → **New batch**):
 - **Plan** (an active plan), **Count** (1–10000), **Label**, and generation
-  options: **Code length** (6–10), **Character mode** (numbers / letters /
-  letters+numbers / complex), optional **Prefix** (A–Z/0–9), and **Exclude
-  ambiguous** (default on: 0/O, 1/I/L, 5/S; I/L/O/U are always excluded).
+  options: **Code length** (6–10, the **random portion** only), **Character
+  mode**, optional **Prefix** (A–Z/0–9, *additional* to the random portion), and
+  **Exclude ambiguous** (default on: 0/O, 1/I/L, 5/S; I/L/O/U are always excluded
+  so a printed code matches exactly what the guest types). Character modes:
+  **Numbers**, **Uppercase letters**, **Uppercase letters and numbers**,
+  **Uppercase/lowercase letters and numbers**. The form shows a live **example**
+  and the exact **character set** before you generate.
 - Open the batch to **view/search/copy/print** codes or **download the CSV**;
-  **revoke** an individual unused code, or **Revoke unused** for the batch. Legacy
-  12-char batches remain usable.
+  click a code for its **details** (state, plan, duration, speed, data cap, max
+  devices, active devices, dates). **Revoke** an unused code, or **Revoke
+  unused** for the batch. Legacy 12-char batches remain usable.
+- **Change a voucher's plan** from a dropdown of active plans — for one voucher
+  (its Details panel) or for the batch (**Change plan…** → *Unused only* or *All
+  eligible*). Unused vouchers change immediately; a voucher with a **live
+  session** is never repointed (disconnect it first); revoked/expired/exhausted
+  vouchers can't be changed. The code, usage history and audit trail are
+  preserved, and the change is recorded (previous plan, new plan, operator,
+  reason). Plans are chosen from the list only — you never type a plan id/name.
 
 **Guest accounts** (**Guest accounts** → **New account**) — username/password
 sign-in, an alternative to vouchers:
-- **Username**, **Password** (min 6), **Guest access plan**, optional **display
-  name / valid-until / notes**. The plan supplies duration/data-cap/speed/max-
-  devices, exactly like a voucher.
-- Manage each account: **change plan**, **reset password** (invalidates the old
-  one), **enable/disable**, **delete**; see **last login** and login count.
-- Passwords are stored hashed and are **write-only** — never shown or exported.
+- **Username** (1–64 chars; a single letter `A` or digit `1` is allowed;
+  case-**insensitive** and unique per property), **Password** (1–128 chars,
+  case-**sensitive**; very short passwords are allowed for temporary guest
+  credentials but a non-blocking *weak password* warning is shown), **Guest
+  access plan** (from the dropdown; label shows duration/speed/max-devices),
+  optional **display name / valid-from / valid-until / notes**. The plan supplies
+  duration/data-cap/speed/max-devices, exactly like a voucher.
+- **Passwords are shown once.** On create/reset you can type a password (with
+  show/hide) or **Generate** one; the exact password is then displayed **once**
+  in a confirmation panel with **Copy**. It cannot be retrieved afterwards — if
+  it is lost, set a new one. Nothing ever returns the password or its hash; it is
+  stored only as an Argon2id hash.
+- Edit any account with a pre-filled form — **username, password, plan, display
+  name, valid-from/until, enabled/disabled, notes** — no delete-and-recreate.
+  Changing the plan applies to **future** logins; a running session keeps its
+  policy. The plan list shows only this property's active plans; an existing
+  account on a now-inactive plan still shows it with an **inactive** badge.
+- The list shows **active devices** (e.g. `1 of 2`), enabled state, **locked**
+  status, validity, last login and login count. Per row: **Edit**, **Password**
+  (set/reset, with optional *Generate* and *Disconnect existing sessions after
+  reset*), **Enable/Disable**, **Disconnect** active devices, **Delete**.
 - Toggle **Show Username & Password tab on the captive portal** to let guests use
-  it. Wrong username/password returns a single generic error and creates no
-  session; repeated failures temporarily lock the account.
+  it. Wrong/unknown/disabled/expired/locked all return one **generic** error and
+  create no session; per-account lockout plus layered throttling (username+IP,
+  username+device, endpoint-wide) damps brute force.
 
 ---
 

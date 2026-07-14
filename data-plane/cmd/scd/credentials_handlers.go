@@ -90,6 +90,14 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	username := strings.TrimSpace(req.Username)
 
+	// Layered brute-force throttle (endpoint-wide + username/IP + username/MAC),
+	// applied before the account lookup so it never leaks whether a username
+	// exists. A throttled attempt creates no session/nft/shaping/accounting.
+	if s.loginRL != nil && !s.loginRL.allow(username, ip.String(), mac.String()) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
+		return
+	}
+
 	genericFail := func() {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "INVALID_USERNAME_OR_PASSWORD"})
 	}
@@ -143,9 +151,16 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 			red = r2
 		}
 	}
-	// Atomic licensed-capacity gate + session creation (same as OTP/voucher).
-	au, err := s.sess.StartGuestAccount(r.Context(), mac, ip, accountID, displayName, red.DurationSeconds)
+	// Per-credential max-devices gate + atomic licensed-capacity gate + session
+	// creation (same production pipeline as OTP/voucher).
+	au, err := s.sess.StartGuestAccount(r.Context(), mac, ip, accountID, displayName, red.MaxDevices, red.DurationSeconds)
 	if err != nil {
+		if devErr := (*session.MaxDevicesError)(nil); errors.As(err, &devErr) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": "MAX_DEVICES_REACHED", "limit": devErr.Limit, "current": devErr.Current,
+			})
+			return
+		}
 		if capErr := (*session.CapacityError)(nil); errors.As(err, &capErr) {
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"error": "LICENSE_CAPACITY_REACHED", "limit": capErr.Limit, "current": capErr.Current,
