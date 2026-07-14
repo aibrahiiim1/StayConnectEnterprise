@@ -186,7 +186,7 @@ from the local StayConnect CA.
   **password**, and typing **`ROTATE`** to confirm. You cannot upload a key; it
   mints and hot-swaps with auto-rollback.
 
-### Setup / Enrollment — `/setup/enrollment`
+### Setup / Activation — `/setup/enrollment`
 The first-run wizard to connect the appliance to Central.
 
 - **Connect** form (before enrollment): **Enrollment code** (the token from the

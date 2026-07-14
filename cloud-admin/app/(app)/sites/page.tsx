@@ -78,7 +78,7 @@ export default function SitesPage() {
       load();
     } catch (e: any) {
       if (e instanceof ApiError && e.body?.error === "limit_exceeded") {
-        setErr(`Plan limit reached: ${e.body.limit_key} (${e.body.current}/${e.body.limit})`);
+        setErr(`License limit reached: ${e.body.limit_key} (${e.body.current}/${e.body.limit})`);
       } else {
         setErr(e?.message ?? "Create failed");
       }

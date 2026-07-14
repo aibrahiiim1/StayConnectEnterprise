@@ -49,7 +49,7 @@ export default function VoucherBatchesPage() {
       if (e instanceof ApiError && e.body?.error === "limit_exceeded") {
         setErr(`License limit reached: ${e.body.limit_key} (${e.body.current}/${e.body.limit})`);
       } else if (e instanceof ApiError && e.body?.error === "license_restricted") {
-        setErr("License is restricted — renewing the license re-enables batch creation.");
+        setErr("This appliance's license doesn't currently allow new voucher batches (expired, suspended, revoked or not activated) — renew or activate the license to re-enable.");
       } else {
         setErr(e?.message ?? "Create failed");
       }

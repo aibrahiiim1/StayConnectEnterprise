@@ -2,6 +2,16 @@
 
 This guide explains how to use the StayConnect admin console for each operator role. Start with the section that matches your role; each page is task-oriented ("how do I…") rather than a feature reference.
 
+> **New to StayConnect?** Read the
+> [Complete Operations Manual](../STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md) first —
+> it takes a hotel from an unpacked appliance to live, licensed guest WiFi. The full
+> documentation index is at [docs/README.md](../README.md).
+>
+> **Current model:** onboarding is **zero-touch** (self-register → *Pending
+> activation* → one-click **Activate**); the entitlement is a **signed appliance
+> license** (max concurrent online guests + validity + grace + features). Plans and
+> subscriptions are **retired**.
+
 ## Complete references & configuration manuals
 
 If you want a **page-by-page reference** (what every screen shows and does) or a
@@ -21,10 +31,10 @@ The role-based guides below are shorter, task-oriented walkthroughs for each rol
 | Role | Read this | In one sentence |
 |---|---|---|
 | **Platform admin** | [platform-admin.md](platform-admin.md) | You run the whole StayConnect platform. You create tenants and assign each tenant's first admin. |
-| **Tenant admin** | [tenant-admin.md](tenant-admin.md) | You run a hotel chain / brand / property group on StayConnect. You manage sites, appliances, staff, PMS, subscription. |
+| **Tenant admin** | [tenant-admin.md](tenant-admin.md) | You run a hotel chain / brand / property group on StayConnect. You manage sites, appliances, staff, PMS, and licenses. |
 | **Tenant operator** | [tenant-operator.md](tenant-operator.md) | You do day-to-day WiFi operations for one property — voucher batches, guest sessions, walled garden. |
 | **Viewer** | [viewer-and-billing.md](viewer-and-billing.md#viewer) | You can look at everything in your tenant but not change anything (auditors, support, read-only stakeholders). |
-| **Billing** | [viewer-and-billing.md](viewer-and-billing.md#billing) | You can view the tenant and change the subscription plan. Nothing else. |
+| **Billing** | [viewer-and-billing.md](viewer-and-billing.md#billing) | You can view the customer's licensing/usage. Nothing else. |
 
 If a guest (hotel WiFi user) can't log in and you're trying to help them, jump straight to [common-tasks.md](common-tasks.md#a-guest-cant-log-in).
 
@@ -50,14 +60,14 @@ The left-hand menu shows up to 14 items. You'll only see the ones your role can 
 | **Notifications** | Email/SMS provider settings (SendGrid, Twilio, etc.) |
 | **Social login** | "Log in with Google/Apple/Facebook" setup |
 | **Payments** | Guest payments (paid WiFi plans) via Stripe |
-| **Plan** | Your StayConnect subscription |
+| **License** | The appliance's signed license — state, capacity, validity, features |
 | **Operators** | Staff accounts — who can log into this admin console |
 | **Walled garden** | URLs guests can reach *before* logging in (captive portal, hotel website) |
 | **Audit log** | Every action taken in the admin — who did what, when |
 
 ## Glossary
 
-- **Tenant** — A customer account (e.g., "Coral Sea Resorts"). Has its own sites, staff, subscription.
+- **Customer (Tenant)** — A customer account (e.g., "Coral Sea Resorts"). Has its own sites, staff, and licensed appliances.
 - **Site** — A physical property belonging to a tenant (e.g., "Coral Sea Resort Hurghada").
 - **Appliance** — A StayConnect gateway installed at a site. Handles DHCP, captive portal, firewall, and sessions.
 - **Session** — One guest device currently connected to WiFi.

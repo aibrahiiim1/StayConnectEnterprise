@@ -494,7 +494,7 @@ func enforceCreateLimitDeltaSplit(
 		return false
 	}
 	if count+delta > lim {
-		Fail(w, r, http.StatusForbidden, CodeLimitExceeded, "plan limit reached", map[string]any{
+		Fail(w, r, http.StatusForbidden, CodeLimitExceeded, "license limit reached", map[string]any{
 			"limit_key": limitKey,
 			"limit":     lim,
 			"current":   count,

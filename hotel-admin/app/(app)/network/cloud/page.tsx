@@ -129,7 +129,7 @@ export default function CloudConnectionPage() {
             <Row k="Appliance ID" v={<code>{c.appliance_id}</code>} />
             <Row k="Serial" v={<code>{c.serial || "—"}</code>} />
             <Row k="Site ID" v={<code>{c.site_id}</code>} />
-            <Row k="Tenant / Group ID" v={<code>{c.tenant_id}</code>} />
+            <Row k="Customer ID" v={<code>{c.tenant_id}</code>} />
           </CardBody>
         </Card>
 
@@ -137,7 +137,6 @@ export default function CloudConnectionPage() {
           <CardHeader><CardTitle>License</CardTitle></CardHeader>
           <CardBody>
             <Row k="State" v={<Badge className={l.state === "Active" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}>{l.state}</Badge>} />
-            <Row k="Plan" v={l.commercial_plan_code} />
             <Row k="Valid until" v={l.valid_until} />
             <Row k="Offline grace" v={l.offline_grace_days != null ? `${l.offline_grace_days} days` : "—"} />
             <Row k="Cloud validation stale" v={l.cloud_stale ? "yes" : "no"} />

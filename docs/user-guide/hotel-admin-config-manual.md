@@ -4,7 +4,7 @@ Step-by-step instructions for configuring an appliance from the on-box **Hotel
 Admin** console. For a description of what each page shows, see
 [hotel-admin-reference.md](hotel-admin-reference.md).
 
-**Typical order:** Enroll → Activate (license) → build a Guest network → set up
+**Typical order:** Connect (zero-touch) → Activate (license) → build a Guest network → set up
 Auth methods → create Access plans → generate Vouchers → optional integrations
 (PMS / Notifications / Social / Payments) → branding → operators.
 
@@ -13,25 +13,28 @@ Auth methods → create Access plans → generate Vouchers → optional integrat
 
 ---
 
-## 1. Enroll the appliance (connect it to Central)
+## 1. Connect the appliance to Central
 
-Do this once, on first boot.
+**The normal path is zero-touch — you do nothing on the box.** A factory-clean
+appliance with internet self-registers with Central and appears under the Control
+Panel's **Onboarding** page as **Pending activation**, where an operator activates
+it (no token). See the Control Panel manual, "Onboard & activate an Appliance."
 
-1. Get an **enrollment token** from the Control Panel: *Appliances → Enrollment
-   token* (optionally locked to this appliance's **Serial**). Copy it.
-2. In Hotel Admin, go to **Setup / Enrollment** (`/setup/enrollment`).
+You only use the on-box **Setup / Activation** page (`/setup/enrollment`) for the
+**advanced/manual** path — when the box can't auto-register (e.g.
+`SCD_AUTO_REGISTER=false`) or your installer was given an enrollment token:
+
+1. In the Control Panel, mint a token: *Appliances → Enrollment token*
+   (optionally locked to this appliance's **Serial**). Copy it.
+2. In Hotel Admin, go to **Setup / Activation** (`/setup/enrollment`).
 3. Enter the **Enrollment code** (the token) and confirm the **Serial**.
 4. Click **Connect**.
-5. Watch the progress: **Connect → Verify → Ready**. Expand *Technical details* to
-   see the full lifecycle and the network/Central checks (DNS, Central :443,
-   clock, mTLS :9443, NATS :4223).
+5. Watch the progress. Expand *Technical details* to see the full lifecycle and the
+   network/Central checks (DNS, Central :443, clock, mTLS, NATS).
 
-When it shows **Setup complete**, the appliance is enrolled, holds its mTLS
-certificate, and is bound to the customer/site.
-
-> Zero-touch alternative: a factory-clean box with internet self-registers as
-> *Pending* in the Control Panel's **Onboarding** page, where an operator can
-> activate it without a token.
+When it shows **Setup complete**, the appliance holds its mTLS certificate and is
+bound to the customer/site. Either way, the operator still **Activates** it in the
+Control Panel to issue the license (§2).
 
 ---
 
@@ -42,8 +45,9 @@ Until then the Dashboard and License page show **Pending activation** and guests
 are denied.
 
 **Online (normal):** the Control Panel operator activates the box (Onboarding →
-Activate, or Licenses → Issue license). The license is pushed and installed
-automatically; the License page flips to **Active**.
+Activate, or Licenses → Issue license). The appliance then **fetches** its signed
+license itself over its authenticated channel and installs it automatically; the
+License page flips to **Active** (Central does not push it).
 
 **Offline activation (no cloud):**
 1. On the License page, copy the **StayConnect Serial Number** and **WAN MAC
@@ -243,10 +247,10 @@ a service.
 
 | I want to… | Page |
 |---|---|
-| Connect the box to the cloud | Setup / Enrollment |
+| Connect the box to the cloud (advanced/manual) | Setup / Activation |
 | Activate / install a license | License |
 | Change WAN or LAN IP | WAN / LAN settings |
-| Broadcast a new guest WiFi VLAN | Guest networks → New |
+| Add a new guest VLAN | Guest networks → New |
 | Pin a device to a fixed IP | DHCP & leases → Reservations |
 | Issue guest WiFi codes | Guest access plans → Voucher batches |
 | Room-number login | PMS providers |

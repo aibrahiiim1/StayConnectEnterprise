@@ -12,10 +12,11 @@ const licenseTone = (state?: string | null) => {
   switch (state) {
     case "Active":      return "ok";
     case "GracePeriod": return "warn";
-    case "Restricted":
+    case "Restricted": // legacy pre-v3 state
     case "Suspended":   return "warn";
     case "Expired":
-    case "Revoked":     return "err";
+    case "Revoked":
+    case "Unlicensed":  return "err";
     default:            return "default";
   }
 };

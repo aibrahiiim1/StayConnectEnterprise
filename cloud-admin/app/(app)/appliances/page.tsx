@@ -142,7 +142,7 @@ export default function AppliancesPage() {
       load();
     } catch (e: any) {
       if (e instanceof ApiError && e.body?.error === "limit_exceeded") {
-        setErr(`Plan limit reached: ${e.body.limit_key} (${e.body.current}/${e.body.limit})`);
+        setErr(`License limit reached: ${e.body.limit_key} (${e.body.current}/${e.body.limit})`);
       } else setErr(e?.message ?? "Create failed");
     } finally { setBusy(false); }
   }
@@ -175,6 +175,13 @@ export default function AppliancesPage() {
         </div>
       </div>
 
+      <p className="text-sm text-muted mb-4">
+        Most appliances install <strong>zero-touch</strong>: a factory-clean box with internet self-registers and
+        appears under <a href="/onboarding" className="text-brand hover:underline">Onboarding</a> as
+        <em> Pending activation</em>, where you pick its customer, site and license terms and click Activate — no token.
+        Mint an <strong>enrollment token</strong> below only for the advanced / manual install path (pre-registering a
+        box, or an offline installer who will type a code).
+      </p>
       {sites.length === 0 && (
         <div className="text-sm text-warn mb-4">
           Create a site first — appliances belong to a site.
@@ -271,7 +278,7 @@ export default function AppliancesPage() {
       <Card className="mb-6">
         <CardBody className="p-0">
           {rows === null ? <EmptyState title="Loading…" /> : rows.length === 0 ? (
-            <EmptyState title="No appliances yet" hint="Enroll one to start shaping and accounting traffic." />
+            <EmptyState title="No appliances yet" hint="Factory-clean appliances self-register under Onboarding; activate them there. Or mint a token above for a manual install." />
           ) : (
             <Table>
               <THead>

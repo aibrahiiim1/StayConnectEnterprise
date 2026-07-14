@@ -59,7 +59,7 @@ function licenseTone(state?: string): "ok" | "warn" | "err" | "default" {
 
 // The detailed 15-stage lifecycle stays available behind "Show technical details".
 const STAGES = [
-  "Awaiting enrollment", "Token submitted", "Identity generated", "Enrollment accepted",
+  "Awaiting enrollment", "Enrollment submitted", "Identity generated", "Enrollment accepted",
   "Pending approval", "Claimed", "Assignment issued", "Assignment adopted",
   "Certificate requested", "Certificate issued", "API mTLS connected", "NATS mTLS connected",
   "Awaiting license", "License active", "Setup complete",
@@ -248,9 +248,12 @@ export default function SetupEnrollmentPage() {
         <Card>
           <CardBody className="space-y-4">
             <div>
-              <div className="text-base font-semibold">Enter the code from your control panel</div>
+              <div className="text-base font-semibold">Connect this appliance to the control panel</div>
               <p className="text-sm text-muted">
-                In the control panel, open <b>Connect an Appliance</b>, generate a token, and paste it here.
+                Most appliances connect <b>automatically</b> once they reach the internet — no code needed. The box
+                self-registers and appears in the control panel under <b>Onboarding</b> as <em>Pending activation</em>,
+                where an operator activates it. Only use the manual code below if your installer gave you an
+                <b> enrollment token</b> (minted in the control panel under <b>Appliances → Enrollment token</b>).
               </p>
             </div>
             <div>
@@ -394,7 +397,7 @@ export default function SetupEnrollmentPage() {
             <StepHeader title="License" icon={<BadgeCheck className="h-4 w-4" />} />
             <CardBody>
               <Row k="State" v={<Badge tone={licenseTone(lic?.state)}>{lic?.state || "unknown"}</Badge>} />
-              <Row k="Plan" v={lic?.plan || "—"} />
+              <Row k="Max online guests" v={lic?.max_concurrent_online_guests == null ? "—" : lic.max_concurrent_online_guests === -1 ? "Unlimited" : String(lic.max_concurrent_online_guests)} />
               <Row k="Valid until" v={lic?.valid_until || "—"} />
               <Row k="Offline grace" v={lic?.offline_grace_days != null ? `${lic.offline_grace_days} days` : "—"} />
             </CardBody>

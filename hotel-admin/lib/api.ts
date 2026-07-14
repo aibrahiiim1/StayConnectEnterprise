@@ -268,7 +268,9 @@ export type AuditEntry = {
 // ------- License (GET /edge/v1/license — scd's locally evaluated state) -------
 
 export type LicenseState =
-  | "Active" | "GracePeriod" | "Restricted" | "Suspended" | "Expired" | "Revoked"
+  | "Active" | "GracePeriod" | "Suspended" | "Expired" | "Revoked" | "Unlicensed"
+  // "Restricted" is a legacy (pre-v3) intermediate state kept only for old license docs.
+  | "Restricted"
   | string; // tolerate future states
 
 export type LicenseFeatures = {

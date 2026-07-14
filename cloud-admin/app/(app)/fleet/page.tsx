@@ -84,7 +84,7 @@ export default function FleetPage() {
       <Card>
         <CardBody className="p-0">
           {rows === null ? <EmptyState title="Loading…" /> : rows.length === 0 ? (
-            <EmptyState title="No appliances" hint="Enrolled appliances and their health will appear here." />
+            <EmptyState title="No appliances" hint="Activated appliances and their health will appear here." />
           ) : (
             <Table>
               <THead>

@@ -40,7 +40,7 @@ function licenseTone(state?: string): "ok" | "warn" | "err" | "default" {
   switch (state) {
     case "Active": return "ok";
     case "GracePeriod": case "Restricted": case "Suspended": return "warn";
-    case "Expired": case "Revoked": return "err";
+    case "Expired": case "Revoked": case "Unlicensed": return "err";
     default: return "default";
   }
 }

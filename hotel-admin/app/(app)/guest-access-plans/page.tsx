@@ -61,7 +61,7 @@ export default function GuestAccessPlansPage() {
       if (e instanceof ApiError && e.body?.error === "limit_exceeded") {
         setErr(`License limit reached: ${e.body.limit_key} (${e.body.current}/${e.body.limit})`);
       } else if (e instanceof ApiError && e.body?.error === "license_restricted") {
-        setErr("License is restricted — renewing the license re-enables plan creation.");
+        setErr("This appliance's license doesn't currently allow new access plans (expired, suspended, revoked or not activated) — renew or activate the license to re-enable.");
       } else if (e instanceof ApiError) setErr(e.message);
       else setErr(e?.message ?? "Create failed");
     } finally { setBusy(false); }

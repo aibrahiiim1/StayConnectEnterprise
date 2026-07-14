@@ -20,9 +20,10 @@ type Tenant = {
 };
 
 /**
- * Customers (Tenants). This is step 1 of commercial onboarding: a new hotel group
- * is created here, then given a Subscription, then a Site, then an Appliance is
- * enrolled + assigned. Previously this could only be done with direct SQL.
+ * Customers (Tenants). This is step 1 of onboarding: a new hotel group is created
+ * here, then a Site, then an Appliance is onboarded + activated (the signed
+ * appliance license is the entitlement — there is no plan/subscription step).
+ * Previously a customer could only be created with direct SQL.
  */
 export default function TenantsPage() {
   const [rows, setRows] = useState<Tenant[] | null>(null);
@@ -104,7 +105,7 @@ export default function TenantsPage() {
       </div>
 
       <p className="text-sm text-muted mb-4">
-        Onboarding order: <strong>Customer</strong> → Commercial plan (subscription) → Site → enroll &amp; assign an Appliance → issue a License.
+        Onboarding order: <strong>Customer</strong> → Site → onboard &amp; activate an Appliance → License. (No plan or subscription — the signed appliance license is the entitlement.)
       </p>
 
       {err && <div className="text-err text-sm mb-4">{err}</div>}

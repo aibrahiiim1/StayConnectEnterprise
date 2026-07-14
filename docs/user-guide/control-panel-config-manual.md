@@ -83,7 +83,7 @@ Use this when you want to pre-register a box, or the installer will type a token
 - **Mint a token:** **Appliances** (`/appliances`) → **Enrollment token** →
   choose **Site**, optionally lock to a **Serial**, set **TTL hours** → **Mint
   token** → **Copy** the token (shown once). Give it to the installer, who enters
-  it in the appliance's **Hotel Admin → Setup / Enrollment** wizard.
+  it in the appliance's **Hotel Admin → Setup / Activation** wizard.
 - **Or register by hand:** **Appliances** → **New appliance** → **Site**,
   **Serial**, **Name**, **Model**.
 

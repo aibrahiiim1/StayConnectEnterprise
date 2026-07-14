@@ -52,7 +52,7 @@ const SECTIONS: Section[] = [
       { href: "/network/system",    label: "WAN / LAN settings", icon: Router, resource: "network" },
       { href: "/network/cloud",     label: "Cloud connection", icon: Cloud, resource: "network" },
       { href: "/network/certificate", label: "TLS certificate", icon: Lock, resource: "network" },
-      { href: "/setup/enrollment",  label: "Setup / Enrollment", icon: ServerCog, resource: "network" },
+      { href: "/setup/enrollment",  label: "Setup / Activation", icon: ServerCog, resource: "network" },
       { href: "/network",           label: "Guest networks", icon: Network, resource: "network" },
       { href: "/network/dhcp",      label: "DHCP & leases",  icon: Wifi,    resource: "network" },
       { href: "/network/revisions", label: "Config history", icon: History, resource: "network" },

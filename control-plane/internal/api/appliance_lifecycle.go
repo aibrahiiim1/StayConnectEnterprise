@@ -202,7 +202,7 @@ func (b *Base) assignAppliance(w http.ResponseWriter, r *http.Request) {
 			var cnt int64
 			b.DB.QueryRow(ctx, `SELECT count(*) FROM appliances WHERE tenant_id=$1 AND lifecycle_state IN ('assigned','licensed','online','offline')`, in.TenantID).Scan(&cnt)
 			if cnt >= limit {
-				Fail(w, r, http.StatusConflict, "allocation_exceeded", "appliance allocation exceeded; upgrade subscription or override")
+				Fail(w, r, http.StatusConflict, "allocation_exceeded", "appliance limit reached for this site")
 				return
 			}
 		}

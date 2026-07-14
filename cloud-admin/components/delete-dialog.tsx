@@ -92,7 +92,7 @@ export function DeleteDialog({
                   </li>
                 ))}
               </ul>
-              <div className="mt-2 text-xs text-muted">Delete or archive these first, in order (Appliances → Site → Subscription → Customer).</div>
+              <div className="mt-2 text-xs text-muted">Delete or archive these first, in order (Appliances → Site → Customer).</div>
             </div>
           )}
 

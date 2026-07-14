@@ -242,19 +242,20 @@ export default function CommercialPage() {
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       <div className="flex items-baseline justify-between">
         <div>
-          <div className="text-xs text-muted uppercase tracking-wider">Commercial</div>
-          <h1 className="text-2xl font-semibold">Plans, subscription &amp; entitlements</h1>
+          <div className="text-xs text-muted uppercase tracking-wider">Legacy · read-only</div>
+          <h1 className="text-2xl font-semibold">Plans, subscription &amp; entitlements <span className="text-sm font-normal text-muted">(retired)</span></h1>
         </div>
         <Button variant="ghost" onClick={() => { loadTenant(tenantID); loadPlanLimits(planID); }}>
           <RefreshCw size={14} /> Refresh
         </Button>
       </div>
 
-      <p className="text-sm text-muted">
-        Resolution order: <strong>Plan limits → Subscription terms → Tenant overrides → signed License</strong>.
-        The license is a signed snapshot — editing a plan or override never rewrites an issued license;
-        re-issue it for new terms to reach the appliance.
-      </p>
+      <div className="rounded-md border border-warn/40 bg-warn/5 px-4 py-3 text-sm text-warn">
+        This legacy commercial model (plans → subscription → overrides) is <strong>retired</strong> and has
+        <strong> no effect on issued licenses</strong>. Guest capacity and validity now come solely from the
+        <strong> signed appliance license</strong> (see <a href="/licenses" className="underline">Licenses</a>).
+        Kept for historical/audit reference only.
+      </div>
 
       {err && <div className="text-err text-sm">{err}</div>}
       {msg && <div className="text-sm">{msg}</div>}

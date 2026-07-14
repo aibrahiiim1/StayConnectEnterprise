@@ -48,8 +48,10 @@ func GetIntLimit(ctx context.Context, db *pgxpool.Pool, tenantID, key string) (i
 //
 // Behaviour:
 //   - limit = -1  (unlimited) → pass
-//   - limit = 0 or missing key → pass (limit not modelled yet; don't break)
-//   - ErrNoSubscription → 402
+//   - limit = 0 or missing key → pass (no plan cap; the simple-license model does
+//     not gate creates on a subscription — GetIntLimit never returns
+//     ErrNoSubscription anymore, so the payment-required branch below is dead but
+//     retained for backward-compat safety)
 //   - count + 1 > limit → 403 "limit_exceeded"
 func EnforceCreateLimit(
 	ctx context.Context,
@@ -78,7 +80,7 @@ func EnforceCreateLimit(
 		return false
 	}
 	if count+1 > lim {
-		Fail(w, r, http.StatusForbidden, CodeLimitExceeded, "plan limit reached", map[string]any{
+		Fail(w, r, http.StatusForbidden, CodeLimitExceeded, "license limit reached", map[string]any{
 			"limit_key": limitKey,
 			"limit":     lim,
 			"current":   count,

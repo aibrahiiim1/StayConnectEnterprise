@@ -82,7 +82,7 @@ config.
   - **Enrollment token** → *Mint enrollment token* form: **Site**, **Serial
     (optional, locks the token to one box)**, **TTL hours** (default 24, max
     168). On success the full token is shown **once** with a **Copy** button —
-    paste it into the appliance's `Hotel Admin → Setup / Enrollment` wizard.
+    paste it into the appliance's `Hotel Admin → Setup / Activation` wizard.
   - **New appliance** → register a box by hand: **Site**, **Serial**, **Name**,
     **Model** (optional).
 - **Row actions:**

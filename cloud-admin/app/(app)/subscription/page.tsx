@@ -74,8 +74,15 @@ export default function SubscriptionPage() {
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="mb-4">
-        <div className="text-xs text-muted uppercase tracking-wider">Billing</div>
-        <h1 className="text-2xl font-semibold">Plan & subscription</h1>
+        <div className="text-xs text-muted uppercase tracking-wider">Legacy · read-only</div>
+        <h1 className="text-2xl font-semibold">Plan & subscription <span className="text-sm font-normal text-muted">(retired)</span></h1>
+      </div>
+
+      <div className="mb-4 rounded-md border border-warn/40 bg-warn/5 px-4 py-3 text-sm text-warn">
+        Plans and subscriptions were <strong>retired</strong>. They no longer gate onboarding or guest
+        capacity — the entitlement is the <strong>signed appliance license</strong> (see{" "}
+        <a href="/licenses" className="underline">Licenses</a>). This page is kept for historical reference only
+        and is not part of the normal workflow.
       </div>
 
       {err && <div className="text-err text-sm mb-4">{err}</div>}
