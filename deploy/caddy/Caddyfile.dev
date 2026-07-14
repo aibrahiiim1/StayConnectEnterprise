@@ -1,0 +1,68 @@
+# Dev/E2E variant of the production Caddyfile.
+#
+# Swaps real Let's Encrypt for Caddy's internal CA (`tls internal`) so
+# the whole proxy path is exercisable without public DNS or real certs.
+# Bind to :9443 and :9080 instead of :443/:80 so we don't conflict with
+# anything else on the appliance (portald itself uses :8343 for TLS).
+#
+# /etc/hosts on the appliance pins the three hostnames to 127.0.0.1.
+
+{
+	# Local CA — run `caddy trust` once to import the root into the
+	# system trust store, or pass `-k` to curl.
+	local_certs
+	# Serve on non-privileged ports so the test doesn't need root.
+	https_port 9443
+	http_port  9080
+	# Non-default admin API port — avoids colliding with any stock
+	# `caddy.service` the apt package may have left running.
+	admin 127.0.0.1:2020
+
+	servers {
+		protocols h1 h2
+		trusted_proxies static 127.0.0.1/32 ::1/128
+	}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options    "nosniff"
+		X-Frame-Options           "DENY"
+		Referrer-Policy           "strict-origin-when-cross-origin"
+		Permissions-Policy        "geolocation=(), microphone=(), camera=()"
+		-Server
+	}
+}
+
+portal.stayconnect.local {
+	import security_headers
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8380 {
+		header_up X-Forwarded-Host  {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP         {remote_host}
+	}
+}
+
+api.stayconnect.local {
+	import security_headers
+	header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'"
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080 {
+		header_up X-Forwarded-Host  {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP         {remote_host}
+	}
+}
+
+admin.stayconnect.local {
+	import security_headers
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://api.stayconnect.local:9443; frame-ancestors 'none'"
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3000 {
+		header_up X-Forwarded-Host  {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP         {remote_host}
+	}
+}

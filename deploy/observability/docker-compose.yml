@@ -1,0 +1,85 @@
+# StayConnect — observability stack (phase 13).
+#
+# Run alongside the existing stayconnect-pg/redis/nats stack:
+#   docker compose -f deploy/observability/docker-compose.yml up -d
+#
+# Both services use network_mode=host — they bind to 127.0.0.1 on the
+# host directly and can reach ctrlapi/scd on localhost without the
+# Docker bridge. This avoids nftables-vs-docker iptables collisions on
+# appliances whose firewall is already managed by nftables.
+#
+# Services:
+#   stayconnect-prometheus  — scrapes scd (TCP) and ctrlapi; loads alerts
+#   stayconnect-alertmanager — routes alerts to email / webhook receivers
+#   stayconnect-grafana     — dashboards auto-provisioned from JSON
+
+# Log rotation on every container (json-file 50m x 5) — keeps a chatty
+# exporter from filling the appliance disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 50m
+    max-file: "5"
+
+services:
+  stayconnect-prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: stayconnect-prometheus
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - stayconnect-prom-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+      - "--web.listen-address=127.0.0.1:9090"
+    logging: *default-logging
+
+  stayconnect-alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: stayconnect-alertmanager
+    restart: unless-stopped
+    network_mode: host
+    # ALERTMANAGER_CONFIG picks which file to load. Defaults to the prod
+    # template; export ALERTMANAGER_CONFIG=alertmanager-dev.yml for
+    # testing (see scripts/phase15-alertmanager-test.sh).
+    command:
+      - "--config.file=/etc/alertmanager/${ALERTMANAGER_CONFIG:-alertmanager.yml}"
+      - "--storage.path=/alertmanager"
+      - "--web.listen-address=127.0.0.1:9093"
+      - "--cluster.listen-address="
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+      - stayconnect-alertmanager-data:/alertmanager
+    logging: *default-logging
+
+  stayconnect-grafana:
+    image: grafana/grafana:11.3.0
+    container_name: stayconnect-grafana
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - stayconnect-prometheus
+      - stayconnect-alertmanager
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Run Grafana on :3001 to avoid colliding with web-admin on :3000.
+      GF_SERVER_HTTP_PORT: "3001"
+      GF_SERVER_HTTP_ADDR: "127.0.0.1"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - stayconnect-grafana-data:/var/lib/grafana
+    logging: *default-logging
+
+volumes:
+  stayconnect-prom-data:
+  stayconnect-alertmanager-data:
+  stayconnect-grafana-data:

@@ -1,0 +1,19 @@
+[Unit]
+Description=StayConnect Control Plane API (ctrlapi)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/stayconnect/ctrlapi.env
+ExecStart=/opt/stayconnect/bin/ctrlapi serve
+Restart=on-failure
+RestartSec=2
+User=root
+Group=root
+ProtectSystem=full
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

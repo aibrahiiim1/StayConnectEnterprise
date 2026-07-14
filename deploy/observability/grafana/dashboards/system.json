@@ -1,0 +1,92 @@
+{
+  "uid": "stayconnect-system",
+  "title": "StayConnect — System Health",
+  "tags": ["stayconnect", "system"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Scrape targets up",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(up)"}, {"expr": "count(up)"}],
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [
+        {"color": "red", "value": null}, {"color": "green", "value": 2}
+      ]}}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "value"}
+    },
+    {
+      "id": 2, "type": "stat", "title": "scd uptime",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "min(scd_uptime_seconds)"}],
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "ctrlapi uptime",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "ctrlapi_uptime_seconds"}],
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Heartbeats / min",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(rate(ctrlapi_heartbeats_received_total[5m])) * 60"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "ctrlapi p95 HTTP latency by route",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "histogram_quantile(0.95, sum by (route, le)(rate(ctrlapi_http_request_duration_seconds_bucket[5m])))",
+        "legendFormat": "{{route}} p95"
+      }],
+      "fieldConfig": {"defaults": {"unit": "s"}}
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Go memory (process_resident_memory_bytes)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "process_resident_memory_bytes",
+        "legendFormat": "{{job}} {{instance}}"
+      }],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "Goroutines",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "go_goroutines",
+        "legendFormat": "{{job}}"
+      }]
+    },
+    {
+      "id": 20, "type": "timeseries", "title": "Reaper closures by reason",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum by (reason)(rate(scd_reaper_closed_total[15m]))",
+        "legendFormat": "{{reason}}"
+      }],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 21, "type": "timeseries", "title": "Appliances flipped offline (cumulative)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "ctrlapi_appliances_flipped_offline_total"
+      }]
+    }
+  ]
+}

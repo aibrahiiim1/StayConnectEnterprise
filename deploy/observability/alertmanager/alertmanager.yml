@@ -1,0 +1,150 @@
+# StayConnect — Alertmanager production config (phase 15).
+#
+# Alertmanager doesn't expand ${ENV_VAR}s natively. Before deploy, run
+# envsubst to substitute SENDGRID_API_KEY + SMTP_FROM:
+#
+#   envsubst < alertmanager.yml.template > alertmanager.yml
+#
+# Or — since this file lives in-tree — just search-and-replace before
+# mounting it in production. See deploy/observability/README.md.
+#
+# Routing tree:
+#   default (platform ops)          → email-warning + webhook-fallback
+#   severity=critical               → email-critical (shorter grouping)
+#                                   → webhook-critical (page integration)
+#   severity=info                   → muted (dashboard-only)
+#
+# Inhibit: a firing critical alert for a given (alertname, tenant_id)
+# silences any warning on the same pair — avoids noise during an outage.
+
+# The literal REPLACE_* placeholders below are valid YAML so
+# `amtool check-config` accepts this template as-is. Swap them for your
+# real values before deploying (see README for envsubst recipe).
+
+global:
+  resolve_timeout: 5m
+  # SMTP relay (currently a Gmail app-password relay until SendGrid exists).
+  # The credential is NOT stored in this repo: the password is read at
+  # runtime from a file that deployment writes into the (git-ignored)
+  # secrets/ directory next to this config:
+  #
+  #   echo -n '<app password>' > deploy/observability/alertmanager/secrets/smtp_password
+  #   chmod 600 deploy/observability/alertmanager/secrets/smtp_password
+  #
+  # SECURITY NOTE (2026-07-11): a Google app password for the account below
+  # was previously committed in this file. Removing it from the tree does
+  # NOT revoke it — it must be rotated at
+  # https://myaccount.google.com/apppasswords (delete the old app password,
+  # create a new one, write it to the secrets file). Until that manual
+  # rotation happens, treat the old credential as exposed.
+  smtp_smarthost: smtp.gmail.com:587
+  smtp_from: 'aibrahiiiiim@gmail.com'
+  smtp_auth_username: 'aibrahiiiiim@gmail.com'
+  smtp_auth_password_file: /etc/alertmanager/secrets/smtp_password
+  smtp_require_tls: true
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
+
+route:
+  receiver: email-warning
+  # Group alerts that share these labels; keeps SendGrid from getting
+  # flooded during a correlated outage.
+  group_by: ['alertname', 'tenant_id', 'service']
+  # Wait this long for more alerts in the same group before firing.
+  group_wait: 30s
+  # Throttle repeats of the same group.
+  group_interval: 5m
+  # Silence-friendly resend cadence once ops has ACK'd.
+  repeat_interval: 4h
+
+  routes:
+    # Critical → email + (optional) webhook to paging integration.
+    - matchers:
+        - severity = "critical"
+      receiver: email-critical
+      group_wait: 10s         # page faster
+      group_interval: 2m
+      repeat_interval: 1h
+      continue: true          # also forward to webhook-fallback below
+    # Webhook fan-out disabled while webhook URLs are still REPLACE_ME
+    # placeholders — enabling them would log a retry-failure per
+    # critical. Uncomment once real PagerDuty / Slack URLs are in the
+    # receiver blocks below. The receivers themselves stay defined.
+    #
+    # - matchers:
+    #     - severity = "critical"
+    #   receiver: webhook-critical
+    #   group_wait: 10s
+    #   continue: true
+    #
+    # - matchers:
+    #     - severity = "critical"
+    #   receiver: webhook-fallback
+    #   group_wait: 10s
+
+    # Info → dashboard-only. Routed to /dev/null so the email quota
+    # isn't burnt on unactionable signals.
+    - matchers:
+        - severity = "info"
+      receiver: blackhole
+
+receivers:
+  - name: email-warning
+    email_configs:
+      - to: 'aibrahiiiiim@gmail.com'
+        headers:
+          Subject: '[WARN] {{ .CommonLabels.alertname }}'
+        html: |
+          <h3>{{ .CommonLabels.alertname }}</h3>
+          <p><b>Severity:</b> {{ .CommonLabels.severity }}</p>
+          <p><b>Tenant:</b> {{ or .CommonLabels.tenant_id "-" }}</p>
+          {{ range .Alerts }}<p>{{ .Annotations.description }}</p>{{ end }}
+        send_resolved: true
+
+  - name: email-critical
+    email_configs:
+      - to: 'aibrahiiiiim@gmail.com'
+        headers:
+          Subject: '[CRIT] {{ .CommonLabels.alertname }}'
+          X-Priority: '1'
+        html: |
+          <h2 style="color:#c00">{{ .CommonLabels.alertname }}</h2>
+          <p><b>Severity:</b> {{ .CommonLabels.severity }}</p>
+          <p><b>Tenant:</b> {{ or .CommonLabels.tenant_id "-" }}</p>
+          {{ range .Alerts }}
+            <p>{{ .Annotations.summary }}</p>
+            <p><pre>{{ .Annotations.description }}</pre></p>
+          {{ end }}
+        send_resolved: true
+
+  # Generic webhook for paging (PagerDuty events API v2, OpsGenie, Slack's
+  # incoming-webhook, etc.). The URL below is a placeholder — replace
+  # with your actual endpoint. Leaving it pointed at a dead URL is fine
+  # — Alertmanager will retry; it won't block other receivers.
+  - name: webhook-critical
+    webhook_configs:
+      # Replace with your PagerDuty / OpsGenie / Slack URL. See README
+      # for URL shapes.
+      - url: 'https://events.pagerduty.com/v2/enqueue?integration_key=REPLACE_ME'
+        send_resolved: true
+        max_alerts: 50
+
+  # Fallback for ad-hoc ops listeners (Slack bot, local forwarder).
+  - name: webhook-fallback
+    webhook_configs:
+      - url: 'https://hooks.slack.com/services/REPLACE_ME'
+        send_resolved: true
+
+  # Dead-letter receiver. Alertmanager requires every route to have a
+  # receiver, so we wire info-severity here and let it drop them.
+  - name: blackhole
+
+# A firing critical suppresses any warning for the same (alertname,
+# tenant_id) pair — keeps inboxes from getting the same incident twice.
+inhibit_rules:
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ['alertname', 'tenant_id']

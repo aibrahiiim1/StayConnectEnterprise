@@ -1,0 +1,105 @@
+{
+  "uid": "stayconnect-payments",
+  "title": "StayConnect — Payments",
+  "tags": ["stayconnect", "payments"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "tenant_id",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": "label_values(ctrlapi_payment_amount_cents_total, tenant_id)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true
+      },
+      {
+        "name": "currency",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": "label_values(ctrlapi_payment_amount_cents_total{tenant_id=~\"$tenant_id\"}, currency)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Revenue (24h, minor units)",
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum(increase(ctrlapi_payment_amount_cents_total{tenant_id=~\"$tenant_id\",currency=~\"$currency\"}[24h]))"
+      }],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "graphMode": "area"}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Successful checkouts (24h)",
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum(increase(ctrlapi_payment_checkout_total{result=\"ok\"}[24h]))"
+      }],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Webhook failures (24h)",
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum(increase(ctrlapi_payment_webhook_total{result=~\"signature_fail|voucher_fail|parse_failed|dedupe_failed\"}[24h]))"
+      }],
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [
+        {"color": "green", "value": null},
+        {"color": "red", "value": 1}
+      ]}}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background"}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Checkout success rate",
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum(rate(ctrlapi_payment_checkout_total{result=\"ok\"}[30m])) / clamp_min(sum(rate(ctrlapi_payment_checkout_total[30m])), 0.001)"
+      }],
+      "fieldConfig": {"defaults": {"unit": "percentunit"}},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Checkout attempts by result",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum by (result)(rate(ctrlapi_payment_checkout_total[5m]))",
+        "legendFormat": "{{result}}"
+      }],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Webhook outcomes",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum by (result)(rate(ctrlapi_payment_webhook_total[5m]))",
+        "legendFormat": "{{result}}"
+      }],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "Revenue rate (cents/min)",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 13},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum by (tenant_id, currency)(rate(ctrlapi_payment_amount_cents_total{tenant_id=~\"$tenant_id\",currency=~\"$currency\"}[5m])) * 60",
+        "legendFormat": "{{tenant_id}} / {{currency}}"
+      }],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    }
+  ]
+}

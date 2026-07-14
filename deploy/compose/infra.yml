@@ -1,0 +1,57 @@
+name: stayconnect-infra
+
+# Log rotation on every container: json-file 50m x 5. Without this a chatty
+# container can fill the appliance disk (bit the pilot VM before 2026-04).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 50m
+    max-file: "5"
+
+services:
+  postgres:
+    image: timescale/timescaledb:2.16.1-pg16
+    container_name: stayconnect-pg
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stayconnect
+      POSTGRES_PASSWORD: stayconnect
+      POSTGRES_DB: stayconnect
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stayconnect -d stayconnect"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    container_name: stayconnect-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redisdata:/data
+    logging: *default-logging
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: stayconnect-nats
+    restart: unless-stopped
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    volumes:
+      - natsdata:/data
+    logging: *default-logging
+
+volumes:
+  pgdata:
+  redisdata:
+  natsdata:

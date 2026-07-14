@@ -1,0 +1,19 @@
+[Unit]
+Description=StayConnect Accounting Daemon (acctd)
+After=network-online.target stayconnect-scd.service stayconnect-tc-setup.service
+Wants=network-online.target
+Requires=stayconnect-scd.service stayconnect-tc-setup.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/stayconnect/acctd.env
+ExecStart=/opt/stayconnect/bin/acctd
+Restart=on-failure
+RestartSec=2
+User=root
+Group=root
+ProtectSystem=full
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

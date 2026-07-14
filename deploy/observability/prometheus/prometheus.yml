@@ -1,0 +1,56 @@
+# StayConnect Prometheus scrape config (phase 13).
+#
+# Targets:
+#   - ctrlapi on the host (port 8080), served by chi middleware
+#   - scd's TCP metrics listener (SCD_METRICS_ADDR, default 127.0.0.1:9101)
+#
+# scd's constant labels (tenant_id, site_id, appliance_id) are baked into
+# its series, so there's no per-target relabel needed. ctrlapi serves one
+# label set per request via the HTTP middleware.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    environment: dev
+    cluster: primary
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+# Forward firing rules to Alertmanager. Single-node deploy; scale to a
+# 3-node AM cluster in prod by adding two more target entries + enabling
+# --cluster.listen-address on each instance.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - 127.0.0.1:9093
+
+scrape_configs:
+  # network_mode=host means localhost here refers to the appliance
+  # itself — same view scd/ctrlapi have. Change to `host.docker.internal`
+  # (with an extra_hosts map) if you switch back to bridge networking.
+  - job_name: ctrlapi
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 127.0.0.1:8080
+        labels:
+          service: ctrlapi
+
+  - job_name: scd
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 127.0.0.1:9101
+        labels:
+          service: scd
+
+  # Prometheus scraping itself — useful for rate(prometheus_http_requests_total)
+  # and alert on scrape failures.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - 127.0.0.1:9090

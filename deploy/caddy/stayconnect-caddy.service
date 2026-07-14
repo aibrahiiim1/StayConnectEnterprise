@@ -1,0 +1,29 @@
+# Drop into /etc/systemd/system/stayconnect-caddy.service and
+#   systemctl enable --now stayconnect-caddy
+#
+# We run Caddy as the `caddy` user (created by the apt package). The unit
+# is a thin wrapper that keeps the storage path under /var/lib/caddy and
+# logs under /var/log/caddy — avoids surprises when the distro's stock
+# caddy.service is also around.
+
+[Unit]
+Description=StayConnect edge proxy (Caddy)
+Documentation=https://caddyserver.com/docs/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+PrivateTmp=true
+ProtectSystem=full
+# Needs CAP_NET_BIND_SERVICE to bind :80 and :443 as non-root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

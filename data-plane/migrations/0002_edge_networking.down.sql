@@ -1,0 +1,14 @@
+BEGIN;
+ALTER TABLE sessions DROP COLUMN IF EXISTS gateway_ip;
+ALTER TABLE sessions DROP COLUMN IF EXISTS ingress_interface;
+ALTER TABLE sessions DROP COLUMN IF EXISTS vlan_id;
+ALTER TABLE sessions DROP COLUMN IF EXISTS guest_network_id;
+DROP TABLE IF EXISTS network_health_checks;
+DROP TABLE IF EXISTS network_apply_events;
+DROP TABLE IF EXISTS network_config_revisions;
+DROP TABLE IF EXISTS dhcp_reservations;
+DROP TABLE IF EXISTS dhcp_pools;
+DROP TABLE IF EXISTS guest_networks;
+DROP TABLE IF EXISTS network_interfaces;
+DELETE FROM schema_migrations WHERE version = '0002_edge_networking';
+COMMIT;

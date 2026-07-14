@@ -1,0 +1,272 @@
+package main
+
+const landingHTML = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Wi-Fi Access</title>
+<style>
+  :root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; }
+  body { max-width: 440px; margin: 8vh auto; padding: 24px; }
+  h1 { font-size: 1.4rem; margin: 0 0 8px; }
+  p  { color: #666; margin: 0 0 20px; }
+  .tabs { display:flex; gap:0; border-bottom:1px solid #ddd; margin-bottom:18px; }
+  .tab { flex:1; padding:10px 12px; text-align:center; cursor:pointer;
+         color:#666; font-size:.92rem; border-bottom:2px solid transparent; user-select:none; }
+  .tab.active { color:inherit; border-bottom-color:#0a6cff; font-weight:600; }
+  .panel { display:none; }
+  .panel.active { display:block; }
+  label { display:block; font-size:.9rem; margin-bottom:6px; }
+  input[type=text], input[type=email], input[type=tel] {
+    width:100%; padding:12px 14px; font-size:1.1rem;
+    box-sizing:border-box; border:1px solid #ccc; border-radius:8px;
+  }
+  input[name=code] { letter-spacing:8px; text-align:center; font-variant-numeric: tabular-nums; }
+  input[name=voucher] { letter-spacing:2px; text-transform:uppercase; }
+  button { width:100%; margin-top:16px; padding:12px; font-size:1rem; font-weight:600;
+           border:0; border-radius:8px; background:#0a6cff; color:#fff; cursor:pointer; }
+  button:hover:not(:disabled) { background:#0858d6; }
+  button:disabled { opacity:.5; cursor:wait; }
+  button.link { background:none; color:#0a6cff; font-weight:400; padding:6px; margin-top:8px; }
+  .err { color:#b00020; margin-top:12px; min-height:1.2em; font-size:.9rem; }
+  .small { font-size:.8rem; color:#777; }
+</style>
+</head><body>
+  <h1>Welcome</h1>
+  <p>Choose how you'd like to connect.</p>
+
+  <div class="tabs" id="tabs"></div>
+
+  <!-- Voucher panel -->
+  <div class="panel" id="panel-voucher">
+    <form method="POST" action="/auth/voucher">
+      <label for="voucher">Voucher code</label>
+      <input id="voucher" name="code" type="text" autocomplete="off" required maxlength="32" placeholder="XXXX-XXXX-XXXX">
+      <button type="submit">Connect</button>
+      <div class="err">{{.Error}}</div>
+    </form>
+  </div>
+
+  <!-- Email panel -->
+  <div class="panel" id="panel-email">
+    <form data-otp="email" data-stage="dest" autocomplete="off">
+      <label for="email">Email address</label>
+      <input id="email" name="dest" type="email" required placeholder="you@example.com" autocomplete="email">
+      <button type="submit">Send code</button>
+      <div class="err"></div>
+    </form>
+    <form data-otp="email" data-stage="code" autocomplete="off" style="display:none">
+      <p class="small">We sent a 6-digit code to <span class="dest"></span>.</p>
+      <label>Verification code</label>
+      <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" required maxlength="6" placeholder="------">
+      <button type="submit">Verify</button>
+      <button type="button" class="link" data-resend>Try a different email</button>
+      <div class="err"></div>
+    </form>
+  </div>
+
+  <!-- PMS / Room panel — guest enters room number plus one verification field -->
+  <div class="panel" id="panel-pms">
+    <form id="form-pms" autocomplete="off">
+      <label for="pms-room">Room number</label>
+      <input id="pms-room" name="room" type="text" inputmode="numeric" required placeholder="e.g. 101">
+      <p class="small" id="pms-prompt" style="margin-top:10px"></p>
+      <input id="pms-secondary" name="secondary" type="text" required placeholder="Last name or reservation number">
+      <button type="submit">Connect</button>
+      <div class="err" id="pms-err"></div>
+    </form>
+  </div>
+
+  <!-- Social panel -->
+  <div class="panel" id="panel-social">
+    <div id="social-providers"></div>
+    <p class="small" style="margin-top:12px">You'll be redirected to the provider, then back here.</p>
+  </div>
+
+  <!-- SMS panel -->
+  <div class="panel" id="panel-sms">
+    <form data-otp="sms" data-stage="dest" autocomplete="off">
+      <label for="phone">Phone number</label>
+      <input id="phone" name="dest" type="tel" required placeholder="+1 555 123 4567" autocomplete="tel">
+      <p class="small">Include country code, e.g. <span class="small">+44 20 7946 0958</span></p>
+      <button type="submit">Send code</button>
+      <div class="err"></div>
+    </form>
+    <form data-otp="sms" data-stage="code" autocomplete="off" style="display:none">
+      <p class="small">We texted a 6-digit code to <span class="dest"></span>.</p>
+      <label>Verification code</label>
+      <input name="code" type="text" inputmode="numeric" pattern="[0-9]*" required maxlength="6" placeholder="------">
+      <button type="submit">Verify</button>
+      <button type="button" class="link" data-resend>Use a different number</button>
+      <div class="err"></div>
+    </form>
+  </div>
+
+  <script>
+    const Tabs = {
+      voucher: { id:'voucher', label:'Voucher', panel:'panel-voucher' },
+      email:   { id:'email',   label:'Email',   panel:'panel-email' },
+      sms:     { id:'sms',     label:'Phone',   panel:'panel-sms' },
+      pms:     { id:'pms',     label:'Room',    panel:'panel-pms' },
+      social:  { id:'social',  label:'Social',  panel:'panel-social' },
+    };
+    const ProviderLabels = { google: 'Continue with Google', apple: 'Continue with Apple', facebook: 'Continue with Facebook' };
+    const PMSPrompts = {
+      room_lastname:    "Last name on the reservation",
+      room_firstname:   "First name on the reservation",
+      room_reservation: "Reservation / confirmation number",
+      either:           "Last name OR reservation number",
+    };
+    const challenges = {}; // channel -> challenge_id
+
+    function setTab(id) {
+      document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.tab === id));
+      document.querySelectorAll('.panel').forEach(el => el.classList.remove('active'));
+      const t = Tabs[id]; if (t) document.getElementById(t.panel).classList.add('active');
+    }
+
+    fetch('/api/auth-methods').then(r => r.json()).then(cfg => {
+      const tabsEl = document.getElementById('tabs');
+      const enabled = [];
+      if (cfg.voucher && cfg.voucher.enabled) enabled.push('voucher');
+      if (cfg.email   && cfg.email.enabled)   enabled.push('email');
+      if (cfg.sms     && cfg.sms.enabled)     enabled.push('sms');
+      if (cfg.pms     && cfg.pms.enabled) {
+        enabled.push('pms');
+        document.getElementById('pms-prompt').textContent = PMSPrompts[cfg.pms.mode] || PMSPrompts.either;
+        // Pre-set the secondary field's autocomplete hint based on mode.
+        const sec = document.getElementById('pms-secondary');
+        sec.placeholder = PMSPrompts[cfg.pms.mode] || sec.placeholder;
+        sec.dataset.mode = cfg.pms.mode || 'either';
+      }
+      // Render social provider buttons.
+      if (cfg.social) {
+        const providers = Object.keys(cfg.social).filter(k => cfg.social[k] && cfg.social[k].enabled);
+        if (providers.length > 0) {
+          enabled.push('social');
+          const host = document.getElementById('social-providers');
+          providers.forEach(p => {
+            const a = document.createElement('a');
+            a.href = '/auth/social/start?provider=' + encodeURIComponent(p);
+            a.style.cssText = 'display:block;text-align:center;padding:12px;margin-top:10px;border:1px solid #ccc;border-radius:8px;color:inherit;text-decoration:none;font-weight:600';
+            a.textContent = ProviderLabels[p] || ('Continue with ' + p);
+            host.appendChild(a);
+          });
+        }
+      }
+      if (enabled.length === 0) { tabsEl.innerHTML = '<div class="small">No auth methods configured.</div>'; return; }
+      enabled.forEach(id => {
+        const el = document.createElement('div');
+        el.className = 'tab'; el.dataset.tab = id; el.textContent = Tabs[id].label;
+        el.addEventListener('click', () => setTab(id));
+        tabsEl.appendChild(el);
+      });
+      setTab(enabled[0]);
+    }).catch(() => { setTab('voucher'); });
+
+    function panel(channel) { return document.getElementById('panel-' + channel); }
+    function form(channel, stage) { return panel(channel).querySelector('form[data-stage="' + stage + '"]'); }
+
+    function attach(channel) {
+      const destForm = form(channel, 'dest');
+      const codeForm = form(channel, 'code');
+      destForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = destForm.querySelector('button[type=submit]');
+        const errEl = destForm.querySelector('.err');
+        errEl.textContent = ''; btn.disabled = true;
+        const dest = destForm.querySelector('input[name=dest]').value.trim();
+        try {
+          const r = await fetch('/auth/otp/request', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ channel, destination: dest })
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) { errEl.textContent = j.error || 'Request failed'; return; }
+          challenges[channel] = j.challenge_id;
+          codeForm.querySelector('.dest').textContent = dest;
+          destForm.style.display = 'none';
+          codeForm.style.display = 'block';
+          codeForm.querySelector('input[name=code]').focus();
+        } finally { btn.disabled = false; }
+      });
+      codeForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = codeForm.querySelector('button[type=submit]');
+        const errEl = codeForm.querySelector('.err');
+        errEl.textContent = ''; btn.disabled = true;
+        const code = codeForm.querySelector('input[name=code]').value.trim();
+        try {
+          const r = await fetch('/auth/otp/verify', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ challenge_id: challenges[channel], code })
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) { errEl.textContent = j.error || 'Verification failed'; return; }
+          window.location = '/success?s=' + encodeURIComponent(j.session_id || '') +
+                            '&t=' + encodeURIComponent(j.duration_seconds || 0);
+        } finally { btn.disabled = false; }
+      });
+      codeForm.querySelector('[data-resend]').addEventListener('click', () => {
+        codeForm.style.display = 'none';
+        destForm.style.display = 'block';
+        destForm.querySelector('input[name=dest]').focus();
+        delete challenges[channel];
+      });
+    }
+    attach('email');
+    attach('sms');
+
+    // PMS — single-step form: room + secondary field. Mode decides which
+    // server-side field we fill from the secondary input.
+    document.getElementById('form-pms').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = e.target.querySelector('button[type=submit]');
+      const errEl = document.getElementById('pms-err');
+      errEl.textContent = ''; btn.disabled = true;
+      const room = document.getElementById('pms-room').value.trim();
+      const sec  = document.getElementById('pms-secondary');
+      const val  = sec.value.trim();
+      const mode = sec.dataset.mode || 'either';
+      const body = { room };
+      if (mode === 'room_firstname')      body.first_name = val;
+      else if (mode === 'room_reservation') body.reservation_number = val;
+      else if (mode === 'room_lastname')    body.last_name = val;
+      else { // either — guess: if all-digits-or-hyphens and starts with letters, treat as reservation
+        if (/^[A-Z0-9\-]+$/i.test(val) && /\d/.test(val)) body.reservation_number = val;
+        else body.last_name = val;
+      }
+      try {
+        const r = await fetch('/auth/pms/verify', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(body)
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { errEl.textContent = j.error || 'Verification failed'; return; }
+        window.location = '/success?s=' + encodeURIComponent(j.session_id || '') +
+                          '&t=' + encodeURIComponent(j.duration_seconds || 0);
+      } finally { btn.disabled = false; }
+    });
+  </script>
+</body></html>`
+
+const successHTML = `<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connected</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 420px; margin: 10vh auto; padding: 24px; text-align:center; }
+  .ok { font-size: 3rem; color: #1a9e4a; }
+  h1 { margin: 8px 0; }
+  p { color: #666; }
+  a.btn { display:inline-block; margin-top:16px; padding:10px 16px; border:1px solid #ccc; border-radius:8px; color:#333; text-decoration:none; }
+</style>
+</head><body>
+  <div class="ok">✓</div>
+  <h1>You're online</h1>
+  <p>Session: {{.SessionID}}<br>
+     {{if .DurationSeconds}}Time remaining: {{.HumanRemaining}}{{else}}No time limit{{end}}</p>
+  <a class="btn" href="/status">Status</a>
+  <form method="POST" action="/logout" style="display:inline"><button type="submit" style="margin-left:8px">Disconnect</button></form>
+</body></html>`

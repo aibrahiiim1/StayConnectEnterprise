@@ -1,0 +1,111 @@
+#!/usr/sbin/nft -f
+# StayConnect Enterprise — gateway ruleset (edge-first)
+#
+# Topology:
+#   WAN  = ens160   (uplink; management SSH only)
+#   LAN  = br-lan   (10.10.0.1/24; ens192 slave; guests here)
+#   MGMT = the appliance management address (Caddy fronts hotel-admin/edged)
+#
+# Behaviour:
+#   - Guest IPs in @auth_ipv4 get full internet via WAN SNAT.
+#   - Unauthenticated guests have TCP 80/443 DNAT'd to the local portal.
+#   - Walled-garden IPs are reachable pre-auth (reconciled by scd from the
+#     site DB's walled_garden_rules — including resolved domain rules).
+#   - Everything else pre-auth is dropped.
+#   - IPv6 on the guest LAN is explicitly dropped end-to-end: the captive
+#     DNAT is IPv4-only, so allowing v6 would bypass the portal. No RA/DHCPv6
+#     is offered; this makes the posture explicit rather than incidental.
+#
+# Application ports (ctrlapi :8080, admin UIs :3000/:3100, edged :8090) are
+# NOT open here — they are reachable only via Caddy (:443) or loopback.
+#
+# Managed runtime sets (scd owns both):
+#   @auth_ipv4         — IPs of authenticated clients (with per-element timeout)
+#   @walled_garden_ip  — IPs reachable pre-auth
+
+flush ruleset
+
+table inet stayconnect {
+
+    set auth_ipv4 {
+        type ipv4_addr
+        flags timeout
+        comment "Authenticated guest IPs"
+    }
+
+    set walled_garden_ip {
+        type ipv4_addr
+        flags interval
+        auto-merge
+        comment "Pre-auth allowed hosts/CIDRs"
+        elements = {
+            1.1.1.1,
+            8.8.8.8,
+            8.8.4.4
+        }
+    }
+
+    # ---- Filter hooks --------------------------------------------------------
+
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        iif "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        # Management from WAN: SSH + ping + HTTPS (Caddy fronts the admin
+        # UIs and APIs). Raw application ports are no longer WAN-exposed.
+        iifname "ens160" tcp dport 22 accept
+        iifname "ens160" tcp dport 443 accept comment "Caddy TLS (admin UIs/APIs)"
+        iifname "ens160" icmp type echo-request accept
+
+        # Guest-facing services on LAN (IPv4 only — see header).
+        iifname "br-lan" meta nfproto ipv6 drop comment "no IPv6 guest services"
+        iifname "br-lan" udp dport { 67, 68 } accept comment "DHCP"
+        iifname "br-lan" udp dport 53 accept comment "DNS"
+        iifname "br-lan" tcp dport 53 accept comment "DNS/TCP"
+        iifname "br-lan" tcp dport { 8380, 8343 } accept comment "Portal"
+        iifname "br-lan" icmp type echo-request accept
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+
+        # IPv6 from guests can never be captive-checked (v4-only DNAT) —
+        # drop before conntrack shortcuts can pass anything.
+        iifname "br-lan" meta nfproto ipv6 drop comment "IPv6 guest bypass guard"
+
+        ct state established,related accept
+        ct state invalid drop
+
+        # Authenticated guests → internet.
+        iifname "br-lan" oifname "ens160" ip saddr @auth_ipv4 accept
+
+        # Walled-garden pre-auth.
+        iifname "br-lan" oifname "ens160" ip daddr @walled_garden_ip accept
+    }
+
+    chain output {
+        type filter hook output priority filter; policy accept;
+    }
+
+    # ---- NAT hooks (inet family, kernel >= 5.2) ------------------------------
+
+    chain prerouting_nat {
+        type nat hook prerouting priority dstnat; policy accept;
+
+        # Captive redirect: unauth HTTP/HTTPS → local portal.
+        iifname "br-lan" ip saddr != @auth_ipv4 ip daddr != @walled_garden_ip \
+            tcp dport 80  dnat ip to 10.10.0.1:8380
+        iifname "br-lan" ip saddr != @auth_ipv4 ip daddr != @walled_garden_ip \
+            tcp dport 443 dnat ip to 10.10.0.1:8343
+    }
+
+    chain postrouting_nat {
+        type nat hook postrouting priority srcnat; policy accept;
+
+        # SNAT guest subnet out the WAN.
+        ip saddr 10.10.0.0/24 oifname "ens160" masquerade
+    }
+}

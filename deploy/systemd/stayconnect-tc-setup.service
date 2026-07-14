@@ -1,0 +1,14 @@
+[Unit]
+Description=StayConnect tc (HTB) root qdisc setup
+After=network-online.target
+Wants=network-online.target
+Before=stayconnect-scd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/stayconnect/deploy/scripts/tc-setup.sh
+ExecStop=/bin/sh -c "/usr/sbin/tc qdisc del dev ens160 root 2>/dev/null; /usr/sbin/tc qdisc del dev br-lan root 2>/dev/null; exit 0"
+
+[Install]
+WantedBy=multi-user.target

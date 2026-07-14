@@ -1,0 +1,100 @@
+{
+  "uid": "stayconnect-overview",
+  "title": "StayConnect — Overview",
+  "tags": ["stayconnect"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "tenant_id",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "query": "label_values(scd_uptime_seconds, tenant_id)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Active sessions",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{"expr": "sum(scd_sessions_active{tenant_id=~\"$tenant_id\"})", "legendFormat": "active"}],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "graphMode": "area"}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Appliances online",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum(rate(ctrlapi_heartbeats_received_total{tenant_id=~\"$tenant_id\"}[5m])) * 60",
+        "legendFormat": "heartbeats/min"
+      }],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Sessions started (1h)",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum(increase(scd_sessions_started_total{tenant_id=~\"$tenant_id\"}[1h]))"
+      }],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Revenue (1h, minor units)",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum(increase(ctrlapi_payment_amount_cents_total{tenant_id=~\"$tenant_id\"}[1h]))"
+      }],
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}}
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Sessions started by method",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum by (method)(rate(scd_sessions_started_total{tenant_id=~\"$tenant_id\"}[5m]))",
+        "legendFormat": "{{method}}"
+      }],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Sessions closed by reason",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum by (reason)(rate(scd_sessions_closed_total{tenant_id=~\"$tenant_id\"}[5m]))",
+        "legendFormat": "{{reason}}"
+      }],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "id": 20, "type": "timeseries", "title": "ctrlapi HTTP rate by status",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum by (status)(rate(ctrlapi_http_requests_total[5m]))",
+        "legendFormat": "{{status}}"
+      }],
+      "fieldConfig": {"defaults": {"unit": "reqps"}}
+    },
+    {
+      "id": 21, "type": "timeseries", "title": "nft set mutations",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [{
+        "expr": "sum by (op, source)(rate(scd_nft_ops_total{tenant_id=~\"$tenant_id\"}[5m]))",
+        "legendFormat": "{{op}}/{{source}}"
+      }],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    }
+  ]
+}

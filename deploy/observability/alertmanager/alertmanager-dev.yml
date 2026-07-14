@@ -1,0 +1,67 @@
+# StayConnect — Alertmanager dev/E2E config.
+#
+# SMTP is stubbed out — everything routes to the localhost webhook-sink
+# service so the E2E test can verify routing without SendGrid creds.
+# Stand up the sink (deploy/observability/alertmanager/webhook-sink/)
+# before running this config.
+
+global:
+  resolve_timeout: 1m
+  # SMTP is unreachable in dev — we never actually hit email-* routes
+  # because the E2E test only fires alerts with severity=critical that
+  # continue: true through the webhook receivers.
+  smtp_smarthost: '127.0.0.1:25'
+  smtp_from: 'alerts@stayconnect.local'
+
+route:
+  receiver: webhook-fallback
+  group_by: ['alertname', 'tenant_id', 'service']
+  group_wait: 5s            # tighter timings for test runs
+  group_interval: 10s
+  repeat_interval: 1m
+
+  routes:
+    # Critical → paging webhook. continue: true so the next sibling
+    # also evaluates this alert (and forwards a copy to fallback).
+    # NOTE: `continue: true` only affects SIBLING route evaluation —
+    # it does NOT fall through to the top-level default receiver.
+    # That's why the fallback-for-critical fan-out is an explicit
+    # route, not a reliance on default-receiver semantics.
+    - matchers:
+        - severity = "critical"
+      receiver: webhook-critical
+      group_wait: 2s
+      group_interval: 10s
+      repeat_interval: 1m
+      continue: true
+
+    - matchers:
+        - severity = "critical"
+      receiver: webhook-fallback
+      group_wait: 2s
+      group_interval: 10s
+      repeat_interval: 1m
+
+    - matchers:
+        - severity = "info"
+      receiver: blackhole
+
+receivers:
+  - name: webhook-critical
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/critical'
+        send_resolved: true
+
+  - name: webhook-fallback
+    webhook_configs:
+      - url: 'http://127.0.0.1:9099/fallback'
+        send_resolved: true
+
+  - name: blackhole
+
+inhibit_rules:
+  - source_matchers:
+      - severity = "critical"
+    target_matchers:
+      - severity = "warning"
+    equal: ['alertname', 'tenant_id']

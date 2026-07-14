@@ -1,0 +1,212 @@
+# StayConnect alert rules (phase 13).
+#
+# Severities:
+#   critical — page immediately (pager / Slack critical channel)
+#   warning  — notify during business hours
+#   info     — dashboard-only
+#
+# Tenant-aware rules use the tenant_id label wherever the source metric
+# carries one (heartbeats, payments, scd constant labels). Rules without
+# a tenant label fire globally and should be routed to platform ops.
+
+groups:
+
+  # ──────────────────────────────────────────────────────────────────
+  # System health — scrape targets, heartbeats, appliance liveness
+  # ──────────────────────────────────────────────────────────────────
+  - name: system-health
+    interval: 30s
+    rules:
+      - alert: ScrapeTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape target {{ $labels.job }} down"
+          description: >
+            {{ $labels.instance }} has been unreachable by Prometheus for
+            more than 2 minutes. Check the service and its network.
+
+      - alert: ApplianceOffline
+        # The heartbeat sweeper flips appliances to offline after 30s of
+        # silence. Alert once that status has stuck for 2 minutes.
+        expr: |
+          increase(ctrlapi_appliances_flipped_offline_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Appliance(s) flipped to offline"
+          description: >
+            The heartbeat staleness sweeper closed {{ $value }}
+            appliance(s) in the last 5 minutes. Verify the site's
+            connectivity and scd process.
+
+      - alert: ApplianceNoHeartbeats
+        # Tenant-scoped: a tenant that normally receives heartbeats has
+        # gone quiet for > 3 minutes.
+        expr: |
+          rate(ctrlapi_heartbeats_received_total[3m]) == 0
+          and on(tenant_id) (max_over_time(ctrlapi_heartbeats_received_total[1h]) > 0)
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No heartbeats from tenant {{ $labels.tenant_id }}"
+          description: >
+            Tenant had heartbeat traffic in the last hour but none in the
+            last 3 minutes. Appliance(s) may have lost NATS or network.
+
+  # ──────────────────────────────────────────────────────────────────
+  # ctrlapi HTTP health
+  # ──────────────────────────────────────────────────────────────────
+  - name: ctrlapi-http
+    interval: 30s
+    rules:
+      - alert: CtrlapiHigh5xxRate
+        # > 5% of requests returning 5xx over 5 minutes.
+        expr: |
+          (
+            sum(rate(ctrlapi_http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(ctrlapi_http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ctrlapi 5xx rate above 5%"
+          description: >
+            {{ $value | humanizePercentage }} of ctrlapi requests returned 5xx
+            over the last 5m. Inspect ctrlapi logs.
+
+      - alert: CtrlapiSlow
+        # p95 of any route > 2s sustained.
+        expr: |
+          histogram_quantile(0.95,
+            sum by (route, le)(rate(ctrlapi_http_request_duration_seconds_bucket[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "ctrlapi p95 > 2s on route {{ $labels.route }}"
+          description: >
+            A ctrlapi route has p95 > 2s for 10 minutes. DB pressure
+            or slow upstream call.
+
+  # ──────────────────────────────────────────────────────────────────
+  # PMS health
+  # ──────────────────────────────────────────────────────────────────
+  - name: pms
+    interval: 30s
+    rules:
+      - alert: PMSProviderDown
+        # status enum: 0=down, 1=degraded, 2=connecting, 3=connected, 4=idle
+        expr: scd_pms_provider_status == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PMS provider {{ $labels.provider }} down (tenant {{ $labels.tenant_id }})"
+          description: >
+            scd reports the {{ $labels.kind }} provider
+            '{{ $labels.provider }}' as down for more than 2 minutes.
+            Check the upstream PMS connectivity and credentials.
+
+      - alert: PMSValidationFailuresSpike
+        # Sudden spike in non-"ok" validate outcomes.
+        expr: |
+          sum by (tenant_id, provider)(
+            rate(scd_pms_validate_total{result!="ok"}[5m])
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PMS validate failures spiking for {{ $labels.provider }}"
+          description: >
+            > 1 failed validate/sec for 5 minutes. Possible bad field map,
+            upstream outage, or guests entering wrong data.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Authentication flows
+  # ──────────────────────────────────────────────────────────────────
+  - name: auth
+    interval: 30s
+    rules:
+      - alert: SocialLoginFailureRate
+        expr: |
+          (
+            sum by (tenant_id, provider)(rate(scd_social_login_total{result=~"failed|bad_state"}[10m]))
+            /
+            clamp_min(sum by (tenant_id, provider)(rate(scd_social_login_total[10m])), 0.001)
+          ) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Social login failure rate high for {{ $labels.provider }}"
+          description: >
+            Over 30% of social logins failing or hitting bad state for
+            the last 10m. Likely OAuth client misconfiguration or
+            upstream outage.
+
+      - alert: OTPVerifyLockoutsSpike
+        # Repeated "locked" results suggest brute-force attempts.
+        expr: increase(scd_otp_verify_total{result="locked"}[10m]) > 20
+        labels:
+          severity: warning
+        annotations:
+          summary: "OTP lockouts spiking (tenant {{ $labels.tenant_id }})"
+          description: >
+            > 20 OTP verify attempts hit the per-destination lockout in
+            10 minutes. Consider investigating for abuse.
+
+  # ──────────────────────────────────────────────────────────────────
+  # Payments — webhook + checkout failures
+  # ──────────────────────────────────────────────────────────────────
+  - name: payments
+    interval: 30s
+    rules:
+      - alert: StripeSignatureFailures
+        # Any signature_fail events for > 5 min: either the wrong
+        # webhook_secret is configured or someone is attempting to forge.
+        expr: increase(ctrlapi_payment_webhook_total{result="signature_fail"}[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Stripe webhook signature failures"
+          description: >
+            Stripe webhook calls are failing signature verification.
+            Either the webhook_secret drifted in Stripe's config, or
+            someone is attempting to spoof events.
+
+      - alert: StripeVoucherIssueFailures
+        expr: increase(ctrlapi_payment_webhook_total{result="voucher_fail"}[15m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Payments completing without vouchers issued"
+          description: >
+            At least one paid checkout failed to issue a voucher in the
+            last 15 minutes. Guests have been charged without getting
+            access — investigate IMMEDIATELY.
+
+      - alert: CheckoutCreateFailureRate
+        expr: |
+          (
+            sum(rate(ctrlapi_payment_checkout_total{result!="ok"}[10m]))
+            /
+            clamp_min(sum(rate(ctrlapi_payment_checkout_total[10m])), 0.001)
+          ) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Checkout-create failures > 20%"
+          description: >
+            More than 20% of /checkout/create attempts failed in the last
+            10m. Likely Stripe API outage, bad credentials, or template
+            misconfiguration.

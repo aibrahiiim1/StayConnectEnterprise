@@ -1,0 +1,35 @@
+# hotel-admin — Next.js UI for hotel staff, served from the appliance.
+# Binds 127.0.0.1:3100; Caddy exposes it on the management IP over TLS only.
+#
+# Runs the Next.js STANDALONE bundle (node server.js) from the atomic release
+# symlink /opt/stayconnect/hotel-admin -> /opt/stayconnect/releases/hotel-admin/<stamp>.
+# No npm and no build ever run on the appliance (see deploy/scripts/
+# deploy-hotel-admin.sh) — this is what prevents a repeat of the /root build
+# that exhausted the pilot's memory. A MemoryMax cap is a belt-and-braces
+# guard so the UI process can never starve the box either.
+[Unit]
+Description=StayConnect Hotel Admin UI (Next.js standalone)
+After=network-online.target stayconnect-edged.service
+Wants=network-online.target stayconnect-edged.service
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/stayconnect/hotel-admin
+ExecStart=/usr/bin/node server.js
+Environment=NODE_ENV=production
+Environment=PORT=3100
+Environment=HOSTNAME=127.0.0.1
+EnvironmentFile=-/etc/stayconnect/hotel-admin.env
+User=stayconnect
+Group=stayconnect
+Restart=on-failure
+RestartSec=3
+MemoryMax=768M
+MemoryHigh=640M
+OOMPolicy=stop
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

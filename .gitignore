@@ -1,0 +1,22 @@
+*.exe
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+/.env
+/.env.*
+!.env.example
+/tmp/
+/control-plane/ctrlapi
+/data-plane/**/bin/
+node_modules/
+.next/
+coverage/
+*.log
+.idea/
+.vscode/
+.DS_Store
+
+# Deploy staging bundles (built Next standalone output)
+.deploy/

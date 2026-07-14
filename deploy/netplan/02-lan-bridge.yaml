@@ -1,0 +1,16 @@
+network:
+  version: 2
+  ethernets:
+    ens192:
+      dhcp4: no
+      dhcp6: no
+  bridges:
+    br-lan:
+      interfaces: [ens192]
+      addresses:
+        - 10.10.0.1/24
+      dhcp4: no
+      dhcp6: no
+      parameters:
+        stp: false
+        forward-delay: 0
