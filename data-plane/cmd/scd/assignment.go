@@ -456,11 +456,33 @@ func (s *server) seedTenantSiteMirror(ctx context.Context, tenantID, siteID, ten
 		slog.Warn("assignment: site mirror upsert failed", "err", err)
 		return
 	}
+	// The appliance's own MIRROR row. sessions.appliance_id (and other guest-domain
+	// tables) FK to appliances(id); without this row every guest session INSERT
+	// fails "sessions_appliance_id_fkey", so a voucher validates but authorization
+	// never completes. Repointed to the current owner so it survives a transition.
+	if s.applID != "" {
+		name := s.serial
+		if name == "" {
+			name = s.applID
+		}
+		serial := s.serial
+		if serial == "" {
+			serial = s.applID
+		}
+		if _, err := tx.Exec(ctx, `
+        INSERT INTO appliances (id, tenant_id, site_id, serial, name, status)
+        VALUES ($1, $2, $3, $4, $5, 'online')
+        ON CONFLICT (id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id, site_id = EXCLUDED.site_id, updated_at = now()
+    `, s.applID, tenantID, siteID, serial, name); err != nil {
+			slog.Warn("assignment: appliance mirror upsert failed", "err", err)
+			return
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		slog.Warn("assignment: tenant/site mirror commit failed", "err", err)
 		return
 	}
-	slog.Info("assignment: tenant/site mirror upserted", "tenant_id", tenantID, "site_id", siteID)
+	slog.Info("assignment: tenant/site/appliance mirror upserted", "tenant_id", tenantID, "site_id", siteID, "appliance_id", s.applID)
 }
 
 // reexec replaces the current process image with a fresh scd, so all subsystems
