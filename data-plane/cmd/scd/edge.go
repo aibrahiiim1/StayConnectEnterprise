@@ -114,10 +114,10 @@ func (s *server) licenseStatus(w http.ResponseWriter, r *http.Request) {
 	if !loaded {
 		out := map[string]any{
 			"state": string(s.lic.State()), "installed": false, "license_id": "",
+			"build_profile": buildprofile.Name,
 		}
 		if s.permissiveBlocked != "" {
 			out["permissive_blocked"] = s.permissiveBlocked
-			out["build_profile"] = buildprofile.Name
 		}
 		writeJSON(w, http.StatusOK, out)
 		return
