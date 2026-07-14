@@ -153,6 +153,33 @@ func (s *store) AvailableIfaceSet(ctx context.Context) (map[string]bool, error) 
 	return out, rows.Err()
 }
 
+// IfaceMeta is the operator-assigned classification of an interface.
+type IfaceMeta struct {
+	Role      string
+	Protected bool
+}
+
+// InterfaceMeta returns name -> {role, protected} from the inventory, so the
+// /v1/interfaces response can carry the role the operator assigned (which is what
+// the guest-network wizard filters on).
+func (s *store) InterfaceMeta(ctx context.Context) (map[string]IfaceMeta, error) {
+	rows, err := s.db.Query(ctx, `SELECT name, COALESCE(role,'unused'), is_protected FROM network_interfaces`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]IfaceMeta{}
+	for rows.Next() {
+		var n, role string
+		var protected bool
+		if err := rows.Scan(&n, &role, &protected); err != nil {
+			return nil, err
+		}
+		out[n] = IfaceMeta{Role: role, Protected: protected}
+	}
+	return out, rows.Err()
+}
+
 // --- revisions ---
 
 func (s *store) CreateRevision(ctx context.Context, summary string, intent []netcfg.GuestNetwork, createdBy string) (string, int64, error) {

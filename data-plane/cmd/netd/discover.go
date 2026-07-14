@@ -17,6 +17,13 @@ type Interface struct {
 	IPs       []string `json:"ips"`
 	Kind      string   `json:"kind"` // device|vlan|bridge|bond|veth
 	Parent    string   `json:"parent,omitempty"`
+	// Role/Protected are the operator-assigned classification from the
+	// network_interfaces inventory (guest_access|guest_trunk|ha_sync|unused|
+	// management|wan). Discover() leaves these empty; the /v1/interfaces handler
+	// fills them from the store so the UI can tell which interfaces may parent a
+	// guest network.
+	Role      string `json:"role"`
+	Protected bool   `json:"is_protected"`
 }
 
 type ipAddrEntry struct {

@@ -209,6 +209,19 @@ func (s *server) interfaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.st.SyncInterfaces(r.Context(), ifaces, s.topo.MgmtInterface, s.topo.WANInterface)
+	// Overlay the operator-assigned role/protected flag from the inventory so the
+	// UI can tell which interfaces may parent a guest network. Discover() alone
+	// leaves Role empty, which made every interface non-selectable in the wizard.
+	if meta, err := s.st.InterfaceMeta(r.Context()); err == nil {
+		for i := range ifaces {
+			if m, ok := meta[ifaces[i].Name]; ok {
+				ifaces[i].Role = m.Role
+				ifaces[i].Protected = m.Protected
+			} else if ifaces[i].Role == "" {
+				ifaces[i].Role = "unused"
+			}
+		}
+	}
 	writeJSON(w, 200, map[string]any{"interfaces": ifaces})
 }
 
