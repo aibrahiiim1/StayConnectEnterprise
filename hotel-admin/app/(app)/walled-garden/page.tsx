@@ -55,7 +55,7 @@ export default function WalledGardenPage() {
         description: (form.get("description") as string) || undefined,
       });
       setShowNew(false);
-      (e.currentTarget as HTMLFormElement).reset();
+      (e.target as HTMLFormElement).reset();
       load();
     } catch (e) { setErr(errMsg(e)); }
     finally { setBusy(false); }

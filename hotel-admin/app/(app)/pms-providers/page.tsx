@@ -77,7 +77,7 @@ export default function PMSProvidersPage() {
     try {
       await api.post("/pms-providers", body);
       setShowNew(false);
-      (e.currentTarget as HTMLFormElement).reset();
+      (e.target as HTMLFormElement).reset();
       load();
     } catch (e) { setErr(errMsg(e)); }
     finally { setBusy(false); }

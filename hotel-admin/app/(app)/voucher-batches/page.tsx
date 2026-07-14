@@ -43,7 +43,7 @@ export default function VoucherBatchesPage() {
         name: (form.get("name") as string) || undefined,
       });
       setShowNew(false);
-      (e.currentTarget as HTMLFormElement).reset();
+      (e.target as HTMLFormElement).reset();
       load();
     } catch (e: any) {
       if (e instanceof ApiError && e.body?.error === "limit_exceeded") {

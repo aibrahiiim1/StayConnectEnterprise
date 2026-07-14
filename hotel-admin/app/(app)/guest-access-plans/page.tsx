@@ -36,7 +36,11 @@ export default function GuestAccessPlansPage() {
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setBusy(true); setErr(null);
-    const form = new FormData(e.currentTarget);
+    // Capture the form element NOW: after the first await React has nulled
+    // e.currentTarget, so a later .reset() throws "reading 'reset' of null" and
+    // shows a bogus error even though the create succeeded.
+    const el = e.currentTarget;
+    const form = new FormData(el);
     const num = (k: string) => {
       const v = form.get(k) as string;
       return v === "" || v == null ? undefined : Number(v);
@@ -55,7 +59,7 @@ export default function GuestAccessPlansPage() {
         currency:         (form.get("currency") as string) || undefined,
       });
       setShowNew(false);
-      (e.currentTarget as HTMLFormElement).reset();
+      el.reset();
       load();
     } catch (e: any) {
       if (e instanceof ApiError && e.body?.error === "limit_exceeded") {

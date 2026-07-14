@@ -60,7 +60,7 @@ export default function NotificationsPage() {
         enabled: form.get("enabled") === "on",
       });
       setShowNew(false);
-      (e.currentTarget as HTMLFormElement).reset();
+      (e.target as HTMLFormElement).reset();
       load();
     } catch (e) { setErr(errMsg(e)); }
     finally { setBusy(false); }
