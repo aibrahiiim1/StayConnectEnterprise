@@ -70,10 +70,10 @@ export default function HealthPage() {
   const [detail, setDetail] = useState<{ service: ServiceHealth; recovery_events: RecoveryEvent[] } | null>(null);
   const [logs, setLogs] = useState<string[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const writable = me ? canWrite("health", me.roles) : false;
+  const writable = me ? canWrite("diagnostics", me.roles) : false;
 
   const load = useCallback(async () => {
-    try { setSum(await api.get<Summary>("/health/services")); }
+    try { setSum(await api.get<Summary>("/diagnostics/services")); }
     catch (e) { setErr(e instanceof ApiError ? e.message : "failed to load health"); }
   }, []);
 
@@ -82,17 +82,17 @@ export default function HealthPage() {
 
   async function openDetail(name: string) {
     setSel(name); setLogs(null);
-    try { setDetail(await api.get(`/health/services/${name}`)); } catch { setDetail(null); }
+    try { setDetail(await api.get(`/diagnostics/services/${name}`)); } catch { setDetail(null); }
   }
   async function recheck(name: string) {
     setBusy("recheck:" + name);
-    try { await api.post(`/health/services/${name}/recheck`); await load(); if (sel === name) await openDetail(name); }
+    try { await api.post(`/diagnostics/services/${name}/recheck`); await load(); if (sel === name) await openDetail(name); }
     catch (e) { setErr(e instanceof ApiError ? e.message : "recheck failed"); }
     finally { setBusy(null); }
   }
   async function viewLogs(name: string) {
     setBusy("logs:" + name);
-    try { const r = await api.get<{ lines: string[] }>(`/health/services/${name}/logs`); setLogs(r.lines || []); }
+    try { const r = await api.get<{ lines: string[] }>(`/diagnostics/services/${name}/logs`); setLogs(r.lines || []); }
     catch (e) { setErr(e instanceof ApiError ? e.message : "logs failed"); }
     finally { setBusy(null); }
   }
@@ -103,7 +103,7 @@ export default function HealthPage() {
     if (!password) return;
     setBusy("restart:" + name);
     try {
-      await api.post(`/health/services/${name}/restart`, { reason, password });
+      await api.post(`/diagnostics/services/${name}/restart`, { reason, password });
       await load();
     } catch (e) {
       setErr(e instanceof ApiError ? (e.body?.error === "reauth_required" ? "Password confirmation failed." : e.message) : "restart failed");

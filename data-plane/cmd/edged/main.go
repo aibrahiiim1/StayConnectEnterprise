@@ -232,7 +232,9 @@ func main() {
 			mountResource(r, s, "reports", s.reportsRoutes)
 			mountResource(r, s, "backups", s.backupsRoutes)
 			mountResource(r, s, "network", s.networkRoutes)
-			mountResource(r, s, "health", s.healthRoutes)
+			// NOTE: mounted at "diagnostics", NOT "health" — the unauthenticated
+			// GET /edge/v1/health summary (common.go) must not be shadowed.
+			mountResource(r, s, "diagnostics", s.healthRoutes)
 		})
 	})
 

@@ -61,7 +61,7 @@ const SECTIONS: Section[] = [
   {
     title: "System",
     items: [
-      { href: "/health",  label: "Diagnostics", icon: Activity, resource: "health" },
+      { href: "/health",  label: "Diagnostics", icon: Activity, resource: "diagnostics" },
       { href: "/license", label: "License",   icon: BadgeCheck, resource: "license" },
       { href: "/backups", label: "Backups",   icon: Archive,    resource: "backups" },
       { href: "/audit",   label: "Audit log", icon: ScrollText, resource: "audit" },
