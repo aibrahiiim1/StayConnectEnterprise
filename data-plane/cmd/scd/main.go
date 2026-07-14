@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -176,6 +177,13 @@ type server struct {
 	tenID  string
 	siteID string
 	applID string
+
+	// tenantBlocked is set when a cross-tenant data purge could not complete. While
+	// set, the appliance authorizes NO guests (fail-closed) — a transition is never
+	// treated as complete on a partial cleanup. tenantBlockReason carries a short
+	// operator-facing explanation.
+	tenantBlocked     atomic.Bool
+	tenantBlockReason string
 
 	// Cloud connection config surfaced (read-only, secrets masked) to the Hotel
 	// Admin Cloud Connection page via edged.
@@ -600,6 +608,18 @@ func main() {
 	// version change, so a plain restart / re-exec must reconcile too.
 	if s.db != nil && s.tenID != "" && s.siteID != "" {
 		s.seedTenantSiteMirror(rootCtx, s.tenID, s.siteID, "", "")
+
+		// Secure cross-tenant transition: if the site DB still holds data owned by a
+		// PREVIOUS tenant (cross-tenant reassignment / deleted+recreated Customer /
+		// ownership transfer), securely purge it before any guest is authorized. On
+		// failure the appliance is held fail-closed so a partial cleanup can never
+		// expose one customer's data to another.
+		if err := s.reconcileTenantOwnership(rootCtx); err != nil {
+			s.tenantBlockReason = "cross-tenant data cleanup failed; guest access is disabled until it succeeds"
+			s.tenantBlocked.Store(true)
+			slog.Error("tenant-transition: CLEANUP FAILED — holding appliance FAIL-CLOSED (no guest authorization) until it succeeds",
+				"err", err, "current_tenant", s.tenID)
+		}
 	}
 
 	// Setup-wizard state: identity store (for runtime enrollment) + identity

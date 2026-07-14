@@ -30,6 +30,16 @@ import (
 // feature == "" means "basic access" (voucher) — allowed in every state that
 // permits new sessions. Returns true when the request may proceed.
 func (s *server) licenseGate(w http.ResponseWriter, feature string) bool {
+	// Fail CLOSED while a cross-tenant data transition is incomplete: never
+	// authorize a guest until the previous tenant's local data has been fully
+	// purged, so one customer's data can never be exposed under another's ownership.
+	if s.tenantBlocked.Load() {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error":   "tenant_transition_pending",
+			"message": "This appliance is completing a customer transition; guest access is temporarily unavailable.",
+		})
+		return false
+	}
 	if s.lic == nil {
 		// Fail CLOSED: a missing license manager is a startup/config fault, never
 		// a reason to authorize a guest. (In practice s.lic is always set before

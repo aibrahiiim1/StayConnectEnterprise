@@ -615,6 +615,38 @@ the appliance's bound license.** Choose by intent:
 > **Site-wide licenses** (licenses not bound to a specific appliance) are
 > deliberately **left valid** by these appliance-level actions.
 
+### Cross-customer transition & secure data purge
+
+An appliance's local site database holds tenant-owned guest data (access plans,
+vouchers, sessions, guest PII, PMS/notification/social/payment **credentials**,
+walled garden, portal config, operators, usage/accounting). When an appliance
+moves to a **different Customer** — a genuine reassignment, or a Customer that was
+**deleted and recreated** (a new tenant UUID), decommission-and-reuse, or an
+ownership transfer — that previous customer's data must never remain readable
+under the new owner.
+
+The appliance enforces this automatically, comparing **immutable tenant UUIDs**
+(never names/slugs):
+
+- **Same-customer** deactivate/reactivate (same tenant UUID) → **all tenant data
+  is preserved** (plans, vouchers, sessions stay valid).
+- **Cross-customer** transition (different tenant UUID) → on the next boot the
+  appliance **securely purges every previous-tenant row and cached secret** in one
+  transaction *before it authorizes any guest*: it repoints the live guest
+  networks (VLAN/DHCP/portal stay up) to the new owner, deletes all foreign-tenant
+  rows across every tenant-owned table + the local tenant/site mirror, drops
+  pending outbox events queued under the old identity, flushes runtime guest
+  authorization (nftables), and writes an **audited transition record**
+  (`appliance.tenant_transition_purge`) with the purged counts.
+- **Fail-closed:** if the purge cannot complete, the appliance authorizes **no**
+  guests (`tenant_transition_pending`) until it succeeds — a partial cleanup can
+  never expose one customer's data to another. The purge is idempotent, so a
+  retry (or reboot) completes safely.
+
+Preserved across a transition: appliance/system/network/bootstrap state (WAN/mgmt,
+identity, certs, guest-network topology) and the immutable security **audit
+history**. Guest-facing data and secrets are not.
+
 ---
 
 ## 26. Safe deletion & dependency order
