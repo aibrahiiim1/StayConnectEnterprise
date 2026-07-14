@@ -9,14 +9,21 @@ import (
 
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
+	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
 )
 
 type activateReq struct {
-	TenantID         string `json:"tenant_id"`
-	SiteID           string `json:"site_id"`
-	ValidDays        int    `json:"valid_days"`
-	OfflineGraceDays int    `json:"offline_grace_days"`
-	Override         bool   `json:"override_allocation"`
+	TenantID string `json:"tenant_id"`
+	SiteID   string `json:"site_id"`
+	// Simple license model: the activation form carries the license terms
+	// directly — no plan or subscription selection.
+	MaxConcurrentOnlineGuests int        `json:"max_concurrent_online_guests"`
+	ValidFrom                 *time.Time `json:"valid_from"`
+	ValidUntil                *time.Time `json:"valid_until"`
+	ValidDays                 int        `json:"valid_days"` // fallback when valid_until absent
+	GracePeriodDays           int        `json:"grace_period_days"`
+	OfflineGraceDays          int        `json:"offline_grace_days"` // legacy alias
+	Override                  bool       `json:"override_allocation"`
 }
 
 // activateAppliance is the ONE-CLICK activation. In a single operator action
@@ -37,11 +44,14 @@ func (b *Base) activateAppliance(w http.ResponseWriter, r *http.Request) {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "tenant_id and site_id required")
 		return
 	}
-	if in.ValidDays <= 0 {
+	if in.ValidUntil == nil && in.ValidDays <= 0 {
 		in.ValidDays = 365
 	}
-	if in.OfflineGraceDays <= 0 {
-		in.OfflineGraceDays = 30
+	if in.GracePeriodDays <= 0 {
+		in.GracePeriodDays = in.OfflineGraceDays
+	}
+	if in.GracePeriodDays <= 0 {
+		in.GracePeriodDays = 30
 	}
 	if b.Lic == nil {
 		Fail(w, r, http.StatusServiceUnavailable, CodeInternal, "licensing not configured")
@@ -125,9 +135,20 @@ func (b *Base) activateAppliance(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// (5) Hardware-bound license.
-	doc, _, err := b.Lic.IssueForAppliance(ctx, in.TenantID, in.SiteID, id, operatorID,
-		time.Duration(in.ValidDays)*24*time.Hour, in.OfflineGraceDays)
+	// (5) Hardware-bound license with the operator's explicit terms.
+	lp := licensing.IssueParams{
+		TenantID: in.TenantID, SiteID: in.SiteID, ApplianceID: id, CreatedBy: operatorID,
+		MaxConcurrentOnlineGuests: in.MaxConcurrentOnlineGuests,
+		GracePeriodDays:           in.GracePeriodDays,
+		ValidFor:                  time.Duration(in.ValidDays) * 24 * time.Hour,
+	}
+	if in.ValidFrom != nil {
+		lp.ValidFrom = *in.ValidFrom
+	}
+	if in.ValidUntil != nil {
+		lp.ValidUntil = *in.ValidUntil
+	}
+	doc, _, err := b.Lic.Issue(ctx, lp)
 	if err != nil {
 		audit.Op(ctx, b.DB, r, "appliance.activate_failed", "appliance", id, map[string]any{"step": "license", "error": err.Error()})
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "license issue failed: "+err.Error())

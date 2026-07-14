@@ -38,7 +38,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
-	lic "github.com/stayconnect/enterprise/license"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/mail"
 	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
@@ -53,6 +52,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/voucher"
+	lic "github.com/stayconnect/enterprise/license"
 )
 
 type cfg struct {
@@ -314,41 +314,39 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce tenant plan limit: max_concurrent_devices.
-	// Configured + Limit >= 0 + Current >= Limit  → block.
-	// Limit == -1 means "unlimited".
-	if cc, err := s.sess.CheckConcurrency(r.Context()); err != nil {
-		slog.Warn("concurrency check", "err", err)
-	} else if cc.Configured && cc.Limit >= 0 && cc.Current >= cc.Limit {
-		writeJSON(w, http.StatusForbidden, map[string]any{
-			"error":     "limit_exceeded",
-			"limit_key": "max_concurrent_devices",
-			"limit":     cc.Limit,
-			"current":   cc.Current,
-		})
+	// ATOMIC licensed-capacity gate + session creation: the cap from the LOCAL
+	// signed license is checked under an advisory lock inside the same
+	// transaction that inserts the session row, so simultaneous logins can
+	// never exceed the licensed limit. A rejected guest gets a clear
+	// LICENSE_CAPACITY_REACHED and NO nft/shaping/accounting/session state —
+	// portal, DHCP and DNS keep working and existing sessions are untouched.
+	au, err := s.sess.Start(r.Context(), mac, ip, red.VoucherID, red.DurationSeconds)
+	if err != nil {
+		if capErr := (*session.CapacityError)(nil); errors.As(err, &capErr) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error":   "LICENSE_CAPACITY_REACHED",
+				"limit":   capErr.Limit,
+				"current": capErr.Current,
+			})
+			return
+		}
+		slog.Error("session start", "err", err)
+		httpErr(w, http.StatusInternalServerError, "session start failed")
 		return
 	}
-
 	nc := s.resolveNetwork(r.Context(), ip)
 	ttl := time.Duration(red.DurationSeconds) * time.Second
 	if err := s.nft.Allow(r.Context(), nc.Bridge, ip, ttl); err != nil {
 		slog.Error("nft allow", "err", err)
+		_ = s.sess.End(context.Background(), ip, "policy")
 		httpErr(w, http.StatusInternalServerError, "nft allow failed")
 		return
 	}
 	if err := s.shp.AddSession(r.Context(), nc.Bridge, ip, red.DownKbps, red.UpKbps); err != nil {
 		slog.Error("shape add", "err", err)
 		_ = s.nft.Deny(context.Background(), nc.Bridge, ip)
+		_ = s.sess.End(context.Background(), ip, "policy")
 		httpErr(w, http.StatusInternalServerError, "shape add failed")
-		return
-	}
-
-	au, err := s.sess.Start(r.Context(), mac, ip, red.VoucherID, red.DurationSeconds)
-	if err != nil {
-		slog.Error("session start", "err", err)
-		_ = s.nft.Deny(context.Background(), nc.Bridge, ip)
-		_ = s.shp.DeleteSession(context.Background(), nc.Bridge, ip)
-		httpErr(w, http.StatusInternalServerError, "session start failed")
 		return
 	}
 	s.recordSessionNetwork(r.Context(), au.SessionID, nc)
@@ -611,6 +609,10 @@ func main() {
 		WANMAC:                 s.hw.WANMAC,
 	})
 	s.lic.Load(rootCtx)
+	// The concurrent-online-guest cap comes DIRECTLY from the local signed
+	// license and is enforced atomically inside session creation. Central
+	// availability plays no part in guest authorization.
+	s.sess.LicensedLimit = s.lic.MaxConcurrentOnlineGuests
 	if ident != nil && c.CtrlAPIBase != "" {
 		priv := ident.PrivateKey()
 		applID := ident.ApplianceID

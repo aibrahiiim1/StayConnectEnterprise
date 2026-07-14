@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, Subscription, TopResp, UsageSummary, Whoami } from "@/lib/api";
+import { api, TopResp, UsageSummary, Whoami } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { KpiCard } from "@/components/kpi-card";
 import { Badge } from "@/components/ui/badge";
@@ -28,7 +28,7 @@ type FleetLicenseSummary = {
 export default function DashboardPage() {
   const [me, setMe] = useState<Whoami | null>(null);
   const [summary, setSummary] = useState<UsageSummary | null>(null);
-  const [sub, setSub] = useState<Subscription | null>(null);
+
   const [top, setTop] = useState<TopResp | null>(null);
   const [tenantID, setTenantID] = useState<string | null>(null);
   const [fleetLicenses, setFleetLicenses] = useState<FleetLicenseSummary | null>(null);
@@ -79,13 +79,11 @@ export default function DashboardPage() {
     const q = `tenant_id=${tenantID}&tz=${encodeURIComponent(tz)}`;
     (async () => {
       try {
-        const [s, sb, t] = await Promise.all([
+        const [s, t] = await Promise.all([
           api.get<UsageSummary>(`/v1/tenants/${tenantID}/usage/summary?tz=${encodeURIComponent(tz)}`),
-          api.get<Subscription>(`/v1/tenants/${tenantID}/subscription`).catch(() => null),
           api.get<TopResp>(`/v1/tenants/${tenantID}/usage/top-sites?top_n=5&${q}`),
         ]);
         setSummary(s);
-        setSub(sb);
         setTop(t);
       } catch (e: any) {
         setErr(e?.message ?? "Failed to load dashboard");
@@ -100,15 +98,8 @@ export default function DashboardPage() {
           <div className="text-xs text-muted uppercase tracking-wider">Overview</div>
           <h1 className="text-2xl font-semibold">Dashboard</h1>
         </div>
-        {/* A subscription/plan belongs to a TENANT's own org. Never surface it on the
-            Platform (vendor) header — the Platform issues licenses, it isn't licensed. */}
-        {!isPlatform && sub && (
-          <div className="text-sm text-muted">
-            <Badge tone={sub.status === "active" ? "ok" : sub.status === "trialing" ? "info" : "warn"}>{sub.status}</Badge>{" "}
-            <span className="ml-2 text-text">{sub.plan_name}</span>
-            <span className="ml-2">· billed {sub.billing_cycle}</span>
-          </div>
-        )}
+        {/* Simple license model: no plan/subscription is surfaced anywhere in
+            the normal workflow — the license itself is the entitlement. */}
       </div>
 
       {err && <div className="text-err text-sm mb-4">{err}</div>}
@@ -135,19 +126,11 @@ export default function DashboardPage() {
           value={summary?.sessions_today ?? "—"}
           hint={summary ? `since ${new Date(summary.period_start).toLocaleDateString()}` : undefined}
         />
-        {isPlatform ? (
-          <KpiCard
-            label="Licensed appliances"
-            value={fleetLicenses ? fleetLicenses.active + fleetLicenses.expiring : "—"}
-            hint="Live entitlements issued to the fleet"
-          />
-        ) : (
-          <KpiCard
-            label="Plan"
-            value={sub?.plan_code ?? "—"}
-            hint={sub ? `renews ${new Date(sub.current_period_end).toLocaleDateString()}` : undefined}
-          />
-        )}
+        <KpiCard
+          label="Licensed appliances"
+          value={fleetLicenses ? fleetLicenses.active + fleetLicenses.expiring : "—"}
+          hint="Live entitlements issued to the fleet"
+        />
       </div>
 
       <Card>

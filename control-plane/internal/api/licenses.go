@@ -12,7 +12,6 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/audit"
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
-	lic "github.com/stayconnect/enterprise/license"
 )
 
 // LicensesBase serves /cloud/v1/licenses (operator side) and the appliance
@@ -38,6 +37,13 @@ type License struct {
 	KeyID              string          `json:"key_id"`
 	RevokedAt          *time.Time      `json:"revoked_at,omitempty"`
 	CreatedAt          time.Time       `json:"created_at"`
+
+	// Simple model (v3): the license IS the entitlement.
+	LicenseVersion            int64      `json:"license_version"`
+	MaxConcurrentOnlineGuests int        `json:"max_concurrent_online_guests"`
+	GracePeriodDays           int        `json:"grace_period_days"`
+	ValidFrom                 *time.Time `json:"valid_from,omitempty"`
+	SupersedesLicenseID       *string    `json:"supersedes_license_id,omitempty"`
 }
 
 func (b *LicensesBase) Routes() http.Handler {
@@ -92,13 +98,17 @@ func (b *LicensesBase) driveApplianceLifecycle(ctx context.Context, siteID, to s
 
 const licenseCols = `id, tenant_id, site_id, commercial_plan_code, status, issued_at,
        valid_until, offline_grace_days, appliance_ids, features, limits, key_id,
-       revoked_at, created_at`
+       revoked_at, created_at,
+       COALESCE(license_version,0), COALESCE(max_concurrent_online_guests,0),
+       COALESCE(grace_period_days,0), valid_from, supersedes_license_id`
 
 func scanLicense(row interface{ Scan(...any) error }) (License, error) {
 	var l License
 	err := row.Scan(&l.ID, &l.TenantID, &l.SiteID, &l.CommercialPlanCode, &l.Status,
 		&l.IssuedAt, &l.ValidUntil, &l.OfflineGraceDays, &l.ApplianceIDs,
-		&l.Features, &l.Limits, &l.KeyID, &l.RevokedAt, &l.CreatedAt)
+		&l.Features, &l.Limits, &l.KeyID, &l.RevokedAt, &l.CreatedAt,
+		&l.LicenseVersion, &l.MaxConcurrentOnlineGuests, &l.GracePeriodDays,
+		&l.ValidFrom, &l.SupersedesLicenseID)
 	return l, err
 }
 
@@ -264,23 +274,36 @@ func (b *LicensesBase) get(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, l)
 }
 
+// issue creates (or, on /{id}/renew, supersedes with) a signed license under
+// the SIMPLE model: one appliance, a max-concurrent-online-guests cap, a
+// validity window and an explicit grace period. No plan/subscription needed.
+// Renew may change the cap, dates and grace — the change always lands as a NEW
+// signed document with a higher license_version (the active document is never
+// silently mutated, and the appliance's anti-rollback rejects the old one).
 func (b *LicensesBase) issue(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		TenantID         string `json:"tenant_id"`
-		SiteID           string `json:"site_id"`
-		ApplianceID      string `json:"appliance_id"` // when set, bind the license to this appliance's hardware/identity
-		ValidDays        int    `json:"valid_days"`
-		OfflineGraceDays int    `json:"offline_grace_days"`
+		TenantID                  string     `json:"tenant_id"`
+		SiteID                    string     `json:"site_id"`
+		ApplianceID               string     `json:"appliance_id"` // bind the license to this appliance's hardware/identity
+		MaxConcurrentOnlineGuests int        `json:"max_concurrent_online_guests"`
+		ValidFrom                 *time.Time `json:"valid_from"`
+		ValidUntil                *time.Time `json:"valid_until"`
+		ValidDays                 int        `json:"valid_days"` // fallback when valid_until absent
+		GracePeriodDays           int        `json:"grace_period_days"`
+		OfflineGraceDays          int        `json:"offline_grace_days"` // legacy field name, maps to grace
 	}
 	if err := DecodeJSON(r, &in); err != nil || in.SiteID == "" || in.TenantID == "" {
 		Fail(w, r, http.StatusBadRequest, CodeBadRequest, "tenant_id and site_id are required")
 		return
 	}
-	if in.ValidDays <= 0 {
+	if in.ValidUntil == nil && in.ValidDays <= 0 {
 		in.ValidDays = 365
 	}
-	if in.OfflineGraceDays <= 0 {
-		in.OfflineGraceDays = 30
+	if in.GracePeriodDays <= 0 {
+		in.GracePeriodDays = in.OfflineGraceDays
+	}
+	if in.GracePeriodDays <= 0 {
+		in.GracePeriodDays = 30
 	}
 	ctx, cancel := DBCtx(r)
 	defer cancel()
@@ -289,20 +312,21 @@ func (b *LicensesBase) issue(w http.ResponseWriter, r *http.Request) {
 	if s := auth.FromContext(r.Context()); s != nil {
 		createdBy = s.OperatorID
 	}
-	var doc *lic.Document
-	var env *lic.Envelope
-	var err error
-	if in.ApplianceID != "" {
-		doc, env, err = b.Svc.IssueForAppliance(ctx, in.TenantID, in.SiteID, in.ApplianceID, createdBy,
-			time.Duration(in.ValidDays)*24*time.Hour, in.OfflineGraceDays)
-	} else {
-		doc, env, err = b.Svc.IssueForSite(ctx, in.TenantID, in.SiteID, createdBy,
-			time.Duration(in.ValidDays)*24*time.Hour, in.OfflineGraceDays)
+	p := licensing.IssueParams{
+		TenantID: in.TenantID, SiteID: in.SiteID, ApplianceID: in.ApplianceID,
+		CreatedBy:                 createdBy,
+		MaxConcurrentOnlineGuests: in.MaxConcurrentOnlineGuests,
+		GracePeriodDays:           in.GracePeriodDays,
+		ValidFor:                  time.Duration(in.ValidDays) * 24 * time.Hour,
 	}
+	if in.ValidFrom != nil {
+		p.ValidFrom = *in.ValidFrom
+	}
+	if in.ValidUntil != nil {
+		p.ValidUntil = *in.ValidUntil
+	}
+	doc, env, err := b.Svc.Issue(ctx, p)
 	switch {
-	case errors.Is(err, licensing.ErrNoSubscription):
-		Fail(w, r, http.StatusPaymentRequired, CodePaymentRequired, "tenant has no active subscription")
-		return
 	case errors.Is(err, licensing.ErrNoSigner):
 		Fail(w, r, http.StatusServiceUnavailable, CodeInternal, "vendor signing key not configured")
 		return
@@ -315,12 +339,15 @@ func (b *LicensesBase) issue(w http.ResponseWriter, r *http.Request) {
 	b.driveApplianceLifecycle(ctx, in.SiteID, "licensed")
 	audit.Op(r.Context(), b.DB, r, "license.issued", "license", doc.LicenseID, map[string]any{
 		"_tenant_id": in.TenantID, "site_id": in.SiteID,
-		"plan": doc.CommercialPlanCode, "valid_until": doc.ValidUntil,
+		"license_version": doc.LicenseVersion, "max_concurrent_online_guests": doc.MaxConcurrentOnlineGuests,
+		"grace_period_days": doc.GracePeriodDays, "valid_from": doc.ValidFrom, "valid_until": doc.ValidUntil,
+		"supersedes": doc.SupersedesLicenseID,
 	})
 	WriteJSON(w, http.StatusCreated, map[string]any{
-		"license_id": doc.LicenseID,
-		"document":   doc,
-		"envelope":   env,
+		"license_id":      doc.LicenseID,
+		"license_version": doc.LicenseVersion,
+		"document":        doc,
+		"envelope":        env,
 	})
 }
 

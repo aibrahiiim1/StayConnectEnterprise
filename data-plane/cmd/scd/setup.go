@@ -27,7 +27,28 @@ func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 		if ev, ok := s.lic.Evaluation(); ok && ev.Doc != nil {
 			lic = map[string]any{"state": string(ev.State), "license_id": ev.Doc.LicenseID,
 				"plan": ev.Doc.CommercialPlanCode, "valid_until": ev.Doc.ValidUntil,
-				"offline_grace_days": ev.Doc.OfflineGraceDays}
+				"offline_grace_days": ev.Doc.OfflineGraceDays,
+				// Simple license model: usage against the licensed cap.
+				"license_version":   ev.Doc.LicenseVersion,
+				"valid_from":        ev.Doc.ValidFrom,
+				"grace_period_days": ev.Doc.EffectiveGraceDays(),
+				"grace_ends_at":     ev.GraceUntil,
+			}
+			maxGuests := s.lic.MaxConcurrentOnlineGuests()
+			lic["max_concurrent_online_guests"] = maxGuests
+			if s.sess != nil {
+				if n, err := s.sess.ActiveCount(r.Context()); err == nil {
+					lic["current_online_guests"] = n
+					if maxGuests > 0 {
+						rem := maxGuests - n
+						if rem < 0 {
+							rem = 0
+						}
+						lic["remaining_capacity"] = rem
+						lic["usage_percent"] = float64(n) / float64(maxGuests) * 100
+					}
+				}
+			}
 		} else {
 			lic = map[string]any{"state": string(s.lic.State())}
 		}
@@ -87,23 +108,23 @@ func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 		serial = s.serial
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"serial":                  serial,
-		"hardware":                hw,
-		"activation_status":       activation,
-		"hardware_mismatch":       hwMismatch,
-		"appliance_id":            s.applID,
+		"serial":                   serial,
+		"hardware":                 hw,
+		"activation_status":        activation,
+		"hardware_mismatch":        hwMismatch,
+		"appliance_id":             s.applID,
 		"identity_key_fingerprint": s.identityKeyFpr,
-		"version":                 scdVersion,
-		"enrolled":                s.enrolled,
-		"locked":                  s.enrolled, // bootstrap setup is locked once enrolled
-		"tenant_id":               s.tenID,
-		"site_id":                 s.siteID,
-		"api_mtls":                api,
-		"nats_mtls":               nats,
-		"license":                 lic,
-		"assignment":              s.assignmentStatus(),
-		"network":                 s.networkChecks(),
-		"outbox":                  outbox,
+		"version":                  scdVersion,
+		"enrolled":                 s.enrolled,
+		"locked":                   s.enrolled, // bootstrap setup is locked once enrolled
+		"tenant_id":                s.tenID,
+		"site_id":                  s.siteID,
+		"api_mtls":                 api,
+		"nats_mtls":                nats,
+		"license":                  lic,
+		"assignment":               s.assignmentStatus(),
+		"network":                  s.networkChecks(),
+		"outbox":                   outbox,
 	})
 }
 

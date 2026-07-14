@@ -76,6 +76,17 @@ type Document struct {
 	ValidFrom              time.Time `json:"valid_from,omitempty"`
 	SignerKeyID            string    `json:"signer_key_id,omitempty"`
 
+	// Schema v3 — the SIMPLE license model. The license itself is the direct
+	// source of the commercial entitlement: one appliance, one concurrent
+	// online-guest cap, one validity window with an explicit grace period.
+	// LicenseVersion is a per-appliance monotonic sequence: the appliance
+	// persists the highest version it has accepted and refuses anything lower
+	// (anti-rollback / old-license replay protection).
+	MaxConcurrentOnlineGuests int    `json:"max_concurrent_online_guests,omitempty"` // 0 = unlimited
+	GracePeriodDays           int    `json:"grace_period_days,omitempty"`
+	LicenseVersion            int64  `json:"license_version,omitempty"`
+	SupersedesLicenseID       string `json:"supersedes_license_id,omitempty"`
+
 	// SchemaVersion allows future payload evolution; verifiers reject
 	// versions they do not understand rather than misreading fields.
 	SchemaVersion int `json:"schema_version"`
@@ -84,8 +95,29 @@ type Document struct {
 // CurrentSchemaVersion is the version new licenses are issued with. Verifiers
 // accept MinSchemaVersion..CurrentSchemaVersion so an appliance holding a v1
 // license keeps working across the upgrade.
-const CurrentSchemaVersion = 2
+const CurrentSchemaVersion = 3
 const MinSchemaVersion = 1
+
+// EffectiveGraceDays is the grace window applied after ValidUntil. The simple
+// model (v3) carries it explicitly; older documents fall back to the offline
+// grace, which historically doubled as the renewal grace.
+func (d *Document) EffectiveGraceDays() int {
+	if d.GracePeriodDays > 0 {
+		return d.GracePeriodDays
+	}
+	return d.OfflineGraceDays
+}
+
+// EffectiveMaxConcurrentOnlineGuests is the appliance-wide cap on concurrently
+// authorized guest sessions across all guest VLANs/networks. 0 = unlimited.
+// v3 documents carry it explicitly; older documents fall back to the
+// plan-derived limit.
+func (d *Document) EffectiveMaxConcurrentOnlineGuests() int {
+	if d.MaxConcurrentOnlineGuests > 0 {
+		return d.MaxConcurrentOnlineGuests
+	}
+	return d.Limits.MaxConcurrentGuestSessions
+}
 
 // Envelope is the on-disk / on-wire form: the exact signed payload bytes
 // (base64 in JSON) plus the Ed25519 signature and the signing key id.
@@ -129,11 +161,16 @@ const (
 )
 
 // AllowsNewSessions reports whether new guest sessions may be created.
+//
+// Final simple-model semantics: Active and Grace authorize new sessions;
+// Expired, Suspended and Revoked do not. Existing sessions are never dropped
+// by a state change (the reaper/quotas end them naturally), and DHCP/DNS/
+// portal/Hotel Admin all keep running — only NEW Internet authorization is
+// refused. Restricted is a legacy (pre-v3) intermediate window and keeps its
+// historical allow-basic-access behavior for old documents.
 func (s State) AllowsNewSessions() bool {
 	switch s {
-	case StateActive, StateGracePeriod, StateRestricted, StateSuspended:
-		// Restricted/Suspended still allow basic guest access (voucher/PMS/
-		// email OTP) — a billing dispute must not take a hotel's WiFi down.
+	case StateActive, StateGracePeriod, StateRestricted:
 		return true
 	default:
 		return false

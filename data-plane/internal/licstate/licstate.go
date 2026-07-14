@@ -163,6 +163,72 @@ func (m *Manager) State() lic.State {
 // AllowsNewSessions gates every guest auth path.
 func (m *Manager) AllowsNewSessions() bool { return m.State().AllowsNewSessions() }
 
+// MaxConcurrentOnlineGuests returns the appliance-wide concurrent
+// online-guest cap from the LOCAL signed license: -1 = unlimited (or
+// unlicensed dev mode). Enforcement never consults Central.
+func (m *Manager) MaxConcurrentOnlineGuests() int64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if !m.loaded || m.current.Doc == nil {
+		return -1
+	}
+	if v := m.current.Doc.EffectiveMaxConcurrentOnlineGuests(); v > 0 {
+		return int64(v)
+	}
+	return -1
+}
+
+// LicenseInfo is the operator-facing snapshot for Hotel Admin / setup status.
+// It carries no private keys or secret material.
+type LicenseInfo struct {
+	Installed       bool       `json:"installed"`
+	State           string     `json:"state"`
+	LicenseID       string     `json:"license_id,omitempty"`
+	LicenseVersion  int64      `json:"license_version,omitempty"`
+	MaxGuests       int64      `json:"max_concurrent_online_guests"` // -1 unlimited
+	ValidFrom       *time.Time `json:"valid_from,omitempty"`
+	ValidUntil      *time.Time `json:"valid_until,omitempty"`
+	GracePeriodDays int        `json:"grace_period_days"`
+	GraceEndsAt     *time.Time `json:"grace_ends_at,omitempty"`
+	CloudStale      bool       `json:"cloud_stale,omitempty"`
+}
+
+// Info returns the current license snapshot for status endpoints.
+func (m *Manager) Info() LicenseInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := LicenseInfo{Installed: m.loaded, MaxGuests: -1}
+	if !m.loaded {
+		if m.required {
+			out.State = string(lic.StateExpired)
+		} else {
+			out.State = string(lic.StateActive)
+		}
+		return out
+	}
+	ev := m.current
+	out.State = string(ev.State)
+	out.CloudStale = ev.CloudStale
+	if ev.Doc != nil {
+		d := ev.Doc
+		out.LicenseID = d.LicenseID
+		out.LicenseVersion = d.LicenseVersion
+		if v := d.EffectiveMaxConcurrentOnlineGuests(); v > 0 {
+			out.MaxGuests = int64(v)
+		}
+		if !d.ValidFrom.IsZero() {
+			vf := d.ValidFrom
+			out.ValidFrom = &vf
+		}
+		vu := d.ValidUntil
+		out.ValidUntil = &vu
+		out.GracePeriodDays = d.EffectiveGraceDays()
+		ge := ev.GraceUntil
+		out.GraceEndsAt = &ge
+	}
+	return out
+}
+
 // AllowsProvisioning gates management writes (plans, batches, providers).
 func (m *Manager) AllowsProvisioning() bool { return m.State().AllowsProvisioning() }
 
@@ -287,7 +353,7 @@ func (m *Manager) syncLimits(ctx context.Context, d *lic.Document) error {
 		return int64(v)
 	}
 	ints := map[string]int64{
-		"max_concurrent_devices":    unlim(d.Limits.MaxConcurrentGuestSessions),
+		"max_concurrent_devices":    unlim(d.EffectiveMaxConcurrentOnlineGuests()),
 		"max_operators":             unlim(d.Limits.MaxLocalOperators),
 		"max_guest_access_plans":    unlim(d.Limits.MaxGuestAccessPlans),
 		"max_appliances":            unlim(d.Limits.MaxAppliancesForSite),

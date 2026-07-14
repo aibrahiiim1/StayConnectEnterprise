@@ -1,6 +1,7 @@
 package license
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,13 +29,27 @@ type Store struct {
 	verifier *Verifier
 }
 
-var ErrRollback = errors.New("license rollback rejected")
+// ErrRollback is returned when an older/superseded/replayed license is
+// presented. Callers surface it to operators as LICENSE_ROLLBACK_REJECTED.
+var ErrRollback = errors.New("LICENSE_ROLLBACK_REJECTED: license rollback rejected")
 
 const clockRollbackTolerance = 48 * time.Hour
 
 type storeState struct {
-	// InstalledIssuedAt of the current document (monotonic).
+	// InstalledIssuedAt of the current document (monotonic, legacy rule).
 	InstalledIssuedAt time.Time `json:"installed_issued_at"`
+	// HighestVersion is the highest license_version this appliance has ever
+	// accepted (v3 anti-rollback). Any document with a lower version — or the
+	// same version under a different license_id/fingerprint — is rejected,
+	// even if its signature is valid, its dates are unexpired, its limit is
+	// higher, or Central is offline. Survives restart/reboot/re-import;
+	// removed only by an authorized factory reset (which wipes the dir).
+	HighestVersion int64 `json:"highest_version"`
+	// AcceptedLicenseID / AcceptedFingerprint identify the exact document at
+	// HighestVersion, so a DIFFERENT document forged/reused at the same
+	// version is also rejected.
+	AcceptedLicenseID   string `json:"accepted_license_id"`
+	AcceptedFingerprint string `json:"accepted_fingerprint"`
 	// HighWater is the max wall-clock time this appliance has observed.
 	HighWater time.Time `json:"high_water"`
 	// LastCloudValidation is the last time the cloud confirmed this
@@ -99,6 +114,29 @@ func (s *Store) Install(raw []byte, now time.Time) (*Document, error) {
 		return nil, err
 	}
 	st := s.readState()
+	fpr := fmt.Sprintf("%x", sha256.Sum256([]byte(env.PayloadB64)))
+
+	// A previously revoked license can never be re-installed, even with a
+	// valid signature and unexpired dates.
+	if s.readRevoked()[doc.LicenseID] {
+		return nil, fmt.Errorf("%w: license %s was revoked", ErrRollback, doc.LicenseID)
+	}
+	// Monotonic version anti-rollback (v3+). Once any versioned document has
+	// been accepted, every replacement must carry a HIGHER version; the same
+	// version is accepted only for the byte-identical document (idempotent
+	// re-import of the current file). Legacy unversioned documents (version 0)
+	// are rejected once a versioned one has been accepted.
+	if st.HighestVersion > 0 {
+		switch {
+		case doc.LicenseVersion < st.HighestVersion:
+			return nil, fmt.Errorf("%w: license_version %d older than accepted %d (license %s superseded)",
+				ErrRollback, doc.LicenseVersion, st.HighestVersion, doc.LicenseID)
+		case doc.LicenseVersion == st.HighestVersion &&
+			(doc.LicenseID != st.AcceptedLicenseID || (st.AcceptedFingerprint != "" && fpr != st.AcceptedFingerprint)):
+			return nil, fmt.Errorf("%w: different document at already-accepted version %d",
+				ErrRollback, doc.LicenseVersion)
+		}
+	}
 	if !st.InstalledIssuedAt.IsZero() && doc.IssuedAt.Before(st.InstalledIssuedAt) {
 		return nil, fmt.Errorf("%w: incoming issued_at %s older than installed %s",
 			ErrRollback, doc.IssuedAt.Format(time.RFC3339), st.InstalledIssuedAt.Format(time.RFC3339))
@@ -114,6 +152,11 @@ func (s *Store) Install(raw []byte, now time.Time) (*Document, error) {
 		return nil, err
 	}
 	st.InstalledIssuedAt = doc.IssuedAt
+	if doc.LicenseVersion >= st.HighestVersion {
+		st.HighestVersion = doc.LicenseVersion
+		st.AcceptedLicenseID = doc.LicenseID
+		st.AcceptedFingerprint = fpr
+	}
 	if now.After(st.HighWater) {
 		st.HighWater = now
 	}

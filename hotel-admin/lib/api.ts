@@ -636,7 +636,18 @@ export type SetupStatus = {
   site_id?: string;
   api_mtls?: { mtls_ready?: boolean; cert_fingerprint?: string; not_after?: string };
   nats_mtls?: { connected?: boolean; mtls?: boolean };
-  license?: { state?: string; license_id?: string; plan?: string; valid_from?: string; valid_until?: string; offline_grace_days?: number };
+  license?: {
+    state?: string; license_id?: string; plan?: string;
+    valid_from?: string; valid_until?: string; offline_grace_days?: number;
+    // Simple license model: usage against the licensed cap.
+    license_version?: number;
+    grace_period_days?: number;
+    grace_ends_at?: string;
+    max_concurrent_online_guests?: number; // -1 unlimited
+    current_online_guests?: number;
+    remaining_capacity?: number;
+    usage_percent?: number;
+  };
   assignment?: {
     status?: string;
     assigned?: boolean;

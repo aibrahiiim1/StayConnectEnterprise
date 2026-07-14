@@ -360,6 +360,12 @@ export type License = {
   key_id: string;
   revoked_at?: string | null;
   created_at: string;
+  // Simple model (v3): the license IS the entitlement.
+  license_version?: number;
+  max_concurrent_online_guests?: number;
+  grace_period_days?: number;
+  valid_from?: string | null;
+  supersedes_license_id?: string | null;
 };
 
 // FleetAppliance is the vendor/group health view of one appliance — no guest
@@ -376,6 +382,8 @@ export type FleetAppliance = {
   license_status?: string | null;
   license_valid_until?: string | null;
   last_health?: unknown;
+  last_usage?: any;
+  last_usage_at?: string | null;
 };
 
 export type TelemetryRow = {

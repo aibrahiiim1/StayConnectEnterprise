@@ -186,21 +186,63 @@ export default function LicensePage() {
         </CardBody>
       </Card>
 
-      {/* ---- License status ---- */}
+      {/* ---- Grace / expiry / capacity warnings ---- */}
+      {(lic?.state === "GracePeriod") && (
+        <div className="rounded border border-[#6b4e1c] bg-[#3a2a0e] p-3 text-sm text-warn">
+          <b>License in grace period.</b> It expired {lic?.valid_until ? formatDate(lic.valid_until) : ""} and guests keep
+          working until <b>{lic?.grace_ends_at ? formatDate(lic.grace_ends_at) : "the grace end"}</b>. Renew now to avoid interruption.
+        </div>
+      )}
+      {(lic?.state === "Expired" || lic?.state === "Revoked" || lic?.state === "Suspended") && (
+        <div className="rounded border border-[#6b2128] bg-[#3a1418] p-3 text-sm text-err">
+          <b>License {lic?.state}.</b> New guest logins are refused; existing guest sessions are not dropped.
+          DHCP, DNS, the captive portal and this admin stay available.
+          {lic?.valid_until ? <> Expired {formatDate(lic.valid_until)}{lic?.grace_ends_at ? <>; grace ended {formatDate(lic.grace_ends_at)}</> : null}.</> : null}
+        </div>
+      )}
+      {lic?.max_concurrent_online_guests != null && lic.max_concurrent_online_guests > 0 &&
+        lic.current_online_guests != null && lic.current_online_guests >= lic.max_concurrent_online_guests && (
+        <div className="rounded border border-[#6b4e1c] bg-[#3a2a0e] p-3 text-sm text-warn">
+          <b>Licensed capacity reached.</b> {lic.current_online_guests} of {lic.max_concurrent_online_guests} concurrent
+          online guests in use — new logins receive LICENSE_CAPACITY_REACHED until a slot frees up.
+        </div>
+      )}
+
+      {/* ---- License status (simple model: one appliance, one cap, one window) ---- */}
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> License</CardTitle></CardHeader>
-        <CardBody className="grid gap-x-8 md:grid-cols-2">
+        <CardBody className="space-y-4">
+          {/* Concurrent online guests — the licensed cap and live usage. */}
           <div>
-            <Row k="Activation" v={<Badge tone={activationTone(activation)}>{activationLabel(activation)}</Badge>} />
-            <Row k="License status" v={<Badge tone={licenseTone(ls?.state ?? lic?.state)}>{ls?.state ?? lic?.state ?? "—"}</Badge>} />
-            <Row k="Plan" v={lic?.plan || ls?.commercial_plan_code || "—"} />
-            <Row k="Valid from" v={ls?.issued_at ? formatDate(ls.issued_at) : "—"} />
+            <div className="mb-1 flex items-baseline justify-between text-sm">
+              <span className="text-muted">Online guests (all guest networks)</span>
+              <span className="font-mono">
+                {lic?.current_online_guests ?? "—"} / {lic?.max_concurrent_online_guests && lic.max_concurrent_online_guests > 0 ? lic.max_concurrent_online_guests : "∞"}
+                {lic?.remaining_capacity != null && <span className="text-muted"> · {lic.remaining_capacity} free</span>}
+                {lic?.usage_percent != null && <span className="text-muted"> · {Math.round(lic.usage_percent)}%</span>}
+              </span>
+            </div>
+            {lic?.max_concurrent_online_guests != null && lic.max_concurrent_online_guests > 0 && (
+              <div className="h-2 overflow-hidden rounded bg-panel2">
+                <div className={`h-full ${((lic.usage_percent ?? 0) >= 100) ? "bg-err" : (lic.usage_percent ?? 0) >= 80 ? "bg-warn" : "bg-ok"}`}
+                  style={{ width: `${Math.min(100, lic.usage_percent ?? 0)}%` }} />
+              </div>
+            )}
           </div>
-          <div>
-            <Row k="Valid until" v={lic?.valid_until ? formatDate(lic.valid_until) : (ls?.valid_until ? formatDate(ls.valid_until) : "—")} />
-            <Row k="Offline grace" v={lic?.offline_grace_days != null ? `${lic.offline_grace_days} days` : (ls?.offline_grace_days != null ? `${ls.offline_grace_days} days` : "—")} />
-            <Row k="Customer" v={<span className="inline-flex items-center gap-1"><Building2 className="h-3.5 w-3.5 text-muted" />{asg?.tenant_name || "—"}</span>} />
-            <Row k="Hotel / Site" v={asg?.site_name || "—"} />
+          <div className="grid gap-x-8 md:grid-cols-2">
+            <div>
+              <Row k="Activation" v={<Badge tone={activationTone(activation)}>{activationLabel(activation)}</Badge>} />
+              <Row k="License status" v={<Badge tone={licenseTone(ls?.state ?? lic?.state)}>{ls?.state ?? lic?.state ?? "—"}</Badge>} />
+              <Row k="Max concurrent online guests" v={lic?.max_concurrent_online_guests && lic.max_concurrent_online_guests > 0 ? String(lic.max_concurrent_online_guests) : "Unlimited"} />
+              <Row k="Valid from" v={lic?.valid_from ? formatDate(lic.valid_from) : (ls?.issued_at ? formatDate(ls.issued_at) : "—")} />
+              <Row k="Valid until" v={lic?.valid_until ? formatDate(lic.valid_until) : (ls?.valid_until ? formatDate(ls.valid_until) : "—")} />
+            </div>
+            <div>
+              <Row k="Grace period" v={lic?.grace_period_days != null ? `${lic.grace_period_days} days` : "—"} />
+              <Row k="Grace ends" v={lic?.grace_ends_at ? formatDate(lic.grace_ends_at) : "—"} />
+              <Row k="Customer" v={<span className="inline-flex items-center gap-1"><Building2 className="h-3.5 w-3.5 text-muted" />{asg?.tenant_name || "—"}</span>} />
+              <Row k="Hotel / Site" v={asg?.site_name || "—"} />
+            </div>
           </div>
         </CardBody>
       </Card>

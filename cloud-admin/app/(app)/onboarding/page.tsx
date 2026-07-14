@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { api, withStepUp, reauth, ApiError, Plan, ListResp } from "@/lib/api";
+import { api, withStepUp, reauth, ApiError, ListResp } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -14,7 +14,7 @@ import { Check, Loader2, Circle, Plug, ShieldCheck, RotateCcw, RefreshCw } from 
 import { formatRelative } from "@/lib/utils";
 
 /**
- * Connect an Appliance — pick a Pending appliance, choose Customer/Site/Plan,
+ * Connect an Appliance — pick a Pending appliance, choose Customer/Site + license terms,
  * click Activate ONCE. The server runs claim -> assign -> signed assignment ->
  * certificate -> hardware-bound license; the appliance then converges to Active
  * on its own. No token needed for the normal online flow.
@@ -44,7 +44,10 @@ export default function OnboardingPage() {
   const router = useRouter();
   const [pending, setPending] = useState<Pending[] | null>(null);
   const [tenants, setTenants] = useState<Tenant[]>([]);
-  const [plans, setPlans] = useState<Plan[]>([]);
+  // Simple license model — the activation form carries the license terms.
+  const [maxGuests, setMaxGuests] = useState("500");
+  const [validUntil, setValidUntil] = useState("");
+  const [graceDays, setGraceDays] = useState("30");
   const [sites, setSites] = useState<Site[]>([]);
 
   const [sel, setSel] = useState<Pending | null>(null);
@@ -54,7 +57,7 @@ export default function OnboardingPage() {
   const [siteMode, setSiteMode] = useState<"existing" | "new">("existing");
   const [siteId, setSiteId] = useState("");
   const [newSite, setNewSite] = useState("");
-  const [planId, setPlanId] = useState("");
+  
   const [password, setPassword] = useState("");
   const [formErr, setFormErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -80,12 +83,8 @@ export default function OnboardingPage() {
 
   const loadBase = useCallback(async () => {
     try {
-      const [t, pl] = await Promise.all([
-        api.get<{ data: Tenant[] }>("/v1/tenants"),
-        api.get<ListResp<Plan>>("/v1/plans"),
-      ]);
+      const t = await api.get<{ data: Tenant[] }>("/v1/tenants");
       setTenants(t.data ?? []);
-      setPlans((pl.data ?? []).filter((x) => x.is_active));
     } catch { /* ignore */ }
   }, []);
 
@@ -158,7 +157,6 @@ export default function OnboardingPage() {
       tid = (r.data ?? []).find((x) => x.slug === slug)?.id ?? "";
     }
     if (!tid) throw new Error("Pick or create a customer.");
-    if (planId) await api.post(`/v1/tenants/${tid}/subscription`, { plan_id: planId });
     let sid = siteMode === "existing" ? siteId : "";
     if (siteMode === "new") {
       const name = newSite.trim();
@@ -176,7 +174,6 @@ export default function OnboardingPage() {
   async function onActivate() {
     setFormErr(null);
     if (!sel) { setFormErr("Select a pending appliance."); return; }
-    if (tenantMode === "new" && plans.length > 0 && !planId) { setFormErr("Choose a plan for the new customer."); return; }
     if (!password.trim()) { setFormErr("Enter your password to authorize activation."); return; }
     setBusy(true);
     try {
@@ -185,10 +182,15 @@ export default function OnboardingPage() {
       const t = await resolveTargets();
       trackId.current = sel.id;
       setPhase("activating");
+      const body: any = {
+        tenant_id: t.tenant, site_id: t.site,
+        max_concurrent_online_guests: Number(maxGuests) || 0,
+        grace_period_days: Number(graceDays) || 30,
+      };
+      if (validUntil) body.valid_until = new Date(validUntil + "T23:59:59Z").toISOString();
+      else body.valid_days = 365;
       const res = await withStepUp(() =>
-        api.post<{ status: string }>(`/cloud/v1/appliances-admin/${sel.id}/activate`, {
-          tenant_id: t.tenant, site_id: t.site,
-        }));
+        api.post<{ status: string }>(`/cloud/v1/appliances-admin/${sel.id}/activate`, body));
       if (res.status !== "activated") throw new Error("activation did not complete");
       setPhase("converging");
     } catch (e) {
@@ -218,7 +220,7 @@ export default function OnboardingPage() {
 
   function reset() {
     setPhase(""); setRunErr(null); trackId.current = null; setSel(null);
-    setNewCustomer(""); setNewSite(""); setPlanId("");
+    setNewCustomer(""); setNewSite("");
     loadPending();
   }
 
@@ -230,8 +232,8 @@ export default function OnboardingPage() {
       <div className="mb-1 text-xs text-muted uppercase tracking-wider">Infrastructure</div>
       <h1 className="mb-1 flex items-center gap-2 text-2xl font-semibold"><Plug size={22} /> Connect an Appliance</h1>
       <p className="mb-6 text-sm text-muted">
-        A factory-clean appliance with internet appears here automatically. Pick it, choose customer, site and plan,
-        and click Activate once — assignment, certificate, mTLS and license all happen for you.
+        A factory-clean appliance with internet appears here automatically. Pick it, choose customer, site and the license terms,
+        and click Activate once — assignment, certificate, mTLS and the signed license all happen for you. No plan or subscription needed.
       </p>
 
       {!phase ? (
@@ -288,12 +290,22 @@ export default function OnboardingPage() {
                     ? <select className={selectCls} value={siteId} onChange={(e) => setSiteId(e.target.value)} disabled={!tenantId}><option value="">Select a site…</option>{sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
                     : <Input placeholder="Site name" value={newSite} onChange={(e) => setNewSite(e.target.value)} />}
                 </div>
-                <div className="space-y-2">
-                  <Label>Plan</Label>
-                  <select className={selectCls} value={planId} onChange={(e) => setPlanId(e.target.value)}>
-                    <option value="">{tenantMode === "existing" ? "Keep current plan" : "Select a plan…"}</option>
-                    {plans.map((p) => <option key={p.id} value={p.id}>{p.name} — {(p.price_cents / 100).toFixed(0)} {p.currency}/{p.billing_cycle === "yearly" ? "yr" : "mo"}</option>)}
-                  </select>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label>Max concurrent online guests</Label>
+                    <Input type="number" min={0} value={maxGuests} onChange={(e) => setMaxGuests(e.target.value)} />
+                    <div className="text-xs text-muted">0 = unlimited. Appliance-wide across all guest VLANs.</div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Valid until</Label>
+                    <Input type="date" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+                    <div className="text-xs text-muted">Empty = 365 days from now.</div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Grace period (days)</Label>
+                    <Input type="number" min={0} value={graceDays} onChange={(e) => setGraceDays(e.target.value)} />
+                    <div className="text-xs text-muted">After expiry, guests keep working with warnings.</div>
+                  </div>
                 </div>
                 <div className="space-y-1 max-w-sm">
                   <Label htmlFor="ob-pw">Confirm your password</Label>

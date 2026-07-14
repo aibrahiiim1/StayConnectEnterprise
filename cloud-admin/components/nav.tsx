@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard, MapPin, Server, Radar, Users, LogOut,
-  CreditCard, BadgeCheck, ScrollText, Building2, PlugZap, SlidersHorizontal,
+  BadgeCheck, ScrollText, Building2, PlugZap,
   ShieldAlert, FileBadge, KeyRound, HardDrive,
 } from "lucide-react";
 
@@ -30,10 +30,11 @@ const SECTIONS: Section[] = [
   {
     title: "Commercial",
     items: [
-      { href: "/tenants",      label: "Customers",       icon: Building2 },
-      { href: "/commercial",   label: "Plans & limits",  icon: SlidersHorizontal },
-      { href: "/subscription", label: "Commercial plan", icon: CreditCard },
-      { href: "/licenses",     label: "Licenses",        icon: BadgeCheck },
+      // Simple license model: Customers organize the fleet; Licenses carry the
+      // entitlement. Plans/subscriptions are legacy read-only history (pages
+      // remain reachable by URL for auditing, but are out of the normal flow).
+      { href: "/tenants",  label: "Customers", icon: Building2 },
+      { href: "/licenses", label: "Licenses",  icon: BadgeCheck },
     ],
   },
   {

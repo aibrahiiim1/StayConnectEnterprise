@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -20,6 +21,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
+	lic "github.com/stayconnect/enterprise/license"
 )
 
 // licenseGate blocks a guest auth request when the license state refuses new
@@ -100,21 +102,46 @@ func (s *server) licenseStatus(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// Live usage against the licensed concurrent-online-guest cap.
+	var current int64 = -1
+	if s.sess != nil {
+		if n, err := s.sess.ActiveCount(r.Context()); err == nil {
+			current = n
+		}
+	}
+	maxGuests := s.lic.MaxConcurrentOnlineGuests()
+	var remaining any = "unlimited"
+	var usagePct any
+	if maxGuests > 0 {
+		rem := maxGuests - current
+		if rem < 0 {
+			rem = 0
+		}
+		remaining = rem
+		usagePct = float64(current) / float64(maxGuests) * 100
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"state":                 string(ev.State),
-		"installed":             true,
-		"license_id":            ev.Doc.LicenseID,
-		"commercial_plan_code":  ev.Doc.CommercialPlanCode,
-		"issued_at":             ev.Doc.IssuedAt,
-		"valid_until":           ev.Doc.ValidUntil,
-		"offline_grace_days":    ev.Doc.OfflineGraceDays,
-		"grace_until":           ev.GraceUntil,
-		"restricted_until":      ev.RestrictedUntil,
-		"features":              ev.Doc.Features,
-		"limits":                ev.Doc.Limits,
-		"cloud_stale":           ev.CloudStale,
-		"clock_rollback":        ev.ClockRollback,
-		"last_cloud_validation": ev.LastCloudValidation,
+		"state":                        string(ev.State),
+		"installed":                    true,
+		"license_id":                   ev.Doc.LicenseID,
+		"license_version":              ev.Doc.LicenseVersion,
+		"commercial_plan_code":         ev.Doc.CommercialPlanCode,
+		"issued_at":                    ev.Doc.IssuedAt,
+		"valid_from":                   ev.Doc.ValidFrom,
+		"valid_until":                  ev.Doc.ValidUntil,
+		"offline_grace_days":           ev.Doc.OfflineGraceDays,
+		"grace_period_days":            ev.Doc.EffectiveGraceDays(),
+		"grace_until":                  ev.GraceUntil,
+		"restricted_until":             ev.RestrictedUntil,
+		"features":                     ev.Doc.Features,
+		"limits":                       ev.Doc.Limits,
+		"max_concurrent_online_guests": maxGuests,
+		"current_online_guests":        current,
+		"remaining_capacity":           remaining,
+		"usage_percent":                usagePct,
+		"cloud_stale":                  ev.CloudStale,
+		"clock_rollback":               ev.ClockRollback,
+		"last_cloud_validation":        ev.LastCloudValidation,
 	})
 }
 
@@ -130,12 +157,23 @@ func (s *server) licenseInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	doc, err := s.lic.Install(r.Context(), raw)
 	if err != nil {
+		// Anti-rollback: an older/superseded/revoked/replayed document is never
+		// accepted — even with a valid signature, unexpired dates, a higher
+		// guest limit, or Central offline.
+		if errors.Is(err, lic.ErrRollback) {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":  "LICENSE_ROLLBACK_REJECTED",
+				"detail": err.Error(),
+			})
+			return
+		}
 		httpErr(w, http.StatusBadRequest, "install failed: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "installed", "license_id": doc.LicenseID,
-		"state": string(s.lic.State()),
+		"license_version": doc.LicenseVersion,
+		"state":           string(s.lic.State()),
 	})
 }
 
@@ -396,16 +434,16 @@ func hotelAdminCertHealth() map[string]any {
 	}
 	pick := func(k string) any { return st[k] }
 	return map[string]any{
-		"serial":              pick("serial"),
-		"fingerprint_sha256":  pick("fingerprint_sha256"),
-		"expires_at":          pick("expires_at"),
-		"days_remaining":      pick("days_remaining"),
-		"status_threshold":    pick("status_threshold"),
-		"san_config_match":    pick("san_config_match"),
-		"current_management_ip": pick("current_management_ip"),
-		"last_renewal_result": pick("last_renewal_result"),
+		"serial":                  pick("serial"),
+		"fingerprint_sha256":      pick("fingerprint_sha256"),
+		"expires_at":              pick("expires_at"),
+		"days_remaining":          pick("days_remaining"),
+		"status_threshold":        pick("status_threshold"),
+		"san_config_match":        pick("san_config_match"),
+		"current_management_ip":   pick("current_management_ip"),
+		"last_renewal_result":     pick("last_renewal_result"),
 		"last_successful_renewal": pick("last_successful_renewal"),
-		"last_error":          pick("last_error"),
+		"last_error":              pick("last_error"),
 	}
 }
 
