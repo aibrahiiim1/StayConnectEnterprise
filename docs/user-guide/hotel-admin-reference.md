@@ -62,12 +62,31 @@ are generated from.
 ### Voucher batches — `/voucher-batches`
 Generate and manage batches of guest WiFi voucher codes from a plan.
 
-- **Columns:** Label · Count · Created · (CSV · Revoke all).
-- **New batch** form: **Plan** (dropdown of active plans), **Count** (1–10000,
-  default 50), **Label** (optional). Needs at least one active plan.
-- **Actions:** **CSV** download of codes · **Revoke all** non-terminal vouchers.
-- **Batch detail** (`/voucher-batches/{id}`): lists each code with State (active /
-  unused / revoked / expired / exhausted), Issued, Activated; **Download CSV**.
+- **Columns:** Label · Count · **Format** (generation mode/length/prefix) ·
+  **Totals** (unused/active/used/revoked) · Created · (View codes · CSV · Revoke
+  unused).
+- **New batch** form: **Plan**, **Count** (1–10000), **Label**, **Code length**
+  (6–10), **Character mode** (numbers / letters / letters+numbers / complex),
+  **Prefix** (optional, A–Z/0–9), **Exclude ambiguous** (on by default). Codes use
+  secure random generation, are globally unique, and always exclude I/L/O/U.
+- **Batch detail** (`/voucher-batches/{id}`): search/filter codes by text and
+  state; **copy** an individual code; **print**; **download CSV**; **revoke** an
+  individual unused code. Shows the generation format and state totals.
+
+### Guest accounts — `/guest-accounts`
+Username & Password guest sign-in — an alternative to vouchers, bound to a Guest
+Access Plan.
+
+- **Columns:** Username · Name · Plan · Status (enabled/disabled) · Valid until ·
+  Last login · Logins.
+- **New account:** Username (3–64), Password (min 6, write-only), **Plan**,
+  optional display name / valid-until / notes.
+- **Per-account actions:** change **Plan**, **Reset** password (invalidates the
+  old one), **Enable/Disable**, **Delete**.
+- **Portal toggle:** *Show Username & Password tab on the captive portal* —
+  controls whether guests see the method. Passwords are argon2id-hashed and never
+  displayed/exported; wrong credentials return one generic error and create no
+  session; repeated failures lock the account temporarily.
 
 ### Sessions — `/sessions`
 See connected/recent guest devices and force-disconnect them.

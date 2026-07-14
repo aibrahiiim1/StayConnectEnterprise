@@ -150,9 +150,25 @@ Make sure the portal endpoints are reachable pre-login via the **Walled garden**
   (cents)**, **Currency**.
 
 **Voucher batch** (**Voucher batches** → **New batch**):
-- **Plan** (an active plan), **Count** (1–10000), **Label**. Generate, then
-  **download the CSV** of codes to hand out or print. **Revoke all** cancels a
-  batch's unused codes.
+- **Plan** (an active plan), **Count** (1–10000), **Label**, and generation
+  options: **Code length** (6–10), **Character mode** (numbers / letters /
+  letters+numbers / complex), optional **Prefix** (A–Z/0–9), and **Exclude
+  ambiguous** (default on: 0/O, 1/I/L, 5/S; I/L/O/U are always excluded).
+- Open the batch to **view/search/copy/print** codes or **download the CSV**;
+  **revoke** an individual unused code, or **Revoke unused** for the batch. Legacy
+  12-char batches remain usable.
+
+**Guest accounts** (**Guest accounts** → **New account**) — username/password
+sign-in, an alternative to vouchers:
+- **Username**, **Password** (min 6), **Guest access plan**, optional **display
+  name / valid-until / notes**. The plan supplies duration/data-cap/speed/max-
+  devices, exactly like a voucher.
+- Manage each account: **change plan**, **reset password** (invalidates the old
+  one), **enable/disable**, **delete**; see **last login** and login count.
+- Passwords are stored hashed and are **write-only** — never shown or exported.
+- Toggle **Show Username & Password tab on the captive portal** to let guests use
+  it. Wrong username/password returns a single generic error and creates no
+  session; repeated failures temporarily lock the account.
 
 ---
 

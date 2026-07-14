@@ -424,14 +424,23 @@ shared across VLAN 100 **and** VLAN 200 (and any legacy `br-lan`), not 300 each.
 Guests can authenticate by:
 
 - **Voucher** — a printed/emailed code (needs Access plans + Voucher batches, §15).
+- **Username & Password (Guest Accounts)** — a named account with a password,
+  bound to an Access plan (§15). Basic-access like vouchers (no license feature
+  gate). Managed on **Hotel Admin → Guest accounts**; the portal tab is shown only
+  when you enable it there. Passwords are stored hashed (argon2id) and are
+  write-only.
 - **OTP** — email or SMS one-time code (needs a Notifications provider, §16).
 - **PMS** — room number + name checked against the hotel PMS (needs a PMS
   provider, §16).
 - **Social login** — Google/Apple/Facebook/Microsoft (needs a Social provider).
 - **Payment** — paid WiFi via Stripe (needs a Payments provider).
 
-Which methods you may use depends on what you enable **and** what the license
-entitles (the License page's Entitlements table shows the licensed features).
+All methods share the **same** authorization pipeline (credential check → license
+state → atomic appliance-wide capacity reservation → session → nft → shaping →
+accounting); a failed login creates no session or authorization. Which methods you
+may use depends on what you enable **and** what the license entitles (the License
+page's Entitlements table shows the licensed features; voucher and
+username/password are always available).
 Make sure the portal, payment and OAuth callback hosts are reachable **before**
 login via the **Walled garden** (§17).
 
@@ -447,12 +456,30 @@ Description, **Duration (s)** (blank = unlimited time), **Data cap (bytes)** (bl
 > concept from the license's appliance-wide concurrent-guest capacity (§10).
 
 **Voucher batch** (**Voucher batches** → **New batch**): choose an active **Plan**,
-a **Count** (1–10000) and a **Label**; generate; **download the CSV** to hand out
-or print. **Revoke all** cancels a batch's unused codes.
+a **Count** (1–10000), a **Label**, and the **code generation options**:
+- **Code length** 6–10.
+- **Character mode**: numbers only · uppercase letters · letters + numbers ·
+  complex (letters + numbers).
+- **Optional prefix** (A–Z/0–9, e.g. `PARTY`).
+- **Exclude ambiguous characters** (on by default): drops `0/O`, `1/I/L`, `5/S`.
+  (`I, L, O, U` are *always* excluded so a code matches exactly what the guest
+  types.) Codes use secure random generation and are globally unique; a batch too
+  large for the chosen space is rejected rather than weakening randomness.
 
-New plans/voucher batches require the license to permit provisioning — if the
-license is Expired/Suspended/Revoked/Unlicensed you'll get a "license doesn't
-currently allow…" error; renew or activate first.
+Then **view the codes** (search/filter, copy a code, print, or **download the
+CSV**), **revoke** an individual unused code, or **Revoke unused** for the whole
+batch. Each batch shows its generation format and unused/active/used/revoked
+totals. Existing legacy (12-char) batches keep working unchanged.
+
+**Guest accounts** (**Guest accounts** → **New account**): username, password
+(min 6), an active **Plan**, optional display name / valid-until / notes. Manage
+each account (change plan, **reset password**, enable/disable, delete) and see its
+last-login/usage. Toggle **Show Username & Password tab on the captive portal** to
+expose the method to guests.
+
+New plans/voucher batches/guest accounts require the license to permit
+provisioning — if the license is Expired/Suspended/Revoked/Unlicensed you'll get a
+"license doesn't currently allow…" error; renew or activate first.
 
 ---
 
