@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -25,7 +24,6 @@ import (
 
 	"strconv"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
@@ -34,20 +32,22 @@ import (
 )
 
 type cfg struct {
-	DBURL       string
-	ScdSocket   string
-	TickSeconds int
-	TenantID    string
-	ApplianceID string
+	DBURL        string
+	ScdSocket    string
+	TickSeconds  int
+	TenantID     string
+	ApplianceID  string
+	LegacyBridge string
 }
 
 func loadCfg() cfg {
 	return cfg{
-		DBURL:       envOr("ACCTD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
-		ScdSocket:   envOr("ACCTD_SCD_SOCKET", "/run/stayconnect/scd.sock"),
-		TickSeconds: envInt("ACCTD_TICK_SECONDS", 1),
-		TenantID:    os.Getenv("ACCTD_TENANT_ID"),
-		ApplianceID: os.Getenv("ACCTD_APPLIANCE_ID"),
+		DBURL:        envOr("ACCTD_DB_URL", "postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect?sslmode=disable"),
+		ScdSocket:    envOr("ACCTD_SCD_SOCKET", "/run/stayconnect/scd.sock"),
+		TickSeconds:  envInt("ACCTD_TICK_SECONDS", 1),
+		TenantID:     os.Getenv("ACCTD_TENANT_ID"),
+		ApplianceID:  os.Getenv("ACCTD_APPLIANCE_ID"),
+		LegacyBridge: envOr("ACCTD_LEGACY_BRIDGE", "br-lan"),
 	}
 }
 func envOr(k, d string) string {
@@ -73,12 +73,13 @@ type snapEntry struct {
 }
 
 type acctd struct {
-	db       *pgxpool.Pool
-	shp      *shape.Client
-	scd      *http.Client
-	tenantID string
-	applID   string
-	prev     snapshot
+	db           *pgxpool.Pool
+	shp          *shape.Client
+	scd          *http.Client
+	tenantID     string
+	applID       string
+	legacyBridge string
+	prev         snapshot
 }
 
 func main() {
@@ -98,7 +99,7 @@ func main() {
 	// fallback: leaving them hard-wired meant a re-assigned appliance kept billing
 	// usage to the PREVIOUS customer.
 	idStore := &identity.Store{Dir: envOr("ACCTD_IDENTITY_DIR", "/etc/stayconnect/identity")}
-	if ident, err := idStore.LoadOrEnroll(rootCtx, "", "", ""); err == nil && ident != nil {
+	if ident, err := idStore.LoadOrEnroll(rootCtx, "", "", "", false); err == nil && ident != nil {
 		c.ApplianceID = ident.ApplianceID
 	}
 	asgStore := &assignment.Store{Dir: envOr("ACCTD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
@@ -125,12 +126,13 @@ func main() {
 	defer pool.Close()
 
 	a := &acctd{
-		db:       pool,
-		shp:      shape.New(),
-		scd:      newUnixClient(c.ScdSocket),
-		tenantID: c.TenantID,
-		applID:   c.ApplianceID,
-		prev:     snapshot{},
+		db:           pool,
+		shp:          shape.New(),
+		scd:          newUnixClient(c.ScdSocket),
+		tenantID:     c.TenantID,
+		applID:       c.ApplianceID,
+		legacyBridge: c.LegacyBridge,
+		prev:         snapshot{},
 	}
 
 	tick := time.NewTicker(time.Duration(c.TickSeconds) * time.Second)
@@ -159,112 +161,154 @@ func newUnixClient(socketPath string) *http.Client {
 	return &http.Client{Transport: tr, Timeout: 3 * time.Second}
 }
 
+// activeSession is one accountable session with its network placement and quota.
+type activeSession struct {
+	id, tid, vid       string
+	ip                 net.IP
+	bridge             string
+	dataCap            int64
+	durSec             int
+	startedAt          time.Time
+	totalUp, totalDown int64
+}
+
 func (a *acctd) loop(ctx context.Context) error {
-	stats, err := a.shp.Stats(ctx)
+	sessions, err := a.loadActive(ctx)
 	if err != nil {
 		return err
 	}
+	if len(sessions) == 0 {
+		a.prev = snapshot{}
+		return nil
+	}
 
-	// Combine WAN (bytes_up) and LAN (bytes_down) into per-IP snapshot.
-	cur := snapshot{}
-	for _, s := range stats {
-		key := s.IP.String()
-		e := cur[key]
-		switch s.Iface {
-		case shape.WANIface:
-			e.BytesUp = s.Bytes
-		case shape.LANIface:
-			e.BytesDown = s.Bytes
+	// Read tc counters once per device. Download counts live on the guest
+	// bridge (dst = guest IP); upload counts live on the bridge's IFB
+	// (src = guest IP, captured pre-SNAT via the ingress redirect). Each
+	// device serves exactly one guest subnet, so (device, minor) uniquely
+	// identifies a session — traffic can never be attributed across networks.
+	downCache := map[string]map[int]shape.ClassBytes{}
+	upCache := map[string]map[int]shape.ClassBytes{}
+	readDown := func(bridge string) map[int]shape.ClassBytes {
+		if m, ok := downCache[bridge]; ok {
+			return m
 		}
-		cur[key] = e
+		m, _ := a.shp.ReadClasses(ctx, bridge)
+		downCache[bridge] = m
+		return m
+	}
+	readUp := func(bridge string) map[int]shape.ClassBytes {
+		ifb := shape.IFBName(bridge)
+		if m, ok := upCache[ifb]; ok {
+			return m
+		}
+		m, _ := a.shp.ReadClasses(ctx, ifb)
+		upCache[ifb] = m
+		return m
 	}
 
 	now := time.Now()
+	next := snapshot{}
 
-	for ipStr, cur := range cur {
-		prev := a.prev[ipStr]
-		dUp := int64(cur.BytesUp) - int64(prev.BytesUp)
-		dDown := int64(cur.BytesDown) - int64(prev.BytesDown)
-		if dUp < 0 {
-			dUp = int64(cur.BytesUp)
+	for _, s := range sessions {
+		minor, ok := shape.MinorForIP(s.ip)
+		if !ok {
+			continue
+		}
+		curUp := readUp(s.bridge)[minor].Bytes
+		curDown := readDown(s.bridge)[minor].Bytes
+		next[s.id] = snapEntry{BytesUp: curUp, BytesDown: curDown}
+
+		prev, seen := a.prev[s.id]
+		if !seen {
+			// First observation of this session (fresh auth, or an acctd/scd
+			// restart, or a reboot that rebuilt the class). Adopt the current
+			// counter as the baseline and write nothing, so already-persisted
+			// totals are never double-counted. Subsequent ticks measure deltas.
+			continue
+		}
+
+		dUp := int64(curUp) - int64(prev.BytesUp)
+		dDown := int64(curDown) - int64(prev.BytesDown)
+		if dUp < 0 { // class was re-created (counter reset) — count from zero
+			dUp = int64(curUp)
 		}
 		if dDown < 0 {
-			dDown = int64(cur.BytesDown)
+			dDown = int64(curDown)
 		}
 
-		if dUp == 0 && dDown == 0 && a.prev[ipStr] == (snapEntry{}) {
-			// first observation, no delta to write
-			continue
+		if dUp != 0 || dDown != 0 {
+			_, _ = a.db.Exec(ctx, `
+				INSERT INTO accounting_records (ts, session_id, tenant_id, appliance_id, bytes_up, bytes_down)
+				VALUES ($1, $2, $3, $4, $5, $6)
+			`, now, s.id, s.tid, a.applID, dUp, dDown)
+
+			s.totalUp += dUp
+			s.totalDown += dDown
+			_, _ = a.db.Exec(ctx, `
+				UPDATE sessions SET bytes_up = $2, bytes_down = $3, last_activity_at = $4
+				 WHERE id = $1
+			`, s.id, s.totalUp, s.totalDown, now)
 		}
 
-		sid, tid, vid, dataCap, durSec, startedAt, totalUp, totalDown, found, err := a.lookupActive(ctx, ipStr)
-		if err != nil {
-			slog.Warn("lookup active", "ip", ipStr, "err", err)
-			continue
-		}
-		if !found {
-			continue
-		}
-
-		_, _ = a.db.Exec(ctx, `
-			INSERT INTO accounting_records (ts, session_id, tenant_id, appliance_id, bytes_up, bytes_down)
-			VALUES ($1, $2, $3, $4, $5, $6)
-		`, now, sid, tid, a.applID, dUp, dDown)
-
-		newUp := totalUp + dUp
-		newDown := totalDown + dDown
-		_, _ = a.db.Exec(ctx, `
-			UPDATE sessions SET bytes_up = $2, bytes_down = $3, last_activity_at = $4
-			 WHERE id = $1
-		`, sid, newUp, newDown, now)
-
-		// Quota check.
-		if vid != "" {
-			usedBytes := newUp + newDown
-			elapsed := int(now.Sub(startedAt).Seconds())
-			if dataCap > 0 && usedBytes >= dataCap {
-				a.revoke(ctx, ipStr, "quota_bytes")
+		// Quota enforcement (bytes + time).
+		if s.vid != "" {
+			usedBytes := s.totalUp + s.totalDown
+			elapsed := int(now.Sub(s.startedAt).Seconds())
+			if s.dataCap > 0 && usedBytes >= s.dataCap {
+				a.revoke(ctx, s.ip.String(), "quota_bytes")
 				continue
 			}
-			if durSec > 0 && elapsed >= durSec {
-				a.revoke(ctx, ipStr, "quota_time")
+			if s.durSec > 0 && elapsed >= s.durSec {
+				a.revoke(ctx, s.ip.String(), "quota_time")
 				continue
 			}
 		}
 	}
 
-	a.prev = cur
+	// prev is replaced (not merged) so revoked/closed sessions drop out and
+	// their baselines don't linger.
+	a.prev = next
 	return nil
 }
 
-// lookupActive returns session + quota values for the active session matching ip.
-func (a *acctd) lookupActive(ctx context.Context, ip string) (
-	sid, tid, vid string,
-	dataCap int64, durSec int,
-	startedAt time.Time,
-	totalUp, totalDown int64,
-	found bool, err error,
-) {
-	err = a.db.QueryRow(ctx, `
-		SELECT s.id, s.tenant_id, COALESCE(s.voucher_id::text,''), s.started_at,
-		       s.bytes_up, s.bytes_down,
+// loadActive returns every active session for this tenant with its network
+// placement (ingress bridge) and quota limits.
+func (a *acctd) loadActive(ctx context.Context) ([]activeSession, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT s.id, s.tenant_id, COALESCE(s.voucher_id::text,''),
+		       host(s.ip), COALESCE(s.ingress_interface, ''),
+		       s.started_at, s.bytes_up, s.bytes_down,
 		       COALESCE(t.data_cap_bytes, 0), COALESCE(t.duration_seconds, 0)
 		  FROM sessions s
 		  LEFT JOIN vouchers v ON v.id = s.voucher_id
 		  LEFT JOIN ticket_templates t ON t.id = v.template_id
 		 WHERE s.tenant_id = $1
-		   AND s.ip = $2::inet
 		   AND s.state = 'active'
-		 ORDER BY s.started_at DESC
-		 LIMIT 1
-	`, a.tenantID, ip).Scan(&sid, &tid, &vid, &startedAt, &totalUp, &totalDown, &dataCap, &durSec)
+	`, a.tenantID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", "", "", 0, 0, time.Time{}, 0, 0, false, nil
-		}
-		return
+		return nil, err
 	}
-	return sid, tid, vid, dataCap, durSec, startedAt, totalUp, totalDown, true, nil
+	defer rows.Close()
+	var out []activeSession
+	for rows.Next() {
+		var s activeSession
+		var ipStr, bridge string
+		if err := rows.Scan(&s.id, &s.tid, &s.vid, &ipStr, &bridge,
+			&s.startedAt, &s.totalUp, &s.totalDown, &s.dataCap, &s.durSec); err != nil {
+			return nil, err
+		}
+		s.ip = net.ParseIP(ipStr)
+		if s.ip == nil {
+			continue
+		}
+		if bridge == "" {
+			bridge = a.legacyBridge
+		}
+		s.bridge = bridge
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
 
 func (a *acctd) revoke(ctx context.Context, ip, reason string) {
@@ -279,5 +323,6 @@ func (a *acctd) revoke(ctx context.Context, ip, reason string) {
 	}
 	defer resp.Body.Close()
 	slog.Info("revoked", "ip", ip, "reason", reason, "status", resp.StatusCode)
-	delete(a.prev, ip)
+	// prev is keyed by session id and fully replaced each tick, so a revoked
+	// session drops out naturally once it leaves the active set.
 }

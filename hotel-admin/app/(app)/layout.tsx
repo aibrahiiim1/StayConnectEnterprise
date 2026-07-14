@@ -12,22 +12,31 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    const bounce = async () => {
+      // Session cookie is stale/invalid (expired, or edged restarted and dropped
+      // its in-memory sessions). Explicitly clear the cookie so the middleware
+      // won't bounce /login back to /dashboard (a redirect loop), then show the
+      // login form.
+      try { await api.post("/auth/logout"); } catch {}
+      if (!cancelled) router.replace("/login");
+    };
     (async () => {
       try {
         const m = await api.get<Whoami>("/auth/whoami");
         if (!cancelled) setMe(m);
       } catch {
-        // whoami failed → the session cookie is stale/invalid (e.g. edged
-        // restarted and dropped its in-memory sessions). Explicitly clear the
-        // cookie so the middleware won't bounce /login back to /dashboard (a
-        // redirect loop), then show the login form.
-        try { await api.post("/auth/logout"); } catch {}
-        if (!cancelled) router.replace("/login");
+        await bounce();
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+    // Re-validate periodically so a session that expires while the operator is
+    // watching a long-lived page (onboarding, sessions, dashboard) recovers to
+    // /login instead of every poll erroring on 401.
+    const iv = setInterval(() => {
+      api.get<Whoami>("/auth/whoami").catch(() => bounce());
+    }, 30000);
+    return () => { cancelled = true; clearInterval(iv); };
   }, [router]);
 
   async function onLogout() {
