@@ -862,11 +862,26 @@ func main() {
 		s.enqueueLicenseAck(rootCtx)
 	}
 
-	// One-shot signed hello against ctrlapi on boot. Only runs for enrolled
-	// appliances (ident != nil) and when a control-plane base URL is set.
-	// This is the 5.1 smoke-test; 5.2 replaces it with a real RPC loop.
+	// Signed hello against ctrlapi — on boot AND periodically. Besides smoke-
+	// testing signed-auth, this provides ORPHAN RECOVERY: if Central no longer
+	// knows this appliance (its row was deleted from the control panel), our
+	// identity is orphaned. We confirm with a second call, then self-reset so the
+	// box re-registers as a fresh Pending and STOPS serving on its now-stale
+	// cached license — no manual factory reset needed.
+	//
+	// Running periodically (not only on boot) is essential: a deletion that
+	// happens while the appliance is already running must be detected within one
+	// interval, not left serving on the cached license until license expiry or a
+	// manual restart. Offline-safety is preserved — a transient Central outage
+	// yields connection errors / 5xx / timeouts, never a definitive 401
+	// "not enrolled", so a reset can only ever be triggered by a real deletion
+	// (and only after a second confirming call).
 	if ident != nil && c.CtrlAPIBase != "" {
-		go func() {
+		orphan := func(code int, b []byte) bool {
+			l := strings.ToLower(string(b))
+			return code == 401 && (strings.Contains(l, "not enrolled") || strings.Contains(l, "unknown appliance") || strings.Contains(l, "not found"))
+		}
+		helloProbe := func() {
 			hctx, cancel := context.WithTimeout(rootCtx, 10*time.Second)
 			defer cancel()
 			tok, err := applianceauth.SignRequest(ident.PrivateKey(), ident.ApplianceID, "GET", "/v1/appliance/hello", nil)
@@ -884,18 +899,9 @@ func main() {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 			resp.Body.Close()
 			if resp.StatusCode == 200 {
-				slog.Info("hello: ctrlapi signed-auth ok")
 				return
 			}
 			slog.Warn("hello: unexpected status", "status", resp.StatusCode, "body", string(body))
-			// Orphan recovery: if Central no longer knows this appliance (its row
-			// was deleted from the control panel for a re-test), our identity is
-			// orphaned. Confirm with a second call, then self-reset so we
-			// re-register as a fresh Pending — no manual factory reset needed.
-			orphan := func(code int, b []byte) bool {
-				l := strings.ToLower(string(b))
-				return code == 401 && (strings.Contains(l, "not enrolled") || strings.Contains(l, "unknown appliance") || strings.Contains(l, "not found"))
-			}
 			if c.AutoRegister && orphan(resp.StatusCode, body) {
 				time.Sleep(3 * time.Second)
 				tok2, _ := applianceauth.SignRequest(ident.PrivateKey(), ident.ApplianceID, "GET", "/v1/appliance/hello", nil)
@@ -913,6 +919,25 @@ func main() {
 						_ = os.Remove(c.CertDir + "/mtls-client.key")
 						_ = exec.Command("systemctl", "restart", "stayconnect-scd").Run()
 					}
+				}
+			}
+		}
+		go func() {
+			helloProbe() // boot
+			interval := 5 * time.Minute
+			if v := envOr("SCD_ORPHAN_CHECK_INTERVAL", ""); v != "" {
+				if d, e := time.ParseDuration(v); e == nil && d >= 30*time.Second {
+					interval = d
+				}
+			}
+			t := time.NewTicker(interval)
+			defer t.Stop()
+			for {
+				select {
+				case <-rootCtx.Done():
+					return
+				case <-t.C:
+					helloProbe()
 				}
 			}
 		}()
