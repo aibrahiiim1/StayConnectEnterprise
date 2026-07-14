@@ -20,3 +20,6 @@ coverage/
 
 # Deploy staging bundles (built Next standalone output)
 .deploy/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
