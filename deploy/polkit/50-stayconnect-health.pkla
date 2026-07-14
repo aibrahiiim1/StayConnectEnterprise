@@ -1,0 +1,16 @@
+# polkit <0.106 (pkla) grant for the appliance health supervisor.
+#
+# polkit 0.105 (Ubuntu 20.04-era) has no JS rules.d, and pkla cannot match the
+# unit argument, so it grants the `stayconnect` user (which runs edged) the
+# systemd manage-units action. The per-unit whitelist is enforced in edged
+# (health_routes.go unitFor), which only ever restarts the appliance's own
+# service units. Required for the step-up + audited "Restart service" action to
+# work under edged's NoNewPrivileges=yes sandbox (D-Bus/polkit, not setuid/sudo).
+#
+# Install to /etc/polkit-1/localauthority/50-local.d/50-stayconnect-health.pkla.
+[StayConnect appliance health supervisor: manage own service units]
+Identity=unix-user:stayconnect
+Action=org.freedesktop.systemd1.manage-units
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
