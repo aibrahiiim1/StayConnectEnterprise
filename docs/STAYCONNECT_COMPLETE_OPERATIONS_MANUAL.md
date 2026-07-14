@@ -98,6 +98,37 @@ generates itself on first boot; Central never learns the private key.
 license). The appliance decides *how the hotel network actually works* and
 enforces the license locally, even if Central is unreachable.
 
+### Ownership hierarchy (how everything is organized)
+
+```
+Platform  →  Customer  →  Site  →  Appliance  →  Guest Networks / VLANs
+```
+
+- **Customer** = the hotel group / company / owner (a tenant). A Customer owns
+  one or more Sites.
+- **Site** = **one physical property** (a single hotel/resort/deployment
+  location). A Site belongs to exactly one Customer and contains one or more
+  Appliances. Buildings, floors, wings, SSIDs and guest VLANs are **not** Sites —
+  they are configured on the appliance.
+- **Appliance** = the on-site gateway. It belongs to exactly one Site at a time;
+  moving it to another Customer's Site requires the explicit, audited
+  cross-customer reassignment (never a silent move).
+
+These rules are enforced in the UI, the API, **and** the database (a composite
+foreign key makes an appliance-under-another-customer's-site impossible).
+
+### Customer context (Control Panel)
+
+The Control Panel has a **Customer context** selector at the top of the sidebar.
+Platform admins pick **All Customers** or one specific Customer; the choice
+persists across navigation and refresh. It scopes the customer-owned pages
+(Sites, Appliances, Licenses, Operators, Audit, Dashboard) to the selected
+Customer. **Creating a Site or Appliance requires a specific Customer to be
+selected** — create forms show "Owner: <Customer>", and in All-Customers mode
+creation is disabled until you choose one. A tenant operator has no selector and
+is pinned to their own Customer (enforced server-side). See the Control Panel
+reference for details.
+
 ---
 
 ## 3. The one official onboarding workflow
