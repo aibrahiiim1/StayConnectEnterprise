@@ -55,12 +55,15 @@ export default function SitesPage() {
 
   async function onCreate(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (allCustomers) return; // guarded by UI; a customer must be chosen
     setBusy(true); setErr(null);
     const form = new FormData(e.currentTarget);
     const el = e.currentTarget;
+    // The owning customer: the one selected in the form (shown when the global
+    // context is "All Customers"), otherwise the globally-selected customer.
+    const owner = (form.get("tenant_id") as string) || selectedTenantId;
+    if (!owner) { setErr("Choose the owning customer for this site."); setBusy(false); return; }
     try {
-      await api.post(`/v1/sites?tenant_id=${selectedTenantId}`, {
+      await api.post(`/v1/sites?tenant_id=${owner}`, {
         code: form.get("code"),
         name: form.get("name"),
         timezone: form.get("timezone") || "UTC",
@@ -128,26 +131,34 @@ export default function SitesPage() {
         <Card className="mb-6">
           <CardHeader><CardTitle>New site</CardTitle></CardHeader>
           <CardBody>
-            {allCustomers ? (
+            {tenants.length === 0 ? (
               <div className="text-sm text-warn">
-                Select a customer in the <strong>Customer context</strong> selector (top-left) first — a site must
-                belong to one explicit customer.
+                No customers exist yet. Create a customer on the <a href="/tenants" className="underline">Customers</a> page first.
               </div>
             ) : (
-              <>
-                <div className="mb-3 text-sm text-muted flex items-center gap-1.5">
-                  <Building2 size={13} /> Owner: <span className="text-text font-medium">{selectedTenantName}</span>
-                </div>
-                <form onSubmit={onCreate} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                  <div><Label>Code</Label><Input name="code" required placeholder="hurghada" /></div>
-                  <div><Label>Name</Label><Input name="name" required placeholder="Coral Sea Resort Hurghada" /></div>
-                  <div><Label>Timezone</Label><Input name="timezone" placeholder="UTC" /></div>
-                  <div><Label>Country</Label><Input name="country" placeholder="EG" /></div>
-                  <div className="sm:col-span-4 flex justify-end">
-                    <Button type="submit" disabled={busy}>{busy ? "Creating…" : `Create under ${selectedTenantName}`}</Button>
+              <form onSubmit={onCreate} className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="sm:col-span-4">
+                  <Label>Owning customer</Label>
+                  <div className="relative">
+                    <Building2 size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
+                    <select
+                      name="tenant_id" required defaultValue={allCustomers ? "" : selectedTenantId}
+                      className="h-9 w-full rounded-md bg-panel2 border border-border pl-7 pr-3 text-sm"
+                    >
+                      {allCustomers && <option value="" disabled>— select a customer —</option>}
+                      {tenants.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
                   </div>
-                </form>
-              </>
+                  <div className="mt-1 text-xs text-muted">The site will belong to this customer. A site always has exactly one owning customer.</div>
+                </div>
+                <div><Label>Code</Label><Input name="code" required placeholder="hurghada" /></div>
+                <div><Label>Name</Label><Input name="name" required placeholder="Coral Sea Resort Hurghada" /></div>
+                <div><Label>Timezone</Label><Input name="timezone" placeholder="UTC" /></div>
+                <div><Label>Country</Label><Input name="country" placeholder="EG" /></div>
+                <div className="sm:col-span-4 flex justify-end">
+                  <Button type="submit" disabled={busy}>{busy ? "Creating…" : "Create site"}</Button>
+                </div>
+              </form>
             )}
           </CardBody>
         </Card>
