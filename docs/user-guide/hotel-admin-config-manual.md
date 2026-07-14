@@ -76,10 +76,18 @@ License page flips to **Active** (Central does not push it).
 
 Go to **WAN / LAN settings** (`/network/system`).
 
-1. Review the **WAN / Management** and **Guest LAN** status cards.
+> This page covers only the **WAN uplink** and the appliance's **legacy base
+> bridge** (`br-lan`). Guest WiFi is **not** configured here — each Guest Network
+> has its own VLAN, bridge, gateway, DHCP pool and captive portal, managed under
+> **Guest networks** (§4) and **DHCP & leases**. The legacy base bridge appears in
+> an **Advanced · Base LAN / Legacy Bridge** section with a *Legacy* badge; its
+> DHCP showing **off** is normal when guests are served by Guest Networks.
+
+1. Review the **WAN / Management** status card and the **Guest Networks** pointer.
 2. Under **Change configuration** set what you need:
    - **WAN:** IP address, prefix length, default gateway, DNS (comma-separated).
-   - **LAN:** guest gateway IP, prefix length. (DHCP is managed on the DHCP page.)
+   - **Base LAN:** base-bridge gateway IP, prefix length. (Guest DHCP is managed
+     per guest network on the DHCP page, not here.)
 3. Click **Validate & preview** — review the before/after and the new management
    URL.
 4. Click **Apply change** and **enter your password**.

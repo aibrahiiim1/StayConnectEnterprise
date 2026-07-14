@@ -12,7 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { canWrite } from "@/lib/roles";
 import { errMsg } from "@/lib/utils";
-import { Router, Wifi, AlertTriangle, CheckCircle2, XCircle, Download, RefreshCw } from "lucide-react";
+import { Router, AlertTriangle, CheckCircle2, XCircle, Download, RefreshCw, Archive, Network, ExternalLink } from "lucide-react";
 
 function Dot({ ok }: { ok: boolean }) {
   return <span className={ok ? "text-emerald-600" : "text-red-600"}>{ok ? "●" : "●"}</span>;
@@ -214,24 +214,66 @@ export default function NetworkSettingsPage() {
           </CardBody>
         </Card>
 
-        {/* LAN card */}
+        {/* Guest Networks pointer — the real guest-facing config lives here, NOT
+            on the legacy base bridge below. */}
         <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><Wifi className="h-4 w-4" />Guest LAN <span className="text-xs font-normal text-neutral-400">({state.lan.bridge})</span></CardTitle></CardHeader>
-          <CardBody className="space-y-1 text-sm">
+          <CardHeader><CardTitle className="flex items-center gap-2"><Network className="h-4 w-4" />Guest Networks</CardTitle></CardHeader>
+          <CardBody className="space-y-3 text-sm">
+            <p className="text-muted">
+              Guest WiFi is served by the <strong>Guest Networks</strong> you create — each has its own VLAN, bridge,
+              gateway, DHCP pool and captive-portal settings. Configure and check them here (this page only covers the
+              WAN uplink and the legacy base bridge):
+            </p>
+            <div className="flex flex-col gap-2">
+              <a href="/network" className="inline-flex items-center gap-2 text-brand hover:underline">
+                <ExternalLink size={14} /> Guest Networks — create / edit VLANs, gateways, portal
+              </a>
+              <a href="/network/dhcp" className="inline-flex items-center gap-2 text-brand hover:underline">
+                <ExternalLink size={14} /> DHCP &amp; leases — per-network DHCP pools, reservations, leases
+              </a>
+            </div>
+            <p className="text-xs text-muted">
+              Example: a guest network <code>CHR</code> → VLAN 90 → <code>ens192.90</code> → bridge <code>br-g90</code>
+              {" "}→ gateway <code>10.20.0.1/22</code> → DHCP pool <code>10.20.0.100–10.20.3.250</code>. Each guest
+              network shows its own DHCP status on those pages.
+            </p>
+          </CardBody>
+        </Card>
+      </div>
+
+      {/* Legacy base bridge — clearly demarcated so it is never mistaken for an
+          active Guest VLAN. Behavior is unchanged; this is presentation only. */}
+      <details className="rounded-lg border border-border bg-panel">
+        <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium flex items-center gap-2">
+          <Archive size={14} /> Advanced · Base LAN / Legacy Bridge
+          <span className="text-xs font-normal text-muted">({state.lan.bridge})</span>
+          <Badge tone="default">Legacy{state.lan.dhcp_enabled ? "" : " · unused"}</Badge>
+        </summary>
+        <div className="px-4 pb-4">
+          <p className="mb-3 text-sm text-muted">
+            This is the appliance&apos;s <strong>legacy base bridge</strong>. Configured Guest VLANs, gateways, DHCP
+            pools, and captive-portal settings are managed under{" "}
+            <a href="/network" className="text-brand hover:underline">Guest Networks</a> and{" "}
+            <a href="/network/dhcp" className="text-brand hover:underline">DHCP &amp; leases</a> — not here. It is normal
+            for this bridge to have DHCP off when your guests are served by Guest Networks.
+          </p>
+          <div className="space-y-1 text-sm">
             <Row k="Physical interface" v={<code>{state.lan.physical_interface}</code>} />
             <Row k="Bridge" v={<code>{state.lan.bridge}</code>} />
             <Row k="MAC address" v={<code>{state.lan.mac}</code>} />
             <Row k="Link" v={<StateBadge ok={state.lan.link_up} label={state.lan.link_up ? "up" : "down"} />} />
-            <Row k="Guest gateway IP" v={<code>{state.lan.ip}/{state.lan.prefix_len}</code>} />
+            <Row k="Base gateway IP" v={<code>{state.lan.ip}/{state.lan.prefix_len}</code>} />
             <Row k="Subnet mask" v={<code>{state.lan.netmask}</code>} />
-            <Row k="DHCP" v={<StateBadge ok={state.lan.dhcp_enabled} label={state.lan.dhcp_enabled ? "enabled" : "disabled"} />} />
-            <Row k="DHCP range" v={<code>{state.lan.dhcp_start} – {state.lan.dhcp_end}</code>} />
-            <Row k="Lease time" v={`${state.lan.dhcp_lease_seconds}s`} />
+            {/* DHCP on the legacy bridge is informational, NOT a warning — guests
+                use Guest Networks, so "off" here is expected. */}
+            <Row k="DHCP (this bridge)" v={<Badge tone="default">{state.lan.dhcp_enabled ? "enabled" : "off — guests use Guest Networks"}</Badge>} />
+            {state.lan.dhcp_enabled && <Row k="DHCP range" v={<code>{state.lan.dhcp_start} – {state.lan.dhcp_end}</code>} />}
+            {state.lan.dhcp_enabled && <Row k="Lease time" v={`${state.lan.dhcp_lease_seconds}s`} />}
             <Row k="DNS to clients" v={<code>{state.lan.dns.join(", ")}</code>} />
             <Row k="Bridge members" v={<code>{state.lan.members.join(", ") || "—"}</code>} />
-          </CardBody>
-        </Card>
-      </div>
+          </div>
+        </div>
+      </details>
 
       {/* edit form */}
       {writable && (
@@ -247,16 +289,16 @@ export default function NetworkSettingsPage() {
                 <Field label="DNS (comma separated)"><Input value={wanDns} onChange={(e) => setWanDns(e.target.value)} /></Field>
               </fieldset>
               <fieldset className="space-y-2 rounded border border-neutral-200 p-3">
-                <legend className="px-1 text-xs font-semibold uppercase text-neutral-500">Guest LAN ({state.lan.bridge})</legend>
-                <Field label="Guest gateway IP"><Input value={lanIp} onChange={(e) => setLanIp(e.target.value)} /></Field>
+                <legend className="px-1 text-xs font-semibold uppercase text-neutral-500">Base LAN / Legacy bridge ({state.lan.bridge})</legend>
+                <Field label="Base gateway IP"><Input value={lanIp} onChange={(e) => setLanIp(e.target.value)} /></Field>
                 <Field label="Prefix length"><Input type="number" value={lanPrefix} onChange={(e) => setLanPrefix(Number(e.target.value))} /></Field>
                 {/* Carryover A — DHCP has ONE source of truth: the Guest Networks
                     pages (Site DB → Kea). Shown read-only here to avoid a second,
                     conflicting editor for the same Kea scope. */}
                 <div className="rounded border border-neutral-200 bg-neutral-50 p-2 text-xs text-neutral-600">
                   <div className="mb-1 font-semibold uppercase text-neutral-500">DHCP (read-only)</div>
-                  <div>Status: <b>{dhcpEnabled ? "enabled" : "disabled"}</b> · Range: <code>{dhcpStart || "—"} – {dhcpEnd || "—"}</code> · Lease: <code>{dhcpLease}s</code></div>
-                  <div className="mt-1">Guest DHCP scopes, lease times, reservations and Option 114 are managed in{" "}
+                  <div>This is the legacy base bridge. Guest VLAN DHCP scopes, lease times, reservations and Option 114
+                    are managed per guest network in{" "}
                     <a href="/network/dhcp" className="text-blue-600 underline">Guest Networks → DHCP &amp; leases</a> (single source of truth).</div>
                 </div>
               </fieldset>

@@ -183,14 +183,22 @@ This is the **only** normal way to bring a hotel online. Use it every time.
 ## 5. WAN / LAN connectivity
 
 WAN/LAN is configured **on the appliance** in Hotel Admin → **WAN / LAN settings**
-(`/network/system`). You normally only touch this if the WAN is static or the LAN
-gateway must change.
+(`/network/system`). You normally only touch this if the WAN is static or the base
+bridge gateway must change.
 
-1. Review the **WAN / Management** and **Guest LAN** status cards.
+> This page covers only the **WAN uplink** and the appliance's **legacy base
+> bridge** (`br-lan`). It is **not** where guest WiFi lives — each Guest Network
+> has its own VLAN, bridge, gateway, DHCP pool and captive portal (see §11).
+> Example: `CHR` → VLAN 90 → `ens192.90` → bridge `br-g90` → gateway `10.20.0.1/22`
+> → DHCP pool `10.20.0.100–10.20.3.250`. The legacy base bridge is shown under an
+> **Advanced · Base LAN / Legacy Bridge** section with a *Legacy* badge; its DHCP
+> showing **off** there is normal when guests are served by Guest Networks.
+
+1. Review the **WAN / Management** status card and the **Guest Networks** pointer.
 2. Under **Change configuration**:
    - **WAN:** IP address, prefix length, default gateway, DNS (comma-separated).
-   - **LAN:** guest gateway IP, prefix length (DHCP pools are managed per guest
-     network / on the DHCP page).
+   - **Base LAN:** base-bridge gateway IP, prefix length (guest DHCP pools are
+     managed per guest network on the DHCP page, not here).
 3. Click **Validate & preview** — check the before/after and the new management URL.
 4. Click **Apply change** and **re-enter your password**.
 5. A **countdown banner** appears. If the management IP changed, reconnect to the

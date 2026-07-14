@@ -150,15 +150,28 @@ Create Hotel Admin staff accounts and manage roles/passwords.
 ## NETWORKING (all gated by the `network` / Hotel IT role)
 
 ### WAN / LAN settings — `/network/system`
-Configure the appliance's WAN/management IP and the guest LAN gateway, with a
-**preview → apply → confirm** flow and automatic rollback.
+Configure the appliance's WAN/management IP and the legacy base-bridge gateway,
+with a **preview → apply → confirm** flow and automatic rollback.
+
+> **This page is only the WAN uplink + the legacy base bridge — it is NOT where
+> guest WiFi lives.** Your Guest Networks (each with its own VLAN, bridge, gateway,
+> DHCP pool and captive portal) are created and checked on the **Guest Networks**
+> (`/network`) and **DHCP & leases** (`/network/dhcp`) pages. Example: guest network
+> `CHR` → VLAN 90 → `ens192.90` → bridge `br-g90` → gateway `10.20.0.1/22` → DHCP
+> pool `10.20.0.100–10.20.3.250`.
 
 - **Status cards:** **WAN / Management** (interface, MAC, link, IP mode, IP,
   mask, gateway, DNS, management URL, connectivity dots for gateway/internet/DNS,
-  drift warning) and **Guest LAN** (interface, bridge, gateway IP, DHCP range,
-  lease time, DNS, bridge members).
-- **Change configuration** (writers): WAN IP / prefix / gateway / DNS; LAN gateway
-  IP / prefix (DHCP is read-only here — manage it on the DHCP page).
+  drift warning) and a **Guest Networks** pointer card (links to the Guest Networks
+  and DHCP & leases pages).
+- **Advanced · Base LAN / Legacy Bridge** (collapsible): the appliance's legacy
+  base bridge (`br-lan`) — interface, bridge, MAC, link, base gateway IP, DNS,
+  members. It carries a **Legacy** badge; when guests are served by Guest Networks
+  its DHCP shows **off** here, which is **normal** (not a warning). Guest DHCP is
+  never configured on this bridge.
+- **Change configuration** (writers): WAN IP / prefix / gateway / DNS; base-LAN
+  gateway IP / prefix (DHCP is read-only here — manage it per guest network on the
+  DHCP page).
 - **Flow:** **Validate & preview** (shows before/after + new management URL) →
   **Apply change** (requires your password) → a **countdown banner** appears:
   **Keep this configuration** or **Roll back now** (rollback needs your password).
