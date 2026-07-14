@@ -188,17 +188,27 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 
 	scdOK := false
 	var licState any
+	// licenseInstalled is true ONLY for a real signed license (installed with a
+	// non-empty license_id). The permissive "unlicensed-dev" licstate reports
+	// state="Active" with no license_id and must NOT read as licensed/activated —
+	// otherwise the dashboard shows a green "Active" on a factory-clean box while
+	// the License page correctly says "Pending activation".
+	licenseInstalled := false
 	if st, raw, err := s.scd.call(ctx, http.MethodGet, "/v1/license/status", nil); err == nil && st == 200 {
 		scdOK = true
 		var lic map[string]any
 		if json.Unmarshal(raw, &lic) == nil {
 			licState = lic["state"]
+			installed, _ := lic["installed"].(bool)
+			licID, _ := lic["license_id"].(string)
+			licenseInstalled = installed && licID != ""
 		}
 	} else if st2, _, err2 := s.scd.call(ctx, http.MethodGet, "/v1/health", nil); err2 == nil && st2 == 200 {
 		scdOK = true
 	}
 	out["scd"] = scdOK
 	out["license_state"] = licState
+	out["license_installed"] = licenseInstalled
 
 	if st, raw, err := s.scd.call(ctx, http.MethodGet, "/v1/admin/outbox/stats", nil); err == nil && st == 200 {
 		var ob map[string]any

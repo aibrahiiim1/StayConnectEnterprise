@@ -87,11 +87,24 @@ export default function DashboardPage() {
         <KpiCard
           label="License"
           value={
-            <Badge tone={licenseTone(health?.license_state) as any} className="text-sm h-6 px-3">
-              {health?.license_state ?? "—"}
-            </Badge>
+            health == null ? (
+              <Badge tone="default" className="text-sm h-6 px-3">—</Badge>
+            ) : health.license_installed ? (
+              // A real signed license is installed → show its enforcement state.
+              <Badge tone={licenseTone(health.license_state) as any} className="text-sm h-6 px-3">
+                {health.license_state ?? "—"}
+              </Badge>
+            ) : (
+              // No real license — the "Active" reported by the permissive
+              // unlicensed-dev licstate is NOT activation. Surface it clearly.
+              <Badge tone="warn" className="text-sm h-6 px-3">Pending activation</Badge>
+            )
           }
-          hint={<Link href="/license" className="hover:text-text">View license →</Link>}
+          hint={
+            <Link href="/license" className="hover:text-text">
+              {health && !health.license_installed ? "Activate this appliance →" : "View license →"}
+            </Link>
+          }
         />
       </div>
 

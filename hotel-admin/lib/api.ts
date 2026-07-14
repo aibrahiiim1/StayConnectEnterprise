@@ -318,6 +318,10 @@ export type EdgeHealth = {
   db: boolean;
   scd: boolean;
   license_state?: LicenseState | null;
+  // True only for a REAL signed license. The permissive unlicensed-dev licstate
+  // reports license_state="Active" with no license — this flag disambiguates so
+  // the dashboard shows "Pending activation" instead of a false "Active".
+  license_installed?: boolean;
   sync_outbox?: { enabled: boolean; pending?: number; dead?: number; oldest_pending?: string | null };
 };
 
