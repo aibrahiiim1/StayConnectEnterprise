@@ -65,14 +65,20 @@ export default function AppliancesPage() {
 
   async function load() {
     if (!ready) return;
-    setRows(null);
+    setRows(null); setErr(null);
     try {
+      // Appliances + sites fan out across customers (super-admin, no tenant_id).
+      // Enrollment tokens are strictly tenant-scoped and are only used by the
+      // per-customer create/mint forms, so skip them in All-Customers mode and
+      // never let a tokens failure blank the appliance list.
       const [apps, st, tk] = await Promise.all([
         api.get<ListResp<Appliance>>(`/v1/appliances?tenant_id=${selectedTenantId}`),
-        api.get<ListResp<Site>>(`/v1/sites?tenant_id=${selectedTenantId}`),
-        api.get<ListResp<BootstrapToken>>(`/v1/appliance-bootstrap-tokens?tenant_id=${selectedTenantId}`),
+        api.get<ListResp<Site>>(`/v1/sites?tenant_id=${selectedTenantId}`).catch(() => ({ data: [] as Site[] })),
+        allCustomers
+          ? Promise.resolve({ data: [] as BootstrapToken[] })
+          : api.get<ListResp<BootstrapToken>>(`/v1/appliance-bootstrap-tokens?tenant_id=${selectedTenantId}`).catch(() => ({ data: [] as BootstrapToken[] })),
       ]);
-      setRows(apps.data);
+      setRows(apps.data ?? []);
       setSites(st.data ?? []);
       setTokens(tk.data ?? []);
     } catch (e: any) {
