@@ -1,14 +1,18 @@
 [Unit]
 Description=StayConnect Captive Portal Daemon (portald)
+# Soft dependency on scd: portald dials scd's socket lazily per request and
+# returns a transient error when scd is momentarily down, so the captive portal
+# page itself keeps serving. scd being down must NOT stop portald (Wants=, not
+# Requires=), and portald must never permanently fail on a start-limit.
 After=network-online.target stayconnect-scd.service
-Wants=network-online.target
-Requires=stayconnect-scd.service
+Wants=network-online.target stayconnect-scd.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/stayconnect/portald.env
 ExecStart=/opt/stayconnect/bin/portald
-Restart=on-failure
+Restart=always
 RestartSec=2
 User=stayconnect
 Group=stayconnect

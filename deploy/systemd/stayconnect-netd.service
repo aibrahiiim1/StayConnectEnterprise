@@ -3,10 +3,11 @@
 # only on a protected unix socket. NEVER on TCP.
 [Unit]
 Description=StayConnect Network Daemon (privileged, guest networks + DHCP)
-After=network-online.target postgresql.service kea-dhcp4-server.service
-Wants=network-online.target
-StartLimitIntervalSec=120
-StartLimitBurst=10
+After=network-online.target docker.service postgresql.service kea-dhcp4-server.service
+Wants=network-online.target docker.service
+# Never permanently give up: netd owns the guest networks/DHCP/nftables, so it
+# must always recover automatically after a crash or a dependency delay.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -14,7 +15,7 @@ ExecStart=/opt/stayconnect/bin/netd
 EnvironmentFile=-/etc/stayconnect/netd.env
 User=root
 Group=root
-Restart=on-failure
+Restart=always
 RestartSec=2
 RuntimeDirectory=stayconnect
 RuntimeDirectoryMode=0755

@@ -11,6 +11,9 @@ Description=StayConnect edge proxy (Caddy)
 Documentation=https://caddyserver.com/docs/
 After=network-online.target
 Wants=network-online.target
+# Caddy fronts both the captive portal (:80/:443) and Hotel Admin routes, so it
+# must recover automatically from any crash and never permanently fail.
+StartLimitIntervalSec=0
 
 [Service]
 Type=notify
@@ -18,6 +21,10 @@ User=caddy
 Group=caddy
 ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
 ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+# The stock unit shipped with no Restart policy — a Caddy crash left the portal
+# and Hotel Admin routes dead until a manual restart. Always recover.
+Restart=always
+RestartSec=2
 TimeoutStopSec=5s
 LimitNOFILE=1048576
 PrivateTmp=true

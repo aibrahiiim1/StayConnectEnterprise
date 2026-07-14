@@ -1,18 +1,26 @@
 [Unit]
 Description=StayConnect Session Controller Daemon (scd)
-After=network-online.target postgresql.service nftables.service
-# portald + acctd Require= scd (they talk to its unix socket), so stopping scd
-# stops them too — but without Wants= here, starting scd did NOT bring them back,
-# leaving the guest portal down after any scd stop/start (e.g. re-enrollment or
-# an assignment-driven restart). Wants= makes scd pull its dependents back up.
-Wants=network-online.target stayconnect-portald.service stayconnect-acctd.service
+# docker.service: the site DB (stayconnect-pg) is a container, so order after
+# Docker at cold boot. scd itself uses a lazy pgx pool (no startup Ping), so a
+# slow DB does not crash it — this is ordering, not a hard requirement.
+After=network-online.target docker.service postgresql.service nftables.service
+# portald + acctd now Wants= scd (soft) rather than Require=, so they are not
+# stopped when scd stops; Wants= here still pulls them back up when scd starts,
+# so a scd stop/start (re-enrollment, assignment-driven restart, redeploy)
+# leaves the whole guest plane converged with no manual intervention.
+Wants=network-online.target docker.service stayconnect-portald.service stayconnect-acctd.service
 Requires=nftables.service
+# Never permanently give up (a slow DB/nftables at boot must not wedge the core
+# daemon). StartLimitIntervalSec is a [Unit] directive.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 EnvironmentFile=/etc/stayconnect/scd.env
 ExecStart=/opt/stayconnect/bin/scd
-Restart=on-failure
+# Always recover. scd normally re-execs in place (same PID), so this only fires
+# on an actual exit/crash.
+Restart=always
 RestartSec=2
 # needs CAP_NET_ADMIN to run `nft`; running as root for Phase 1 simplicity
 User=root

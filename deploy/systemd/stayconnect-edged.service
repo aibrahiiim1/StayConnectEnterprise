@@ -2,17 +2,21 @@
 # Binds the management loopback only; Caddy exposes it on the management IP.
 [Unit]
 Description=StayConnect Edge API (Hotel Admin backend)
-After=network-online.target stayconnect-scd.service
-Wants=network-online.target
-Requires=stayconnect-scd.service
-# PartOf makes a scd restart RESTART edged too (Requires alone only stops it when
-# scd stops, leaving edged down after `systemctl restart scd` — e.g. runtime
-# enrollment or orphan self-reset). This keeps the Hotel Admin API up.
-PartOf=stayconnect-scd.service
-# edged is Requires= scd; a scd restart cascades here. Widen the burst
-# window so routine scd restarts don't trip the start-limit and wedge edged.
-StartLimitIntervalSec=120
-StartLimitBurst=10
+# Ordering only (best-effort): start after the network, the DB container's
+# supervisor, and scd. These are NOT hard requirements — edged tolerates scd
+# being down (it dials scd's socket lazily, per request) and retries the site
+# DB with backoff at startup instead of exiting, so it must never be stopped or
+# blocked just because a dependency is momentarily unavailable.
+After=network-online.target docker.service stayconnect-scd.service
+Wants=network-online.target docker.service stayconnect-scd.service
+# NOTE: intentionally NO Requires= and NO PartOf= scd. A scd restart (runtime
+# enrollment, assignment adoption, redeploy) must NOT tear edged down — the
+# Hotel Admin API stays continuously available and simply reconnects to scd's
+# socket on the next request. This is what fixes the "edged goes inactive when
+# scd restarts and never recovers" defect.
+# StartLimitIntervalSec=0 (a [Unit] directive) disables the start-rate limiter
+# so edged may restart as often as needed and can never be permanently wedged.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -20,7 +24,10 @@ ExecStart=/opt/stayconnect/bin/edged serve
 EnvironmentFile=-/etc/stayconnect/edged.env
 User=stayconnect
 Group=stayconnect
-Restart=on-failure
+# Always recover, with a bounded 2s backoff. Combined with the in-process DB
+# retry and StartLimitIntervalSec=0 above, edged self-heals from any crash,
+# dependency delay or socket outage with zero manual intervention.
+Restart=always
 RestartSec=2
 NoNewPrivileges=yes
 ProtectSystem=strict

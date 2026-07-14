@@ -122,13 +122,39 @@ func main() {
 
 	pool, err := pgxpool.New(rootCtx, c.DBURL)
 	if err != nil {
+		// A bad DSN is a genuine configuration fault, not a transient one.
 		slog.Error("db open", "err", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
-	if err := pool.Ping(rootCtx); err != nil {
-		slog.Error("site db unreachable", "err", err, "dsn_host", c.DBURL)
-		os.Exit(1)
+	// The site DB is a container that may not be ready at cold boot, or during
+	// a restart of the DB. Retry the first connection with bounded backoff
+	// instead of exiting: crash-looping here would, under systemd's start-limit,
+	// wedge edged permanently (the Hotel Admin API would stay inactive with no
+	// automatic recovery). If the DB is still unreachable after the window we
+	// serve anyway — the pool keeps retrying per query, so edged recovers on its
+	// own the moment the DB comes back, with no manual restart.
+	for attempt := 1; ; attempt++ {
+		pctx, cancel := context.WithTimeout(rootCtx, 3*time.Second)
+		perr := pool.Ping(pctx)
+		cancel()
+		if perr == nil {
+			break
+		}
+		if rootCtx.Err() != nil {
+			return
+		}
+		if attempt >= 60 {
+			slog.Warn("site db still unreachable after retries; serving degraded (pool keeps retrying per query)",
+				"err", perr, "dsn_host", c.DBURL)
+			break
+		}
+		slog.Warn("site db not ready, retrying", "attempt", attempt, "err", perr)
+		select {
+		case <-rootCtx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
 	}
 
 	s := &server{

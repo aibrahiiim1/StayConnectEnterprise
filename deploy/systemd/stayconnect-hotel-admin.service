@@ -11,8 +11,8 @@
 Description=StayConnect Hotel Admin UI (Next.js standalone)
 After=network-online.target stayconnect-edged.service
 Wants=network-online.target stayconnect-edged.service
-StartLimitIntervalSec=120
-StartLimitBurst=10
+# Never permanently fail on a start-limit; the UI must always come back.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -24,7 +24,7 @@ Environment=HOSTNAME=127.0.0.1
 EnvironmentFile=-/etc/stayconnect/hotel-admin.env
 User=stayconnect
 Group=stayconnect
-Restart=on-failure
+Restart=always
 RestartSec=3
 MemoryMax=768M
 MemoryHigh=640M
