@@ -9,29 +9,21 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNoSubscription means the tenant has no active/trialing subscription and
-// limits can't be evaluated. Handlers translate this to 402 Payment Required.
+// ErrNoSubscription is retained for backward compatibility but is no longer
+// returned by GetIntLimit: plans/subscriptions were retired in the simple-license
+// model, so a Customer with no plan is NOT blocked — the signed appliance license
+// is the entitlement (it enforces max concurrent online guests locally). Absence
+// of plan-based effective limits therefore means "no plan-imposed cap"
+// (unlimited), not "payment required".
 var ErrNoSubscription = errors.New("no active subscription for tenant")
 
-// GetIntLimit returns the effective int limit for a tenant and key.
+// GetIntLimit returns the effective plan-based int limit for a tenant and key.
 //   - Returns (-1, nil) when the key exists and is unlimited (stored as -1).
 //   - Returns (val, nil) on a numeric limit.
-//   - Returns (0, ErrNoSubscription) when the tenant has no rows in
-//     tenant_effective_limits at all (i.e. no subscription).
-//   - Returns (0, nil) when the key is missing for this tenant — handler
-//     decides whether that means "unlimited" or "fail".
+//   - Returns (0, nil) when the tenant has no plan-based limits at all, or the
+//     key is missing — treated as "no plan cap" (unlimited). Real guest capacity
+//     is enforced by the signed license on the appliance, not here.
 func GetIntLimit(ctx context.Context, db *pgxpool.Pool, tenantID, key string) (int64, error) {
-	// Determine whether the tenant has any effective limits (= has a sub).
-	var any bool
-	if err := db.QueryRow(ctx, `
-        SELECT EXISTS (SELECT 1 FROM tenant_effective_limits WHERE tenant_id = $1)
-    `, tenantID).Scan(&any); err != nil {
-		return 0, err
-	}
-	if !any {
-		return 0, ErrNoSubscription
-	}
-
 	var v *int64
 	err := db.QueryRow(ctx, `
         SELECT int_value FROM tenant_effective_limits
