@@ -2,6 +2,20 @@
 
 This guide explains how to use the StayConnect admin console for each operator role. Start with the section that matches your role; each page is task-oriented ("how do I…") rather than a feature reference.
 
+## Complete references & configuration manuals
+
+If you want a **page-by-page reference** (what every screen shows and does) or a
+**step-by-step configuration manual**, use these:
+
+| Document | What it covers |
+|---|---|
+| [control-panel-reference.md](control-panel-reference.md) | Every **Control Panel** (Cloud Admin) page — Dashboard, Sites, Appliances, Onboarding, Fleet, Customers, Licenses, Operators, Security alerts, Certificates, Assignment keys, Backup health, Audit |
+| [control-panel-config-manual.md](control-panel-config-manual.md) | How to create a **Customer → Site → Appliance → License** and run day-2 operations on the Control Panel |
+| [hotel-admin-reference.md](hotel-admin-reference.md) | Every **Appliance Hotel Admin** page — Dashboard, Access plans, Vouchers, Sessions, PMS/Notifications/Social/Payments, Walled garden, Branding, Operators, WAN/LAN, Cloud, TLS, Setup/Enrollment, Guest networks, DHCP, Config history, Diagnostics, License, Backups, Audit |
+| [hotel-admin-config-manual.md](hotel-admin-config-manual.md) | How to **enroll, activate, and fully configure** an appliance from Hotel Admin — networking, guest VLANs, auth methods, vouchers, integrations, operators |
+
+The role-based guides below are shorter, task-oriented walkthroughs for each role.
+
 ## Who should read what
 
 | Role | Read this | In one sentence |
