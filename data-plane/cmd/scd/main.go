@@ -404,7 +404,11 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 	if err := s.shp.DeleteSession(r.Context(), nc.Bridge, ip); err != nil {
 		slog.Warn("shape delete", "err", err)
 	}
-	if req.Reason == "" {
+	// Clamp to a reason the sessions_end_reason_check CHECK constraint allows, so a
+	// caller passing an unexpected reason ends the session cleanly instead of 500.
+	switch req.Reason {
+	case "quota_bytes", "quota_time", "admin", "idle", "dhcp_expired", "policy":
+	default:
 		req.Reason = "admin"
 	}
 	if err := s.sess.End(r.Context(), ip, req.Reason); err != nil {

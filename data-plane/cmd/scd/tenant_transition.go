@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -135,6 +136,14 @@ func (s *server) reconcileTenantOwnership(ctx context.Context) error {
 		return fmt.Errorf("purge sync_outbox: %w", err)
 	} else if n := ct.RowsAffected(); n > 0 {
 		purged["sync_outbox"] = n
+	}
+
+	// Controlled failure injection for acceptance testing: fail AFTER the deletes
+	// but BEFORE commit, so the deferred Rollback proves no partial purge is ever
+	// committed and the caller holds the appliance fail-closed. Off unless the env
+	// var is explicitly set; never set in production.
+	if os.Getenv("SCD_TENANT_PURGE_FAIL_INJECT") == "true" {
+		return fmt.Errorf("injected cleanup failure (acceptance test) — transaction will roll back, no partial purge")
 	}
 
 	// Audited transition record — kept in the preserved audit_log (immutable
