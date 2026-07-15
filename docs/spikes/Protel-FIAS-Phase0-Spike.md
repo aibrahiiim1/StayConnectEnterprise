@@ -1,10 +1,10 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE1B_HELD — PRECONDITIONS_NOT_MET (no IfcAuthKey / no property attestation / route + IFC-safety unconfirmed)`**
+**Spike status: `GATE1B_COMPLETE — READ-ONLY LINK-ALIVE CONFIRMED ON BOTH INTERFACES (no auth key; no financial traffic)`**
 
-Gate 1 (read-only preflight) executed 2026-07-15 against both approved endpoints. TCP reachability and FIAS 2.20 framing confirmed on both; the FIAS link could not be brought to the "alive" state read-only because the interface authentication key and PMS-side interface registration are not yet provided (correctly not attempted/guessed). No posting, no reversal, no link interruption, no guest data received, no network scanning.
+Gate 1 (read-only preflight, 2026-07-15) confirmed TCP reachability and FIAS 2.20 framing on both endpoints but did not reach link-alive. Gate 1B (2026-07-15) established the correct read-only sequence and reached **link-alive on both interfaces without any authentication key**, confirming the Gate-1 `LA` absence was a **sequencing issue (the `LR` subscription records were withheld), not authentication**. No posting, reversal, PS/PA, link interruption, restart, `pms_providers` creation, or database/config change. Guest record VALUES were never decoded or stored — only record-type counts and timing. Contract remains **CONDITIONALLY FROZEN**.
 
-**Gate 1B (authenticated read-only) was requested 2026-07-15 but NOT started:** the five mandatory "before connecting" preconditions are unsatisfied (see "Gate 1B — Precondition Hold" below). No authenticated connection was opened. Contract remains **CONDITIONALLY FROZEN**.
+**Owner correction applied:** there is no `IfcAuthKey` on either Protel interface (the prior integration connected by IP + TCP port only). `IfcAuthKey` is removed as a prerequisite and was neither invented, guessed, nor required.
 
 Governing documents: [StayConnect-IAM-Phase0-Contract.md](../architecture/StayConnect-IAM-Phase0-Contract.md) (§9 receives this spike's measured results) and [StayConnect-IAM-Handoff.md](../context/StayConnect-IAM-Handoff.md) (execution gates).
 
@@ -16,34 +16,41 @@ Rules of engagement:
 
 ## Supplied Connection Information
 
-### PMS Interface 1 (`pms1`)
+### PMS Interface 1 (`pms1`) — owner-attested
 
 | Field | Value |
 |---|---|
+| Property | **Coral Sea Holiday Village** |
+| Hotel ID | **3** |
 | Host/IP | `150.0.0.18` |
 | TCP port | `5003` |
+| Device mode | Socket Server |
 | TLS | disabled |
-| Protel version | _not revealed pre-authentication (no V# exposed in LS)_ |
-| FIAS/IFC version | _not revealed pre-authentication; spec on file: FIAS 2.20, `docs/FIAS_2.20.24.pdf`_ |
-| Property/Hotel code | _not revealed pre-authentication_ |
+| Route | internal hotel network only (owner-attested) |
+| FIAS/IFC version | client sends `V#1.13`, `RT4`, interface id `IFPB`; spec on file: FIAS 2.20 (`docs/FIAS_2.20.24.pdf`) |
 
-### PMS Interface 2 (`pms2`)
+### PMS Interface 2 (`pms2`) — owner-attested
 
 | Field | Value |
 |---|---|
+| Property | **Coral Sea Aqua Club** |
+| Hotel ID | **2** |
 | Host/IP | `120.0.0.15` |
 | TCP port | `5001` |
+| Device mode | Socket Server |
 | TLS | disabled |
-| Protel version | _not revealed pre-authentication (no V# exposed in LS)_ |
-| FIAS/IFC version | _not revealed pre-authentication_ |
-| Property/Hotel code | _not revealed pre-authentication_ |
+| Route | internal hotel network only (owner-attested) |
+| FIAS/IFC version | client sends `V#1.13`, `RT4`, interface id `IFPB`; spec on file: FIAS 2.20 |
 
-> Note: two independent interfaces were supplied — this also enables live validation of the
-> multi-PMS namespace and duplicate-source-detection requirements during later phases.
+> Both properties are served by one StayConnect Edge as two independent PMS Interface
+> namespaces (Hotel ID 3 = `pms1`; Hotel ID 2 = `pms2`). This also enables live validation of
+> the multi-PMS namespace and duplicate-source-detection requirements during later phases.
 
-## Gate 1B — Precondition Hold (2026-07-15, no connection opened)
+## Gate 1B — Precondition Hold (2026-07-15, earlier — now RESOLVED)
 
-Gate 1B (authenticated, strictly read-only) was requested. Its own instruction defines five mandatory checks **before connecting**, plus abort triggers. None of the five were satisfiable from the information available, and two abort triggers are already active. **No authenticated FIAS connection was opened; no traffic of any kind was sent this step.** Reasoning, per precondition:
+> **RESOLVED 2026-07-15** by owner attestation (property identities + internal-route confirmation) and the correction that **no `IfcAuthKey` exists** on either interface. The hold below is retained as the historical record of why the first Gate-1B request was stopped; see **Gate 1B — Results** further down for the completed read-only validation.
+
+Gate 1B (authenticated, strictly read-only) was first requested without the mandatory inputs. Its instruction defined five mandatory checks **before connecting**, plus abort triggers; at that time none of the five were satisfiable and two abort triggers were active, so **no connection was opened** on that request. Reasoning, per precondition:
 
 | # | Required before connecting | Status | Why held |
 |---|---|---|---|
@@ -65,27 +72,51 @@ Gate 1B (authenticated, strictly read-only) was requested. Its own instruction d
 
 Once all five are in hand, Gate 1B can run: authenticate the dedicated read-only IFC, confirm `LA`/alive, capture negotiated identity/version and safely-exposed property identifiers, receive the approved resync, resolve only the approved test reservation + folio (redacted), and measure heartbeat/reconnect/resync cadence — with immediate abort on any of the defined triggers.
 
-## Current Blocker (after Gate 1)
+## Gate 1B — Results (2026-07-15, authenticated-free read-only, redacted)
 
-The FIAS link cannot reach the data-streaming state read-only, so no reservation/folio can be queried yet. To unblock, the following are required **per interface** (secrets supplied out-of-band, never stored in this repo):
+Executed from the Hotel Appliance `172.21.60.23` using an ephemeral Python harness that reuses the connector's FIAS framing and the previously-working sequence (`data-plane/internal/pms/protel_fias.go`). One endpoint at a time, Hotel ID 3 first. No `pms_providers`, service, config, or database change. **No `PS`/`PA`, charge, reversal, checkout manipulation, lost-ACK, link interruption, or service restart.** Guest record VALUES were never decoded or stored — only record-type counts and timing.
 
-1. **Interface authentication key (IfcAuthKey)** for the FIAS `LD`/`CG`/`RT4` authentication — provided out-of-band; will live only as an AEAD secret generation, never in Markdown.
-2. **PMS-side interface registration/enable** so Protel accepts our `LD` and begins the database resync + guest feed (an operator action on the Protel/IFC side).
-3. **Expected interface name / IFC number** the PMS is configured to accept (the harness currently sends the default `IFPB`).
-4. **Expected `V#` (version) and `RT` (record-transfer type)** values, if the property mandates specific ones.
-5. Owner **confirmation of the routing path for pms2** (`120.0.0.15`, a public-range address currently routed over the WAN `ens160`).
+**Existing-client / occupancy check.** With "allow new connection" unchecked, a Socket Server that already has a client refuses newcomers (it protects, not displaces). On both endpoints the server **accepted the TCP connection and sent an unsolicited opening `LS`** (server inviting a client) — the signal of a **free client slot**. Therefore **no existing production client was connected to either Socket Server**, and nothing was displaced. Each test connection was brief (~40 s) and gracefully closed to release the slot. The appliance held no prior connection to either endpoint (`ss` clean; `pms_providers`/`pms_attempts` empty).
 
-Once the link comes up read-only, a further read-only step can confirm a test reservation and its folio from the in-house cache before any Gate-2/Gate-3 planning.
+**Correct working FIAS handshake/initialization sequence (verified on both):**
 
-## Gate 2 — Required Inputs Still Needed (per interface, before any live plan)
+1. Client dials the Socket Server; server sends opening `LS|DA(YYMMDD)|TI(HHMMSS)|`.
+2. Client sends `LS|DA..|TI..|` (link start).
+3. Client sends `LD|DA..|TI..|IFPB|V#1.13|RT4|` — interface id `IFPB`, version `V#1.13`, record-transfer `RT4`, **no authentication field**.
+4. Client sends the `LR` subscription records: `LR|RIGI|FLRNG#GNGFGAGD|`, `LR|RIGC|FLRNG#GNGFGAGD|`, `LR|RIGO|FLRNG#|` (subscribe to Guest-In / Guest-Change / Guest-Out with the room/reservation/name/arrival/departure fields).
+5. Server transitions the link to **alive** and sends `LA` (Link Alive); observed at **~5.1 s** on both interfaces.
+6. Server streams the **initial in-house resync** as `GI`/`GC` records (~11 s after connect).
+7. Link is maintained by sending `LA` on idle; the peer keeps the connection open (no `LE`, no drop across the 40 s window).
 
-- IfcAuthKey + interface registration (items 1–4 above);
-- test room + reservation number + guest/family name (for the read-only lookup match);
-- folio id to be used as the posting target;
-- posting code (test article) + test amount + currency;
-- reversal method confirmation (expected: negative posting);
-- Front Office contact + approved maintenance window;
-- explicit owner approval of the written Gate-2 live test plan.
+**Reason `LA`/data streaming did not occur in Gate 1.** Gate 1 sent only `LS` + `LD` and deliberately **omitted the `LR` subscription records**. Without `LR`, the Socket Server does not complete link setup or start the feed, so it re-issued `LS` and never sent `LA`. Adding the `LR` records brought the link to alive on the first attempt **with no authentication key** — confirming the Gate-1 `LA` absence was a **FIAS sequencing/configuration issue, not authentication failure**.
+
+**Observed record types, heartbeat, resync (redacted; counts/timing only):**
+
+| Interface | Occupancy | First `LA` | Resync begins | Guest records (type→count) | Heartbeat |
+|---|---|---|---|---|---|
+| pms1 — Hotel 3, Coral Sea Holiday Village (`150.0.0.18:5003`) | slot free | ~5.1 s | ~11.2 s | `GI`=7, `GC`=2 | client `LA` on idle keeps link up; server `LA` received |
+| pms2 — Hotel 2, Coral Sea Aqua Club (`120.0.0.15:5001`) | slot free | ~5.1 s | ~11.1 s | `GI`=2 | same |
+
+No `DS`/`DE` database-resync envelope records were seen — Protel streamed `GI` records directly. No `GO`/`LE` during the window. Guest field **values were never read**; only the record-id and arrival time were counted.
+
+**Property mapping — confirmed.** By owner attestation and endpoint: **`pms1` → Hotel ID 3 → Coral Sea Holiday Village** and **`pms2` → Hotel ID 2 → Coral Sea Aqua Club**. Corroborated operationally by two independent Socket Servers with **distinct occupancy** (Hotel 3 = 9 in-house records vs Hotel 2 = 2), consistent with two separate properties. The protocol-level hotel-id field was **not independently decoded** (that would require reading record field values); if the owner wants an independent hotel-id confirmation, it can be captured in a targeted, redaction-safe read of the link/property field only.
+
+**Interfaces unaffected — evidence.** No existing client was present to disturb (both slots were free); connections were read-only, brief, and gracefully closed; no `pms_providers` row, service restart, config, or database write occurred.
+
+**Two independent namespaces.** Treated as two independent PMS Interface namespaces on one StayConnect Edge (separate Socket Servers, separate occupancy, separate hotel ids) — matching the contract's per-interface namespace model.
+
+## Test-Room Details Still Required (for Gate 2)
+
+Gate 1B confirmed the read-only feed but was **not** given an approved test reservation, so no specific guest/folio was resolved (correctly — none was surfaced). Before any Gate-2 planning, per interface:
+
+- test **room + reservation number + guest/family name** (to match one specific in-house reservation read-only);
+- **folio id** to be used as the posting target, and confirmation postings are permitted on it;
+- **posting code** (test article) + **test amount + currency**;
+- **reversal method** confirmation (expected: negative posting);
+- **Front Office contact** + approved **maintenance window**;
+- explicit owner approval of the written **Gate-2 live test plan**.
+
+(No `IfcAuthKey` or interface-registration items remain — resolved: the interfaces accept `IFPB`/`V#1.13`/`RT4` with no key, and both routes are owner-attested internal.)
 
 ## Test Fixtures (placeholders — to be supplied before Gate 2)
 
@@ -108,10 +139,10 @@ Once the link comes up read-only, a further read-only step can confirm a test re
 - [x] FIAS record framing verified — **STX (0x02) … ETX (0x03)** confirmed on both; opening `LS` record received
 - [x] Handshake behavior observed — link **did not reach alive** without interface auth/registration (see results)
 - [x] Heartbeat/keepalive cadence observed and recorded — see results
-- [ ] Protel + FIAS/IFC versions identified — **not revealed pre-authentication** (blocked)
-- [ ] Approved test reservation lookup — **blocked** (link not alive → no in-house cache; requires IFC auth + registration + approved fixtures)
-- [ ] Folio identification — **blocked** (same cause)
-- [x] Confirmed: **no posting sent, no reversal, no link interruption, no guest data received, no network scanning**
+- [x] FIAS/IFC handshake identified in Gate 1B — client `V#1.13` / `RT4` / `IFPB` accepted; link reaches alive with no key
+- [ ] Approved test reservation lookup — pending Gate-2 fixtures (link-alive + feed confirmed in Gate 1B; no test reservation supplied yet)
+- [ ] Folio identification — pending Gate-2 fixtures
+- [x] Confirmed: **no posting sent, no reversal, no link interruption, no service restart, no network scanning; guest values never decoded/stored**
 
 ## Gate 1 — Results (2026-07-15, read-only, redacted)
 
