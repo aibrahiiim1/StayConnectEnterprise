@@ -1,8 +1,8 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE2_PLAN_GROUNDED (production PS/PA wire) — GATE 2.5 ACCESS-BLOCKED (172.21.96.150) — AWAITING GATE-3A FIXTURES + FINANCE/PROTEL CONFIRMATIONS + COLLISION-RISK CLEARANCE (no financial traffic performed)`**
+**Spike status: `GATE2_PLAN_GROUNDED (production PS/PA wire) — AWAITING GATE-3A FINANCIAL/TEST FIXTURES (no financial traffic performed)`**
 
-Gate 2.5 (old-server reconciliation) still could not run on-host after a third, self-service attempt: I searched the environment exhaustively for an already-authorized access path (workstation keys/agent/config, repo inventory/secrets/CI, and the appliance as a bastion) and found **none** — `172.21.96.150` refuses my key, the appliance holds no client key and is itself unauthorized on it, and no credential is stored anywhere I can reach. No passwords were guessed. **Outcome D (evidence insufficient).** The Socket-Server client-slot collision risk is therefore **UNRESOLVED** and remains a hard blocker for Gate 3A; the single item the owner must supply (authorize the listed public key, or provide a secure-store credential) is in the Gate 2.5 section.
+The legacy-server (`172.21.96.150`) SSH inspection is **cancelled** — not required. Socket-Server collision safety is handled **in-band at test start**: accept + opening `LS` = free slot; keep that connection for the whole run; refusal / no `LS` ⇒ abort without displacing (see "Socket-Server collision clearance"). Gate 3A is now blocked **only** on the real financial/test fixtures.
 
 Gate 1 (read-only preflight, 2026-07-15) confirmed TCP reachability and FIAS 2.20 framing on both endpoints but did not reach link-alive. Gate 1B (2026-07-15) established the correct read-only sequence and reached **link-alive on both interfaces without any authentication key**, confirming the Gate-1 `LA` absence was a **sequencing issue (the `LR` subscription records were withheld), not authentication**. No posting, reversal, PS/PA, link interruption, restart, `pms_providers` creation, or database/config change. Guest record VALUES were never decoded or stored — only record-type counts and timing. Contract remains **CONDITIONALLY FROZEN**.
 
@@ -341,7 +341,7 @@ The **wire format is now grounded** in the production evidence (`PS` record, fie
 
 ### Gate 3 authorization + execution split
 
-Gate 3 executes **only** after: (a) all Gate-3A mandatory fixtures (below) are supplied with real values; (b) the Protel-admin/Finance confirmation items above are resolved; (c) **Gate 2.5** (old-server reconciliation) confirms no legacy process can collide on the Socket Server or emit `PS`; and (d) the owner explicitly approves. Execution is split and separately approved:
+Gate 3 executes **only** after: (a) all Gate-3A mandatory fixtures (below) are supplied with real values; (b) the Protel-admin/Finance confirmation items above are resolved; (c) the **in-band Socket-Server collision check** at test start passes (accept + opening `LS` = free slot, held for the whole run); and (d) the owner explicitly approves. Execution is split and separately approved:
 
 - **Gate 3A** — one normal **debit** only (§4); corrected manually in Protel.
 - **Gate 3B** — programmatic **reversal** only, and only after a separate Protel **capability proof** (§5).
@@ -352,9 +352,8 @@ A failed or unreconciled Gate 3A blocks 3B/3C/3D until the folio is confirmed ne
 
 ### Gate-3A blockers (the ONLY things that block Gate 3A)
 
-Gate 3A (one normal debit) is blocked **only** by these mandatory items — all still outstanding:
+Gate 3A (one normal debit) is blocked **only** by these mandatory financial/test items — all still outstanding. (Socket-Server collision safety is **not** a pre-run blocker: it is proven **in-band at test start** — accept + opening `LS` = free slot, held for the whole run; refusal / no `LS` ⇒ abort — see "Socket-Server collision clearance".)
 
-- **Gate-2.5 collision clearance** (old-server reconciliation confirms no legacy connector can collide on the Socket Server or emit `PS`);
 - confirmed Protel **Folio/base currency and exponent**;
 - **Package currency equals the PMS Interface currency**;
 - **Finance confirmation of the `SOWIFI` revenue mapping**;
@@ -376,50 +375,18 @@ Gate 3A (one normal debit) is blocked **only** by these mandatory items — all 
 
 The "Unresolved Protel-specific fields" above that concern reversal semantics, `P#` dedup, and checkout are **not** Gate-3A blockers; they gate 3B/3C/3D only. (`AS`-code meanings and `G#` folio-target semantics are needed to *interpret* the 3A result and so are confirmed as part of the 3A Finance/Protel sign-off.)
 
-## Gate 2.5 — Old-Server Connector Reconciliation (172.21.96.150) — read-only — OUTCOME D (evidence insufficient: access not wired)
+## Socket-Server collision clearance — in-band, at test start (legacy-server SSH inspection CANCELLED)
 
-**Purpose:** determine whether a legacy connector on the old Coral Sea server `172.21.96.150` is (or intermittently is) connected to the Protel Socket Server — a client-slot collision risk — and whether it can still emit financial `PS` records, despite `pms.enabled=false` / `pms.protel.enabled=false`.
+The legacy-server (`172.21.96.150`) SSH investigation is **cancelled and out of scope** — it is not required for the new StayConnect implementation. No access to, or modification of, that server is attempted. There is no SSH-access blocker and no credential/key request.
 
-**Outcome: D — Evidence insufficient (no authorized access path exists for me to use).** I took responsibility for establishing access and searched the execution environment exhaustively for an already-authorized method (2026-07-16, third attempt):
+**Collision clearance is an in-band check performed at the start of the approved Gate-3A run, using the already-verified Socket-Server behavior** (§0 of the plan):
 
-- **Workstation keys/agent/config:** only `~/.ssh/id_ed25519` (already rejected by the server); no ssh-agent running; no `~/.ssh/config` Host alias; no staged key/credential file in `/d/tmp`, the scratchpad, or the project tree; no relevant environment variable.
-- **Repo / ops assets:** no Ansible inventory, `hosts`, ssh_config, `.env`, vault, or secrets file; no CI/CD or service-connection credential; the only project reference to `172.21.96.150` is this spike doc. `docs/SYSTEM_OVERVIEW.md` notes the `172.21.96.x` subnet is a *separate legacy deployment*.
-- **Management-host / bastion path:** the reachable appliance `172.21.60.23` holds **no private key** (it is an SSH *target*, only `authorized_keys` present), so it cannot act as a client/bastion; and a single batch-mode (key-only, no-password) probe from the appliance to `172.21.96.150` was **refused** (`publickey`), so the appliance is not an authorized client of the legacy server either. (The transient `known_hosts` entry that probe created on the appliance was removed; the appliance is left untouched.)
+- Open **one** connection to the Protel Socket Server and complete the read-only link (`LS→LS→LD→LR→LA`).
+- **If the server accepts the connection and sends its opening `LS`, the single-client slot is FREE** (with "allow new connection" unchecked, a server that already had a client would refuse the newcomer). Reaching `LA` confirms we hold the slot.
+- **Keep that same accepted connection for the entire approved test run** — do not disconnect/reconnect (avoids a slot race).
+- **If the connection is refused, or no opening `LS` is received, ABORT immediately** — do not displace, reconnect into a race, or modify any existing client.
 
-No credentials were brute-forced or guessed; no unrelated host/port was contacted; no private key/password/secret was read or printed. There is **genuinely no valid access credential or authorized management path available to me**, so — per the standing rule to STOP in that case — the on-host investigation was not performed and nothing on any host was stopped/restarted/signalled/modified.
-
-**Minimum single item the product owner must supply** (exactly one; I will do all key generation, SSH configuration, the investigation, and cleanup myself once any one is in place):
-
-- **Preferred — authorize my existing public key** on an account on `172.21.96.150` (append the workstation public key below to that account's `~/.ssh/authorized_keys`). This is the least-privilege option; it exposes no secret to me and needs no key creation by anyone else. My public key (safe to share; **not** a private key):
-  `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMTyUinoWRw2EpS5Ay1e35KLYH83AaHvLTq6kN0J/uh9`
-- **Or** — a one-time credential for an authorized account, delivered through a secure store this environment can reach (agent, key file at a path, or vault reference) — never pasted into chat/Git/logs. With an initial authenticated channel I will then generate a dedicated Ed25519 key, install only its public key, run Gate 2.5 read-only, and remove the temporary public key and local private key afterward.
-
-**Supported secure delivery mechanisms I can consume:** an ssh-agent this shell can reach; a private key placed at a filesystem path (I use `ssh -i <path>`, contents never printed); a `~/.ssh/config` Host+IdentityFile entry; or authorization of the public key above. A password typed into chat is **not** an acceptable delivery mechanism (it would expose a secret).
-
-**Collision-risk assessment from available evidence:**
-
-- **Gate 1B (2026-07-15) is authoritative that both Protel slots were FREE at that time:** with "allow new connection" unchecked (a busy single-client server refuses newcomers), our connections were accepted, received the opening `LS`, and reached `LA`. A persistently-connected legacy client would have caused our connect to be refused — it was not. So no legacy client held the slot during the Gate-1B window.
-- **The "recent LA heartbeat" has two candidate sources, unresolved:**
-  1. **Our own Gate 1B test** sent 8 `LA` keepalives to each endpoint (interface `IFPB` / `WS` unset). A Protel wire log showing a "recent LA heartbeat" may be **our** test, not the old server.
-  2. **A legacy connector on `172.21.96.150`** that connects **intermittently** (heartbeat bursts) and simply was not connected during the Gate-1B window. If so, there is a **real, time-dependent slot-collision risk**: if it connects during a Gate-3 run (or vice-versa) one side is refused; and — critically — if it is an **orphaned process not governed by `pms.*.enabled`**, it is unproven whether it could still emit `PS`.
-- **Why the link can appear active while `pms.enabled`/`pms.protel.enabled` are false (hypotheses, to confirm on-host):** an orphaned/stale process still running after the flags were flipped; a separate FidServ/legacy binary not gated by those flags; a systemd unit that ignores the config; or the observed heartbeat is actually our Gate-1B traffic. Cannot be decided without on-host inspection.
-- **PS-capability:** **UNDETERMINED.** Cannot confirm read-only/heartbeat-only vs still-financial without inspecting the process and its config on-host.
-
-**Conclusion — hard blocker for Gate 3:** the collision risk is **UNRESOLVED and non-trivial**. Gate 3 must not proceed until an operator with access completes Gate 2.5 on-host and confirms any legacy connector is inert (stopped/disabled and not `PS`-capable).
-
-**Read-only commands to run on `172.21.96.150` once access is granted (no modification):**
-
-```
-ss -tnp | grep -E '150\.0\.0\.18:5003|120\.0\.0\.15:5001'      # active TCP sessions to Protel + owning PID
-ps -ef | grep -iE 'fias|protel|fidserv|stayconnect|pms' | grep -v grep
-# for each candidate PID:
-readlink /proc/<PID>/exe ;  tr '\0' ' ' </proc/<PID>/cmdline ;  ls -l /proc/<PID>/cwd
-ps -o user= -p <PID>                                            # service owner
-tr '\0' '\n' </proc/<PID>/environ | grep -iE 'config|conf|pms'  # loaded config path (redact secrets)
-systemctl status <unit> ; systemctl cat <unit>                  # unit + config path (read-only)
-docker ps ; docker inspect <id>                                 # if containerized
-# then read the loaded config to check pms.enabled / pms.protel.enabled and whether the process honors them
-```
+This replaces any pre-run legacy-connector reconciliation: collision safety is proven at test time by the server's own admission control, not by inspecting the old server.
 
 ## Measured Results (empty until the spike runs)
 
