@@ -475,6 +475,14 @@ a **Count** (1–10000), a **Label**, and the **code generation options**:
   types.) Codes use secure random generation and are globally unique; a batch too
   large for the chosen space is rejected rather than weakening randomness.
 
+> A voucher's plan **Duration** (and **Data cap**) is a **total, consumable
+> allowance**, not a per-login one. As guest sessions run, the time/bytes used
+> are accrued onto the voucher; once the allowance is spent the voucher becomes
+> **Exhausted** and can't be redeemed again — so a "10-minute" voucher grants 10
+> minutes of total access, whether used in one sitting or across reconnects, not
+> a fresh 10 minutes on every re-login. (Guest **accounts** are reusable
+> credentials by design — each login gets the plan duration.)
+
 Then **view the codes** (search/filter, copy, print, **download CSV**), open a
 code for its **Details** (state, plan, duration, speed, data cap, max devices,
 active devices, dates), **revoke** an unused code, or **Revoke unused** for the
@@ -778,6 +786,7 @@ Notes verified in code:
 | Guest login says "Too many attempts" | Brute-force throttle tripped (username+IP/device or endpoint-wide) | Wait ~1 minute and retry |
 | Lost a guest password | Passwords are shown once and never stored in plaintext | Set a new password (Guest accounts → Password); it's shown once again |
 | Can't change a voucher's plan | Voucher is revoked/expired/exhausted, or has a live session | Only unused/idle vouchers can be repointed; disconnect the session first |
+| Guest keeps re-using an "expired" voucher for more time | Voucher duration is a **total** allowance; it exhausts once spent | Expected: the voucher flips to **Exhausted** and re-login is refused once its total time/data is used. Issue a new voucher for more access |
 | Guests denied, state Unlicensed | No valid license (fail-closed) | Activate / import license (§7, §34) |
 | Can't create plans/vouchers/accounts | License not Active | Renew/activate |
 | Portal doesn't auto-pop | DHCP option 114 / walled garden | Verify network settings and walled garden (§13, §17) |
