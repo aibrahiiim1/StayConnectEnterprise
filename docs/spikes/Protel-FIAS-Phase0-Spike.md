@@ -1,8 +1,10 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE1_PREFLIGHT_COMPLETE — BLOCKED_PENDING_IFC_AUTH_AND_REGISTRATION`**
+**Spike status: `GATE1B_HELD — PRECONDITIONS_NOT_MET (no IfcAuthKey / no property attestation / route + IFC-safety unconfirmed)`**
 
-Gate 1 (read-only preflight) executed 2026-07-15 against both approved endpoints. TCP reachability and FIAS 2.20 framing confirmed on both; the FIAS link could not be brought to the "alive" state read-only because the interface authentication key and PMS-side interface registration are not yet provided (correctly not attempted/guessed). No posting, no reversal, no link interruption, no guest data received, no network scanning. Contract remains **CONDITIONALLY FROZEN**.
+Gate 1 (read-only preflight) executed 2026-07-15 against both approved endpoints. TCP reachability and FIAS 2.20 framing confirmed on both; the FIAS link could not be brought to the "alive" state read-only because the interface authentication key and PMS-side interface registration are not yet provided (correctly not attempted/guessed). No posting, no reversal, no link interruption, no guest data received, no network scanning.
+
+**Gate 1B (authenticated read-only) was requested 2026-07-15 but NOT started:** the five mandatory "before connecting" preconditions are unsatisfied (see "Gate 1B — Precondition Hold" below). No authenticated connection was opened. Contract remains **CONDITIONALLY FROZEN**.
 
 Governing documents: [StayConnect-IAM-Phase0-Contract.md](../architecture/StayConnect-IAM-Phase0-Contract.md) (§9 receives this spike's measured results) and [StayConnect-IAM-Handoff.md](../context/StayConnect-IAM-Handoff.md) (execution gates).
 
@@ -38,6 +40,30 @@ Rules of engagement:
 
 > Note: two independent interfaces were supplied — this also enables live validation of the
 > multi-PMS namespace and duplicate-source-detection requirements during later phases.
+
+## Gate 1B — Precondition Hold (2026-07-15, no connection opened)
+
+Gate 1B (authenticated, strictly read-only) was requested. Its own instruction defines five mandatory checks **before connecting**, plus abort triggers. None of the five were satisfiable from the information available, and two abort triggers are already active. **No authenticated FIAS connection was opened; no traffic of any kind was sent this step.** Reasoning, per precondition:
+
+| # | Required before connecting | Status | Why held |
+|---|---|---|---|
+| 1 | Owner-approved **Property/Hotel identity** for each endpoint | **Missing** | No property/hotel names or codes have been attested for `150.0.0.18:5003` or `120.0.0.15:5001`. Without an attestation there is nothing to match the post-auth identity against — and "Property identity does not match the owner attestation" is an explicit **abort** trigger, so connecting blind is disallowed. |
+| 2 | Confirm both routes are **intentional internal** hotel routes despite public-range IPs | **Unconfirmed → active abort trigger** | Gate 1 established both endpoints are reached over the WAN uplink `ens160` via the default gateway `172.21.60.1`; `120.0.0.15` and `150.0.0.18` are both **public IANA-range** addresses (not RFC-1918). "Either endpoint appears reachable through the public Internet rather than the intended internal route" is an explicit **abort** trigger. This must be affirmatively confirmed as internal (e.g., private WAN / MPLS / static internal routing) before any authenticated attempt. |
+| 3 | Protel-operations confirmation that the dedicated IFC registration **cannot disconnect/replace/disturb** an existing FIAS interface | **Missing** | No Protel-ops sign-off provided. Some Oracle/FIAS deployments allow a newer IFC to bump an existing session; "an existing production FIAS connection is displaced" is an explicit **abort** trigger. Cannot be self-certified. |
+| 4 | A **dedicated test interface identity / IFC number** for StayConnect | **Missing** | None supplied. The Gate-1 harness used the connector default `IFPB`; reusing a default or unknown identity risks colliding with a real interface (ties to #3). |
+| 5 | **IfcAuthKey** via an out-of-band secret mechanism | **Missing** | No auth key and no pointer to an out-of-band mechanism (env var, staged file, secret store, path) were provided. Guessing, brute-forcing, or hunting the filesystem for a secret is forbidden and was not attempted. An authenticated connection is impossible without it. |
+
+**Decision:** halt Gate 1B before any connection. Proceeding would require either connecting without an auth key (impossible) or connecting despite unmet safety attestations and two active abort triggers (disallowed). This is the correct fail-closed outcome.
+
+### To release the Gate 1B hold, the product owner must provide
+
+1. **Per endpoint: the attested Property/Hotel identity** (name and/or code) that the connection is expected to represent — recorded here as attestation, matched against post-auth link data.
+2. **Written confirmation** that `150.0.0.18` and `120.0.0.15` are intentional **internal** hotel routes (how they are carried — private WAN/MPLS/VPN/static internal), not Internet-exposed paths.
+3. **Protel-operations confirmation** that registering a new, dedicated StayConnect IFC will not disconnect, replace, or disturb any existing/production FIAS interface on either endpoint.
+4. **The dedicated StayConnect IFC identity / interface number** (and any mandated `V#` version and `RT` record-transfer type) to use for the test link.
+5. **The IfcAuthKey per interface**, delivered out-of-band (e.g., placed in a named file on the appliance with a path told to the operator, or an environment variable, or a secret store reference) — **never** pasted into chat, Git, Markdown, logs, shell history, or command output. This document will only ever reference the mechanism/location, never the value.
+
+Once all five are in hand, Gate 1B can run: authenticate the dedicated read-only IFC, confirm `LA`/alive, capture negotiated identity/version and safely-exposed property identifiers, receive the approved resync, resolve only the approved test reservation + folio (redacted), and measure heartbeat/reconnect/resync cadence — with immediate abort on any of the defined triggers.
 
 ## Current Blocker (after Gate 1)
 
