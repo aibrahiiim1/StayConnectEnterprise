@@ -1,6 +1,8 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE3A_READINESS_PACK_PREPARED (technical facts read-only-confirmed) — AWAITING HUMAN APPROVALS: fixtures + Finance SOWIFI/currency confirmation (no financial traffic performed)`**
+**Spike status: `GATE3A_ABORTED_PRE_FLIGHT — fixtures still placeholder tokens; no connection opened, no PS sent (no financial traffic performed)`**
+
+A Gate-3A execution was requested 2026-07-16, but the "owner-approved fixture" arrived as **unpopulated placeholder tokens** (`<ROOM>`, `<NAME>`, `<RESERVATION_OR_UNKNOWN>`, `<FOLIO>`, `<AMOUNT_MINOR>`, `<CURRENCY>`, `<EXPONENT>`, `<CONTACT>`, `<WINDOW>` — only the three `YES` confirmations were real). Per the runbook's pre-send gates (§D 4–6, 10) and abort conditions, Gate 3A **aborted before opening any connection**. No `PS` was built or sent; nothing was resolved; no Front Office coordination was possible. See "Gate 3A — Execution Attempt" below.
 
 The legacy-server (`172.21.96.150`) SSH inspection is **cancelled** — not required. Socket-Server collision safety is handled **in-band at test start**: accept + opening `LS` = free slot; keep that connection for the whole run; refusal / no `LS` ⇒ abort without displacing (see "Socket-Server collision clearance"). Gate 3A is now blocked **only** on the real financial/test fixtures.
 
@@ -387,6 +389,34 @@ The legacy-server (`172.21.96.150`) SSH investigation is **cancelled and out of 
 - **If the connection is refused, or no opening `LS` is received, ABORT immediately** — do not displace, reconnect into a race, or modify any existing client.
 
 This replaces any pre-run legacy-connector reconciliation: collision safety is proven at test time by the server's own admission control, not by inspecting the old server.
+
+## Gate 3A — Execution Attempt (2026-07-16): ABORTED at fixture pre-gate (no PS sent)
+
+Gate-3A execution was requested. It **aborted before any connection** because the required test fixtures were supplied as **placeholder tokens, not real values**. No FIAS connection was opened, no reservation resolved, no `PS` built or transmitted, and no Front Office coordination occurred. This is the correct, safe outcome: a real financial debit must never be posted against invented/placeholder room/reservation/amount values or without live Front Office supervision.
+
+**Fixture check (what was received):**
+
+| Fixture | Received | Usable? |
+|---|---|---|
+| Test Room | `<ROOM>` | ✗ placeholder |
+| Guest family name | `<NAME>` | ✗ placeholder |
+| Reservation number | `<RESERVATION_OR_UNKNOWN>` | ✗ placeholder |
+| Expected Folio | `<FOLIO>` | ✗ placeholder |
+| `amount_minor` | `<AMOUNT_MINOR>` | ✗ placeholder |
+| Currency | `<CURRENCY>` | ✗ placeholder |
+| Protel Folio/base currency | `<CURRENCY>` | ✗ placeholder |
+| Protel-side exponent | `<EXPONENT>` | ✗ placeholder |
+| Front Office contact | `<CONTACT>` | ✗ placeholder |
+| Maintenance window | `<WINDOW>` | ✗ placeholder |
+| Posting permitted | `YES` | ✓ (but moot without a folio) |
+| Finance `SOWIFI` mapping confirmed | `YES` | ✓ |
+| Front Office manual-correction approved | `YES` | ✓ |
+
+**Abort conditions triggered (§4/§E):** approved reservation cannot be resolved/verified (`RN`/`G#` not real); Folio not verifiable; amount not a real value; currency/exponent not real (step-10 assertions cannot be evaluated); Front Office not reachable (placeholder contact/window) so mandatory pre/post folio evidence and manual correction cannot be arranged. Any one of these mandates abort; here all apply.
+
+**Result of the requested return items:** verified `RN`/`G#` resolution — **not performed** (no real reservation, no connection); exact `PS`/`PA` — **none sent**; `PA` status/response time — **N/A**; Front Office folio verification — **N/A**; manual correction — **N/A**; folio net-zero — **N/A (no charge ever posted)**.
+
+**To run Gate 3A, re-issue with real values** for: Test Room, Guest family name, Reservation number (or an explicit "resolve from room+name"), Expected Folio, `amount_minor`, Currency, Protel Folio/base currency, Protel-side exponent, Front Office contact, and Maintenance window — with Front Office standing by to record the folio before/after and perform the manual correction. Everything else (technical wire facts, runbook, template, aborts) is ready below.
 
 ## Gate 3A — Readiness Pack (prepared, NOT executed)
 
