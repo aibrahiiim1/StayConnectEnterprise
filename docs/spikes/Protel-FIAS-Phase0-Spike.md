@@ -1,6 +1,6 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE1B_COMPLETE — READ-ONLY LINK-ALIVE CONFIRMED ON BOTH INTERFACES (no auth key; no financial traffic)`**
+**Spike status: `GATE2_PLAN_DRAFTED — AWAITING REAL FIXTURES + OWNER APPROVAL TO EXECUTE GATE 3 (no financial traffic performed)`**
 
 Gate 1 (read-only preflight, 2026-07-15) confirmed TCP reachability and FIAS 2.20 framing on both endpoints but did not reach link-alive. Gate 1B (2026-07-15) established the correct read-only sequence and reached **link-alive on both interfaces without any authentication key**, confirming the Gate-1 `LA` absence was a **sequencing issue (the `LR` subscription records were withheld), not authentication**. No posting, reversal, PS/PA, link interruption, restart, `pms_providers` creation, or database/config change. Guest record VALUES were never decoded or stored — only record-type counts and timing. Contract remains **CONDITIONALLY FROZEN**.
 
@@ -118,19 +118,23 @@ Gate 1B confirmed the read-only feed but was **not** given an approved test rese
 
 (No `IfcAuthKey` or interface-registration items remain — resolved: the interfaces accept `IFPB`/`V#1.13`/`RT4` with no key, and both routes are owner-attested internal.)
 
-## Test Fixtures (placeholders — to be supplied before Gate 2)
+## Test Fixtures — Gate 2 (first property: Coral Sea Holiday Village / Hotel ID 3 / pms1)
 
-| Item | pms1 | pms2 |
+**All fixture values are still UNSUPPLIED.** The owner's Gate-2 message carried literal placeholder tokens (`<ROOM>`, `<RESERVATION>`, …), not values. Gate-2 *planning* is complete (below); **Gate-2/Gate-3 execution is blocked until these are provided with real values.** No values were invented.
+
+| Fixture | Value | Status |
 |---|---|---|
-| Test room | _TBD_ | _TBD_ |
-| Reservation number | _TBD_ | _TBD_ |
-| Guest / family name | _TBD_ | _TBD_ |
-| Folio | _TBD_ | _TBD_ |
-| Posting code (test article) | _TBD_ | _TBD_ |
-| Test amount + currency | _TBD_ | _TBD_ |
-| Reversal method | _negative posting (confirm during preflight)_ | _TBD_ |
-| Front Office contact | _TBD_ | _TBD_ |
-| Approved maintenance window | _TBD_ | _TBD_ |
+| Test room | `<ROOM>` | **GAP** |
+| Reservation number | `<RESERVATION>` | **GAP** |
+| Guest / family name | `<NAME>` | **GAP** |
+| Expected Folio | `<FOLIO>` | **GAP** |
+| Posting permission confirmed | `<YES>` | **GAP** (must be explicit YES + which folio) |
+| Posting code (PMS transaction/department for internet charge) | `<CODE>` | **GAP** (+ confirm which FIAS field carries it — see plan §3) |
+| Test amount | `<AMOUNT>` | **GAP** |
+| Currency | `<CURRENCY>` | **GAP** |
+| Reversal method expected by Protel | `<METHOD>` | **GAP** (negative/rebate vs correction — Protel-specific) |
+| Front Office contact | `<CONTACT>` | **GAP** |
+| Maintenance window | `<WINDOW>` | **GAP** |
 
 ## Gate 1 — Read-Only Preflight Checklist
 
@@ -175,15 +179,117 @@ Both endpoints are reached over the WAN uplink `ens160` via the default gateway 
 
 **Separate properties?** The two endpoints are distinct hosts/ports answering independently (independent `LS` timestamps), consistent with two separate PMS interfaces. This **cannot be positively confirmed as two separate properties from the protocol pre-authentication**, because no property/hotel/IFC identifier is exposed before link-up. Confirmation requires either owner attestation or post-authentication `LD`/link data (Gate 2+).
 
-## Gate 3 — Live Spike Scenarios (requires explicit approval after Gate 2)
+## Gate 2 — Live-Spike Plan (PROPOSED — awaiting real fixtures + explicit owner approval)
 
-1. Small test charge posted; verified on the Protel folio.
-2. Reversal of the test charge; verified on the folio.
-3. Lost-ACK drill: link interrupted mid-post → command lands `UNKNOWN`; verified against the folio (posted or not) → manual-review path.
-4. Checkout while link down: staleness behavior of lookups and the financial fresh-validation block.
-5. Stale occupancy: room move during staleness → occupancy re-verification aborts posting.
-6. Heartbeat/keepalive and night-audit/resync cadence measurements.
-7. Folio-number reuse behavior (drives `folio_identity_strategy` for the connector revision).
+Documentation only. **Nothing in this section has been executed. No FIAS posting/reversal/state-changing record has been sent. No production connection was opened for this plan.** First property: **Coral Sea Holiday Village (Hotel ID 3, pms1, `150.0.0.18:5003`, `IFPB`/`V#1.13`/`RT4`, no auth key)**. Coral Sea Aqua Club (Hotel 2) is planned only as an independent read-only repeat; no financial test is planned for Hotel 2 in this cycle.
+
+Amount convention (spec §Posting): all FIAS amount fields (`TA`, `S1-S9`, `T1-T9`, `TP`) are **minor units with no decimal separator** (e.g. 10.50 → `TA1050`) — matching the contract's ISO-4217 minor-unit rule. `<AMOUNT>`/`<CURRENCY>` fixtures must be given so the minor-unit value is computed exactly once and confirmed against the approved amount before send.
+
+### §0 Pre-conditions checked at the start of every Gate-3 run (read-only)
+
+1. **Occupancy probe** on `150.0.0.18:5003`: connect; a busy Socket Server ("allow new connection" unchecked) refuses newcomers, so **accept + server opening `LS` = slot free**; refusal/reset ⇒ an existing client is present ⇒ **ABORT** (do not displace).
+2. **Property identity match**: confirm we are on Hotel ID 3 before any posting (owner attestation + endpoint; and, if the owner wants, a redaction-safe read of the link/property field only). Mismatch ⇒ **ABORT**.
+3. **Front Office reachable** (`<CONTACT>`) and inside the **`<WINDOW>`** maintenance window. Not reachable ⇒ **ABORT**.
+4. **Posting permission** on `<FOLIO>` explicitly confirmed (`<YES>`). Missing ⇒ **ABORT**.
+
+### §1 Redaction-safe read-only lookup of ONLY the approved test reservation
+
+Bring the link to alive (`LS→LS→LD(IFPB/V#1.13/RT4)→LR:GI,GC,GO→LA`), receive the resync, and locate **only** the record whose Room = `<ROOM>` **and** Reservation `G#` = `<RESERVATION>` **and** name matches `<NAME>`. Confirm the associated folio corresponds to `<FOLIO>`. Redaction: log only a boolean "approved reservation found + folio matches", `<ROOM>`/`<RESERVATION>` (approved test identifiers only), and record timing — **never** other guests' values; if the approved reservation cannot be isolated from the stream safely, **STOP**. Optionally issue a guest-scoped inquiry (see §3, inquiry form) to confirm the PMS resolves the same reservation/folio live.
+
+### §2 10–15 minute passive Link-Alive observation (read-only)
+
+Hold the alive link ~15 min sending only `LA` on idle, measuring: **client `LA` cadence** (our idle keep-alive interval), **server `LA` cadence** (unprompted server keep-alives, if any), **idle behavior** (does the server drop an idle link?), **reconnect timeout** (if the server closes, time to re-establish + whether a fresh resync replays), and **whether any automatic resync (`DS`/`DE` or a fresh `GI` burst) occurs** (e.g. at night-audit). All values feed the contract §9 freshness axes (heartbeat, feed-continuity, resync cadence). No records other than `LA` are sent.
+
+### §3 Exact FIAS posting + acknowledgment records (from FIAS 2.20 spec, grounded)
+
+Guest-folio postings use the **`PR` (Posting Request)** family, **not `PS`** (`PS` is room-only and "postings to specific guests (G#) are not supported"). Required sequence per spec: **inquiry `PR` → posting `PR` → `PA`**, one at a time, waiting for `PA` before any next posting.
+
+- **Inquiry `PR`** (no `TA`, carries `PI`): e.g. `PR|G#<RESERVATION>|RN<ROOM>|PI<inq-token>|WS<ws-id>|DA<yymmdd>|TI<hhmmss>|` → PMS returns guest/folio match (or `PL` Posting List if multiple/sharers). Confirms the folio and that the guest is in-house.
+- **Posting `PR`** (carries `TA` + a **unique** `P#`): e.g. `PR|G#<RESERVATION>|RN<ROOM>|TA<amount-minor>|PT<type>|P#<unique-seq>|WS<ws-id>|DA..|TI..|X1<ref>|` plus the **posting/department code `<CODE>`** in the Protel-designated field. **Field-mapping gap:** the spec carries the charge's article/department via `PT` (Posting Type), `SO` (Sales Outlet), and/or PMS interface configuration; the exact field Protel expects `<CODE>` in must be confirmed with Protel operations before send (do not assume).
+- **Acknowledgment `PA`**: `PA|RN<ROOM>|AS<status>|P#<unique-seq>|DA..|TI..|` — `ASOK` = posted; other `AS` codes = failure/reason. The `PA` **echoes the same `P#`**, which is how the charge is correlated.
+- **Timeout (spec §5):** minimum 30 s general, **60 s for `PR`**. No `PA` within the timeout ⇒ stop waiting ⇒ command is **UNKNOWN** (never a blind resend).
+- **Idempotency anchor:** `P#` (Posting Sequence Number) "shall be unique as per message sent" — this is the FIAS-level idempotency key; StayConnect derives it from the durable `site-stay-purchase-seq` (contract §4.5 `idempotency_key`) so a retry uses a **new** `P#`, never a duplicate.
+
+### §4 Normal-charge flow (one charge, immediately reversed)
+
+1. **Pre-test folio evidence:** Front Office reads and records the `<FOLIO>` balance/line-items; StayConnect issues an inquiry `PR` (read-only) and records the pre-state (redacted).
+2. **Posting request:** send exactly one posting `PR` for `<AMOUNT>`/`<CURRENCY>` (as `TA<amount-minor>`) with a fresh unique `P#` and `<CODE>`. **Guard:** the computed minor-unit `TA` is asserted equal to the approved `<AMOUNT>` before the socket write; mismatch ⇒ **ABORT** (no send).
+3. **Expected acknowledgment:** one `PA` with `ASOK` echoing the same `P#`, within 60 s. Non-`OK` `AS` ⇒ treat as not-posted, record reason, stop.
+4. **Post-test folio verification:** Front Office confirms exactly one line of `<AMOUNT>` `<CODE>` appeared; StayConnect re-inquires (read-only) and records the delta = the single expected charge.
+5. **Idempotency/reference strategy:** one posting in flight at a time; unique `P#` per attempt; the `PA`'s `P#` is the reference tying ack↔request; no auto-retry (§6).
+6. **Immediate rollback:** proceed straight to §5 reversal so the guest's folio nets to its pre-test balance.
+
+### §5 Reversal flow (undo the test charge)
+
+1. **Reversal record:** per Protel's specified method `<METHOD>` (typically a rebate/credit or negative posting via `PR`), referencing the original charge (original `P#` and/or `X1` cross-reference) with its own **new unique `P#`**. Exact `<METHOD>` and the reference field are a **fixture gap** — confirmed with Protel before send; not assumed.
+2. **Expected acknowledgment:** one `PA` `ASOK` echoing the reversal's `P#` within 60 s.
+3. **Final folio verification:** Front Office confirms the charge and reversal net to zero on `<FOLIO>` and the pre-test balance is restored; StayConnect re-inquires (read-only) to record net-zero.
+
+### §6 Lost-ACK scenario (safe — only after the request is proven transmitted)
+
+1. Send one posting `PR` with a fresh unique `P#`; **confirm the bytes were transmitted** (socket write flushed / `send()` fully returned for the framed record) — the interruption is applied **only after** transmission is proven, never before.
+2. **Interrupt the connection** (close our socket) **before** the `PA` is received. No FIAS "interrupt" record is sent — this is a transport drop of our own client connection only; the PMS link/other clients are unaffected.
+3. The command has **no `PA` within the 60 s timeout ⇒ UNKNOWN** (contract: `posting → SENDING → UNKNOWN`).
+4. **No auto-retry:** FIAS has no idempotent replay and `P#` must be unique, so a blind resend risks a **double charge** — therefore the command routes to **MANUAL_REVIEW**, never an automatic retry.
+5. **Front Office verifies** whether the charge actually reached Protel by inspecting `<FOLIO>` for a line with that `P#`/amount.
+6. **Manual-review decision path** (contract §15): `CONFIRM_POSTED` (folio shows it → mark POSTED, then reverse via §5) / `CONFIRM_NOT_POSTED_RETRY` (folio clean → re-post with a **new** `P#`) / `CONFIRM_NOT_POSTED_ABANDON`. Whatever the outcome, the test folio is left net-zero.
+
+### §7 Checkout-while-link-down and stale-occupancy (only the approved test reservation)
+
+No unrelated guest is ever touched; these use **only** the `<RESERVATION>` test fixture and require explicit owner + Front Office coordination. StayConnect sends **no** `XC`/checkout or state-changing record — Front Office performs the PMS action; StayConnect only observes read-only.
+
+- **Checkout while link down:** with our client disconnected, Front Office checks out the **test** reservation. Expected: (a) StayConnect's cached occupancy is now stale; (b) an attempted posting is **blocked by the financial fresh-validation rule** (occupancy re-verification fails → refuse, no send); (c) on reconnect, the resync/`GO` reflects the checkout. Confirms `posting_allowed=false` after checkout is honored.
+- **Stale occupancy (room move):** with our client disconnected, Front Office moves the **test** reservation to a different room. Expected on reconnect: occupancy re-verification detects room mismatch vs the pre-move cache and **aborts any posting** until re-resolved. Confirms the room-move-is-not-identity rule and stale-occupancy abort.
+
+These two scenarios are **optional** and only run if the owner approves altering the designated test reservation; otherwise they are documented and deferred.
+
+### §8 Strict abort conditions (any ⇒ stop immediately, send nothing further)
+
+- resolved reservation or folio ≠ `<RESERVATION>`/`<FOLIO>`;
+- property identity ≠ Hotel ID 3 (unexpected property);
+- occupancy probe shows an existing client on the Socket Server (do not displace);
+- posting permission on `<FOLIO>` not explicitly confirmed;
+- any unexpected/unrecognized FIAS record on the link;
+- Front Office unavailable or outside `<WINDOW>`;
+- computed request value ≠ approved `<AMOUNT>` (minor-unit assertion fails);
+- any duplicate-posting risk (e.g. `PA` missing but folio shows the charge ⇒ never resend);
+- reversal cannot be confirmed (leave for manual folio correction, escalate).
+
+### §9 Safety & rollback summary
+
+- One posting in flight at a time; wait up to 60 s for `PA`; unique `P#` per attempt; no auto-retry.
+- Every financial step is bracketed by Front Office pre/post folio evidence and a StayConnect read-only re-inquiry.
+- The single test charge is **immediately reversed** (§5) so the guest folio returns to net-zero; if reversal fails, escalate to Front Office for manual correction.
+- Connections are brief, occupancy-checked before connect, and gracefully closed; all evidence redacted; guest values never stored beyond the approved test identifiers.
+- Everything pins the Hotel 3 (pms1) namespace; no crossing to Hotel 2.
+
+### Redacted planned message sequence (templates only — no real values, nothing sent)
+
+```
+# link up (read-only)
+S→C  LS|DA<..>|TI<..>|
+C→S  LS|DA<..>|TI<..>|
+C→S  LD|DA<..>|TI<..>|IFPB|V#1.13|RT4|
+C→S  LR|RIGI|FLRNG#GNGFGAGD|   LR|RIGC|FLRNG#GNGFGAGD|   LR|RIGO|FLRNG#|
+S→C  LA|                       # link alive
+S→C  GI.. / GC..               # resync (redacted; isolate ONLY <RESERVATION>)
+
+# inquiry (read-only, no TA)
+C→S  PR|G#<RESERVATION>|RN<ROOM>|PI<inq>|WS<ws>|DA<..>|TI<..>|
+S→C  PA|... (or PL| for sharers)     # confirm folio = <FOLIO>
+
+# charge (Gate 3 only, after approval)   — TA is minor units, P# unique
+C→S  PR|G#<RESERVATION>|RN<ROOM>|TA<amount-minor>|PT<type>|P#<seqA>|WS<ws>|<CODE-field>|DA<..>|TI<..>|
+S→C  PA|RN<ROOM>|ASOK|P#<seqA>|DA<..>|TI<..>|
+
+# reversal (Gate 3 only)                 — per <METHOD>, references seqA, new P#
+C→S  PR|...|TA<amount-minor>|<METHOD-fields ref seqA>|P#<seqB>|WS<ws>|DA<..>|TI<..>|
+S→C  PA|RN<ROOM>|ASOK|P#<seqB>|DA<..>|TI<..>|
+```
+
+### Gate 3 authorization
+
+Gate 3 (the actual charge/reversal/lost-ACK/checkout scenarios above) executes **only** after: (a) all fixture GAPs are filled with real values, (b) the Protel-specific `<CODE>` field mapping and `<METHOD>` reversal are confirmed with Protel operations, and (c) the owner explicitly approves this written plan. Until then, nothing financial runs.
 
 ## Measured Results (empty until the spike runs)
 
