@@ -1,6 +1,8 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE2_PLAN_DRAFTED — AWAITING REAL FIXTURES + OWNER APPROVAL TO EXECUTE GATE 3 (no financial traffic performed)`**
+**Spike status: `GATE2_PLAN_GROUNDED (production PS/PA wire) — GATE 2.5 ACCESS-BLOCKED (172.21.96.150) — AWAITING GATE-3A FIXTURES + FINANCE/PROTEL CONFIRMATIONS + COLLISION-RISK CLEARANCE (no financial traffic performed)`**
+
+Gate 2.5 (old-server reconciliation) could not run on-host — no login to `172.21.96.150` (key rejected; passwords not guessed). The Socket-Server client-slot collision risk is therefore **UNRESOLVED** and is a hard blocker for Gate 3 (see Gate 2.5 section).
 
 Gate 1 (read-only preflight, 2026-07-15) confirmed TCP reachability and FIAS 2.20 framing on both endpoints but did not reach link-alive. Gate 1B (2026-07-15) established the correct read-only sequence and reached **link-alive on both interfaces without any authentication key**, confirming the Gate-1 `LA` absence was a **sequencing issue (the `LR` subscription records were withheld), not authentication**. No posting, reversal, PS/PA, link interruption, restart, `pms_providers` creation, or database/config change. Guest record VALUES were never decoded or stored — only record-type counts and timing. Contract remains **CONDITIONALLY FROZEN**.
 
@@ -204,23 +206,31 @@ A separate free-slot probe followed by a later reconnect is **not** used: it ope
 
 ### §1 Redaction-safe read-only lookup of ONLY the approved test reservation
 
-Bring the link to alive (`LS→LS→LD(IFPB/V#1.13/RT4)→LR:GI,GC,GO→LA`), receive the resync, and locate **only** the record whose Room = `<ROOM>` **and** Reservation `G#` = `<RESERVATION>` **and** name matches `<NAME>`. Confirm the associated folio corresponds to `<FOLIO>`. Redaction: log only a boolean "approved reservation found + folio matches", `<ROOM>`/`<RESERVATION>` (approved test identifiers only), and record timing — **never** other guests' values; if the approved reservation cannot be isolated from the stream safely, **STOP**. Optionally issue a guest-scoped inquiry (see §3, inquiry form) to confirm the PMS resolves the same reservation/folio live.
+Bring the link to alive (`LS→LS→LD(IFPB/V#1.13/RT4)→LR:GI,GC,GO→LA`), receive the resync, and locate **only** the record whose Room = `<ROOM>` **and** Reservation `G#` = `<RESERVATION>` **and** name matches `<NAME>`. Confirm the associated folio corresponds to `<FOLIO>`. Redaction: log only a boolean "approved reservation found + folio matches", `<ROOM>`/`<RESERVATION>` (approved test identifiers only), and record timing — **never** other guests' values; if the approved reservation cannot be isolated from the stream safely, **STOP**. (The production `PS` flow has **no** `PR` inquiry/answer step, so folio pre-confirmation comes from the resync cache **plus** Front Office reading the folio — not from a protocol inquiry.)
 
 ### §2 10–15 minute passive Link-Alive observation (read-only)
 
 Hold the alive link ~15 min sending only `LA` on idle, measuring: **client `LA` cadence** (our idle keep-alive interval), **server `LA` cadence** (unprompted server keep-alives, if any), **idle behavior** (does the server drop an idle link?), **reconnect timeout** (if the server closes, time to re-establish + whether a fresh resync replays), and **whether any automatic resync (`DS`/`DE` or a fresh `GI` burst) occurs** (e.g. at night-audit). All values feed the contract §9 freshness axes (heartbeat, feed-continuity, resync cadence). No records other than `LA` are sent.
 
-### §3 Exact FIAS posting + acknowledgment records (from FIAS 2.20 spec, grounded)
+### §3 FIAS posting + acknowledgment records (grounded in the production wire evidence)
 
-Guest-folio postings use the **`PR` (Posting Request)** family, **not `PS`** (`PS` is room-only and "postings to specific guests (G#) are not supported"). Required sequence per spec: **inquiry `PR` → posting `PR` → `PA`**, one at a time, waiting for `PA` before any next posting.
+**Authoritative source:** the accepted production-implementation review + Protel wire-log findings (the legacy Coral Sea integration), which supersede the generic spec derivation. FidServ/Protel accounting-configuration facts (e.g. what `SOWIFI` maps to) remain **subject to confirmation by the property's Protel administrator / Finance** (see §4-note and Gate-3A fixtures).
 
-- **Inquiry `PR`** (no `TA`, carries `PI`): e.g. `PR|G#<RESERVATION>|RN<ROOM>|PI<inq-token>|WS<ws-id>|DA<yymmdd>|TI<hhmmss>|` → PMS returns guest/folio match (or `PL` Posting List if multiple/sharers). Confirms the folio and that the guest is in-house.
-- **Posting `PR`** (carries `TA` + a **unique** `P#`): e.g. `PR|G#<RESERVATION>|RN<ROOM>|TA<amount-minor>|PT<type>|P#<unique-seq>|WS<ws-id>|DA..|TI..|X1<ref>|` plus the **posting/department code `<CODE>`** in the Protel-designated field. **Field-mapping gap:** the spec carries the charge's article/department via `PT` (Posting Type), `SO` (Sales Outlet), and/or PMS interface configuration; the exact field Protel expects `<CODE>` in must be confirmed with Protel operations before send (do not assume).
-- **Acknowledgment `PA`**: `PA|RN<ROOM>|AS<status>|P#<unique-seq>|DA..|TI..|` — `ASOK` = posted; other `AS` codes = failure/reason. The `PA` **echoes the same `P#`**, which is how the charge is correlated.
-- **Timeout (spec §5):** minimum 30 s general, **60 s for `PR`**. No `PA` within the timeout ⇒ stop waiting ⇒ command is **UNKNOWN** (never a blind resend).
+- **Financial record is `PS`** (not `PR`). The production wire posts a guest-folio charge with `PS` including `G#`. (The generic FIAS spec note that "`PS` cannot target `G#`" does **not** match this installation's observed behavior; the production wire is authoritative for legacy behavior, and `G#`-folio targeting semantics are a Protel-admin confirmation item.)
+- **Exact production field order:** `RN, G#, TA, PT, SO, CT, P#, WS`.
+  - `RN` = room; **`G# = reservation, MANDATORY`** (an `ASOK` on an `RN`-only post does **not** prove a Guest-Folio posting — it may hit a room account);
+  - `TA` = **integer minor units, exponent 2, no currency code on the FIAS wire** (e.g. 10.50 → `TA1050`);
+  - **`PT = D`** (debit); do **not** assume `PT=C`;
+  - **`SO = WIFI`** (sales outlet);
+  - `CT` = clear text, **max 20 characters**;
+  - `P#` = unique protocol-attempt sequence (see below);
+  - **`WS = STAYCONNECT`** (workstation id).
+- **Acknowledgment `PA` fields:** `RN, AS, P#, CT`. Known **`AS` outcomes: `OK, NG, NA, NP, NR, RY, UR`** (`OK` = accepted; the others are failure/retry/unknown-reason statuses whose exact meaning is a Protel-admin confirmation item). **Match the `PA` to its `PS` by PMS Interface + `P#`** — **not** by Room Number. Legacy `PA`-matching by `RN` is unsafe (sharers / concurrent rooms) and is **not** carried forward.
 - **Two distinct identifiers — do not conflate:**
-  - **StayConnect internal `idempotency_key`** — stable for the *logical* Posting (derived from the durable `site-stay-purchase-seq`, contract §4.5). It is the anchor for our own state machine, ledger, and manual-review correlation. It never changes across attempts of the same logical Posting.
-  - **FIAS `P#` (Posting Sequence Number)** — a *protocol* transaction/reference value. The spec says it "shall be unique as per message sent," but **whether Protel deduplicates on `P#`, and how it treats a replayed or reused `P#`, is NOT a proven idempotency guarantee** — it is unverified for this installation and **must be measured** (see §6 and Unresolved fields). This plan makes no assumption that a given `P#` is safely replayable or that Protel rejects a duplicate `P#`.
+  - **StayConnect internal `idempotency_key`** — stable for the *logical* Posting (derived from `site-stay-purchase-seq`, contract §4.5). Anchors our state machine, ledger and manual-review correlation; never changes across attempts of the same logical Posting.
+  - **FIAS `P#`** — a *unique protocol-attempt sequence*, **not** business idempotency. Whether Protel deduplicates on `P#` is unverified and **must be measured**; this plan assumes no `P#`-based dedup guarantee.
+- **No auto-retry.** The legacy behavior of **automatically retrying after 3 minutes with a new `P#` is unsafe (it can double-post) and is NOT carried forward.** A transmitted `PS` with no matched `PA` becomes **UNKNOWN** and is never automatically retried (contract rule 1).
+- **Reversal is not solved.** Programmatic reversal was **not implemented or production-proven** in the legacy system; operational correction is **manual in Protel**. Programmatic reversal stays `capability=false` until a supervised test proves the exact `PT`/`TA`/`SO` semantics (contract rule 5); do not assume `PT=C` or negative `TA`.
 
 ### Step gating & separate approvals
 
@@ -233,31 +243,35 @@ The financial scenarios are **not** a single run. Each is a **separately approve
 
 **Blocking rule:** if the **normal charge (§4) or the reversal (§5) fails or ends UNKNOWN and is not cleanly reconciled to net-zero, ALL later scenarios are blocked** — no lost-ACK, no checkout/staleness — until the folio is confirmed net-zero and the owner re-approves.
 
-### §4 Normal-charge flow (one charge, immediately reversed)
+### §4 Normal-charge flow — **Gate 3A**, one debit only (manual correction on standby)
 
-1. **Pre-test folio evidence:** Front Office reads and records the `<FOLIO>` balance/line-items; StayConnect issues an inquiry `PR` (read-only) and records the pre-state (redacted).
-2. **Posting request:** send exactly one posting `PR` for `<AMOUNT>`/`<CURRENCY>` (as `TA<amount-minor>`) with a fresh unique `P#` and `<CODE>`. **Guard:** the computed minor-unit `TA` is asserted equal to the approved `<AMOUNT>` before the socket write; mismatch ⇒ **ABORT** (no send).
-3. **Expected acknowledgment:** one `PA` with `ASOK` echoing the same `P#`, within 60 s. Non-`OK` `AS` ⇒ treat as not-posted, record reason, stop.
-4. **Post-test folio verification:** Front Office confirms exactly one line of `<AMOUNT>` `<CODE>` appeared; StayConnect re-inquires (read-only) and records the delta = the single expected charge.
-5. **Idempotency/reference strategy:** one posting in flight at a time; unique `P#` per attempt; the `PA`'s `P#` is the reference tying ack↔request; no auto-retry (§6).
-6. **Immediate rollback:** proceed straight to §5 reversal so the guest's folio nets to its pre-test balance.
+> **Finance/Protel confirmation required first:** an `ASOK` on `SO=WIFI` proves the wire was accepted, **not** that it landed on the correct revenue/transaction account. The FidServ `WIFI` (`SOWIFI`) revenue mapping must be confirmed by property Finance/Protel **before** this runs (contract rule 4).
 
-### §5 Reversal flow (undo the test charge)
+1. **Pre-test folio evidence:** Front Office reads and records the `<FOLIO>` balance/line-items; StayConnect records the pre-state from the resync cache (redacted). (No `PR` inquiry exists in the `PS` flow.)
+2. **Posting record:** send exactly one **`PS`** with field order `RN<ROOM>|G#<RESERVATION>|TA<amount_minor>|PTD|SOWIFI|CT<=20|P#<seqA>|WSSTAYCONNECT|`. **`G#` mandatory.** **Guards before the socket write:** computed `TA` (minor units, exponent 2) == approved `amount_minor`; package currency == pinned interface base currency (contract rule 3); `CT` ≤ 20 chars; a fresh unique `P#`; else **ABORT** (no send). Record the `posting_attempts` row (internal_posting_id, attempt#, interface, `P#`, `RN`, `G#`, sent_at) before/at send.
+3. **Expected acknowledgment:** one `PA` (`RN, AS, P#, CT`) with **`AS=OK`**, **matched by PMS Interface + `P#`** (not by `RN`), within the timeout. Any non-`OK` `AS` (`NG/NA/NP/NR/RY/UR`) ⇒ treat as not-cleanly-posted, record `AS` + `response_at`, **stop** (do not retry).
+4. **Post-test folio verification:** Front Office confirms exactly one `<AMOUNT>` line on the correct folio with the expected revenue mapping; `RN`-only appearance is **not** acceptance of a guest-folio posting.
+5. **Reference strategy:** one posting in flight at a time; unique `P#` per attempt; correlation is internal `idempotency_key` ↔ `posting_attempts.P#`; **no auto-retry** (§6).
+6. **Rollback:** the first debit is corrected **manually in Protel by Front Office** per the approved manual-correction procedure (programmatic reversal is Gate 3B only, and only after capability proof — §5). Front Office confirms the folio returns to net-zero.
 
-1. **Reversal record:** per Protel's specified method `<METHOD>` (typically a rebate/credit or negative posting via `PR`), referencing the original charge (original `P#` and/or `X1` cross-reference) with its own **new unique `P#`**. Exact `<METHOD>` and the reference field are a **fixture gap** — confirmed with Protel before send; not assumed.
-2. **Expected acknowledgment:** one `PA` `ASOK` echoing the reversal's `P#` within 60 s.
-3. **Final folio verification:** Front Office confirms the charge and reversal net to zero on `<FOLIO>` and the pre-test balance is restored; StayConnect re-inquires (read-only) to record net-zero.
+### §5 Reversal flow — **Gate 3B**, only after separate Protel capability proof
 
-### §6 Lost-ACK scenario (safe — only after the request is proven transmitted)
+Programmatic reversal was **not implemented or production-proven** in the legacy system; it stays **`capability=false`** (contract rule 5). It is **not** attempted in Gate 3A. Before any programmatic reversal:
 
-1. Send one posting `PR` (its `P#` recorded and linked to the logical Posting's internal `idempotency_key`); **confirm the bytes were transmitted** (socket write flushed / `send()` fully returned for the framed record) — the interruption is applied **only after** transmission is proven, never before.
-2. **Interrupt the connection** (close our own client socket) **before** the `PA` is received. No FIAS "interrupt" record is sent — this is a transport drop of our own connection only; the PMS link/other clients are unaffected.
-3. No `PA` within the 60 s timeout ⇒ the command is **UNKNOWN** (contract: `posting → SENDING → UNKNOWN`).
-4. **Never auto-retry — with either the same or a new `P#`.** A resend of the same `P#` may double-post if Protel does not dedup on it; a resend with a new `P#` definitely creates a second charge if the first actually posted. Since Protel's `P#` replay/dedup behavior is unverified (§3), **any** automatic retry is unsafe. The command routes to **MANUAL_REVIEW** and waits for external evidence.
+1. **Capability proof (supervised, separate approval):** with Protel-admin/Finance supervision, establish the exact reversal semantics — record type, `PT`, `TA` sign/encoding, `SO`, and the reference to the original attempt. **Do not assume `PT=C` or a negative `TA`.** Until proven, the field `<METHOD>` is unresolved.
+2. Only after the semantics are proven and separately approved: send one reversal (its own new `P#`, linked to the same internal `idempotency_key`), expect one `PA` `AS=OK` matched by **Interface + `P#`**, and confirm net-zero on the folio.
+3. **Until then, correction of any Gate-3A debit is manual in Protel** by Front Office (the approved manual-correction procedure).
+
+### §6 Lost-ACK / UNKNOWN — **Gate 3C**, only after Gate 3A is reconciled
+
+1. Send one **`PS`** (its `P#` recorded in `posting_attempts`, linked to the logical Posting's internal `idempotency_key`); **confirm the bytes were transmitted** (socket write flushed / `send()` fully returned for the framed record) — the interruption is applied **only after** transmission is proven, never before.
+2. **Interrupt our own client socket** **before** the `PA` is received. No FIAS "interrupt" record is sent — a transport drop of our own connection only; the PMS link/other clients are unaffected.
+3. No matched `PA` (by Interface + `P#`) within the timeout ⇒ the command is **UNKNOWN** (contract: `posting → SENDING → UNKNOWN`).
+4. **Never auto-retry — with either the same or a new `P#`.** Resending the same `P#` may double-post if Protel does not dedup on it; resending with a new `P#` definitely double-charges if the first actually posted. The legacy "**retry after 3 minutes with a new `P#`**" is exactly this unsafe behavior and is **removed** (contract rule 1). The command routes to **MANUAL_REVIEW** and waits for external evidence.
 5. **External reconciliation:** Front Office inspects `<FOLIO>` for a line matching the amount/reference and reports whether the charge reached Protel.
-6. **Audited Manual-Review decision** (contract §15): `CONFIRM_POSTED` (folio shows it → mark POSTED, then reverse via §5) / `CONFIRM_NOT_POSTED_ABANDON` / **`CONFIRM_NOT_POSTED_RETRY`**. A manually-approved retry creates a **new protocol attempt linked to the same internal `idempotency_key`** (same logical Posting, new ledger attempt row). **Whether that new attempt reuses the same `P#` or allocates a new `P#` is itself unresolved** and must be grounded in the previously working integration, Protel configuration/spec, or measured behavior before it is exercised — it is not decided by this plan. Whatever the outcome, the test folio is left net-zero.
+6. **Audited Manual-Review decision** (contract §15): `CONFIRM_POSTED` (folio shows it → mark POSTED, then correct per §5/manual) / `CONFIRM_NOT_POSTED_ABANDON` / **`CONFIRM_NOT_POSTED_RETRY`**. A manually-approved retry is a **new protocol attempt linked to the same internal `idempotency_key`** (new `posting_attempts` row). **Whether it reuses the same `P#` or allocates a new `P#` is unresolved** and must be grounded in Protel configuration/spec or measured behavior first — not decided by this plan. Whatever the outcome, the test folio is left net-zero.
 
-### §7 Checkout-while-link-down and stale-occupancy (only the approved test reservation)
+### §7 Checkout-while-link-down and stale-occupancy — **Gate 3D**, separate (only the approved test reservation)
 
 No unrelated guest is ever touched; these use **only** the `<RESERVATION>` test fixture and require explicit owner + Front Office coordination. StayConnect sends **no** `XC`/checkout or state-changing record — Front Office performs the PMS action; StayConnect only observes read-only.
 
@@ -282,54 +296,104 @@ These two scenarios are **optional** and only run if the owner approves altering
 
 ### §9 Safety & rollback summary
 
-- One posting in flight at a time; wait up to 60 s for `PA`; unique `P#` per attempt; no auto-retry.
-- Every financial step is bracketed by Front Office pre/post folio evidence and a StayConnect read-only re-inquiry.
-- The single test charge is **immediately reversed** (§5) so the guest folio returns to net-zero; if reversal fails, escalate to Front Office for manual correction.
-- Connections are brief, occupancy-checked before connect, and gracefully closed; all evidence redacted; guest values never stored beyond the approved test identifiers.
-- Everything pins the Hotel 3 (pms1) namespace; no crossing to Hotel 2.
+- One posting in flight at a time; wait for the `PA` matched by **Interface + `P#`**; unique `P#` per attempt; **no auto-retry** (the legacy 3-min/new-`P#` retry is removed).
+- Every financial step is bracketed by Front Office pre/post folio evidence; `ASOK`/`RN`-only is not proof of a correct guest-folio revenue posting.
+- Gate 3A's single debit is corrected **manually in Protel** (programmatic reversal is Gate 3B, capability-gated); folio confirmed net-zero.
+- One held persistent connection per run (§0); drop mid-run ⇒ abort + UNKNOWN handling; all evidence redacted; guest values never stored beyond the approved test identifiers.
+- Everything pins the Hotel 3 (pms1) namespace; package currency must equal the interface base currency (no FX); no crossing to Hotel 2.
 
-### Redacted planned message sequence (templates only — no real values, nothing sent)
+### Redacted planned message sequence (production-grounded templates — no real values, nothing sent)
 
 ```
-# link up (read-only)
+# link up (read-only) — verified in Gate 1B
 S→C  LS|DA<..>|TI<..>|
 C→S  LS|DA<..>|TI<..>|
 C→S  LD|DA<..>|TI<..>|IFPB|V#1.13|RT4|
 C→S  LR|RIGI|FLRNG#GNGFGAGD|   LR|RIGC|FLRNG#GNGFGAGD|   LR|RIGO|FLRNG#|
 S→C  LA|                       # link alive
-S→C  GI.. / GC..               # resync (redacted; isolate ONLY <RESERVATION>)
+S→C  GI.. / GC..               # resync (redacted; isolate ONLY <RESERVATION>); no PR inquiry in the PS flow
 
-# inquiry (read-only, no TA)
-C→S  PR|G#<RESERVATION>|RN<ROOM>|PI<inq>|WS<ws>|DA<..>|TI<..>|
-S→C  PA|... (or PL| for sharers)     # confirm folio = <FOLIO>
+# charge (Gate 3A only) — PS, production field order; G# MANDATORY; TA integer minor units exp2, no currency;
+#                         PT=D debit; SO=WIFI; CT<=20; P#=unique protocol attempt; WS=STAYCONNECT
+C→S  PS|RN<ROOM>|G#<RESERVATION>|TA<amount_minor>|PTD|SOWIFI|CT<=20chars>|P#<seqA>|WSSTAYCONNECT|
+S→C  PA|RN<ROOM>|AS<OK|NG|NA|NP|NR|RY|UR>|P#<seqA>|CT<..>|     # MATCH by Interface + P# (NOT by RN)
 
-# charge (Gate 3 only)   — TA minor-unit encoding UNVERIFIED; P# = FIAS protocol ref (dedup UNVERIFIED)
-C→S  PR|G#<RESERVATION>|RN<ROOM>|TA<amount-minor>|PT<type?>|P#<seqA>|WS<ws>|<CODE-field?>|DA<..>|TI<..>|
-S→C  PA|RN<ROOM>|ASOK|P#<seqA>|DA<..>|TI<..>|
+# reversal (Gate 3B only, after Protel capability proof) — record/PT/TA-sign/SO UNRESOLVED; do NOT assume PT=C or negative TA
+C→S  <reversal record per proven <METHOD>>|P#<seqB>|WSSTAYCONNECT|
+S→C  PA|...|AS<OK|..>|P#<seqB>|
 
-# reversal (Gate 3 only) — <METHOD> UNVERIFIED; references original attempt; P# reuse-vs-new per grounded decision
-C→S  PR|...|TA<amount-minor>|<METHOD-fields ref seqA>|P#<seqB?>|WS<ws>|DA<..>|TI<..>|
-S→C  PA|RN<ROOM>|ASOK|P#<seqB?>|DA<..>|TI<..>|
-
-# The logical Posting is keyed by StayConnect internal idempotency_key; P# is ONLY the FIAS protocol ref.
-# <CODE-field?>, <type?>, TA encoding, <METHOD>, and P# reuse-vs-new are UNRESOLVED — see below.
+# Logical Posting keyed by StayConnect internal idempotency_key; P# is ONLY the FIAS protocol attempt ref.
+# UNRESOLVED (Protel-admin/Finance): SOWIFI revenue mapping, G# folio-target semantics, AS-code meanings,
+#   P# dedup behavior, reversal semantics <METHOD>, currency/exponent confirmation.
 ```
 
 ### Unresolved Protel-specific fields (must be grounded/confirmed before Gate 3)
 
-None of these are backed by a prior working StayConnect posting integration (the connector is lookup-only); each is spec-derived and **must be confirmed from Protel configuration/spec or measured** before any charge:
+The **wire format is now grounded** in the production evidence (`PS` record, field order `RN,G#,TA,PT,SO,CT,P#,WS`, `PT=D`, `SO=WIFI`, `WS=STAYCONNECT`, `CT≤20`, `TA` minor-units exp2 no-currency, `PA` fields `RN,AS,P#,CT`, `AS∈{OK,NG,NA,NP,NR,RY,UR}`). The remaining items require **property Protel-admin / Finance confirmation or supervised measurement** before any charge:
 
-1. **Posting Code field** — which FIAS field carries `<CODE>` (e.g. `PT` Posting Type, `SO` Sales Outlet, or PMS interface/department configuration).
-2. **Posting Type `PT`** value for a direct internet charge to a folio.
-3. **Amount encoding** — minor-unit/no-separator confirmed for this installation, and the correct currency exponent for `<CURRENCY>`.
-4. **`P#` behavior** — uniqueness requirement, and whether Protel deduplicates/rejects a replayed or reused `P#` (drives the §6 retry `P#` decision). To be measured, not assumed.
-5. **Reversal/correction method `<METHOD>`** — negative posting vs rebate/credit vs correction record, and the exact field referencing the original charge.
-6. **Response-timeout behavior** — actual `PA` latency and whether Protel ever answers late after our timeout (affects UNKNOWN handling); spec default is 60 s for `PR`.
-7. **`PL` (Posting List) handling** — sharer/multi-folio selection response shape for this property.
+1. **`SOWIFI` revenue mapping** — Finance/Protel must confirm what FidServ department/transaction/revenue account `WIFI` posts to. `ASOK` does not prove revenue-account correctness (contract rule 4).
+2. **`G#` folio-target semantics** — confirm `PS`+`G#` posts to the intended **guest folio** on this installation (the generic spec says `PS` is room-only; production differs — Protel-admin to confirm which folio a `G#` post lands on, incl. multiple-folio guests).
+3. **`AS` code meanings** — exact semantics of `NG/NA/NP/NR/RY/UR` (which are hard failures vs retry-advisory vs unknown) for correct MANUAL_REVIEW routing.
+4. **`P#` dedup behavior** — whether Protel rejects/deduplicates a replayed/reused `P#` (drives the §6 retry `P#` decision). Measure under supervision; assume nothing.
+5. **Reversal semantics `<METHOD>`** — record type, `PT`, `TA` sign/encoding, `SO`, original-attempt reference. `capability=false` until proven (Gate 3B). Do **not** assume `PT=C` or negative `TA`.
+6. **`PA` latency / late-answer behavior** — real response time and whether Protel ever answers after our timeout (affects UNKNOWN handling).
+7. **Currency/exponent confirmation** — Protel/Folio base currency + exponent; and that the package currency equals it (contract rule 3; no FX in v1).
 
-### Gate 3 authorization
+### Gate 3 authorization + execution split
 
-Gate 3 executes **only** after: (a) all fixture GAPs are filled with real values; (b) every "Unresolved Protel-specific field" above is confirmed with Protel operations or measured read-only; (c) each financial scenario is **separately** approved per "Step gating," with a failed/unreconciled charge or reversal blocking all later scenarios; and (d) the owner explicitly approves this written plan. Until then, nothing financial runs.
+Gate 3 executes **only** after: (a) all Gate-3A mandatory fixtures (below) are supplied with real values; (b) the Protel-admin/Finance confirmation items above are resolved; (c) **Gate 2.5** (old-server reconciliation) confirms no legacy process can collide on the Socket Server or emit `PS`; and (d) the owner explicitly approves. Execution is split and separately approved:
+
+- **Gate 3A** — one normal **debit** only (§4); corrected manually in Protel.
+- **Gate 3B** — programmatic **reversal** only, and only after a separate Protel **capability proof** (§5).
+- **Gate 3C** — **lost-ACK / UNKNOWN** only after Gate 3A is reconciled (§6).
+- **Gate 3D** — **checkout / staleness** separately (§7).
+
+A failed or unreconciled Gate 3A blocks 3B/3C/3D until the folio is confirmed net-zero and the owner re-approves.
+
+### Gate-3A mandatory fixtures (owner / Finance / Protel confirmations — all still UNSUPPLIED)
+
+- Protel/Folio **base currency and exponent**;
+- confirmation that **Package currency matches** the interface base currency;
+- **Finance confirmation of `SOWIFI`** revenue/transaction mapping;
+- approved **Room** (`<ROOM>`);
+- **verified Reservation `G#`** (`<RESERVATION>`);
+- **verified open Folio** (`<FOLIO>`);
+- **`posting_allowed` confirmation**;
+- **`amount_minor`** (with `<CURRENCY>`);
+- **Front Office contact** (`<CONTACT>`);
+- **maintenance window** (`<WINDOW>`);
+- **manual correction procedure** for the first debit.
+
+## Gate 2.5 — Old-Server Connector Reconciliation (172.21.96.150) — read-only, ACCESS-BLOCKED
+
+**Purpose:** determine whether a legacy connector on the old Coral Sea server `172.21.96.150` is (or intermittently is) connected to the Protel Socket Server — a client-slot collision risk — and whether it can still emit financial `PS` records, despite `pms.enabled=false` / `pms.protel.enabled=false`.
+
+**Access status:** I could **not** log in to `172.21.96.150` (host key is in `known_hosts` from a prior connection, but the workstation's `id_ed25519` key is rejected for `root` and for `stayconnect/ubuntu/admin/coral/fidserv`; password auth is offered but I do **not** guess credentials). Therefore the on-host process identification (PID, executable, service owner, loaded config path, active TCP sessions) **was not performed** — it requires operator-provided access. **Nothing was stopped, restarted, signalled, or modified; no settings changed; no other IP/port contacted; no FIAS traffic sent.**
+
+**Collision-risk assessment from available evidence:**
+
+- **Gate 1B (2026-07-15) is authoritative that both Protel slots were FREE at that time:** with "allow new connection" unchecked (a busy single-client server refuses newcomers), our connections were accepted, received the opening `LS`, and reached `LA`. A persistently-connected legacy client would have caused our connect to be refused — it was not. So no legacy client held the slot during the Gate-1B window.
+- **The "recent LA heartbeat" has two candidate sources, unresolved:**
+  1. **Our own Gate 1B test** sent 8 `LA` keepalives to each endpoint (interface `IFPB` / `WS` unset). A Protel wire log showing a "recent LA heartbeat" may be **our** test, not the old server.
+  2. **A legacy connector on `172.21.96.150`** that connects **intermittently** (heartbeat bursts) and simply was not connected during the Gate-1B window. If so, there is a **real, time-dependent slot-collision risk**: if it connects during a Gate-3 run (or vice-versa) one side is refused; and — critically — if it is an **orphaned process not governed by `pms.*.enabled`**, it is unproven whether it could still emit `PS`.
+- **Why the link can appear active while `pms.enabled`/`pms.protel.enabled` are false (hypotheses, to confirm on-host):** an orphaned/stale process still running after the flags were flipped; a separate FidServ/legacy binary not gated by those flags; a systemd unit that ignores the config; or the observed heartbeat is actually our Gate-1B traffic. Cannot be decided without on-host inspection.
+- **PS-capability:** **UNDETERMINED.** Cannot confirm read-only/heartbeat-only vs still-financial without inspecting the process and its config on-host.
+
+**Conclusion — hard blocker for Gate 3:** the collision risk is **UNRESOLVED and non-trivial**. Gate 3 must not proceed until an operator with access completes Gate 2.5 on-host and confirms any legacy connector is inert (stopped/disabled and not `PS`-capable).
+
+**Read-only commands to run on `172.21.96.150` once access is granted (no modification):**
+
+```
+ss -tnp | grep -E '150\.0\.0\.18:5003|120\.0\.0\.15:5001'      # active TCP sessions to Protel + owning PID
+ps -ef | grep -iE 'fias|protel|fidserv|stayconnect|pms' | grep -v grep
+# for each candidate PID:
+readlink /proc/<PID>/exe ;  tr '\0' ' ' </proc/<PID>/cmdline ;  ls -l /proc/<PID>/cwd
+ps -o user= -p <PID>                                            # service owner
+tr '\0' '\n' </proc/<PID>/environ | grep -iE 'config|conf|pms'  # loaded config path (redact secrets)
+systemctl status <unit> ; systemctl cat <unit>                  # unit + config path (read-only)
+docker ps ; docker inspect <id>                                 # if containerized
+# then read the loaded config to check pms.enabled / pms.protel.enabled and whether the process honors them
+```
 
 ## Measured Results (empty until the spike runs)
 
