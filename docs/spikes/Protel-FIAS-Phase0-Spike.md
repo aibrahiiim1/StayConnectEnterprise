@@ -1,6 +1,6 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE2_PLAN_GROUNDED (production PS/PA wire) — AWAITING GATE-3A FINANCIAL/TEST FIXTURES (no financial traffic performed)`**
+**Spike status: `GATE3A_READINESS_PACK_PREPARED (technical facts read-only-confirmed) — AWAITING HUMAN APPROVALS: fixtures + Finance SOWIFI/currency confirmation (no financial traffic performed)`**
 
 The legacy-server (`172.21.96.150`) SSH inspection is **cancelled** — not required. Socket-Server collision safety is handled **in-band at test start**: accept + opening `LS` = free slot; keep that connection for the whole run; refusal / no `LS` ⇒ abort without displacing (see "Socket-Server collision clearance"). Gate 3A is now blocked **only** on the real financial/test fixtures.
 
@@ -387,6 +387,86 @@ The legacy-server (`172.21.96.150`) SSH investigation is **cancelled and out of 
 - **If the connection is refused, or no opening `LS` is received, ABORT immediately** — do not displace, reconnect into a race, or modify any existing client.
 
 This replaces any pre-run legacy-connector reconciliation: collision safety is proven at test time by the server's own admission control, not by inspecting the old server.
+
+## Gate 3A — Readiness Pack (prepared, NOT executed)
+
+For one controlled debit against **Coral Sea Holiday Village · Hotel ID 3 · `150.0.0.18:5003` · TLS off**. Nothing here is executed; **no `PS` or state-changing record is sent.**
+
+### A. Automatically confirmed technical facts (read-only)
+
+Measured via read-only FIAS sessions (Gate 1B 2026-07-15 and a fresh 2026-07-15/16 session), plus the accepted production wire evidence:
+
+- **Slot free / admission:** connect is accepted and the server sends its opening `LS` (single-client slot free); framing **STX (0x02) … ETX (0x03)**.
+- **Link identity/version accepted, no auth key:** client `LD` `IFPB` / `V#1.13` / `RT4` → **`LA` (link alive) at ~5.1 s**.
+- **Heartbeat:** client `LA` on idle keeps the link up; the peer holds the connection (no `LE`/drop within the observation window).
+- **Resync/feed timing is variable and not instant:** Gate 1B streamed `GI`×7 + `GC`×2 at ~11 s; a later 20 s session streamed none. **Do not assume the approved reservation can be resolved instantly from the cache** — hold the link and, if needed, allow the in-house feed to arrive; **Front Office folio evidence is authoritative** for pre/post state.
+- **`PS` debit wire format (production-grounded):** field order `RN, G#, TA, PT, SO, CT, P#, WS`; `PT=D` (debit); `SO=WIFI`; `WS=STAYCONNECT`; `CT` ≤ 20 chars; **`TA` integer minor units, exponent 2, no currency on the wire**; **`G#` mandatory** (`RN`-only `ASOK` ≠ guest-folio posting).
+- **`PA` acknowledgment:** fields `RN, AS, P#, CT`; `AS ∈ {OK, NG, NA, NP, NR, RY, UR}`; **matched by PMS Interface + `P#`**, never by `RN`.
+- **`P#` allocation:** durable atomic per-interface sequence (contract §9a rule 2), **not** a Unix timestamp.
+
+**NOT technically visible on the FIAS wire → require Finance/Protel confirmation (not guessed):**
+
+- PMS Interface **base/folio currency**;
+- **currency exponent**;
+- **`SO=WIFI` revenue/transaction-account mapping** (FidServ) — the FIAS wire carries no currency and no accounting mapping; an `ASOK` on `SO=WIFI` proves wire acceptance only, not revenue-account correctness.
+
+### B. Owner / Finance test-fixture form (human approvals — all still UNSUPPLIED)
+
+Only the approvals that cannot be discovered automatically. Do **not** pick an arbitrary real guest.
+
+| Approval | Value | Status |
+|---|---|---|
+| Approved test **Room** | `<ROOM>` | **needed** |
+| **Reservation `G#`** (or enough approved info to resolve it read-only) | `<RESERVATION>` | **needed** |
+| Expected **open Folio** | `<FOLIO>` | **needed** |
+| **Posting permitted** on that folio | `<YES>` | **needed** |
+| Approved **`amount_minor`** + **currency** | `<AMOUNT>` / `<CURRENCY>` | **needed** |
+| **Front Office contact** | `<CONTACT>` | **needed** |
+| **Maintenance window** | `<WINDOW>` | **needed** |
+| **Finance: `SOWIFI` → intended Internet revenue code** | — | **needed** |
+| Approval for **manual Front Office correction** after the debit | — | **needed** |
+| PMS Interface **base/folio currency + exponent** | — | **needed** |
+
+Once the approved reservation is supplied, StayConnect resolves and verifies **RN, G#, Folio read-only** (link-alive + in-house feed / Front Office) **before** any financial execution.
+
+### C. Final redacted `PS`/`PA` template (no real values; nothing sent)
+
+```
+# link up (read-only) — verified
+S→C  LS|DA<..>|TI<..>|
+C→S  LS|DA<..>|TI<..>|   ·   LD|DA<..>|TI<..>|IFPB|V#1.13|RT4|   ·   LR|RIGI|..| LR|RIGC|..| LR|RIGO|..|
+S→C  LA|                 # link alive (~5.1s); then in-house GI/GC feed (redacted; isolate ONLY <RESERVATION>)
+
+# one debit (Gate 3A) — G# MANDATORY; TA integer minor units exp2 (no currency on wire); durable P#
+C→S  PS|RN<ROOM>|G#<RESERVATION>|TA<amount_minor>|PTD|SOWIFI|CT<=20chars>|P#<durable-seq>|WSSTAYCONNECT|
+S→C  PA|RN<ROOM>|AS<OK|NG|NA|NP|NR|RY|UR>|P#<durable-seq>|CT<..>|      # MATCH by Interface + P# (NOT RN)
+```
+
+### D. Gate 3A execution runbook (prepared; execute only on explicit approval)
+
+1. At the approved test start, **open one connection** to `150.0.0.18:5003`.
+2. **Accept + opening `LS` ⇒ Socket Server slot is FREE.**
+3. **Keep the same connection for the entire run** (no disconnect/reconnect).
+4. **Refusal, timeout, or no opening `LS` ⇒ immediate ABORT** (do not displace/modify any client).
+5. Complete `LS → LD → LR` and **reach `LA`**.
+6. **Resolve only the approved `RN`/`G#`/Folio** read-only (in-house feed + Front Office); if it cannot be isolated safely, ABORT.
+7. Obtain **Front Office pre-posting folio evidence**.
+8. Build **exactly one `PS` debit**: verified `RN`; verified `G#`; approved integer `TA`; `PTD`; `SOWIFI`; redacted `CT` ≤ 20 chars; **durable allocated `P#`**; `WSSTAYCONNECT`. Guard: computed `TA` == approved `amount_minor`; package currency == interface currency; else ABORT (no send). Write the `posting_attempts` row at send.
+9. **Wait for the matching `PA` by PMS Interface + `P#`.**
+10. **No automatic retry under any circumstance.**
+11. **No `PA` after transmission ⇒ UNKNOWN ⇒ Manual Review** (external folio evidence required).
+12. **Front Office verifies the actual folio, not `ASOK` alone** (correct guest folio + intended revenue code).
+13. **Front Office performs the approved manual correction** of the debit.
+14. **Verify the folio returns to net zero.**
+15. **Close the same connection gracefully.**
+
+### E. Abort conditions (any ⇒ stop immediately, send nothing further)
+
+Socket Server slot unavailable · wrong Property (≠ Hotel 3) · wrong `RN`/`G#`/Folio · missing posting permission · currency mismatch · `SOWIFI` mapping not Finance-confirmed · Front Office unavailable · amount mismatch (`TA` ≠ approved) · unexpected FIAS response · unresolved UNKNOWN transaction · any duplicate-posting risk (e.g. no `PA` but folio shows the charge ⇒ never resend).
+
+### F. Manual-correction procedure (after the single debit)
+
+Programmatic reversal is `capability=false` (Gate 3B, capability-gated). For Gate 3A, the debit is corrected **manually in Protel by Front Office** per the approved procedure; StayConnect observes read-only and confirms **net-zero** on the folio. If the transaction is UNKNOWN, Front Office reconciles the folio first (posted or not) and the manual correction is applied only to a confirmed-posted debit; nothing is auto-retried.
 
 ## Measured Results (empty until the spike runs)
 
