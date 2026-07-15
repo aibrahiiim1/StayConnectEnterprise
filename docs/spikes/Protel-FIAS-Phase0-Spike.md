@@ -399,16 +399,22 @@ Measured via read-only FIAS sessions (Gate 1B 2026-07-15 and a fresh 2026-07-15/
 - **Slot free / admission:** connect is accepted and the server sends its opening `LS` (single-client slot free); framing **STX (0x02) … ETX (0x03)**.
 - **Link identity/version accepted, no auth key:** client `LD` `IFPB` / `V#1.13` / `RT4` → **`LA` (link alive) at ~5.1 s**.
 - **Heartbeat:** client `LA` on idle keeps the link up; the peer holds the connection (no `LE`/drop within the observation window).
-- **Resync/feed timing is variable and not instant:** Gate 1B streamed `GI`×7 + `GC`×2 at ~11 s; a later 20 s session streamed none. **Do not assume the approved reservation can be resolved instantly from the cache** — hold the link and, if needed, allow the in-house feed to arrive; **Front Office folio evidence is authoritative** for pre/post state.
-- **`PS` debit wire format (production-grounded):** field order `RN, G#, TA, PT, SO, CT, P#, WS`; `PT=D` (debit); `SO=WIFI`; `WS=STAYCONNECT`; `CT` ≤ 20 chars; **`TA` integer minor units, exponent 2, no currency on the wire**; **`G#` mandatory** (`RN`-only `ASOK` ≠ guest-folio posting).
+- **Resync/feed timing is variable and not instant:** Gate 1B streamed `GI`×7 + `GC`×2 at ~11 s; a later 20 s session streamed none. **Do not assume the approved reservation can be resolved from the cache within any fixed wait** — resolution is gated on the approved `RN`/`G#` actually being present and verified (§D step 6); **Front Office folio evidence is authoritative** for pre/post state.
+- **`PS` debit wire format (production-grounded):** field order `RN, G#, TA, PT, SO, CT, P#, WS`; `PT=D` (debit); `SO=WIFI`; `WS=STAYCONNECT`; `CT` ≤ 20 chars; **`G#` mandatory** (`RN`-only `ASOK` ≠ guest-folio posting).
+- **`TA` encoding — confirmed:** the **legacy StayConnect implementation encodes `TA` using exponent 2 (major amount × 100)**, as an integer with no currency on the wire. (The *Protel-side* interpretation is a Finance/Protel confirmation item — see below.)
 - **`PA` acknowledgment:** fields `RN, AS, P#, CT`; `AS ∈ {OK, NG, NA, NP, NR, RY, UR}`; **matched by PMS Interface + `P#`**, never by `RN`.
-- **`P#` allocation:** durable atomic per-interface sequence (contract §9a rule 2), **not** a Unix timestamp.
+- **`P#` — legacy observed:** the previous implementation used an **epoch-seeded increasing `P#`**.
+
+**Design requirement (NOT wire-discovered or production-confirmed):**
+
+- **`P#` allocation for new StayConnect** will use a **durable atomic sequence per PMS Interface** (contract §9a rule 2) — a design decision, not something observed on the wire or confirmed in production.
 
 **NOT technically visible on the FIAS wire → require Finance/Protel confirmation (not guessed):**
 
-- PMS Interface **base/folio currency**;
-- **currency exponent**;
-- **`SO=WIFI` revenue/transaction-account mapping** (FidServ) — the FIAS wire carries no currency and no accounting mapping; an `ASOK` on `SO=WIFI` proves wire acceptance only, not revenue-account correctness.
+- the **Protel Folio/base currency**;
+- the **Protel-side currency interpretation / exponent** (i.e. how Protel reads the `TA` integer);
+- **whether the Protel currency matches the Internet Package currency**;
+- the **`SO=WIFI` revenue/transaction-account mapping** (FidServ) — the FIAS wire carries no currency and no accounting mapping; an `ASOK` on `SO=WIFI` proves wire acceptance only, not revenue-account correctness.
 
 ### B. Owner / Finance test-fixture form (human approvals — all still UNSUPPLIED)
 
@@ -449,9 +455,9 @@ S→C  PA|RN<ROOM>|AS<OK|NG|NA|NP|NR|RY|UR>|P#<durable-seq>|CT<..>|      # MATCH
 3. **Keep the same connection for the entire run** (no disconnect/reconnect).
 4. **Refusal, timeout, or no opening `LS` ⇒ immediate ABORT** (do not displace/modify any client).
 5. Complete `LS → LD → LR` and **reach `LA`**.
-6. **Resolve only the approved `RN`/`G#`/Folio** read-only (in-house feed + Front Office); if it cannot be isolated safely, ABORT.
-7. Obtain **Front Office pre-posting folio evidence**.
-8. Build **exactly one `PS` debit**: verified `RN`; verified `G#`; approved integer `TA`; `PTD`; `SOWIFI`; redacted `CT` ≤ 20 chars; **durable allocated `P#`**; `WSSTAYCONNECT`. Guard: computed `TA` == approved `amount_minor`; package currency == interface currency; else ABORT (no send). Write the `posting_attempts` row at send.
+6. **Resolve the approved `RN` and `G#` read-only — never on a fixed resync wait.** Proceed only once the approved `RN` **and** `G#` are **actually present and verified** against the owner-approved reservation and the Front Office folio evidence (from the in-house feed and/or Front Office). There is **no timed "assume-resolved" step**. **If the approved reservation cannot be resolved and verified, ABORT without sending any `PS`.**
+7. Obtain **Front Office pre-posting folio evidence** (this is the authoritative confirmation of `RN`/`G#`/Folio, independent of feed timing).
+8. Build **exactly one `PS` debit** — only after step 6/7 verification: verified `RN`; verified `G#`; approved integer `TA`; `PTD`; `SOWIFI`; redacted `CT` ≤ 20 chars; **durable allocated `P#`**; `WSSTAYCONNECT`. Guard: computed `TA` == approved `amount_minor`; package currency == interface currency (Finance-confirmed); else ABORT (no send). Write the `posting_attempts` row at send.
 9. **Wait for the matching `PA` by PMS Interface + `P#`.**
 10. **No automatic retry under any circumstance.**
 11. **No `PA` after transmission ⇒ UNKNOWN ⇒ Manual Review** (external folio evidence required).
@@ -462,7 +468,7 @@ S→C  PA|RN<ROOM>|AS<OK|NG|NA|NP|NR|RY|UR>|P#<durable-seq>|CT<..>|      # MATCH
 
 ### E. Abort conditions (any ⇒ stop immediately, send nothing further)
 
-Socket Server slot unavailable · wrong Property (≠ Hotel 3) · wrong `RN`/`G#`/Folio · missing posting permission · currency mismatch · `SOWIFI` mapping not Finance-confirmed · Front Office unavailable · amount mismatch (`TA` ≠ approved) · unexpected FIAS response · unresolved UNKNOWN transaction · any duplicate-posting risk (e.g. no `PA` but folio shows the charge ⇒ never resend).
+Socket Server slot unavailable · wrong Property (≠ Hotel 3) · **approved reservation cannot be resolved/verified** (`RN`/`G#` not actually present & verified) · wrong `RN`/`G#`/Folio · missing posting permission · currency mismatch or Protel currency/exponent not Finance-confirmed · `SOWIFI` mapping not Finance-confirmed · Front Office unavailable · amount mismatch (`TA` ≠ approved) · unexpected FIAS response · unresolved UNKNOWN transaction · any duplicate-posting risk (e.g. no `PA` but folio shows the charge ⇒ never resend).
 
 ### F. Manual-correction procedure (after the single debit)
 
