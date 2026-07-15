@@ -73,8 +73,10 @@ Generate and manage batches of guest WiFi voucher codes from a plan.
   **character set** are shown. Codes use secure random generation, are globally
   unique, and always exclude I/L/O/U (so a printed code matches what is typed).
 - **Batch detail** (`/voucher-batches/{id}`): search/filter codes by text and
-  state; click a code for its **Details** (state, plan, duration, speed, data
-  cap, **max devices**, **active devices**, dates); **copy**; **print**;
+  state; click a code for its **Details** — state + **exhaustion reason** (time /
+  data / revoked), plan, duration **window**, speed, **first activated**, **valid
+  until**, **time remaining**, **max/active devices**, **data cap / used
+  (all devices) / remaining**; **copy**; **print**;
   **download CSV**; **revoke** an unused code. **Change plan** for one voucher or
   the whole batch (*Unused only* / *All eligible*) from a plan dropdown — unused
   vouchers change immediately, vouchers with a live session are skipped, and

@@ -78,32 +78,12 @@ func (m *Manager) reserveDeviceSlot(ctx context.Context, tx pgx.Tx, credCol, cre
 		return fmt.Errorf("device-slot lock: %w", err)
 	}
 	// A reconnect from the same device replaces its own prior session so it is
-	// not double-counted. Rolled back with the tx if we then reject. For a
-	// voucher we also accrue the replaced session's usage onto the voucher (and
-	// exhaust it if depleted) so a same-device reconnect can't reset the clock
-	// and hand out a fresh full duration.
-	if credCol == "voucher_id" {
-		if _, err := tx.Exec(ctx, `
-            WITH closed AS (
-                UPDATE sessions SET state='closed', ended_at=now(), end_reason='policy'
-                 WHERE voucher_id = $1 AND mac = $2::macaddr AND state='active'
-                RETURNING voucher_id,
-                          GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at))::int) AS secs,
-                          (bytes_up + bytes_down) AS bytes
-            )
-            UPDATE vouchers v SET
-                seconds_used = v.seconds_used + c.secs,
-                bytes_used   = v.bytes_used + c.bytes,
-                state = CASE
-                    WHEN v.state NOT IN ('unused','active') THEN v.state
-                    WHEN t.duration_seconds IS NOT NULL AND (v.seconds_used + c.secs) >= t.duration_seconds THEN 'exhausted'
-                    WHEN t.data_cap_bytes  IS NOT NULL AND (v.bytes_used + c.bytes)   >= t.data_cap_bytes  THEN 'exhausted'
-                    ELSE v.state END
-              FROM closed c, ticket_templates t
-             WHERE v.id = c.voucher_id AND t.id = v.template_id`, credID, mac.String()); err != nil {
-			return fmt.Errorf("device-slot reconcile: %w", err)
-		}
-	} else if _, err := tx.Exec(ctx, fmt.Sprintf(`
+	// not double-counted. Rolled back with the tx if we then reject. No usage is
+	// accrued here: a voucher's time comes from its durable validity window and
+	// its data from the live SUM over its sessions, so the replaced session's
+	// bytes still count and the window is untouched — a reconnect can neither
+	// reset the clock nor lose usage.
+	if _, err := tx.Exec(ctx, fmt.Sprintf(`
         UPDATE sessions SET state='closed', ended_at=now(), end_reason='policy'
          WHERE %s = $1 AND mac = $2::macaddr AND state='active'`, credCol),
 		credID, mac.String()); err != nil {
@@ -417,37 +397,19 @@ func (m *Manager) StartPMS(ctx context.Context, mac net.HardwareAddr, ip net.IP,
 	return out, nil
 }
 
-// End closes the active session for the given IP (if any) and, when that
-// session was backed by a VOUCHER, accrues the time and bytes it consumed onto
-// the voucher — marking the voucher 'exhausted' once the plan's finite duration
-// or data cap is spent. This makes a voucher genuinely single-allowance: a
-// "10-minute" code grants 10 minutes of TOTAL access, not a fresh 10 minutes on
-// every re-login. Guest-account and OTP/PMS/social sessions carry no voucher_id,
-// so they stay reusable-by-design (each login gets the plan duration).
-//
-// A single data-modifying CTE keeps the close + accrual atomic, and it fires for
-// every close path (reaper, admin disconnect, acctd quota revoke, portal
-// logout) because they all funnel through End.
+// End closes the active session for the given IP (if any). It is intentionally a
+// pure, idempotent state transition: only an 'active' row becomes 'closed', so a
+// duplicate, concurrent or retried End (reaper, admin disconnect, acctd revoke,
+// portal logout, crash recovery) closes nothing the second time. No usage is
+// written here — a voucher's consumed TIME is derived from its durable validity
+// window (vouchers.expires_at, set once at activation) and its consumed DATA
+// from the live SUM(bytes) over its sessions, so a session's usage is counted
+// exactly once and can never be double-charged by repeated closes.
 func (m *Manager) End(ctx context.Context, ip net.IP, reason string) error {
 	_, err := m.DB.Exec(ctx, `
-        WITH closed AS (
-            UPDATE sessions
-               SET state = 'closed', ended_at = now(), end_reason = $2
-             WHERE tenant_id = $1 AND ip = $3::inet AND state = 'active'
-            RETURNING voucher_id,
-                      GREATEST(0, EXTRACT(EPOCH FROM (now() - started_at))::int) AS secs,
-                      (bytes_up + bytes_down) AS bytes
-        )
-        UPDATE vouchers v SET
-            seconds_used = v.seconds_used + c.secs,
-            bytes_used   = v.bytes_used + c.bytes,
-            state = CASE
-                WHEN v.state NOT IN ('unused','active') THEN v.state
-                WHEN t.duration_seconds IS NOT NULL AND (v.seconds_used + c.secs) >= t.duration_seconds THEN 'exhausted'
-                WHEN t.data_cap_bytes  IS NOT NULL AND (v.bytes_used + c.bytes)   >= t.data_cap_bytes  THEN 'exhausted'
-                ELSE v.state END
-          FROM closed c, ticket_templates t
-         WHERE c.voucher_id IS NOT NULL AND v.id = c.voucher_id AND t.id = v.template_id
+        UPDATE sessions
+           SET state = 'closed', ended_at = now(), end_reason = $2
+         WHERE tenant_id = $1 AND ip = $3::inet AND state = 'active'
     `, m.TenantID, reason, ip.String())
 	return err
 }

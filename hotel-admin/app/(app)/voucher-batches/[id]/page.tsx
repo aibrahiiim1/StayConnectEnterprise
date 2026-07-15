@@ -32,6 +32,18 @@ function fmtDuration(sec?: number | null): string {
   return `${Math.round(sec / 60)}m`;
 }
 
+// fmtRemaining renders a live remaining time (seconds) as a coarse human string.
+function fmtRemaining(sec?: number | null): string {
+  if (sec === null || sec === undefined) return "—";
+  if (sec <= 0) return "expired";
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+const REASON_LABEL: Record<string, string> = { time: "time expired", data: "data cap reached", revoked: "revoked", expired: "time expired" };
+
 export default function VoucherBatchDetail() {
   const { id } = useParams<{ id: string }>();
   const [batch, setBatch] = useState<VoucherBatch | null>(null);
@@ -200,23 +212,38 @@ export default function VoucherBatchDetail() {
         <Card className="mb-4 border-brand">
           <CardHeader><CardTitle>Voucher {detail.code_display}</CardTitle></CardHeader>
           <CardBody>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-3">
-              <div><div className="text-xs text-muted">State</div><Badge tone={toneFor(detail.state) as any}>{detail.state}</Badge></div>
-              <div><div className="text-xs text-muted">Plan</div>{detail.plan_name} ({detail.plan_code})</div>
-              <div><div className="text-xs text-muted">Duration</div>{fmtDuration(detail.duration_seconds)}</div>
-              <div><div className="text-xs text-muted">Data cap</div>{detail.data_cap_bytes ? formatBytes(detail.data_cap_bytes) : "unlimited"}</div>
-              <div><div className="text-xs text-muted">Speed</div>{detail.down_kbps ? `${Math.round(detail.down_kbps / 1000)}↓/${Math.round((detail.up_kbps ?? 0) / 1000)}↑ Mbps` : "unshaped"}</div>
-              <div><div className="text-xs text-muted">Max devices</div>{detail.max_devices ?? "—"}</div>
-              <div><div className="text-xs text-muted">Active devices</div>{detail.active_devices ?? 0}{detail.max_devices ? ` of ${detail.max_devices}` : ""}</div>
-              <div><div className="text-xs text-muted">Issued</div>{formatRelative(detail.issued_at)}</div>
-              <div><div className="text-xs text-muted">Activated</div>{detail.activated_at ? formatRelative(detail.activated_at) : "—"}</div>
-              <div><div className="text-xs text-muted">Expires</div>{detail.expires_at ? formatRelative(detail.expires_at) : "—"}</div>
+            {(() => {
+              const eff = detail.effective_state || detail.state;
+              const terminal = ["revoked", "expired", "exhausted"].includes(eff);
+              return (<>
+            <div className="text-xs text-muted mb-3">
+              Duration is a <strong>validity window</strong> from first activation — shared across all allowed devices;
+              reconnects and reboots don&apos;t reset it. Data cap is aggregated across every device.
             </div>
-            {["revoked", "expired", "exhausted"].includes(detail.state) ? (
-              <div className="text-xs text-muted">This voucher is {detail.state}; its plan can no longer be changed.</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-3">
+              <div><div className="text-xs text-muted">State</div>
+                <Badge tone={toneFor(eff) as any}>{eff}</Badge>
+                {terminal && detail.exhaustion_reason && <span className="text-xs text-muted ml-1">({REASON_LABEL[detail.exhaustion_reason] ?? detail.exhaustion_reason})</span>}
+              </div>
+              <div><div className="text-xs text-muted">Plan</div>{detail.plan_name} ({detail.plan_code})</div>
+              <div><div className="text-xs text-muted">Duration (window)</div>{fmtDuration(detail.duration_seconds)}</div>
+              <div><div className="text-xs text-muted">Speed</div>{detail.down_kbps ? `${Math.round(detail.down_kbps / 1000)}↓/${Math.round((detail.up_kbps ?? 0) / 1000)}↑ Mbps` : "unshaped"}</div>
+              <div><div className="text-xs text-muted">First activated</div>{detail.first_activated_at ? formatRelative(detail.first_activated_at) : "not yet"}</div>
+              <div><div className="text-xs text-muted">Valid until</div>{detail.valid_until ? formatRelative(detail.valid_until) : (detail.duration_seconds ? "—" : "no time limit")}</div>
+              <div><div className="text-xs text-muted">Time remaining</div>{detail.first_activated_at ? fmtRemaining(detail.time_remaining_seconds) : (detail.duration_seconds ? fmtDuration(detail.duration_seconds) : "no time limit")}</div>
+              <div><div className="text-xs text-muted">Active devices</div>{detail.active_devices ?? 0}{detail.max_devices ? ` of ${detail.max_devices}` : ""}</div>
+              <div><div className="text-xs text-muted">Data cap</div>{detail.data_cap_bytes ? formatBytes(detail.data_cap_bytes) : "unlimited"}</div>
+              <div><div className="text-xs text-muted">Data used (all devices)</div>{formatBytes(detail.data_used_bytes ?? 0)}</div>
+              <div><div className="text-xs text-muted">Data remaining</div>{detail.data_cap_bytes ? formatBytes(detail.data_remaining_bytes ?? 0) : "unlimited"}</div>
+              <div><div className="text-xs text-muted">Issued</div>{formatRelative(detail.issued_at)}</div>
+            </div>
+            {terminal ? (
+              <div className="text-xs text-muted">This voucher is {eff}{detail.exhaustion_reason ? ` (${REASON_LABEL[detail.exhaustion_reason] ?? detail.exhaustion_reason})` : ""}; its plan can no longer be changed.</div>
             ) : (
               <ChangePlanInline plans={activePlans} current={detail.template_id} onApply={(tid, reason) => onChangeVoucherPlan(detail, tid, reason)} />
             )}
+              </>);
+            })()}
             <div className="mt-3 flex justify-end"><Button size="sm" variant="ghost" onClick={() => setDetail(null)}>Close</Button></div>
           </CardBody>
         </Card>

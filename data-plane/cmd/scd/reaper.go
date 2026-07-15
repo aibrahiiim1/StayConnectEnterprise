@@ -61,6 +61,29 @@ func (s *server) reaperSweep(ctx context.Context) {
 	defer cancel()
 	idleCutoff := time.Now().Add(-idleTimeout)
 
+	// Converge voucher lifecycle state: an activated voucher whose validity
+	// window has closed becomes 'expired' (time), and one whose AGGREGATE data
+	// across all its sessions has met the plan cap becomes 'exhausted' (data).
+	// Authoritative login gating lives in voucher.Validate; this keeps the
+	// persisted state, batch totals and plan-edit guard correct even for idle
+	// vouchers with no active session. Idempotent (only active → terminal).
+	if _, err := s.db.Exec(rctx, `
+        UPDATE vouchers v
+           SET state = CASE
+                 WHEN COALESCE(v.expires_at,
+                        v.activated_at + make_interval(secs => t.duration_seconds)) <= now() THEN 'expired'
+                 ELSE 'exhausted' END
+          FROM ticket_templates t
+         WHERE v.tenant_id = $1 AND t.id = v.template_id AND v.state = 'active'
+           AND ( COALESCE(v.expires_at,
+                    v.activated_at + make_interval(secs => t.duration_seconds)) <= now()
+                 OR (t.data_cap_bytes IS NOT NULL
+                     AND COALESCE((SELECT SUM(se.bytes_up + se.bytes_down)
+                                     FROM sessions se WHERE se.voucher_id = v.id), 0) >= t.data_cap_bytes) )
+    `, s.tenID); err != nil {
+		slog.Warn("reaper voucher reconcile failed", "err", err)
+	}
+
 	// Two reasons in one query: 'quota_time' (expired) wins over 'idle'
 	// when both are true (don't blame the user for going quiet on a
 	// session they couldn't have used past expiry).

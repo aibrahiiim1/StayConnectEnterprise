@@ -126,6 +126,11 @@ export type Voucher = {
   duration_seconds?: number | null; data_cap_bytes?: number | null;
   down_kbps?: number | null; up_kbps?: number | null;
   max_devices?: number | null; active_devices?: number | null;
+  // Derived usage under the validity-window model.
+  first_activated_at?: string | null; valid_until?: string | null;
+  time_remaining_seconds?: number | null;
+  data_used_bytes?: number | null; data_remaining_bytes?: number | null;
+  effective_state?: string; exhaustion_reason?: string;
 };
 
 export type Session = {

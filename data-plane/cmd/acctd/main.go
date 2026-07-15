@@ -1,13 +1,13 @@
 // acctd — Accounting Daemon.
 //
 // Every tick (default 1s):
-//   1. Snapshot byte counters from tc for every guest-session class.
-//   2. Compute per-IP deltas against the previous snapshot.
-//   3. Write accounting_records rows + update sessions.bytes_up/bytes_down.
-//   4. Enforce quotas:
-//        - elapsed seconds > ticket_templates.duration_seconds  -> revoke (quota_time)
-//        - bytes_up+bytes_down > ticket_templates.data_cap_bytes -> revoke (quota_bytes)
-//      Revoke is done by POSTing to scd's Unix socket so nft/tc are cleaned up.
+//  1. Snapshot byte counters from tc for every guest-session class.
+//  2. Compute per-IP deltas against the previous snapshot.
+//  3. Write accounting_records rows + update sessions.bytes_up/bytes_down.
+//  4. Enforce quotas:
+//     - elapsed seconds > ticket_templates.duration_seconds  -> revoke (quota_time)
+//     - bytes_up+bytes_down > ticket_templates.data_cap_bytes -> revoke (quota_bytes)
+//     Revoke is done by POSTing to scd's Unix socket so nft/tc are cleaned up.
 package main
 
 import (
@@ -178,6 +178,10 @@ type activeSession struct {
 	durSec             int
 	startedAt          time.Time
 	totalUp, totalDown int64
+	// voucherBytes is the AGGREGATE bytes across every session of this session's
+	// voucher, as of this tick's load — the data cap is enforced on this
+	// aggregate so multiple devices on one voucher share (not multiply) the cap.
+	voucherBytes int64
 }
 
 func (a *acctd) loop(ctx context.Context) error {
@@ -259,11 +263,15 @@ func (a *acctd) loop(ctx context.Context) error {
 			`, s.id, s.totalUp, s.totalDown, now)
 		}
 
-		// Quota enforcement (bytes + time).
+		// Quota enforcement (bytes + time). Data is enforced on the voucher's
+		// AGGREGATE across all its devices (voucherBytes at load + this tick's
+		// delta), so a data cap is shared, not multiplied, across devices. Time
+		// is a per-session backstop; the authoritative wall-clock window is the
+		// session's expires_at, which the scd reaper enforces.
 		if s.vid != "" {
-			usedBytes := s.totalUp + s.totalDown
+			aggBytes := s.voucherBytes + dUp + dDown
 			elapsed := int(now.Sub(s.startedAt).Seconds())
-			if s.dataCap > 0 && usedBytes >= s.dataCap {
+			if s.dataCap > 0 && aggBytes >= s.dataCap {
 				a.revoke(ctx, s.ip.String(), "quota_bytes")
 				continue
 			}
@@ -287,7 +295,10 @@ func (a *acctd) loadActive(ctx context.Context) ([]activeSession, error) {
 		SELECT s.id, s.tenant_id, COALESCE(s.voucher_id::text,''),
 		       host(s.ip), COALESCE(s.ingress_interface, ''),
 		       s.started_at, s.bytes_up, s.bytes_down,
-		       COALESCE(t.data_cap_bytes, 0), COALESCE(t.duration_seconds, 0)
+		       COALESCE(t.data_cap_bytes, 0), COALESCE(t.duration_seconds, 0),
+		       COALESCE((SELECT SUM(s2.bytes_up + s2.bytes_down) FROM sessions s2
+		                  WHERE s.voucher_id IS NOT NULL AND s2.voucher_id = s.voucher_id),
+		                s.bytes_up + s.bytes_down)
 		  FROM sessions s
 		  LEFT JOIN vouchers v ON v.id = s.voucher_id
 		  LEFT JOIN ticket_templates t ON t.id = v.template_id
@@ -303,7 +314,7 @@ func (a *acctd) loadActive(ctx context.Context) ([]activeSession, error) {
 		var s activeSession
 		var ipStr, bridge string
 		if err := rows.Scan(&s.id, &s.tid, &s.vid, &ipStr, &bridge,
-			&s.startedAt, &s.totalUp, &s.totalDown, &s.dataCap, &s.durSec); err != nil {
+			&s.startedAt, &s.totalUp, &s.totalDown, &s.dataCap, &s.durSec, &s.voucherBytes); err != nil {
 			return nil, err
 		}
 		s.ip = net.ParseIP(ipStr)

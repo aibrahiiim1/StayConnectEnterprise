@@ -405,7 +405,7 @@ type edgeVoucher struct {
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 	BytesUsed   int64      `json:"bytes_used"`
 	SecondsUsed int        `json:"seconds_used"`
-	// Plan snapshot + live device usage (detail view only).
+	// Plan snapshot + live usage (detail view only).
 	PlanName        *string `json:"plan_name,omitempty"`
 	PlanCode        *string `json:"plan_code,omitempty"`
 	DurationSeconds *int    `json:"duration_seconds,omitempty"`
@@ -414,6 +414,14 @@ type edgeVoucher struct {
 	UpKbps          *int    `json:"up_kbps,omitempty"`
 	MaxDevices      *int    `json:"max_devices,omitempty"`
 	ActiveDevices   *int    `json:"active_devices,omitempty"`
+	// Derived usage under the validity-window model.
+	FirstActivatedAt     *time.Time `json:"first_activated_at,omitempty"` // window start
+	ValidUntil           *time.Time `json:"valid_until,omitempty"`        // window end (expires_at)
+	TimeRemainingSeconds *int64     `json:"time_remaining_seconds,omitempty"`
+	DataUsedBytes        *int64     `json:"data_used_bytes,omitempty"` // aggregate across devices
+	DataRemainingBytes   *int64     `json:"data_remaining_bytes,omitempty"`
+	EffectiveState       string     `json:"effective_state,omitempty"`   // active|unused|expired|exhausted|revoked
+	ExhaustionReason     string     `json:"exhaustion_reason,omitempty"` // time|data|revoked|expired|""
 }
 
 func (s *server) voucherBatchesRoutes() http.Handler {
@@ -813,20 +821,22 @@ func (s *server) getVoucher(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var v edgeVoucher
-	var active int64
+	var active, usedBytes int64
 	err := s.db.QueryRow(ctx, `
         SELECT v.id, v.template_id, v.batch_id, v.code, v.state,
-               v.issued_at, v.activated_at, v.expires_at, v.bytes_used, v.seconds_used,
+               v.issued_at, v.activated_at, v.expires_at,
                t.name, t.code, t.duration_seconds, t.data_cap_bytes, t.down_kbps, t.up_kbps,
                t.max_concurrent_devices,
                (SELECT count(DISTINCT s.mac) FROM sessions s
-                 WHERE s.voucher_id = v.id AND s.state='active')
+                 WHERE s.voucher_id = v.id AND s.state='active'),
+               COALESCE((SELECT SUM(se.bytes_up + se.bytes_down) FROM sessions se
+                          WHERE se.voucher_id = v.id), 0)
           FROM vouchers v JOIN ticket_templates t ON t.id = v.template_id
          WHERE v.id = $1 AND v.tenant_id = $2
     `, id, s.tenantID).Scan(&v.ID, &v.TemplateID, &v.BatchID, &v.Code, &v.State,
-		&v.IssuedAt, &v.ActivatedAt, &v.ExpiresAt, &v.BytesUsed, &v.SecondsUsed,
+		&v.IssuedAt, &v.ActivatedAt, &v.ExpiresAt,
 		&v.PlanName, &v.PlanCode, &v.DurationSeconds, &v.DataCapBytes, &v.DownKbps, &v.UpKbps,
-		&v.MaxDevices, &active)
+		&v.MaxDevices, &active, &usedBytes)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "voucher not found")
 		return
@@ -837,6 +847,49 @@ func (s *server) getVoucher(w http.ResponseWriter, r *http.Request) {
 	}
 	ai := int(active)
 	v.ActiveDevices = &ai
+	v.FirstActivatedAt = v.ActivatedAt
+	// Window end: durable expires_at, or (legacy fallback) activated_at + duration.
+	windowEnd := v.ExpiresAt
+	if windowEnd == nil && v.ActivatedAt != nil && v.DurationSeconds != nil {
+		w := v.ActivatedAt.Add(time.Duration(*v.DurationSeconds) * time.Second)
+		windowEnd = &w
+	}
+	v.ValidUntil = windowEnd
+	// Derived usage under the validity-window model.
+	now := time.Now()
+	du := usedBytes
+	v.DataUsedBytes = &du
+	if v.DataCapBytes != nil {
+		rem := *v.DataCapBytes - usedBytes
+		if rem < 0 {
+			rem = 0
+		}
+		v.DataRemainingBytes = &rem
+	}
+	if windowEnd != nil {
+		secs := int64(windowEnd.Sub(now).Seconds())
+		if secs < 0 {
+			secs = 0
+		}
+		v.TimeRemainingSeconds = &secs
+	}
+	// Effective state + exhaustion reason (derived; may lead the stored state
+	// that the reaper converges within one sweep).
+	v.EffectiveState = v.State
+	switch v.State {
+	case "revoked":
+		v.ExhaustionReason = "revoked"
+	case "expired":
+		v.ExhaustionReason = "time"
+	case "exhausted":
+		v.ExhaustionReason = "data"
+	default:
+		if windowEnd != nil && !now.Before(*windowEnd) {
+			v.EffectiveState, v.ExhaustionReason = "expired", "time"
+		} else if v.DataCapBytes != nil && usedBytes >= *v.DataCapBytes {
+			v.EffectiveState, v.ExhaustionReason = "exhausted", "data"
+		}
+	}
 	v.CodeDisplay = crockford.Format(v.Code)
 	writeJSON(w, http.StatusOK, v)
 }
