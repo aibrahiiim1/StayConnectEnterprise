@@ -2,7 +2,7 @@
 
 **Spike status: `GATE2_PLAN_GROUNDED (production PS/PA wire) — GATE 2.5 ACCESS-BLOCKED (172.21.96.150) — AWAITING GATE-3A FIXTURES + FINANCE/PROTEL CONFIRMATIONS + COLLISION-RISK CLEARANCE (no financial traffic performed)`**
 
-Gate 2.5 (old-server reconciliation) could not run on-host — no login to `172.21.96.150` (key rejected; passwords not guessed). The Socket-Server client-slot collision risk is therefore **UNRESOLVED** and is a hard blocker for Gate 3 (see Gate 2.5 section).
+Gate 2.5 (old-server reconciliation) still could not run on-host after a second attempt — the out-of-band SSH mechanism is **not wired into the execution environment** (no agent/config-alias/staged key; `172.21.96.150` still refuses login; passwords not guessed). **Outcome D (evidence insufficient).** The Socket-Server client-slot collision risk is therefore **UNRESOLVED** and remains a hard blocker for Gate 3A (see Gate 2.5 section for exactly what must be wired).
 
 Gate 1 (read-only preflight, 2026-07-15) confirmed TCP reachability and FIAS 2.20 framing on both endpoints but did not reach link-alive. Gate 1B (2026-07-15) established the correct read-only sequence and reached **link-alive on both interfaces without any authentication key**, confirming the Gate-1 `LA` absence was a **sequencing issue (the `LR` subscription records were withheld), not authentication**. No posting, reversal, PS/PA, link interruption, restart, `pms_providers` creation, or database/config change. Guest record VALUES were never decoded or stored — only record-type counts and timing. Contract remains **CONDITIONALLY FROZEN**.
 
@@ -350,25 +350,39 @@ Gate 3 executes **only** after: (a) all Gate-3A mandatory fixtures (below) are s
 
 A failed or unreconciled Gate 3A blocks 3B/3C/3D until the folio is confirmed net-zero and the owner re-approves.
 
-### Gate-3A mandatory fixtures (owner / Finance / Protel confirmations — all still UNSUPPLIED)
+### Gate-3A blockers (the ONLY things that block Gate 3A)
 
-- Protel/Folio **base currency and exponent**;
-- confirmation that **Package currency matches** the interface base currency;
-- **Finance confirmation of `SOWIFI`** revenue/transaction mapping;
+Gate 3A (one normal debit) is blocked **only** by these mandatory items — all still outstanding:
+
+- **Gate-2.5 collision clearance** (old-server reconciliation confirms no legacy connector can collide on the Socket Server or emit `PS`);
+- confirmed Protel **Folio/base currency and exponent**;
+- **Package currency equals the PMS Interface currency**;
+- **Finance confirmation of the `SOWIFI` revenue mapping**;
 - approved **Room** (`<ROOM>`);
 - **verified Reservation `G#`** (`<RESERVATION>`);
 - **verified open Folio** (`<FOLIO>`);
 - **`posting_allowed` confirmation**;
-- **`amount_minor`** (with `<CURRENCY>`);
+- approved **`amount_minor` and currency** (`<AMOUNT>`/`<CURRENCY>`);
 - **Front Office contact** (`<CONTACT>`);
 - **maintenance window** (`<WINDOW>`);
-- **manual correction procedure** for the first debit.
+- **manual Front Office correction procedure** for the first debit.
 
-## Gate 2.5 — Old-Server Connector Reconciliation (172.21.96.150) — read-only, ACCESS-BLOCKED
+**Do NOT block Gate 3A on** (these belong to later, separately-approved gates):
+
+- `PT=C` or programmatic reversal behavior → **Gate 3B**;
+- `P#` replay/dedup testing → **Gate 3C**;
+- lost-ACK behavior → **Gate 3C**;
+- checkout / staleness behavior → **Gate 3D**.
+
+The "Unresolved Protel-specific fields" above that concern reversal semantics, `P#` dedup, and checkout are **not** Gate-3A blockers; they gate 3B/3C/3D only. (`AS`-code meanings and `G#` folio-target semantics are needed to *interpret* the 3A result and so are confirmed as part of the 3A Finance/Protel sign-off.)
+
+## Gate 2.5 — Old-Server Connector Reconciliation (172.21.96.150) — read-only — OUTCOME D (evidence insufficient: access not wired)
 
 **Purpose:** determine whether a legacy connector on the old Coral Sea server `172.21.96.150` is (or intermittently is) connected to the Protel Socket Server — a client-slot collision risk — and whether it can still emit financial `PS` records, despite `pms.enabled=false` / `pms.protel.enabled=false`.
 
-**Access status:** I could **not** log in to `172.21.96.150` (host key is in `known_hosts` from a prior connection, but the workstation's `id_ed25519` key is rejected for `root` and for `stayconnect/ubuntu/admin/coral/fidserv`; password auth is offered but I do **not** guess credentials). Therefore the on-host process identification (PID, executable, service owner, loaded config path, active TCP sessions) **was not performed** — it requires operator-provided access. **Nothing was stopped, restarted, signalled, or modified; no settings changed; no other IP/port contacted; no FIAS traffic sent.**
+**Outcome: D — Evidence insufficient.** Two access attempts (2026-07-15 and 2026-07-16) both failed. On 2026-07-16 the owner reported that a valid out-of-band SSH mechanism had been provided, but it is **not wired into the execution environment**: no ssh-agent is running (`ssh-add` reports no agent), there is no `~/.ssh/config` Host alias for the server, no additional private key beyond the already-rejected `id_ed25519`, and no staged key/credential file was found in the out-of-band locations (`/d/tmp`, the session scratchpad, the project tree) or any relevant environment variable. `ssh root@172.21.96.150` is still refused (`publickey,password`). Passwords were **not** guessed; no key/secret content was read or printed. Therefore the on-host process identification (PID, executable, owner, start time, cwd, parent/unit/container, config path, loaded flags, `PS`-capability, last LS/LD/LR/LA/PS/PA activity) **was not performed**. **Nothing was stopped/restarted/signalled/attached; no file/config/firewall/route changed; no FIAS connection or traffic; no other IP/port contacted; no environment secrets exposed.**
+
+**To actually run Gate 2.5, the operator must wire the access so the sandbox can use it without secrets crossing chat/logs/Git — one of:** (a) load the key into an ssh-agent this shell can reach; (b) place the private key at a path and add a `~/.ssh/config` Host entry (`Host coral-legacy` / `HostName 172.21.96.150` / `User …` / `IdentityFile …`) so `ssh coral-legacy` works; or (c) drop the key file at a known path and tell me the **path only** (used via `ssh -i <path>`, contents never printed).
 
 **Collision-risk assessment from available evidence:**
 

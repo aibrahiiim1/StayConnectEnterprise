@@ -471,25 +471,52 @@ CREATE TABLE payment_transactions (           -- typed, append-only, merchant-sc
 -- Trigger: parent must be transaction_type='CHARGE' with identical currency/exponent and the
 -- same merchant_account_id; Σ(REFUND amounts per parent) ≤ parent amount. Never overwritten.
 
-CREATE TABLE posting_attempts (             -- append-only FIAS PS protocol-attempt ledger (§9a rule 2)
+-- P# allocation: a DURABLE ATOMIC per-interface sequence (§9a rule 2). NOT a Unix timestamp.
+CREATE TABLE pms_interface_pnumber_seq (    -- one row per interface; bumped transactionally
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL, pms_interface_id uuid NOT NULL,
+  next_p_number bigint NOT NULL DEFAULT 1,
+  PRIMARY KEY (pms_interface_id),
+  FOREIGN KEY (tenant_id, site_id, pms_interface_id) REFERENCES pms_interfaces (tenant_id, site_id, id));
+-- Allocation: UPDATE ... SET next_p_number = next_p_number + 1 RETURNING (old) under the
+-- posting transaction (contention serialized), so every P# is unique and monotonic per interface
+-- and survives restart. The wire P# is rendered from this durable value.
+
+CREATE TABLE posting_attempts (             -- IMMUTABLE request identity + controlled one-way state (§9a rule 2)
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL, site_id uuid NOT NULL,
   internal_posting_id uuid NOT NULL,        -- the logical Posting (pms_postings.id)
   pms_interface_id uuid NOT NULL,
   attempt_no int NOT NULL,
+  -- IMMUTABLE request/transmission identity (never updated after insert; trigger-enforced):
   p_number text NOT NULL,                    -- FIAS P# — unique protocol attempt, NOT business idempotency
   rn text, g_number text,                    -- RN / G# sent on the PS (G# mandatory for guest folio)
   sent_at timestamptz NOT NULL,
-  response_at timestamptz,
-  pa_as_status text CHECK (pa_as_status IN ('OK','NG','NA','NP','NR','RY','UR')),  -- NULL until PA (UNKNOWN)
+  -- CONTROLLED one-way state (the ONLY mutable columns; monotonic transitions only):
   outcome text NOT NULL DEFAULT 'SENDING'
     CHECK (outcome IN ('SENDING','ACKED','UNKNOWN','FAILED')),
-  UNIQUE (pms_interface_id, p_number),       -- PA is matched by (interface, P#) — never by RN
+  response_at timestamptz,
+  pa_as_status text CHECK (pa_as_status IN ('OK','NG','NA','NP','NR','RY','UR')),
+  UNIQUE (tenant_id, site_id, pms_interface_id, p_number),   -- uniqueness scoped by tenant+site+interface+P#
   UNIQUE (internal_posting_id, attempt_no),
+  UNIQUE (tenant_id, site_id, id),                            -- anchor for the events FK
   FOREIGN KEY (tenant_id, site_id, pms_interface_id) REFERENCES pms_interfaces (tenant_id, site_id, id),
   FOREIGN KEY (tenant_id, site_id, internal_posting_id) REFERENCES pms_postings (tenant_id, site_id, id));
--- A PS with sent_at but no response_at past the timeout ⇒ outcome=UNKNOWN; never auto-retried.
--- A manually-approved retry inserts a NEW attempt_no under the SAME internal_posting_id.
+-- Trigger: identity columns are immutable after insert; `outcome` may advance only
+-- SENDING → {ACKED|UNKNOWN|FAILED} (one-way, never back to SENDING). A PS with sent_at and no
+-- matched PA past the timeout ⇒ outcome=UNKNOWN (never auto-retried). A manually-approved retry
+-- inserts a NEW attempt_no (new P#) under the SAME internal_posting_id.
+
+CREATE TABLE posting_attempt_events (       -- FULLY APPEND-ONLY audit history (no update/delete)
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL,
+  posting_attempt_id uuid NOT NULL,
+  event_type text NOT NULL,                  -- SENT | PA_RECEIVED | TIMED_OUT | MARKED_UNKNOWN | REVIEW_DECISION …
+  detail jsonb NOT NULL DEFAULT '{}',        -- redacted (AS status, timing, actor, decision — never secrets)
+  created_at timestamptz NOT NULL DEFAULT now(),
+  FOREIGN KEY (tenant_id, site_id, posting_attempt_id)
+    REFERENCES posting_attempts (tenant_id, site_id, id));
+-- INSERT-only (trigger rejects UPDATE/DELETE). Every state change on posting_attempts writes one
+-- event here, giving a complete immutable audit trail while posting_attempts holds current state.
 ```
 
 ### 4.6 Entitlements, transfers, devices, sessions, accounting
@@ -652,7 +679,11 @@ The live Protel spike must measure and record: missed-checkout-while-link-down b
 The legacy Coral Sea Protel wire is authoritative for existing behavior; FidServ/Protel **accounting-configuration** facts (e.g. what `SO=WIFI` maps to) remain subject to confirmation by the property's Protel administrator / Finance. Grounded wire: financial record **`PS`** with field order `RN, G#, TA, PT, SO, CT, P#, WS`; `PT=D` (debit); `SO=WIFI`; `WS=STAYCONNECT`; `CT` ≤ 20 chars; **`TA` integer minor units, exponent 2, no currency code on the wire**; `G#` mandatory (an `RN`-only `ASOK` does **not** prove a Guest-Folio posting); `PA` fields `RN, AS, P#, CT`; `AS ∈ {OK, NG, NA, NP, NR, RY, UR}`; `P#` is a **unique protocol-attempt sequence, not business idempotency**.
 
 1. **UNKNOWN, never auto-retried.** A transmitted `PS` without a matched `PA` becomes **UNKNOWN** and is never automatically retried (the legacy "retry after 3 minutes with a new `P#`" is removed — it can double-post). Resolution is external evidence + audited MANUAL_REVIEW only.
-2. **Protocol-attempt ledger (`posting_attempts`).** Every `PS` attempt is pinned in a durable table (DDL in §4.5): `internal_posting_id`, `attempt_no`, `pms_interface_id`, `p_number` (`P#`), `rn`, `g_number` (`G#`), `sent_at`, `response_at`, `pa_as_status`. `PA` is matched to its `PS` by **PMS Interface + `P#`** — never by Room Number (legacy `RN` matching is unsafe under sharers/concurrency).
+2. **Protocol-attempt ledger (`posting_attempts` + `posting_attempt_events`).** DDL in §4.5.
+   - **`posting_attempts`** holds an **immutable request/transmission identity** (`internal_posting_id`, `attempt_no`, `pms_interface_id`, `p_number`, `rn`, `g_number`, `sent_at` — never updated after insert) plus a **controlled one-way state** (`outcome` advancing `SENDING → ACKED|UNKNOWN|FAILED` only, with `response_at`/`pa_as_status`). It is therefore **not** fully append-only — it carries current state under strict one-way transitions.
+   - **`posting_attempt_events`** is the **fully append-only** audit history (insert-only; every state change writes one event).
+   - **`P#` allocation** is a **durable atomic per-interface sequence** (`pms_interface_pnumber_seq`, bumped transactionally) — **not** a Unix timestamp. Uniqueness and ownership are scoped by **`tenant_id, site_id, pms_interface_id, p_number`**.
+   - `PA` is matched to its `PS` by **PMS Interface + `P#`** — never by Room Number (legacy `RN` matching is unsafe under sharers/concurrency).
 3. **Currency equality (no FX in v1).** A PMS-settled Package's currency **must equal the pinned PMS Interface base currency**. FIAS carries no currency field on the wire; the interface base currency + exponent is authoritative. **Reject the Purchase if package currency ≠ interface currency.** No implicit FX conversion in v1.
 4. **`SO=WIFI` acceptance ≠ revenue correctness.** An `ASOK` on `SO=WIFI` proves wire acceptance, not that the charge hit the correct revenue/transaction account. **Property Finance/Protel must confirm the FidServ `WIFI` (`SOWIFI`) mapping before any financial testing or production enablement.**
 5. **Programmatic reversal is `capability=false`** until a supervised test proves the exact `PT`/`TA`/`SO` reversal semantics. **Do not assume `PT=C` or a negative `TA`.** The first controlled debit is corrected **manually in Protel by Front Office** if explicitly approved.
