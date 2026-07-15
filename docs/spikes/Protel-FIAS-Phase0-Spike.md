@@ -1,8 +1,8 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE3A_ABORTED_PRE_FLIGHT — fixtures still placeholder tokens; no connection opened, no PS sent (no financial traffic performed)`**
+**Spike status: `GATE3A_ABORTED — currency/exponent NOT confirmable + no folio-cleanup path; no connection opened, no PS sent (no financial traffic performed)`**
 
-A Gate-3A execution was requested 2026-07-16, but the "owner-approved fixture" arrived as **unpopulated placeholder tokens** (`<ROOM>`, `<NAME>`, `<RESERVATION_OR_UNKNOWN>`, `<FOLIO>`, `<AMOUNT_MINOR>`, `<CURRENCY>`, `<EXPONENT>`, `<CONTACT>`, `<WINDOW>` — only the three `YES` confirmations were real). Per the runbook's pre-send gates (§D 4–6, 10) and abort conditions, Gate 3A **aborted before opening any connection**. No `PS` was built or sent; nothing was resolved; no Front Office coordination was possible. See "Gate 3A — Execution Attempt" below.
+Two Gate-3A execution requests (2026-07-16) both aborted **before any connection or `PS`**. Attempt #1: fixtures were placeholder tokens. Attempt #2 (auto-select any in-house room, debit 1.00): the Protel-side **currency/exponent is not determinable from any read-only evidence** (FIAS carries no currency; appliance has no PMS config; supplied values were placeholders) — so the owner's own §2 currency guard mandates abort — and the run also removed the mandatory net-zero folio-correction path for a real guest. No `PS` built or sent; no guest selected. See "Gate 3A — Execution Attempt #2" below.
 
 The legacy-server (`172.21.96.150`) SSH inspection is **cancelled** — not required. Socket-Server collision safety is handled **in-band at test start**: accept + opening `LS` = free slot; keep that connection for the whole run; refusal / no `LS` ⇒ abort without displacing (see "Socket-Server collision clearance"). Gate 3A is now blocked **only** on the real financial/test fixtures.
 
@@ -390,7 +390,26 @@ The legacy-server (`172.21.96.150`) SSH investigation is **cancelled and out of 
 
 This replaces any pre-run legacy-connector reconciliation: collision safety is proven at test time by the server's own admission control, not by inspecting the old server.
 
-## Gate 3A — Execution Attempt (2026-07-16): ABORTED at fixture pre-gate (no PS sent)
+## Gate 3A — Execution Attempt #2 (2026-07-16): ABORTED at the currency guard (no connection, no PS sent)
+
+A second Gate-3A execution was requested — this time authorizing auto-selection of any in-house room and a 1.00 debit — but it **aborts before opening any connection**, on the owner's own §2 currency guard, and with a flagged safety regression. **No FIAS connection opened, no guest selected, no `PS` built or sent.**
+
+**Primary blocker — Protel-side exponent/currency is NOT determinable (owner's §2 guard: "if the exponent cannot be determined safely, abort before PS"):**
+
+- the FIAS wire carries **no currency field** and no accounting metadata (the `GI/GC` feed is room/reservation/name/dates only) — so currency/exponent cannot be read from a FIAS session;
+- the appliance has **no PMS configuration** (`pms_providers` = 0) — nothing to read there;
+- the legacy Protel server is out of scope and there is no Protel-admin access;
+- the values supplied in the request are the placeholder tokens `<CURRENCY>` / `<EXPONENT>`, **not** confirmed values, and the instruction is conditional ("*if* the confirmed exponent is 2, TA must be 100").
+
+Guessing exponent = 2 and sending `TA100` would be an unsafe assumption (if the real exponent were 3, 1.00 = `TA1000`; if 0, `TA1`) — exactly what §2 forbids ("Do not send `TA1` when the intention is 1.00"). Therefore: **abort before PS.** Connecting first was declined because it cannot resolve the exponent and would needlessly expose a real guest's personal data.
+
+**Secondary concern (flagged):** this run auto-targets a **random real in-house guest**, **forbids reversal** (§6), and provides **no Front Office correction path** — so the mandatory net-zero restoration from the approved design is absent, and a real, non-consenting guest would carry an uncorrected `Gate3A Test` charge. This is a material safety regression versus the frozen plan.
+
+**Requested return items:** redacted RN/G# — **none** (no guest selected, no connection); in-house confirmation — **N/A**; confirmed currency/exponent — **NOT determinable** (see above); allocated `P#` — **none**; `PS`/`PA` — **none sent**; `PA` status/response time — **N/A**; folio placement — **N/A (nothing posted)**; only-one-PS/no-retry — **N/A (zero PS)**.
+
+**To run Gate 3A safely, supply the two missing essentials:** (1) the **confirmed Protel Folio currency and exponent** (a Finance/Protel fact, not a placeholder), so `TA` for 1.00 is exact; and (2) a **correction/cleanup path** for the real guest's folio (Front Office contact to record before/after and remove the test debit), restoring net-zero. With those, the run proceeds per the readiness pack below.
+
+## Gate 3A — Execution Attempt #1 (2026-07-16): ABORTED at fixture pre-gate (no PS sent)
 
 Gate-3A execution was requested. It **aborted before any connection** because the required test fixtures were supplied as **placeholder tokens, not real values**. No FIAS connection was opened, no reservation resolved, no `PS` built or transmitted, and no Front Office coordination occurred. This is the correct, safe outcome: a real financial debit must never be posted against invented/placeholder room/reservation/amount values or without live Front Office supervision.
 
