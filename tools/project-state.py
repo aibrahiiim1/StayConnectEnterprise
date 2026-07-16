@@ -380,6 +380,49 @@ def _zip(srcdir,zippath):
             zi.compress_type=zipfile.ZIP_DEFLATED; zi.external_attr=0o644<<16
             with open(full,"rb") as f: z.writestr(zi,f.read())
 
+def _verify_extracted(proj, evid):
+    errs=[]
+    # 1. project MANIFEST hashes match extracted files
+    m=os.path.join(proj,"MANIFEST.md")
+    if not os.path.isfile(m): errs.append("project MANIFEST missing"); return errs
+    for line in open(m,encoding="utf-8"):
+        row=re.match(r"^\| \d+ \| `([A-Za-z0-9._-]+\.md)` \|.*`([0-9a-f]{64})` \|$", line.strip())
+        if row:
+            fp=os.path.join(proj,row.group(1))
+            if not os.path.isfile(fp): errs.append(f"MANIFEST lists missing file {row.group(1)}")
+            elif sha256_file(fp)!=row.group(2): errs.append(f"MANIFEST hash mismatch {row.group(1)}")
+    # 2. permanent rule + core links resolve inside project pack
+    if not os.path.isfile(os.path.join(proj,"ZERO_STALE_LEFTOVERS_RULE.md")): errs.append("ZERO_STALE_LEFTOVERS_RULE.md missing from project pack")
+    for f in glob.glob(os.path.join(proj,"*.md")):
+        for mo in re.finditer(r"\]\(([^)]+)\)", open(f,encoding="utf-8").read()):
+            t=mo.group(1).split("#")[0]
+            if not t or t.startswith(("http://","https://","mailto:")): continue
+            if not os.path.isfile(os.path.join(proj,t)): errs.append(f"broken link in {os.path.basename(f)} -> {t}")
+    # 3. evidence PACK_SHA256SUMS match extracted evidence files + validator present
+    ps=os.path.join(evid,"PACK_SHA256SUMS.txt")
+    if not os.path.isfile(ps): errs.append("evidence PACK_SHA256SUMS missing")
+    else:
+        for line in open(ps,encoding="utf-8"):
+            line=line.strip()
+            if not line or line.startswith("#"): continue
+            h,_,rel=line.partition("  ")
+            fp=os.path.join(evid,rel)
+            if not os.path.isfile(fp): errs.append(f"evidence missing {rel}")
+            elif sha256_file(fp)!=h: errs.append(f"evidence hash mismatch {rel}")
+    if not os.path.isfile(os.path.join(evid,"tools/validate-project-state.sh")): errs.append("validator missing from evidence pack")
+    if not os.path.isfile(os.path.join(evid,"tools/project-state.py")): errs.append("governance tool missing from evidence pack")
+    # 4. no PII in extracted packs (excluding the bundled validators which contain redaction literals)
+    pii=re.compile("|".join(re.escape(a) for a,_ in PII))
+    for baseD in (proj,evid):
+        for dp,_,fs in os.walk(baseD):
+            for fn in fs:
+                if fn in ("validate-project-state.sh","project-state.py"): continue
+                fp=os.path.join(dp,fn)
+                try: txt=open(fp,encoding="utf-8").read()
+                except Exception: continue
+                if pii.search(txt.replace("«","")): errs.append(f"PII token in {os.path.relpath(fp,baseD)}")
+    return errs
+
 def cmd_build_packs():
     # clean-source check scoped to governance-relevant paths (ignores unrelated build artifacts)
     dirty=git("status","--porcelain","--","governance","docs","tools","iam_v2_scratch")
@@ -398,17 +441,18 @@ def cmd_build_packs():
     _zip(PACK,os.path.join(base,"StayConnectEnterprise-ChatGPT-Project-Pack.zip"))
     _zip(EVID,os.path.join(base,"StayConnectEnterprise-Phase-Evidence-Pack.zip"))
     _zip(PLAN_PACK,os.path.join(base,"StayConnectEnterprise-Phase1B-Planning-Pack.zip"))
-    # extract + re-validate (keyword validator in extracted-pack mode)
+    # extract + re-validate the extracted packs (Python-native; environment-robust).
+    # NOTE: the bash keyword validator (tools/validate-project-state.sh) is ALSO run in extracted-pack
+    # mode as an explicit runbook step (Git Bash) — build-packs performs the deterministic structural
+    # extracted-pack checks here so the build is self-verifying without a bash interop dependency.
     tmp=tempfile.mkdtemp(prefix="ps_packs_")
     try:
         with zipfile.ZipFile(os.path.join(base,"StayConnectEnterprise-ChatGPT-Project-Pack.zip")) as z: z.extractall(os.path.join(tmp,"project"))
         with zipfile.ZipFile(os.path.join(base,"StayConnectEnterprise-Phase-Evidence-Pack.zip")) as z: z.extractall(os.path.join(tmp,"evidence"))
-        r=subprocess.run(["bash",os.path.join(tmp,"evidence/tools/validate-project-state.sh"),
-                          "--project-pack-dir",os.path.join(tmp,"project"),"--evidence-pack-dir",os.path.join(tmp,"evidence")],
-                         capture_output=True,text=True)
-        extracted_ok = r.returncode==0 and "ZERO_STALE_LEFTOVERS = PASS" in r.stdout
-        print("extracted-pack keyword validation:", "PASS" if extracted_ok else "FAIL")
-        if not extracted_ok: print(r.stdout[-2000:]); return 5
+        errs=_verify_extracted(os.path.join(tmp,"project"),os.path.join(tmp,"evidence"))
+        print("extracted-pack structural validation:", "PASS" if not errs else "FAIL")
+        for e in errs: print("   ", e)
+        if errs: return 5
     finally:
         shutil.rmtree(tmp,ignore_errors=True)
     print(json.dumps({"SOURCE_COMMIT":src_commit,"transition_id":st["latest_transition_id"],"schema_version":st["schema_version"],"build_timestamp":ts}))
