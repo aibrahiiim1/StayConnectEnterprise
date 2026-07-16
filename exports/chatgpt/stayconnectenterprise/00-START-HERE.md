@@ -2,7 +2,7 @@
 
 **Read this file first.** It is the orientation for an AI consultant continuing work on StayConnect Enterprise. It summarizes the current, authoritative state; the individual documents in this pack are the detailed sources. Where this summary and a copied source document disagree, follow the **source-of-truth precedence** in §12.
 
-**Source documentation baseline commit:** `79bf3e8` (`docs(stayconnect): apply PO-approved folio fail-closed amendment; HA/cutover truthfulness`).
+**Source documentation baseline commit:** `22a2e15` (`feat(iam_v2): Phase 1A LIVE-DARK created + verified in production stayconnect_site`).
 **Project-pack export commit:** the commit that adds/updates this pack (later than `4a1adc5`).
 **Export date:** 2026-07-16.
 
@@ -23,14 +23,15 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 ## 3. Current project phase & status
 
 - **Phase 0 (IAM redesign architecture contract + live PMS validation): FINAL and CLOSED** — approved by the Product Owner **2026-07-16**.
-- **Phase 1A (clean-slate core domain + persistence foundation): the current phase.** Its execution plan is written and its status is **`READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`**.
-- **Phase 1A is NOT implemented.** No migrations, schema, feature code, services, or deployment for the redesign exist yet. (The *currently deployed* production system — vouchers, guest accounts, max-devices, validity-window metering — is a **separate prior delivery** that remains live and untouched.)
+- **Phase 1A (clean-slate IAM core + persistence): the current phase.** Maturity: **SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED (2026-07-16, 18/18 acceptance).**
+- **Phase 1A live-dark is created, NOT cut over.** The isolated `iam_v2` schema (49 tables, fingerprint `bd75026f`, 0 rows) exists **dark** in production `stayconnect_site`: no service reads/writes it, no DSN/`search_path` change, public schema unchanged, services active. NOT deployed, NOT cut over, NOT live accepted, no IAM data migration, no Phase 1B. (The currently deployed voucher/guest-account system is a separate prior delivery, live and untouched.)
 
 ## 4. Completed & live-verified milestones
 
 - **Protel FIAS Gate 3A — PASS (2026-07-16):** one supervised, controlled **USD 1.00** folio debit against **Coral Sea Holiday Village / Hotel ID 3** was executed and **verified end-to-end** by Front Office: protocol accepted (`PA ASOK`, matched by PMS Interface + `P#`), correct **guest folio**, correct **`SO=WIFI` revenue mapping**, then **manually corrected** back to the **exact original balance**. (Guest identifiers redacted in this pack.)
 - Verified FIAS behavior: `LS→LD→LR→LA` startup sequence; live `GI/GC/GO` feed + read-only `DR` resync; mandatory `RN`+`G#` folio targeting; production-grounded `PS`/`PA` field order and `AS` statuses; **single active-client slot** per interface; `P#` is a **protocol-attempt reference, not business idempotency**.
 - Phase-0 IAM architecture contract fully specified and FINAL: domain model, canonical DDL, invariants, state machines, RBAC, financial safety, offline/restore.
+- **Phase 1A `iam_v2` — scratch-verified (99/99), offline-real-schema-verified, and PRODUCTION LIVE-DARK created + verified (18/18, 2026-07-16):** 49 tables (catalog fingerprint `bd75026f`, identical across scratch/offline/production), dark in `stayconnect_site`, public schema unchanged, services active. Not cut over.
 
 ## 5. Permanent architecture decisions (do not relitigate)
 
@@ -69,7 +70,7 @@ Build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL s
 
 ## 9. Next authorized action
 
-**Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan** (`READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`). Phase 1A is **NOT started**; no implementation is currently authorized. **Plan approval authorizes scratch/test implementation only** (a dedicated disposable database) — **live-database `iam_v2` creation and cutover need later, separate Product-Owner approvals** (see the 14-step approval ladder in the plan §7a/§11). Nothing downstream (1B credential/portal cutover, packages, stay domain, financial posting execution) is authorized yet.
+**Product-Owner review of the Phase 1A LIVE-DARK acceptance** (`StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`, 18/18) — **before any Phase 1B authorization**. The dark `iam_v2` schema is created + verified in production but **NOT cut over**; no service reads/writes it, no DSN/`search_path` change. Phase 1B (credential/portal, dark/flagged), cutover, IAM data migration, and legacy cleanup each need their **own** separate PO approval (plan §7a/§11 ladder). Nothing downstream is authorized yet.
 
 ## 10. Forbidden until explicitly approved
 

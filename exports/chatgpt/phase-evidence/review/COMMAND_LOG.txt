@@ -1,0 +1,175 @@
+>>> run.sh fresh (marker + MG-0..MG-9)
+NOTICE:  relation "_scratch_marker" already exists, skipping
+NOTICE:  drop cascades to 60 other objects
+DETAIL:  drop cascades to table iam_v2.pms_interfaces
+drop cascades to table iam_v2.pms_interface_revisions
+drop cascades to table iam_v2.pms_interface_secret_generations
+drop cascades to table iam_v2.guest_network_pms_map
+drop cascades to table iam_v2.pms_interface_pnumber_seq
+drop cascades to table iam_v2.pms_source_conflicts
+drop cascades to table iam_v2.service_plans
+drop cascades to table iam_v2.service_plan_revisions
+drop cascades to table iam_v2.internet_packages
+drop cascades to table iam_v2.internet_package_revisions
+drop cascades to table iam_v2.package_eligibility_rules
+drop cascades to table iam_v2.package_grant_tiers
+drop cascades to table iam_v2.package_settlement_mappings
+drop cascades to table iam_v2.site_checkout_grace_config
+drop cascades to table iam_v2.guest_principals
+drop cascades to table iam_v2.guest_principal_identities
+drop cascades to table iam_v2.guest_access_accounts
+drop cascades to table iam_v2.voucher_code_key_generations
+drop cascades to table iam_v2.voucher_batches
+drop cascades to table iam_v2.vouchers
+drop cascades to table iam_v2.stays
+drop cascades to table iam_v2.stay_guests
+drop cascades to table iam_v2.folios
+drop cascades to table iam_v2.stay_folios
+drop cascades to table iam_v2.stay_events
+drop cascades to table iam_v2.stay_links
+drop cascades to table iam_v2.post_stay_profiles
+drop cascades to table iam_v2.auth_contexts
+drop cascades to table iam_v2.offer_quotes
+drop cascades to table iam_v2.purchases
+drop cascades to table iam_v2.settlements
+drop cascades to table iam_v2.devices
+drop cascades to table iam_v2.device_network_appearances
+drop cascades to table iam_v2.entitlements
+drop cascades to table iam_v2.entitlement_adjustments
+drop cascades to table iam_v2.entitlement_transfers
+drop cascades to table iam_v2.entitlement_devices
+drop cascades to table iam_v2.sessions
+drop cascades to table iam_v2.accounting_records
+drop cascades to table iam_v2.session_counter_watermarks
+drop cascades to table iam_v2.pms_postings
+drop cascades to table iam_v2.posting_outbox
+drop cascades to table iam_v2.payment_transactions
+drop cascades to table iam_v2.posting_attempts
+drop cascades to table iam_v2.posting_attempt_events
+drop cascades to table iam_v2.posting_review_actions
+drop cascades to table iam_v2.financial_epoch
+drop cascades to table iam_v2.compliance_archives
+drop cascades to table iam_v2.auth_resolutions
+drop cascades to function iam_v2.trg_reject_update_delete()
+drop cascades to function iam_v2.trg_secret_gen_guard()
+drop cascades to function iam_v2.trg_posting_attempt_oneway()
+drop cascades to function iam_v2.trg_entitlement_guard()
+drop cascades to function iam_v2.apply_adjustment(uuid,text,text,uuid,text)
+drop cascades to function iam_v2.trg_posting_charge_gate()
+drop cascades to function iam_v2.ns_device_slot(text)
+drop cascades to function iam_v2.ns_capacity(text)
+drop cascades to function iam_v2.reserve_device_slot(uuid,uuid,text,text,integer)
+drop cascades to function iam_v2.ingest_sample(uuid,bigint,bigint,bigint,integer)
+drop cascades to function iam_v2.close_session(uuid,text)
+  fixture ok
+    MG0: duplicate pre-check rows=0
+    MG0: CREATE UNIQUE INDEX CONCURRENTLY (autocommit)
+    MG0: verify indisvalid=true indisready=true exact_def=true
+  MG0_OK
+  apply mg1_pms_interface_core
+  apply mg2_plans_packages
+  apply mg3_identities_credentials
+  apply mg4_stay_domain
+  apply mg5_auth_commerce
+  apply mg6_entitlements_devices_sessions
+  apply mg7_postings_payments
+  apply mg8_resolution_aux
+  apply mg9_engine
+UP_OK
+>>> seed.sql
+BEGIN
+INSERT 0 1
+INSERT 0 2
+UPDATE 1
+INSERT 0 1
+INSERT 0 1
+UPDATE 1
+INSERT 0 1
+INSERT 0 1
+UPDATE 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 3
+INSERT 0 1
+COMMIT
+>>> tests.sh
+>>> tests_extra.sh
+>>> guard_tests.sh
+>>> roles_apply.sh (owner-owned build)
+NOTICE:  drop cascades to 60 other objects
+DETAIL:  drop cascades to table iam_v2.pms_interfaces
+drop cascades to table iam_v2.pms_interface_revisions
+drop cascades to table iam_v2.pms_interface_secret_generations
+drop cascades to table iam_v2.guest_network_pms_map
+drop cascades to table iam_v2.pms_interface_pnumber_seq
+drop cascades to table iam_v2.pms_source_conflicts
+drop cascades to table iam_v2.service_plans
+drop cascades to table iam_v2.service_plan_revisions
+drop cascades to table iam_v2.internet_packages
+drop cascades to table iam_v2.internet_package_revisions
+drop cascades to table iam_v2.package_eligibility_rules
+drop cascades to table iam_v2.package_grant_tiers
+drop cascades to table iam_v2.package_settlement_mappings
+drop cascades to table iam_v2.site_checkout_grace_config
+drop cascades to table iam_v2.guest_principals
+drop cascades to table iam_v2.guest_principal_identities
+drop cascades to table iam_v2.guest_access_accounts
+drop cascades to table iam_v2.voucher_code_key_generations
+drop cascades to table iam_v2.voucher_batches
+drop cascades to table iam_v2.vouchers
+drop cascades to table iam_v2.stays
+drop cascades to table iam_v2.stay_guests
+drop cascades to table iam_v2.folios
+drop cascades to table iam_v2.stay_folios
+drop cascades to table iam_v2.stay_events
+drop cascades to table iam_v2.stay_links
+drop cascades to table iam_v2.post_stay_profiles
+drop cascades to table iam_v2.auth_contexts
+drop cascades to table iam_v2.offer_quotes
+drop cascades to table iam_v2.purchases
+drop cascades to table iam_v2.settlements
+drop cascades to table iam_v2.devices
+drop cascades to table iam_v2.device_network_appearances
+drop cascades to table iam_v2.entitlements
+drop cascades to table iam_v2.entitlement_adjustments
+drop cascades to table iam_v2.entitlement_transfers
+drop cascades to table iam_v2.entitlement_devices
+drop cascades to table iam_v2.sessions
+drop cascades to table iam_v2.accounting_records
+drop cascades to table iam_v2.session_counter_watermarks
+drop cascades to table iam_v2.pms_postings
+drop cascades to table iam_v2.posting_outbox
+drop cascades to table iam_v2.payment_transactions
+drop cascades to table iam_v2.posting_attempts
+drop cascades to table iam_v2.posting_attempt_events
+drop cascades to table iam_v2.posting_review_actions
+drop cascades to table iam_v2.financial_epoch
+drop cascades to table iam_v2.compliance_archives
+drop cascades to table iam_v2.auth_resolutions
+drop cascades to function iam_v2.trg_reject_update_delete()
+drop cascades to function iam_v2.trg_secret_gen_guard()
+drop cascades to function iam_v2.trg_posting_attempt_oneway()
+drop cascades to function iam_v2.trg_entitlement_guard()
+drop cascades to function iam_v2.apply_adjustment(uuid,text,text,uuid,text)
+drop cascades to function iam_v2.trg_posting_charge_gate()
+drop cascades to function iam_v2.ns_device_slot(text)
+drop cascades to function iam_v2.ns_capacity(text)
+drop cascades to function iam_v2.reserve_device_slot(uuid,uuid,text,text,integer)
+drop cascades to function iam_v2.ingest_sample(uuid,bigint,bigint,bigint,integer)
+drop cascades to function iam_v2.close_session(uuid,text)
+psql:<stdin>:11: NOTICE:  role "iam_v2_migrator" has already been granted membership in role "iam_v2_owner" by role "postgres"
+NOTICE:  schema "iam_v2" already exists, skipping
+ROLES_APPLY_OK
+>>> role_tests.sh
+>>> inventory.sh
+ERROR:  column reference "oid" is ambiguous
+LINE 1: ...LECT tgrelid::regclass::text, tgname, pg_get_triggerdef(oid)
+                                                                   ^
+>>> idempotency.sh
+>>> offline_real.sh

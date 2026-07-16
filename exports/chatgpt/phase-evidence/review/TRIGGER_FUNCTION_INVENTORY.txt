@@ -1,0 +1,26 @@
+# TRIGGERS
+iam_v2.accounting_records	ao_accounting	CREATE TRIGGER ao_accounting BEFORE DELETE OR UPDATE ON iam_v2.accounting_records FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete()
+iam_v2.entitlement_adjustments	ao_adjust	CREATE TRIGGER ao_adjust BEFORE DELETE OR UPDATE ON iam_v2.entitlement_adjustments FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete()
+iam_v2.entitlements	ent_guard	CREATE TRIGGER ent_guard BEFORE INSERT OR UPDATE ON iam_v2.entitlements FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_entitlement_guard()
+iam_v2.internet_package_revisions	imm_pkg_rev	CREATE TRIGGER imm_pkg_rev BEFORE DELETE OR UPDATE ON iam_v2.internet_package_revisions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete()
+iam_v2.pms_interface_revisions	imm_pms_rev	CREATE TRIGGER imm_pms_rev BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_revisions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete()
+iam_v2.pms_interface_secret_generations	sg_guard	CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_generations FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_secret_gen_guard()
+iam_v2.pms_postings	ao_postings	CREATE TRIGGER ao_postings BEFORE DELETE OR UPDATE ON iam_v2.pms_postings FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete()
+iam_v2.pms_postings	charge_gate	CREATE TRIGGER charge_gate BEFORE INSERT ON iam_v2.pms_postings FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_posting_charge_gate()
+iam_v2.posting_attempt_events	ao_pa_events	CREATE TRIGGER ao_pa_events BEFORE DELETE OR UPDATE ON iam_v2.posting_attempt_events FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete()
+iam_v2.posting_attempts	pa_oneway	CREATE TRIGGER pa_oneway BEFORE DELETE OR UPDATE ON iam_v2.posting_attempts FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_posting_attempt_oneway()
+iam_v2.posting_review_actions	ao_review	CREATE TRIGGER ao_review BEFORE DELETE OR UPDATE ON iam_v2.posting_review_actions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete()
+iam_v2.service_plan_revisions	imm_plan_rev	CREATE TRIGGER imm_plan_rev BEFORE DELETE OR UPDATE ON iam_v2.service_plan_revisions FOR EACH ROW EXECUTE FUNCTION iam_v2.trg_reject_update_delete()
+
+# FUNCTIONS
+apply_adjustment	p_ent uuid, p_field text, p_new text, p_actor uuid, p_reason text	void
+close_session	p_session uuid, p_reason text DEFAULT 'logout'::text	text
+ingest_sample	p_session uuid, p_seq bigint, p_up bigint, p_down bigint, p_epoch integer DEFAULT 1	text
+ns_capacity	p text	bigint
+ns_device_slot	p text	bigint
+reserve_device_slot	p_ent uuid, p_dev uuid, p_cred text, p_appliance text, p_max integer	text
+trg_entitlement_guard		trigger
+trg_posting_attempt_oneway		trigger
+trg_posting_charge_gate		trigger
+trg_reject_update_delete		trigger
+trg_secret_gen_guard		trigger

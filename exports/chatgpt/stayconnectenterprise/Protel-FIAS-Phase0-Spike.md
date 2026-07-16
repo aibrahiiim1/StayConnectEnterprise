@@ -1,8 +1,8 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-> **Export note:** guest-linked identifiers (room number, reservation `G#`, and identity fingerprints) are **redacted** in this exported copy for external sharing; all technical protocol/financial findings are preserved verbatim.
+> **Export note:** guest-linked identifiers redacted for external sharing; technical findings preserved verbatim.
 
-**Spike status: `GATE3A_CLOSED — PASS. PROTOCOL ACCEPTED, CORRECT FOLIO VERIFIED, REVENUE MAPPING VERIFIED, MANUAL CLEANUP VERIFIED (P#900002 / Room «REDACTED» / G#«RES-REDACTED»). Gates 3B–3D NOT started.`**
+**Spike status: `GATE3A_CLOSED — PASS. PROTOCOL ACCEPTED, CORRECT FOLIO VERIFIED, REVENUE MAPPING VERIFIED, MANUAL CLEANUP VERIFIED (P#900002 / Room «ROOM-REDACTED» / G#«RES-REDACTED»). Gates 3B–3D NOT started.`**
 
 ### Gate 3A — CLOSURE (Front Office verified, 2026-07-16)
 
@@ -10,7 +10,7 @@ Product owner completed out-of-band Front Office verification for **Attempt #5 (
 
 | Verification item | Result |
 |---|---|
-| Room «REDACTED» / Reservation G#«RES-REDACTED» received the USD 1.00 debit | **YES** |
+| Room «ROOM-REDACTED» / Reservation G#«RES-REDACTED» received the USD 1.00 debit | **YES** |
 | Debit appeared on the **correct guest Folio** | **YES** |
 | `SO=WIFI` posted to the **intended Internet revenue mapping** | **YES** |
 | Front Office **manually corrected/removed** the USD 1.00 debit | **YES** |
@@ -115,7 +115,7 @@ Phase 0 is FINAL, but implementation remains forbidden until the **Phase 1A plan
 ---
 
 
-**Attempt #5 (2026-07-16, owner-selected Room «REDACTED»):** owner explicitly selected **Room «REDACTED»** (no redaction of the room number authorized). Full `LS→LD(IFPB/V#1.13/RT4)→LR(GI/GC/GO)` handshake, incoming `LS`/`LA` acked with `LA|`, read-only `DR` resync returned `DS` + **365 in-house records** ending with an explicit **`DE`**; Room «REDACTED» resolved to a valid `G#` from an in-house `GI`, not cleared by any `GO`. Exactly **one** `PS` (`TA100`/`PTD`/`SOWIFI`/`WSSTAYCONNECT`/`CTGate3A Test`/**`P#900002`**) sent with **zero retries**; **`PA ASOK` matched by Interface + `P#` in 93 ms**. `P#900001` (Attempt #4) was NOT reused. Result: `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED`. The resolved `G#` was returned directly to the product owner and is deliberately NOT stored in Git/Markdown. Guest name never decoded or stored. See "Execution Attempt #5" below.
+**Attempt #5 (2026-07-16, owner-selected Room «ROOM-REDACTED»):** owner explicitly selected **Room «ROOM-REDACTED»** (no redaction of the room number authorized). Full `LS→LD(IFPB/V#1.13/RT4)→LR(GI/GC/GO)` handshake, incoming `LS`/`LA` acked with `LA|`, read-only `DR` resync returned `DS` + **365 in-house records** ending with an explicit **`DE`**; Room «ROOM-REDACTED» resolved to a valid `G#` from an in-house `GI`, not cleared by any `GO`. Exactly **one** `PS` (`TA100`/`PTD`/`SOWIFI`/`WSSTAYCONNECT`/`CTGate3A Test`/**`P#900002`**) sent with **zero retries**; **`PA ASOK` matched by Interface + `P#` in 93 ms**. `P#900001` (Attempt #4) was NOT reused. Result: `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED`. The resolved `G#` was returned directly to the product owner and is deliberately NOT stored in Git/Markdown. Guest name never decoded or stored. See "Execution Attempt #5" below.
 
 **Attempt #4 (2026-07-16):**
 
@@ -507,9 +507,9 @@ The legacy-server (`172.21.96.150`) SSH investigation is **cancelled and out of 
 
 This replaces any pre-run legacy-connector reconciliation: collision safety is proven at test time by the server's own admission control, not by inspecting the old server.
 
-## Gate 3A — Execution Attempt #5 (2026-07-16): EXECUTED — owner-selected Room «REDACTED», one debit, PA ASOK
+## Gate 3A — Execution Attempt #5 (2026-07-16): EXECUTED — owner-selected Room «ROOM-REDACTED», one debit, PA ASOK
 
-Owner-directed test: the product owner **explicitly selected Room «REDACTED»** and authorized recording the room number in this document (guest name still forbidden in Git/Markdown; the resolved `G#` returned directly to the owner, not stored here).
+Owner-directed test: the product owner **explicitly selected Room «ROOM-REDACTED»** and authorized recording the room number in this document (guest name still forbidden in Git/Markdown; the resolved `G#` returned directly to the owner, not stored here).
 
 **Handshake fix vs earlier attempts:** the PMS retransmits its opening `LS` and does **not** advance to `LA` unless the client (a) sends `LS→LD(IFPB/V#1.13/RT4)→LR` immediately on connect — as the production connector does — and (b) acks incoming `LS`/`LA` with a bare `LA|`. Gating on a client-side "reach LA before proceeding" milestone stalled the link; mirroring the connector and driving a `DR` resync completed it. (A prior harness process also had to be reaped because it held the PMS's single-client slot open.)
 
@@ -517,9 +517,9 @@ Owner-directed test: the product owner **explicitly selected Room «REDACTED»**
 
 - Connect; sent `LS`, `LD (IFPB/V#1.13/RT4)`, `LR(GI/GC/GO)` immediately. Peer `LS`/`LA` acked with `LA|`.
 - Read-only **`DR` resync** → `DS` + **365 in-house records** → explicit **`DE`** (full roster, complete).
-- **Room «REDACTED»** matched in an in-house `GI` with a valid `G#`; **not** cleared by any `GO`/checkout in the roster.
+- **Room «ROOM-REDACTED»** matched in an in-house `GI` with a valid `G#`; **not** cleared by any `GO`/checkout in the roster.
 
-**Pre-send verification (all satisfied):** `RN==«ROOM-REDACTED»`; in-house; valid `G#`; `RN`+`G#` same current Stay on Hotel ID 3; not cleared by `GO`/checkout; no prior UNKNOWN posting for Room «REDACTED» (Attempt #4 targeted a different room); `TA==100`.
+**Pre-send verification (all satisfied):** `RN==«ROOM-REDACTED»`; in-house; valid `G#`; `RN`+`G#` same current Stay on Hotel ID 3; not cleared by `GO`/checkout; no prior UNKNOWN posting for Room «ROOM-REDACTED» (Attempt #4 targeted a different room); `TA==100`.
 
 **The one debit (exactly one `PS`, zero retries):**
 
@@ -536,7 +536,7 @@ PA|RN«ROOM-REDACTED»|SOWIFI|P#900002|WSSTAYCONNECT|ASOK|      # matched by PMS
 
 **Owner cleanup correlation keys** (used to locate + remove in Protel out-of-band): `RN=«ROOM-REDACTED»`, `P#=900002`, `WS=STAYCONNECT`, `SO=WIFI`, `CT="Gate3A Test"`, amount USD 1.00 (`TA100`), posted ~`2026-07-16T05:53:03Z`, `PA ASOK`.
 
-**Folio verification: COMPLETE (2026-07-16).** Front Office confirmed the USD 1.00 debit landed on the correct guest Folio (Room «REDACTED» / G#«RES-REDACTED»), `SO=WIFI` mapped to the intended Internet revenue account, the debit was manually removed, and the Folio returned to its exact original balance. See "Gate 3A — CLOSURE" at the top of this document. **Gate 3A verdict: PASS.**
+**Folio verification: COMPLETE (2026-07-16).** Front Office confirmed the USD 1.00 debit landed on the correct guest Folio (Room «ROOM-REDACTED» / G#«RES-REDACTED»), `SO=WIFI` mapped to the intended Internet revenue account, the debit was manually removed, and the Folio returned to its exact original balance. See "Gate 3A — CLOSURE" at the top of this document. **Gate 3A verdict: PASS.**
 
 ## Gate 3A — Execution Attempt #4 (2026-07-16): EXECUTED — one debit, PA ASOK (protocol accepted; folio NOT independently verified)
 

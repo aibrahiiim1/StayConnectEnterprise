@@ -1,0 +1,135 @@
+iam_v2 SCRATCH — A-SERIES + REVIEW EVIDENCE (rev 2, corrected per PO evidence review)
+Disposable container 'iamv2-scratch' 127.0.0.1:55432 db iam_scratch, PostgreSQL 16.14, Docker 29.5.2.
+ALLOWLIST safety guard (marker + ack + loopback + port + prefix; no fallback). NOT live; NOT cut over.
+==========================================================================================
+### CORE SUITE ###
+===== A-SERIES (scratch) =====
+PASS  INV-01 iam_v2 base-table count = 49
+PASS  INV-02 no accidental IAM objects in public (only fixtures + scratch harness tables)
+PASS  INV-03 MG-0 anchor present & valid
+PASS  IMM-01 interface revision UPDATE rejected
+PASS  IMM-02 interface revision DELETE rejected
+PASS  IMM-03 plan revision UPDATE rejected
+PASS  IMM-04 package revision UPDATE rejected
+PASS  AO-01 accounting_records UPDATE rejected
+PASS  AO-02 pms_postings UPDATE rejected (append-only ledger)
+PASS  FK-01 cross-tenant stay->interface rejected
+PASS  FK-02 cross-site folio->interface rejected
+PASS  FK-03 same-namespace child insert accepted (rollback)
+PASS  FOLIO-01 CHARGE under UNSET revision blocked
+PASS  FOLIO-02 no outbox/P# side-effects from blocked CHARGE
+PASS  FOLIO-03 CHARGE under concrete strategy admitted (rollback)
+PASS  FOLIO-04 CHARGE on non-IN_HOUSE stay blocked
+PASS  ENT-01 second live entitlement per voucher rejected
+PASS  ENT-02 no transition out of TERMINATED
+PASS  ENT-03 counter decrease via direct UPDATE rejected
+PASS  ENT-04 audited adjustment decrease allowed + logs
+PASS  ENT-05 cross-subject supersession rejected
+PASS  WIN-01 window_ends_at move without adjustment rejected
+PASS  CNT-01 monotonic counter increase allowed
+PASS  ACC-01 first sample APPLIED
+PASS  ACC-02 duplicate (session,seq) sample = DUPLICATE
+PASS  ACC-03 out-of-order (older seq) = STALE, no double count
+PASS  ACC-04 counter-reset epoch bump handled
+PASS  ACC-05 session close idempotent (2nd = ALREADY_ENDED)
+PASS  DEV-01 first device authorized (count 0 < max 2)
+PASS  DEV-02 over-limit 3rd device rejected (max=2)
+PASS  DEV-03 same-device reconnect = RECONNECT (no slot burn)
+PASS  LN-01 namespaces distinct: dev(11) <> cap(7) for same key
+PASS  LN-02 LN_DEVICE_SLOT constant = hashtextextended(x,11)
+PASS  LN-03 LN_CAPACITY constant = hashtextextended(x,7)
+PASS  PA-01 outcome cannot return to SENDING
+PASS  PA-02 posting_attempts identity immutable (P# change rejected)
+PASS  REV-01 no reversal sender/PT=C function exists
+PASS  CAP-01 (A5) aggregate data-cap terminal transition to TERMINATED/DATA (atomic, one-way)
+PASS  CAP-RESID-01 (A11) rejected admission leaves ZERO residual binding rows
+PASS  SUSP-01 (A9) suspension keeps window; still counts live
+PASS  REOPEN-01 (A10) sample after TERMINATED does not reopen entitlement
+PASS  AGG-01 AGGREGATE_ONLINE_TIME storable but inert (enum only)
+===== RESULT: PASS=42 FAIL=0 =====
+
+### EXTRA SUITE ###
+===== A-SERIES EXTRA (scratch) =====
+PASS  MIG-01 migration up -> 49 iam_v2 tables
+PASS  MIG-02 migration down -> 0 iam_v2 tables
+PASS  MIG-03 migration re-up -> 49 iam_v2 tables (deterministic rebuild)
+PASS  MG0-REC-01 invalid index detected before recovery
+PASS  MG0-REC-02 MG-0 recovery yields VALID index (via DROP+rebuild CONCURRENTLY)
+PASS  RACE-01 device race max=1: exactly one AUTHORIZED
+PASS  RACE-02 device race max=1: exactly one MAX_DEVICES_REACHED
+PASS  RACE-03 one-live-entitlement race: exactly one INSERT wins
+PASS  RACE-04 one-live-entitlement race: exactly one rejected by ent_live_voucher
+PASS  RESTART-01 validity window unchanged across container restart
+PASS  RESTART-02 iam_v2 schema intact after restart (49 tables)
+===== EXTRA RESULT: PASS=11 FAIL=0 =====
+
+### GUARD ALLOWLIST TESTS ###
+===== SAFETY-GUARD ALLOWLIST TESTS =====
+PASS  GUARD-00 correct disposable scratch target ALLOWED
+PASS  GUARD-01 live db name 'stayconnect_site' refused
+PASS  GUARD-02 alternate live-looking 'stayconnect' refused
+PASS  GUARD-03 non-scratch-prefix db 'prod_iam' refused
+PASS  GUARD-04 non-local host (wrong container) refused
+PASS  GUARD-05 wrong port refused
+PASS  GUARD-06 missing ack flag refused
+PASS  GUARD-07 empty db name (empty DSN) refused
+PASS  GUARD-08 malformed db name refused
+PASS  GUARD-09 false marker value refused
+PASS  GUARD-10 missing marker row refused
+PASS  GUARD-11 restored correct marker ALLOWED again
+===== GUARD RESULT: PASS=12 FAIL=0 =====
+
+### ROLE / LEAST-PRIVILEGE TESTS ###
+===== ROLE / LEAST-PRIVILEGE TESTS =====
+PASS  ROLE-01 schema iam_v2 owned by iam_v2_owner (not superuser)
+PASS  ROLE-02 all 49 iam_v2 tables owned by iam_v2_owner
+PASS  ROLE-03 zero iam_v2 tables owned by superuser
+PASS  ROLE-04 iam_v2_migrator is a member of iam_v2_owner (can SET ROLE owner)
+PASS  ROLE-05 iam_v2_svc_scd SELECT denied
+PASS  ROLE-06 iam_v2_svc_scd INSERT denied
+PASS  ROLE-05 iam_v2_svc_edged SELECT denied
+PASS  ROLE-06 iam_v2_svc_edged INSERT denied
+PASS  ROLE-05 iam_v2_svc_acctd SELECT denied
+PASS  ROLE-06 iam_v2_svc_acctd INSERT denied
+PASS  ROLE-05 iam_v2_svc_portald SELECT denied
+PASS  ROLE-06 iam_v2_svc_portald INSERT denied
+PASS  ROLE-05 iam_v2_svc_hoteladm SELECT denied
+PASS  ROLE-06 iam_v2_svc_hoteladm INSERT denied
+PASS  ROLE-07 service roles have 0 privileges on iam_v2 tables
+PASS  ROLE-08 PUBLIC has 0 privileges on iam_v2 tables
+PASS  ROLE-09 PUBLIC (a no-priv role) SELECT denied
+PASS  ROLE-10 default-privileges: service role denied on a NEW owner table
+PASS  ROLE-11 default search_path excludes iam_v2 ("$user", public)
+PASS  ROLE-12 owner can read its own tables (positive control)
+===== ROLE RESULT: PASS=20 FAIL=0 =====
+
+### IDEMPOTENCY / CATALOG EQUALITY ###
+===== MIGRATION IDEMPOTENCY / CATALOG EQUALITY =====
+PASS  IDEM-01 fresh build -> 49 tables
+PASS  IDEM-02 second apply (no down) skips all 9 migrations (idempotent)
+PASS  IDEM-03 catalog fingerprint unchanged after second apply
+PASS  IDEM-04 still 49 tables after second apply
+PASS  IDEM-05 exact catalog equality after fresh rebuild (deterministic)
+fingerprint=bd75026ff6ea5835a1ca8d19051eb257
+===== IDEMPOTENCY RESULT: PASS=5 FAIL=0 =====
+
+### OFFLINE REAL-SCHEMA COMPATIBILITY ###
+===== OFFLINE REAL-SCHEMA COMPATIBILITY =====
+PASS  OFR-01 committed real platform schema (0001..0006) applies clean (schema-only)
+PASS  OFR-02 real public.guest_networks exposes (tenant_id,site_id,id) for the anchor
+PASS  OFR-03 MG-0 anchor builds on real guest_networks (CONCURRENTLY)
+PASS  OFR-04 MG-1..MG-9 build 49 iam_v2 tables on real schema
+PASS  OFR-05 second apply on real schema skips all 9 (idempotent)
+PASS  OFR-06 real-schema catalog fingerprint stable on second apply
+PASS  OFR-07 down drops iam_v2 on real schema (0 tables)
+PASS  OFR-08 re-up on real schema reproduces identical iam_v2 catalog
+PASS  OFR-09 iam_v2 catalog IDENTICAL on fixture DB and real-schema DB
+real-schema iam_v2 fingerprint: bd75026ff6ea5835a1ca8d19051eb257
+===== OFFLINE-REAL RESULT: PASS=9 FAIL=0 =====
+
+### SECRET / GUEST-PII SCAN ###
+SEC-01 secrets/guest-PII patterns in committed artifacts: 0 (want 0)
+SEC-02 POSTGRES_PASSWORD assignments committed: 0 (want 0)
+
+### TOTALS ###
+OVERALL: PASS=99 FAIL=0  (Core + Extra + Guard + Role + Idempotency + Offline-real)

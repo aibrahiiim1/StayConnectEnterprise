@@ -1,6 +1,6 @@
 # StayConnect Internet Access Management — Phase 0 Contract
 
-> **Export note:** guest-linked identifiers (room number, reservation `G#`, and identity fingerprints) are **redacted** in this exported copy for external sharing; all technical protocol/financial findings are preserved verbatim.
+> **Export note:** guest-linked identifiers redacted for external sharing; technical findings preserved verbatim.
 
 **Status: FINAL — Phase 0 CLOSED.** *(2026-07-16 — approved by the Product Owner; previously READY_FOR_FINAL_OWNER_APPROVAL, and before that CONDITIONALLY FROZEN.)*
 
@@ -719,7 +719,7 @@ The legacy Coral Sea Protel wire is authoritative for existing behavior; FidServ
 
 ### 9b. FIAS live validation — Gate 3A CLOSED: PASS (2026-07-16, production-grounded)
 
-The supervised live financial spike executed against **Coral Sea Holiday Village (Hotel ID 3, `150.0.0.18:5003`)** and closed **PASS** with full Front Office verification of a single controlled USD 1.00 `PS` debit (`P#900002`, Room «REDACTED»). Verdict: **PROTOCOL ACCEPTED, CORRECT FOLIO VERIFIED, REVENUE MAPPING VERIFIED, MANUAL CLEANUP VERIFIED.** This retires several `*`-pending assumptions in §9/§9a for this interface class:
+The supervised live financial spike executed against **Coral Sea Holiday Village (Hotel ID 3, `150.0.0.18:5003`)** and closed **PASS** with full Front Office verification of a single controlled USD 1.00 `PS` debit (`P#900002`, Room «ROOM-REDACTED»). Verdict: **PROTOCOL ACCEPTED, CORRECT FOLIO VERIFIED, REVENUE MAPPING VERIFIED, MANUAL CLEANUP VERIFIED.** This retires several `*`-pending assumptions in §9/§9a for this interface class:
 
 - **`PA ASOK` with a mandatory `G#` posts to the correct Guest Folio** — verified end-to-end (correct folio, `SO=WIFI` → intended Internet revenue account, manual removal to exact original balance). `PA` matched by **PMS Interface + `P#`** as specified (§9a rule 2).
 - Full evidence and per-attempt detail: [Protel-FIAS-Phase0-Spike.md](Protel-FIAS-Phase0-Spike.md) "Gate 3A — CLOSURE" and "Execution Attempt #5".
