@@ -1,8 +1,18 @@
 # StayConnect Internet Access Management — Phase 0 Contract
 
-**Status: READY_FOR_FINAL_OWNER_APPROVAL.** *(2026-07-16 — was CONDITIONALLY FROZEN.)*
+**Status: FINAL — Phase 0 CLOSED.** *(2026-07-16 — approved by the Product Owner; previously READY_FOR_FINAL_OWNER_APPROVAL, and before that CONDITIONALLY FROZEN.)*
 
-The Phase-0 **protocol and architecture** validation is complete on already-measured live evidence (see §9b/§9c and `docs/spikes/Protel-FIAS-Phase0-Spike.md`). The contract now awaits **only the product owner's explicit FINAL approval** — it is **not** marked FINAL automatically.
+| Finalization record | Value |
+|---|---|
+| Approval | **Explicit Product-Owner FINAL approval** |
+| Approving role | **Product Owner** |
+| Approval date | **2026-07-16** |
+| Authoritative baseline | contract `ffe2200`, synchronized handoff `6b4721d` |
+| FINAL documentation commit | *established by the commit that carries this status change* |
+| Phase 0 | **CLOSED** |
+| Next authorized activity | **Phase 1A planning** (see [StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md)) — planning only; implementation remains unauthorized until the Phase 1A plan is separately approved |
+
+The Phase-0 **protocol and architecture** validation is complete on already-measured live evidence (see §9b/§9c and `docs/spikes/Protel-FIAS-Phase0-Spike.md`) and is now **FINAL**. The approved architecture, DDL, invariants, limitations, measured FIAS findings, and acceptance requirements below are unchanged by this finalization — only the status advanced.
 
 Phase-0 finalization deliberately separates three distinct validation tiers (§9c):
 
@@ -10,7 +20,7 @@ Phase-0 finalization deliberately separates three distinct validation tiers (§9
 2. **Per-property deployment validation** — a **per-property financial-onboarding checklist** (currency/exponent, package-currency compatibility, `SO=WIFI` mapping, RN+G# targeting, one controlled debit, folio placement, approved cleanup). Aqua Club / Hotel ID 2 lives here — it is a deployment prerequisite, **not** a Phase-0 finalization blocker.
 3. **Post-implementation acceptance testing** — behaviors that **cannot** be measured before their StayConnect components exist (UNKNOWN/Manual-Review posting-engine safety; Checkout & Checkout-Grace on the PMS/Entitlement phase). Preserved as **binding acceptance requirements**, not Phase-0 blockers.
 
-**No feature implementation, schema migration, portal/UI change, PMS production configuration change, cutover, or deployment is authorized until this contract is approved FINAL by the product owner.** READY_FOR_FINAL_OWNER_APPROVAL does **not** unlock implementation.
+**Phase 0 is FINAL and CLOSED. The next authorized activity is Phase 1A *planning only*.** No feature implementation, schema migration, portal/UI change, PMS production configuration change, cutover, or deployment is authorized until the **Phase 1A plan is separately approved** by the product owner. FINAL status closes Phase-0 architecture; it does **not** by itself unlock implementation.
 
 **Scope:** the Internet Access Management domain on the Hotel Appliance (site DB; scd/edged/portald/acctd services). Explicitly out of scope and untouched: appliance enrollment, hardware-bound identity, PKI/mTLS, signed licensing, Central Control Plane boundaries, WAN/LAN configuration, guest VLANs, DHCP/DNS, captive-portal network interception, nftables/traffic-control foundations, updates, remote support, and audit infrastructure.
 
@@ -740,7 +750,7 @@ The earlier closure plan incorrectly gated Phase-0 finalization on product behav
 | 3C | Posting-Engine UNKNOWN safety | Posting Engine, `posting_attempts`/`posting_attempt_events`, `pms_interface_pnumber_seq`, Manual-Review workflow | transmitted request → **UNKNOWN** when no matching `PA`; **no auto-retry**; **no auto-allocated second `P#`**; Manual-Review; external Folio reconciliation; audited `CONFIRM_POSTED`/`RETRY_APPROVED`/`ABANDON`; **no duplicate charge** |
 | 3D | Checkout & Checkout-Grace | Stay/Event persistence, Checkout handler, Post-Stay profile, Checkout-Grace Purchase+Entitlement, session reassignment, accounting cutoff, idempotent event processing | healthy-link checkout; link-down checkout; delayed checkout; **stale-cache refusal**; reconnect+resync; **mandatory Checkout Grace** (no intentional disconnect/re-auth); **effective-checkout-timestamp** accounting split; **repeated-checkout idempotency** |
 
-**Finalization (READY_FOR_FINAL_OWNER_APPROVAL → FINAL) requires only:** the product owner's **explicit final approval** of this corrected contract. Tier-2 (per-property) and Tier-3 (post-implementation) items are **not** finalization blockers — they are, respectively, deployment prerequisites and binding acceptance requirements. Deferred limitations are listed in §9d.
+**Finalization — DONE (2026-07-16):** the product owner gave **explicit FINAL approval** of this corrected contract; Phase 0 is **FINAL and CLOSED**. Tier-2 (per-property) and Tier-3 (post-implementation) items were **not** finalization blockers — they are, respectively, deployment prerequisites and binding acceptance requirements that carry forward past FINAL. Deferred limitations are listed in §9d. Next authorized activity: **Phase 1A planning** (implementation still gated on separate approval of the Phase 1A plan).
 
 ### 9d. Deferred limitations (carried past Phase-0 FINAL)
 
@@ -814,7 +824,7 @@ Manual-review actions (each requires financial-review write **and password re-au
 | **6** | Guest device self-service; optional AGGREGATE_ONLINE_TIME | device-management tests | additive |
 | **7** | Cleanup, final docs/ops manual, full-system re-acceptance (reboot, offline, purge, restore drills) | complete matrix | last blue/green snapshot |
 
-Phases 2 and 3 are parallelizable after 1B.
+Phases 2 and 3 are parallelizable after 1B. The detailed **Phase 1A execution plan** (migration groups, per-object specs, lock-order library, acceptance) is drafted in [StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md) — planning only, pending separate owner approval before implementation.
 
 ## 19. Acceptance & Failure-Drill Matrix
 
@@ -828,4 +838,4 @@ Phases 2 and 3 are parallelizable after 1B.
 
 ---
 
-**End of contract.** Status: **READY_FOR_FINAL_OWNER_APPROVAL** — the Phase-0 protocol/architecture validation is complete and merged (§9b/§9c); the contract awaits **only the product owner's explicit FINAL approval** and is **not** marked FINAL automatically. Per-property financial onboarding (§9c Tier 2, incl. Aqua Club) and post-implementation acceptance (§9c Tier 3 / §9d) are **not** finalization blockers. No implementation work of any kind is authorized before FINAL approval.
+**End of contract.** Status: **FINAL — Phase 0 CLOSED** (Product-Owner approval, 2026-07-16). The Phase-0 protocol/architecture validation is complete and merged (§9b/§9c). Per-property financial onboarding (§9c Tier 2, incl. Aqua Club) and post-implementation acceptance (§9c Tier 3 / §9d) carry forward as deployment prerequisites and binding acceptance requirements, not finalization blockers. **Next authorized activity: Phase 1A planning only** ([StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md)); no implementation, migration, connector, UI, config, or deployment work is authorized until the Phase 1A plan is separately approved.

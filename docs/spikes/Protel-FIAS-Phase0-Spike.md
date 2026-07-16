@@ -37,7 +37,7 @@ Product owner completed out-of-band Front Office verification for **Attempt #5 (
 2. **Per-property deployment validation** — a per-property financial-onboarding checklist; **Aqua Club / Hotel ID 2 lives here**, not as a Phase-0 blocker (§3A below).
 3. **Post-implementation acceptance testing** — behaviors requiring code/schema that do not yet exist (UNKNOWN/Manual-Review; Checkout & Checkout-Grace); preserved as **binding acceptance requirements**, not Phase-0 blockers (§3B below).
 
-Contract status is accordingly **READY_FOR_FINAL_OWNER_APPROVAL** — awaiting only explicit owner FINAL approval (see contract §9c/§9d).
+Contract status is now **FINAL — Phase 0 CLOSED** (Product-Owner approval, 2026-07-16; see contract §9c/§9d). Next authorized activity: Phase 1A planning only.
 
 ### 1. Exact proven scope — Tier 1 (Phase-0 finalization basis; do NOT generalize)
 
@@ -92,13 +92,13 @@ These are **binding acceptance requirements** for later phases, **not** Phase-0 
 
 **3D — Checkout & Checkout-Grace.** *Requires first:* Stay/Event persistence, the Checkout handler, the Post-Stay profile, the Checkout-Grace Purchase+Entitlement, session reassignment, accounting cutoff, and idempotent event processing (contract §3, §16). *Acceptance scenarios (all binding):* healthy-link Checkout; link-down Checkout; delayed Checkout; **stale-cache refusal**; reconnect and resync; **mandatory Checkout Grace**; **no intentional guest disconnect or re-authentication**; **effective-checkout-timestamp** accounting split; **repeated-Checkout idempotency**.
 
-### 4. Phase-0 finalization conditions (READY_FOR_FINAL_OWNER_APPROVAL → FINAL)
+### 4. Phase-0 finalization — DONE (FINAL, Phase 0 CLOSED)
 
-Phase-0 finalization rests on the **Tier-1** evidence above (already measured and merged into contract §9b/§9c). The contract may move to **FINAL** on:
+Phase-0 finalization rested on the **Tier-1** evidence above (measured and merged into contract §9b/§9c). The single condition is met:
 
-- [ ] **explicit final product-owner approval** of the corrected Phase-0 contract.
+- [x] **explicit final product-owner approval** of the corrected Phase-0 contract — **granted 2026-07-16**. Contract status: **FINAL — Phase 0 CLOSED**.
 
-**Not** finalization blockers: Tier-2 per-property onboarding (incl. Aqua Club) and Tier-3 post-implementation acceptance (3C/3D). Deferred limitations are enumerated in contract §9d and repeated here:
+**Not** finalization blockers (carry forward past FINAL): Tier-2 per-property onboarding (incl. Aqua Club) and Tier-3 post-implementation acceptance (3C/3D). Deferred limitations are enumerated in contract §9d and repeated here:
 
 - Hotel ID 2 (Aqua Club) financial Posting **not yet approved** (read-only until its checklist passes);
 - **programmatic reversal disabled** (manual Front Office correction only in v1);
@@ -106,9 +106,9 @@ Phase-0 finalization rests on the **Tier-1** evidence above (already measured an
 - **Checkout-Grace** behavior **pending PMS/Entitlement implementation**;
 - **physical traffic accounting** still requires **live implementation acceptance** (non-zero real-device usage), unprovable at Phase 0.
 
-### 5. Implementation boundary (unchanged)
+### 5. Implementation boundary (Phase 0 FINAL; implementation still gated on Phase 1A plan approval)
 
-Still forbidden until the owner approves the corrected contract as **FINAL**: schema migrations; feature code; production connector development; portal/admin-UI work; service configuration; `pms_providers` creation; deployment. Documentation only. READY_FOR_FINAL_OWNER_APPROVAL does **not** unlock implementation.
+Phase 0 is FINAL, but implementation remains forbidden until the **Phase 1A plan is separately approved**: schema migrations; feature code; production connector development; portal/admin-UI work; service configuration; `pms_providers` creation; deployment. The next authorized activity is **Phase 1A planning only** (documentation) — see [../architecture/StayConnect-IAM-Phase1A-Plan.md](../architecture/StayConnect-IAM-Phase1A-Plan.md).
 
 ---
 

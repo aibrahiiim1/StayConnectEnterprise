@@ -2,16 +2,17 @@
 
 Operational handoff for a future agent or new session working on the Internet Access Management (IAM) redesign. The authoritative design is [StayConnect-IAM-Phase0-Contract.md](../architecture/StayConnect-IAM-Phase0-Contract.md); the live spike record is [Protel-FIAS-Phase0-Spike.md](../spikes/Protel-FIAS-Phase0-Spike.md).
 
-**Authoritative documentation baseline:** commit `ffe2200`.
+**Authoritative documentation baseline:** contract `ffe2200`, synchronized handoff `6b4721d`; **FINAL status set 2026-07-16** (see the FINAL commit in git log).
 
 ## Current Stage
 
-**Phase 0 — Architecture Contract and live PMS validation.** Protocol/architecture validation is **complete**; the contract awaits explicit product-owner FINAL approval.
+**Phase 0 — FINAL and CLOSED (2026-07-16, Product-Owner approved).** Protocol/architecture validation is complete and merged; the contract is approved FINAL. **Next authorized activity: Phase 1A planning only.**
 
 ## Current Status
 
-- **Contract status: `READY_FOR_FINAL_OWNER_APPROVAL`** *(was CONDITIONALLY FROZEN).* It is **not** FINAL yet — it awaits **only** the product owner's explicit FINAL approval. `READY_FOR_FINAL_OWNER_APPROVAL` does **not** unlock implementation.
+- **Contract status: `FINAL` — Phase 0 CLOSED** *(2026-07-16, explicit Product-Owner approval; previously READY_FOR_FINAL_OWNER_APPROVAL, before that CONDITIONALLY FROZEN).* FINAL closes Phase-0 architecture; it does **not** by itself unlock implementation — Phase 1A **planning** is authorized, but Phase 1A **implementation** requires separate approval of the Phase 1A plan.
 - The live Protel FIAS Phase-0 spike is **done**; results are merged into contract §9b/§9c/§9d.
+- The Phase 1A execution plan is drafted in [StayConnect-IAM-Phase1A-Plan.md](../architecture/StayConnect-IAM-Phase1A-Plan.md) — **planning only, not started**.
 - **No feature implementation has started.** No production schema, service, portal/UI, firewall, networking, or PMS configuration change has occurred for this redesign. (The deployed voucher/guest-account/max-devices system is a separate prior delivery and remains live and untouched.)
 
 ## Proven Phase-0 Scope (Tier 1 — the finalization basis)
@@ -78,12 +79,15 @@ Before financial Posting is enabled for **any** Property, that Property must ind
 
 ## Next Authorized Step
 
-1. **Explicit product-owner approval to mark the Phase-0 contract FINAL** (the single remaining finalization condition).
-2. **Then begin Phase 1A only.**
+1. **Phase 1A planning** — review/refine the drafted [Phase 1A execution plan](../architecture/StayConnect-IAM-Phase1A-Plan.md) (clean-slate core domain + persistence foundation).
+2. **Product-owner approval of the Phase 1A plan** — the gate that authorizes Phase 1A implementation.
+3. **Then begin Phase 1A implementation only** (migrations/code), still ahead of Phase 1B and later phases.
 
-Per-property onboarding (Tier 2, incl. Aqua Club) and post-implementation acceptance (Tier 3 / Gates 3C, 3D) are **not** finalization blockers and do **not** precede implementation.
+Per-property onboarding (Tier 2, incl. Aqua Club) and post-implementation acceptance (Tier 3 / Gates 3C, 3D) are **not** Phase-0 finalization blockers; they carry forward as, respectively, a deployment prerequisite and binding acceptance requirements.
 
-## Forbidden Until FINAL Approval
+## Forbidden Until the Phase 1A Plan Is Approved
+
+*(Phase 0 is FINAL, but implementation stays gated on separate approval of the Phase 1A plan.)*
 
 - schema migrations (any DDL for this domain);
 - feature code;
