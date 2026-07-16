@@ -829,8 +829,8 @@ Manual-review actions (each requires financial-review write **and password re-au
 | Phase | Content | Gate | Rollback boundary |
 |---|---|---|---|
 | **0** | This contract signed; **live Protel FIAS spike**; mews/apaleo capability contract tests; measured values merged into §9 | spike artifact + owner approval → contract FINAL | n/a |
-| **1A Core Foundation** | Clean-slate schema in the standby site DB; entitlement engine (window mode, supersession, counters, watermarks); device registry; lock-order library — dark, no user-visible change | A-series acceptance | blue/green swap-back |
-| **1B Credential/Portal Cutover** | Auth contexts; voucher (HMAC/AEAD), account, OTP/social (guest principals) re-pointed; session-after-grant portal flow; controlled reset of disposable test data; cutover | B-series + reboot/offline/purge drills | blue/green swap-back |
+| **1A Core Foundation** | Clean-slate isolated `iam_v2` schema **inside the existing site DB** (no standby/whole-DB swap); entitlement engine (window mode, supersession, counters, watermarks); device registry; lock-order library — dark, no user-visible change | A-series acceptance | drop `iam_v2` / leave dark (pre-cutover) |
+| **1B Credential/Portal Cutover** | Auth contexts; voucher (HMAC/AEAD), account, OTP/social (guest principals) re-pointed; session-after-grant portal flow; controlled reset of disposable test data; cutover | B-series + reboot/offline/purge drills | flip `search_path` back before first write (Boundary A); after first write reverse-migrate / forward-fix (Boundary B) |
 | **2** | Packages, revisions, rules, tiers, quotes; free purchases; portal package selection; grace-config UI | C-series incl. quote races | additive down-migration |
 | **3** | Stay domain: interfaces/revisions/routing, STRICT resolution, stays/sharers/folios/events, room move, **mandatory checkout grace**, reinstatement — no posting | D + F series | additive |
 | **4** | Financial: settlements, postings + outbox lanes, secret generations, payments re-rail, recovery mode, manual review, compliance archive; per-tenant posting enable flag | E + G series | posting flag off |
