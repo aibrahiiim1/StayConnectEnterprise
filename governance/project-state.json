@@ -2,9 +2,17 @@
   "schema_version": "1.0.0",
   "project": "StayConnect Enterprise",
   "_note": "AUTHORITATIVE mutable current-state source. The ONLY place current operational state is defined. Mutate via `tools/project-state.py transition`; validate via `tools/project-state.py validate`; generated status blocks are rendered from here via `tools/project-state.py render`. Do not duplicate current-state wording elsewhere outside generated blocks.",
+  "authoritative_remote": "https://github.com/aibrahiiim1/StayConnectEnterprise.git",
+  "delivery_governance": {
+    "rule_doc": "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md",
+    "manifest_tool": "tools/generate-change-manifest.py",
+    "report_template": "docs/templates/PHASE_FINAL_REPORT_TEMPLATE.md",
+    "default_branch": "master",
+    "branch_strategy": "one complete Phase per branch + one PR (phase/<name>-<purpose>); governance-only uses governance/<purpose>; no direct commits to the protected default branch without explicit PO authorization"
+  },
   "current_phase": "1B",
-  "current_activity": "PHASE_1B_PLAN_CORRECTION_PENDING_APPROVAL",
-  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B PLANNING (corrected plan pending Product-Owner approval; NOT implemented)",
+  "current_activity": "GOVERNANCE_GITHUB_DELIVERY_RULE_PENDING_APPROVAL",
+  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B PLANNING (corrected plan pending Product-Owner approval; NOT implemented); permanent GitHub execution/delivery operating rule applied and pending Product-Owner approval",
   "phases": {
     "0":  { "status": "FINAL_CLOSED",       "title": "IAM redesign architecture contract + live PMS validation", "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)." },
     "1A": { "status": "ACCEPTED_AND_CLOSED","title": "Clean-slate IAM core + persistence (iam_v2)",              "maturity": "ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER" },
@@ -58,7 +66,7 @@
     "MANDATORY Phase-1B prerequisite (Gate P): site-DB services connect as superuser stayconnect; least-privilege roles + credential rotation required before any iam_v2 runtime routing."
   ],
   "allowed_actions": [
-    "Product-Owner approval or rejection of the corrected Phase 1B plan",
+    "Product-Owner approval of this permanent GitHub execution and delivery operating rule and the corrected Phase 1B plan",
     "Read-only inspection and documentation/governance work"
   ],
   "prohibited_actions": [
@@ -71,9 +79,9 @@
     "Network/HA/deployment/topology change; Central changes; legacy cleanup",
     "Guest paid access; Phase 2 or any later Phase"
   ],
-  "next_authorized_action": "Product-Owner approval or rejection of the corrected Phase 1B plan",
+  "next_authorized_action": "Product-Owner approval of this permanent GitHub execution and delivery operating rule and the corrected Phase 1B plan",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
   "privilege_matrix": "docs/architecture/Phase1B-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D9",
-  "latest_transition_id": "T0007"
+  "latest_transition_id": "T0008"
 }

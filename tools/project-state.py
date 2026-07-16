@@ -122,7 +122,8 @@ def cmd_validate(deep=True):
     except Exception as e: print(f"FAIL: project-state.json parse: {e}"); print("PROJECT_STATE_GOVERNANCE = FAIL"); return 1, None
     req = ["schema_version","project","current_phase","current_activity","current_maturity","phases",
            "next_authorized_action","current_phase_plan","latest_accepted_po_decision","latest_transition_id",
-           "prohibited_actions","allowed_actions","live_scratch_dark_cutover","database_schema_state"]
+           "prohibited_actions","allowed_actions","live_scratch_dark_cutover","database_schema_state",
+           "authoritative_remote","delivery_governance"]
     for k in req:
         if k not in st: fail(f"project-state.json missing required field: {k}")
     try: dec = load(DECISIONS)
@@ -179,11 +180,30 @@ def cmd_validate(deep=True):
 
     # decision register agreement: D1 not reopenable; D9 active; required decisions present
     dmap = {d["id"]: d for d in dec.get("decisions", [])}
-    for need in ["D1","D2","D3","D4","D5","D6","D7","D8","D9","PH-1B-SCOPE","PH-CUTOVER","SEC-NO-IAMV2-PRIV"]:
+    for need in ["D1","D2","D3","D4","D5","D6","D7","D8","D9","PH-1B-SCOPE","PH-CUTOVER","SEC-NO-IAMV2-PRIV",
+                 "GH-SOURCE-OF-TRUTH","GH-BRANCH-PR","GH-COMPLETE-MANIFEST","GH-FINAL-REPORT"]:
         if need not in dmap: fail(f"decision-register missing {need}")
     if dmap.get("D1", {}).get("reopenable", False) is not False: fail("D1 must not be reopenable")
     if dmap.get("D1", {}).get("status") != "ACTIVE": fail("D1 must be ACTIVE")
     if dmap.get("D9", {}).get("status") != "ACTIVE": fail("D9 (Phase 1A accepted) must be ACTIVE")
+
+    # GitHub execution & delivery governance (permanent rule)
+    remote = st.get("authoritative_remote","")
+    if "aibrahiiim1/StayConnectEnterprise" not in remote:
+        fail(f"authoritative_remote must point to aibrahiiim1/StayConnectEnterprise (got: {remote!r})")
+    dg = st.get("delivery_governance", {})
+    for key, want in [("rule_doc","docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md"),
+                      ("manifest_tool","tools/generate-change-manifest.py"),
+                      ("report_template","docs/templates/PHASE_FINAL_REPORT_TEMPLATE.md")]:
+        got = dg.get(key)
+        if got != want: fail(f"delivery_governance.{key} must be '{want}' (got: {got!r})")
+        elif not os.path.isfile(os.path.join(ROOT, want)): fail(f"delivery_governance {key} file missing on disk: {want}")
+    rd_path = os.path.join(ROOT, "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md")
+    if os.path.isfile(rd_path):
+        rd = open(rd_path, encoding="utf-8").read()
+        for tok in ["aibrahiiim1/StayConnectEnterprise","CREATED","MODIFIED","DELETED","RENAMED",
+                    "COPIED","GENERATED","EXPORTED","UNCHANGED-BUT-VERIFIED"]:
+            if tok not in rd: fail(f"GitHub delivery rule doc missing required token: {tok}")
 
     # current phase plan matches canonical + exists; privilege matrix agreement
     plan = st.get("current_phase_plan")
@@ -252,6 +272,7 @@ PACK_DOCS = {
  "StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md": ("docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md",None),
  "Protel-FIAS-Phase0-Spike.md": ("docs/spikes/Protel-FIAS-Phase0-Spike.md","spike"),
  "ZERO_STALE_LEFTOVERS_RULE.md": ("docs/ZERO_STALE_LEFTOVERS_RULE.md",None),
+ "GITHUB_EXECUTION_AND_DELIVERY_RULE.md": ("docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md",None),
  "SYSTEM_OVERVIEW.md": ("docs/SYSTEM_OVERVIEW.md",None),
  "TARGET_ARCHITECTURE.md": ("docs/TARGET_ARCHITECTURE.md",None),
  "STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md": ("docs/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md",None),
@@ -272,6 +293,7 @@ MROWS = [
  ("StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`","**Authoritative (acceptance record)**"),
  ("Protel-FIAS-Phase0-Spike.md","`docs/spikes/Protel-FIAS-Phase0-Spike.md`","**Authoritative** *(sanitized)*"),
  ("ZERO_STALE_LEFTOVERS_RULE.md","`docs/ZERO_STALE_LEFTOVERS_RULE.md`","**Permanent rule**"),
+ ("GITHUB_EXECUTION_AND_DELIVERY_RULE.md","`docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md`","**Permanent rule**"),
  ("SYSTEM_OVERVIEW.md","`docs/SYSTEM_OVERVIEW.md`","Historical snapshot"),
  ("TARGET_ARCHITECTURE.md","`docs/TARGET_ARCHITECTURE.md`","Supporting"),
  ("STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md","`docs/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md`","Supporting"),

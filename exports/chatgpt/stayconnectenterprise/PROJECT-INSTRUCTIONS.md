@@ -1,13 +1,13 @@
 # StayConnect Enterprise — ChatGPT Project Instructions
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0007 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0008 -->
 **Current phase:** 1B — Credential/identity/auth-context (DARK)
-**Current activity:** `PHASE_1B_PLAN_CORRECTION_PENDING_APPROVAL`
+**Current activity:** `GOVERNANCE_GITHUB_DELIVERY_RULE_PENDING_APPROVAL`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B PLANNING (NOT implemented) · 2 NOT_STARTED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Product-Owner approval or rejection of the corrected Phase 1B plan
+**Single next authorized action:** Product-Owner approval of this permanent GitHub execution and delivery operating rule and the corrected Phase 1B plan
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D9`.
 <!-- END GENERATED PROJECT STATE -->
 
@@ -79,3 +79,9 @@ A historical chat, an old draft, or your own prior message **never** overrides a
 ## Permanent Zero-Stale-Leftovers rule
 
 - Every completed milestone must leave **zero** stale/superseded/contradictory/partially-updated artifacts anywhere (docs, plans, acceptance records, comments, config, migrations, exports, manifests, checksums, scripts). A newer statement elsewhere never excuses a stale one. Retained historical content must be explicitly labeled and name its current replacement. The authoritative rule is bundled in this pack as `ZERO_STALE_LEFTOVERS_RULE.md` (repository path `docs/ZERO_STALE_LEFTOVERS_RULE.md`); it is enforced by `tools/validate-project-state.sh` (bundled in the Evidence Pack; must print `ZERO_STALE_LEFTOVERS = PASS`) and each milestone report must carry a `ZERO-STALE-LEFTOVERS VERIFICATION` section. When reviewing an Agent's report, treat any surviving contradiction or stale current-status statement as a documentation blocker.
+
+## Permanent GitHub execution, reporting and delivery rule
+
+- The GitHub repository **`aibrahiiim1/StayConnectEnterprise`** is the **only** authoritative working source. Uploaded ZIP packs (this Project Pack, the Evidence Pack, the Planning Pack) are **exports and review artifacts only** — they never override the repository, its Git history or verified execution evidence; when a ZIP and the repository disagree, the repository wins and the discrepancy must be flagged.
+- Each approved Phase is delivered on **one implementation branch and one PR** (`phase/<name>-<purpose>`), completed end-to-end (implementation, migrations, tests, rollback, docs, governance, exports) without auto-continuing into the next Phase and without direct commits to the protected default branch unless the Product Owner explicitly authorizes it.
+- Every final report follows the **mandatory 20-section structure** and embeds the **complete deterministic changed-file manifest** produced by `tools/generate-change-manifest.py` (`base..HEAD`) — no hand-written or ellipsised file lists; a report whose file list differs from Git **fails delivery**. The authoritative rule is `docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md` (bundled in this pack as `GITHUB_EXECUTION_AND_DELIVERY_RULE.md`), enforced by `tools/project-state.py validate` (checks `authoritative_remote` + `delivery_governance` + the `GH-*` decisions). When reviewing an Agent's report, treat a missing/partial manifest, an unpushed branch claimed as delivered, or a ZIP presented as authoritative as a delivery blocker.

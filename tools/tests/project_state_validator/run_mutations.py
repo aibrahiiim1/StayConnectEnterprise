@@ -48,7 +48,7 @@ MUTATIONS = [
  ("M03 two current phases", "governance/project-state.json",
    ("replace", [('"2":  { "status": "NOT_STARTED"', '"2":  { "status": "PLANNING"')])),
  ("M04 two next authorized actions", "governance/project-state.json",
-   ("replace", [('"next_authorized_action": "Product-Owner approval or rejection of the corrected Phase 1B plan"',
+   ("replace", [('"next_authorized_action": "Product-Owner approval of this permanent GitHub execution and delivery operating rule and the corrected Phase 1B plan"',
                  '"next_authorized_action": "Approve the plan; and also implement Phase 2"')])),
  ("M05 Phase 1B production iam_v2 grant", "docs/architecture/Phase1B-Privilege-Matrix.md",
    ("replace", [("PRODUCTION_IAM_V2_DML: NONE", "PRODUCTION_IAM_V2_DML: GRANTED")])),
@@ -57,7 +57,7 @@ MUTATIONS = [
  ("M07 modified generated block", "docs/context/StayConnect-IAM-Handoff.md",
    ("replace", [("**Current phase:** 1B", "**Current phase:** 9Z")])),
  ("M08 stale source commit / snapshot mismatch", "governance/project-state.json",
-   ("replace", [('"latest_transition_id": "T0007"', '"latest_transition_id": "T0006"')])),
+   ("replace", [('"latest_transition_id": "T0008"', '"latest_transition_id": "T0007"')])),
  ("M09 missing acceptance record", "governance/project-state.json",
    ("replace", [('"path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"',
                  '"path": "docs/acceptance/MISSING.md"')])),
@@ -75,6 +75,10 @@ MUTATIONS = [
    ("append", "\n<!-- tamper -->\n")),
  ("M15 unmarked historical/current contradiction", "docs/context/StayConnect-IAM-Handoff.md",
    ("append", "\nPhase 1A is the current phase.\n")),
+ ("M16 authoritative remote hijacked", "governance/project-state.json",
+   ("replace", [("aibrahiiim1/StayConnectEnterprise.git", "attacker/Evil.git")])),
+ ("M17 GH delivery decision removed", "governance/decision-register.json",
+   ("replace", [('"id": "GH-SOURCE-OF-TRUTH"', '"id": "GH-SOURCE-OF-TRUTH-DISABLED"')])),
 ]
 
 def apply(relpath, op):
