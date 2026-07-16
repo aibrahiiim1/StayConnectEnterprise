@@ -51,8 +51,7 @@ MUTATIONS = [
    ("replace", [('"next_authorized_action": "Product-Owner approval or rejection of the corrected Phase 1B plan"',
                  '"next_authorized_action": "Approve the plan; and also implement Phase 2"')])),
  ("M05 Phase 1B production iam_v2 grant", "docs/architecture/Phase1B-Privilege-Matrix.md",
-   ("replace", [("ZERO — production svc_scd has no iam_v2 grant", "GRANTED — production svc_scd gets iam_v2 write"),
-                ("zero `iam_v2` DML", "iam_v2 DML granted to services")])),
+   ("replace", [("PRODUCTION_IAM_V2_DML: NONE", "PRODUCTION_IAM_V2_DML: GRANTED")])),
  ("M06 Phase 1B rolled-back production write allowed", "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
    ("replace", [("rolled-back", "committed")])),
  ("M07 modified generated block", "docs/context/StayConnect-IAM-Handoff.md",
@@ -79,18 +78,22 @@ MUTATIONS = [
 ]
 
 def apply(relpath, op):
+    # binary I/O so restore is BYTE-EXACT (preserves original line endings; no CRLF<->LF drift)
     p = os.path.join(ROOT, relpath)
-    with open(p, "r", encoding="utf-8") as f: orig = f.read()
-    new = orig
+    with open(p, "rb") as f: orig = f.read()
+    text = orig.decode("utf-8")
     kind = op[0]
     if kind == "replace":
         for find, repl in op[1]:
-            if find not in new: raise AssertionError(f"fixture drift: '{find[:40]}...' not found in {relpath}")
-            new = new.replace(find, repl)
+            if find not in text: raise AssertionError(f"fixture drift: '{find[:40]}...' not found in {relpath}")
+            text = text.replace(find, repl)
     elif kind == "append":
-        new = orig + op[1]
-    with open(p, "w", encoding="utf-8", newline="\n") as f: f.write(new)
-    return p, orig
+        text = text + op[1]
+    with open(p, "wb") as f: f.write(text.encode("utf-8"))
+    return p, orig  # orig is raw bytes
+
+def restore(p, orig):
+    with open(p, "wb") as f: f.write(orig)
 
 def main():
     print("=== baseline (good state) must PASS both validators ===")
@@ -113,7 +116,7 @@ def main():
             allok = allok and failed
             print(f"  [{'PASS' if failed else 'MISS'}] {name:52s} -> fails: {','.join(which) or 'NONE (BAD)'}")
         finally:
-            with open(p, "w", encoding="utf-8", newline="\n") as f: f.write(orig)
+            restore(p, orig)
     print("=== restored good state must PASS again ===")
     s1, k1 = both_status()
     restored_ok = (s1 == 0 and k1 == 0)

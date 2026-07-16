@@ -192,8 +192,9 @@ def cmd_validate(deep=True):
     if not mtx or not os.path.isfile(os.path.join(ROOT, mtx)): fail(f"privilege_matrix missing/not found: {mtx}")
     else:
         mt = open(os.path.join(ROOT, mtx), encoding="utf-8").read()
-        # production zero iam_v2 DML assertion present
-        if "ZERO — production" not in mt and "zero `iam_v2` DML" not in mt: fail("privilege matrix does not assert production zero iam_v2 DML")
+        # machine assertion: production runtime roles hold ZERO iam_v2 DML/EXECUTE
+        if "PRODUCTION_IAM_V2_DML: NONE" not in mt: fail("privilege matrix missing machine assertion PRODUCTION_IAM_V2_DML: NONE")
+        if re.search(r"PRODUCTION_IAM_V2_DML:\s*(GRANTED|SOME|ANY)", mt): fail("privilege matrix asserts a production iam_v2 grant (must be NONE)")
         pt = open(os.path.join(ROOT, plan), encoding="utf-8").read() if plan else ""
         if "Phase1B-Privilege-Matrix.md" not in pt: fail("Phase 1B plan does not reference the privilege matrix")
         for phrase in ["zero production `iam_v2` write", "ZERO `iam_v2` DML"]:

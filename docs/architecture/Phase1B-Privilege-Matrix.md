@@ -2,6 +2,9 @@
 
 **Planning-only.** Authoritative grant specification for Gate P, derived from the completed DB-access inventory (`exports/chatgpt/phase1b-planning/inventory/DB_ACCESS_MAP.md`) and exact query/code inspection. **No grant is applied by this planning document.**
 
+<!-- MACHINE ASSERTION — validated by tools/project-state.py -->
+`PRODUCTION_IAM_V2_DML: NONE`  (no production runtime service role holds any `iam_v2` INSERT/UPDATE/DELETE/SELECT/EXECUTE grant)
+
 **Binding rules (all rows conform):**
 - **Production** service roles receive **only** `public`-schema privileges for their current legacy behavior — **zero `iam_v2` DML**, **zero `iam_v2` EXECUTE**.
 - PUBLIC receives **zero** `iam_v2` privileges; `ALTER DEFAULT PRIVILEGES` denies future owner objects to service roles.
