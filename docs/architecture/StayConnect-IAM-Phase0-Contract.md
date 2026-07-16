@@ -824,7 +824,7 @@ Manual-review actions (each requires financial-review write **and password re-au
 | **6** | Guest device self-service; optional AGGREGATE_ONLINE_TIME | device-management tests | additive |
 | **7** | Cleanup, final docs/ops manual, full-system re-acceptance (reboot, offline, purge, restore drills) | complete matrix | last blue/green snapshot |
 
-Phases 2 and 3 are parallelizable after 1B. The detailed **Phase 1A execution plan** (migration groups, per-object specs, lock-order library, acceptance) is drafted in [StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md) — planning only, pending separate owner approval before implementation.
+Phases 2 and 3 are parallelizable after 1B. The detailed **Phase 1A execution plan** (migration groups, per-object specs, lock strategy, acceptance) is in [StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md), status **READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL** — planning only, pending separate owner approval before implementation. **Owner refinement (2026-07-16):** the 1A "standby site DB / blue-green swap-back" mechanism in the table above is superseded by an **isolated `iam_v2` schema inside the existing site DB** (dark; rollback = leave dark / drop schema; a separate gated `search_path` cutover, never a whole-DB swap); reversal stays `capability=false` (no executable reversal built in 1A). See the plan for the resolved decisions.
 
 ## 19. Acceptance & Failure-Drill Matrix
 

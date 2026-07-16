@@ -12,7 +12,7 @@ Operational handoff for a future agent or new session working on the Internet Ac
 
 - **Contract status: `FINAL` — Phase 0 CLOSED** *(2026-07-16, explicit Product-Owner approval; previously READY_FOR_FINAL_OWNER_APPROVAL, before that CONDITIONALLY FROZEN).* FINAL closes Phase-0 architecture; it does **not** by itself unlock implementation — Phase 1A **planning** is authorized, but Phase 1A **implementation** requires separate approval of the Phase 1A plan.
 - The live Protel FIAS Phase-0 spike is **done**; results are merged into contract §9b/§9c/§9d.
-- The Phase 1A execution plan is drafted in [StayConnect-IAM-Phase1A-Plan.md](../architecture/StayConnect-IAM-Phase1A-Plan.md) — **planning only, not started**.
+- The Phase 1A execution plan ([StayConnect-IAM-Phase1A-Plan.md](../architecture/StayConnect-IAM-Phase1A-Plan.md)) is revised and **`READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`** — **planning only, not started**. Isolation is an **isolated `iam_v2` schema** inside the existing site DB (dark; rollback = leave dark / drop schema; a separate gated `search_path` cutover — **not** a whole-DB blue/green swap). Row-level locks preferred over advisory; reversal stays `capability=false` (no executable reversal built in 1A); Stripe FK deferred (no platform anchor exists); `folio_identity_strategy` UNSET blocks posting.
 - **No feature implementation has started.** No production schema, service, portal/UI, firewall, networking, or PMS configuration change has occurred for this redesign. (The deployed voucher/guest-account/max-devices system is a separate prior delivery and remains live and untouched.)
 
 ## Proven Phase-0 Scope (Tier 1 — the finalization basis)
@@ -79,9 +79,9 @@ Before financial Posting is enabled for **any** Property, that Property must ind
 
 ## Next Authorized Step
 
-1. **Phase 1A planning** — review/refine the drafted [Phase 1A execution plan](../architecture/StayConnect-IAM-Phase1A-Plan.md) (clean-slate core domain + persistence foundation).
-2. **Product-owner approval of the Phase 1A plan** — the gate that authorizes Phase 1A implementation.
-3. **Then begin Phase 1A implementation only** (migrations/code), still ahead of Phase 1B and later phases.
+1. **Product-owner approval of the Phase 1A plan** (status `READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`) — the gate that authorizes Phase 1A implementation.
+2. **Then begin Phase 1A implementation only** — build the dark `iam_v2` schema + core engine (no service routed to it), still ahead of Phase 1B and later phases.
+3. Cutover to `iam_v2` is a **separate, later, explicitly gated** event (see the plan §7a) — build completion does not auto-promote; the old IAM model stays available for rollback until a separate cleanup approval.
 
 Per-property onboarding (Tier 2, incl. Aqua Club) and post-implementation acceptance (Tier 3 / Gates 3C, 3D) are **not** Phase-0 finalization blockers; they carry forward as, respectively, a deployment prerequisite and binding acceptance requirements.
 
