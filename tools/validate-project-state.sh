@@ -118,15 +118,15 @@ if have_repo; then
     [ -f "$f" ] && grep -q "$MAT" "$f" && ok "maturity present in repo $(basename "$f")" || fail "maturity missing in repo $(basename "$f")"
   done
 else skipped "repo docs maturity presence"; fi
-na=$(grep -rhoiE "next authorized (activity|action|step)[^.]*" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" 2>/dev/null | grep -ciE "acceptance of Phase 1A|acceptance of the live-dark|review of the live-dark|review of the Phase 1A LIVE-DARK")
-[ "$na" -ge 2 ] && ok "next-action consistent (PO acceptance of Phase 1A)" || fail "next-action inconsistent ($na)"
+na=$(grep -rhoiE "next authorized (activity|action|step)[^.]*" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" 2>/dev/null | grep -ciE "acceptance of Phase 1A|acceptance of the live-dark|review of the live-dark|review of the Phase 1A LIVE-DARK|approval or rejection of the .{0,30}Phase 1B plan|approval of the .{0,30}Phase 1B (implementation )?plan")
+[ "$na" -ge 2 ] && ok "next-action consistent" || fail "next-action inconsistent ($na)"
 
 echo "== 3. conflicting maturity WITHIN a single pack file =="
 c3=0
 for f in "$PACK"/*.md; do
   [ -f "$f" ] || continue
   hl=$(grep -ciE "live-dark|LIVE-DARK|$MAT" "$f")
-  si=$(grep -inE 'planning only|in scratch only|not created on live|implementation requires separate approval of the Phase 1A plan|Forbidden Until the Phase 1A Plan Is Approved' "$f" 2>/dev/null | grep -viE "$HIST" | grep -viE "nothing in this section is authorized to execute" | wc -l)
+  si=$(grep -inE 'Phase.?1A[^.]{0,40}planning only|Phase.?1A[^.]{0,40}in scratch only|not created on live|implementation requires separate approval of the Phase 1A plan|Forbidden Until the Phase 1A Plan Is Approved' "$f" 2>/dev/null | grep -viE "$HIST" | grep -viE "nothing in this section is authorized to execute" | wc -l)
   [ "$hl" -gt 0 ] && [ "$si" -gt 0 ] && { echo "    conflict in $(basename "$f"): live-dark + $si unlabeled stale line(s)"; c3=$((c3+1)); }
 done
 [ "$c3" = "0" ] && ok "no within-file maturity conflicts" || fail "$c3 file(s) with conflicting maturity"

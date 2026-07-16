@@ -6,7 +6,7 @@ Operational handoff for a future agent or new session working on the Internet Ac
 
 ## Current Stage
 
-**Phase 0 — FINAL and CLOSED (2026-07-16).** **Phase 1A — scratch-verified, offline-real-schema-verified, and production `iam_v2` LIVE-DARK created + verified (2026-07-16); dark, NOT cut over, pending final Product-Owner acceptance of the corrected evidence.** No cutover, no service routing, no IAM data migration, no Phase 1B. **Next authorized activity: Product-Owner acceptance of Phase 1A, then Phase 1B planning under separate authorization.**
+**Phase 0 — FINAL and CLOSED (2026-07-16).** **Phase 1A — scratch-verified, offline-real-schema-verified, and production `iam_v2` LIVE-DARK created + verified (2026-07-16); dark, NOT cut over, pending final Product-Owner acceptance of the corrected evidence.** No cutover, no service routing, no IAM data migration, no Phase 1B. **A complete Phase 1B implementation plan has been drafted (planning-only) — [StayConnect-IAM-Phase1B-Plan.md](../architecture/StayConnect-IAM-Phase1B-Plan.md). Next authorized activity: Product-Owner approval or rejection of the complete Phase 1B plan** (Phase 1B remains NOT implemented; the mandatory least-privilege / superuser-elimination prerequisite is inside that plan).
 
 ## Current Status
 
@@ -92,9 +92,9 @@ Before financial Posting is enabled for **any** Property, that Property must ind
 
 ## Next Authorized Step
 
-1. **Product-Owner review of the Phase-1A LIVE-DARK acceptance** ([record](../architecture/../acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md); 18/18) — **before any Phase 1B authorization**.
-2. Phase 1B (credential/portal, dark/flagged) requires its **own** explicit PO authorization; live-dark creation does **not** authorize it.
-3. Cutover, DSN/`search_path` routing, IAM data migration, and legacy cleanup remain **separately gated** later ladder steps. Each transition needs its own PO approval.
+1. **Product-Owner approval or rejection of the complete Phase 1B plan** ([StayConnect-IAM-Phase1B-Plan.md](../architecture/StayConnect-IAM-Phase1B-Plan.md)) — the single next authorized action. The plan is **planning-only**; it authorizes no code/DDL/role/DSN/routing/deployment/migration/cutover. (Phase 1A LIVE-DARK acceptance record — [record](../acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md), 18/18 — is unchanged.)
+2. Phase 1B **implementation** (credential/portal, dark/flagged, incl. the mandatory least-privilege / superuser-elimination prerequisite) requires its **own** explicit PO authorization (the blueprint in Phase-1B plan §14); approving the plan is not the same as authorizing implementation.
+3. Guest-visible activation / cutover, DSN/`search_path` routing, IAM data migration, and legacy cleanup remain **separately gated** later ladder steps. Each transition needs its own PO approval.
 
 Per-property onboarding (Tier 2, incl. Aqua Club) and post-implementation acceptance (Tier 3 / Gates 3C, 3D) are **not** Phase-0 finalization blockers; they carry forward as, respectively, a deployment prerequisite and binding acceptance requirements.
 
