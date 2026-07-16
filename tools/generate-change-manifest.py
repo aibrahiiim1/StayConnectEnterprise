@@ -136,7 +136,7 @@ def main():
     submods = git("submodule", "status").rstrip()
 
     L = []
-    L.append("# Changed-file manifest (generated — do not hand-edit)")
+    L.append("# Changed-file manifest (generated - do not hand-edit)")
     L.append("")
     L.append(f"- **Base commit:** `{base}`")
     L.append(f"- **HEAD commit:** `{head}`")
