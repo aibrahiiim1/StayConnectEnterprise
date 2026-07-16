@@ -181,7 +181,7 @@ def cmd_validate(deep=True):
     # decision register agreement: D1 not reopenable; D9 active; required decisions present
     dmap = {d["id"]: d for d in dec.get("decisions", [])}
     for need in ["D1","D2","D3","D4","D5","D6","D7","D8","D9","PH-1B-SCOPE","PH-CUTOVER","SEC-NO-IAMV2-PRIV",
-                 "GH-SOURCE-OF-TRUTH","GH-BRANCH-PR","GH-COMPLETE-MANIFEST","GH-FINAL-REPORT"]:
+                 "GH-SOURCE-OF-TRUTH","GH-BRANCH-PR","GH-COMPLETE-MANIFEST","GH-FINAL-REPORT","GH-MANDATORY-CI"]:
         if need not in dmap: fail(f"decision-register missing {need}")
     if dmap.get("D1", {}).get("reopenable", False) is not False: fail("D1 must not be reopenable")
     if dmap.get("D1", {}).get("status") != "ACTIVE": fail("D1 must be ACTIVE")
@@ -194,10 +194,29 @@ def cmd_validate(deep=True):
     dg = st.get("delivery_governance", {})
     for key, want in [("rule_doc","docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md"),
                       ("manifest_tool","tools/generate-change-manifest.py"),
-                      ("report_template","docs/templates/PHASE_FINAL_REPORT_TEMPLATE.md")]:
+                      ("report_template","docs/templates/PHASE_FINAL_REPORT_TEMPLATE.md"),
+                      ("ci_workflow",".github/workflows/project-governance.yml")]:
         got = dg.get(key)
         if got != want: fail(f"delivery_governance.{key} must be '{want}' (got: {got!r})")
         elif not os.path.isfile(os.path.join(ROOT, want)): fail(f"delivery_governance {key} file missing on disk: {want}")
+
+    # mandatory GitHub Actions governance CI must exist, run on PRs to master, run every required
+    # command, and not be weakened (GH-MANDATORY-CI). Text checks only (stdlib; no YAML dependency).
+    wf = os.path.join(ROOT, ".github/workflows/project-governance.yml")
+    if not os.path.isfile(wf):
+        fail("mandatory governance CI missing: .github/workflows/project-governance.yml (GH-MANDATORY-CI)")
+    else:
+        w = open(wf, encoding="utf-8").read()
+        if "pull_request:" not in w: fail("governance CI must run on pull_request (targeting master)")
+        if "master" not in w: fail("governance CI must target the master branch")
+        if "workflow_dispatch" not in w: fail("governance CI must allow manual workflow_dispatch")
+        for cmd in ["tools/project-state.py validate", "tools/project-state.py check-generated",
+                    "tools/tests/project_state_validator/run_mutations.py", "tools/validate-project-state.sh"]:
+            if cmd not in w: fail(f"governance CI missing required validation command: {cmd}")
+        if re.search(r"continue-on-error:\s*true", w): fail("governance CI must not ignore failures (continue-on-error: true)")
+        if "git status --porcelain" not in w: fail("governance CI must assert a clean working tree")
+        if "Project Governance" not in w: fail("governance CI workflow name must be 'Project Governance'")
+        if not re.search(r"(?m)^\s{2,}governance:\s*$", w): fail("governance CI must define the job id 'governance'")
     rd_path = os.path.join(ROOT, "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md")
     if os.path.isfile(rd_path):
         rd = open(rd_path, encoding="utf-8").read()

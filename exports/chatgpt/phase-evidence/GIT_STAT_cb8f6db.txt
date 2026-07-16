@@ -1,4 +1,0 @@
-commit cb8f6db728b79d56d18154e8f78b6bc1383e8054
-Date:   Fri Jul 17 02:23:57 2026 +0300
-
-    generate-change-manifest: ASCII header for clean Windows-console output
