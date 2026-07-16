@@ -1,0 +1,54 @@
+# Phase 1A LIVE-DARK production evidence (sanitized; no credentials/secrets/PII)
+captured_utc=2026-07-16T16:38:19Z
+host=radius db=stayconnect_site pg=16.3 o image=timescale/timescaledb:2.16.1-pg16
+in_recovery=f (primary)
+ERROR:  syntax error at or near "\"
+LINE 1: ...er::regrole::text from pg_namespace where nspname=\047iam_v2...
+                                                             ^
+iam_v2_schema_owner=
+ERROR:  syntax error at or near "\"
+LINE 1: ...from information_schema.tables where table_schema=\047iam_v2...
+                                                             ^
+iam_v2_base_tables=
+ERROR:  syntax error at or near "\"
+LINE 1: ...ct count(*) from pg_constraint where connamespace=\047iam_v2...
+                                                             ^
+iam_v2_constraints=
+ERROR:  syntax error at or near "\"
+LINE 1: ...mespace n on n.oid=c.relnamespace where n.nspname=\047iam_v2...
+                                                             ^
+iam_v2_triggers=
+ERROR:  syntax error at or near "\"
+LINE 1: ...espace n on n.oid=pr.pronamespace where n.nspname=\047iam_v2...
+                                                             ^
+iam_v2_functions=
+ERROR:  syntax error at or near "\"
+LINE 1: ...tup),0) from pg_stat_user_tables where schemaname=\047iam_v2...
+                                                             ^
+iam_v2_live_rows=
+ERROR:  syntax error at or near "\"
+LINE 1: select indisvalid from pg_index where indexrelid=\047public....
+                                                         ^
+mg0_anchor_valid=
+ERROR:  syntax error at or near "\"
+LINE 1: ...from information_schema.tables where table_schema=\047public...
+                                                             ^
+public_base_tables=
+ERROR:  syntax error at or near "\"
+LINE 1: select string_agg(rolname,\047,\047 order by rolname) from p...
+                                  ^
+iam_v2_roles=
+ERROR:  syntax error at or near "\"
+LINE 1: ...mespace n on n.oid=c.relnamespace where n.nspname=\047public...
+                                                             ^
+public_iam_v2_leak=
+--- backups (path size sha256; no secrets) ---
+phase1a_predark_20260716T163702Z_full.dump size=495957 sha256=6b3567b2da76ba9b962468abd66be3d858a34662e96b0e5988262e61819324f4
+phase1a_predark_20260716T163702Z_schema.sql size=77966 sha256=34b0172ac427c8c71cf0bdfdc9ea3c1d3d87767e222353e197ad6177f9636346
+--- services ---
+stayconnect-scd=active
+stayconnect-edged=active
+stayconnect-acctd=active
+stayconnect-portald=active
+nftables=active
+unbound=active
