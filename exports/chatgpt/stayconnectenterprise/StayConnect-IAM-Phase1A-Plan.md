@@ -1,6 +1,6 @@
 # StayConnect IAM — Phase 1A Execution Plan (Core Domain & Persistence Foundation)
 
-**Status: SCRATCH_IMPLEMENTED + SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED (2026-07-16) — NOT deployed; NOT cut over; NOT fully implemented; NOT live accepted; NO IAM data migration; NO Phase 1B.** *(PO authorized the live-dark creation as a distinct ladder step; executed additive + dark + reversible.)* The isolated `iam_v2` schema (49 tables, fingerprint `bd75026f`) now exists **dark** in the production `stayconnect_site` DB — **no service reads/writes it; no DSN/`search_path` change; public schema unchanged** (proof in [Live-Dark Acceptance record](StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md), 18/18 PASS). Next authorized step: **Product-Owner review of the live-dark acceptance before any Phase 1B authorization** (ladder step 7 onward remains separately gated). The former `folio_identity_strategy` BLOCKER is **RESOLVED** — the FINAL contract §4.1 was amended (PO-approved) to `NOT NULL DEFAULT 'UNSET'` (fail-closed), and this plan implements it directly (§9). Cutover is an atomic complete-domain switch with **two explicit rollback boundaries** (§7a); MG-0 uses a non-transactional `CREATE UNIQUE INDEX CONCURRENTLY` model (§2a). **Phase 1A implementation is still NOT approved** — see §11 authorization boundary. No migrations, code, PMS providers, service/config changes, deployment, guest-networking changes, or PMS traffic exist. Implementation begins only after the product owner explicitly approves this plan.
+**Status: SCRATCH_IMPLEMENTED + SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED (2026-07-16) — NOT deployed; NOT cut over; NOT fully implemented; NOT live accepted; NO IAM data migration; NO Phase 1B.** *(PO authorized the live-dark creation as a distinct ladder step; executed additive + dark + reversible.)* The isolated `iam_v2` schema (49 tables, fingerprint `bd75026f`) now exists **dark** in the production `stayconnect_site` DB — **no service reads/writes it; no DSN/`search_path` change; public schema unchanged** (proof in [Live-Dark Acceptance record](StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md), 18/18 PASS). Next authorized step: **Product-Owner review of the live-dark acceptance before any Phase 1B authorization** (ladder step 7 onward remains separately gated). The former `folio_identity_strategy` BLOCKER is **RESOLVED** — the FINAL contract §4.1 was amended (PO-approved) to `NOT NULL DEFAULT 'UNSET'` (fail-closed), and this plan implements it directly (§9). Cutover is an atomic complete-domain switch with **two explicit rollback boundaries** (§7a); MG-0 uses a non-transactional `CREATE UNIQUE INDEX CONCURRENTLY` model (§2a). **Phase 1A implementation was authorized and executed** (scratch, then production live-dark) — see §11 and §12. **No service is routed to `iam_v2`; no DSN/`search_path` change; no PMS traffic; no cutover; no IAM data migration; no Phase 1B.** *(Historical: this plan was originally approved for scratch-only, then live-dark, as distinct ladder steps.)*
 
 **Source of truth:** the FINAL [StayConnect-IAM-Phase0-Contract.md](StayConnect-IAM-Phase0-Contract.md) (Phase 0 CLOSED 2026-07-16). This plan **implements** that contract's approved DDL (§4.1–§4.6), invariants (§2), state machines (§16), and phased decomposition (§18); it introduces **no new architectural decisions**. Owner-directed refinements applied at this review (isolation mechanism, cutover gating, reversal scope, lock strategy, and the resolved open decisions) are recorded in §§2, 5, 8–11 and supersede the corresponding implementation notes only — not the approved architecture.
 
@@ -377,11 +377,12 @@ Run in a **clean test database** and then dark in the appliance's `iam_v2` schem
 
 ---
 
-## 11. Build target & authorization boundary
+## 11. Build target & authorization boundary — CURRENT POSITION ON THE LADDER
 
-- **Phase 1A implementation is still NOT approved.** This document is a plan awaiting Product-Owner implementation approval.
-- **Recommended first implementation target: a dedicated disposable scratch/test database.** The full A-series (§10) runs there first, dark.
-- **Every transition requires its own stated Product-Owner approval:** approving the Phase-1A plan does **not** authorize any live-database change; scratch acceptance does **not** automatically authorize live-dark creation; live-dark creation does **not** authorize Phase 1B or cutover.
+- **Completed (each under its own PO authorization):** plan approval → scratch/test implementation → full scratch A-series acceptance (99/99) → PO review of scratch evidence → authorization to create dark `iam_v2` in live `stayconnect_site` → **live-dark creation + acceptance (18/18, dark)**.
+- **Current position: awaiting Product-Owner acceptance of Phase 1A**, then Phase 1B planning under separate authorization.
+- **Every transition requires its own stated Product-Owner approval:** live-dark creation does **not** authorize Phase 1B, service routing/DSN/`search_path` change, IAM data migration, or cutover — each remains separately gated (steps 7+ below).
+- **Phase 1B prerequisite (mandatory):** production services connect as PostgreSQL **superuser `stayconnect`**, so grant isolation does not bind them; Phase 1B must not route any service to `iam_v2` until a **separately reviewed least-privilege service-role migration + credential-rotation plan** exists (rollback, per-service DSNs, secret handling, connection testing, reboot persistence). Not a blocker to the dark schema; a blocker to Phase-1B runtime integration.
 
 **Phase-1A approval ladder (identical in §7a and §11), in order:**
 
@@ -404,7 +405,7 @@ Run in a **clean test database** and then dark in the appliance's `iam_v2` schem
 
 ## 12. Scratch implementation status (2026-07-16)
 
-Phase-1A was implemented and verified **strictly in a dedicated disposable scratch/test PostgreSQL database** (Docker container `iamv2-scratch`, `127.0.0.1:55432`, db `iam_scratch`, PostgreSQL 16.14), under the Product Owner's scratch-only authorization. Artifacts + reproducible evidence live in `iam_v2_scratch/` (in the repository) (`EVIDENCE.txt`). A hard safety guard refuses any live-looking target.
+Phase-1A was implemented and verified **strictly in a dedicated disposable scratch/test PostgreSQL database** (Docker container `iamv2-scratch`, `127.0.0.1:55432`, db `iam_scratch`, PostgreSQL 16.14), under the Product Owner's scratch-only authorization. Artifacts + reproducible evidence live in [`iam_v2_scratch/`](../../iam_v2_scratch/) (`EVIDENCE.txt`). A hard safety guard refuses any live-looking target.
 
 **Maturity ledger (explicit):**
 

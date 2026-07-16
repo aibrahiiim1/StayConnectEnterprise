@@ -1,3 +1,8 @@
+# [SUPERSEDED — EVIDENCE ERROR] PROD_LIVE_DARK_EVIDENCE.txt
+# This file was generated with shell-escaped-quote corruption (blank/garbled values).
+# It is NOT authoritative. The authoritative production evidence is PROD_LIVE_DARK_EVIDENCE_V2.txt.
+# Retained for audit only; do not cite as valid evidence.
+# ---------------- original (broken) capture below ----------------
 # Phase 1A LIVE-DARK production evidence (sanitized; no credentials/secrets/PII)
 captured_utc=2026-07-16T16:38:19Z
 host=radius db=stayconnect_site pg=16.3 o image=timescale/timescaledb:2.16.1-pg16

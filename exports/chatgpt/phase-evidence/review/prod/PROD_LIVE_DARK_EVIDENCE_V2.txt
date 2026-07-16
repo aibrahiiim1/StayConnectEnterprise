@@ -1,0 +1,41 @@
+# Phase 1A LIVE-DARK — PRODUCTION RE-VERIFICATION EVIDENCE (V2, READ-ONLY, sanitized)
+# Supersedes PROD_LIVE_DARK_EVIDENCE.txt (which had shell-escaped-quote corruption). Authoritative.
+captured_utc=2026-07-16T16:59:23Z
+method=server-side READ-ONLY psql -f prod_verify.sql (no DDL/DML); PSQL_EXIT=0 (no SQL errors)
+appliance=radius(172.21.60.23) container=stayconnect-pg image=timescale/timescaledb:2.16.1-pg16
+--------------------------------------------------------------------------
+current_database=stayconnect_site
+server_addr=local-unix-socket
+in_recovery=false
+pg_version=PostgreSQL 16.3 on x86_6
+iam_v2_schema_owner=iam_v2_owner
+iam_v2_base_tables=49
+iam_v2_total_rows=0
+iam_v2_constraints=252
+iam_v2_triggers=12
+iam_v2_functions=11
+iam_v2_fingerprint=bd75026ff6ea5835a1ca8d19051eb257
+mg0_anchor_def=CREATE UNIQUE INDEX guest_networks_tsi_anchor ON public.guest_networks USING btree (tenant_id, site_id, id)
+mg0_anchor_indisvalid=true
+public_base_tables=42
+public_total_rows=8345
+public_fingerprint=d86ca4c6aed4bb868c173a0d328e0dde
+iam_v2_roles=iam_v2_migrator,iam_v2_owner,iam_v2_svc_acctd,iam_v2_svc_edged,iam_v2_svc_hoteladm,iam_v2_svc_portald,iam_v2_svc_scd
+public_grants_on_iam_v2=0
+stayconnect_rolsuper=true rolcanlogin=true
+db_default_search_path="$user", public
+stayconnect_role_search_path=(none-set)
+iam_v2_leak_into_public=0
+--------------------------------------------------------------------------
+services: scd=active edged=active acctd=active portald=active
+code_refs_to_iam_v2_in_data-plane_control-plane=0 (verified via repo grep; zero references)
+
+## NOTE on public row count (honest)
+public_total_rows is LIVE and grows with normal guest operation (8278 at creation window -> 8345 now).
+The durable invariant is the public STRUCTURAL fingerprint (d86ca4c6...) which is UNCHANGED, and
+iam_v2 remains DARK at 0 rows. The dark schema does not read/write/affect public data.
+
+## VERIFICATION
+All required values populated; no SQL error; no NULL where a value is required.
+Structural invariants match the verified scratch build: iam_v2 fingerprint bd75026f; 49/252/12/11.
+Superuser deviation CONFIRMED: role 'stayconnect' rolsuper=true (services connect as this role).

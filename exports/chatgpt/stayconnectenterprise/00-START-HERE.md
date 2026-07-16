@@ -2,9 +2,11 @@
 
 **Read this file first.** It is the orientation for an AI consultant continuing work on StayConnect Enterprise. It summarizes the current, authoritative state; the individual documents in this pack are the detailed sources. Where this summary and a copied source document disagree, follow the **source-of-truth precedence** in §12.
 
-**Source documentation baseline commit:** `22a2e15` (`feat(iam_v2): Phase 1A LIVE-DARK created + verified in production stayconnect_site`).
-**Project-pack export commit:** the commit that adds/updates this pack (later than `4a1adc5`).
+**Source documentation baseline commit:** `d0eabc2` (final commit of the reconciliation chain `f2d0550` → `bd9ee7f` → `d0eabc2`; supersedes `22a2e15`).
+**Project-pack export commit:** the commit that adds/updates this pack (later than `d0eabc2`).
 **Export date:** 2026-07-16.
+
+**Permanent project rule:** every milestone must satisfy the **Zero-Stale-Leftovers** rule (repo `docs/ZERO_STALE_LEFTOVERS_RULE.md`) — no stale/contradictory/superseded artifact may survive a completed task, enforced by `tools/validate-project-state.sh`. See §14.
 
 ---
 
@@ -70,7 +72,11 @@ Build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL s
 
 ## 9. Next authorized action
 
-**Product-Owner review of the Phase 1A LIVE-DARK acceptance** (`StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`, 18/18) — **before any Phase 1B authorization**. The dark `iam_v2` schema is created + verified in production but **NOT cut over**; no service reads/writes it, no DSN/`search_path` change. Phase 1B (credential/portal, dark/flagged), cutover, IAM data migration, and legacy cleanup each need their **own** separate PO approval (plan §7a/§11 ladder). Nothing downstream is authorized yet.
+The single **next authorized action** is Product-Owner acceptance of Phase 1A (review of the Phase 1A LIVE-DARK acceptance) before any Phase 1B authorization.
+
+**Product-Owner review of the Phase 1A LIVE-DARK acceptance** (`StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`, 18/18; authoritative production evidence is `PROD_LIVE_DARK_EVIDENCE_V2.txt`, captured read-only — the earlier `PROD_LIVE_DARK_EVIDENCE.txt` is **superseded/erroneous**) — **before any Phase 1B authorization**. The dark `iam_v2` schema is created + verified in production but **NOT cut over**; no service reads/writes it, no DSN/`search_path` change. Phase 1B (credential/portal, dark/flagged), cutover, IAM data migration, and legacy cleanup each need their **own** separate PO approval (plan §7a/§11 ladder). Nothing downstream is authorized yet.
+
+**Mandatory Phase-1B prerequisite (superuser deviation).** Production services currently connect to `stayconnect_site` as the PostgreSQL superuser `stayconnect` (`rolsuper=true`). The least-privilege `iam_v2` service roles therefore do **not** yet bind them; the schema's darkness rests on *zero code references + no `search_path` change*, not on grant isolation. No service may be routed to `iam_v2` until a separately reviewed least-privilege service-role + credential-rotation plan is approved and applied. This blocks Phase-1B runtime integration; it is **not** a defect in the dark schema.
 
 ## 10. Forbidden until explicitly approved
 
@@ -82,7 +88,7 @@ Schema migrations; feature code; production connector/posting-engine development
 |---|---|
 | `StayConnect-IAM-Phase0-Contract.md` | **Authoritative** — FINAL Phase-0 architecture contract (DDL, invariants, state machines, FIAS findings §9). |
 | `StayConnect-IAM-Handoff.md` | **Authoritative** — current synchronized operational handoff. |
-| `StayConnect-IAM-Phase1A-Plan.md` | **Authoritative** — current approved phase plan (READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL). |
+| `StayConnect-IAM-Phase1A-Plan.md` | **Authoritative** — current approved phase plan (implemented through production live-dark; cutover/1B still gated). |
 | `Protel-FIAS-Phase0-Spike.md` | **Authoritative** — live FIAS spike + Gate 3A PASS evidence (guest identifiers redacted). |
 | `SYSTEM_OVERVIEW.md` | Supporting — canonical current-system reference. |
 | `TARGET_ARCHITECTURE.md` | Supporting — target architecture. |
@@ -112,3 +118,9 @@ Schema migrations; feature code; production connector/posting-engine development
 - **Recommend and review; do not authorize implementation.** No migrations, code, deployment, or live PMS traffic proceed without explicit Product-Owner approval.
 - When reviewing an engineering Agent's report, check it against the precedence order above and the permanent decisions/limitations; flag anything that contradicts a FINAL decision, generalizes the single Hotel ID 3 result, or would build a deferred/forbidden capability.
 - After any approved milestone, **all related documents must be re-synchronized** to one consistent status and next step.
+
+## 14. Permanent Zero-Stale-Leftovers rule
+
+A permanent, project-wide Product-Owner rule governs every future milestone: **no completed task may leave behind any stale, superseded, contradictory, misleading, or partially-updated artifact** — in docs, handoffs, plans, acceptance records, runbooks, comments, config, migrations, exports, manifests, checksums, or scripts. A newer statement elsewhere does **not** excuse a stale one; a lower section does not correct an earlier one in the same file; a banner does not excuse contradictory current-state content. Old content may remain only if it is required as audit/history, explicitly labeled `HISTORICAL`/`SUPERSEDED`/`CLOSED`/`DEPRECATED`, cannot be mistaken for current behavior, and names its current replacement.
+
+Before any milestone is declared complete: run a repo-wide stale scan, build a current-state assertion set and prove zero contradictions, regenerate + verify both export packs from the synchronized commit, and run `tools/validate-project-state.sh` (must print `ZERO_STALE_LEFTOVERS = PASS`). The authoritative rule text lives in the repository at `docs/ZERO_STALE_LEFTOVERS_RULE.md`; the enforcing validator is `tools/validate-project-state.sh`. Every future milestone report must include a `ZERO-STALE-LEFTOVERS VERIFICATION` section and confirm `ZERO_STALE_LEFTOVERS = PASS`.

@@ -36,7 +36,7 @@ A historical chat, an old draft, or your own prior message **never** overrides a
 ## Production-grade behavior
 
 - Treat everything as production software touching **real guest money and folios.** Prefer correctness, safety, auditability, and fail-closed behavior over speed or cleverness.
-- Respect the current phase gates. Phase 0 is FINAL/CLOSED; Phase 1A is the current phase and is **not implemented**. Do not assume anything is built unless there is verified implementation evidence.
+- Respect the current phase gates. Phase 0 is FINAL/CLOSED; **Phase 1A is the current phase, implemented through PRODUCTION LIVE-DARK (the isolated `iam_v2` schema is created + verified in production `stayconnect_site`, 18/18 acceptance, dark — no service reads/writes it, no DSN/`search_path` change, public schema unchanged).** It is **NOT** cut over, deployed, live-accepted, data-migrated, or Phase 1B. Do not assume anything beyond the verified dark schema is built; require verified evidence for any further claim.
 - Keep the single verified Hotel ID 3 debit in scope: it does **not** generalize to other properties/interfaces, sharers, multi-folio, no-post, or error statuses. **Hotel ID 2 remains financially unapproved.**
 
 ## No fake data or invented protocol behavior
@@ -59,3 +59,11 @@ A historical chat, an old draft, or your own prior message **never** overrides a
 ## No implementation or deployment without explicit Product-Owner approval
 
 - You may design, plan, review, and recommend. You must **not** direct or imply authorization to create/apply migrations, modify code, change databases/services/configuration, connect to a PMS, send FIAS traffic, change networking, or deploy. Those require explicit Product-Owner approval, obtained per the current phase gates.
+
+## Mandatory Phase-1B prerequisite (superuser deviation)
+
+- Production services connect to `stayconnect_site` as the PostgreSQL **superuser `stayconnect`** (`rolsuper=true`), so the least-privilege `iam_v2` service roles do **not** yet bind them; the dark schema's isolation rests on *zero code references + unchanged `search_path`*, not on grant enforcement. **No service may be routed to `iam_v2`** until a separately reviewed least-privilege service-role + credential-rotation plan is approved and applied. This is a blocker to Phase-1B runtime integration, not a defect in the dark schema.
+
+## Permanent Zero-Stale-Leftovers rule
+
+- Every completed milestone must leave **zero** stale/superseded/contradictory/partially-updated artifacts anywhere (docs, plans, acceptance records, comments, config, migrations, exports, manifests, checksums, scripts). A newer statement elsewhere never excuses a stale one. Retained historical content must be explicitly labeled and name its current replacement. The authoritative rule is `docs/ZERO_STALE_LEFTOVERS_RULE.md`; it is enforced by `tools/validate-project-state.sh` (must print `ZERO_STALE_LEFTOVERS = PASS`) and each milestone report must carry a `ZERO-STALE-LEFTOVERS VERIFICATION` section. When reviewing an Agent's report, treat any surviving contradiction or stale current-status statement as a documentation blocker.

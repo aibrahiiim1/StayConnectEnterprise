@@ -40,7 +40,7 @@ Product-Owner authorized **only**: production read-only preflight; backup + veri
 | AC-01 | exactly 49 `iam_v2` tables | PASS |
 | AC-02 | `iam_v2` catalog fingerprint == verified scratch (`bd75026f`) | PASS |
 | AC-03 | public schema unchanged except the MG-0 anchor (`d86ca4c6` before==after) | PASS |
-| AC-04 | public live-row totals unchanged (8278) | PASS |
+| AC-04 | public live-row totals unchanged **at the atomic acceptance window** (8278) — *the public platform is live and grows normally (8345 at V2 re-verification); the durable invariant is the public **structural** fingerprint `d86ca4c6`, which is unchanged* | PASS |
 | AC-05 | public base-table count unchanged (42) | PASS |
 | AC-06 | no `iam_v2*` objects leaked into `public` | PASS |
 | AC-07 | zero rows in `iam_v2` (dark) | PASS |
@@ -72,7 +72,11 @@ Not proven here (require later, separately-authorized phases): appliance reboot 
 ## Authoritative commits
 - Implementation/migrations + scratch evidence: `b2a715f`.
 - This live-dark evidence + documentation sync: recorded in the commit that carries this file (see git log).
-- Sanitized production evidence: `iam_v2_scratch/review/prod/PROD_LIVE_DARK_EVIDENCE.txt`.
+- **Authoritative sanitized production evidence: `iam_v2_scratch/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt`** (clean read-only `psql -f prod_verify.sql`, `PSQL_EXIT=0`, 0 verification fails). The earlier `PROD_LIVE_DARK_EVIDENCE.txt` had shell-escaped-quote corruption and is retained **`[SUPERSEDED — EVIDENCE ERROR]`** for audit only — **not** authoritative.
+- **Superuser deviation (Phase-1B prerequisite):** production services connect as PostgreSQL **superuser `stayconnect`** (`rolsuper=true`), so grant-based schema isolation does not bind them. This is **not** a blocker to the already-created dark schema, but it **is a blocker to Phase 1B runtime integration and any service write to `iam_v2`**: Phase 1B must not route any service to `iam_v2` until a **separately reviewed least-privilege service-role migration + credential-rotation plan** exists (with rollback, per-service DSNs, secret handling, connection testing, reboot persistence). Not performed now.
+
+## Zero-Stale-Leftovers validation
+- **`tools/validate-project-state.sh` → `ZERO_STALE_LEFTOVERS = PASS`** (all 6 checks: no stale current-status phrases; single maturity + next action; acceptance record present and references the V2 evidence with V1 marked superseded; Project-Pack MANIFEST checksums match; core pack links resolve; no secrets/guest-PII/credential-DSNs in exports). Run against the synchronized repository per the permanent rule `docs/ZERO_STALE_LEFTOVERS_RULE.md`.
 
 ## Final maturity & next action
 - **Maturity:** `PHASE1A_PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED` (dark, isolated, additive, reversible) — on top of SCRATCH_IMPLEMENTED + SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED.

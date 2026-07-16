@@ -1,0 +1,10 @@
+commit d0eabc2d9cf70aef8d0bae5de32bc4744bd39ba1
+Author: ahmed-ibrahim <ahmed-ibrahim@CHV-MISMGR>
+Date:   Thu Jul 16 20:18:40 2026 +0300
+
+    docs(iam): record ZERO_STALE_LEFTOVERS=PASS in the Phase 1A live-dark acceptance record
+    
+    Finalizes the documentation sync: the acceptance record now cites tools/validate-project-state.sh
+    passing all six checks. No DB/runtime change.
+    
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>

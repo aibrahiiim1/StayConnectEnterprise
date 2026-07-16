@@ -1,7 +1,5 @@
 # StayConnect Internet Access Management — Phase 0 Contract
 
-> **Export note:** guest-linked identifiers redacted for external sharing; technical findings preserved verbatim.
-
 **Status: FINAL — Phase 0 CLOSED.** *(2026-07-16 — approved by the Product Owner; previously READY_FOR_FINAL_OWNER_APPROVAL, and before that CONDITIONALLY FROZEN.)*
 
 | Finalization record | Value |
@@ -13,7 +11,7 @@
 | Historical Phase-0 finalization provenance | contract `ffe2200`, synchronized handoff `6b4721d` (retained as the historical FINAL-approval baseline only) |
 | FINAL documentation commit | *established by the commit that carries this status change* |
 | Phase 0 | **CLOSED** |
-| Next authorized activity | **Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan** (see [StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md), status `READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`). Phase 1A is **NOT started**; no implementation is currently authorized. Plan approval authorizes **scratch/test implementation only**; live-database `iam_v2` creation and cutover need later, separate approvals |
+| Next authorized activity | **Product-Owner acceptance of Phase 1A** (production `iam_v2` **live-dark created and verified 2026-07-16**, dark/not cut over — see [Live-Dark Acceptance](StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md)), then **Phase 1B planning under separate authorization**. Cutover, service routing, and IAM data migration remain separately gated. |
 
 The Phase-0 **protocol and architecture** validation is complete on already-measured live evidence (see §9b/§9c and `docs/spikes/Protel-FIAS-Phase0-Spike.md`) and is now **FINAL**. The approved architecture, DDL, invariants, limitations, measured FIAS findings, and acceptance requirements below are unchanged by this finalization — only the status advanced.
 
@@ -766,7 +764,7 @@ The earlier closure plan incorrectly gated Phase-0 finalization on product behav
 | 3C | Posting-Engine UNKNOWN safety | Posting Engine, `posting_attempts`/`posting_attempt_events`, `pms_interface_pnumber_seq`, Manual-Review workflow | transmitted request → **UNKNOWN** when no matching `PA`; **no auto-retry**; **no auto-allocated second `P#`**; Manual-Review; external Folio reconciliation; audited `CONFIRM_POSTED`/`RETRY_APPROVED`/`ABANDON`; **no duplicate charge** |
 | 3D | Checkout & Checkout-Grace | Stay/Event persistence, Checkout handler, Post-Stay profile, Checkout-Grace Purchase+Entitlement, session reassignment, accounting cutoff, idempotent event processing | healthy-link checkout; link-down checkout; delayed checkout; **stale-cache refusal**; reconnect+resync; **mandatory Checkout Grace** (no intentional disconnect/re-auth); **effective-checkout-timestamp** accounting split; **repeated-checkout idempotency** |
 
-**Finalization — DONE (2026-07-16):** the product owner gave **explicit FINAL approval** of this corrected contract; Phase 0 is **FINAL and CLOSED**. Tier-2 (per-property) and Tier-3 (post-implementation) items were **not** finalization blockers — they are, respectively, deployment prerequisites and binding acceptance requirements that carry forward past FINAL. Deferred limitations are listed in §9d. Next authorized activity: **Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan** (the plan is complete, status `READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`). Phase 1A is NOT started; plan approval authorizes scratch/test implementation only — live-database creation and cutover need later separate approvals.
+**Finalization — DONE (2026-07-16):** the product owner gave **explicit FINAL approval** of this corrected contract; Phase 0 is **FINAL and CLOSED**. Tier-2 (per-property) and Tier-3 (post-implementation) items were **not** finalization blockers — they are, respectively, deployment prerequisites and binding acceptance requirements that carry forward past FINAL. Deferred limitations are listed in §9d. **Current operational status (2026-07-16):** Phase 1A is scratch-verified, offline-real-schema-verified, and **production `iam_v2` is live-dark created + verified (dark, not cut over)**. Next authorized activity: **Product-Owner acceptance of Phase 1A, then Phase 1B planning under separate authorization**; cutover, service routing, and IAM data migration remain separately gated.
 
 ### 9d. Deferred limitations (carried past Phase-0 FINAL)
 
@@ -831,8 +829,8 @@ Manual-review actions (each requires financial-review write **and password re-au
 | Phase | Content | Gate | Rollback boundary |
 |---|---|---|---|
 | **0** | This contract signed; **live Protel FIAS spike**; mews/apaleo capability contract tests; measured values merged into §9 | spike artifact + owner approval → contract FINAL | n/a |
-| **1A Core Foundation** | Clean-slate schema in the standby site DB; entitlement engine (window mode, supersession, counters, watermarks); device registry; lock-order library — dark, no user-visible change | A-series acceptance | blue/green swap-back |
-| **1B Credential/Portal Cutover** | Auth contexts; voucher (HMAC/AEAD), account, OTP/social (guest principals) re-pointed; session-after-grant portal flow; controlled reset of disposable test data; cutover | B-series + reboot/offline/purge drills | blue/green swap-back |
+| **1A Core Foundation** | Clean-slate isolated `iam_v2` schema **inside the existing site DB** (no standby/whole-DB swap); entitlement engine (window mode, supersession, counters, watermarks); device registry; lock-order library — dark, no user-visible change | A-series acceptance | drop `iam_v2` / leave dark (pre-cutover) |
+| **1B Credential/Portal Cutover** | Auth contexts; voucher (HMAC/AEAD), account, OTP/social (guest principals) re-pointed; session-after-grant portal flow; controlled reset of disposable test data; cutover | B-series + reboot/offline/purge drills | flip `search_path` back before first write (Boundary A); after first write reverse-migrate / forward-fix (Boundary B) |
 | **2** | Packages, revisions, rules, tiers, quotes; free purchases; portal package selection; grace-config UI | C-series incl. quote races | additive down-migration |
 | **3** | Stay domain: interfaces/revisions/routing, STRICT resolution, stays/sharers/folios/events, room move, **mandatory checkout grace**, reinstatement — no posting | D + F series | additive |
 | **4** | Financial: settlements, postings + outbox lanes, secret generations, payments re-rail, recovery mode, manual review, compliance archive; per-tenant posting enable flag | E + G series | posting flag off |
@@ -840,7 +838,7 @@ Manual-review actions (each requires financial-review write **and password re-au
 | **6** | Guest device self-service; optional AGGREGATE_ONLINE_TIME | device-management tests | additive |
 | **7** | Cleanup, final docs/ops manual, full-system re-acceptance (reboot, offline, purge, restore drills) | complete matrix | last blue/green snapshot |
 
-Phases 2 and 3 are parallelizable after 1B. The detailed **Phase 1A execution plan** (migration groups, per-object specs, lock strategy, acceptance) is in [StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md), status **READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL** — planning only, pending separate owner approval before implementation. **Owner refinement (2026-07-16):** the 1A "standby site DB / blue-green swap-back" mechanism in the table above is superseded by an **isolated `iam_v2` schema inside the existing site DB** (dark; rollback = leave dark / drop schema; a separate gated `search_path` cutover, never a whole-DB swap); reversal stays `capability=false` (no executable reversal built in 1A). See the plan for the resolved decisions.
+Phases 2 and 3 are parallelizable after 1B. The detailed **Phase 1A execution plan** (migration groups, per-object specs, lock strategy, acceptance) is in [StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md), maturity **PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED** (2026-07-16; dark, not cut over). **Refinement (approved):** the 1A "standby site DB / blue-green swap-back" mechanism in the table above is superseded by an **isolated `iam_v2` schema inside the existing site DB** (dark; rollback = drop schema + anchor; a separate gated `search_path`/service-routing cutover, never a whole-DB swap); reversal stays `capability=false` (no executable reversal built in 1A). See the plan + the Live-Dark Acceptance record.
 
 ## 19. Acceptance & Failure-Drill Matrix
 
@@ -854,4 +852,4 @@ Phases 2 and 3 are parallelizable after 1B. The detailed **Phase 1A execution pl
 
 ---
 
-**End of contract.** Status: **FINAL — Phase 0 CLOSED** (Product-Owner approval, 2026-07-16). The Phase-0 protocol/architecture validation is complete and merged (§9b/§9c). Per-property financial onboarding (§9c Tier 2, incl. Aqua Club) and post-implementation acceptance (§9c Tier 3 / §9d) carry forward as deployment prerequisites and binding acceptance requirements, not finalization blockers. **Next authorized activity: Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan** ([StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md)). Phase 1A is NOT started; no implementation, migration, connector, UI, config, or deployment work is authorized. Plan approval authorizes scratch/test implementation only; live-database creation and cutover need later separate approvals.
+**End of contract.** Status: **FINAL — Phase 0 CLOSED** (Product-Owner approval, 2026-07-16). The Phase-0 protocol/architecture validation is complete and merged (§9b/§9c). Per-property financial onboarding (§9c Tier 2, incl. Aqua Club) and post-implementation acceptance (§9c Tier 3 / §9d) carry forward as deployment prerequisites and binding acceptance requirements, not finalization blockers. **Current operational status (2026-07-16):** Phase 1A production `iam_v2` **live-dark created + verified** (dark, not cut over; no service routed, no DSN/`search_path` change). **Next authorized activity: Product-Owner acceptance of Phase 1A, then Phase 1B planning under separate authorization.** Cutover, service routing, IAM data migration, deployment, and legacy cleanup remain separately gated. *(This is the current operational status; the Phase-0 design/architecture above is FINAL and unchanged.)*
