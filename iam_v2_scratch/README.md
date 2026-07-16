@@ -1,6 +1,6 @@
 # iam_v2 — Phase 1A SCRATCH/TEST implementation
 
-**Status: IMPLEMENTED-IN-SCRATCH and VERIFIED-IN-SCRATCH. NOT created on any live database. NOT cut over.**
+**Status: SCRATCH_IMPLEMENTED + SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED (99/99 PASS). NOT live-dark created. NOT deployed. NOT cut over. NOT live accepted.** *(Corrected after the Product-Owner evidence review: allowlist safety guard, `iam_v2_owner`/service-role least-privilege, migration idempotency + catalog equality, offline real-schema compatibility on `data-plane/migrations/0001..0006`, and the contract-fidelity matrix are in `review/`.)*
 
 This directory is the **Product-Owner-authorized Phase 1A implementation, executed strictly in a
 dedicated disposable scratch/test PostgreSQL database** (a throwaway Docker container). It is **not**

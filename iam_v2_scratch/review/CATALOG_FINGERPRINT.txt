@@ -1,0 +1,2 @@
+iam_v2 base tables: 49
+catalog_fingerprint_md5: bd75026ff6ea5835a1ca8d19051eb257

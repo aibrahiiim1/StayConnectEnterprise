@@ -26,8 +26,9 @@ val="$(Q "SELECT indisvalid::text FROM pg_index WHERE indexrelid='public.guest_n
 eq "MG0-REC-01 invalid index detected before recovery" "$inv" "false"
 eq "MG0-REC-02 MG-0 recovery yields VALID index (via DROP+rebuild CONCURRENTLY)" "$val" "true"
 
-# restore MG-1..9 (anchor now valid) + reseed for the race/restart tests
-bash "$HERE/run.sh" up >/dev/null 2>&1
+# restore full stack + reseed for the race/restart tests.
+# NOTE: use `fresh` (not `up`) — the migration ledger would make `up` skip after the DROP SCHEMA above.
+bash "$HERE/run.sh" fresh >/dev/null 2>&1
 psqlf "$HERE/seed.sql" >/dev/null 2>&1
 
 # CONCURRENCY: device admission race, max=1, two parallel txns, distinct devices, same credential.
@@ -65,12 +66,7 @@ after="$(Q "SELECT window_ends_at::text FROM iam_v2.entitlements WHERE voucher_i
 eq "RESTART-01 validity window unchanged across container restart" "$after" "$before"
 eq "RESTART-02 iam_v2 schema intact after restart (49 tables)" "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_type='BASE TABLE';")" "49"
 
-# SECRET / PII scan of committed scratch artifacts (exclude the scanner scripts, which contain the pattern strings themselves)
-scan=$(grep -rniE "BEGIN (RSA|OPENSSH) PRIVATE|ssh-ed25519 AAAA|ProofAdmin|sk_live|whsec_|passport|[0-9]{16}" "$HERE" --include=*.sql --include=*.sh --exclude=tests.sh --exclude=tests_extra.sh 2>/dev/null | wc -l)
-eq "SEC-01 no secrets/PII patterns in committed scratch artifacts" "$scan" "0"
-# the disposable container password must NOT be assigned in any committed file (it lived only in a one-off docker-run command)
-pwleak=$(grep -rniE "POSTGRES_PASSWORD=" "$HERE" --exclude=tests.sh --exclude=tests_extra.sh 2>/dev/null | wc -l)
-eq "SEC-02 no POSTGRES_PASSWORD assignment committed in scratch artifacts" "$pwleak" "0"
+# (secret / PII scan is performed centrally in run_all.sh SEC-01/02, with correct scanner-file exclusions)
 
 echo "===== EXTRA RESULT: PASS=$PASSN FAIL=$FAILN ====="
 [ "$FAILN" = "0" ]

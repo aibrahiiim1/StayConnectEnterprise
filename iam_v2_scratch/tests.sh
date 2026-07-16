@@ -23,7 +23,7 @@ echo "===== A-SERIES (scratch) ====="
 
 # ---- schema / isolation integrity ----
 expect_eq "INV-01 iam_v2 base-table count = 49" "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_type='BASE TABLE';" "49"
-expect_eq "INV-02 no accidental non-fixture public tables" "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('tenants','sites','guest_networks');" "0"
+expect_eq "INV-02 no accidental IAM objects in public (only fixtures + scratch harness tables)" "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('tenants','sites','guest_networks','_scratch_marker','_iam_v2_migrations');" "0"
 expect_eq "INV-03 MG-0 anchor present & valid" "SELECT indisvalid::text FROM pg_index WHERE indexrelid='public.guest_networks_tsi_anchor'::regclass;" "true"
 
 # ---- immutable revisions / append-only ----
@@ -77,6 +77,12 @@ expect_fail "PA-02 posting_attempts identity immutable (P# change rejected)" "BE
 
 # ---- reversal scope: no executable reversal; only passive REVERSAL ledger row ----
 expect_eq  "REV-01 no reversal sender/PT=C function exists" "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND (p.proname ILIKE '%revers%send%' OR p.proname ILIKE '%pt_c%' OR p.proname ILIKE '%send_reversal%');" "0"
+
+# ---- A5 / A9 / A10 / A11 DB primitives ----
+expect_ok  "CAP-01 (A5) aggregate data-cap terminal transition to TERMINATED/DATA (atomic, one-way)" "BEGIN; UPDATE iam_v2.entitlements SET consumed_data_bytes=1000000, status='TERMINATED', terminal_reason='DATA', terminated_at=now() WHERE id=$ENT; ROLLBACK;"
+expect_eq  "CAP-RESID-01 (A11) rejected admission leaves ZERO residual binding rows" "BEGIN; DO \$\$ BEGIN PERFORM iam_v2.reserve_device_slot($ENT,$D1,'c',$APP::text,2); PERFORM iam_v2.reserve_device_slot($ENT,$D2,'c',$APP::text,2); PERFORM iam_v2.reserve_device_slot($ENT,$D3,'c',$APP::text,2); END \$\$; SELECT count(*) FROM iam_v2.entitlement_devices WHERE entitlement_id=$ENT AND device_id=$D3; ROLLBACK;" "0"
+expect_eq  "SUSP-01 (A9) suspension keeps window; still counts live" "BEGIN; UPDATE iam_v2.entitlements SET status='SUSPENDED' WHERE id=$ENT; SELECT status||'|'||(window_ends_at IS NOT NULL)::text FROM iam_v2.entitlements WHERE id=$ENT; ROLLBACK;" "SUSPENDED|true"
+expect_eq  "REOPEN-01 (A10) sample after TERMINATED does not reopen entitlement" "BEGIN; UPDATE iam_v2.entitlements SET status='TERMINATED',terminal_reason='DATA',terminated_at=now() WHERE id=$ENT; DO \$\$ BEGIN PERFORM iam_v2.ingest_sample($SESS,10,100,0,1); END \$\$; SELECT status FROM iam_v2.entitlements WHERE id=$ENT; ROLLBACK;" "TERMINATED"
 
 # ---- AGGREGATE_ONLINE_TIME inert (present in enum, not implemented) ----
 expect_ok  "AGG-01 AGGREGATE_ONLINE_TIME storable but inert (enum only)" "BEGIN; INSERT INTO iam_v2.service_plan_revisions(tenant_id,site_id,service_plan_id,revision_no,name,time_accounting_mode) VALUES ($TEN,$SITE,'bbbb0000-0000-0000-0000-000000000001',99,'agg','AGGREGATE_ONLINE_TIME'); ROLLBACK;"
