@@ -1,5 +1,5 @@
 # REPOSITORY ARTIFACTS — committed source referenced by this Evidence Pack but NOT physically packaged.
-# Verify against the repository at SOURCE_DOCUMENTATION_SYNC_COMMIT d4fa9be.
+# Verify against the repository at SOURCE_DOCUMENTATION_SYNC_COMMIT afade95.
 d71beccfc3c85ce283fed580dafbac173dfccb114999c87820e8b701179c116f  iam_v2_scratch/prod_verify.sql
 ff510d372d1765a41619a843aa887e7db4a4ada0eefa1dab6c36d56600532fda  iam_v2_scratch/prod_live_dark.sh
 9ffb4d4e61ed387d209fe471d174c744934950ea035069ceeca640abcd561c68  iam_v2_scratch/mg0.sh

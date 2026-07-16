@@ -1,5 +1,0 @@
-commit d4fa9be9e72f07eccbc8c45713dff6d1a28375c2
-Date:   Thu Jul 16 20:57:40 2026 +0300
-
-    docs(iam)+tools: drop last blue/green rollback value in Â§18; make validator portable
-

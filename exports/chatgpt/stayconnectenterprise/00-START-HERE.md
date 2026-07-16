@@ -2,7 +2,7 @@
 
 **Read this file first.** It is the orientation for an AI consultant continuing work on StayConnect Enterprise. It summarizes the current, authoritative state; the individual documents in this pack are the detailed sources. Where this summary and a copied source document disagree, follow the **source-of-truth precedence** in §12.
 
-**Source documentation baseline commit:** `d4fa9be` (documentation-and-validator portability correction — §18 superseded rollback value removed; validator made portable; supersedes `3e8069d`/`d5a5862`/`2f232cb`/`d0eabc2`/`22a2e15`).
+**Source documentation baseline commit:** `afade95` (adds the planning-only Phase 1B implementation plan; supersedes `d4fa9be`/`d0eabc2`/`22a2e15`).
 **Project-pack export commit:** recorded exactly as `PROJECT_PACK_EXPORT_COMMIT` in `MANIFEST.md`.
 **Export date:** 2026-07-16.
 
@@ -72,7 +72,7 @@ Build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL s
 
 ## 9. Next authorized action
 
-The single **next authorized action** is Product-Owner acceptance of Phase 1A (review of the Phase 1A LIVE-DARK acceptance) before any Phase 1B authorization.
+The single **next authorized action** is Product-Owner **approval or rejection of the complete Phase 1B plan** (`StayConnect-IAM-Phase1B-Plan.md`, planning-only). The Phase 1A LIVE-DARK acceptance record is unchanged (review of the Phase 1A LIVE-DARK acceptance remains available). Phase 1B is **not implemented**; approving the plan does not authorize implementation (the mandatory least-privilege / superuser-elimination prerequisite is inside the plan, §2/§14).
 
 **Product-Owner review of the Phase 1A LIVE-DARK acceptance** (`StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`, 18/18; authoritative production evidence is `PROD_LIVE_DARK_EVIDENCE_V2.txt`, captured read-only — the earlier `PROD_LIVE_DARK_EVIDENCE.txt` is **superseded/erroneous**) — **before any Phase 1B authorization**. The dark `iam_v2` schema is created + verified in production but **NOT cut over**; no service reads/writes it, no DSN/`search_path` change. Phase 1B (credential/portal, dark/flagged), cutover, IAM data migration, and legacy cleanup each need their **own** separate PO approval (plan §7a/§11 ladder). Nothing downstream is authorized yet.
 
@@ -89,6 +89,7 @@ Schema migrations; feature code; production connector/posting-engine development
 | `StayConnect-IAM-Phase0-Contract.md` | **Authoritative** — FINAL Phase-0 architecture contract (DDL, invariants, state machines, FIAS findings §9). |
 | `StayConnect-IAM-Handoff.md` | **Authoritative** — current synchronized operational handoff. |
 | `StayConnect-IAM-Phase1A-Plan.md` | **Authoritative** — current approved phase plan (implemented through production live-dark; cutover/1B still gated). |
+| `StayConnect-IAM-Phase1B-Plan.md` | **Authoritative (planning-only)** — complete Phase 1B credential/portal implementation plan; awaiting PO approval/rejection; not implemented. |
 | `Protel-FIAS-Phase0-Spike.md` | **Authoritative** — live FIAS spike + Gate 3A PASS evidence (guest identifiers redacted). |
 | `SYSTEM_OVERVIEW.md` | Supporting — canonical current-system reference. |
 | `TARGET_ARCHITECTURE.md` | Supporting — target architecture. |
