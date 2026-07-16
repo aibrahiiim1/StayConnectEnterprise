@@ -688,6 +688,24 @@ The legacy Coral Sea Protel wire is authoritative for existing behavior; FidServ
 4. **`SO=WIFI` acceptance ≠ revenue correctness.** An `ASOK` on `SO=WIFI` proves wire acceptance, not that the charge hit the correct revenue/transaction account. **Property Finance/Protel must confirm the FidServ `WIFI` (`SOWIFI`) mapping before any financial testing or production enablement.**
 5. **Programmatic reversal is `capability=false`** until a supervised test proves the exact `PT`/`TA`/`SO` reversal semantics. **Do not assume `PT=C` or a negative `TA`.** The first controlled debit is corrected **manually in Protel by Front Office** if explicitly approved.
 
+### 9b. FIAS live validation — Gate 3A CLOSED: PASS (2026-07-16, production-grounded)
+
+The supervised live financial spike executed against **Coral Sea Holiday Village (Hotel ID 3, `150.0.0.18:5003`)** and closed **PASS** with full Front Office verification of a single controlled USD 1.00 `PS` debit (`P#900002`, Room 14215). Verdict: **PROTOCOL ACCEPTED, CORRECT FOLIO VERIFIED, REVENUE MAPPING VERIFIED, MANUAL CLEANUP VERIFIED.** This retires several `*`-pending assumptions in §9/§9a for this interface class:
+
+- **`PA ASOK` with a mandatory `G#` posts to the correct Guest Folio** — verified end-to-end (correct folio, `SO=WIFI` → intended Internet revenue account, manual removal to exact original balance). `PA` matched by **PMS Interface + `P#`** as specified (§9a rule 2).
+- Full evidence and per-attempt detail: [Protel-FIAS-Phase0-Spike.md](../spikes/Protel-FIAS-Phase0-Spike.md) "Gate 3A — CLOSURE" and "Execution Attempt #5".
+
+**Production-grounded operational requirements (binding on the FIAS connector and any test harness):**
+
+1. **Verified link-startup sequence.** Server `LS` → Client `LS` → Client `LD` → Client `LR` → `LA` acknowledgments. The client sends `LS/LD/LR` **immediately on connect** and acks incoming `LS`/`LA` with a bare `LA|`. Do **not** gate progress on a client-side "reach `LA` first" milestone — this interface retransmits `LS` and the link stalls. (Matches the existing connector in `data-plane/internal/pms/protel_fias.go`.)
+2. **Single active client slot.** Each PMS Interface allows **exactly one** active client connection at a time.
+3. **Single-owner lock per PMS Interface.** Production must enforce a single-owner lock so only one connector (or authorized harness) holds a given Interface; concurrent owners are rejected, not multiplexed.
+4. **Guaranteed socket/process cleanup.** Connectors and harnesses must use **bounded read/write timeouts** and a **finally/defer cleanup path** that always closes the socket and terminates the process — no unbounded reads that can orphan the connection.
+5. **Orphan detection/prevention at startup.** Startup must detect and clear any **orphan** connector/harness still holding the PMS slot (verify the slot is free / reap the stale owner) before connecting.
+6. **Lock-before-start.** No financial test or production connector may start while **another owner holds the Interface lock**.
+
+*(Findings 2–6 were observed directly during Gate 3A: a stalled `LA` gate and a prior harness process that retained the single client slot until reaped. They are recorded here as hard requirements for the eventual connector/harness implementation — no feature code is written at Phase 0.)*
+
 ## 10. PMS Interface Lifecycle & Failure Isolation
 
 States: `ACTIVE ⇄ AUTH_DISABLED → DRAINING → DECOMMISSIONED` (DRAINING → ACTIVE allowed). AUTH_DISABLED: no new guest auth; posting/events continue. DRAINING: no new auth/purchases/postings; outbox drains; events for existing stays only. DECOMMISSIONED: terminal, history preserved; requires zero PENDING/SENDING/UNKNOWN postings, zero unprocessed events, and no live entitlements requiring it — or a privileged audited override routing leftovers to MANUAL_REVIEW. Hard DELETE only for never-referenced interfaces (RESTRICT FKs enforce this naturally).

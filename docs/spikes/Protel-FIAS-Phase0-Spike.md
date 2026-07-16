@@ -1,6 +1,32 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE3A_EXECUTED x2 — two owner-authorized USD 1.00 PS debits, both PA ASOK (PROTOCOL_ACCEPTED); folio placement NOT independently verified — owner owns out-of-band folio verification + cleanup`**
+**Spike status: `GATE3A_CLOSED — PASS. PROTOCOL ACCEPTED, CORRECT FOLIO VERIFIED, REVENUE MAPPING VERIFIED, MANUAL CLEANUP VERIFIED (P#900002 / Room 14215 / G#262224). Gates 3B–3D NOT started.`**
+
+### Gate 3A — CLOSURE (Front Office verified, 2026-07-16)
+
+Product owner completed out-of-band Front Office verification for **Attempt #5 (`P#900002`)** and closed the gate:
+
+| Verification item | Result |
+|---|---|
+| Room 14215 / Reservation G#262224 received the USD 1.00 debit | **YES** |
+| Debit appeared on the **correct guest Folio** | **YES** |
+| `SO=WIFI` posted to the **intended Internet revenue mapping** | **YES** |
+| Front Office **manually corrected/removed** the USD 1.00 debit | **YES** |
+| Folio returned to its **exact original balance** | **YES** |
+
+**Gate 3A verdict: `PASS — PROTOCOL ACCEPTED, CORRECT FOLIO VERIFIED, REVENUE MAPPING VERIFIED, MANUAL CLEANUP VERIFIED`.** End-to-end financial correctness of a StayConnect FIAS `PS` debit against live Protel (Hotel ID 3) is now proven: protocol acceptance (`PA ASOK`), correct-folio placement, correct revenue mapping, and clean reversibility by Front Office to net-zero.
+
+**Production-grounded findings from Gate 3A (carried into the Phase-0 contract §9):**
+
+1. **Verified link-startup sequence:** Server `LS` → Client `LS` → Client `LD` → Client `LR` → `LA` acknowledgments. The client must send `LS/LD/LR` immediately on connect and ack incoming `LS`/`LA` with `LA|`; gating on a client-side "reach LA first" milestone stalls the link.
+2. **Single active client slot:** the PMS Interface allows exactly **one** active client connection at a time.
+3. **Single-owner lock:** production implementation must enforce a **single-owner lock per PMS Interface** (only one connector/harness may hold a given Interface).
+4. **Guaranteed cleanup:** test harnesses and connectors must guarantee socket/process cleanup via **bounded timeouts** and a **finally/defer cleanup path** (no unbounded reads that can orphan the socket).
+5. **Orphan prevention:** startup must **detect and prevent an orphan** connector/harness from retaining the PMS slot (reap/verify the slot is free before connecting).
+6. **Lock-before-start:** no financial test or production connector may start while **another owner holds the Interface lock**.
+
+---
+
 
 **Attempt #5 (2026-07-16, owner-selected Room 14215):** owner explicitly selected **Room 14215** (no redaction of the room number authorized). Full `LS→LD(IFPB/V#1.13/RT4)→LR(GI/GC/GO)` handshake, incoming `LS`/`LA` acked with `LA|`, read-only `DR` resync returned `DS` + **365 in-house records** ending with an explicit **`DE`**; Room 14215 resolved to a valid `G#` from an in-house `GI`, not cleared by any `GO`. Exactly **one** `PS` (`TA100`/`PTD`/`SOWIFI`/`WSSTAYCONNECT`/`CTGate3A Test`/**`P#900002`**) sent with **zero retries**; **`PA ASOK` matched by Interface + `P#` in 93 ms**. `P#900001` (Attempt #4) was NOT reused. Result: `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED`. The resolved `G#` was returned directly to the product owner and is deliberately NOT stored in Git/Markdown. Guest name never decoded or stored. See "Execution Attempt #5" below.
 
@@ -421,7 +447,9 @@ PA|RN14215|SOWIFI|P#900002|WSSTAYCONNECT|ASOK|      # matched by PMS Interface +
 
 **Result: `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED`.** `ASOK` proves Protel accepted the record at the protocol level; it is **not** proof of correct-folio placement. This is a **real** posting on the live PMS.
 
-**Owner cleanup correlation keys** (to locate + remove in Protel out-of-band): `RN=14215`, `P#=900002`, `WS=STAYCONNECT`, `SO=WIFI`, `CT="Gate3A Test"`, amount USD 1.00 (`TA100`), posted ~`2026-07-16T05:53:03Z`, `PA ASOK`. **Folio verification, manual removal, and net-zero confirmation are owned by the product owner and remain AWAITING PRODUCT-OWNER CONFIRMATION.**
+**Owner cleanup correlation keys** (used to locate + remove in Protel out-of-band): `RN=14215`, `P#=900002`, `WS=STAYCONNECT`, `SO=WIFI`, `CT="Gate3A Test"`, amount USD 1.00 (`TA100`), posted ~`2026-07-16T05:53:03Z`, `PA ASOK`.
+
+**Folio verification: COMPLETE (2026-07-16).** Front Office confirmed the USD 1.00 debit landed on the correct guest Folio (Room 14215 / G#262224), `SO=WIFI` mapped to the intended Internet revenue account, the debit was manually removed, and the Folio returned to its exact original balance. See "Gate 3A — CLOSURE" at the top of this document. **Gate 3A verdict: PASS.**
 
 ## Gate 3A — Execution Attempt #4 (2026-07-16): EXECUTED — one debit, PA ASOK (protocol accepted; folio NOT independently verified)
 
