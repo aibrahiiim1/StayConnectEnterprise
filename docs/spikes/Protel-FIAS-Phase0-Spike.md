@@ -1,8 +1,8 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE3A_ABORTED — currency/exponent NOT confirmable + no folio-cleanup path; no connection opened, no PS sent (no financial traffic performed)`**
+**Spike status: `GATE3A_ABORTED — no Front-Office verification channel available to executor; no connection opened, no PS sent (no financial traffic performed)`**
 
-Two Gate-3A execution requests (2026-07-16) both aborted **before any connection or `PS`**. Attempt #1: fixtures were placeholder tokens. Attempt #2 (auto-select any in-house room, debit 1.00): the Protel-side **currency/exponent is not determinable from any read-only evidence** (FIAS carries no currency; appliance has no PMS config; supplied values were placeholders) — so the owner's own §2 currency guard mandates abort — and the run also removed the mandatory net-zero folio-correction path for a real guest. No `PS` built or sent; no guest selected. See "Gate 3A — Execution Attempt #2" below.
+Three Gate-3A requests (2026-07-16) all aborted **before any connection or `PS`**. #1: fixtures were placeholder tokens. #2: Protel currency/exponent not confirmable (owner's §2 guard). **#3 (currency now confirmed USD/exp-2 ⇒ `TA100`, auto-select in-house): the sole remaining blocker is that the executor has NO channel to the human Front Office** that the runbook makes a hard pre-send gate (obtain pre-test folio evidence; verify placement; confirm net-zero). Posting a real USD 1.00 charge to a real guest without that verification/cleanup loop is forbidden by the runbook's own abort clause. See "Execution Attempt #3" — one owner sentence (option A or B) clears it.
 
 The legacy-server (`172.21.96.150`) SSH inspection is **cancelled** — not required. Socket-Server collision safety is handled **in-band at test start**: accept + opening `LS` = free slot; keep that connection for the whole run; refusal / no `LS` ⇒ abort without displacing (see "Socket-Server collision clearance"). Gate 3A is now blocked **only** on the real financial/test fixtures.
 
@@ -389,6 +389,21 @@ The legacy-server (`172.21.96.150`) SSH investigation is **cancelled and out of 
 - **If the connection is refused, or no opening `LS` is received, ABORT immediately** — do not displace, reconnect into a race, or modify any existing client.
 
 This replaces any pre-run legacy-connector reconciliation: collision safety is proven at test time by the server's own admission control, not by inspecting the old server.
+
+## Gate 3A — Execution Attempt #3 (2026-07-16): ABORTED at the Front-Office verification gate (no connection, no PS sent)
+
+Currency/exponent are now resolved (**USD, exponent 2 ⇒ `TA100`**) and guest selection is auto-from-feed, so those prior blockers are cleared. Execution still **aborts before any connection or `PS`** on the **one remaining, fundamental blocker: there is no channel from this execution environment to a human Front Office**, which the runbook makes a hard gate.
+
+- **Pre-send gate cannot be met:** the runbook step 4 requires me to *"Obtain Front Office pre-test Folio evidence for the selected reservation,"* and states *"If Front Office cannot verify the selected Folio before sending, abort without PS."* No phone/chat/email/PMS-folio channel to Front Office is available to me (the auth-gated mail/calendar connectors are not usable here). I cannot capture the pre-test folio balance.
+- **Required deliverables are impossible for me to produce:** "Front Office Folio verification," "manual correction result," and "confirmation that the Folio returned to its exact original balance" all require a human Front Office loop I cannot reach or observe.
+- Consequence: posting a real USD 1.00 debit to a real, non-consenting in-house guest while unable to verify placement **or** confirm the mandatory net-zero cleanup would violate the runbook's own pre-send abort clause. **Abort without PS.** (Connecting first was declined: it cannot create a Front Office channel and would needlessly expose a real guest's personal data for a posting that cannot proceed.)
+
+**This is the last gap. One sentence from the product owner clears it — choose one:**
+
+- **(A) Owner owns the human loop, technical-only send:** explicitly restructure the run so *the owner/Front Office* captures the pre-test folio balance and performs verification + correction out-of-band, and authorize StayConnect to send **only** the single `PS` and report the `PA`, with folio placement reported as `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED` and cleanup/net-zero owned and confirmed by the owner. (Ideally also relay the **pre-test folio balance** so net-zero can be cross-checked from the returned evidence.)
+- **(B) Close the loop to me:** relay, through the prompts, the selected reservation's **pre-test folio balance** and the **post-correction confirmation**, or wire a folio-read channel — so I can complete the full verify→post→verify→net-zero sequence end-to-end.
+
+Until (A) or (B) is given, no `PS` is sent. **Requested return items:** redacted RN/G# — none (no selection/connection); in-house confirmation — N/A; allocated `P#` — none; `PS`/`PA` — none; `PA` status/response time — N/A; Front Office folio verification — **cannot perform (no channel)**; correction/net-zero — N/A (nothing posted); one-PS/zero-retries — N/A (zero PS).
 
 ## Gate 3A — Execution Attempt #2 (2026-07-16): ABORTED at the currency guard (no connection, no PS sent)
 
