@@ -2,7 +2,8 @@
 
 **Read this file first.** It is the orientation for an AI consultant continuing work on StayConnect Enterprise. It summarizes the current, authoritative state; the individual documents in this pack are the detailed sources. Where this summary and a copied source document disagree, follow the **source-of-truth precedence** in §12.
 
-**Authoritative baseline commit:** `4a64b00` (Git HEAD at export time).
+**Source documentation baseline commit:** `4a1adc5` (`docs(stayconnect): reconcile architecture and project status`).
+**Project-pack export commit:** the commit that adds/updates this pack (later than `4a1adc5`).
 **Export date:** 2026-07-16.
 
 ---
@@ -16,6 +17,7 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 - **Appliance (on-site):** Go daemons — `scd` (session/auth control), `edged` (admin API), `portald` (guest captive portal), `acctd` (accounting) — plus a `hotel-admin` Next.js UI. Local Postgres (site DB `stayconnect_site`, with a standby). Enforces guest access, shaping, accounting, and PMS integration at the edge; operates offline.
 - **Central Control Plane (cloud, `150.0.0.252`):** `ctrlapi` Go API + `cloud-admin` Next.js. Fleet/customer/site/license management, telemetry, backup health. Outbound-only from appliances; internal-CA mTLS.
 - **Ownership hierarchy (frozen):** Platform → Customer → Site (one physical property) → Appliance → guest VLANs/networks.
+- **Appliance NIC topology (approved, permanent): exactly two physical NICs — WAN and LAN.** **WAN is also the management interface** (Hotel Admin/SSH/outbound sync); **LAN** carries guest connectivity and guest VLAN/trunk. There is **no** separate management NIC and **no** approved third HA-sync NIC. (Older docs describing a separate `mgmt` IP or an optional `hasync` NIC are superseded.)
 - **PMS integration:** FIAS connector is **lookup-only today**; the financial **posting engine is a future component** (see phase status). Existing FIAS parse/framing lives in `data-plane/internal/pms/`.
 
 ## 3. Current project phase & status
@@ -56,7 +58,12 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 
 ## 8. Current approved plan (Phase 1A)
 
-Build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL schema inside the existing site database**, plus the core entitlement engine (validity-window, supersession, counters, watermarks), device registry, and lock strategy — **dark** (no service reads/writes it; no `search_path` cutover). Rollback before cutover = leave `iam_v2` dark / drop the schema; **no whole-database swap**. See `StayConnect-IAM-Phase1A-Plan.md` for migration groups MG-0…MG-9, per-object specs, the row-lock-first strategy, the replace/retain/migrate/remove matrix, disposable-data handling, and acceptance tests. **Cutover to `iam_v2` is a separate, later, explicitly gated event** (plan §7a, 8 gates); build completion does **not** auto-promote.
+Build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL schema inside the existing site database**, plus the core entitlement engine (validity-window, supersession, counters, watermarks), device registry, and lock strategy — **dark** (no service reads/writes it; no `search_path` cutover). Rollback before cutover = leave `iam_v2` dark / drop the schema; **no whole-database swap**. See `StayConnect-IAM-Phase1A-Plan.md` for migration groups MG-0…MG-9, per-object specs, the row-lock-first strategy, the replace/retain/migrate/remove matrix, disposable-data handling, and acceptance tests. **Cutover to `iam_v2` is a separate, later, explicitly gated event and an ATOMIC complete-domain switch of all IAM services together** (never per-flow or per-service; plan §7a); a single credential vertical slice does **not** authorize cutover, and build completion does **not** auto-promote.
+
+**Open items to resolve before/at implementation (see the plan):**
+- **`folio_identity_strategy` fail-closed gate (BLOCKER for that gate only):** the plan's fail-closed intent contradicts the FINAL contract §4.1 DDL and needs a **separate Product-Owner-approved contract amendment**; until then the DDL as written governs. Does not block approving the rest of the plan.
+- **HA synchronization transport under the two-NIC rule:** an **OPEN architecture decision** (the old third-NIC `hasync` design is superseded); HA is not yet implemented.
+- **Live `iam_v2` creation** is a separately authorized action **after** A-series acceptance in a scratch/test DB.
 
 ## 9. Next authorized action
 

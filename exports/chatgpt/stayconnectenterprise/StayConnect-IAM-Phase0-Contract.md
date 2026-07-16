@@ -1,6 +1,6 @@
 # StayConnect Internet Access Management — Phase 0 Contract
 
-> **Export note:** guest-linked identifiers (room number, reservation `G#`, and identity fingerprints) have been **redacted** in this exported copy for external sharing; all technical protocol/financial findings are preserved verbatim. The repository original retains the owner-authorized room number.
+> **Export note:** guest-linked identifiers (room number, reservation `G#`, and identity fingerprints) are **redacted** in this exported copy for external sharing; all technical protocol/financial findings are preserved verbatim.
 
 **Status: FINAL — Phase 0 CLOSED.** *(2026-07-16 — approved by the Product Owner; previously READY_FOR_FINAL_OWNER_APPROVAL, and before that CONDITIONALLY FROZEN.)*
 
@@ -164,6 +164,8 @@ CREATE UNIQUE INDEX gnpm_one_default ON guest_network_pms_map (guest_network_id)
 -- Save-time validation: candidate count ≤ max_candidate_interfaces (default 3, hard cap 5);
 -- all mapped interfaces must share ≥ 1 common determinate verifier combination.
 ```
+
+> **Open reconciliation item (non-normative; flagged 2026-07-16 audit — the DDL above is UNCHANGED):** `pms_interface_revisions.folio_identity_strategy` is defined `NOT NULL DEFAULT 'GLOBALLY_UNIQUE'` with a 3-value `CHECK`. The Phase-1A plan proposes a **fail-closed** treatment (an unset strategy blocks CHARGE posting until property onboarding sets it), which the current default/CHECK cannot express. Reconciling this requires a **Product-Owner-approved amendment** to this DDL (e.g. add an `'UNSET'` value and default to it, plus a posting-permission gate) — see `StayConnect-IAM-Phase1A-Plan.md` §9 BLOCKER. **No change is made here** without that approval; this note only records the open item.
 
 ### 4.2 Stays, sharers, folios, events
 

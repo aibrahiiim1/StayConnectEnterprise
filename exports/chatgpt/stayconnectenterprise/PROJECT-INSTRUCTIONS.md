@@ -21,6 +21,8 @@ A historical chat, an old draft, or your own prior message **never** overrides a
 ## Permanent StayConnect architecture rules (do not relitigate)
 
 - Ownership hierarchy is frozen: **Platform → Customer → Site (one physical property) → Appliance → guest networks/VLANs.**
+- **Appliance topology: exactly two physical NICs — WAN and LAN. WAN is also the management interface;** LAN carries guest connectivity + VLAN/trunk. No separate management NIC; no approved third HA-sync NIC. The HA-sync transport under two NICs is an **open architecture decision** — do not claim any WAN/LAN HA transport is implemented.
+- **Separate Central Control Plane server;** appliance is edge-first and offline-capable; a factory-clean appliance has **no hardcoded `tenant_id`/`site_id`** — enrollment, claim, and signed assignment are the identity source. One Edge can host **multiple independent PMS Interfaces**; **Room Number is scoped by PMS Interface and is never globally unique.**
 - **No guest-facing PMS selector;** STRICT automatic multi-PMS resolution; unmapped guest networks **fail closed.**
 - **Room number is evidence, never identity or financial ownership;** every stay/folio/event/purchase/posting is pinned to exactly one PMS-interface namespace; sharers are legal.
 - **Mandatory Seamless Checkout Grace;** one live entitlement per subject; atomic same-subject supersession; typed cycle-safe cross-PMS transfer.

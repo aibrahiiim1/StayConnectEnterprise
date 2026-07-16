@@ -1,6 +1,6 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-> **Export note:** guest-linked identifiers (room number, reservation `G#`, and identity fingerprints) have been **redacted** in this exported copy for external sharing; all technical protocol/financial findings are preserved verbatim. The repository original retains the owner-authorized room number.
+> **Export note:** guest-linked identifiers (room number, reservation `G#`, and identity fingerprints) are **redacted** in this exported copy for external sharing; all technical protocol/financial findings are preserved verbatim.
 
 **Spike status: `GATE3A_CLOSED — PASS. PROTOCOL ACCEPTED, CORRECT FOLIO VERIFIED, REVENUE MAPPING VERIFIED, MANUAL CLEANUP VERIFIED (P#900002 / Room «REDACTED» / G#«RES-REDACTED»). Gates 3B–3D NOT started.`**
 

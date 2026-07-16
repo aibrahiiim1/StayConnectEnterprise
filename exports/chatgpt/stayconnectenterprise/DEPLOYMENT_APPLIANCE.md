@@ -4,18 +4,30 @@
 > guest and the hotel staff touch runs here, against the site-local database.
 > Cloud counterpart: [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md).
 
-## 1. Interfaces & addressing (reference example)
+> **⚠️ Topology correction (2026-07-16) — approved two-NIC rule governs.** The approved,
+> permanent appliance topology is **exactly two physical NICs: WAN and LAN.** **WAN is
+> also the management interface** (Hotel Admin, SSH, outbound sync, PMS reachability if the
+> PMS is on the WAN-side hotel network); **LAN** carries guest connectivity and guest
+> VLAN/trunk behavior. There is **no separate physical management NIC** and **no approved
+> third HA-sync NIC.** The historical "separate `mgmt` at `172.21.15.30`" and "optional
+> `hasync` third NIC" wording below is **superseded** — see `SYSTEM_OVERVIEW.md` (WAN=`ens160`,
+> LAN=`ens192`) and `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` (WAN/LAN). Where this file
+> still says "mgmt", read it as **"the WAN/management interface"**.
+
+## 1. Interfaces & addressing (approved two-NIC model)
 
 | Interface | Example | Role |
 |---|---|---|
-| **mgmt** (`ens160`) | `172.21.15.30/24`, hotel IT VLAN, default route | Hotel Admin (`https://172.21.15.30`), SSH, outbound sync (NATS + license HTTPS), PMS reachability if the PMS lives on the hotel LAN, monitoring |
-| **guest** (`br-lan` over `ens192`) | `10.20.0.1/24` | guest gateway: DHCP/DNS/captive portal/shaping; DHCP pool 10.20.0.100–250; option 114 → `http://10.20.0.1:8380/` (**keep the RFC 8910 stanza in the repo Kea config — it was VM-only drift once already**) |
-| **hasync** (optional, `ens224`) | `169.254.7.1/30` p2p | VRRP, conntrackd FTFW, Postgres streaming replication |
+| **WAN = management** (`ens160`) | `172.21.60.23/24`, default route | uplink/masquerade **and** management: Hotel Admin (`https://<WAN-IP>`), SSH, outbound sync (NATS + license HTTPS), PMS reachability when the PMS is on the WAN-side hotel network, monitoring |
+| **LAN = guest** (`ens192`, over `br-lan` / per-VLAN bridges) | `10.20.0.1/24` (and per-VLAN gateways) | guest gateway: DHCP/DNS/captive portal/shaping + 802.1Q guest VLAN trunk; option 114 → `http://10.20.0.1:8380/` (**keep the RFC 8910 stanza in the repo Kea config — it was VM-only drift once already**) |
 
-Uplink note: WAN/masquerade may share mgmt or be a separate interface per the
-hotel's topology; guest traffic masquerades out the uplink, never into the
-mgmt VLAN. ESXi installs: LAN portgroup needs Promiscuous/MAC-changes/Forged-
-transmits = Accept (SYSTEM_OVERVIEW §3).
+Guest traffic masquerades out the **WAN** interface, never onto the guest LAN. ESXi installs:
+the LAN portgroup needs Promiscuous/MAC-changes/Forged-transmits = Accept (SYSTEM_OVERVIEW §3).
+
+**Superseded:** a third **`hasync`** NIC (e.g. `ens224`) for VRRP/conntrackd/Postgres
+replication is **no longer part of the approved topology**. Under the two-NIC rule the HA
+synchronization transport is an **OPEN architecture decision** (see §7 and
+[TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) §6) — do not assume a dedicated sync NIC.
 
 ## 2. Software stack (systemd)
 
@@ -74,8 +86,8 @@ WiFi ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
 
 ## 6. Bring-up order (new site)
 
-1. OS, netplan (mgmt/guest/hasync), sysctl, nftables, tc-setup, Kea (incl.
-   option 114), Unbound.
+1. OS, netplan (**WAN/management + LAN/guest** — two NICs; no dedicated hasync NIC),
+   sysctl, nftables, tc-setup, Kea (incl. option 114), Unbound.
 2. Local Postgres → create `stayconnect_site` + role → apply
    `data-plane/migrations/0001_edge_init.up.sql`.
 3. Install binaries + env files; **enroll**: mint a bootstrap token in
@@ -91,16 +103,25 @@ WiFi ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
 
 ## 7. HA pair
 
+> **Superseded transport / OPEN decision:** the HA design below was written for a **third
+> dedicated `hasync` NIC**, which the approved **two-NIC (WAN+LAN)** rule removes. The HA
+> *behaviors* (VRRP on the guest VIP, connection-tracking sync, nft-set replication,
+> Postgres streaming replication, manual split-brain fencing) are **preserved as intent**,
+> but the **synchronization transport over a two-NIC appliance is an OPEN architecture
+> decision — not yet defined or implemented.** Do **not** claim any WAN/LAN HA transport is
+> implemented. HA overall remains a documented, not-yet-implemented limitation.
+
 Second appliance: same stack; keepalived VRRP on the guest VIP (10.20.0.1),
-conntrackd over hasync, nft `auth_ipv4` replication via `nft.<siteID>`.
-Site DB: primary runs Postgres with **streaming replication** over hasync to
-the secondary; failover promotes the replica (VRRP notify hook), edged/scd on
-the survivor keep their loopback DSN. Both nodes appear in the license's
-`appliance_ids` and each keeps its own cloud identity/heartbeat. Split-brain:
-two nodes cannot arbitrate on their own — recommended cloud-heartbeat witness
-is documented in [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) §6 (known
-limitation, not yet implemented); until then, alert loudly on dual-master
-(both nodes reporting VRRP MASTER in telemetry) and fence manually.
+conntrackd connection-tracking sync, nft `auth_ipv4` replication via `nft.<siteID>`.
+Site DB: primary runs Postgres with **streaming replication** to the secondary; failover
+promotes the replica (VRRP notify hook), edged/scd on the survivor keep their loopback DSN.
+Both nodes appear in the license's `appliance_ids` and each keeps its own cloud
+identity/heartbeat. **HA-sync transport (which link carries VRRP/conntrackd/replication
+under two NICs) is the OPEN decision above.** Split-brain: two nodes cannot arbitrate on
+their own — recommended cloud-heartbeat witness is documented in
+[TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md) §6 (known limitation, not yet
+implemented); until then, alert loudly on dual-master (both nodes reporting VRRP MASTER in
+telemetry) and fence manually.
 
 ## 8. Appliance sizing (guidance)
 
@@ -122,7 +143,7 @@ Guest networks/VLANs/DHCP are now DB-driven and applied by `netd`. Full suite:
 
 ### Guest-trunk interface
 
-Alongside mgmt/guest/hasync (§1), a guest-facing NIC assigned the **`guest_trunk`**
+On the **LAN** interface (§1), the guest-facing NIC assigned the **`guest_trunk`**
 role carries **tagged** 802.1Q guest VLANs from the WLAN controller (e.g. `ens192`
 as a trunk; VLAN 20 → `ens192.20` → `br-g20` → `10.20.0.1/22`). The trunk parent
 is address-less (an L2 trunk); StayConnect owns the per-VLAN gateway. A plain
