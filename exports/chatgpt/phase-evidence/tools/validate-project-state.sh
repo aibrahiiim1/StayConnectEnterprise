@@ -121,7 +121,7 @@ if have_repo; then
     [ -f "$f" ] && grep -q "$MAT" "$f" && ok "maturity present in repo $(basename "$f")" || fail "maturity missing in repo $(basename "$f")"
   done
 else skipped "repo docs maturity presence"; fi
-na=$(grep -rhoiE "next authorized (activity|action|step)[^.]*" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" 2>/dev/null | grep -ciE "acceptance of Phase 1A|acceptance of the live-dark|review of the live-dark|review of the Phase 1A LIVE-DARK|approval or rejection of the .{0,30}Phase 1B plan|approval of the .{0,30}Phase 1B (implementation )?plan")
+na=$(grep -rhoiE "next authorized (activity|action|step)[^.]*" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" 2>/dev/null | grep -ciE "acceptance of Phase 1A|acceptance of the live-dark|review of the live-dark|review of the Phase 1A LIVE-DARK|approval or rejection of the .{0,30}Phase 1B plan|approval of the .{0,30}Phase 1B (implementation )?plan|approval[^.]{0,90}Phase 1B plan")
 [ "$na" -ge 2 ] && ok "next-action consistent" || fail "next-action inconsistent ($na)"
 
 echo "== 3. conflicting maturity WITHIN a single pack file =="
@@ -168,6 +168,22 @@ for f in "$PACK"/*.md; do
   done < <(grep -oE '\]\([^)]*'"$RULE"'[^)]*\)' "$f" | sed -E 's/^\]\(//;s/\)$//;s/#.*$//')
 done
 [ "$b" = "0" ] && ok "all permanent-rule links resolve inside the pack" || fail "$b unresolved permanent-rule link(s)"
+
+echo "== 6b. permanent GitHub execution/delivery rule bundled in the Project Pack + links resolve =="
+GHRULE="GITHUB_EXECUTION_AND_DELIVERY_RULE.md"
+[ -f "$PACK/$GHRULE" ] && ok "$GHRULE present in Project Pack" || fail "$GHRULE missing from Project Pack"
+gb=0
+for f in "$PACK"/*.md; do
+  [ -f "$f" ] || continue
+  while IFS= read -r t; do
+    base="${t##*/}"; base="${base%%#*}"
+    [ "$base" = "$GHRULE" ] || continue
+    if [ "$t" != "$GHRULE" ] && [ "$t" != "./$GHRULE" ]; then
+      [ -f "$PACK/$t" ] || { echo "    broken/unflattened GH-rule link in $(basename "$f"): $t"; gb=$((gb+1)); }
+    fi
+  done < <(grep -oE '\]\([^)]*'"$GHRULE"'[^)]*\)' "$f" | sed -E 's/^\]\(//;s/\)$//;s/#.*$//')
+done
+[ "$gb" = "0" ] && ok "all GitHub-rule links resolve inside the pack" || fail "$gb unresolved GitHub-rule link(s)"
 
 echo "== 7. validator physically shipped in the Evidence Pack with a checksum =="
 [ -f "$EVID/tools/validate-project-state.sh" ] && ok "validator present in Evidence Pack" || fail "validator file missing from Evidence Pack"

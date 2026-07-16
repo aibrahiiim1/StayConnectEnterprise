@@ -1,0 +1,4 @@
+commit 6b735ddf68ef6e3e73da25cf3680cbe80b58fbaf
+Date:   Fri Jul 17 02:11:49 2026 +0300
+
+    Add permanent GitHub execution/reporting/delivery governance rule
