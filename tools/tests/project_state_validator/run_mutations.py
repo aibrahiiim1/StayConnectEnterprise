@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+"""Adversarial mutation tests for the project-state governance validators.
+
+Each mutation injects exactly one defect into the real files, runs the structural validator
+(tools/project-state.py validate) and the keyword validator (tools/validate-project-state.sh),
+and asserts that AT LEAST ONE reports failure (non-zero). The original bytes are restored
+(try/finally) after every case. Finally the restored good state must PASS both validators.
+
+A validator that only passes the good state without failing these negative cases is NOT accepted.
+Run from anywhere:  python tools/tests/project_state_validator/run_mutations.py
+"""
+import subprocess, os, sys
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+def run(cmd):
+    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+def structural():
+    return run([sys.executable, "tools/project-state.py", "validate"]).returncode
+def keyword():
+    return run(["bash", "tools/validate-project-state.sh"]).returncode
+def both_status():
+    return structural(), keyword()
+
+# mutation = (name, relpath, op) ; op = ("replace",[(find,repl),...]) | ("append", text)
+MUTATIONS = [
+ ("M01 Phase 1A NOT_STARTED", "governance/project-state.json",
+   ("replace", [('"1A": { "status": "ACCEPTED_AND_CLOSED"', '"1A": { "status": "NOT_STARTED"')])),
+ ("M02 Phase 1A pending/planning", "governance/project-state.json",
+   ("replace", [('"1A": { "status": "ACCEPTED_AND_CLOSED"', '"1A": { "status": "PLANNING"')])),
+ ("M03 two current phases", "governance/project-state.json",
+   ("replace", [('"2":  { "status": "NOT_STARTED"', '"2":  { "status": "PLANNING"')])),
+ ("M04 two next authorized actions", "governance/project-state.json",
+   ("replace", [('"next_authorized_action": "Product-Owner approval or rejection of the corrected Phase 1B plan"',
+                 '"next_authorized_action": "Approve the plan; and also implement Phase 2"')])),
+ ("M05 Phase 1B production iam_v2 grant", "docs/architecture/Phase1B-Privilege-Matrix.md",
+   ("replace", [("ZERO — production svc_scd has no iam_v2 grant", "GRANTED — production svc_scd gets iam_v2 write"),
+                ("zero `iam_v2` DML", "iam_v2 DML granted to services")])),
+ ("M06 Phase 1B rolled-back production write allowed", "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
+   ("replace", [("rolled-back", "committed")])),
+ ("M07 modified generated block", "docs/context/StayConnect-IAM-Handoff.md",
+   ("replace", [("**Current phase:** 1B", "**Current phase:** 9Z")])),
+ ("M08 stale source commit / snapshot mismatch", "governance/project-state.json",
+   ("replace", [('"latest_transition_id": "T0007"', '"latest_transition_id": "T0006"')])),
+ ("M09 missing acceptance record", "governance/project-state.json",
+   ("replace", [('"path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"',
+                 '"path": "docs/acceptance/MISSING.md"')])),
+ ("M10 missing permanent rule", "governance/artifact-registry.json",
+   ("replace", [('"path": "docs/ZERO_STALE_LEFTOVERS_RULE.md", "status": "AUTHORITATIVE"',
+                 '"path": "docs/MISSING_RULE.md", "status": "AUTHORITATIVE"')])),
+ ("M11 retained legacy item without removal gate", "governance/artifact-registry.json",
+   ("replace", [('"removal_gate": "later separately-approved legacy-cleanup phase, AFTER the atomic complete-domain cutover + reconciliation"',
+                 '"removal_gate": ""')])),
+ ("M12 stale exported copy", "exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md",
+   ("append", "\n<!-- tampered export copy -->\n")),
+ ("M13 broken pack link", "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+   ("append", "\n[dangling](this-file-does-not-exist.md)\n")),
+ ("M14 pack hash mismatch", "exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md",
+   ("append", "\n<!-- tamper -->\n")),
+ ("M15 unmarked historical/current contradiction", "docs/context/StayConnect-IAM-Handoff.md",
+   ("append", "\nPhase 1A is the current phase.\n")),
+]
+
+def apply(relpath, op):
+    p = os.path.join(ROOT, relpath)
+    with open(p, "r", encoding="utf-8") as f: orig = f.read()
+    new = orig
+    kind = op[0]
+    if kind == "replace":
+        for find, repl in op[1]:
+            if find not in new: raise AssertionError(f"fixture drift: '{find[:40]}...' not found in {relpath}")
+            new = new.replace(find, repl)
+    elif kind == "append":
+        new = orig + op[1]
+    with open(p, "w", encoding="utf-8", newline="\n") as f: f.write(new)
+    return p, orig
+
+def main():
+    print("=== baseline (good state) must PASS both validators ===")
+    s0, k0 = both_status()
+    if s0 != 0 or k0 != 0:
+        print(f"  BASELINE FAIL: structural={s0} keyword={k0} — fix the good state before mutation testing"); return 2
+    print("  baseline: structural=PASS keyword=PASS")
+    print("=== mutation matrix (each must make validation FAIL non-zero) ===")
+    results = []
+    allok = True
+    for name, relpath, op in MUTATIONS:
+        p, orig = apply(relpath, op)
+        try:
+            s, k = both_status()
+            failed = (s != 0 or k != 0)
+            which = []
+            if s != 0: which.append("structural")
+            if k != 0: which.append("keyword")
+            results.append((name, failed, ",".join(which) or "NONE"))
+            allok = allok and failed
+            print(f"  [{'PASS' if failed else 'MISS'}] {name:52s} -> fails: {','.join(which) or 'NONE (BAD)'}")
+        finally:
+            with open(p, "w", encoding="utf-8", newline="\n") as f: f.write(orig)
+    print("=== restored good state must PASS again ===")
+    s1, k1 = both_status()
+    restored_ok = (s1 == 0 and k1 == 0)
+    print(f"  restored: structural={'PASS' if s1==0 else 'FAIL'} keyword={'PASS' if k1==0 else 'FAIL'}")
+    print("=" * 60)
+    ok = allok and restored_ok
+    print("PROJECT_STATE_MUTATION_TESTS =", "PASS" if ok else "FAIL")
+    return 0 if ok else 1
+
+if __name__ == "__main__":
+    sys.exit(main())

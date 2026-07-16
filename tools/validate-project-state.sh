@@ -144,21 +144,15 @@ if have_repo; then
   [ -f "$DOCS/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md" ] && ok "acceptance record present (repo source)" || fail "acceptance record missing from repo docs"
 else skipped "repo acceptance source presence"; fi
 
-echo "== 5. exact provenance in MANIFEST (no placeholder) =="
+echo "== 5. deterministic provenance in MANIFEST (SOURCE_COMMIT; export commit is external) =="
 M="$PACK/MANIFEST.md"
-sync_hash=$(grep -E "SOURCE_DOCUMENTATION_SYNC_COMMIT" "$M" 2>/dev/null | head -1 | grep -oE '`[0-9a-f]{7,40}`' | head -1 | tr -d '`')
+src_hash=$(grep -E "SOURCE_COMMIT" "$M" 2>/dev/null | head -1 | grep -oE '`[0-9a-f]{7,40}`' | head -1 | tr -d '`')
 exp_line=$(grep -E "PROJECT_PACK_EXPORT_COMMIT" "$M" 2>/dev/null | head -1)
-exp_hash=$(echo "$exp_line" | grep -oE '`[0-9a-f]{7,40}`' | head -1 | tr -d '`')
-[ -n "$sync_hash" ] && ok "SOURCE_DOCUMENTATION_SYNC_COMMIT = $sync_hash" || fail "SOURCE_DOCUMENTATION_SYNC_COMMIT missing/hex"
-if echo "$exp_line" | grep -qiE "the commit that introduces|HEAD at export|verify with|created \*\*after\*\*"; then
-  fail "PROJECT_PACK_EXPORT_COMMIT uses placeholder wording, not an exact hash"
-elif [ -z "$exp_hash" ]; then fail "PROJECT_PACK_EXPORT_COMMIT missing an exact hex hash"
-else
-  ok "PROJECT_PACK_EXPORT_COMMIT = $exp_hash"
-  if have_repo && command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
-    git -C "$REPO_ROOT" rev-parse --verify -q "$exp_hash^{commit}" >/dev/null 2>&1 && ok "export commit $exp_hash exists in git" || fail "export commit $exp_hash not found in git"
-  else skipped "git existence of export commit $exp_hash"; fi
-fi
+[ -n "$src_hash" ] && ok "SOURCE_COMMIT = $src_hash" || fail "SOURCE_COMMIT (exact hex) missing from MANIFEST"
+if echo "$exp_line" | grep -qiE "\*external\*|external —|external\b"; then ok "PROJECT_PACK_EXPORT_COMMIT recorded as external (no self-reference)"; else fail "PROJECT_PACK_EXPORT_COMMIT must be recorded as external (deterministic model)"; fi
+if [ -n "$src_hash" ] && have_repo && command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+  git -C "$REPO_ROOT" rev-parse --verify -q "$src_hash^{commit}" >/dev/null 2>&1 && ok "SOURCE_COMMIT $src_hash exists in git" || echo "  note: SOURCE_COMMIT $src_hash not yet committed (pre-commit build)"
+else skipped "git existence of SOURCE_COMMIT"; fi
 
 echo "== 6. permanent rule bundled in the Project Pack + links resolve =="
 [ -f "$PACK/$RULE" ] && ok "$RULE present in Project Pack" || fail "$RULE missing from Project Pack"

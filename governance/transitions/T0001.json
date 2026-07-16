@@ -1,0 +1,15 @@
+{
+  "transition_id": "T0001",
+  "seq": 1,
+  "timestamp": "2026-07-16T00:00:00Z",
+  "previous_state": { "phase": "0", "activity": "PHASE_0_CONTRACT_DRAFTING", "phase_status": "IN_PROGRESS" },
+  "new_state": { "phase": "0", "activity": "PHASE_0_CLOSED", "phase_status": "FINAL_CLOSED" },
+  "phase_affected": "0",
+  "po_authorization_ref": "PO explicit approval 2026-07-16 (contract FINAL)",
+  "scope_allowed": "Finalize Phase-0 architecture contract; record live Gate 3A PASS.",
+  "scope_prohibited": "No implementation unlocked by FINAL status.",
+  "evidence_files": ["docs/architecture/StayConnect-IAM-Phase0-Contract.md", "docs/spikes/Protel-FIAS-Phase0-Spike.md"],
+  "source_commit": "4e5daf1",
+  "acceptance_verdict": "PASS — Phase 0 FINAL/CLOSED; Gate 3A PASS",
+  "next_action": "Phase 1A planning"
+}

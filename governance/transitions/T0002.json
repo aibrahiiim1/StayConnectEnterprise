@@ -1,0 +1,15 @@
+{
+  "transition_id": "T0002",
+  "seq": 2,
+  "timestamp": "2026-07-16T01:00:00Z",
+  "previous_state": { "phase": "1A", "activity": "PHASE_1A_PLANNING", "phase_status": "PLANNING" },
+  "new_state": { "phase": "1A", "activity": "PHASE_1A_SCRATCH_VERIFIED", "phase_status": "IN_PROGRESS" },
+  "phase_affected": "1A",
+  "po_authorization_ref": "PO approval — Phase 1A implementation in a disposable scratch/test DB only",
+  "scope_allowed": "MG-0..MG-9 in disposable scratch DB; A-series acceptance.",
+  "scope_prohibited": "No live DB; no DSN/search_path; no service routing.",
+  "evidence_files": ["iam_v2_scratch/EVIDENCE.txt"],
+  "source_commit": "b2a715f",
+  "acceptance_verdict": "PASS — scratch 99/99",
+  "next_action": "Offline-real-schema verification"
+}

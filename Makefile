@@ -184,3 +184,16 @@ test:
 	cd control-plane && go test ./...
 	cd data-plane && go test ./...
 	cd license && go test ./...
+
+# ---- project-state governance (permanent gate) ----
+.PHONY: governance-validate governance-render governance-mutation-tests governance-build-packs
+governance-validate:
+	python tools/project-state.py validate
+	python tools/project-state.py check-generated
+	bash tools/validate-project-state.sh
+governance-render:
+	python tools/project-state.py render
+governance-mutation-tests:
+	python tools/tests/project_state_validator/run_mutations.py
+governance-build-packs:
+	python tools/project-state.py build-packs

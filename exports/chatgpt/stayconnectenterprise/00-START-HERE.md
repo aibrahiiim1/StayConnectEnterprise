@@ -1,5 +1,17 @@
 # StayConnect Enterprise — START HERE (ChatGPT Project entry point)
 
+<!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0007 -->
+**Current phase:** 1B — Credential/identity/auth-context (DARK)
+**Current activity:** `PHASE_1B_PLAN_CORRECTION_PENDING_APPROVAL`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B PLANNING (NOT implemented) · 2 NOT_STARTED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
+**Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
+**iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
+**Single next authorized action:** Product-Owner approval or rejection of the corrected Phase 1B plan
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D9`.
+<!-- END GENERATED PROJECT STATE -->
+
+
 **Read this file first.** It is the orientation for an AI consultant continuing work on StayConnect Enterprise. It summarizes the current, authoritative state; the individual documents in this pack are the detailed sources. Where this summary and a copied source document disagree, follow the **source-of-truth precedence** in §12.
 
 **Source documentation baseline commit:** `a28f6f6` (binding Phase-1B decisions D1-D9; Phase 1A accepted/closed; contract §18 clarification; supersedes `afade95`/`d4fa9be`/`22a2e15`).
@@ -24,10 +36,7 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 
 ## 3. Current project phase & status
 
-- **Phase 0 (IAM redesign architecture contract + live PMS validation): FINAL and CLOSED** — approved by the Product Owner **2026-07-16**.
-- **Phase 1A (clean-slate IAM core + persistence): formally Product-Owner ACCEPTED and CLOSED (2026-07-16)** at maturity **SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER (18/18 acceptance).**
-- **Phase 1B planning is the current activity** (a complete Phase 1B implementation plan is drafted, planning-only; `StayConnect-IAM-Phase1B-Plan.md`).
-- **Phase 1A live-dark is created + accepted, NOT cut over.** The isolated `iam_v2` schema (49 tables, fingerprint `bd75026f`, 0 rows) exists **dark** in production `stayconnect_site`: no service reads/writes it, no DSN/`search_path` change, public schema unchanged, services active. Accepted at the DARK maturity only — NOT deployed, NOT cut over, NOT a user-facing/authority-switch system, no IAM data migration, no Phase 1B implementation. (The currently deployed voucher/guest-account system is a separate prior delivery, live and untouched.)
+**Current operational state is the GENERATED PROJECT STATE block at the top of this file** (rendered from `governance/project-state.json` — the single machine-readable source). Do not maintain a second current-state description here. Non-dynamic context: the isolated `iam_v2` schema is an additive, reversible, dark schema; the currently deployed voucher/guest-account system is a separate prior delivery, live and untouched.
 
 ## 4. Completed & live-verified milestones
 

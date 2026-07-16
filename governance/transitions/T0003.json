@@ -1,0 +1,15 @@
+{
+  "transition_id": "T0003",
+  "seq": 3,
+  "timestamp": "2026-07-16T02:00:00Z",
+  "previous_state": { "phase": "1A", "activity": "PHASE_1A_SCRATCH_VERIFIED", "phase_status": "IN_PROGRESS" },
+  "new_state": { "phase": "1A", "activity": "PHASE_1A_OFFLINE_REAL_SCHEMA_VERIFIED", "phase_status": "IN_PROGRESS" },
+  "phase_affected": "1A",
+  "po_authorization_ref": "Continuation of the scratch authorization (offline real-schema compatibility)",
+  "scope_allowed": "Build identical iam_v2 catalog on the committed real platform migration chain (offline).",
+  "scope_prohibited": "No live DB changes.",
+  "evidence_files": ["iam_v2_scratch/EVIDENCE.txt"],
+  "source_commit": "b2a715f",
+  "acceptance_verdict": "PASS — offline-real 9/9; identical fingerprint bd75026f",
+  "next_action": "PO review of scratch evidence, then live-dark authorization"
+}

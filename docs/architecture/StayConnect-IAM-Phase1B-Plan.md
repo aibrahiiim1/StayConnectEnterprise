@@ -1,5 +1,17 @@
 # StayConnect IAM — Phase 1B Implementation Plan (Credential/Portal Integration, DARK)
 
+<!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0007 -->
+**Current phase:** 1B — Credential/identity/auth-context (DARK)
+**Current activity:** `PHASE_1B_PLAN_CORRECTION_PENDING_APPROVAL`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B PLANNING (NOT implemented) · 2 NOT_STARTED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
+**Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
+**iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
+**Single next authorized action:** Product-Owner approval or rejection of the corrected Phase 1B plan
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D9`.
+<!-- END GENERATED PROJECT STATE -->
+
+
 **Status: PLANNING ONLY — NOT APPROVED FOR IMPLEMENTATION, NOT IMPLEMENTED.** This document is a complete, production-grade Phase 1B plan produced under a Product-Owner *planning* authorization (2026-07-16). It authorizes **no** code, DDL/DML, role/credential change, DSN/`search_path` change, service routing to `iam_v2`, dual-read/write, deployment, data migration, PMS/FIAS traffic, financial posting, network change, cutover, or any later Phase. Nothing here executes until a separate explicit Product-Owner **implementation** authorization (the blueprint in §14) is given.
 
 **Baseline this plan builds on (verified):** Phase 0 FINAL/CLOSED; Phase 1A **formally Product-Owner ACCEPTED and CLOSED** at `SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER`; production `iam_v2` = 49 empty tables (fingerprint `bd75026f`), no service reads/writes it, no DSN/`search_path` routing, no data migration; all services connect as PostgreSQL superuser `stayconnect`. **Phase 1B is credential/identity/auth-context implementation in DARK/flags-OFF mode — it is NOT a cutover** (the atomic complete-domain cutover is a later separately approved gate, only after Phases 2–6 and full-domain acceptance). Ladder reference: [Phase-1A Plan §7a/§11](StayConnect-IAM-Phase1A-Plan.md) (Phase 1B = ladder steps 7–10, dark/flagged, **before** any cutover at step 11).

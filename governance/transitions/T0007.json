@@ -1,0 +1,15 @@
+{
+  "transition_id": "T0007",
+  "seq": 7,
+  "timestamp": "2026-07-16T23:00:00Z",
+  "previous_state": { "phase": "1B", "activity": "PHASE_1B_PLAN_DRAFTED", "phase_status": "PLANNING" },
+  "new_state": { "phase": "1B", "activity": "PHASE_1B_PLAN_CORRECTION_PENDING_APPROVAL", "phase_status": "PLANNING" },
+  "phase_affected": "1B",
+  "po_authorization_ref": "PO binding decisions D1-D9 + governance-hardening correction (planning/governance/documentation only)",
+  "scope_allowed": "Apply binding decisions D1-D9 to the Phase 1B plan; establish machine-readable project-state governance; regenerate exports.",
+  "scope_prohibited": "No implementation; no DB/DDL/DML/role/DSN/service/PMS/network/deployment change; Phase 1B NOT implemented.",
+  "evidence_files": ["docs/architecture/StayConnect-IAM-Phase1B-Plan.md", "docs/architecture/Phase1B-Privilege-Matrix.md", "governance/project-state.json", "governance/decision-register.json"],
+  "source_commit": "a28f6f6",
+  "acceptance_verdict": "PLANNING — corrected plan pending Product-Owner approval",
+  "next_action": "Product-Owner approval or rejection of the corrected Phase 1B plan"
+}

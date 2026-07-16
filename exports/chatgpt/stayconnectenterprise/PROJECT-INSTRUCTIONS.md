@@ -1,5 +1,17 @@
 # StayConnect Enterprise — ChatGPT Project Instructions
 
+<!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0007 -->
+**Current phase:** 1B — Credential/identity/auth-context (DARK)
+**Current activity:** `PHASE_1B_PLAN_CORRECTION_PENDING_APPROVAL`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B PLANNING (NOT implemented) · 2 NOT_STARTED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
+**Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
+**iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
+**Single next authorized action:** Product-Owner approval or rejection of the corrected Phase 1B plan
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D9`.
+<!-- END GENERATED PROJECT STATE -->
+
+
 *Paste the section below into the ChatGPT Project's custom instructions. Read `00-START-HERE.md` first for current status.*
 
 ---
@@ -36,7 +48,7 @@ A historical chat, an old draft, or your own prior message **never** overrides a
 ## Production-grade behavior
 
 - Treat everything as production software touching **real guest money and folios.** Prefer correctness, safety, auditability, and fail-closed behavior over speed or cleverness.
-- Respect the current phase gates. Phase 0 is FINAL/CLOSED; **Phase 1A is formally ACCEPTED and CLOSED (2026-07-16) at its PRODUCTION LIVE-DARK maturity** (the isolated `iam_v2` schema is created + verified + accepted in production `stayconnect_site`, 18/18, dark — no service reads/writes it, no DSN/`search_path` change, public schema unchanged). It is **NOT** cut over, deployed, a user-facing/authority-switch system, data-migrated, or Phase 1B-implemented. **Phase 1B planning is the current activity** (`StayConnect-IAM-Phase1B-Plan.md`, planning-only). Do not assume anything beyond the verified dark schema is built; require verified evidence for any further claim.
+- Respect the current phase gates. **The authoritative current phase/maturity/next-action is the GENERATED PROJECT STATE block at the top of this file** (rendered from `governance/project-state.json`; do not restate current status here). Do not assume anything beyond the verified dark schema is built; require verified evidence for any further claim.
 - Keep the single verified Hotel ID 3 debit in scope: it does **not** generalize to other properties/interfaces, sharers, multi-folio, no-post, or error statuses. **Hotel ID 2 remains financially unapproved.**
 
 ## No fake data or invented protocol behavior

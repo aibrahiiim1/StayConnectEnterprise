@@ -1,0 +1,15 @@
+{
+  "transition_id": "T0006",
+  "seq": 6,
+  "timestamp": "2026-07-16T21:00:00Z",
+  "previous_state": { "phase": "1A", "activity": "PHASE_1A_ACCEPTED_AND_CLOSED", "phase_status": "ACCEPTED_AND_CLOSED" },
+  "new_state": { "phase": "1B", "activity": "PHASE_1B_PLAN_DRAFTED", "phase_status": "PLANNING" },
+  "phase_affected": "1B",
+  "po_authorization_ref": "PO authorization — prepare the complete Phase 1B implementation plan (planning/documentation only)",
+  "scope_allowed": "Author the Phase 1B implementation plan + inventories + privilege matrix.",
+  "scope_prohibited": "No implementation; no DB/DDL/DML/role/DSN/service/PMS/network/deployment change; Phase 1B NOT implemented.",
+  "evidence_files": ["docs/architecture/StayConnect-IAM-Phase1B-Plan.md", "docs/architecture/Phase1B-Privilege-Matrix.md"],
+  "source_commit": "afade95",
+  "acceptance_verdict": "PLANNING — plan drafted (planning-only)",
+  "next_action": "Product-Owner approval or rejection of the Phase 1B plan"
+}

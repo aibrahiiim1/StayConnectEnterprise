@@ -1,0 +1,15 @@
+{
+  "transition_id": "T0005",
+  "seq": 5,
+  "timestamp": "2026-07-16T20:00:00Z",
+  "previous_state": { "phase": "1A", "activity": "PHASE_1A_PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED", "phase_status": "DARK_CREATED" },
+  "new_state": { "phase": "1A", "activity": "PHASE_1A_ACCEPTED_AND_CLOSED", "phase_status": "ACCEPTED_AND_CLOSED" },
+  "phase_affected": "1A",
+  "po_authorization_ref": "PO binding decision D9 — Phase 1A formally accepted and CLOSED at its DARK maturity",
+  "scope_allowed": "Record formal acceptance/closure of Phase 1A at its authorized DARK maturity.",
+  "scope_prohibited": "Acceptance is at DARK maturity only — NOT a user-facing/authority-switch system; no cutover/data-migration/1B unlocked.",
+  "evidence_files": ["docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"],
+  "source_commit": "a28f6f6",
+  "acceptance_verdict": "ACCEPTED_AND_CLOSED — DARK, NOT CUT OVER",
+  "next_action": "Phase 1B planning"
+}

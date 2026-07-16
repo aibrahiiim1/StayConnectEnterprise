@@ -1,0 +1,15 @@
+{
+  "transition_id": "T0004",
+  "seq": 4,
+  "timestamp": "2026-07-16T16:37:00Z",
+  "previous_state": { "phase": "1A", "activity": "PHASE_1A_OFFLINE_REAL_SCHEMA_VERIFIED", "phase_status": "IN_PROGRESS" },
+  "new_state": { "phase": "1A", "activity": "PHASE_1A_PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED", "phase_status": "DARK_CREATED" },
+  "phase_affected": "1A",
+  "po_authorization_ref": "PO explicit authorization — create dark iam_v2 in production stayconnect_site (live-dark creation + acceptance only)",
+  "scope_allowed": "Read-only preflight; backups; create iam_v2 (MG-0..MG-9); live-dark acceptance; rollback on fail.",
+  "scope_prohibited": "No DSN/search_path change; no service reads/writes iam_v2; no dual-write; no Phase 1B; no cutover; no data migration.",
+  "evidence_files": ["docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md", "iam_v2_scratch/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt"],
+  "source_commit": "22a2e15",
+  "acceptance_verdict": "PASS — live-dark 18/18; iam_v2 49 tables/0 rows dark; public fingerprint d86ca4c6 unchanged",
+  "next_action": "Product-Owner acceptance of Phase 1A"
+}
