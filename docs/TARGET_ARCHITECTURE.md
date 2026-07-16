@@ -6,6 +6,20 @@
 > [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md), [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md).
 > The pre-refactor system is described in [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md).
 
+> **⚠️ Corrections (2026-07-16):**
+> 1. **Appliance topology — approved two-NIC rule.** The appliance has **exactly two physical
+>    NICs: WAN and LAN.** **WAN is also the management interface;** **LAN** is the guest gateway
+>    (incl. VLAN trunk). The "separate management interface + guest interface + optional HA-sync
+>    interface" wording in §3/§4/§6/§7 below is **superseded**: management is the WAN NIC, and
+>    there is **no approved third HA-sync NIC** (see `SYSTEM_OVERVIEW.md` WAN=`ens160`/LAN=`ens192`,
+>    `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md`, `DEPLOYMENT_APPLIANCE.md` §1/§7).
+> 2. **HA-sync transport is an OPEN architecture decision** under two NICs (the old design assumed
+>    a dedicated third NIC). Do not claim a WAN/LAN HA transport is implemented.
+> 3. **§8 status table is a dated 2026-07-11 snapshot** — several "in progress" items shipped in
+>    later phases (edge-first refactor, Phase 19 networking, IAM Phase 0). Treat that table as
+>    historical; the current authoritative status lives in the IAM Phase-0 contract, handoff, and
+>    Phase-1A plan.
+
 ## 1. Design goal
 
 The hotel's guest WiFi must work with the internet, the cloud, and NATS all down.
@@ -116,10 +130,13 @@ Key invariants:
 
 ## 6. High availability (per site)
 
-The existing VRRP (keepalived) + conntrackd + NATS nft-set replication design is
-retained unchanged for the data path. New in this architecture: the **site-local
-Postgres runs on the HA primary with streaming replication to the secondary**;
-on failover the secondary promotes its replica.
+The VRRP (keepalived) + conntrackd + NATS nft-set replication **behaviors** are retained for
+the data path, and the **site-local Postgres runs on the HA primary with streaming replication
+to the secondary** (failover promotes the replica). **However, the synchronization *transport*
+is an OPEN architecture decision:** the earlier design assumed a **dedicated third HA-sync NIC**,
+which the approved **two-NIC (WAN+LAN)** rule removes. Which link carries VRRP/conntrackd/
+replication over a two-NIC appliance is **not yet defined or implemented** — do not claim a
+WAN/LAN HA transport exists.
 
 **Known limitation (documented, accepted for now):** a two-node pair has no
 quorum. If the HA sync link fails while both nodes are up, both can believe they
@@ -137,11 +154,18 @@ This witness role is a design recommendation, not yet implemented.
   deploy-topology change only, not a code change.
 - **Production:** cloud and appliances are physically separate
   ([DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md), [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md)).
-  Each appliance has a **management interface** (Hotel Admin, SSH, outbound sync)
-  and a **guest gateway interface** (captive network), plus an optional HA sync
-  interface.
+  Each appliance has **exactly two physical NICs**: a **WAN interface that is also the
+  management interface** (Hotel Admin, SSH, outbound sync) and a **LAN guest-gateway
+  interface** (captive network + guest VLAN trunk). There is **no separate management NIC** and
+  **no approved dedicated HA-sync NIC** — the HA-sync transport under two NICs is an **OPEN
+  architecture decision** (§6).
 
-## 8. Implementation status (2026-07-11)
+## 8. Implementation status (2026-07-11 — DATED HISTORICAL SNAPSHOT)
+
+> **Historical snapshot (2026-07-11).** Several "in progress" rows below shipped in later
+> phases (edge-first refactor completion, Phase 19 networking, IAM Phase 0 FINAL). This table
+> is retained for record; it is **not** the current status. For current status see the IAM
+> Phase-0 contract, `StayConnect-IAM-Handoff.md`, and `StayConnect-IAM-Phase1A-Plan.md`.
 
 | Piece | Status |
 |---|---|

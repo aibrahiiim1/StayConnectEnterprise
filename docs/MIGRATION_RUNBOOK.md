@@ -1,5 +1,11 @@
 # Migration Runbook — Central Schema → Site-Local DB
 
+> **Scope banner:** this runbook describes the **already-delivered Central-to-site *edge*
+> migration** (moving a site's guest rows from the shared central Postgres into its isolated
+> `stayconnect_site` database via `cmd/sitemigrate`). **It is NOT the future IAM `iam_v2`
+> migration.** Do not confuse this with Phase-1A `iam_v2` implementation — that is a separate,
+> not-yet-started effort governed by `docs/architecture/StayConnect-IAM-Phase1A-Plan.md`.
+
 > Phased cutover of one site from the shared central Postgres to its isolated
 > `stayconnect_site` database, using `cmd/sitemigrate` (idempotent, dry-run,
 > per-table count reports, rollback package). Written for the pilot VM
@@ -129,7 +135,7 @@ Known test gotchas that are *not* regressions: netns fixture doesn't survive
 reboot; SIGPIPE with `grep -q` under pipefail; partial-index `ON CONFLICT`
 (see SYSTEM_OVERVIEW §16).
 
-## Phase 8 — post-cutover cloud cleanup (do NOT skip)
+## Phase 9 — post-cutover cloud cleanup (do NOT skip)
 
 `sitemigrate` is deliberately **non-destructive**: it copies the site's guest
 rows into the site DB but leaves the originals in the cloud `stayconnect`

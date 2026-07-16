@@ -163,6 +163,8 @@ CREATE UNIQUE INDEX gnpm_one_default ON guest_network_pms_map (guest_network_id)
 -- all mapped interfaces must share ≥ 1 common determinate verifier combination.
 ```
 
+> **Open reconciliation item (non-normative; flagged 2026-07-16 audit — the DDL above is UNCHANGED):** `pms_interface_revisions.folio_identity_strategy` is defined `NOT NULL DEFAULT 'GLOBALLY_UNIQUE'` with a 3-value `CHECK`. The Phase-1A plan proposes a **fail-closed** treatment (an unset strategy blocks CHARGE posting until property onboarding sets it), which the current default/CHECK cannot express. Reconciling this requires a **Product-Owner-approved amendment** to this DDL (e.g. add an `'UNSET'` value and default to it, plus a posting-permission gate) — see `StayConnect-IAM-Phase1A-Plan.md` §9 BLOCKER. **No change is made here** without that approval; this note only records the open item.
+
 ### 4.2 Stays, sharers, folios, events
 
 ```sql

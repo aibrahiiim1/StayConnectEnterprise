@@ -1,6 +1,18 @@
 # StayConnect Enterprise — Complete System Overview
 
-> ⚠️ **Architecture refactor in progress — see [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md); this document describes the pre-refactor system.**
+> ⚠️ **HISTORICAL SNAPSHOT (generated 2026-07-10) — NOT the current authoritative architecture.**
+> This document describes the **pre-refactor system** as of its generation date. It is retained
+> as a code-level reference snapshot, not as the canonical current design. For the **current
+> authoritative** status and architecture, read (in precedence order):
+> [StayConnect-IAM-Phase0-Contract.md](architecture/StayConnect-IAM-Phase0-Contract.md) (FINAL,
+> Phase 0 CLOSED) → [StayConnect-IAM-Handoff.md](context/StayConnect-IAM-Handoff.md) →
+> [StayConnect-IAM-Phase1A-Plan.md](architecture/StayConnect-IAM-Phase1A-Plan.md) →
+> [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md). Note the **approved two-NIC appliance
+> topology (WAN=management + LAN=guest)** — which this document already reflects (WAN=`ens160`,
+> LAN=`ens192`). Any status/"in progress" tables below are dated snapshots, superseded by the
+> authoritative docs above.
+>
+> ⚠️ **Architecture refactor context — see [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md); this document describes the pre-refactor system.**
 > The edge-first refactor splits this monolith into a Cloud control plane (`/cloud/v1`, commercial + fleet) and per-site Edge appliances (`/edge/v1`, isolated site-local DB, signed offline licensing). Refactor baseline: [CURRENT_STATE_ASSESSMENT.md](CURRENT_STATE_ASSESSMENT.md); full doc suite: CLOUD_ARCHITECTURE, EDGE_ARCHITECTURE, DATA_OWNERSHIP, LICENSING_AND_ENTITLEMENTS, SYNC_PROTOCOL, OFFLINE_OPERATION, ROLE_AND_SCOPE_MATRIX, API_DEPRECATIONS, MIGRATION_RUNBOOK, BACKUP_AND_RESTORE, SECURITY_HARDENING, DEPLOYMENT_CLOUD, DEPLOYMENT_APPLIANCE.
 > **Phase 19 (edge networking — multi guest-network / VLAN / DHCP management):** see [EDGE_NETWORKING.md](EDGE_NETWORKING.md) and its suite (GUEST_VLAN_CONFIGURATION, DHCP_MANAGEMENT, DHCP_OPTION_114, NETWORK_APPLY_AND_ROLLBACK, ARUBA_SSID_VLAN_MAPPING, EXTERNAL_DHCP_MODE, NETWORK_TROUBLESHOOTING).
 
