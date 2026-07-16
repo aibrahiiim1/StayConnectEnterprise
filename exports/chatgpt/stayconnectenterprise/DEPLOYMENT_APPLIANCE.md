@@ -2,7 +2,7 @@
 
 > Production layout for one hotel appliance (or HA pair). Everything the
 > guest and the hotel staff touch runs here, against the site-local database.
-> Cloud counterpart: [DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md).
+> Cloud counterpart: DEPLOYMENT_CLOUD.md.
 
 > **⚠️ Topology correction (2026-07-16) — approved two-NIC rule governs.** The approved,
 > permanent appliance topology is **exactly two physical NICs: WAN and LAN.** **WAN is
@@ -42,7 +42,7 @@ synchronization transport is an **OPEN architecture decision** (see §7 and
 | `kea-dhcp4` / `unbound` | guest DHCP/DNS | bound to 10.20.0.1 |
 | `nftables` | `inet stayconnect` ruleset | see §3 |
 | `stayconnect-caddy` | TLS for Hotel Admin on the **mgmt IP only** | internal CA (`local_certs`) unless the site has real names |
-| backup agent (timer) | nightly `pg_dump` → `backup_records` | [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §1 |
+| backup agent (timer) | nightly `pg_dump` → `backup_records` | BACKUP_AND_RESTORE.md §1 |
 | monitoring | scd/edged Prometheus endpoints, loopback | scraped locally; fleet-level health goes up as telemetry, not scrapes |
 | update agent | Roadmap — update orchestration not yet implemented | until then: staged binary rollout via ops procedure |
 
@@ -54,11 +54,11 @@ revoked.json), env files, and the Postgres data dir.
 
 - input (drop default): mgmt allows SSH 22 + Caddy 443 (Hotel Admin) **from the
   mgmt VLAN only**; guest allows DHCP/DNS/8380/8343/ICMP. **No 8080/3000
-  accepts anywhere** ([SECURITY_HARDENING.md](SECURITY_HARDENING.md) §2).
+  accepts anywhere** (SECURITY_HARDENING.md §2).
 - forward: guest→uplink iff `saddr @auth_ipv4` or `daddr @walled_garden_ip`;
   guest→mgmt VLAN explicitly dropped.
 - **IPv6: dropped on the guest LAN** (no RAs, no v6 forwarding from br-lan)
-  until dual-stack capture exists ([SECURITY_HARDENING.md](SECURITY_HARDENING.md) §4).
+  until dual-stack capture exists (SECURITY_HARDENING.md §4).
 - prerouting DNAT :80→10.20.0.1:8380, :443→10.20.0.1:8343 for unauthenticated
   guests; masquerade guest subnet out the uplink.
 
@@ -133,7 +133,7 @@ nightly backups need headroom for one extra dump generation.
 ## 9. Phase 19 — Networking
 
 Guest networks/VLANs/DHCP are now DB-driven and applied by `netd`. Full suite:
-[EDGE_NETWORKING.md](EDGE_NETWORKING.md).
+EDGE_NETWORKING.md.
 
 ### `netd` systemd unit
 
@@ -148,7 +148,7 @@ role carries **tagged** 802.1Q guest VLANs from the WLAN controller (e.g. `ens19
 as a trunk; VLAN 20 → `ens192.20` → `br-g20` → `10.20.0.1/22`). The trunk parent
 is address-less (an L2 trunk); StayConnect owns the per-VLAN gateway. A plain
 untagged guest port uses role `guest_access` instead. See
-[ARUBA_SSID_VLAN_MAPPING.md](ARUBA_SSID_VLAN_MAPPING.md).
+ARUBA_SSID_VLAN_MAPPING.md.
 
 ### Generated config directory
 
@@ -165,7 +165,7 @@ directory must survive reinstalls along with `/etc/stayconnect/identity` and
 drives DHCP online via `config-test` → `config-set` → `config-write` (persists to
 `/etc/kea/kea-dhcp4.conf`) and reads leases via `lease4-get-all` — **Kea is never
 restarted** to change DHCP, and leases are never read from the memfile CSV
-([DHCP_MANAGEMENT.md](DHCP_MANAGEMENT.md)).
+(DHCP_MANAGEMENT.md).
 
 Bring-up (§6) is unchanged except that after the base netplan/Kea/nftables/Unbound
 skeletons, netd imports the legacy `br-lan` as the first guest network (marked

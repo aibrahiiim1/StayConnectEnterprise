@@ -13,8 +13,8 @@
 > authoritative docs above.
 >
 > ⚠️ **Architecture refactor context — see [TARGET_ARCHITECTURE.md](TARGET_ARCHITECTURE.md); this document describes the pre-refactor system.**
-> The edge-first refactor splits this monolith into a Cloud control plane (`/cloud/v1`, commercial + fleet) and per-site Edge appliances (`/edge/v1`, isolated site-local DB, signed offline licensing). Refactor baseline: [CURRENT_STATE_ASSESSMENT.md](CURRENT_STATE_ASSESSMENT.md); full doc suite: CLOUD_ARCHITECTURE, EDGE_ARCHITECTURE, DATA_OWNERSHIP, LICENSING_AND_ENTITLEMENTS, SYNC_PROTOCOL, OFFLINE_OPERATION, ROLE_AND_SCOPE_MATRIX, API_DEPRECATIONS, MIGRATION_RUNBOOK, BACKUP_AND_RESTORE, SECURITY_HARDENING, DEPLOYMENT_CLOUD, DEPLOYMENT_APPLIANCE.
-> **Phase 19 (edge networking — multi guest-network / VLAN / DHCP management):** see [EDGE_NETWORKING.md](EDGE_NETWORKING.md) and its suite (GUEST_VLAN_CONFIGURATION, DHCP_MANAGEMENT, DHCP_OPTION_114, NETWORK_APPLY_AND_ROLLBACK, ARUBA_SSID_VLAN_MAPPING, EXTERNAL_DHCP_MODE, NETWORK_TROUBLESHOOTING).
+> The edge-first refactor splits this monolith into a Cloud control plane (`/cloud/v1`, commercial + fleet) and per-site Edge appliances (`/edge/v1`, isolated site-local DB, signed offline licensing). Refactor baseline: CURRENT_STATE_ASSESSMENT.md; full doc suite: CLOUD_ARCHITECTURE, EDGE_ARCHITECTURE, DATA_OWNERSHIP, LICENSING_AND_ENTITLEMENTS, SYNC_PROTOCOL, OFFLINE_OPERATION, ROLE_AND_SCOPE_MATRIX, API_DEPRECATIONS, MIGRATION_RUNBOOK, BACKUP_AND_RESTORE, SECURITY_HARDENING, DEPLOYMENT_CLOUD, DEPLOYMENT_APPLIANCE.
+> **Phase 19 (edge networking — multi guest-network / VLAN / DHCP management):** see EDGE_NETWORKING.md and its suite (GUEST_VLAN_CONFIGURATION, DHCP_MANAGEMENT, DHCP_OPTION_114, NETWORK_APPLY_AND_ROLLBACK, ARUBA_SSID_VLAN_MAPPING, EXTERNAL_DHCP_MODE, NETWORK_TROUBLESHOOTING).
 
 > Generated 2026-07-10 from a full sweep of the codebase (`d:\WebProjects\StayConnectEnterprise`), the user guides in `docs/user-guide/`, and operational notes from prior work sessions on the pilot VM. This is the "full picture" reference for the whole system.
 

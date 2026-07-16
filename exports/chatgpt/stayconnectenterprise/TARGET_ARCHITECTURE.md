@@ -1,9 +1,9 @@
 # Target Architecture — Edge-First Refactor
 
 > Authoritative design for the cloud-controlled / hotel-local split. Companion docs:
-> [CLOUD_ARCHITECTURE.md](CLOUD_ARCHITECTURE.md), [EDGE_ARCHITECTURE.md](EDGE_ARCHITECTURE.md),
-> [DATA_OWNERSHIP.md](DATA_OWNERSHIP.md), [LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md),
-> [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md), [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md).
+> CLOUD_ARCHITECTURE.md, EDGE_ARCHITECTURE.md,
+> DATA_OWNERSHIP.md, LICENSING_AND_ENTITLEMENTS.md,
+> SYNC_PROTOCOL.md, [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md).
 > The pre-refactor system is described in [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md).
 
 > **⚠️ Corrections (2026-07-16):**
@@ -114,9 +114,9 @@ Key invariants:
 - **Entitlements are a signed file, not a query.** The appliance verifies the
   Ed25519 vendor-signed license offline and mirrors its limits into the local
   `tenant_effective_limits` table, so existing data-plane limit queries keep
-  working unchanged. See [LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md).
+  working unchanged. See LICENSING_AND_ENTITLEMENTS.md.
 - **All edge→cloud traffic is a durable outbox drain** (`sync_outbox`, exactly-once
-  landing via `fleet_telemetry_dedupe`). See [SYNC_PROTOCOL.md](SYNC_PROTOCOL.md).
+  landing via `fleet_telemetry_dedupe`). See SYNC_PROTOCOL.md.
 - **Guest PII never syncs to the cloud.** Telemetry is aggregates only; the cloud
   ingest additionally strips PII-looking keys (defense in depth, `fleet.Sanitize`).
 
@@ -126,7 +126,7 @@ Key invariants:
 |---|---|---|
 | `/cloud/v1/*` | ctrlapi (cloud) | tenants, sites, appliances, commercial-plans, operators, appliance-bootstrap-tokens, fleet, licenses |
 | `/edge/v1/*` | edged (per appliance, mgmt IP) | health, license, operators, guest-access-plans, voucher-batches, vouchers, sessions, pms-providers, auth-methods, walled-garden, portal-branding, payments, stripe-accounts, notification-providers, social-providers, audit, reports, backups |
-| `/v1/*` (legacy, ctrlapi) | ctrlapi | **Deprecated** compatibility adapters, removed after the pilot cutover — see [API_DEPRECATIONS.md](API_DEPRECATIONS.md). Appliance protocol endpoints (`/v1/appliances/enroll`, `/v1/appliance/hello`, `/v1/appliance/license`) stay. |
+| `/v1/*` (legacy, ctrlapi) | ctrlapi | **Deprecated** compatibility adapters, removed after the pilot cutover — see API_DEPRECATIONS.md. Appliance protocol endpoints (`/v1/appliances/enroll`, `/v1/appliance/hello`, `/v1/appliance/license`) stay. |
 
 ## 6. High availability (per site)
 
@@ -154,7 +154,7 @@ This witness role is a design recommendation, not yet implemented.
   per-database, and moving to physically separate machines later is a
   deploy-topology change only, not a code change.
 - **Production:** cloud and appliances are physically separate
-  ([DEPLOYMENT_CLOUD.md](DEPLOYMENT_CLOUD.md), [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md)).
+  (DEPLOYMENT_CLOUD.md, [DEPLOYMENT_APPLIANCE.md](DEPLOYMENT_APPLIANCE.md)).
   Each appliance has **exactly two physical NICs**: a **WAN interface that is also the
   management interface** (Hotel Admin, SSH, outbound sync) and a **LAN guest-gateway
   interface** (captive network + guest VLAN trunk). There is **no separate management NIC** and

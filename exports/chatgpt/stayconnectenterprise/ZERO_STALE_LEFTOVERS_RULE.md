@@ -1,0 +1,36 @@
+# PERMANENT RULE — Zero Stale Leftovers (project-wide, mandatory)
+
+**Authoritative, permanent Product-Owner rule for the entire StayConnect Enterprise project.** It applies to every future milestone, phase, implementation, acceptance run, documentation update, migration, deployment, export and handoff. Referenced from `StayConnect-IAM-Handoff.md`, `00-START-HERE.md`, and `PROJECT-INSTRUCTIONS.md`.
+
+## Absolute requirement
+No completed task may leave behind any stale, superseded, contradictory, misleading or partially-updated artifact — in docs, handoffs, plans, roadmaps, acceptance records, runbooks, diagrams, README/inline comments, TODOs, feature flags, config templates, env examples, migration notes, fixtures, compatibility/dead code, unused functions, legacy schema/API references, old paths, exported packs, manifests/checksums, scripts, UI labels, stale defaults, old service/role/network names, or old next-action statements.
+
+- A stale statement is **not** acceptable merely because a newer statement exists elsewhere.
+- A lower section of a file does **not** correct a stale statement earlier in the **same** file.
+- A banner/note/disclaimer does **not** excuse contradictory current-state content.
+
+## Source-of-truth enforcement
+Read sources in the required precedence order before changing anything. After every authorized change, synchronize all directly-related sources to state one consistent truth: current Phase; exact maturity; what is implemented / verified / not implemented / prohibited; authoritative commits; known limitations; remaining blockers; the **single** next authorized action. The latest PO-approved contract + verified execution evidence override all older plans/reports/chats/comments/assumptions.
+
+Old content may remain **only if all** hold: (1) required as audit/history; (2) explicitly labeled `HISTORICAL`/`SUPERSEDED`/`CLOSED`/`DEPRECATED`; (3) cannot be mistaken for current plan/behavior/authorization; (4) names the current replacement directly; (5) the stale-content validator excludes it only via an explicit reviewed historical marker. Otherwise remove/rewrite it.
+
+## No stale code/implementation leftovers
+When a later implementation replaces an earlier one, classify every replaced artifact as exactly one of: `RETAINED` · `MIGRATED` · `REMOVED` · `DEPRECATED (with removal gate)` · `HISTORICAL ONLY` · `BLOCKED (reason + owner-approved future gate)`. Forbidden: unreachable legacy branches without an owner-approved reason; duplicate active implementations; old+new config keys both silently accepted; unused columns/tables presented as current; ambiguous stale feature flags; abandoned migration scripts; obsolete env vars; old DSNs/schema names in examples; comments describing removed behavior; silent fallback to old behavior; “temporary” code without a removal gate; fake backward compatibility; silent dual-write/read; legacy cleanup before its separate approval. Do **not** remove a legacy runtime path still required for rollback/reconciliation/an approved compatibility window — instead label it `RETAINED for rollback`, state the removal gate, and ensure it can't be confused with the active target.
+
+## Mandatory repository-wide stale scan
+Before declaring a milestone complete, search the whole repo (tracked source, docs, migrations, scripts, config, tests, committed generated files, export source lists, manifests, acceptance records) for every term affected by the change: previous phase names/statuses; previous next-action wording; superseded architecture terms; old schema/table/role/service/interface names; old network topology; old DB targets; obsolete env vars; deprecated API paths; old defaults; old commit references; stale maturity labels (`NOT STARTED`, `PLANNING ONLY`, `IN PROGRESS`, `READY_FOR_APPROVAL`, `CONDITIONALLY FROZEN`, `PENDING`, `STANDBY DB`, `BLUE/GREEN SWAP`, etc.). Do not scan only the files you expect to change.
+
+## Contradiction gate
+Before commit/export, build a current-state assertion set (current Phase + maturity; implementation/verification status; live vs scratch; deployment/cutover status; DB/schema status; service-routing status; PMS/financial status; networking/HA status; limitations; next authorized action) and prove no current artifact contradicts it. Any contradiction is a release/documentation blocker — do not commit/export/report success while one remains.
+
+## Export freshness gate
+Every Project Pack / Evidence Pack must be rebuilt from the committed authoritative repo state after synchronization. Verify: export source commit == intended sync commit; no copied file older than its source; every required current source included; stale copies deleted/replaced; manifest lists the exact current files; every SHA-256 matches; one consistent Phase status + next action; no superseded pack presented as current. Never patch only the exported copy; never reuse an old ZIP after a newer authoritative commit.
+
+## Required automation
+`tools/validate-project-state.sh` must exit non-zero on: contradictory current Phase statuses; >1 current next action; stale baseline commits; stale plan-status wording; superseded architecture terms outside marked historical sections; project-pack source mismatch; manifest/hash mismatch; missing required acceptance record; current files claiming a completed phase is not started; current files claiming an unimplemented capability is implemented; current files claiming a separately-gated action is authorized; obsolete files still authoritative; broken core links; secrets/guest PII in exports. Run it before every documentation commit, implementation/acceptance commit, and each pack export; record its PASS in the acceptance evidence.
+
+## Commit completion gate
+A milestone is complete only when **all** hold: (1) authorized implementation complete; (2) required acceptance passes; (3) related docs synchronized; (4) zero current-state contradictions; (5) stale-leftover scan clean; (6) retained legacy items explicitly classified + gated; (7) Project Pack regenerated + verified; (8) Evidence Pack regenerated + verified; (9) authoritative commits + checksums recorded; (10) the single next authorized action identical everywhere. Otherwise report `INCOMPLETE — STALE OR UNSYNCHRONIZED ARTIFACTS REMAIN` (never complete/verified/closed/accepted).
+
+## Required output for every future milestone
+Include a `ZERO-STALE-LEFTOVERS VERIFICATION` section listing: search terms used; stale items found; files corrected/removed; legacy items intentionally retained + reason + explicit removal gate; validation-script result; Project-Pack freshness result; Evidence-Pack freshness result; final contradiction count (must be **0**). The final report must explicitly confirm `ZERO_STALE_LEFTOVERS = PASS`, or stop and report the exact remaining files/blockers.

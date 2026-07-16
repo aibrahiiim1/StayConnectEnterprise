@@ -2,8 +2,8 @@
 
 **Read this file first.** It is the orientation for an AI consultant continuing work on StayConnect Enterprise. It summarizes the current, authoritative state; the individual documents in this pack are the detailed sources. Where this summary and a copied source document disagree, follow the **source-of-truth precedence** in §12.
 
-**Source documentation baseline commit:** `d0eabc2` (final commit of the reconciliation chain `f2d0550` → `bd9ee7f` → `d0eabc2`; supersedes `22a2e15`).
-**Project-pack export commit:** the commit that adds/updates this pack (later than `d0eabc2`).
+**Source documentation baseline commit:** `d5a5862` (removes residual Phase-1A planning-only/scratch-only current-state contradictions; hardens the validator; supersedes `2f232cb`/`d0eabc2`/`22a2e15`).
+**Project-pack export commit:** recorded exactly as `PROJECT_PACK_EXPORT_COMMIT` in `MANIFEST.md`.
 **Export date:** 2026-07-16.
 
 **Permanent project rule:** every milestone must satisfy the **Zero-Stale-Leftovers** rule (repo `docs/ZERO_STALE_LEFTOVERS_RULE.md`) — no stale/contradictory/superseded artifact may survive a completed task, enforced by `tools/validate-project-state.sh`. See §14.
@@ -97,6 +97,7 @@ Schema migrations; feature code; production connector/posting-engine development
 | `OFFLINE_OPERATION.md` | Supporting — offline behavior. |
 | `MIGRATION_RUNBOOK.md` | Supporting — migration/rollback runbook. |
 | `PROJECT-INSTRUCTIONS.md` | Paste into the ChatGPT Project's custom instructions. |
+| `ZERO_STALE_LEFTOVERS_RULE.md` | **Permanent rule** — the authoritative Zero-Stale-Leftovers rule (full text, bundled). |
 | `MANIFEST.md` | Provenance + SHA-256 for every exported file. |
 
 ## 12. Source-of-truth precedence
@@ -123,4 +124,4 @@ Schema migrations; feature code; production connector/posting-engine development
 
 A permanent, project-wide Product-Owner rule governs every future milestone: **no completed task may leave behind any stale, superseded, contradictory, misleading, or partially-updated artifact** — in docs, handoffs, plans, acceptance records, runbooks, comments, config, migrations, exports, manifests, checksums, or scripts. A newer statement elsewhere does **not** excuse a stale one; a lower section does not correct an earlier one in the same file; a banner does not excuse contradictory current-state content. Old content may remain only if it is required as audit/history, explicitly labeled `HISTORICAL`/`SUPERSEDED`/`CLOSED`/`DEPRECATED`, cannot be mistaken for current behavior, and names its current replacement.
 
-Before any milestone is declared complete: run a repo-wide stale scan, build a current-state assertion set and prove zero contradictions, regenerate + verify both export packs from the synchronized commit, and run `tools/validate-project-state.sh` (must print `ZERO_STALE_LEFTOVERS = PASS`). The authoritative rule text lives in the repository at `docs/ZERO_STALE_LEFTOVERS_RULE.md`; the enforcing validator is `tools/validate-project-state.sh`. Every future milestone report must include a `ZERO-STALE-LEFTOVERS VERIFICATION` section and confirm `ZERO_STALE_LEFTOVERS = PASS`.
+Before any milestone is declared complete: run a repo-wide stale scan, build a current-state assertion set and prove zero contradictions, regenerate + verify both export packs from the synchronized commit, and run `tools/validate-project-state.sh` (must print `ZERO_STALE_LEFTOVERS = PASS`). The authoritative rule text is bundled in this pack — see [ZERO_STALE_LEFTOVERS_RULE.md](ZERO_STALE_LEFTOVERS_RULE.md) (repository path `docs/ZERO_STALE_LEFTOVERS_RULE.md`); the enforcing validator `tools/validate-project-state.sh` is bundled in the Evidence Pack. Every future milestone report must include a `ZERO-STALE-LEFTOVERS VERIFICATION` section and confirm `ZERO_STALE_LEFTOVERS = PASS`.

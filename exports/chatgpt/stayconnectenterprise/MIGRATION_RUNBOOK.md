@@ -12,7 +12,7 @@
 > (cloud + edge on one Postgres instance, separate databases/DSNs) — the same
 > steps apply per-site in production.
 >
-> Ground rules (from [CURRENT_STATE_ASSESSMENT.md](CURRENT_STATE_ASSESSMENT.md) §9):
+> Ground rules (from CURRENT_STATE_ASSESSMENT.md §9):
 > never leave the VM half-migrated — every phase ends with health checks and
 > the relevant phase suites; scd re-pointing is the riskiest step and is done
 > by DSN swap only (identical schema shape).
@@ -79,7 +79,7 @@ Review the per-table count report. Expected behaviors:
 - `tenant_subscriptions` are **not** copied (cloud domain) — remember the 65
   test-debris rows centrally; entitlements arrive via the license instead;
 - operator rows copy verbatim (legacy roles admitted during the window —
-  [ROLE_AND_SCOPE_MATRIX.md](ROLE_AND_SCOPE_MATRIX.md) §5);
+  ROLE_AND_SCOPE_MATRIX.md §5);
 - hypertable timestamps preserved 1:1.
 
 Do not proceed until dry-run counts match expectations against Phase 1's
@@ -129,7 +129,7 @@ for s in scripts/phase{1,2}*-test.sh scripts/phase4*-test.sh scripts/phase6-test
 plus the new isolation/offline/license suites and the cloud-outage drill in
 [OFFLINE_OPERATION.md](OFFLINE_OPERATION.md) §4. All green = cutover done;
 legacy `/v1` guest routes now serve frozen data for this site
-([API_DEPRECATIONS.md](API_DEPRECATIONS.md)).
+(API_DEPRECATIONS.md).
 
 Known test gotchas that are *not* regressions: netns fixture doesn't survive
 reboot; SIGPIPE with `grep -q` under pipefail; partial-index `ON CONFLICT`

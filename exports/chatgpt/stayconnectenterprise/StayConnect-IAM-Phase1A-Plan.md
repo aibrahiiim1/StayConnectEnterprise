@@ -405,7 +405,7 @@ Run in a **clean test database** and then dark in the appliance's `iam_v2` schem
 
 ## 12. Scratch implementation status (2026-07-16)
 
-Phase-1A was implemented and verified **strictly in a dedicated disposable scratch/test PostgreSQL database** (Docker container `iamv2-scratch`, `127.0.0.1:55432`, db `iam_scratch`, PostgreSQL 16.14), under the Product Owner's scratch-only authorization. Artifacts + reproducible evidence live in [`iam_v2_scratch/`](../../iam_v2_scratch/) (`EVIDENCE.txt`). A hard safety guard refuses any live-looking target.
+Phase-1A was implemented and verified **strictly in a dedicated disposable scratch/test PostgreSQL database** (Docker container `iamv2-scratch`, `127.0.0.1:55432`, db `iam_scratch`, PostgreSQL 16.14), under the Product Owner's scratch-only authorization. Artifacts + reproducible evidence live in `iam_v2_scratch/` (`EVIDENCE.txt`). A hard safety guard refuses any live-looking target.
 
 **Maturity ledger (explicit):**
 
@@ -424,4 +424,4 @@ Phase-1A was implemented and verified **strictly in a dedicated disposable scrat
 
 **Not done (each needs its own separate PO approval — ladder §7a/§11):** creating dark `iam_v2` in the **live** `stayconnect_site` DB (ladder step 5); Phase 1B vertical slice; full IAM path completion; cutover. **No live database, service, PMS/FIAS, network, or deployment change occurred.**
 
-**End of Phase 1A plan.** Phase-1A is **implemented and verified in scratch only** — not created on live, not cut over. No live migrations, production code, providers, services, config, deployment, or PMS traffic are authorized by this document.
+**End of Phase 1A plan.** Current maturity: **SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER.** The isolated `iam_v2` schema is created and verified in production `stayconnect_site` but: **no service reads/writes `iam_v2`; no IAM data migration; no Phase 1B; no cutover.** No service routing, DSN/`search_path` change, production code, providers, config, deployment, or PMS traffic are authorized by this document; each remains separately gated.

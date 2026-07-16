@@ -6,7 +6,7 @@
 >
 > **This is the recommended starting point.** For screen-by-screen reference and
 > shorter step lists, see the companion documents linked in
-> [docs/user-guide/README.md](user-guide/README.md).
+> docs/user-guide/README.md.
 >
 > Everything here is verified against the current production code (not against UI
 > text or older docs). Where an operator-facing label differs from an internal
