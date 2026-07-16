@@ -381,9 +381,10 @@ def _zip(srcdir,zippath):
             with open(full,"rb") as f: z.writestr(zi,f.read())
 
 def cmd_build_packs():
-    dirty=git("status","--porcelain")
+    # clean-source check scoped to governance-relevant paths (ignores unrelated build artifacts)
+    dirty=git("status","--porcelain","--","governance","docs","tools","iam_v2_scratch")
     if dirty.strip():
-        print("BUILD-PACKS REFUSED — working tree is dirty. Commit source first.\n"+dirty); return 3
+        print("BUILD-PACKS REFUSED — governance source is dirty. Commit source first.\n"+dirty); return 3
     src_commit=git("rev-parse","--short","HEAD")
     rc,st=cmd_validate(deep=True)
     if rc!=0: print("BUILD-PACKS REFUSED — structural validation failed."); return rc
