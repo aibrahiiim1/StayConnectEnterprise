@@ -1,6 +1,10 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE3A_EXECUTED — one USD 1.00 PS debit, PA ASOK (PROTOCOL_ACCEPTED); folio placement NOT independently verified — owner owns out-of-band folio verification + cleanup`**
+**Spike status: `GATE3A_EXECUTED x2 — two owner-authorized USD 1.00 PS debits, both PA ASOK (PROTOCOL_ACCEPTED); folio placement NOT independently verified — owner owns out-of-band folio verification + cleanup`**
+
+**Attempt #5 (2026-07-16, owner-selected Room 14215):** owner explicitly selected **Room 14215** (no redaction of the room number authorized). Full `LS→LD(IFPB/V#1.13/RT4)→LR(GI/GC/GO)` handshake, incoming `LS`/`LA` acked with `LA|`, read-only `DR` resync returned `DS` + **365 in-house records** ending with an explicit **`DE`**; Room 14215 resolved to a valid `G#` from an in-house `GI`, not cleared by any `GO`. Exactly **one** `PS` (`TA100`/`PTD`/`SOWIFI`/`WSSTAYCONNECT`/`CTGate3A Test`/**`P#900002`**) sent with **zero retries**; **`PA ASOK` matched by Interface + `P#` in 93 ms**. `P#900001` (Attempt #4) was NOT reused. Result: `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED`. The resolved `G#` was returned directly to the product owner and is deliberately NOT stored in Git/Markdown. Guest name never decoded or stored. See "Execution Attempt #5" below.
+
+**Attempt #4 (2026-07-16):**
 
 Gate 3A executed 2026-07-16 as an owner-approved **technical-only** test (Option A: the product owner owns the out-of-band Front Office folio verification and cleanup). One connection, slot free, `LA` reached, read-only `DR` resync obtained the in-house roster, exactly **one** `PS` (`TA100`, `PTD`, `SOWIFI`, `WSSTAYCONNECT`, `CTGate3A Test`, `P#900001`) sent with **zero retries**; **`PA ASOK` matched by Interface + `P#` in 78 ms**. Reported only as `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED`. No claim is made that the charge reached the correct folio, was corrected, or returned to net zero — the product owner confirms that out-of-band. See "Execution Attempt #4" below. (Prior attempts #1–#3 aborted before any `PS` — placeholders, unconfirmable currency, and no Front-Office channel respectively.)
 
@@ -389,6 +393,35 @@ The legacy-server (`172.21.96.150`) SSH investigation is **cancelled and out of 
 - **If the connection is refused, or no opening `LS` is received, ABORT immediately** — do not displace, reconnect into a race, or modify any existing client.
 
 This replaces any pre-run legacy-connector reconciliation: collision safety is proven at test time by the server's own admission control, not by inspecting the old server.
+
+## Gate 3A — Execution Attempt #5 (2026-07-16): EXECUTED — owner-selected Room 14215, one debit, PA ASOK
+
+Owner-directed test: the product owner **explicitly selected Room 14215** and authorized recording the room number in this document (guest name still forbidden in Git/Markdown; the resolved `G#` returned directly to the owner, not stored here).
+
+**Handshake fix vs earlier attempts:** the PMS retransmits its opening `LS` and does **not** advance to `LA` unless the client (a) sends `LS→LD(IFPB/V#1.13/RT4)→LR` immediately on connect — as the production connector does — and (b) acks incoming `LS`/`LA` with a bare `LA|`. Gating on a client-side "reach LA before proceeding" milestone stalled the link; mirroring the connector and driving a `DR` resync completed it. (A prior harness process also had to be reaped because it held the PMS's single-client slot open.)
+
+**Sequence:**
+
+- Connect; sent `LS`, `LD (IFPB/V#1.13/RT4)`, `LR(GI/GC/GO)` immediately. Peer `LS`/`LA` acked with `LA|`.
+- Read-only **`DR` resync** → `DS` + **365 in-house records** → explicit **`DE`** (full roster, complete).
+- **Room 14215** matched in an in-house `GI` with a valid `G#`; **not** cleared by any `GO`/checkout in the roster.
+
+**Pre-send verification (all satisfied):** `RN==14215`; in-house; valid `G#`; `RN`+`G#` same current Stay on Hotel ID 3; not cleared by `GO`/checkout; no prior UNKNOWN posting for Room 14215 (Attempt #4 targeted a different room); `TA==100`.
+
+**The one debit (exactly one `PS`, zero retries):**
+
+```
+PS|RN14215|G#<resolved-G#-returned-to-owner-only>|TA100|PTD|SOWIFI|CTGate3A Test|P#900002|WSSTAYCONNECT|
+PA|RN14215|SOWIFI|P#900002|WSSTAYCONNECT|ASOK|      # matched by PMS Interface + P# (NOT by RN)
+```
+
+- `TA100` = **USD 1.00** (currency USD, exponent 2, owner-confirmed); `PT=D`; `SO=WIFI`; `WS=STAYCONNECT`; `CT="Gate3A Test"`; **`P#=900002`** (new durable attempt; `P#900001` NOT reused).
+- **`PA` status `AS=OK`**; **response time 93 ms**; matched **by PMS Interface + `P#`**, not by `RN`.
+- **Exactly one `PS`; zero retries**; link closed with `LE`. No second debit, no `PT=C`, no negative `TA`, no reversal, no lost-ACK, no link interruption, no checkout, no DB/config/service change.
+
+**Result: `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED`.** `ASOK` proves Protel accepted the record at the protocol level; it is **not** proof of correct-folio placement. This is a **real** posting on the live PMS.
+
+**Owner cleanup correlation keys** (to locate + remove in Protel out-of-band): `RN=14215`, `P#=900002`, `WS=STAYCONNECT`, `SO=WIFI`, `CT="Gate3A Test"`, amount USD 1.00 (`TA100`), posted ~`2026-07-16T05:53:03Z`, `PA ASOK`. **Folio verification, manual removal, and net-zero confirmation are owned by the product owner and remain AWAITING PRODUCT-OWNER CONFIRMATION.**
 
 ## Gate 3A — Execution Attempt #4 (2026-07-16): EXECUTED — one debit, PA ASOK (protocol accepted; folio NOT independently verified)
 
