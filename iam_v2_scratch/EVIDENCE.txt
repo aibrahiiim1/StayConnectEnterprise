@@ -1,0 +1,80 @@
+iam_v2 SCRATCH — A-SERIES ACCEPTANCE EVIDENCE
+Generated against DISPOSABLE container 'iamv2-scratch' (127.0.0.1:55432, db iam_scratch), PostgreSQL 16.14.
+Target is NOT the appliance (172.21.60.23) and NOT stayconnect_site. Safety guard active and self-tested.
+Phase 1A status: IMPLEMENTED-IN-SCRATCH + VERIFIED-IN-SCRATCH. NOT created on live. NOT cut over.
+==================================================================================
+
+### CORE SUITE (schema integrity, immutability, folio-UNSET fail-closed, entitlement guards,
+###             accounting idempotency, device admission, advisory namespaces, one-way posting) ###
+===== A-SERIES (scratch) =====
+PASS  INV-01 iam_v2 base-table count = 49
+PASS  INV-02 no accidental non-fixture public tables
+PASS  INV-03 MG-0 anchor present & valid
+PASS  IMM-01 interface revision UPDATE rejected
+PASS  IMM-02 interface revision DELETE rejected
+PASS  IMM-03 plan revision UPDATE rejected
+PASS  IMM-04 package revision UPDATE rejected
+PASS  AO-01 accounting_records UPDATE rejected
+PASS  AO-02 pms_postings UPDATE rejected (append-only ledger)
+PASS  FK-01 cross-tenant stay->interface rejected
+PASS  FK-02 cross-site folio->interface rejected
+PASS  FK-03 same-namespace child insert accepted (rollback)
+PASS  FOLIO-01 CHARGE under UNSET revision blocked
+PASS  FOLIO-02 no outbox/P# side-effects from blocked CHARGE
+PASS  FOLIO-03 CHARGE under concrete strategy admitted (rollback)
+PASS  FOLIO-04 CHARGE on non-IN_HOUSE stay blocked
+PASS  ENT-01 second live entitlement per voucher rejected
+PASS  ENT-02 no transition out of TERMINATED
+PASS  ENT-03 counter decrease via direct UPDATE rejected
+PASS  ENT-04 audited adjustment decrease allowed + logs
+PASS  ENT-05 cross-subject supersession rejected
+PASS  WIN-01 window_ends_at move without adjustment rejected
+PASS  CNT-01 monotonic counter increase allowed
+PASS  ACC-01 first sample APPLIED
+PASS  ACC-02 duplicate (session,seq) sample = DUPLICATE
+PASS  ACC-03 out-of-order (older seq) = STALE, no double count
+PASS  ACC-04 counter-reset epoch bump handled
+PASS  ACC-05 session close idempotent (2nd = ALREADY_ENDED)
+PASS  DEV-01 first device authorized (count 0 < max 2)
+PASS  DEV-02 over-limit 3rd device rejected (max=2)
+PASS  DEV-03 same-device reconnect = RECONNECT (no slot burn)
+PASS  LN-01 namespaces distinct: dev(11) <> cap(7) for same key
+PASS  LN-02 LN_DEVICE_SLOT constant = hashtextextended(x,11)
+PASS  LN-03 LN_CAPACITY constant = hashtextextended(x,7)
+PASS  PA-01 outcome cannot return to SENDING
+PASS  PA-02 posting_attempts identity immutable (P# change rejected)
+PASS  REV-01 no reversal sender/PT=C function exists
+PASS  AGG-01 AGGREGATE_ONLINE_TIME storable but inert (enum only)
+===== RESULT: PASS=38 FAIL=0 =====
+
+### EXTRA SUITE (migration up/down/re-up, MG-0 interruption recovery, concurrency races,
+###              container-restart persistence, secret/PII scan) ###
+===== A-SERIES EXTRA (scratch) =====
+PASS  MIG-01 migration up -> 49 iam_v2 tables
+PASS  MIG-02 migration down -> 0 iam_v2 tables
+PASS  MIG-03 migration re-up -> 49 iam_v2 tables (deterministic rebuild)
+PASS  MG0-REC-01 invalid index detected before recovery
+PASS  MG0-REC-02 MG-0 recovery yields VALID index (via DROP+rebuild CONCURRENTLY)
+PASS  RACE-01 device race max=1: exactly one AUTHORIZED
+PASS  RACE-02 device race max=1: exactly one MAX_DEVICES_REACHED
+PASS  RACE-03 one-live-entitlement race: exactly one INSERT wins
+PASS  RACE-04 one-live-entitlement race: exactly one rejected by ent_live_voucher
+PASS  RESTART-01 validity window unchanged across container restart
+PASS  RESTART-02 iam_v2 schema intact after restart (49 tables)
+PASS  SEC-01 no secrets/PII patterns in committed scratch artifacts
+PASS  SEC-02 no POSTGRES_PASSWORD assignment committed in scratch artifacts
+===== EXTRA RESULT: PASS=13 FAIL=0 =====
+
+### DARK-ISOLATION PROOFS ###
+ISO-01 scratch roles (only superuser 'postgres'; no prod roles): postgres
+ISO-02 stayconnect/scd/edged/acctd/portald roles present: 0 (want 0)
+ISO-03 default search_path (no iam_v2 auto-routing): "$user", public
+ISO-04 production code (data-plane, control-plane) references to schema 'iam_v2': 0 (want 0)
+ISO-05 service/deploy references to scratch port 55432 / db iam_scratch: 0 (want 0)
+ISO-06 iam_v2 grants to non-owner/non-PUBLIC roles: 0 (want 0)
+
+### TOTALS ###
+CORE:  PASS=38 FAIL=0
+EXTRA: PASS=13 FAIL=0
+ISOLATION: 6/6 clean
+OVERALL A-SERIES: PASS=51 FAIL=0

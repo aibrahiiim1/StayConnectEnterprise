@@ -1,6 +1,6 @@
 # StayConnect IAM — Phase 1A Execution Plan (Core Domain & Persistence Foundation)
 
-**Status: READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL.** *(Revised 2026-07-16 after owner review; reconciled 2026-07-16 audit; updated 2026-07-16 for the PO-approved folio amendment.)* Planning only — Phase 1A is **not** implemented or in progress. The former `folio_identity_strategy` BLOCKER is **RESOLVED** — the FINAL contract §4.1 was amended (PO-approved) to `NOT NULL DEFAULT 'UNSET'` (fail-closed), and this plan implements it directly (§9). Cutover is an atomic complete-domain switch with **two explicit rollback boundaries** (§7a); MG-0 uses a non-transactional `CREATE UNIQUE INDEX CONCURRENTLY` model (§2a). **Phase 1A implementation is still NOT approved** — see §11 authorization boundary. No migrations, code, PMS providers, service/config changes, deployment, guest-networking changes, or PMS traffic exist. Implementation begins only after the product owner explicitly approves this plan.
+**Status: IMPLEMENTED-IN-SCRATCH & VERIFIED-IN-SCRATCH (2026-07-16) — NOT created on live; NOT cut over.** *(Prior: READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL; the Product Owner authorized Phase-1A implementation **strictly in a dedicated disposable scratch/test database**.)* The plan was executed in scratch only (see §12 and `iam_v2_scratch/`); **no live database, service, PMS, network, or deployment was touched.** Next authorized step: **Product-Owner review of the scratch acceptance evidence**, then a **separate** explicit authorization to create dark `iam_v2` in the live `stayconnect_site` DB (ladder step 5). The former `folio_identity_strategy` BLOCKER is **RESOLVED** — the FINAL contract §4.1 was amended (PO-approved) to `NOT NULL DEFAULT 'UNSET'` (fail-closed), and this plan implements it directly (§9). Cutover is an atomic complete-domain switch with **two explicit rollback boundaries** (§7a); MG-0 uses a non-transactional `CREATE UNIQUE INDEX CONCURRENTLY` model (§2a). **Phase 1A implementation is still NOT approved** — see §11 authorization boundary. No migrations, code, PMS providers, service/config changes, deployment, guest-networking changes, or PMS traffic exist. Implementation begins only after the product owner explicitly approves this plan.
 
 **Source of truth:** the FINAL [StayConnect-IAM-Phase0-Contract.md](StayConnect-IAM-Phase0-Contract.md) (Phase 0 CLOSED 2026-07-16). This plan **implements** that contract's approved DDL (§4.1–§4.6), invariants (§2), state machines (§16), and phased decomposition (§18); it introduces **no new architectural decisions**. Owner-directed refinements applied at this review (isolation mechanism, cutover gating, reversal scope, lock strategy, and the resolved open decisions) are recorded in §§2, 5, 8–11 and supersede the corresponding implementation notes only — not the approved architecture.
 
@@ -400,4 +400,27 @@ Run in a **clean test database** and then dark in the appliance's `iam_v2` schem
 13. **Post-cutover observability and no-return / rollback governance** (§7a two rollback boundaries).
 14. **Separate legacy-cleanup approval** — only after the evidence-based cleanup gates (§9 decision C).
 
-**End of Phase 1A plan.** Status **READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL** — planning only; Phase 1A is not implemented or in progress. No migrations, code, providers, services, config, deployment, or PMS traffic are authorized by this document.
+---
+
+## 12. Scratch implementation status (2026-07-16)
+
+Phase-1A was implemented and verified **strictly in a dedicated disposable scratch/test PostgreSQL database** (Docker container `iamv2-scratch`, `127.0.0.1:55432`, db `iam_scratch`, PostgreSQL 16.14), under the Product Owner's scratch-only authorization. Artifacts + reproducible evidence live in [`iam_v2_scratch/`](../../iam_v2_scratch/) (`EVIDENCE.txt`). A hard safety guard refuses any live-looking target.
+
+**Maturity ledger (explicit):**
+
+| Item | Designed | Implemented (scratch) | Verified (scratch) | Created on live | Cut over |
+|---|:--:|:--:|:--:|:--:|:--:|
+| MG-0 anchor (non-transactional `CONCURRENTLY` + recovery) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| MG-1…MG-9 `iam_v2` schema (49 tables) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Immutability / append-only / one-way triggers | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Folio-`UNSET` fail-closed CHARGE gate | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Entitlement engine (window / one-live / supersession / audited adjust) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Watermark accounting (idempotent / out-of-order / epoch) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Device admission + advisory namespaces (11/7) | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Migration up/down/re-up + restart persistence | ✅ | ✅ | ✅ | ❌ | ❌ |
+
+**Acceptance:** Core 38/38, Extra 13/13, Isolation 6/6 (total **51 PASS / 0 FAIL**). Dark-isolation proofs confirm: only the `postgres` superuser role exists (no prod roles), default `search_path` has no `iam_v2`, **zero** `iam_v2` references in production code (`data-plane`/`control-plane`), zero references to the scratch DSN in service/deploy config, and no non-owner grants on `iam_v2`.
+
+**Not done (each needs its own separate PO approval — ladder §7a/§11):** creating dark `iam_v2` in the **live** `stayconnect_site` DB (ladder step 5); Phase 1B vertical slice; full IAM path completion; cutover. **No live database, service, PMS/FIAS, network, or deployment change occurred.**
+
+**End of Phase 1A plan.** Phase-1A is **implemented and verified in scratch only** — not created on live, not cut over. No live migrations, production code, providers, services, config, deployment, or PMS traffic are authorized by this document.
