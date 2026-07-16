@@ -2,7 +2,7 @@
 
 - **Project:** stayconnectenterprise
 - **SOURCE_DOCUMENTATION_SYNC_COMMIT:** `afade95` — `docs(iam): add complete Phase 1B implementation plan (planning-only)`. Every copied document matches `afade95` (supersedes `d4fa9be`/`d0eabc2`/`22a2e15`).
-- **PROJECT_PACK_EXPORT_COMMIT:** `__EXPORT_COMMIT__` — the exact commit that introduced this regenerated pack (this line is stamped with the real hash after that commit exists).
+- **PROJECT_PACK_EXPORT_COMMIT:** `5b36bab` — the exact commit that introduced this regenerated pack (this line is stamped with the real hash after that commit exists).
 - **Export date:** 2026-07-16
 - **Current phase / maturity:** Phase 0 **FINAL/CLOSED**; **Phase 1A** = SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + **PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED** (49 tables, fingerprint `bd75026f`, dark in `stayconnect_site`, 18/18 acceptance). **NOT deployed, NOT cut over, NOT live accepted, no IAM data migration, no Phase 1B.**
 - **Authoritative production evidence:** `PROD_LIVE_DARK_EVIDENCE_V2.txt` (read-only re-verification, in the Evidence Pack). The earlier `PROD_LIVE_DARK_EVIDENCE.txt` is **superseded (evidence error)** and retained for audit only.
