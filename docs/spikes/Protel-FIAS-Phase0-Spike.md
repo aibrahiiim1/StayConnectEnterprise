@@ -27,6 +27,100 @@ Product owner completed out-of-band Front Office verification for **Attempt #5 (
 
 ---
 
+## Phase-0 Closure Plan & Remaining Validation Matrix (2026-07-16)
+
+**Planning only — nothing in this section is authorized to execute.** No financial test, no connection, no link interruption, no live-reservation manipulation. Each item below is a written plan; each requires separate explicit product-owner authorization (with an approved Room/Stay and named cleanup owner) before any execution.
+
+### 1. Exact proven scope (do NOT generalize)
+
+The live end-to-end debit proof (Gate 3A, `P#900002`) currently covers **only**:
+
+- **Property:** Coral Sea Holiday Village;
+- **Hotel ID:** 3;
+- **one** active in-house Stay;
+- verified **`RN` + mandatory `G#`**;
+- **one** USD 1.00 `PS` debit;
+- **`PA ASOK`** matched by **PMS Interface + `P#`**;
+- **correct Guest Folio** verified by Front Office;
+- **correct `SO=WIFI` revenue mapping** verified;
+- **manual correction** completed by Front Office;
+- **Folio returned to its exact original balance**.
+
+**This single-property, single-stay, happy-path result is NOT** financial validation of: other PMS Interfaces (e.g. Aqua Club / Hotel ID 2), other Properties, **sharers** (two stays one room), **multi-folio** cases, **no-post** cases, or any **error/non-OK `AS` status** (`NG/NA/NP/NR/RY/UR`). Those remain unproven and are covered by the matrix below.
+
+### 2. Gate 3B — programmatic reversal (v1 product decision: DEFERRED)
+
+Recorded v1 decision:
+
+- **`programmatic_reversal` capability = `false`.**
+- **`PT=C` and negative-`TA` behavior remain unverified** — do not assume either.
+- **Financial corrections are manual Front Office operations** in Protel.
+- **Programmatic reversal is NOT a Phase-1A requirement.**
+- It may be introduced later **only after a separate capability spike** proves the exact `PT`/`TA`/`SO` reversal semantics.
+
+Gate 3B **does not block v1**, provided the manual-correction limitation is **visible, audited, and operationally documented** (operations manual + admin UI surfacing + `posting_review_actions` audit trail). See contract §15 (`CREATE_REVERSAL` is a new audited ledger row referencing the original) and §9a rule 5.
+
+### 3. Remaining mandatory Phase-0 validations (plans only)
+
+#### Validation A — Aqua Club controlled debit (second PMS Interface)
+
+| Item | Plan |
+|---|---|
+| Target | **Coral Sea Aqua Club**, **Hotel ID 2**, endpoint `120.0.0.15:5001` |
+| Purpose | Prove the **second** PMS Interface independently; verify **its** currency and **its** `SO=WIFI` revenue mapping; prove **namespace isolation** from Hotel ID 3 (identical room numbers across interfaces must never collide) |
+| Method | Same Gate-3A shape: single-owner connection, `LS/LD/LR` handshake, read-only `DR` resync, resolve one approved in-house Room with `RN`+`G#`, exactly one USD 1.00 `PS`, `PA` matched by Interface + `P#` |
+| **Prerequisites (all required before execution)** | (a) separate explicit authorization; (b) an **approved in-house Room** on Hotel ID 2 with verified `RN`+`G#`; (c) **named cleanup owner** (Front Office) committed to fold verification + manual removal; (d) **owner-confirmed currency + exponent** for the Aqua Club interface (do **not** assume USD/exp-2 from Hotel ID 3); (e) confirmed `SO=WIFI` → Internet revenue mapping on the Aqua Club Protel; (f) single-client slot free (no orphan owner) |
+| Non-goals | No test sent until separately authorized; no generalization of Hotel ID 3 currency/mapping to Hotel ID 2 |
+
+#### Gate 3C — Lost `PA` / UNKNOWN safety (plan only — do NOT execute or interrupt any connection in this action)
+
+Controlled test to prove, on an **approved test Stay** with a **named cleanup owner**:
+
+1. exactly **one** `PS` is transmitted;
+2. `PA` is deliberately **not received by the test client** (client stops reading / drops before the ack — not a PMS-side interruption);
+3. the Posting becomes **UNKNOWN**;
+4. **no automatic retry** occurs;
+5. **no second `P#`** is generated automatically;
+6. Front Office **externally checks the Folio**;
+7. **Manual Review** resolves the attempt as **posted** (`CONFIRM_POSTED`) or **not posted** (`CONFIRM_NOT_POSTED_*`);
+8. **no duplicate charge** is created (a single `PS` on the wire ⇒ at most one folio line);
+9. the Folio finishes **reconciled and net zero** after the test.
+
+| **Prerequisites** | approved test Stay (`RN`+`G#`); named Front-Office cleanup owner; owner authorization to allow one real `PS` whose ack is intentionally not consumed; confirmation that the client-side ack drop does **not** disturb the live production connector's slot; measured values recorded (UNKNOWN detection latency, manual-review evidence) |
+
+#### Gate 3D — Checkout & stale occupancy (plans only — do NOT manipulate a live reservation in this action)
+
+Separate scenarios to prepare (each on an **approved test Stay** only):
+
+1. **Checkout while link healthy** — `GO`/checkout received on a live link; cache eviction + posting-permission withdrawal timing.
+2. **Checkout while link unavailable** — checkout occurs while the PMS link is down; behavior on reconnect.
+3. **Delayed Checkout event** — `GO` arrives late; effective-timestamp handling.
+4. **Stale in-house cache** — occupancy data older than the freshness bound; financial refusal / re-verification (contract §9 axis 4).
+5. **Reconnect and resync** — `DR`/night-audit re-sync rebuilds the roster; continuity judged against resync markers, not a naive "no events for N min" rule.
+6. **Mandatory Checkout Grace creation** — eligible checked-out guest atomically superseded onto the site-level grace entitlement; sessions rebind with zero nft churn; **no intentional guest disconnect or re-authentication**; no future room posting.
+7. **Accounting split at the effective PMS checkout timestamp** — usage before/after checkout attributed correctly.
+8. **Idempotent repeated Checkout handling** — duplicate/replayed `GO` is a no-op (no double eviction, no double split).
+
+| **Prerequisites** | approved test Stay only (no live-reservation manipulation); named owner for any Front-Office-observable action; a controlled way to simulate link-down/reconnect **without** disturbing the production connector's single slot; freshness thresholds from §9 to measure against |
+
+### 4. Phase-0 finalization conditions (CONDITIONALLY FROZEN → FINAL)
+
+The contract may move to **FINAL** only after **all** of:
+
+- [ ] **Validation A (Aqua Club)** financial-interface validation **completed**, *or* explicitly **accepted as a documented deployment prerequisite** (per-property go-live checklist item);
+- [ ] **Gate 3C** safety behavior **measured and merged** into §9/§9a (UNKNOWN → no auto-retry → manual-review → net-zero, proven);
+- [ ] **Gate 3D** checkout/staleness behavior **measured and merged** into §9/§16;
+- [ ] **all measured timings and capability flags** written into the contract's per-revision capability matrix (`can_post, supports_idempotency, read_back, reversal, folio_identity, room_only_posting, safe_retry`);
+- [ ] **explicit final product-owner approval**.
+
+Until then the contract stays **CONDITIONALLY FROZEN**.
+
+### 5. Implementation boundary (unchanged)
+
+Still forbidden at Phase 0: schema migrations; feature code; production connector development; portal/admin-UI work; service configuration; `pms_providers` creation; deployment. Documentation only.
+
+---
+
 
 **Attempt #5 (2026-07-16, owner-selected Room 14215):** owner explicitly selected **Room 14215** (no redaction of the room number authorized). Full `LS→LD(IFPB/V#1.13/RT4)→LR(GI/GC/GO)` handshake, incoming `LS`/`LA` acked with `LA|`, read-only `DR` resync returned `DS` + **365 in-house records** ending with an explicit **`DE`**; Room 14215 resolved to a valid `G#` from an in-house `GI`, not cleared by any `GO`. Exactly **one** `PS` (`TA100`/`PTD`/`SOWIFI`/`WSSTAYCONNECT`/`CTGate3A Test`/**`P#900002`**) sent with **zero retries**; **`PA ASOK` matched by Interface + `P#` in 93 ms**. `P#900001` (Attempt #4) was NOT reused. Result: `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED`. The resolved `G#` was returned directly to the product owner and is deliberately NOT stored in Git/Markdown. Guest name never decoded or stored. See "Execution Attempt #5" below.
 

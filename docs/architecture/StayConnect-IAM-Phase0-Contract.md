@@ -706,6 +706,22 @@ The supervised live financial spike executed against **Coral Sea Holiday Village
 
 *(Findings 2–6 were observed directly during Gate 3A: a stalled `LA` gate and a prior harness process that retained the single client slot until reaped. They are recorded here as hard requirements for the eventual connector/harness implementation — no feature code is written at Phase 0.)*
 
+### 9c. Phase-0 closure matrix — proven scope, deferred capability, remaining validations
+
+**Exact proven scope (do NOT generalize).** The live end-to-end debit proof covers **only**: Coral Sea Holiday Village; Hotel ID 3; one active in-house Stay; verified `RN` + mandatory `G#`; one USD 1.00 `PS` debit; `PA ASOK` matched by PMS Interface + `P#`; correct Guest Folio (Front-Office-verified); correct `SO=WIFI` revenue mapping (verified); manual correction completed; Folio returned to exact original balance. **This is NOT** validation of other PMS Interfaces, other Properties, **sharers**, **multi-folio** cases, **no-post** cases, or any **error/non-OK `AS` status** (`NG/NA/NP/NR/RY/UR`).
+
+**Gate 3B — programmatic reversal (v1 decision: DEFERRED).** `programmatic_reversal` capability = **false**; `PT=C` / negative-`TA` **unverified** (assume neither); corrections are **manual Front Office** operations; programmatic reversal is **not a Phase-1A requirement** and may be added only after a separate capability spike. Gate 3B **does not block v1** provided the manual-correction limitation is **visible, audited, and operationally documented** (ties to §9a rule 5 and §15 `CREATE_REVERSAL`).
+
+**Remaining mandatory Phase-0 validations (planned; execution separately authorized — see spike doc "Phase-0 Closure Plan"):**
+
+| ID | Validation | Target | Proves | Key prerequisites before execution |
+|---|---|---|---|---|
+| A | Aqua Club controlled debit | Coral Sea Aqua Club, **Hotel ID 2**, `120.0.0.15:5001` | 2nd interface independently; **its own** currency + `SO=WIFI` mapping; **namespace isolation** from Hotel ID 3 | Separate auth; approved in-house Room (`RN`+`G#`); named Front-Office cleanup owner; **owner-confirmed currency + exponent for Hotel ID 2** (no carry-over from Hotel ID 3); confirmed `SO=WIFI` mapping; free single-client slot |
+| 3C | Lost `PA` / UNKNOWN safety | approved test Stay | one `PS`; ack not consumed ⇒ **UNKNOWN**; **no auto-retry / no second `P#`**; manual-review resolves; **no duplicate charge**; net-zero | Approved test Stay; named cleanup owner; auth to leave one real `PS` unacked at the client; client-side ack drop must not disturb the production connector's slot |
+| 3D | Checkout & stale occupancy | approved test Stay | checkout link-up / link-down / delayed; stale cache refusal; reconnect+resync; **mandatory Checkout Grace** (no guest disconnect/re-auth); accounting split at effective PMS checkout ts; idempotent repeated checkout | Approved test Stay only (**no live-reservation manipulation**); link-down/reconnect simulation that doesn't disturb the production slot; §9 freshness thresholds to measure against |
+
+**Finalization (CONDITIONALLY FROZEN → FINAL) requires all of:** Validation A completed **or** explicitly accepted as a documented per-property deployment prerequisite; Gate 3C measured + merged; Gate 3D measured + merged; all measured timings and capability flags written into the per-revision capability matrix; **explicit final product-owner approval**. No feature/schema/connector/UI/config/deployment work begins before FINAL.
+
 ## 10. PMS Interface Lifecycle & Failure Isolation
 
 States: `ACTIVE ⇄ AUTH_DISABLED → DRAINING → DECOMMISSIONED` (DRAINING → ACTIVE allowed). AUTH_DISABLED: no new guest auth; posting/events continue. DRAINING: no new auth/purchases/postings; outbox drains; events for existing stays only. DECOMMISSIONED: terminal, history preserved; requires zero PENDING/SENDING/UNKNOWN postings, zero unprocessed events, and no live entitlements requiring it — or a privileged audited override routing leftovers to MANUAL_REVIEW. Hard DELETE only for never-referenced interfaces (RESTRICT FKs enforce this naturally).
