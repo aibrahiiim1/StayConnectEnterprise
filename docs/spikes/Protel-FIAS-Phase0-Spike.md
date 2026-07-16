@@ -1,8 +1,8 @@
 # Protel FIAS — Phase 0 Live Spike Record
 
-**Spike status: `GATE3A_ABORTED — no Front-Office verification channel available to executor; no connection opened, no PS sent (no financial traffic performed)`**
+**Spike status: `GATE3A_EXECUTED — one USD 1.00 PS debit, PA ASOK (PROTOCOL_ACCEPTED); folio placement NOT independently verified — owner owns out-of-band folio verification + cleanup`**
 
-Three Gate-3A requests (2026-07-16) all aborted **before any connection or `PS`**. #1: fixtures were placeholder tokens. #2: Protel currency/exponent not confirmable (owner's §2 guard). **#3 (currency now confirmed USD/exp-2 ⇒ `TA100`, auto-select in-house): the sole remaining blocker is that the executor has NO channel to the human Front Office** that the runbook makes a hard pre-send gate (obtain pre-test folio evidence; verify placement; confirm net-zero). Posting a real USD 1.00 charge to a real guest without that verification/cleanup loop is forbidden by the runbook's own abort clause. See "Execution Attempt #3" — one owner sentence (option A or B) clears it.
+Gate 3A executed 2026-07-16 as an owner-approved **technical-only** test (Option A: the product owner owns the out-of-band Front Office folio verification and cleanup). One connection, slot free, `LA` reached, read-only `DR` resync obtained the in-house roster, exactly **one** `PS` (`TA100`, `PTD`, `SOWIFI`, `WSSTAYCONNECT`, `CTGate3A Test`, `P#900001`) sent with **zero retries**; **`PA ASOK` matched by Interface + `P#` in 78 ms**. Reported only as `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED`. No claim is made that the charge reached the correct folio, was corrected, or returned to net zero — the product owner confirms that out-of-band. See "Execution Attempt #4" below. (Prior attempts #1–#3 aborted before any `PS` — placeholders, unconfirmable currency, and no Front-Office channel respectively.)
 
 The legacy-server (`172.21.96.150`) SSH inspection is **cancelled** — not required. Socket-Server collision safety is handled **in-band at test start**: accept + opening `LS` = free slot; keep that connection for the whole run; refusal / no `LS` ⇒ abort without displacing (see "Socket-Server collision clearance"). Gate 3A is now blocked **only** on the real financial/test fixtures.
 
@@ -389,6 +389,39 @@ The legacy-server (`172.21.96.150`) SSH investigation is **cancelled and out of 
 - **If the connection is refused, or no opening `LS` is received, ABORT immediately** — do not displace, reconnect into a race, or modify any existing client.
 
 This replaces any pre-run legacy-connector reconciliation: collision safety is proven at test time by the server's own admission control, not by inspecting the old server.
+
+## Gate 3A — Execution Attempt #4 (2026-07-16): EXECUTED — one debit, PA ASOK (protocol accepted; folio NOT independently verified)
+
+Owner-approved **Option A** (technical-only send; product owner owns out-of-band folio verification + cleanup; pre-send Front Office evidence waived). Executed against **Coral Sea Holiday Village / Hotel ID 3 / `150.0.0.18:5003`**.
+
+**Sequence (redacted):**
+
+- One connection opened; **accepted + opening `LS` ⇒ slot free**; `LS → LD (IFPB/V#1.13/RT4) → LR(GI/GC/GO) → LA` reached. Same connection kept for the whole run.
+- The in-house feed did **not** auto-stream (as in a prior session), so a read-only **`DR` (Database Resync request)** was sent; PMS returned `DS` + the in-house `GI` list (**355 rooms carrying a `G#`**; `GO`-cleared rooms excluded). *(The explicit `DE` end-marker had not arrived before the collection window closed, but a full 355-record in-house roster was received and the `PS` was sent only after that window — never interleaved with resync records.)*
+- **Selected exactly one currently in-house room** with a verified `RN` **and** `G#` from the same `GI` record (not cleared by any `GO`). Guest name/personal data were **never** decoded or stored.
+
+**Selected reservation (redacted — no PII):**
+
+| Field | Redacted evidence |
+|---|---|
+| `RN` | 5-digit room, SHA-256[:8] = `3c2ffe67` |
+| `G#` | 6-digit reservation, SHA-256[:8] = `81a3edc5` |
+| In-house | **yes** (DR-resync `GI`, not cleared by `GO`) |
+
+**The one debit (exactly one `PS`, zero retries):**
+
+```
+PS|RN<redacted>|G#<redacted>|TA100|PTD|SOWIFI|CTGate3A Test|P#900001|WSSTAYCONNECT|
+PA|RN<redacted>|ASOK|P#900001|CT|          # matched by PMS Interface + P# (NOT by RN)
+```
+
+- `TA100` = **USD 1.00** (currency USD, exponent 2, owner-confirmed); `PT=D`; `SO=WIFI`; `WS=STAYCONNECT`; `CT="Gate3A Test"` (11 chars ≤ 20); **`P# = 900001`** (one unique protocol attempt allocated for this run).
+- **`PA` status: `AS=OK`**; **response time: 78 ms**; matched **by PMS Interface + `P#`**, not by `RN`.
+- **Exactly one `PS` sent; zero retries**; connection closed gracefully. No second debit, no `PT=C`, no negative `TA`, no reversal, no lost-ACK, no link interruption, no checkout, no DB/config/service change.
+
+**Result: `PROTOCOL_ACCEPTED — FOLIO_PLACEMENT_NOT_INDEPENDENTLY_VERIFIED`.** `ASOK` proves Protel accepted the posting record at the protocol level; it is **not** proof the correct guest folio was charged. This is a **real** posting on the live PMS.
+
+**Owner cleanup correlation keys** (to locate + remove the test debit in Protel out-of-band, without exposing PII here): `P#=900001`, `WS=STAYCONNECT`, `SO=WIFI`, `CT="Gate3A Test"`, amount USD 1.00 (`TA100`), posted ~`2026-07-16T05:17:26Z`, `PA ASOK`. **Folio verification, manual removal, and net-zero confirmation are owned by the product owner and remain AWAITING PRODUCT-OWNER CONFIRMATION.**
 
 ## Gate 3A — Execution Attempt #3 (2026-07-16): ABORTED at the Front-Office verification gate (no connection, no PS sent)
 
