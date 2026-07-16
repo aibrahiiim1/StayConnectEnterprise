@@ -27,11 +27,19 @@ Product owner completed out-of-band Front Office verification for **Attempt #5 (
 
 ---
 
-## Phase-0 Closure Plan & Remaining Validation Matrix (2026-07-16)
+## Phase-0 Closure Plan & Remaining Validation Matrix (2026-07-16, corrected)
 
 **Planning only — nothing in this section is authorized to execute.** No financial test, no connection, no link interruption, no live-reservation manipulation. Each item below is a written plan; each requires separate explicit product-owner authorization (with an approved Room/Stay and named cleanup owner) before any execution.
 
-### 1. Exact proven scope (do NOT generalize)
+**Correction (2026-07-16):** the earlier version of this plan wrongly gated **Phase-0 finalization** on product behaviors that cannot be measured before the corresponding StayConnect components exist. This is corrected into **three distinct tiers**:
+
+1. **Phase-0 protocol & architecture validation** — measurable now, measured; the finalization basis (§1 below).
+2. **Per-property deployment validation** — a per-property financial-onboarding checklist; **Aqua Club / Hotel ID 2 lives here**, not as a Phase-0 blocker (§3A below).
+3. **Post-implementation acceptance testing** — behaviors requiring code/schema that do not yet exist (UNKNOWN/Manual-Review; Checkout & Checkout-Grace); preserved as **binding acceptance requirements**, not Phase-0 blockers (§3B below).
+
+Contract status is accordingly **READY_FOR_FINAL_OWNER_APPROVAL** — awaiting only explicit owner FINAL approval (see contract §9c/§9d).
+
+### 1. Exact proven scope — Tier 1 (Phase-0 finalization basis; do NOT generalize)
 
 The live end-to-end debit proof (Gate 3A, `P#900002`) currently covers **only**:
 
@@ -60,64 +68,47 @@ Recorded v1 decision:
 
 Gate 3B **does not block v1**, provided the manual-correction limitation is **visible, audited, and operationally documented** (operations manual + admin UI surfacing + `posting_review_actions` audit trail). See contract §15 (`CREATE_REVERSAL` is a new audited ledger row referencing the original) and §9a rule 5.
 
-### 3. Remaining mandatory Phase-0 validations (plans only)
+### 3A. Tier 2 — Per-property financial-onboarding checklist (deployment prerequisite, NOT a Phase-0 blocker)
 
-#### Validation A — Aqua Club controlled debit (second PMS Interface)
+Financial Posting must be **independently validated per Property** before it is enabled there. This is a **deployment gate**, not a Phase-0 finalization gate. Before PMS Posting is enabled for **any** Property, that Property must confirm:
 
-| Item | Plan |
-|---|---|
-| Target | **Coral Sea Aqua Club**, **Hotel ID 2**, endpoint `120.0.0.15:5001` |
-| Purpose | Prove the **second** PMS Interface independently; verify **its** currency and **its** `SO=WIFI` revenue mapping; prove **namespace isolation** from Hotel ID 3 (identical room numbers across interfaces must never collide) |
-| Method | Same Gate-3A shape: single-owner connection, `LS/LD/LR` handshake, read-only `DR` resync, resolve one approved in-house Room with `RN`+`G#`, exactly one USD 1.00 `PS`, `PA` matched by Interface + `P#` |
-| **Prerequisites (all required before execution)** | (a) separate explicit authorization; (b) an **approved in-house Room** on Hotel ID 2 with verified `RN`+`G#`; (c) **named cleanup owner** (Front Office) committed to fold verification + manual removal; (d) **owner-confirmed currency + exponent** for the Aqua Club interface (do **not** assume USD/exp-2 from Hotel ID 3); (e) confirmed `SO=WIFI` → Internet revenue mapping on the Aqua Club Protel; (f) single-client slot free (no orphan owner) |
-| Non-goals | No test sent until separately authorized; no generalization of Hotel ID 3 currency/mapping to Hotel ID 2 |
+1. **PMS Interface currency and exponent** (owner/Finance-confirmed — never carried over from another property);
+2. **Package currency compatibility** with the interface base currency (contract §9a rule 3; no FX in v1);
+3. **`SO=WIFI` revenue mapping** to the intended Internet revenue account (Finance/Protel-confirmed);
+4. **`RN` + `G#` folio targeting** (mandatory `G#`; `RN`-only `ASOK` is not proof);
+5. **one controlled Debit** (single-owner connection, Gate-3A shape);
+6. **actual Folio placement** verified by Front Office;
+7. **approved cleanup/correction** to net-zero by a named owner.
 
-#### Gate 3C — Lost `PA` / UNKNOWN safety (plan only — do NOT execute or interrupt any connection in this action)
+**Aqua Club — Coral Sea Aqua Club, Hotel ID 2, `120.0.0.15:5001`:** reclassified from a Phase-0 architecture-finalization blocker to this **mandatory per-property financial-onboarding requirement**. It remains **read-only capable and financially UNAPPROVED** until it passes the checklist above. Additional Aqua-Club-specific notes: prove **namespace isolation** from Hotel ID 3 (identical room numbers across interfaces must never collide); **do not assume USD/exponent-2** from Hotel ID 3; single-client slot must be free (no orphan owner) before any test. No test is sent until separately authorized with an approved Room and named cleanup owner.
 
-Controlled test to prove, on an **approved test Stay** with a **named cleanup owner**:
+### 3B. Tier 3 — Post-implementation acceptance (cannot be measured before the components exist)
 
-1. exactly **one** `PS` is transmitted;
-2. `PA` is deliberately **not received by the test client** (client stops reading / drops before the ack — not a PMS-side interruption);
-3. the Posting becomes **UNKNOWN**;
-4. **no automatic retry** occurs;
-5. **no second `P#`** is generated automatically;
-6. Front Office **externally checks the Folio**;
-7. **Manual Review** resolves the attempt as **posted** (`CONFIRM_POSTED`) or **not posted** (`CONFIRM_NOT_POSTED_*`);
-8. **no duplicate charge** is created (a single `PS` on the wire ⇒ at most one folio line);
-9. the Folio finishes **reconciled and net zero** after the test.
+These are **binding acceptance requirements** for later phases, **not** Phase-0 blockers. Do not require product state-machine behavior to be measured before its code and schema exist.
 
-| **Prerequisites** | approved test Stay (`RN`+`G#`); named Front-Office cleanup owner; owner authorization to allow one real `PS` whose ack is intentionally not consumed; confirmation that the client-side ack drop does **not** disturb the live production connector's slot; measured values recorded (UNKNOWN detection latency, manual-review evidence) |
+**Protocol-spike evidence already known (informs the design; no further Phase-0 test needed):** a `PS` may reach Protel even when the `PA` is not available to the client; a fresh `P#` creates another **independent** posting; therefore **blind retry is unsafe**. (Grounded in Gate 3A behavior — no deliberate lost-ACK test was run.)
 
-#### Gate 3D — Checkout & stale occupancy (plans only — do NOT manipulate a live reservation in this action)
+**3C — Posting-Engine UNKNOWN safety.** *Requires first:* the Posting Engine, `posting_attempts` + `posting_attempt_events`, `pms_interface_pnumber_seq`, and the Manual-Review workflow (contract §4.5, §9a, §15). *Acceptance:* a transmitted request with **no matching `PA` becomes UNKNOWN**; **no automatic retry**; **no automatically allocated second `P#`**; **Manual-Review** workflow engaged; **external Folio reconciliation**; audited **`CONFIRM_POSTED` / `RETRY_APPROVED` / `ABANDON`** decisions; **no duplicate charge**.
 
-Separate scenarios to prepare (each on an **approved test Stay** only):
+**3D — Checkout & Checkout-Grace.** *Requires first:* Stay/Event persistence, the Checkout handler, the Post-Stay profile, the Checkout-Grace Purchase+Entitlement, session reassignment, accounting cutoff, and idempotent event processing (contract §3, §16). *Acceptance scenarios (all binding):* healthy-link Checkout; link-down Checkout; delayed Checkout; **stale-cache refusal**; reconnect and resync; **mandatory Checkout Grace**; **no intentional guest disconnect or re-authentication**; **effective-checkout-timestamp** accounting split; **repeated-Checkout idempotency**.
 
-1. **Checkout while link healthy** — `GO`/checkout received on a live link; cache eviction + posting-permission withdrawal timing.
-2. **Checkout while link unavailable** — checkout occurs while the PMS link is down; behavior on reconnect.
-3. **Delayed Checkout event** — `GO` arrives late; effective-timestamp handling.
-4. **Stale in-house cache** — occupancy data older than the freshness bound; financial refusal / re-verification (contract §9 axis 4).
-5. **Reconnect and resync** — `DR`/night-audit re-sync rebuilds the roster; continuity judged against resync markers, not a naive "no events for N min" rule.
-6. **Mandatory Checkout Grace creation** — eligible checked-out guest atomically superseded onto the site-level grace entitlement; sessions rebind with zero nft churn; **no intentional guest disconnect or re-authentication**; no future room posting.
-7. **Accounting split at the effective PMS checkout timestamp** — usage before/after checkout attributed correctly.
-8. **Idempotent repeated Checkout handling** — duplicate/replayed `GO` is a no-op (no double eviction, no double split).
+### 4. Phase-0 finalization conditions (READY_FOR_FINAL_OWNER_APPROVAL → FINAL)
 
-| **Prerequisites** | approved test Stay only (no live-reservation manipulation); named owner for any Front-Office-observable action; a controlled way to simulate link-down/reconnect **without** disturbing the production connector's single slot; freshness thresholds from §9 to measure against |
+Phase-0 finalization rests on the **Tier-1** evidence above (already measured and merged into contract §9b/§9c). The contract may move to **FINAL** on:
 
-### 4. Phase-0 finalization conditions (CONDITIONALLY FROZEN → FINAL)
+- [ ] **explicit final product-owner approval** of the corrected Phase-0 contract.
 
-The contract may move to **FINAL** only after **all** of:
+**Not** finalization blockers: Tier-2 per-property onboarding (incl. Aqua Club) and Tier-3 post-implementation acceptance (3C/3D). Deferred limitations are enumerated in contract §9d and repeated here:
 
-- [ ] **Validation A (Aqua Club)** financial-interface validation **completed**, *or* explicitly **accepted as a documented deployment prerequisite** (per-property go-live checklist item);
-- [ ] **Gate 3C** safety behavior **measured and merged** into §9/§9a (UNKNOWN → no auto-retry → manual-review → net-zero, proven);
-- [ ] **Gate 3D** checkout/staleness behavior **measured and merged** into §9/§16;
-- [ ] **all measured timings and capability flags** written into the contract's per-revision capability matrix (`can_post, supports_idempotency, read_back, reversal, folio_identity, room_only_posting, safe_retry`);
-- [ ] **explicit final product-owner approval**.
-
-Until then the contract stays **CONDITIONALLY FROZEN**.
+- Hotel ID 2 (Aqua Club) financial Posting **not yet approved** (read-only until its checklist passes);
+- **programmatic reversal disabled** (manual Front Office correction only in v1);
+- **UNKNOWN / Manual-Review** behavior **pending Posting-Engine implementation**;
+- **Checkout-Grace** behavior **pending PMS/Entitlement implementation**;
+- **physical traffic accounting** still requires **live implementation acceptance** (non-zero real-device usage), unprovable at Phase 0.
 
 ### 5. Implementation boundary (unchanged)
 
-Still forbidden at Phase 0: schema migrations; feature code; production connector development; portal/admin-UI work; service configuration; `pms_providers` creation; deployment. Documentation only.
+Still forbidden until the owner approves the corrected contract as **FINAL**: schema migrations; feature code; production connector development; portal/admin-UI work; service configuration; `pms_providers` creation; deployment. Documentation only. READY_FOR_FINAL_OWNER_APPROVAL does **not** unlock implementation.
 
 ---
 

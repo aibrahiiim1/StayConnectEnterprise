@@ -1,13 +1,16 @@
 # StayConnect Internet Access Management — Phase 0 Contract
 
-**Status: CONDITIONALLY FROZEN.**
-This contract becomes **FINAL** only when all three conditions are met:
+**Status: READY_FOR_FINAL_OWNER_APPROVAL.** *(2026-07-16 — was CONDITIONALLY FROZEN.)*
 
-1. The live Protel FIAS Phase-0 spike is completed (see `docs/spikes/Protel-FIAS-Phase0-Spike.md`).
-2. The measured capabilities and thresholds are merged into §9 (FIAS Freshness & Financial Validation).
-3. The product owner explicitly approves the resulting contract.
+The Phase-0 **protocol and architecture** validation is complete on already-measured live evidence (see §9b/§9c and `docs/spikes/Protel-FIAS-Phase0-Spike.md`). The contract now awaits **only the product owner's explicit FINAL approval** — it is **not** marked FINAL automatically.
 
-**No feature implementation, schema migration, portal/UI change, PMS production configuration change, cutover, or deployment is authorized until this contract is FINAL and approved.**
+Phase-0 finalization deliberately separates three distinct validation tiers (§9c):
+
+1. **Phase-0 protocol & architecture validation** — the finalization basis; measurable now and measured (framing, LS/LD/LR/LA startup, GI/GC/GO feed, RN+G# folio targeting, PS/PA field order and AS statuses, one live end-to-end Hotel ID 3 debit with verified folio/mapping/cleanup, single-client slot, P#-not-idempotency, transmitted-without-PA risk, reversal-unsupported-in-v1, independent interface namespaces).
+2. **Per-property deployment validation** — a **per-property financial-onboarding checklist** (currency/exponent, package-currency compatibility, `SO=WIFI` mapping, RN+G# targeting, one controlled debit, folio placement, approved cleanup). Aqua Club / Hotel ID 2 lives here — it is a deployment prerequisite, **not** a Phase-0 finalization blocker.
+3. **Post-implementation acceptance testing** — behaviors that **cannot** be measured before their StayConnect components exist (UNKNOWN/Manual-Review posting-engine safety; Checkout & Checkout-Grace on the PMS/Entitlement phase). Preserved as **binding acceptance requirements**, not Phase-0 blockers.
+
+**No feature implementation, schema migration, portal/UI change, PMS production configuration change, cutover, or deployment is authorized until this contract is approved FINAL by the product owner.** READY_FOR_FINAL_OWNER_APPROVAL does **not** unlock implementation.
 
 **Scope:** the Internet Access Management domain on the Hotel Appliance (site DB; scd/edged/portald/acctd services). Explicitly out of scope and untouched: appliance enrollment, hardware-bound identity, PKI/mTLS, signed licensing, Central Control Plane boundaries, WAN/LAN configuration, guest VLANs, DHCP/DNS, captive-portal network interception, nftables/traffic-control foundations, updates, remote support, and audit infrastructure.
 
@@ -706,21 +709,46 @@ The supervised live financial spike executed against **Coral Sea Holiday Village
 
 *(Findings 2–6 were observed directly during Gate 3A: a stalled `LA` gate and a prior harness process that retained the single client slot until reaped. They are recorded here as hard requirements for the eventual connector/harness implementation — no feature code is written at Phase 0.)*
 
-### 9c. Phase-0 closure matrix — proven scope, deferred capability, remaining validations
+### 9c. Phase-0 closure matrix — three validation tiers (corrected 2026-07-16)
 
-**Exact proven scope (do NOT generalize).** The live end-to-end debit proof covers **only**: Coral Sea Holiday Village; Hotel ID 3; one active in-house Stay; verified `RN` + mandatory `G#`; one USD 1.00 `PS` debit; `PA ASOK` matched by PMS Interface + `P#`; correct Guest Folio (Front-Office-verified); correct `SO=WIFI` revenue mapping (verified); manual correction completed; Folio returned to exact original balance. **This is NOT** validation of other PMS Interfaces, other Properties, **sharers**, **multi-folio** cases, **no-post** cases, or any **error/non-OK `AS` status** (`NG/NA/NP/NR/RY/UR`).
+The earlier closure plan incorrectly gated Phase-0 finalization on product behaviors that **cannot be measured before the corresponding StayConnect components exist**. Corrected: finalization rests on **already-measured protocol/architecture evidence**; property-specific financial proof is **per-property deployment**; state-machine safety behavior is **post-implementation acceptance**.
 
-**Gate 3B — programmatic reversal (v1 decision: DEFERRED).** `programmatic_reversal` capability = **false**; `PT=C` / negative-`TA` **unverified** (assume neither); corrections are **manual Front Office** operations; programmatic reversal is **not a Phase-1A requirement** and may be added only after a separate capability spike. Gate 3B **does not block v1** provided the manual-correction limitation is **visible, audited, and operationally documented** (ties to §9a rule 5 and §15 `CREATE_REVERSAL`).
+**Tier 1 — Phase-0 protocol & architecture validation (COMPLETE; the finalization basis).** Measured live and merged into §9/§9a/§9b:
 
-**Remaining mandatory Phase-0 validations (planned; execution separately authorized — see spike doc "Phase-0 Closure Plan"):**
+- both PMS endpoints reachable and using **independent Interface namespaces**;
+- verified FIAS framing and startup sequence (`LS/LD/LR/LA`, §9b finding 1);
+- live `GI`/`GC`/`GO` feed behavior and read-only `DR` resync;
+- mandatory **`RN` + `G#`** folio targeting (an `RN`-only `ASOK` is not proof);
+- production-grounded `PS` field order and values (§9a);
+- `PA` structure and known `AS` statuses (`OK/NG/NA/NP/NR/RY/UR`);
+- **one live end-to-end debit** against Hotel ID 3, correct Guest Folio verified, `SO=WIFI` revenue mapping verified, manual correction + balance restoration verified (§9b);
+- **single-client Socket Server** behavior (one active slot);
+- **`P#` is a protocol-attempt reference, not business idempotency**;
+- **transmitted-without-`PA`** risk understood (a `PS` can reach Protel even when the client never sees the `PA`; a fresh `P#` creates an independent posting ⇒ **blind retry is unsafe**);
+- **programmatic reversal unsupported in v1** (§9a rule 5, Gate 3B below).
 
-| ID | Validation | Target | Proves | Key prerequisites before execution |
-|---|---|---|---|---|
-| A | Aqua Club controlled debit | Coral Sea Aqua Club, **Hotel ID 2**, `120.0.0.15:5001` | 2nd interface independently; **its own** currency + `SO=WIFI` mapping; **namespace isolation** from Hotel ID 3 | Separate auth; approved in-house Room (`RN`+`G#`); named Front-Office cleanup owner; **owner-confirmed currency + exponent for Hotel ID 2** (no carry-over from Hotel ID 3); confirmed `SO=WIFI` mapping; free single-client slot |
-| 3C | Lost `PA` / UNKNOWN safety | approved test Stay | one `PS`; ack not consumed ⇒ **UNKNOWN**; **no auto-retry / no second `P#`**; manual-review resolves; **no duplicate charge**; net-zero | Approved test Stay; named cleanup owner; auth to leave one real `PS` unacked at the client; client-side ack drop must not disturb the production connector's slot |
-| 3D | Checkout & stale occupancy | approved test Stay | checkout link-up / link-down / delayed; stale cache refusal; reconnect+resync; **mandatory Checkout Grace** (no guest disconnect/re-auth); accounting split at effective PMS checkout ts; idempotent repeated checkout | Approved test Stay only (**no live-reservation manipulation**); link-down/reconnect simulation that doesn't disturb the production slot; §9 freshness thresholds to measure against |
+**Do NOT generalize** the single Hotel ID 3 debit as financial validation of every Property or PMS Interface, nor of sharers, multi-folio, no-post, or error-status cases.
 
-**Finalization (CONDITIONALLY FROZEN → FINAL) requires all of:** Validation A completed **or** explicitly accepted as a documented per-property deployment prerequisite; Gate 3C measured + merged; Gate 3D measured + merged; all measured timings and capability flags written into the per-revision capability matrix; **explicit final product-owner approval**. No feature/schema/connector/UI/config/deployment work begins before FINAL.
+**Gate 3B — programmatic reversal (v1 decision: DEFERRED, non-blocking).** `programmatic_reversal` capability = **false**; `PT=C` / negative-`TA` **unverified** (assume neither); corrections are **manual Front Office** operations; **not a Phase-1A requirement**; may be added only after a separate capability spike. Non-blocking for v1 provided the manual-correction limitation is **visible, audited, operationally documented** (§9a rule 5, §15 `CREATE_REVERSAL`).
+
+**Tier 2 — Per-property financial-onboarding checklist (deployment prerequisite, NOT a Phase-0 blocker).** Before PMS Posting is enabled for **any** Property, that Property must independently confirm: PMS Interface **currency + exponent**; **Package-currency compatibility** (§9a rule 3); **`SO=WIFI` revenue mapping**; **`RN`+`G#`** folio targeting; **one controlled debit**; **actual Folio placement**; **approved cleanup/correction**. **Aqua Club / Hotel ID 2 (`120.0.0.15:5001`)** sits here: it remains **read-only capable and financially unapproved** until it passes this checklist. Full checklist + prerequisites: spike doc "Per-property deployment checklist".
+
+**Tier 3 — Post-implementation acceptance (cannot be measured pre-code; preserved as binding requirements).**
+
+| ID | Acceptance area | Requires (must exist first) | Binding requirements |
+|---|---|---|---|
+| 3C | Posting-Engine UNKNOWN safety | Posting Engine, `posting_attempts`/`posting_attempt_events`, `pms_interface_pnumber_seq`, Manual-Review workflow | transmitted request → **UNKNOWN** when no matching `PA`; **no auto-retry**; **no auto-allocated second `P#`**; Manual-Review; external Folio reconciliation; audited `CONFIRM_POSTED`/`RETRY_APPROVED`/`ABANDON`; **no duplicate charge** |
+| 3D | Checkout & Checkout-Grace | Stay/Event persistence, Checkout handler, Post-Stay profile, Checkout-Grace Purchase+Entitlement, session reassignment, accounting cutoff, idempotent event processing | healthy-link checkout; link-down checkout; delayed checkout; **stale-cache refusal**; reconnect+resync; **mandatory Checkout Grace** (no intentional disconnect/re-auth); **effective-checkout-timestamp** accounting split; **repeated-checkout idempotency** |
+
+**Finalization (READY_FOR_FINAL_OWNER_APPROVAL → FINAL) requires only:** the product owner's **explicit final approval** of this corrected contract. Tier-2 (per-property) and Tier-3 (post-implementation) items are **not** finalization blockers — they are, respectively, deployment prerequisites and binding acceptance requirements. Deferred limitations are listed in §9d.
+
+### 9d. Deferred limitations (carried past Phase-0 FINAL)
+
+- **Hotel ID 2 (Aqua Club) financial Posting not yet approved** — read-only until its per-property onboarding checklist passes.
+- **Programmatic reversal disabled** — manual Front Office correction only in v1.
+- **UNKNOWN / Manual-Review behavior pending Posting-Engine implementation** — safety design specified (§9a rules 1–2), acceptance-tested post-build (Tier 3 / 3C).
+- **Checkout-Grace behavior pending PMS/Entitlement implementation** — specified (§3 invariants, §16 state machines), acceptance-tested post-build (Tier 3 / 3D).
+- **Physical traffic accounting** still requires live implementation acceptance (non-zero real-device usage → accounting), which cannot be proven at Phase 0.
 
 ## 10. PMS Interface Lifecycle & Failure Isolation
 
@@ -800,4 +828,4 @@ Phases 2 and 3 are parallelizable after 1B.
 
 ---
 
-**End of contract.** Status remains **CONDITIONALLY FROZEN** until the Protel spike artifact is merged into §9 and the product owner approves the result as FINAL. No implementation work of any kind is authorized before that approval.
+**End of contract.** Status: **READY_FOR_FINAL_OWNER_APPROVAL** — the Phase-0 protocol/architecture validation is complete and merged (§9b/§9c); the contract awaits **only the product owner's explicit FINAL approval** and is **not** marked FINAL automatically. Per-property financial onboarding (§9c Tier 2, incl. Aqua Club) and post-implementation acceptance (§9c Tier 3 / §9d) are **not** finalization blockers. No implementation work of any kind is authorized before FINAL approval.
