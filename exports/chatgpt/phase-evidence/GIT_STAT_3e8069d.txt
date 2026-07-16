@@ -1,5 +1,0 @@
-commit 3e8069dc166c3ea19adb2559ee66910c3d7f3a10
-Date:   Thu Jul 16 20:42:13 2026 +0300
-
-    docs(iam): make the acceptance record's validator description count-robust (10 checks)
-
