@@ -126,8 +126,9 @@ done
 [ "$brk" = "0" ] && ok "core pack links resolve" || fail "$brk broken core pack link(s)"
 
 echo "== 10. no secrets / guest PII / credential DSNs in exports =="
-sec=$(grep -rnE "BEGIN (RSA|OPENSSH) PRIVATE|ssh-ed25519 AAAA|sk_live|whsec_|POSTGRES_PASSWORD=[^ ]|postgres://[a-z_]+:[A-Za-z0-9]{6,}@|14215|262224|3c2ffe67|81a3edc5" exports/ 2>/dev/null | grep -viE "POSTGRES_PASSWORD assignments committed|redacted|«" | wc -l)
-[ "$sec" = "0" ] && ok "no secrets/PII/credential-DSNs in exports" || { grep -rnE "sk_live|whsec_|14215|262224" exports/ | head; fail "$sec secret/PII hit(s) in exports"; }
+# exclude this validator's own copy (its redaction-pattern literals are not real PII)
+sec=$(grep -rnE "BEGIN (RSA|OPENSSH) PRIVATE|ssh-ed25519 AAAA|sk_live|whsec_|POSTGRES_PASSWORD=[^ ]|postgres://[a-z_]+:[A-Za-z0-9]{6,}@|14215|262224|3c2ffe67|81a3edc5" exports/ --exclude=validate-project-state.sh 2>/dev/null | grep -viE "POSTGRES_PASSWORD assignments committed|redacted|«" | wc -l)
+[ "$sec" = "0" ] && ok "no secrets/PII/credential-DSNs in exports" || { grep -rnE "sk_live|whsec_|14215|262224" exports/ --exclude=validate-project-state.sh | head; fail "$sec secret/PII hit(s) in exports"; }
 
 echo "======================================"
 if [ "$FAIL" = "0" ]; then echo "ZERO_STALE_LEFTOVERS = PASS"; exit 0; else echo "ZERO_STALE_LEFTOVERS = FAIL ($FAIL)"; exit 1; fi
