@@ -1,0 +1,53 @@
+name: Project Governance
+
+# Repository-side enforcement layer for the permanent GitHub execution/delivery rule
+# (docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md, decision GH-MANDATORY-CI).
+# Governance/validation only — no deployment, no database access, no migrations, no
+# production tests. Read-only repository permissions.
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    name: governance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Structural project-state validation
+        run: python tools/project-state.py validate
+
+      - name: Generated-block consistency
+        run: python tools/project-state.py check-generated
+
+      - name: Adversarial mutation suite
+        run: python tools/tests/project_state_validator/run_mutations.py
+
+      - name: Zero-stale keyword validation
+        run: bash tools/validate-project-state.sh
+
+      - name: Working tree must remain clean
+        run: |
+          status="$(git status --porcelain --untracked-files=all)"
+          if [ -n "$status" ]; then
+            echo "Working tree dirty after validation:"
+            echo "$status"
+            exit 1
+          fi
+          echo "clean"

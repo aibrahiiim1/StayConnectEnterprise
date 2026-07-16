@@ -59,7 +59,7 @@ EXPORTED
 UNCHANGED-BUT-VERIFIED
 ```
 
-For every changed file, state: the exact path; classification; a concise purpose; the owning workstream or migration group; whether it affects runtime, database, configuration, documentation, tests, governance or export; and whether rollback removes or restores it.
+For every changed file, state: the exact path; classification; a concise purpose; the owning workstream or migration group; whether it affects runtime, database, configuration, documentation, tests, governance or export; and whether rollback removes or restores it. The generator emits exactly these columns per file — **Path · Classification · Git status · Domain · Workstream · Rollback · Purpose** — and no changed path may have an empty **Workstream** or **Purpose** value. Workstream is reproducible: it uses an explicit bracket prefix on the latest touching commit subject where present (e.g. `[W0]`, `[W1]`, `[MG-3]`, `[GOVERNANCE]`, `[EXPORT]`, `[CI]`) and otherwise falls back to a deterministic path-based classification.
 
 The manifest is generated from commands equivalent to:
 
@@ -94,6 +94,8 @@ Before reporting completion: commit all authorized changes intentionally; push t
 
 **After implementation:** all acceptance tests pass or are truthfully classified; documentation is synchronized; the project-state transition is appended where authorized; the artifact registry is updated; the complete changed-file manifest is generated; repository and extracted-pack validation pass; `ZERO_STALE_LEFTOVERS = PASS`; the full repository is clean; the branch is pushed and the PR is available.
 
+**Repository-side enforcement (GH-MANDATORY-CI).** GitHub Actions is the authoritative merge gate. The workflow `.github/workflows/project-governance.yml` (workflow name **Project Governance**, job **governance**) runs on every pull request targeting `master`, every push to `master`, and manual `workflow_dispatch`; it checks out full history (`fetch-depth: 0`), runs `python tools/project-state.py validate`, `python tools/project-state.py check-generated`, `python tools/tests/project_state_validator/run_mutations.py` and `bash tools/validate-project-state.sh`, and then asserts the working tree is still clean — failing on any non-zero step. It uses read-only repository permissions and performs no deployment, database access, migrations or production tests. **A PR is not merge-ready until this check is green** — local validator output alone is insufficient for a delivered PR. The default branch should be protected to require the `governance` check.
+
 No Agent may bypass the governed execution wrapper or validators.
 
 ## 9. No stale leftovers
@@ -110,7 +112,8 @@ This rule is enforced by:
 
 - `tools/project-state.py validate` — asserts `authoritative_remote` points to `aibrahiiim1/StayConnectEnterprise`, that `delivery_governance` names this rule, the manifest generator and the report template (all present on disk), and that the `GH-*` decisions are registered.
 - `tools/validate-project-state.sh` — keyword safety layer (bundled with the export packs).
-- `tools/generate-change-manifest.py` — the deterministic changed-file manifest every final report must embed.
-- The decision register entries `GH-SOURCE-OF-TRUTH`, `GH-BRANCH-PR`, `GH-COMPLETE-MANIFEST`, `GH-FINAL-REPORT` (`governance/decision-register.json`).
+- `tools/generate-change-manifest.py` — the deterministic changed-file manifest every final report must embed (columns: Path · Classification · Git status · Domain · Workstream · Rollback · Purpose).
+- `.github/workflows/project-governance.yml` — the mandatory **Project Governance** CI check (GH-MANDATORY-CI), enforced structurally by `tools/project-state.py validate` and adversarially by `run_mutations.py` (missing workflow, removed command, missing PR trigger, ignored failures).
+- The decision register entries `GH-SOURCE-OF-TRUTH`, `GH-BRANCH-PR`, `GH-COMPLETE-MANIFEST`, `GH-FINAL-REPORT`, `GH-MANDATORY-CI` (`governance/decision-register.json`).
 
-Run `make governance-validate` before any implement/migrate/deploy/export, and `python tools/generate-change-manifest.py <base>..HEAD` before writing every final report.
+Run `make governance-validate` before any implement/migrate/deploy/export, and `python tools/generate-change-manifest.py <base>..HEAD` before writing every final report. A delivered PR must additionally show the GitHub **Project Governance** check green before it is called merge-ready.

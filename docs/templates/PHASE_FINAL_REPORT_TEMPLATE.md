@@ -39,7 +39,9 @@
 <!-- Privilege, isolation, secret-handling, PII results. -->
 
 ## 10. Complete generated changed-file manifest
-<!-- Paste the VERBATIM output of tools/generate-change-manifest.py <base>..HEAD here. -->
+<!-- Paste the VERBATIM output of tools/generate-change-manifest.py <base>..HEAD here.
+     Columns: Path | Classification | Git status | Domain | Workstream | Rollback | Purpose.
+     Every path individually; no brace-grouping, no ellipses, no "see scratchpad", no omissions. -->
 ```text
 <generated manifest>
 ```

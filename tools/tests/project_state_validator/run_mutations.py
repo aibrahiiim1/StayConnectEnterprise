@@ -79,14 +79,25 @@ MUTATIONS = [
    ("replace", [("aibrahiiim1/StayConnectEnterprise.git", "attacker/Evil.git")])),
  ("M17 GH delivery decision removed", "governance/decision-register.json",
    ("replace", [('"id": "GH-SOURCE-OF-TRUTH"', '"id": "GH-SOURCE-OF-TRUTH-DISABLED"')])),
+ ("M18 governance CI workflow missing", ".github/workflows/project-governance.yml",
+   ("remove", None)),
+ ("M19 required CI validation command removed", ".github/workflows/project-governance.yml",
+   ("replace", [("python tools/project-state.py validate", "echo skip-validate")])),
+ ("M20 CI no longer runs on PRs to master", ".github/workflows/project-governance.yml",
+   ("replace", [("pull_request:", "pull_request_disabled:")])),
+ ("M21 CI job ignores failures", ".github/workflows/project-governance.yml",
+   ("append", "\n    continue-on-error: true\n")),
 ]
 
 def apply(relpath, op):
     # binary I/O so restore is BYTE-EXACT (preserves original line endings; no CRLF<->LF drift)
     p = os.path.join(ROOT, relpath)
     with open(p, "rb") as f: orig = f.read()
-    text = orig.decode("utf-8")
     kind = op[0]
+    if kind == "remove":
+        os.remove(p)                       # simulate a missing required file; restore() recreates it byte-exact
+        return p, orig
+    text = orig.decode("utf-8")
     if kind == "replace":
         for find, repl in op[1]:
             if find not in text: raise AssertionError(f"fixture drift: '{find[:40]}...' not found in {relpath}")

@@ -18,7 +18,7 @@ Usage:
 Deterministic: rows are sorted by path; no timestamps, no randomness. Same repo + same range =>
 byte-identical output.
 """
-import subprocess, sys, os
+import subprocess, sys, os, re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -106,6 +106,25 @@ def purpose_of(path, base, head):
     out = git("log", "--format=%s", "-1", f"{base}..{head}", "--", path).strip()
     return out.splitlines()[0] if out else "(no commit subject in range)"
 
+def workstream_of(path, subject):
+    """Reproducible owning workstream / migration group. Prefer an explicit bracket prefix
+    on the latest touching commit subject (e.g. [W0], [MG-3], [GOVERNANCE], [EXPORT]); otherwise
+    fall back to a deterministic path-based classification. Never empty."""
+    m = re.match(r"\s*\[([^\]]+)\]", subject or "")
+    if m:
+        tag = m.group(1).strip().upper()
+        if tag: return tag
+    p = path.replace("\\", "/")
+    if p.startswith(".github/"): return "CI"
+    if p.startswith("exports/"): return "EXPORT"
+    if p.startswith("governance/"): return "GOVERNANCE"
+    if "/migrations/" in p or p.endswith((".up.sql", ".down.sql")): return "MIGRATIONS"
+    if p.startswith("tools/"): return "TOOLING"
+    if p.startswith("docs/"): return "DOCS"
+    if p.startswith("deploy/"): return "DEPLOY"
+    if p.startswith(("data-plane/", "control-plane/", "cloud-admin/", "hotel-admin/", "web-admin/")): return "RUNTIME"
+    return "OTHER"
+
 def main():
     base, head, verified, out_path = resolve_range(sys.argv[1:])
     branch = git("rev-parse", "--abbrev-ref", "HEAD").strip()
@@ -113,7 +132,7 @@ def main():
 
     # name-status with rename/copy detection
     ns = git("diff", "--name-status", "--find-renames", "--find-copies", f"{base}..{head}")
-    rows = []  # (path_display, classification, git_status, domain, rollback, purpose)
+    rows = []  # (path_display, classification, git_status, domain, workstream, rollback, purpose)
     for line in ns.splitlines():
         if not line.strip(): continue
         parts = line.split("\t")
@@ -123,11 +142,13 @@ def main():
             disp = f"{old} -> {new}"
             word = classify(st, new)
             git_st = f"{st} ({old} -> {new})"
-            rows.append((disp, word, git_st, domain_of(new), rollback_of(STATUS_WORD.get(st[0], st)), purpose_of(new, base, head)))
+            purp = purpose_of(new, base, head)
+            rows.append((disp, word, git_st, domain_of(new), workstream_of(new, purp), rollback_of(STATUS_WORD.get(st[0], st)), purp))
         else:
             path = parts[-1]
             word = classify(st, path)
-            rows.append((path, word, st, domain_of(path), rollback_of(STATUS_WORD.get(st[0], st)), purpose_of(path, base, head)))
+            purp = purpose_of(path, base, head)
+            rows.append((path, word, st, domain_of(path), workstream_of(path, purp), rollback_of(STATUS_WORD.get(st[0], st)), purp))
     rows.sort(key=lambda r: r[0])
 
     stat = git("diff", "--stat", f"{base}..{head}").rstrip()
@@ -147,22 +168,22 @@ def main():
     L.append("")
     L.append("## Files")
     L.append("")
-    L.append("| Path | Classification | Git status | Domain | Rollback | Purpose (last commit subject in range) |")
-    L.append("|---|---|---|---|---|---|")
-    for disp, word, git_st, dom, rb, purp in rows:
+    L.append("| Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |")
+    L.append("|---|---|---|---|---|---|---|")
+    for disp, word, git_st, dom, ws, rb, purp in rows:
         purp = purp.replace("|", "\\|")
-        L.append(f"| `{disp}` | {word} | `{git_st}` | {dom} | {rb} | {purp} |")
+        L.append(f"| `{disp}` | {word} | `{git_st}` | {dom} | {ws} | {rb} | {purp} |")
     if not rows:
-        L.append("| *(no changes in range)* | | | | | |")
+        L.append("| *(no changes in range)* | | | | | | |")
     L.append("")
 
     if verified:
         L.append("## UNCHANGED-BUT-VERIFIED")
         L.append("")
-        L.append("| Path | Classification | Domain |")
-        L.append("|---|---|---|")
+        L.append("| Path | Classification | Domain | Workstream |")
+        L.append("|---|---|---|---|")
         for p in sorted(verified):
-            L.append(f"| `{p}` | UNCHANGED-BUT-VERIFIED | {domain_of(p)} |")
+            L.append(f"| `{p}` | UNCHANGED-BUT-VERIFIED | {domain_of(p)} | {workstream_of(p, '')} |")
         L.append("")
 
     L.append("## Total diff statistics (`git diff --stat`)")
