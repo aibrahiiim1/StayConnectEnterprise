@@ -37,7 +37,7 @@ Product owner completed out-of-band Front Office verification for **Attempt #5 (
 2. **Per-property deployment validation** — a per-property financial-onboarding checklist; **Aqua Club / Hotel ID 2 lives here**, not as a Phase-0 blocker (§3A below).
 3. **Post-implementation acceptance testing** — behaviors requiring code/schema that do not yet exist (UNKNOWN/Manual-Review; Checkout & Checkout-Grace); preserved as **binding acceptance requirements**, not Phase-0 blockers (§3B below).
 
-Contract status is now **FINAL — Phase 0 CLOSED** (Product-Owner approval, 2026-07-16; see contract §9c/§9d). Next authorized activity: **Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan** (Phase 1A NOT started).
+Contract status is now **FINAL — Phase 0 CLOSED** (Product-Owner approval, 2026-07-16; see contract §9c/§9d). Current operational status: Phase 1A production `iam_v2` **live-dark created + verified** (dark, not cut over). Next authorized activity: **Product-Owner acceptance of Phase 1A, then Phase 1B planning under separate authorization.**
 
 ### 1. Exact proven scope — Tier 1 (Phase-0 finalization basis; do NOT generalize)
 
@@ -108,7 +108,7 @@ Phase-0 finalization rested on the **Tier-1** evidence above (measured and merge
 
 ### 5. Implementation boundary (Phase 0 FINAL; implementation still gated on Phase 1A plan approval)
 
-Phase 0 is FINAL, but implementation remains forbidden until the **Phase 1A plan is separately approved**: schema migrations; feature code; production connector development; portal/admin-UI work; service configuration; `pms_providers` creation; deployment. The next authorized activity is **Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan** (the plan is complete; Phase 1A NOT started) — see [../architecture/StayConnect-IAM-Phase1A-Plan.md](../architecture/StayConnect-IAM-Phase1A-Plan.md).
+Phase 0 is FINAL. **Current operational status:** Phase 1A production `iam_v2` **live-dark created + verified** (dark, not cut over); still forbidden without their own separate approvals: service routing/DSN/`search_path` change, IAM data migration, cutover, deployment, PMS connector/posting execution. The next authorized activity is **Product-Owner acceptance of Phase 1A, then Phase 1B planning under separate authorization** — see [../architecture/StayConnect-IAM-Phase1A-Plan.md](../architecture/StayConnect-IAM-Phase1A-Plan.md).
 
 ---
 

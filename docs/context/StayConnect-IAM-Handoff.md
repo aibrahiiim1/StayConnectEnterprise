@@ -2,11 +2,11 @@
 
 Operational handoff for a future agent or new session working on the Internet Access Management (IAM) redesign. The authoritative design is [StayConnect-IAM-Phase0-Contract.md](../architecture/StayConnect-IAM-Phase0-Contract.md); the live spike record is [Protel-FIAS-Phase0-Spike.md](../spikes/Protel-FIAS-Phase0-Spike.md).
 
-**Current synchronized documentation baseline:** `79bf3e8`. *(Historical Phase-0 finalization provenance only: contract `ffe2200`, synchronized handoff `6b4721d` — the historical FINAL-approval baseline, not the current one.)*
+**Current synchronized documentation baseline:** the Phase-1A live-dark reconciliation commit (see git log; supersedes `79bf3e8`/`22a2e15`). *(Historical Phase-0 finalization provenance only: contract `ffe2200`, synchronized handoff `6b4721d` — not current.)*
 
 ## Current Stage
 
-**Phase 0 — FINAL and CLOSED (2026-07-16, Product-Owner approved).** Protocol/architecture validation is complete and merged; the contract is approved FINAL. The Phase 1A plan is complete (`READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`). **Next authorized activity: Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan.** Phase 1A is NOT started; plan approval authorizes scratch/test implementation only — live-database creation and cutover need later separate approvals.
+**Phase 0 — FINAL and CLOSED (2026-07-16).** **Phase 1A — scratch-verified, offline-real-schema-verified, and production `iam_v2` LIVE-DARK created + verified (2026-07-16); dark, NOT cut over, pending final Product-Owner acceptance of the corrected evidence.** No cutover, no service routing, no IAM data migration, no Phase 1B. **Next authorized activity: Product-Owner acceptance of Phase 1A, then Phase 1B planning under separate authorization.**
 
 ## Current Status
 
@@ -126,6 +126,7 @@ Per-property onboarding (Tier 2, incl. Aqua Club) and post-implementation accept
 - **HA synchronization transport under the two-NIC rule (still OPEN).** The prior HA design (VRRP/conntrackd/nft-set replication/Postgres streaming replication) assumed a **dedicated third `hasync` NIC**, which is now superseded. The exact HA-sync transport over a two-NIC (WAN+LAN) appliance is **not designed, implemented, or accepted** — this is an **OPEN architecture decision**. **Single-appliance local-first/offline operation is current and supported; HA failover under the final two-NIC architecture is NOT.** Do **not** claim any WAN/LAN HA failover, conntrack/nft replication, or Postgres streaming replication is available.
 - *(Resolved 2026-07-16: the `folio_identity_strategy` fail-closed amendment was Product-Owner-approved and applied to the FINAL contract §4.1 — no longer an open item.)*
 
-## Permanent Documentation-Synchronization Rule
+## Permanent Rules (mandatory)
 
-After every approved milestone, test, decision, or implementation change, **all directly related documentation must be synchronized** so that the current status, verified evidence, limitations, authoritative commits, remaining blockers, and next authorized step **match everywhere**. The latest Product-Owner-approved contract and verified execution evidence **always override** stale documents and historical chats. No document may show an older phase or status than the others; correct stale statements or label them clearly as historical — never rewrite a historical snapshot as if it were current architecture.
+- **[Zero Stale Leftovers](../ZERO_STALE_LEFTOVERS_RULE.md)** — after every milestone/decision/implementation change, no stale/superseded/contradictory/partially-updated artifact may remain anywhere (docs, code, config, exports, manifests); run the repo-wide stale scan + `tools/validate-project-state.sh`, prove zero current-state contradictions, and confirm `ZERO_STALE_LEFTOVERS = PASS` before declaring a milestone complete. A lower section does not fix a stale statement earlier in the same file; a banner does not excuse contradictory current-state content.
+- **Documentation synchronization** — the latest PO-approved contract + verified execution evidence override all older docs/chats; all directly-related sources must state one consistent current status, maturity, limitations, authoritative commits, remaining blockers, and the **single** next authorized action. Old content survives only when explicitly labeled HISTORICAL/SUPERSEDED and cannot be mistaken for current.
