@@ -2,7 +2,7 @@
 
 - **Project:** stayconnectenterprise
 - **SOURCE_DOCUMENTATION_SYNC_COMMIT:** `a28f6f6` — `docs(iam): apply binding Phase-1B decisions D1-D9; Phase 1A accepted/closed; contract §18 clarification`. Every copied document matches `a28f6f6` (supersedes `afade95`/`d4fa9be`/`22a2e15`).
-- **PROJECT_PACK_EXPORT_COMMIT:** `__EXPORT_COMMIT__` — the exact commit that introduced this regenerated pack (this line is stamped with the real hash after that commit exists).
+- **PROJECT_PACK_EXPORT_COMMIT:** `3e4450f` — the exact commit that introduced this regenerated pack (this line is stamped with the real hash after that commit exists).
 - **Export date:** 2026-07-16
 - **Current phase / maturity:** Phase 0 **FINAL/CLOSED**; **Phase 1A formally Product-Owner ACCEPTED and CLOSED (2026-07-16)** at SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + **PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER** (49 tables, fingerprint `bd75026f`, dark in `stayconnect_site`, 18/18). **NOT deployed, NOT cut over, NOT a user-facing/authority-switch system, no IAM data migration, no Phase 1B implementation. Phase 1B planning is the current activity.**
 - **Authoritative production evidence:** `PROD_LIVE_DARK_EVIDENCE_V2.txt` (read-only re-verification, in the Evidence Pack). The earlier `PROD_LIVE_DARK_EVIDENCE.txt` is **superseded (evidence error)** and retained for audit only.
