@@ -18,11 +18,11 @@ Everything that reads/writes only the site-local DB and local kernel state:
 | Session concurrency/limits | `tenant_effective_limits` is a local table fed by the signed license |
 | Bandwidth shaping, data/time quotas, accounting | tc + acctd + local `accounting_records` |
 | Session reaper, idle timeout, natural expiry | scd local loops |
-| Hotel Admin (all of `/edge/v1`) | edged + hotel-admin are served from the appliance's mgmt IP |
+| Hotel Admin (all of `/edge/v1`) | edged + hotel-admin are served from the appliance's **WAN/management IP** (two-NIC rule: WAN is the management interface) |
 | Local operator login | argon2id against local `operators` |
 | Voucher batch creation, GuestAccessPlan edits, walled garden, branding | local writes (license state permitting) |
 | License enforcement | evaluated offline from the persisted signed document |
-| HA failover | VRRP/conntrackd/nft replication + local DB replication are all site-local |
+| HA failover | **NOT available** — HA failover under the final two-NIC (WAN+LAN) architecture is **not yet designed, implemented, or accepted** (the old third-NIC `hasync` design is superseded; the HA-sync transport is an OPEN decision). **Single-appliance local-first/offline operation is what is current and supported.** The VRRP/conntrackd/nft/DB-replication ideas are design intent only. |
 | Backups | local pg_dump + `backup_records` |
 
 ## 2. What pauses or degrades

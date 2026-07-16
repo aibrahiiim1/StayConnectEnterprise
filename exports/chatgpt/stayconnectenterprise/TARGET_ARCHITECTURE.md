@@ -100,8 +100,8 @@ Plain "Plan" is banned in code, UI and docs.
  │   guest iface (e.g. 10.20.0.1) ── Kea DHCP · Unbound DNS     │     │
  │        │  nftables captive DNAT ──▶ portald ──unix──▶ scd ───┘     │
  │        ▼                                                           │
- │   Guest devices              [optional HA sync iface: VRRP,        │
- │                               conntrackd, nft.<site> replication]  │
+ │   Guest devices              [HA sync: SUPERSEDED third-NIC design; │
+ │                               transport OPEN, not implemented — §6]  │
  └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -130,13 +130,14 @@ Key invariants:
 
 ## 6. High availability (per site)
 
-The VRRP (keepalived) + conntrackd + NATS nft-set replication **behaviors** are retained for
-the data path, and the **site-local Postgres runs on the HA primary with streaming replication
-to the secondary** (failover promotes the replica). **However, the synchronization *transport*
-is an OPEN architecture decision:** the earlier design assumed a **dedicated third HA-sync NIC**,
-which the approved **two-NIC (WAN+LAN)** rule removes. Which link carries VRRP/conntrackd/
-replication over a two-NIC appliance is **not yet defined or implemented** — do not claim a
-WAN/LAN HA transport exists.
+**Support status (truthful):** **single-appliance local-first / offline operation is current and
+supported.** **HA failover under the final two-NIC architecture is NOT yet designed, implemented,
+or accepted.** The VRRP (keepalived) + conntrackd + NATS nft-set replication + Postgres streaming
+replication ideas below are **design intent only**; the earlier design assumed a **dedicated third
+HA-sync NIC**, which the approved **two-NIC (WAN+LAN)** rule removes, so the synchronization
+**transport is an OPEN architecture decision**. **Do not claim any WAN/LAN HA failover, conntrack
+replication, nft replication, or Postgres streaming replication is available** — none is
+implemented or accepted under the two-NIC design.
 
 **Known limitation (documented, accepted for now):** a two-node pair has no
 quorum. If the HA sync link fails while both nodes are up, both can believe they

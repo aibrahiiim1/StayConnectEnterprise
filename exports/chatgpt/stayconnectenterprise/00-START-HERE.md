@@ -2,7 +2,7 @@
 
 **Read this file first.** It is the orientation for an AI consultant continuing work on StayConnect Enterprise. It summarizes the current, authoritative state; the individual documents in this pack are the detailed sources. Where this summary and a copied source document disagree, follow the **source-of-truth precedence** in §12.
 
-**Source documentation baseline commit:** `4a1adc5` (`docs(stayconnect): reconcile architecture and project status`).
+**Source documentation baseline commit:** `79bf3e8` (`docs(stayconnect): apply PO-approved folio fail-closed amendment; HA/cutover truthfulness`).
 **Project-pack export commit:** the commit that adds/updates this pack (later than `4a1adc5`).
 **Export date:** 2026-07-16.
 
@@ -60,10 +60,12 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 
 Build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL schema inside the existing site database**, plus the core entitlement engine (validity-window, supersession, counters, watermarks), device registry, and lock strategy — **dark** (no service reads/writes it; no `search_path` cutover). Rollback before cutover = leave `iam_v2` dark / drop the schema; **no whole-database swap**. See `StayConnect-IAM-Phase1A-Plan.md` for migration groups MG-0…MG-9, per-object specs, the row-lock-first strategy, the replace/retain/migrate/remove matrix, disposable-data handling, and acceptance tests. **Cutover to `iam_v2` is a separate, later, explicitly gated event and an ATOMIC complete-domain switch of all IAM services together** (never per-flow or per-service; plan §7a); a single credential vertical slice does **not** authorize cutover, and build completion does **not** auto-promote.
 
-**Open items to resolve before/at implementation (see the plan):**
-- **`folio_identity_strategy` fail-closed gate (BLOCKER for that gate only):** the plan's fail-closed intent contradicts the FINAL contract §4.1 DDL and needs a **separate Product-Owner-approved contract amendment**; until then the DDL as written governs. Does not block approving the rest of the plan.
-- **HA synchronization transport under the two-NIC rule:** an **OPEN architecture decision** (the old third-NIC `hasync` design is superseded); HA is not yet implemented.
-- **Live `iam_v2` creation** is a separately authorized action **after** A-series acceptance in a scratch/test DB.
+**Rollback boundaries (cutover):** a routing flip-back is safe **only before the first production write** to `iam_v2` (Boundary A). **After** the first production write (Boundary B) a direct flip-back is forbidden without a tested reverse-migration/replay; otherwise **forward-fix only**, and all durable writes must be reconciled before any return. The first production write is the explicit no-return boundary.
+
+**Resolved / open items:**
+- **`folio_identity_strategy` fail-closed — APPROVED & in force (2026-07-16).** FINAL contract §4.1 amended to `NOT NULL DEFAULT 'UNSET'` (4-value CHECK). `UNSET` permits read-only ingestion/lookup/auth but **blocks every financial CHARGE** (before outbox/`P#`/transmission) until property onboarding records a concrete strategy in a **new** revision. `UNSET` is the only unset sentinel (`UNKNOWN` = a Posting state). No open folio item remains.
+- **HA synchronization transport under the two-NIC rule — OPEN.** Single-appliance local-first/offline is current and supported; **HA failover under the two-NIC architecture is NOT designed/implemented/accepted**; the old third-NIC `hasync` design is superseded.
+- **Live `iam_v2` creation** is a separately authorized action **after** A-series acceptance in a scratch/test DB; **cutover** is a still-later separate approval.
 
 ## 9. Next authorized action
 

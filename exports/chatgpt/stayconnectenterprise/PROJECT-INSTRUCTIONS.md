@@ -28,7 +28,8 @@ A historical chat, an old draft, or your own prior message **never** overrides a
 - **Mandatory Seamless Checkout Grace;** one live entitlement per subject; atomic same-subject supersession; typed cycle-safe cross-PMS transfer.
 - **Tenant-wide Guest Principals** keyed by verified factors; **MAC = device, never a person.**
 - **Immutable revisions** everywhere; purchases/postings pin exact revisions + secret generations.
-- **Financial safety:** purchase → settlement → posting/payment separation; **`UNKNOWN` postings never auto-retry;** ISO-4217 minor-unit money; per-interface outbox; five-action audited manual-review; **`programmatic_reversal = false` in v1** (manual Front Office correction only).
+- **Financial safety:** purchase → settlement → posting/payment separation; **`UNKNOWN` postings never auto-retry;** ISO-4217 minor-unit money; per-interface outbox; five-action audited manual-review; **`programmatic_reversal = false` in v1** (manual Front Office correction only). **Folio fail-closed:** a PMS interface revision defaults to `folio_identity_strategy = 'UNSET'` — read-only ingestion/lookup/auth are allowed, but **every financial CHARGE is blocked** (before outbox/`P#`/transmission) until property onboarding records a concrete strategy in a new immutable revision (`UNSET` is the only unset sentinel; `UNKNOWN` is a Posting state).
+- **HA truthfulness:** single-appliance local-first/offline operation is current and supported; **HA failover under the two-NIC architecture is NOT designed, implemented, or accepted** — never claim VRRP/conntrack/nft/Postgres-replication HA is available; the HA-sync transport is an open decision.
 - **Idempotent accounting** via per-session watermarks + append-only ledger + monotonic counters (decreases only via audited adjustment).
 - **Edge-first & offline-capable;** composite tenant/site isolation on every table.
 

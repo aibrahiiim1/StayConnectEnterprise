@@ -1,6 +1,6 @@
 # StayConnect IAM — Phase 1A Execution Plan (Core Domain & Persistence Foundation)
 
-**Status: READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL.** *(Revised 2026-07-16 after owner review; further reconciled 2026-07-16 audit — folio-strategy BLOCKER flagged for contract amendment, cutover gates corrected to an atomic complete-domain switch, MG-0 non-transactional execution model added, decisions A–D finalized.)* Planning only — Phase 1A is **not** implemented or in progress. **Note:** one open item (the `folio_identity_strategy` §9 BLOCKER) requires a separate Product-Owner-approved amendment to the FINAL contract before its fail-closed gate can be implemented; it does not block approving the rest of this plan. No migrations, code, PMS providers, service/config changes, deployment, guest-networking changes, or PMS traffic exist. Implementation begins only after the product owner explicitly approves this plan.
+**Status: READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL.** *(Revised 2026-07-16 after owner review; reconciled 2026-07-16 audit; updated 2026-07-16 for the PO-approved folio amendment.)* Planning only — Phase 1A is **not** implemented or in progress. The former `folio_identity_strategy` BLOCKER is **RESOLVED** — the FINAL contract §4.1 was amended (PO-approved) to `NOT NULL DEFAULT 'UNSET'` (fail-closed), and this plan implements it directly (§9). Cutover is an atomic complete-domain switch with **two explicit rollback boundaries** (§7a); MG-0 uses a non-transactional `CREATE UNIQUE INDEX CONCURRENTLY` model (§2a). **Phase 1A implementation is still NOT approved** — see §11 authorization boundary. No migrations, code, PMS providers, service/config changes, deployment, guest-networking changes, or PMS traffic exist. Implementation begins only after the product owner explicitly approves this plan.
 
 **Source of truth:** the FINAL [StayConnect-IAM-Phase0-Contract.md](StayConnect-IAM-Phase0-Contract.md) (Phase 0 CLOSED 2026-07-16). This plan **implements** that contract's approved DDL (§4.1–§4.6), invariants (§2), state machines (§16), and phased decomposition (§18); it introduces **no new architectural decisions**. Owner-directed refinements applied at this review (isolation mechanism, cutover gating, reversal scope, lock strategy, and the resolved open decisions) are recorded in §§2, 5, 8–11 and supersede the corresponding implementation notes only — not the approved architecture.
 
@@ -54,14 +54,19 @@ MG-0 adds the supporting anchor `UNIQUE (tenant_id, site_id, id)` on the **live*
 1. **Duplicate pre-check (read-only):** verify the target columns are already unique before building a unique index —
    `SELECT tenant_id, site_id, id, count(*) FROM public.guest_networks GROUP BY tenant_id, site_id, id HAVING count(*) > 1;`
    Expected: **zero rows** (`id` is the primary key, so `(tenant_id, site_id, id)` is inherently unique). If any row is returned, **abort MG-0** and escalate — do not force the index.
-2. **Build concurrently, outside any transaction (autocommit):**
-   `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS guest_networks_tsi_anchor ON public.guest_networks (tenant_id, site_id, id);`
+2. **Pre-existing-index validity guard (do NOT use bare `IF NOT EXISTS` to skip a broken index).** Before building, check whether the anchor already exists and whether it is valid:
+   `SELECT c.relname, i.indisvalid, i.indisready FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname = 'guest_networks_tsi_anchor';`
+   - If it **exists and is valid** (`indisvalid = true`): MG-0 is already satisfied — stop.
+   - If it **exists but is INVALID** (a leftover from an interrupted concurrent build): **`DROP INDEX CONCURRENTLY guest_networks_tsi_anchor;` first**, then proceed to step 3. **Never** let a plain `CREATE ... IF NOT EXISTS` silently "succeed" against an invalid index — `IF NOT EXISTS` would skip the build and leave the invalid index in place. Either omit `IF NOT EXISTS` (and rely on the guard above) or pair it with the mandatory step-5 validity verification so an invalid index can never be accepted.
+   - If it **does not exist**: proceed to step 3.
+3. **Build concurrently, outside any transaction (autocommit):**
+   `CREATE UNIQUE INDEX CONCURRENTLY guest_networks_tsi_anchor ON public.guest_networks (tenant_id, site_id, id);`
    `CONCURRENTLY` takes only a `SHARE UPDATE EXCLUSIVE` lock — it does **not** block reads or writes to the live table.
-3. **Optional constraint promotion (brief lock):** a unique **index** is already a valid FK target, so this is optional; if a named constraint is preferred, `ALTER TABLE public.guest_networks ADD CONSTRAINT guest_networks_tsi_anchor_uq UNIQUE USING INDEX guest_networks_tsi_anchor;` (short `ACCESS EXCLUSIVE` lock only).
-4. **Verification:** confirm the index is valid and ready —
-   `SELECT indisvalid, indisready FROM pg_index WHERE indexrelid = 'public.guest_networks_tsi_anchor'::regclass;` → both **true**.
-5. **Interruption recovery:** if step 2 is interrupted/fails, Postgres leaves an **INVALID** index. Detect (`indisvalid = false`), then `DROP INDEX CONCURRENTLY IF EXISTS public.guest_networks_tsi_anchor;` and retry from step 1. Never leave an invalid index in place; never let the FK-adding migrations (MG-1+) run until step 4 passes.
-6. **Rollback (before cutover):** `DROP INDEX CONCURRENTLY IF EXISTS public.guest_networks_tsi_anchor;` (also non-transactional) — the only MG-0 footprint on `public`.
+4. **Optional constraint promotion (brief lock):** a unique **index** is already a valid FK target, so this is optional; if a named constraint is preferred, `ALTER TABLE public.guest_networks ADD CONSTRAINT guest_networks_tsi_anchor_uq UNIQUE USING INDEX guest_networks_tsi_anchor;` (short `ACCESS EXCLUSIVE` lock only).
+5. **Validity verification (mandatory gate):** confirm the index is valid and ready —
+   `SELECT indisvalid, indisready FROM pg_index WHERE indexrelid = 'public.guest_networks_tsi_anchor'::regclass;` → **both `true`**. MG-1+ (the FK-adding migrations) **must not run** until this passes.
+6. **Interruption recovery / retry:** if step 3 is interrupted/fails, Postgres leaves an **INVALID** index. Detect (`indisvalid = false`), `DROP INDEX CONCURRENTLY guest_networks_tsi_anchor;`, and **retry from step 1**. Never leave, and never accept, an invalid index.
+7. **Rollback (before cutover):** `DROP INDEX CONCURRENTLY IF EXISTS public.guest_networks_tsi_anchor;` (also non-transactional) — the only MG-0 footprint on `public`. *(Here `IF EXISTS` is safe: it guards a DROP, not a CREATE, so it cannot mask an invalid index.)*
 
 Every subsequent group (MG-1…MG-9) creates only `iam_v2` objects and **does** run in a single transaction. MG-0's anchor is the sole additive change to a platform table in all of Phase 1A.
 
@@ -90,7 +95,7 @@ Each block lists what is **not** already covered by §3. Fields: **Purpose · PK
 
 **`pms_interfaces`** — Purpose: the namespace root; one physical PMS connection per site. PK `id`. FKs: `current_revision_id → pms_interface_revisions`. Uniqueness: `UNIQUE (tenant_id, site_id, id)`. Immutable: identity; Mutable: `lifecycle_state` (`ACTIVE⇄AUTH_DISABLED→DRAINING→DECOMMISSIONED`, guarded), `current_revision_id`. Lifecycle: §10/§16 interface state machine — Phase 1A creates the table + guard trigger; DRAINING/DECOMMISSION *enforcement* is exercised in phase 4. Idempotency: none (admin-created). Locking: `SELECT … FOR UPDATE` **row lock** on the interface row when rotating revision/secret. Acceptance: create/rotate revision keeps history; illegal state jump rejected.
 
-**`pms_interface_revisions`** — Purpose: immutable config/capability snapshot (timezone, folio-identity strategy, measured capability matrix, verifier combinations, freshness bounds). PK `id`. FKs: composite → `pms_interfaces`. Uniqueness: `UNIQUE (pms_interface_id, revision_no)`, `UNIQUE (tenant_id, site_id, pms_interface_id, id)`. Immutable: **all columns** (append-only trigger). Lifecycle: create-only; superseded by newer revision_no. **`folio_identity_strategy`:** the FINAL DDL is `NOT NULL DEFAULT 'GLOBALLY_UNIQUE'` (3-value CHECK). The desired fail-closed onboarding gate (unset ⇒ block posting) is an **open contract-amendment item — see the §9 BLOCKER**; until it is Product-Owner-approved, this revision stores the strategy exactly per the FINAL DDL. Idempotency: `revision_no` natural key. Locking: row lock on the interface + append; no advisory lock needed. Acceptance: UPDATE/DELETE rejected; capability matrix round-trips; repoint atomic; folio-strategy fail-closed gate deferred to the §9 BLOCKER amendment.
+**`pms_interface_revisions`** — Purpose: immutable config/capability snapshot (timezone, folio-identity strategy, measured capability matrix, verifier combinations, freshness bounds). PK `id`. FKs: composite → `pms_interfaces`. Uniqueness: `UNIQUE (pms_interface_id, revision_no)`, `UNIQUE (tenant_id, site_id, pms_interface_id, id)`. Immutable: **all columns** (append-only trigger). Lifecycle: create-only; superseded by newer revision_no. **`folio_identity_strategy`:** the amended FINAL DDL is `NOT NULL DEFAULT 'UNSET'` (4-value CHECK incl. `UNSET`). A new revision is born `UNSET` (fail-closed); read-only ingestion/lookup/auth are allowed, but financial CHARGE is blocked until onboarding records a concrete strategy in a **new** revision. Idempotency: `revision_no` natural key. Locking: row lock on the interface + append; no advisory lock needed. Acceptance: UPDATE/DELETE rejected; capability matrix round-trips; repoint atomic; **`UNSET` blocks CHARGE; a new revision with a concrete strategy admits CHARGE.**
 
 **`pms_interface_secret_generations`** — Purpose: AEAD-encrypted interface credentials, generational. PK `id`. FKs: composite → `pms_interfaces`. Uniqueness: `UNIQUE (pms_interface_id, generation_no)`. Immutable: ciphertext/nonce/key-id; Mutable: `superseded_at` only. Lifecycle: append + supersede; **DELETE rejected while any non-terminal financial command pins the generation** (enforced when postings arrive in phase 4; trigger installed now). Idempotency: `generation_no`. Locking: row lock on the interface row. Acceptance: write-only secret; ciphertext never selectable in plaintext; delete-guard fires.
 
@@ -130,7 +135,7 @@ Each block lists what is **not** already covered by §3. Fields: **Purpose · PK
 
 **`stay_guests`** — Purpose: guests on a stay; exactly one primary. PK `id`. FKs: composite → `stays`, CASCADE. Uniqueness: `one_primary_guest_per_stay` partial unique. Immutable: none; Mutable: primary flag, normalized names, `pin_hash`. Lifecycle: primary-change demotes-old-in-same-tx; duplicate re-assert ⇒ SKIPPED_DUPLICATE; conflicting identity ⇒ MANUAL_REVIEW (phase 3). Locking: parent stay lock. Acceptance: never two primaries; never silent replacement.
 
-**`folios`** — Purpose: folio identity, strategy-aware. PK `id`. FKs: composite → `pms_interfaces`. Uniqueness: `UNIQUE (tenant,site,pms_interface_id, external_folio_id, identity_epoch)`, `folio_open_identity` partial unique. Immutable: external id; Mutable: `status` (OPEN→CLOSED), `identity_epoch` (++ on REUSED_SEQUENTIAL recycle → **new row**). Lifecycle: resolved by the interface revision's `folio_identity_strategy` (per the FINAL DDL). The fail-closed "unset ⇒ block posting" behavior is an **open contract-amendment item (§9 BLOCKER)**, not yet in force. Acceptance: recycled number → new epoch row; postings pin folio **row id** so history can't alias.
+**`folios`** — Purpose: folio identity, strategy-aware. PK `id`. FKs: composite → `pms_interfaces`. Uniqueness: `UNIQUE (tenant,site,pms_interface_id, external_folio_id, identity_epoch)`, `folio_open_identity` partial unique. Immutable: external id; Mutable: `status` (OPEN→CLOSED), `identity_epoch` (++ on REUSED_SEQUENTIAL recycle → **new row**). Lifecycle: resolved by the interface revision's `folio_identity_strategy` (amended FINAL DDL). While the interface revision is `UNSET`, **financial CHARGE is blocked fail-closed** (contract §9a rule 6); a concrete strategy admits CHARGE. Acceptance: recycled number → new epoch row; postings pin folio **row id** so history can't alias.
 
 **`stay_folios`** — Purpose: stay↔folio link + default posting target. PK `(stay_id, folio_id)`. FKs: composite to both. Uniqueness: `UNIQUE(stay_id) WHERE is_default_posting_target`. Acceptance: one default posting target per stay.
 
@@ -172,7 +177,7 @@ Each block lists what is **not** already covered by §3. Fields: **Purpose · PK
 
 > **Reversal scope (FINAL v1: `programmatic_reversal=false`).** Phase 1A builds **only** the passive ledger/audit representation of a reversal: the `posting_type=REVERSAL` **row kind**, the `reverses_posting_id` **linkage** to the original posting, and the `Σ(REVERSAL)≤CHARGE` **integrity constraint**. Phase 1A builds **NO** FIAS `PT=C` sender, **NO** negative-`TA` logic, **NO** automatic reversal, **NO** reversal API/UI action, and **NO** dormant executable reversal code path. A REVERSAL row in v1 is written **only** as the audited ledger record of a **manual Front Office correction** (created through the manual-review/correction workflow with RBAC + reason + evidence), never emitted to a PMS. A programmatic reversal sender requires a **later, separately approved capability spike** (contract §9d).
 
-**`pms_postings`** — Purpose: append-only posting ledger; pins settlement/purchase exact pair + folio + both revisions + secret generation. PK `id`. FKs: `(settlement_id, purchase_id)`, `(purchase_id, pms_interface_id)`, composite → stays/folios/stay_folios/mappings/interface-revision/secret-generation. Uniqueness: `UNIQUE idempotency_key`, `UNIQUE (tenant,site,pms_interface_id,id)` (outbox anchor). Immutable: append-only; snapshotted amount/currency. Mutable: none (state lives in attempts/outbox). Lifecycle: `posting_type CHARGE|REVERSAL`; a REVERSAL row is a **manual-correction ledger record** linked via `reverses_posting_id`, constrained by `Σ(REVERSAL)≤CHARGE` — **not** a PMS-emitted reversal in v1 (see box above). INSERT trigger re-reads stay IN_HOUSE∧posting_allowed for CHARGE. (A folio-strategy fail-closed gate — block CHARGE while `folio_identity_strategy` is unset — is an **open contract-amendment item, §9 BLOCKER**, not yet in force.) Idempotency: `idempotency_key`. Locking: §5 (row locks; `pnumber_seq` row → outbox row). Acceptance: E-series — pin-chain fuzz rejected at SQL; CHARGE on non-IN_HOUSE aborts; **no executable reversal sender exists** (§10 check).
+**`pms_postings`** — Purpose: append-only posting ledger; pins settlement/purchase exact pair + folio + both revisions + secret generation. PK `id`. FKs: `(settlement_id, purchase_id)`, `(purchase_id, pms_interface_id)`, composite → stays/folios/stay_folios/mappings/interface-revision/secret-generation. Uniqueness: `UNIQUE idempotency_key`, `UNIQUE (tenant,site,pms_interface_id,id)` (outbox anchor). Immutable: append-only; snapshotted amount/currency. Mutable: none (state lives in attempts/outbox). Lifecycle: `posting_type CHARGE|REVERSAL`; a REVERSAL row is a **manual-correction ledger record** linked via `reverses_posting_id`, constrained by `Σ(REVERSAL)≤CHARGE` — **not** a PMS-emitted reversal in v1 (see box above). INSERT trigger re-reads stay IN_HOUSE∧posting_allowed for CHARGE, **and rejects CHARGE fail-closed when the pinned interface revision's `folio_identity_strategy = 'UNSET'` — before outbox creation, `P#` allocation, or transmission** (contract §9a rule 6, §16). Idempotency: `idempotency_key`. Locking: §5 (row locks; `pnumber_seq` row → outbox row). Acceptance: E-series — pin-chain fuzz rejected at SQL; CHARGE on non-IN_HOUSE aborts; **CHARGE under `UNSET` folio strategy aborts with no outbox/`P#`/transmission** (E4b); **no executable reversal sender exists** (§10 check).
 
 **`posting_outbox`** — Purpose: per-interface serialized delivery lane; one active row per posting. PK `id`. FKs: composite `(tenant,site,pms_interface_id,posting_id)` → posting anchor. Uniqueness: `UNIQUE(posting_id) WHERE state IN ('QUEUED','IN_FLIGHT','HELD_RECOVERY')`. Mutable: `state` (QUEUED→IN_FLIGHT→DONE|HELD_RECOVERY). Idempotency: one-active-row partial unique. Locking: row lock on the outbox row; per-interface serialization via the one-active-row partial unique. Acceptance: E8 — one active row; retries never change interface.
 
@@ -267,10 +272,32 @@ Build completion does **not** promote the new IAM model. Promotion is a separate
 6. **Full-domain acceptance** — the complete B/C/D/E/F acceptance matrix (contract §19) green against `iam_v2`, dark, including reboot/offline/idempotency.
 7. **Explicit Product-Owner cutover approval.**
 8. **Atomic complete-domain routing switch** — **all** IAM services' `search_path`/DSN flipped to `iam_v2` **together**, in one change window; no other subsystem, DB, or network change.
-9. **Observability + rollback window** — old schema/code stay live and reversible; rollback = flip **all** IAM services' routing back atomically (no data destruction).
+9. **Observability + bounded rollback window** — old schema/code stay live; rollback is governed by the **two rollback boundaries** below (a routing flip-back is safe **only before the first production write** to `iam_v2`).
 10. **Separate legacy-cleanup approval** — only after the evidence-based cleanup gates (§9 decision C) does a later phase drop the old IAM tables/code.
 
-**Mechanism:** cutover is an **atomic, all-IAM-services** `search_path`/DSN change (every IAM service from the old tables to `iam_v2` in one window), reversible by flipping all of them back. There is **no whole-database swap** and **no per-service/per-flow partial routing**. **Phase 1A executes none of this** — it is documented so the end-state is unambiguous.
+**Mechanism:** cutover is an **atomic, all-IAM-services** `search_path`/DSN change (every IAM service from the old tables to `iam_v2` in one window). There is **no whole-database swap** and **no per-service/per-flow partial routing**. **Phase 1A executes none of this.**
+
+### Two explicit rollback boundaries (correcting "flip `search_path` back")
+
+**Rollback is NOT simply "flip routing back" once production has written to `iam_v2`.** Two boundaries govern:
+
+- **Boundary A — BEFORE the first production write to `iam_v2`.** Routing may be returned to the legacy IAM **freely**; **no data divergence exists** (nothing new was written to `iam_v2`). This is the only "flip-back is enough" window.
+- **Boundary B — AFTER the first production write to `iam_v2`.** A **direct flip-back is FORBIDDEN** unless a **tested and accepted reverse-migration / replay procedure** exists. Otherwise the response is **forward-fix only**. **All durable writes created after cutover** — voucher redemptions, guest accounts, purchases, entitlements, sessions, accounting samples, adjustments, postings/attempts, and any other durable state — **must be reconciled** (carried back or replayed into the legacy model) **before** any return to the legacy model is even considered. The **first production write is the explicit no-return boundary** and must be observable (logged/marked) at cutover.
+
+### Future cutover prerequisites (DESCRIBED — not authorized here)
+
+Before a complete cutover is eligible (all still gated, none authorized by this plan):
+
+- complete **implementation and acceptance of every currently supported IAM path** (§7a list);
+- a **maintenance / write-freeze** procedure for the cutover window;
+- an **authoritative data inventory** of what carries forward;
+- a **deterministic carry-forward transformation** (old → `iam_v2`), reproducible and verified;
+- **backup and restore evidence** captured immediately before cutover;
+- **end-to-end read/write acceptance** against `iam_v2` **before** reopening guest/admin writes;
+- an **explicit first-production-write / no-return boundary** marker;
+- **post-cutover reconciliation and rollback decision rules** (Boundary A vs B above).
+
+**Phase 1A remains dark and performs no cutover.**
 
 ---
 
@@ -291,23 +318,20 @@ Build completion does **not** promote the new IAM model. Promotion is a separate
 1. **Locking** — **prefer row-level transactional locks** (§5). Advisory locks only for device/appliance capacity admission, using documented stable **non-secret namespaces** (`LN_DEVICE_SLOT`, `LN_CAPACITY`) with a collision test — **not** called "salts".
 2. **`AGGREGATE_ONLINE_TIME`** — **capability-disabled and behaviorally inert** in v1; the enum value exists but no code path implements it and **no partial functionality is exposed**.
 3. **Central template schema** — **outside Phase 1A**; `central_template_id` is a nullable inert column, no Central table/FK/sync flow created.
-4. **`folio_identity_strategy` — fail-closed intent, but see the BLOCKER below.** The desired behavior is: **no unsafe global default**; an unset/unknown strategy blocks financial CHARGE posting until property onboarding sets an approved strategy. **This is NOT yet reconcilable with the FINAL contract** — see the boxed BLOCKER immediately below. This plan does **not** silently override the FINAL DDL.
+4. **`folio_identity_strategy` — fail-closed, APPROVED (see the RESOLVED box below).** The FINAL contract §4.1 was amended (PO-approved 2026-07-16) to `NOT NULL DEFAULT 'UNSET'` with a 4-value CHECK; `UNSET` blocks all financial CHARGE (before outbox/`P#`/transmission) while permitting read-only ingestion/lookup/auth. Phase 1A implements the amended DDL directly.
 5. **Stripe FK** — **verified**: the canonical composite `(tenant_id, id)` anchor does **not** exist on `stripe_accounts` today (it has `PRIMARY KEY (id)` + a partial unique on `tenant_id`, both in the site DB `data-plane/migrations/0001_edge_init.up.sql` and control-plane `0018_stripe_payments`). Therefore the `payment_transactions.merchant_account_id → stripe_accounts` FK is **deferred to the payment phase**; in 1A `merchant_account_id` is a plain `uuid` column with **no** FK and **no** placeholder table invented.
 6. **Isolation mechanism** — **isolated `iam_v2` schema** in the existing DB (not a cloned/standby whole-database blue/green).
 
-> ### BLOCKER — `folio_identity_strategy` contradicts the FINAL contract DDL (requires PO-approved amendment)
+> ### RESOLVED — `folio_identity_strategy` fail-closed amendment (Product-Owner APPROVED, 2026-07-16)
 >
-> The FINAL contract §4.1 canonical DDL declares:
-> `folio_identity_strategy text NOT NULL DEFAULT 'GLOBALLY_UNIQUE' CHECK (folio_identity_strategy IN ('GLOBALLY_UNIQUE','UNIQUE_PER_STAY','REUSED_SEQUENTIAL'))`.
-> This has a **non-fail-closed default** (`GLOBALLY_UNIQUE`) and a 3-value `CHECK` that **excludes** any `UNSET`/`UNKNOWN` value. The plan's desired fail-closed behavior (unset ⇒ block posting) is therefore **not implementable** without changing the FINAL DDL. A lower-precedence plan **must not silently override** a FINAL, Product-Owner-approved contract decision.
+> The prior BLOCKER is closed. The FINAL contract §4.1 was amended (PO-approved) to:
+> `folio_identity_strategy text NOT NULL DEFAULT 'UNSET' CHECK (folio_identity_strategy IN ('UNSET','GLOBALLY_UNIQUE','UNIQUE_PER_STAY','REUSED_SEQUENTIAL'))`.
+> **`UNSET` is the only unset sentinel** (`UNKNOWN` stays reserved as a Posting state). Phase 1A now implements the amended DDL directly:
+> - a new interface revision defaults to `UNSET`; **read-only ingestion, guest lookup, and authentication are permitted**;
+> - **every financial CHARGE is rejected fail-closed while `UNSET`** — the rejection is enforced **before** posting-outbox creation, **before** `P#` allocation from `iam_v2.pms_interface_pnumber_seq`, and **before** any PMS transmission (contract §9a rule 6, §16 PMS-Posting precondition);
+> - a concrete strategy is recorded by property onboarding as a **new immutable revision** — existing revisions are never mutated; postings pin their revision.
 >
-> **Affected references:** contract §3 ERD (folio identity strategy), §4.1 DDL (the `DEFAULT` + `CHECK`), §9/§9a/§9c capability matrix (`folio_identity`), §16 PMS-Posting permission; plan §4 (`pms_interface_revisions`, `folios`, `pms_postings`), §9 decision 4, §10 folio-strategy gate; handoff folio note.
->
-> **Recommended fail-closed correction (PROPOSED — do NOT apply without explicit Product-Owner approval, because it amends the FINAL contract):** amend §4.1 to add an explicit unset state and make new interfaces fail-closed, e.g.
-> `folio_identity_strategy text NOT NULL DEFAULT 'UNSET' CHECK (folio_identity_strategy IN ('UNSET','GLOBALLY_UNIQUE','UNIQUE_PER_STAY','REUSED_SEQUENTIAL'))`,
-> plus a posting-permission rule that **blocks CHARGE while strategy = 'UNSET'** until property onboarding sets an approved strategy. (Alternative: keep the 3-value `CHECK` but **drop the `DEFAULT`** so every interface revision must set the strategy explicitly at creation; this is fail-safe on insert but does not model an explicit "unset" state.)
->
-> **Until that amendment is approved,** Phase 1A implements `folio_identity_strategy` **exactly as the FINAL DDL states** (`NOT NULL DEFAULT 'GLOBALLY_UNIQUE'`, 3-value CHECK). The fail-closed onboarding gate is tracked as an **open contract-amendment item**, not a plan-level override.
+> **Reflected in:** contract §4.1 DDL + §9/§9a rule 6/§9c Tier 2/§16/§19 E4b; plan §4 (`pms_interface_revisions`, `folios`, `pms_postings`), §10 folio gate; handoff. No open folio item remains.
 
 **Remaining genuine decisions requiring Product-Owner input:**
 
@@ -334,7 +358,7 @@ Run in a **clean test database** and then dark in the appliance's `iam_v2` schem
 - **Full rebuild from zero:** `DROP SCHEMA iam_v2 CASCADE` then re-apply MG-0…MG-9 reproduces the exact schema (deterministic build).
 - **Reboot with no production behavior change:** appliance reboot with `iam_v2` present changes nothing user-visible; production services behave identically.
 - **No executable reversal:** a check proves there is **no** FIAS `PT=C`/negative-`TA`/automatic reversal code path or API/UI action (only the passive REVERSAL ledger row + linkage + constraint exist).
-- **Folio-strategy gate (deferred):** the fail-closed "unset ⇒ block CHARGE" gate is **not** implemented in 1A — it depends on the §9 BLOCKER contract amendment. 1A stores `folio_identity_strategy` exactly per the FINAL DDL; this acceptance check activates only once the amendment is approved.
+- **Folio-strategy gate (APPROVED, in scope):** with the §4.1 amendment in force, a revision defaulting to `UNSET` **blocks financial CHARGE** (no outbox row, no `P#` allocation, no transmission) while still allowing read-only ingestion/lookup/auth; recording a concrete strategy in a **new** revision admits CHARGE. This is acceptance test **E4b** (contract §19).
 
 **Engine (contract §19 A-series):**
 
@@ -344,5 +368,15 @@ Run in a **clean test database** and then dark in the appliance's `iam_v2` schem
 - **Lock strategy:** row-lock paths verified; the device/capacity advisory path uses the §5 namespaces in the documented order; a deliberate reversed-order test is rejected by the helper; the namespace collision test passes.
 
 ---
+
+---
+
+## 11. Build target & authorization boundary
+
+- **Phase 1A implementation is still NOT approved.** This document is a plan awaiting Product-Owner implementation approval.
+- **Recommended first implementation target: a dedicated scratch/test database.** The full A-series (§10) runs there first, dark.
+- **Creating the dark `iam_v2` schema in the live `stayconnect_site` database requires a later, separate Product-Owner authorization** — granted only **after** scratch A-series acceptance. Approving this plan does **not** authorize touching the live database.
+- **Cutover to `iam_v2` is a still-later, separately approved event** (§7a), an atomic complete-domain switch governed by the two rollback boundaries. Approving Phase 1A implementation does **not** authorize cutover.
+- Escalation ladder (each a distinct approval): **plan approval → scratch build/acceptance → live dark `iam_v2` creation → 1B vertical slice → full IAM path completion + full-domain acceptance → cutover approval → atomic cutover → legacy-cleanup approval.**
 
 **End of Phase 1A plan.** Status **READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL** — planning only; Phase 1A is not implemented or in progress. No migrations, code, providers, services, config, deployment, or PMS traffic are authorized by this document.
