@@ -1,0 +1,4 @@
+commit 956608a8060c65f3fd8a9ba90b7a09107dec4f59
+Date:   Fri Jul 17 00:51:23 2026 +0300
+
+    governance: machine-assertion sentinel PRODUCTION_IAM_V2_DML for the privilege matrix; byte-exact mutation restore

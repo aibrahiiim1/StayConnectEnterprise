@@ -1,5 +1,17 @@
 # StayConnect IAM — Phase 1A Execution Plan (Core Domain & Persistence Foundation)
 
+<!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0007 -->
+**Current phase:** 1B — Credential/identity/auth-context (DARK)
+**Current activity:** `PHASE_1B_PLAN_CORRECTION_PENDING_APPROVAL`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B PLANNING (NOT implemented) · 2 NOT_STARTED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
+**Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
+**iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
+**Single next authorized action:** Product-Owner approval or rejection of the corrected Phase 1B plan
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D9`.
+<!-- END GENERATED PROJECT STATE -->
+
+
 **Status: SCRATCH_IMPLEMENTED + SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED (2026-07-16) — formally Product-Owner ACCEPTED and CLOSED at this DARK maturity; NOT deployed; NOT cut over; NOT a user-facing/authority-switch system; NO IAM data migration; NO Phase 1B implementation.** *(PO authorized the live-dark creation as a distinct ladder step; executed additive + dark + reversible.)* The isolated `iam_v2` schema (49 tables, fingerprint `bd75026f`) now exists **dark** in the production `stayconnect_site` DB — **no service reads/writes it; no DSN/`search_path` change; public schema unchanged** (proof in [Live-Dark Acceptance record](StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md), 18/18 PASS). Next authorized step: **Product-Owner approval or rejection of the Phase 1B plan** ([StayConnect-IAM-Phase1B-Plan.md](StayConnect-IAM-Phase1B-Plan.md)); Phase 1B implementation and ladder step 7 onward remain separately gated. The former `folio_identity_strategy` BLOCKER is **RESOLVED** — the FINAL contract §4.1 was amended (PO-approved) to `NOT NULL DEFAULT 'UNSET'` (fail-closed), and this plan implements it directly (§9). Cutover is an atomic complete-domain switch with **two explicit rollback boundaries** (§7a); MG-0 uses a non-transactional `CREATE UNIQUE INDEX CONCURRENTLY` model (§2a). **Phase 1A implementation was authorized and executed** (scratch, then production live-dark) — see §11 and §12. **No service is routed to `iam_v2`; no DSN/`search_path` change; no PMS traffic; no cutover; no IAM data migration; no Phase 1B.** *(Historical: this plan was originally approved for scratch-only, then live-dark, as distinct ladder steps.)*
 
 **Source of truth:** the FINAL [StayConnect-IAM-Phase0-Contract.md](StayConnect-IAM-Phase0-Contract.md) (Phase 0 CLOSED 2026-07-16). This plan **implements** that contract's approved DDL (§4.1–§4.6), invariants (§2), state machines (§16), and phased decomposition (§18); it introduces **no new architectural decisions**. Owner-directed refinements applied at this review (isolation mechanism, cutover gating, reversal scope, lock strategy, and the resolved open decisions) are recorded in §§2, 5, 8–11 and supersede the corresponding implementation notes only — not the approved architecture.

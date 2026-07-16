@@ -1,5 +1,0 @@
-commit a28f6f61cf52c00ef2472c8f2067ee4878041190
-Date:   Thu Jul 16 21:53:30 2026 +0300
-
-    docs(iam): apply binding Phase-1B decisions D1-D9; Phase 1A accepted/closed; contract Â§18 clarification; validator hardening
-

@@ -1,6 +1,6 @@
-# REPOSITORY ARTIFACTS cited by this planning pack (committed source, not packaged). Verify at sync commit a28f6f6.
-97d1bf69d9b1b2ae20ffedf5ec2a95bba53ef0c5110ac123113789cc181df316  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
-4e3fba9a3940bc2e4b1b14509105f033aa5d379544b2e406f81f6118d7f102c2  docs/architecture/Phase1B-Privilege-Matrix.md
+# cited committed source, not packaged. Verify at SOURCE_COMMIT 956608a.
+33d66c951bbe3c621d4315104625ad139ec10ab998cc5bc0101e21c58a03229c  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+ebec050db07010ca998b2ddf6680aea76ed70fe5df7483615e1495835ff7d215  docs/architecture/Phase1B-Privilege-Matrix.md
 2951201822a3df82f3c6252bd831ba95567c115d7067d7c3730e04cb7cd7de60  data-plane/internal/pmsguard/guard.go
 3256ff7a86b50550f6a2a7de43c023e55731cd24d03b53025b458b79af25396a  data-plane/cmd/scd/main.go
 979c198cfdfca59ebbcce093f60e9dc334a5042d78b3ab0e1500dc6bca371aa0  data-plane/cmd/acctd/main.go
@@ -11,7 +11,6 @@
 c3ce735abb75f870757857843770d71553e9e43a2fd524d5a9d92ff4f1659cd6  data-plane/internal/voucher/voucher.go
 25951c48b8e951175c33f791a04ab3418c657403d2824b5e8d3ccbfe5fe04e3c  data-plane/internal/otp/otp.go
 aabf7c2b0cb11d1997a5fc5e4774d2f1707e1bed21aa9b854677fd7ba31ff579  data-plane/cmd/scd/credentials_handlers.go
-419dfdb3169a178373f0bc16296ac60d8869401834d82536ad399197353f28cd  data-plane/cmd/scd/credentials_ratelimit.go
 39ba494c1484dddc58905c5518b1155935b9037f3b0382a4eed02124ccebf07f  data-plane/cmd/scd/otp_handlers.go
 b70e1e7f00c647e7ba6b085e5982398562c4adf60137a710bf0e21b6013fd52c  data-plane/cmd/scd/social_handlers.go
 423dfc62f184b3a410007fdc0cae42c2c80da5661e423a66b54921ef7e8f00e3  data-plane/cmd/scd/pms_handlers.go
