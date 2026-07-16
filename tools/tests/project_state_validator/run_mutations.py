@@ -9,16 +9,33 @@ and asserts that AT LEAST ONE reports failure (non-zero). The original bytes are
 A validator that only passes the good state without failing these negative cases is NOT accepted.
 Run from anywhere:  python tools/tests/project_state_validator/run_mutations.py
 """
-import subprocess, os, sys
+import subprocess, os, sys, shutil
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+def _find_bash():
+    # Prefer Git Bash on Windows (Python's PATH 'bash' may resolve to WSL bash, which fails on Windows paths).
+    for env in ("BASH", "GIT_BASH"):
+        b = os.environ.get(env)
+        if b and os.path.isfile(b): return b
+    g = shutil.which("git")
+    if g:
+        for rel in ("../bin/bash.exe", "../../bin/bash.exe", "../usr/bin/bash.exe"):
+            cand = os.path.normpath(os.path.join(os.path.dirname(g), rel))
+            if os.path.isfile(cand): return cand
+    for cand in (r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files\Git\usr\bin\bash.exe",
+                 r"C:\Program Files (x86)\Git\bin\bash.exe"):
+        if os.path.isfile(cand): return cand
+    return shutil.which("bash") or "bash"
+
+BASH = _find_bash()
 
 def run(cmd):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
 def structural():
     return run([sys.executable, "tools/project-state.py", "validate"]).returncode
 def keyword():
-    return run(["bash", "tools/validate-project-state.sh"]).returncode
+    return run([BASH, "tools/validate-project-state.sh"]).returncode
 def both_status():
     return structural(), keyword()
 
