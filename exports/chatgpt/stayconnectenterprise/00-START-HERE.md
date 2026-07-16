@@ -2,7 +2,7 @@
 
 **Read this file first.** It is the orientation for an AI consultant continuing work on StayConnect Enterprise. It summarizes the current, authoritative state; the individual documents in this pack are the detailed sources. Where this summary and a copied source document disagree, follow the **source-of-truth precedence** in §12.
 
-**Source documentation baseline commit:** `d5a5862` (removes residual Phase-1A planning-only/scratch-only current-state contradictions; hardens the validator; supersedes `2f232cb`/`d0eabc2`/`22a2e15`).
+**Source documentation baseline commit:** `3e8069d` (documentation sync — removes residual Phase-1A planning-only/scratch-only current-state contradictions; hardens the validator; supersedes `d5a5862`/`2f232cb`/`d0eabc2`/`22a2e15`).
 **Project-pack export commit:** recorded exactly as `PROJECT_PACK_EXPORT_COMMIT` in `MANIFEST.md`.
 **Export date:** 2026-07-16.
 

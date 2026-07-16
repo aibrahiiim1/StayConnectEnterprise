@@ -1,5 +1,0 @@
-commit d5a5862274a33a64c5fec35e387682410ce2d117
-Date:   Thu Jul 16 20:37:50 2026 +0300
-
-    tools: exclude the validator's own copy from the export PII self-scan
-
