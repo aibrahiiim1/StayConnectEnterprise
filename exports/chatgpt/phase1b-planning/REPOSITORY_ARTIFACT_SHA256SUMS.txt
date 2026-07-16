@@ -1,5 +1,7 @@
-# REPOSITORY ARTIFACTS cited by this planning pack (committed source, not packaged). Verify at sync commit afade95.
-3fb4fc7c84d5bfa8fb36251882ee2331403606e6c00a34c841f2b69e346dc65d  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+# REPOSITORY ARTIFACTS cited by this planning pack (committed source, not packaged). Verify at sync commit a28f6f6.
+97d1bf69d9b1b2ae20ffedf5ec2a95bba53ef0c5110ac123113789cc181df316  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+4e3fba9a3940bc2e4b1b14509105f033aa5d379544b2e406f81f6118d7f102c2  docs/architecture/Phase1B-Privilege-Matrix.md
+2951201822a3df82f3c6252bd831ba95567c115d7067d7c3730e04cb7cd7de60  data-plane/internal/pmsguard/guard.go
 3256ff7a86b50550f6a2a7de43c023e55731cd24d03b53025b458b79af25396a  data-plane/cmd/scd/main.go
 979c198cfdfca59ebbcce093f60e9dc334a5042d78b3ab0e1500dc6bca371aa0  data-plane/cmd/acctd/main.go
 80942e5c9de8267c7d32460ecaf54b37a944fc3755ffc1f9a229c449cfdb7c88  data-plane/cmd/edged/main.go

@@ -36,7 +36,7 @@ A historical chat, an old draft, or your own prior message **never** overrides a
 ## Production-grade behavior
 
 - Treat everything as production software touching **real guest money and folios.** Prefer correctness, safety, auditability, and fail-closed behavior over speed or cleverness.
-- Respect the current phase gates. Phase 0 is FINAL/CLOSED; **Phase 1A is the current phase, implemented through PRODUCTION LIVE-DARK (the isolated `iam_v2` schema is created + verified in production `stayconnect_site`, 18/18 acceptance, dark — no service reads/writes it, no DSN/`search_path` change, public schema unchanged).** It is **NOT** cut over, deployed, live-accepted, data-migrated, or Phase 1B. Do not assume anything beyond the verified dark schema is built; require verified evidence for any further claim.
+- Respect the current phase gates. Phase 0 is FINAL/CLOSED; **Phase 1A is formally ACCEPTED and CLOSED (2026-07-16) at its PRODUCTION LIVE-DARK maturity** (the isolated `iam_v2` schema is created + verified + accepted in production `stayconnect_site`, 18/18, dark — no service reads/writes it, no DSN/`search_path` change, public schema unchanged). It is **NOT** cut over, deployed, a user-facing/authority-switch system, data-migrated, or Phase 1B-implemented. **Phase 1B planning is the current activity** (`StayConnect-IAM-Phase1B-Plan.md`, planning-only). Do not assume anything beyond the verified dark schema is built; require verified evidence for any further claim.
 - Keep the single verified Hotel ID 3 debit in scope: it does **not** generalize to other properties/interfaces, sharers, multi-folio, no-post, or error statuses. **Hotel ID 2 remains financially unapproved.**
 
 ## No fake data or invented protocol behavior

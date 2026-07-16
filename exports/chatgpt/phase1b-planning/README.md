@@ -6,6 +6,7 @@
 - `inventory/DB_ACCESS_MAP.md` — per-service PostgreSQL access (all services connect as superuser `stayconnect` today).
 - `inventory/AUTH_ENTRY_POINTS.md` — the six auth paths + shared portald→scd pipeline + legacy tables.
 - `inventory/IAM_V2_OBJECTS.md` — the verified `iam_v2` credential/portal object set (no new DDL needed).
+- `Phase1B-Privilege-Matrix.md` — the exact machine-reviewable least-privilege grant matrix (production = zero `iam_v2` DML; scratch-only `iam_v2` grants; migration-executor model).
 - `IMPLEMENTATION_BLUEPRINT.md` — the proposed single PO implementation-authorization prompt (§14 extract).
 - `PACK_SHA256SUMS.txt` — SHA-256 of every file physically in this pack.
 - `REPOSITORY_ARTIFACT_SHA256SUMS.txt` — SHA-256 of the committed source files the inventories cite (not packaged).

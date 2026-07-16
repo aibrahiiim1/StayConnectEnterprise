@@ -1,6 +1,6 @@
 # StayConnect IAM — Phase 1A LIVE-DARK Acceptance Record
 
-**Verdict: PASS.** The isolated `iam_v2` schema was created in the **production** `stayconnect_site` database, **dark** (no service reads/writes, no DSN/`search_path` change), and passed live-dark acceptance 18/18. **NOT deployed, NOT cut over, NOT live accepted as a user-facing system; no IAM data migration; no Phase 1B.**
+**Verdict: PASS — formally Product-Owner ACCEPTED and CLOSED (2026-07-16)** at maturity `SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER`. The isolated `iam_v2` schema was created in the **production** `stayconnect_site` database, **dark** (no service reads/writes, no DSN/`search_path` change), and passed live-dark acceptance 18/18. Acceptance is at the authorized DARK maturity only — it is **NOT** a user-facing/authority-switch system: **NOT deployed, NOT cut over; no IAM data migration; no Phase 1B implementation.** Phase 1B planning is the current activity.
 
 ## Execution date & environment
 - **Date:** 2026-07-16 ~16:37 UTC.
@@ -79,5 +79,5 @@ Not proven here (require later, separately-authorized phases): appliance reboot 
 - **`tools/validate-project-state.sh` → `ZERO_STALE_LEFTOVERS = PASS`** (all checks: no stale Phase-1A planning-only/scratch-only/plan-approval-gated/live-dark-future current-state text; single maturity + consistent next action; no within-file maturity conflict; acceptance record present and references the V2 evidence with V1 marked superseded; exact SOURCE and PROJECT_PACK_EXPORT commit provenance; permanent rule bundled with resolving links; validator bundled + checksummed in the Evidence Pack; MANIFEST checksums match packaged files; all pack links resolve; no secrets/guest-PII/credential-DSNs in exports). Run against **both** the repository source and the generated Project Pack, per the permanent rule `docs/ZERO_STALE_LEFTOVERS_RULE.md`.
 
 ## Final maturity & next action
-- **Maturity:** `PHASE1A_PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED` (dark, isolated, additive, reversible) — on top of SCRATCH_IMPLEMENTED + SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED.
-- **Single next authorized action:** **Product-Owner review of this live-dark acceptance before any Phase 1B authorization.** No cutover, DSN/`search_path` change, data migration, or service routing is authorized.
+- **Maturity:** `PHASE1A_PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED` (dark, isolated, additive, reversible) — on top of SCRATCH_IMPLEMENTED + SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED. **Phase 1A is formally Product-Owner ACCEPTED and CLOSED at this DARK maturity (2026-07-16).**
+- **Single next authorized action:** **Product-Owner approval or rejection of the complete Phase 1B plan** (`../architecture/StayConnect-IAM-Phase1B-Plan.md`). No cutover, DSN/`search_path` change, data migration, or service routing is authorized; Phase 1B implementation needs its own separate authorization.

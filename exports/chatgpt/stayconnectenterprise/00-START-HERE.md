@@ -2,7 +2,7 @@
 
 **Read this file first.** It is the orientation for an AI consultant continuing work on StayConnect Enterprise. It summarizes the current, authoritative state; the individual documents in this pack are the detailed sources. Where this summary and a copied source document disagree, follow the **source-of-truth precedence** in §12.
 
-**Source documentation baseline commit:** `afade95` (adds the planning-only Phase 1B implementation plan; supersedes `d4fa9be`/`d0eabc2`/`22a2e15`).
+**Source documentation baseline commit:** `a28f6f6` (binding Phase-1B decisions D1-D9; Phase 1A accepted/closed; contract §18 clarification; supersedes `afade95`/`d4fa9be`/`22a2e15`).
 **Project-pack export commit:** recorded exactly as `PROJECT_PACK_EXPORT_COMMIT` in `MANIFEST.md`.
 **Export date:** 2026-07-16.
 
@@ -16,7 +16,7 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 
 ## 2. Current architecture (two tiers)
 
-- **Appliance (on-site):** Go daemons — `scd` (session/auth control), `edged` (admin API), `portald` (guest captive portal), `acctd` (accounting) — plus a `hotel-admin` Next.js UI. Local Postgres (site DB `stayconnect_site`, with a standby). Enforces guest access, shaping, accounting, and PMS integration at the edge; operates offline.
+- **Appliance (on-site):** Go daemons — `scd` (session/auth control), `edged` (admin API), `portald` (guest captive portal), `acctd` (accounting) — plus a `hotel-admin` Next.js UI. Local Postgres (site DB `stayconnect_site`; an isolated second-site **test** DB `stayconnect_site_b` exists for isolation tests — **not** a replication standby). Enforces guest access, shaping, accounting, and PMS integration at the edge; operates offline.
 - **Central Control Plane (cloud, `150.0.0.252`):** `ctrlapi` Go API + `cloud-admin` Next.js. Fleet/customer/site/license management, telemetry, backup health. Outbound-only from appliances; internal-CA mTLS.
 - **Ownership hierarchy (frozen):** Platform → Customer → Site (one physical property) → Appliance → guest VLANs/networks.
 - **Appliance NIC topology (approved, permanent): exactly two physical NICs — WAN and LAN.** **WAN is also the management interface** (Hotel Admin/SSH/outbound sync); **LAN** carries guest connectivity and guest VLAN/trunk. There is **no** separate management NIC and **no** approved third HA-sync NIC. (Older docs describing a separate `mgmt` IP or an optional `hasync` NIC are superseded.)
@@ -25,8 +25,9 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 ## 3. Current project phase & status
 
 - **Phase 0 (IAM redesign architecture contract + live PMS validation): FINAL and CLOSED** — approved by the Product Owner **2026-07-16**.
-- **Phase 1A (clean-slate IAM core + persistence): the current phase.** Maturity: **SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED (2026-07-16, 18/18 acceptance).**
-- **Phase 1A live-dark is created, NOT cut over.** The isolated `iam_v2` schema (49 tables, fingerprint `bd75026f`, 0 rows) exists **dark** in production `stayconnect_site`: no service reads/writes it, no DSN/`search_path` change, public schema unchanged, services active. NOT deployed, NOT cut over, NOT live accepted, no IAM data migration, no Phase 1B. (The currently deployed voucher/guest-account system is a separate prior delivery, live and untouched.)
+- **Phase 1A (clean-slate IAM core + persistence): formally Product-Owner ACCEPTED and CLOSED (2026-07-16)** at maturity **SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER (18/18 acceptance).**
+- **Phase 1B planning is the current activity** (a complete Phase 1B implementation plan is drafted, planning-only; `StayConnect-IAM-Phase1B-Plan.md`).
+- **Phase 1A live-dark is created + accepted, NOT cut over.** The isolated `iam_v2` schema (49 tables, fingerprint `bd75026f`, 0 rows) exists **dark** in production `stayconnect_site`: no service reads/writes it, no DSN/`search_path` change, public schema unchanged, services active. Accepted at the DARK maturity only — NOT deployed, NOT cut over, NOT a user-facing/authority-switch system, no IAM data migration, no Phase 1B implementation. (The currently deployed voucher/guest-account system is a separate prior delivery, live and untouched.)
 
 ## 4. Completed & live-verified milestones
 

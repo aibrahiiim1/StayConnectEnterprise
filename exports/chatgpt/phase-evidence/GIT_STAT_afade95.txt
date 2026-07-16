@@ -1,5 +1,0 @@
-commit afade951339edfa47f9a635fc6e085464996fc61
-Date:   Thu Jul 16 21:24:08 2026 +0300
-
-    docs(iam): add complete Phase 1B implementation plan (planning-only); update next-action; scope validator checks
-

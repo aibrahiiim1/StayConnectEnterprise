@@ -2,7 +2,7 @@
 
 **Status: PLANNING ONLY — NOT APPROVED FOR IMPLEMENTATION, NOT IMPLEMENTED.** This document is a complete, production-grade Phase 1B plan produced under a Product-Owner *planning* authorization (2026-07-16). It authorizes **no** code, DDL/DML, role/credential change, DSN/`search_path` change, service routing to `iam_v2`, dual-read/write, deployment, data migration, PMS/FIAS traffic, financial posting, network change, cutover, or any later Phase. Nothing here executes until a separate explicit Product-Owner **implementation** authorization (the blueprint in §14) is given.
 
-**Baseline this plan builds on (verified):** Phase 0 FINAL/CLOSED; Phase 1A `PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER`; production `iam_v2` = 49 empty tables (fingerprint `bd75026f`), no service reads/writes it, no DSN/`search_path` routing, no data migration; all services connect as PostgreSQL superuser `stayconnect`; source baseline `d4fa9be`. Ladder reference: Phase-1A Plan §7a/§11 (Phase 1B = ladder steps 7–10, dark/flagged, **before** any cutover at step 11).
+**Baseline this plan builds on (verified):** Phase 0 FINAL/CLOSED; Phase 1A **formally Product-Owner ACCEPTED and CLOSED** at `SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER`; production `iam_v2` = 49 empty tables (fingerprint `bd75026f`), no service reads/writes it, no DSN/`search_path` routing, no data migration; all services connect as PostgreSQL superuser `stayconnect`. **Phase 1B is credential/identity/auth-context implementation in DARK/flags-OFF mode — it is NOT a cutover** (the atomic complete-domain cutover is a later separately approved gate, only after Phases 2–6 and full-domain acceptance). Ladder reference: Phase-1A Plan §7a/§11 (Phase 1B = ladder steps 7–10, dark/flagged, **before** any cutover at step 11).
 
 ---
 
@@ -104,6 +104,32 @@ Point the service env file back to the superuser DSN and restart that one servic
 
 **No service may route to `iam_v2` until Gate P passes.** Gate P is independent of and precedes the credential/portal code activation.
 
+### 2.8 Production grants — ZERO iam_v2 DML (binding)
+During Phase-1B **production**, service roles receive **only** the exact privileges required for their **current legacy `public`** behavior:
+- Service roles receive **zero `iam_v2` DML** (no SELECT/INSERT/UPDATE/DELETE on any `iam_v2` table) and **no** `iam_v2` `EXECUTE`.
+- PUBLIC receives **zero** `iam_v2` privileges.
+- **No production service is capable of writing to `iam_v2`** (reinforces D1).
+- Granting any `iam_v2` privilege to a runtime service role requires a **later separate runtime-routing authorization** (the cutover gate), never Phase 1B.
+- Only **scratch/test** roles receive the `iam_v2` privileges needed for acceptance testing.
+- No service role ever receives broad `ALL TABLES`, owner membership, `CREATE`/`ALTER`/`DROP`, `BYPASSRLS`, or superuser.
+
+### 2.9 Exact privilege matrix (machine-reviewable)
+The complete, ellipsis-free grant matrix — **service role · database/schema · table · columns (where applicable) · SELECT · INSERT · UPDATE · DELETE · sequence USAGE/SELECT · function EXECUTE · reason/source-code-path · negative-permission test · rollback** — is maintained as **`docs/architecture/Phase1B-Privilege-Matrix.md`** (bundled in the planning pack). It is derived from the completed DB-access inventory and exact query/code inspection, and is the authoritative grant specification for Gate P. Production rows grant **only** `public`-schema privileges (zero `iam_v2`); scratch rows add the `iam_v2` privileges for acceptance.
+
+### 2.10 Migration executor (non-runtime)
+Migrations are **never** run by a runtime service role and **never** depend on permanent use of the `stayconnect` superuser:
+- `iam_v2_owner` — **NOLOGIN**, owns schema + objects.
+- `iam_v2_migrator` — **NOLOGIN**, `MEMBER OF iam_v2_owner` (applies `iam_v2` migrations via `SET ROLE iam_v2_owner`); a parallel **NOLOGIN** `site_migrator` owns/applies `public`-schema migrations.
+- A separate **controlled migration-executor LOGIN role** (`migrate_exec`) or an equally explicit secure operator mechanism is used to *drive* migrations: it is `MEMBER OF` the relevant NOLOGIN migrator role and uses `SET ROLE`; it holds **no** runtime service privileges.
+- **Credential storage:** `migrate_exec` secret in a 0600 root-only operator env, **enabled only for the migration window** (time-limited); **disabled/removed after use**; every migration run **audited** (who/when/what); secret **rotated** after use.
+- **Rollback:** migration down-scripts run through the same executor; on failure, drop the migration's objects; the executor role is disabled either way. **Do not** leave the migration path dependent on `stayconnect` superuser.
+
+### 2.11 Superuser rollback = break-glass only (retained, with removal gate)
+Returning a service to the `stayconnect` **superuser** DSN exists **only** as an **emergency break-glass rollback during Gate P**:
+- **Time-bounded**, **audited**, and **explicitly approved by the execution runbook** at the moment of use.
+- **Followed by credential revocation/removal** once Gate-P acceptance is re-established under the least-privilege role.
+- Classified **`RETAINED for rollback` with an explicit removal gate** (removed at Gate-P completion); it is **not** a normal long-term operating option and must never be the steady state.
+
 ---
 
 ## 3. Current authentication & portal inventory (from code — read-only)
@@ -154,6 +180,42 @@ Target flow (dark/flagged; per-method):
 9. **Secret handling:** voucher HMAC/AEAD keys and PMS secrets remain ciphertext + generation + supersession (already modeled); reveal/print requires operator re-auth + audit (contract §4.4, B2).
 10. **Account/credential lifecycle, session handoff, error contracts, localization-safe generic guest errors, offline behavior:** preserved from legacy (§3) and mapped onto `iam_v2` objects; generic uniform envelopes for all non-success (no enumeration).
 
+### 4a. Transient challenge state (D2 — RETAINED, governed)
+`public.auth_otps` (OTP challenge) and `public.social_oauth_states` (social CSRF/state) are classified **`RETAINED — OPERATIONAL TRANSIENT STATE`**: short-TTL operational challenge state, **not** an identity source of truth.
+- **Ownership:** `scd` (edge). **Retention:** OTP rows expire ≤10 min (single-use `consumed_at`); social state ≤10 min single-use; a cleanup sweep bounds storage.
+- **Prohibited:** treating either as durable guest identity, or as an `iam_v2` identity substitute. The resolved verified factor is written to `iam_v2.guest_principal_identities`; the challenge tables never carry authority.
+- **Removal/rehome gate:** before the later complete-domain cutover, these tables get a **review/removal/rehome decision** (keep as ephemeral `public` operational state, or model as `iam_v2` challenge objects via a contract amendment). Until then they must not create an unacknowledged hybrid IAM authority — they hold no identity of record.
+- `pms_attempts` is **Phase 3** scope (not touched in 1B).
+
+### 4b. Durable, local-first throttling (D4 — required before any activation)
+Process-local throttling (the current `credentials_ratelimit.go` limiter) resets on restart and is insufficient for future guest-visible activation. **Chosen design — local Postgres bucket table**, reusing the **proven** local-first durable pattern already in the codebase (`pms_attempts` durable attempt counting in `data-plane/internal/pmsguard/guard.go`, and `guest_accounts.failed_attempts`/`locked_until`). **No Redis or other unverified dependency.**
+- **Store:** a minimal new `public.auth_throttle_buckets` table (loopback-only local Postgres; the same store every edge service already uses) — this is the **minimal explicit schema amendment** required, identified as part of the Phase-1B implementation authorization (it is `public`-schema, not `iam_v2`).
+- **Shape:** `(scope_kind text, scope_key text, method text, window_start timestamptz, window_len_seconds int, count int, expires_at timestamptz, PRIMARY KEY (scope_kind, scope_key, method, window_start))`. `scope_kind ∈ {ENDPOINT, IDENTITY, IP, DEVICE, METHOD}` (endpoint, identity/IP, device and method scopes).
+- **Atomic increment:** `INSERT … ON CONFLICT (…) DO UPDATE SET count = auth_throttle_buckets.count + 1 RETURNING count` (single-statement atomic; no read-modify-write race).
+- **Expiry & bounded storage:** each row carries `expires_at`; a periodic cleanup (reaper-style, like the session reaper) deletes expired rows; window keys are time-bucketed so storage is bounded by active scopes × windows.
+- **No PII/secret:** `scope_key` stores a **hash** of the identifier (e.g. HMAC of username/MAC/IP), never the raw credential, OTP, or plaintext identifier.
+- **Failure behavior:** on DB error the limiter **fails closed** (deny/throttle) rather than allowing unbounded attempts; cleanup failures degrade gracefully (storage grows bounded until the next sweep).
+- **Survives restart + reboot** (durable in local Postgres); **no Central dependency**.
+- **Acceptance:** negative tests (limit enforced), concurrency tests (atomic increment under parallel logins), and **reboot persistence** (counters survive service restart + appliance reboot). Classified `[IMPL]` in scratch + `[DARK]` reboot check.
+
+### 4c. OTP verification secret design (D7)
+`SHA-256(salt|code)` is **not** the final Phase-1B security design for a 6-digit OTP. **Chosen design — keyed HMAC with a dedicated protected local key + constant-time comparison** (Argon2id fallback only if the key-management foundation cannot safely support HMAC), built on the **verified existing secret foundation** (the `voucher_code_key_generations` / `pms_interface_secret_generations` model: ciphertext + AEAD + `encryption_key_id` + generation numbering + supersession).
+- **Key source & storage:** a dedicated OTP HMAC key held like other edge secrets (encrypted at rest via the existing local key-encryption mechanism; loopback-only; 0600; never in Git/logs/exports/process args).
+- **Generation/version pin:** each stored OTP row pins the `key_generation_id` used, so rotation never invalidates in-flight codes; **rotation** supersedes the generation (new `superseded_at`), old generation retained until all pinned rows expire.
+- **Comparison:** `crypto/subtle` constant-time compare of `HMAC(key_gen, salt|code)`.
+- **Expiry / attempt cap:** unchanged strong controls — TTL 10 min, single-use, 5-attempt cap, cooldown/hourly/IP caps (now backed by §4b durable throttling).
+- **Migration compatibility:** during rollout, verify supports both the legacy `salt:sha256` format (for in-flight codes) and the new HMAC format (generation-pinned); new issuance uses HMAC only; the transition is documented and time-bounded.
+- **Reboot:** key + generation survive reboot (durable secret store); in-flight codes still verify.
+- **Secret/log/export protection:** the plaintext code is never persisted or logged after delivery; the HMAC key never leaves the appliance.
+- **Doc/comment alignment:** correct the stale "argon2id" comment in migration `0008` so code, migration, and docs all state the **same** algorithm (keyed HMAC).
+
+### 4d. Social Stub safety (production must refuse the Stub)
+The social-auth Stub provider (`internal/social/stub.go`) is **test-only**. Phase 1B requires:
+- The **Stub is disabled/refused in production mode** — a production build/flag must not select the Stub.
+- The production social flag **cannot enable** unless a **real configured `social_oauth_providers` row passes startup validation** (client id/secret/redirect present, provider implemented — today only Google).
+- **No fake social success response** is ever returned in production.
+- **Negative tests** prove production **refuses** the Stub (flag-on + Stub-only ⇒ social remains unavailable, not a fake success).
+
 ---
 
 ## 5. Dark & feature-flag rollout
@@ -166,7 +228,7 @@ Phase 1B changes **no** guest behavior on delivery. Flags:
 Rollout stages (each gated; no auto-promotion):
 1. **Gate P:** least-privilege roles created + verified (§2).
 2. Application code deployed with **all `iam_v2` paths OFF** (pure legacy behavior; zero `iam_v2` guest-path access).
-3. **Dark shadow evaluation** (explicitly defined, safe): scd computes the `iam_v2` auth_context + would-grant in parallel with the legacy decision, **writes nothing guest-visible**, compares, emits divergence metrics. (Whether shadow may write ephemeral `iam_v2.auth_contexts`/`devices` in production is **PO decision D1** — default recommendation: **no production `iam_v2` writes in 1B**; shadow is compute-only/rolled-back.)
+3. **Dark evaluation, ZERO production `iam_v2` writes (D1 — RESOLVED/REJECTED shadow writes).** Phase 1B permits **no** production write to `iam_v2` — **including writes inside a transaction that is later rolled back** (rejected: sequences, external side effects, or other non-transactional behavior may survive, and it may cross the first-production-write boundary). Production Phase 1B permits **only**: application deployment with all IAM-v2 flags OFF; **no IAM-v2 repository execution on guest requests**; optional **read-only** schema/version/connection health checks; and **no** credential/device/principal/auth-context/entitlement/session/audit row written to `iam_v2`. All functional IAM-v2 write-path testing is **scratch/test only**.
 4. **No guest-visible decision** is ever taken from `iam_v2` in Phase 1B.
 5. **Controlled internal test path:** a synthetic tenant/site (or a maintenance flag limited to an operator test MAC) exercises the full `iam_v2` path end-to-end in a scratch/test DB, and in production only via an explicitly bounded internal test that touches no real guest.
 6. **Product-Owner acceptance** before any guest-visible activation (which is the cutover, ladder step 11 — separate approval).
@@ -218,7 +280,7 @@ Workstreams (each: repo/package, files, APIs, domain services, persistence, port
 - **W1 — `iam_v2` data-access layer.** New package `data-plane/internal/iamv2/` (repositories for principals/identities/accounts/vouchers/auth_contexts/devices/entitlements/sessions; wraps `pgxpool`; `search_path`-safe, schema-qualified `iam_v2.*`). No behavior change until flags on. Tests: repo unit tests in scratch.
 - **W2 — Credential validators (iam_v2).** Voucher (HMAC blind-index + AEAD), account (argon2id verifier reused from `credentials_handlers.go`), OTP identity resolver, social identity resolver (issuer-scoped). APIs: internal `scd` service methods behind per-method flags. Reuse existing throttles/lockouts. Tests: B1–B5 in scratch.
 - **W3 — auth_context service.** Creates `iam_v2.auth_contexts` (method↔subject), TTL/one-time; device upsert (`devices`, `device_network_appearances`). Tests: B6, method↔subject coherence.
-- **W4 — session/entitlement engine adapter (shadow).** Bridges to `reserve_device_slot`/`ingest_sample`/`close_session`/entitlement guard; computes would-grant; **production shadow = compute + compare + rolled-back tx** (no durable write) unless D1 approves. Tests: A-series device/capacity/idempotency reuse + B3/B4 attach-to-live-entitlement in scratch.
+- **W4 — session/entitlement engine adapter interface (scratch-tested only; D3).** Implements the **adapter interface** required by the future session-after-grant path (bridges to `reserve_device_slot`/`ingest_sample`/`close_session`/entitlement guard). **Production performs ZERO `iam_v2` writes (D1)** — no rolled-back-transaction shadow. Real acquisition, zero-cost purchase creation, entitlement creation, and `iam_v2` session issuance are **DEFERRED TO PHASE 2 / FULL-DOMAIN** — not Phase 1B. Tests (scratch only): A-series device/capacity/idempotency reuse + the credential/principal/device/auth-context portions of B3/B4; the entitlement/session portions of B3/B4 are deferred.
 - **W5 — Feature-flag & kill-switch infra.** Config-file-first flags (default OFF), per-method + master; startup validation; audited changes; `/api/auth-methods` continues to reflect **legacy** availability while dark. Tests: flags-OFF non-regression; kill-switch.
 - **W6 — Observability.** Metrics/logs/audit/correlation IDs; shadow-divergence metric; role-connection health; no PII (§11).
 - **W7 — Portal wiring (portald).** No structural change; ensure the socket contract and error envelopes are unchanged; add nothing guest-visible. (Portald remains DB-less.)
@@ -297,8 +359,10 @@ Classification: **[IMPL]** implementation acceptance (scratch/test); **[DARK]** 
 | F3 | zero unauthorized `iam_v2` access in production (no guest-path `iam_v2` read/write while dark) | [DARK] |
 | B1 | voucher HMAC redemption, single-use enforced (scratch) | [IMPL] |
 | B2 | voucher reveal/export re-auth + audit + CSV formula-injection guard + last4 default | [IMPL] |
-| B3 | account attaches to its **live** entitlement (never fresh quota per login); assigned package follows-current-then-pins | [IMPL] |
-| B4 | OTP/social: same verified factor on a new MAC → same tenant-wide principal + same per-site live entitlement; issuer-scoped social; **MAC never an owner** | [IMPL] |
+| B3a | account **credential validation** (argon2id, lockout, generic error) | [IMPL] |
+| B3b | account **attaches to its live entitlement** (never fresh quota per login); assigned package follows-current-then-pins | **[DEFER] — DEFERRED TO PHASE 2 / FULL-DOMAIN ACCEPTANCE** (needs real entitlement/session; no complete B3 PASS in 1B) |
+| B4a | OTP/social **principal/identity resolution**: same verified factor on a new MAC → same tenant-wide `guest_principal`; issuer-scoped social; **MAC never an owner** | [IMPL] |
+| B4b | OTP/social same-per-site **live entitlement** attach | **[DEFER] — DEFERRED TO PHASE 2 / FULL-DOMAIN ACCEPTANCE** (needs real entitlement/session; no complete B4 PASS in 1B) |
 | B5 | lockouts, layered throttles, generic errors, one-time password reveal | [IMPL] |
 | B6 | auth_contexts one-time/TTL; method↔subject coherence (PMS context without stay rejected, etc.) | [IMPL] |
 | S1 | device slot: over-limit reject; same-device reconnect no slot burn (`reserve_device_slot`) | [IMPL] |
@@ -340,13 +404,13 @@ Aligns with Phase-1A §7a/§11 (Phase 1B = steps 7–10, before cutover at 11+).
 
 > **PROPOSED Product-Owner Phase-1B implementation authorization (for a later message):**
 >
-> "APPROVED — implement Phase 1B (credential/portal integration, DARK) end-to-end in one controlled execution, per `docs/architecture/StayConnect-IAM-Phase1B-Plan.md`.
+> "APPROVED — implement Phase 1B (credential/identity/auth-context, **DARK**) end-to-end in one controlled execution, per `docs/architecture/StayConnect-IAM-Phase1B-Plan.md`.
 >
-> **Authorized:** create least-privilege site-DB roles (`svc_scd/edged/acctd/netd`, `iam_v2_migrator`) + grants + per-service 0600 DSN env files, and move those services off superuser `stayconnect` (Gate P), with negative-permission acceptance; implement W0–W9 (iam_v2 data-access, voucher/account/OTP/social validators, auth_context service, shadow session/entitlement adapter, feature flags default OFF, observability) in `data-plane/`; run full [IMPL] acceptance in a disposable scratch DB; deploy to production with **all flags OFF**; run [DARK] acceptance (roles, flags-OFF non-regression, zero unauthorized iam_v2 access, guest-plane non-regression, secret/PII scan); back up before changes; sync docs + regenerate export packs; run `tools/validate-project-state.sh` (repository + extracted-pack) → `ZERO_STALE_LEFTOVERS = PASS`.
+> **Authorized:** **Gate P** — create the least-privilege site-DB roles and **de-superuser ALL site-DB runtime services** (`scd`, `edged`, `acctd`, `netd`) using the exact grant matrix in `Phase1B-Privilege-Matrix.md` (**production service roles receive ZERO `iam_v2` DML**; PUBLIC zero; no service can write `iam_v2`), a non-runtime migration-executor model (NOLOGIN owner + NOLOGIN migrator + time-limited audited `migrate_exec`; **no permanent `stayconnect` superuser dependency**), per-service 0600 DSN env files, credential rotation, and negative-permission acceptance; remove the unused `iam_v2_svc_portald`/`iam_v2_svc_hoteladm` skeleton roles. Implement W0–W9 in `data-plane/` (iam_v2 data-access, voucher/account/OTP/social validators, auth_context service, the session-after-grant **adapter interface**, **durable local-Postgres throttling** incl. the minimal `public.auth_throttle_buckets` amendment, **keyed-HMAC OTP secret**, deployment-controlled local flags default OFF, observability); **IAM-v2 functional tests run in scratch ONLY**; deploy to production with **all flags OFF** and performing **ZERO `iam_v2` writes** (no rolled-back-tx shadow; read-only health checks only); run [DARK] acceptance (roles/negative permissions, flags-OFF non-regression, **zero `iam_v2` writes**, guest-plane non-regression, production refuses the social Stub, secret/PII scan, reboot persistence of durable throttling); back up before changes; sync docs + regenerate all export packs; run `tools/validate-project-state.sh` (repository + extracted-pack) → `ZERO_STALE_LEFTOVERS = PASS`.
 >
-> **NOT authorized (hard stops):** guest-visible activation or `search_path`/DSN cutover to iam_v2; any guest-visible decision taken from iam_v2; dual-read/dual-write; production credential-data migration into iam_v2; PMS/post-stay/paid auth; packages/quotes/pricing/purchases-as-commerce (Phase 2); financial posting (Phase 4); programmatic reversal; network/HA/deployment-topology change; Central changes; legacy cleanup; Phase 2 or any later Phase.
+> **NOT authorized (hard stops):** guest-visible activation or authority switch or `search_path`/DSN cutover to iam_v2; any guest-visible decision from iam_v2; **any production `iam_v2` write** (incl. rolled-back transactions); real production **purchase/entitlement/`iam_v2` session** issuance; dual-read/dual-write; production credential-data migration into iam_v2; **any `iam_v2` DML grant to a runtime service role**; PMS/post-stay/paid auth; packages/quotes/pricing/purchases-as-commerce (Phase 2); financial posting (Phase 4); programmatic reversal; network/HA/deployment-topology change; Central changes; legacy cleanup; Phase 2 or any later Phase.
 >
-> **Acceptance:** Phase-1B matrix [IMPL]+[DARK] green; **zero guest-visible change**; services non-superuser; no secret/PII leak. **Rollback:** flags OFF and/or DSN revert to legacy; roles are additive/droppable; no data divergence (no iam_v2 guest writes). **Do not continue to Phase 2.** Stop and report on any negative-permission failure, guest-visible regression, unauthorized iam_v2 write, secret/PII leak, or acceptance red."
+> **Acceptance:** Phase-1B matrix [IMPL] (scratch) + [DARK] (production) green; **zero guest-visible change**; **zero production `iam_v2` writes**; services non-superuser with exact grants; durable throttling + keyed-HMAC OTP proven; production refuses Stub; no secret/PII leak. **Rollback:** flags OFF and/or DSN revert to legacy (break-glass superuser only as time-bounded audited Gate-P rollback, removed after); roles additive/droppable; no data divergence (no iam_v2 writes at all). **Do NOT continue if durable throttling, OTP secret design, the exact grant matrix, or Gate-P acceptance fails. Do not continue to Phase 2. No cutover.** Stop and report on any negative-permission failure, guest-visible regression, any production iam_v2 write, secret/PII leak, production Stub acceptance, or acceptance red."
 
 This blueprint is a **proposal only** and is not executed by the current planning task.
 
@@ -362,22 +426,24 @@ This blueprint is a **proposal only** and is not executed by the current plannin
 
 ---
 
-## 16. Risks, assumptions & unresolved Product-Owner decisions
+## 16. Risks, assumptions & Product-Owner decisions (D1–D9 — BINDING, RESOLVED)
 
-**Assumptions:** Phase-1A baseline holds (verified); the 49-table schema is sufficient for the four in-scope methods (verified — no new DDL); legacy code paths remain the sole production authority throughout Phase 1B.
+**Assumptions:** Phase-1A baseline holds (verified, and Phase 1A is now formally accepted/CLOSED at its DARK maturity); the 49-table schema is sufficient for the four in-scope methods (verified — no new `iam_v2` DDL); legacy code paths remain the **sole** production authority throughout Phase 1B.
 
-**Unresolved PO decisions (D#) — must be answered before/at implementation approval:**
-- **D1 — Production shadow writes.** May the dark `iam_v2` path write ephemeral rows (`auth_contexts`/`devices`) in production, or is production strictly compute-only/no-iam_v2-write with functional proof only in scratch? *Recommendation: no production iam_v2 writes in 1B (safest; avoids the first-production-write boundary).* 
-- **D2 — Transient challenge tables.** Keep `auth_otps`/`social_oauth_states`/`pms_attempts` in `public` (recommended — ephemeral, not identity) or model them in `iam_v2` (needs new objects → contract change)?
-- **D3 — Session-after-grant coupling.** A free grant needs a zero-amount `purchase` (`entitlements.purchase_id NOT NULL UNIQUE`), which is Phase-2 territory. Confirm Phase 1B stops at *shadow* would-grant (no real entitlement/session in iam_v2), with real entitlement/session creation deferred to cutover/Phase 2.
-- **D4 — Throttle durability.** Login/OTP throttles are in-process (reset on restart, not shared). Harden to durable/shared storage in 1B, or accept as-is and defer?
-- **D5 — Flag storage.** Config-file flags (recommended) vs a DB-backed flag table (adds one object).
-- **D6 — Role scope.** Move all edge services (scd/edged/acctd/netd) off superuser in Gate P, or only the iam_v2-touching ones (scd/edged/acctd)? Note `iam_v2_svc_hoteladm`/`iam_v2_svc_portald` skeleton roles are unused (hotel-admin has no DB; portald has no DB) — recommend removing/renaming them. *Recommendation: de-superuser all edge site-DB services; drop the unused skeleton roles.*
-- **D7 — OTP hashing intent.** Migration `0008` comment says "argon2id" but code uses `SHA-256(salt|code)` (deliberate for short-TTL OTP). Confirm expected behavior; align comment.
-- **D8 — Paid access.** Absent in legacy; out of Phase 1B. Confirm it is **not** in Phase 1B scope (net-new; future).
-- **D9 — Phase 1A acceptance recording.** The current authorization treats Phase 1A as accepted/closed, but the acceptance record/handoff still say "pending final PO acceptance." Per the instruction to not change Phase 1A acceptance status, this plan left it unchanged — PO should confirm whether to formally record Phase 1A acceptance.
+**Resolved Product-Owner decisions (binding — no longer open questions):**
+| D# | Decision (binding) |
+|---|---|
+| **D1** | **REJECTED — zero production `iam_v2` writes**, including writes inside a later-rolled-back transaction. Production 1B = deploy with all IAM-v2 flags OFF; no IAM-v2 repository execution on guest requests; optional read-only schema/version/connection health checks only; no credential/device/principal/auth-context/entitlement/session/audit row in `iam_v2`. All IAM-v2 write-path testing is scratch/test only. (§5, §8-W4) |
+| **D2** | **APPROVED WITH GOVERNANCE.** `public.auth_otps` + `public.social_oauth_states` **RETAINED — OPERATIONAL TRANSIENT STATE** (short-TTL challenge state, not an identity source of truth): scd-owned, TTL/retention bounded (OTP ≤10 min; social state ≤10 min), single-use, must **not** be treated as durable guest identity, with a **review/removal/rehome gate before the later complete-domain cutover** so they never become an unacknowledged hybrid IAM authority. `pms_attempts` = Phase 3. (§4a) |
+| **D3** | **CONFIRMED.** Phase 1B does **no** real production entitlement/session issuance via `iam_v2`. It implements + scratch-tests credential validation, principal/identity resolution, device resolution, one-time `auth_context`, and the session-after-grant **adapter interface** only. Real acquisition / zero-cost purchase / entitlement / `iam_v2` session belong to Phase 2 / full-domain. The entitlement/session portions of B3/B4 are `DEFERRED TO PHASE 2 / FULL-DOMAIN ACCEPTANCE` — **no complete B3/B4 PASS is claimed in Phase 1B**. (§12) |
+| **D4** | **DURABLE, LOCAL-FIRST THROTTLING REQUIRED before any activation** — chosen design in §4b (local Postgres bucket table, the proven `pms_attempts`/`guest_accounts.locked_until` pattern; no Redis/new dependency). Requires the minimal `public.auth_throttle_buckets` amendment, identified as part of the Phase-1B implementation authorization. (§4b) |
+| **D5** | **Deployment-controlled local config/env flags** — master + per-method, default OFF, startup validation, **no DB-backed flag table**, no Hotel-Admin/Central activation UI in 1B, changed only by an explicit deployment action recorded in deployment/audit evidence, all OFF in production 1B. Guest-visible flag governance is later/separate. (§5) |
+| **D6** | **De-superuser all site-DB runtime services** (`scd`, `edged`, `acctd`, `netd`); `portald` + Hotel Admin get **no** DB role (no direct connection); **remove/retire** the unused `iam_v2_svc_portald`/`iam_v2_svc_hoteladm` skeleton roles; central-DB roles are a **separate future security-hardening item**. (§2) |
+| **D7** | OTP verification design = **keyed HMAC with a dedicated protected local key + constant-time compare** (Argon2id fallback if HMAC key-management cannot be safely supported); generation-pinned, rotatable; correct the stale "argon2id" comment in migration `0008` to match. Full design in §4c. (§4c) |
+| **D8** | **CONFIRMED OUT OF PHASE 1B** — no guest paid access implemented or implied. |
+| **D9** | Phase 1A is **formally Product-Owner ACCEPTED and CLOSED** at `SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER`. Phase 1B planning is the current activity. All status carriers corrected accordingly. |
 
-**Risks:** voucher plaintext→HMAC/AEAD re-encode transform (cutover) is non-trivial and must be proven in scratch; social defaults to Stub unless a real provider row (only Google impl real); OTP delivery/social exchange are online-dependent; in-process throttles don't survive restart/HA; empty production `iam_v2` means production 1B is flags-OFF-only (functional proof is scratch-bound) — this must be communicated so no one expects a live iam_v2 credential check in 1B.
+**Risks & stop conditions:** voucher plaintext→HMAC/AEAD re-encode transform (a cutover-time step) is non-trivial and must be proven in scratch; social defaults to Stub unless a real provider row (only Google impl real) — production must **refuse** Stub (§4d); OTP delivery / social exchange are online-dependent; empty production `iam_v2` means production 1B is **flags-OFF-only** (functional proof is scratch-bound — no live `iam_v2` credential check in 1B). **Halt + report (do not proceed) on:** any negative-permission failure; any guest-visible regression while dark; **any production `iam_v2` write**; failure of durable-throttle, OTP-secret, exact-grants, or Gate-P acceptance; any secret/PII leak; production accepting the social Stub.
 
 ---
 

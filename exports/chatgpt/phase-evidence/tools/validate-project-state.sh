@@ -81,10 +81,13 @@ declare -a RULES=(
   'implementation requires separate approval of the Phase 1A plan|implementation stays gated on .{0,30}approval of the Phase 1A plan|Phase 1A \*\*implementation\*\* requires separate approval::Phase 1A implementation gated on plan approval (current)'
   'until the Phase 1A plan is (separately )?approved|Forbidden Until the Phase 1A Plan Is Approved::Phase 1A blocked until plan approval (current)'
   'implemented and verified in scratch only|Phase-?1A is .{0,30}in scratch only|in scratch only[ ,.-]+not created on live::Phase 1A described as scratch-only'
-  'not created on live|not yet created (on|in) (live|production)|live-dark .{0,20}(is|remains) (future|to be created|not yet)|separate approval to create dark .?iam_v2.? in live::live-dark creation described as still-future'
+  'not created on live|not yet created (on|in) (live|production)|live-dark .{0,20}(is|remains) (future|to be created|not yet)|separate approval to create dark .?iam_v2.? in live|Phase.?1A[^.]{0,40}live-dark creation[^.]{0,20}(future|still a future)::live-dark creation described as still-future'
   'READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL::stale approval-status label'
+  'Phase.?1A[^.]{0,30}(is )?the current phase|the current phase[^.]{0,30}Phase.?1A::Phase 1A described as the current phase (stale — Phase 1B planning is current)'
+  'pending final Product-Owner acceptance|Phase.?1A[^.]{0,40}pending[^.]{0,25}acceptance::Phase 1A described as pending acceptance (stale — accepted/closed)'
+  'Phase.?1A[^.]{0,40}NOT live accepted|Phase.?1A[^.]{0,40}not live accepted::Phase 1A described as not-live-accepted at its authorized maturity (stale — accepted/closed)'
 )
-ARCH='blue/green|standby site db|whole-database swap|whole-db swap|swap-back'  # superseded standby/whole-DB terms
+ARCH='blue/green|standby site db|standby .{0,15}stayconnect_site|with a standby|whole-database swap|whole-db swap|swap-back'  # superseded standby/whole-DB terms
 
 echo "== 1. no stale Phase-1A current-status phrases (per-line historical excused) =="
 declare -a SCAN=("$PACK"); have_repo && SCAN+=("$DOCS")
