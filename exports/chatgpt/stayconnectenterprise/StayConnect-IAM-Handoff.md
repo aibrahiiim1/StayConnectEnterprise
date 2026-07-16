@@ -2,11 +2,11 @@
 
 Operational handoff for a future agent or new session working on the Internet Access Management (IAM) redesign. The authoritative design is [StayConnect-IAM-Phase0-Contract.md](StayConnect-IAM-Phase0-Contract.md); the live spike record is [Protel-FIAS-Phase0-Spike.md](Protel-FIAS-Phase0-Spike.md).
 
-**Authoritative documentation baseline:** contract `ffe2200`, synchronized handoff `6b4721d`; **FINAL status set 2026-07-16** (see the FINAL commit in git log).
+**Current synchronized documentation baseline:** `79bf3e8`. *(Historical Phase-0 finalization provenance only: contract `ffe2200`, synchronized handoff `6b4721d` — the historical FINAL-approval baseline, not the current one.)*
 
 ## Current Stage
 
-**Phase 0 — FINAL and CLOSED (2026-07-16, Product-Owner approved).** Protocol/architecture validation is complete and merged; the contract is approved FINAL. **Next authorized activity: Phase 1A planning only.**
+**Phase 0 — FINAL and CLOSED (2026-07-16, Product-Owner approved).** Protocol/architecture validation is complete and merged; the contract is approved FINAL. The Phase 1A plan is complete (`READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`). **Next authorized activity: Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan.** Phase 1A is NOT started; plan approval authorizes scratch/test implementation only — live-database creation and cutover need later separate approvals.
 
 ## Current Status
 

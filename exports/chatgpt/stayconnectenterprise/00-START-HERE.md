@@ -69,7 +69,7 @@ Build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL s
 
 ## 9. Next authorized action
 
-**Obtain explicit Product-Owner approval of the Phase 1A plan** (`READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`). Only then may Phase 1A implementation (the dark `iam_v2` schema + engine) begin. Nothing downstream (1B credential/portal cutover, packages, stay domain, financial posting execution) is authorized yet.
+**Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan** (`READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`). Phase 1A is **NOT started**; no implementation is currently authorized. **Plan approval authorizes scratch/test implementation only** (a dedicated disposable database) — **live-database `iam_v2` creation and cutover need later, separate Product-Owner approvals** (see the 14-step approval ladder in the plan §7a/§11). Nothing downstream (1B credential/portal cutover, packages, stay domain, financial posting execution) is authorized yet.
 
 ## 10. Forbidden until explicitly approved
 

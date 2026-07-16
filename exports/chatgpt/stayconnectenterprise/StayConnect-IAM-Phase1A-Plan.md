@@ -262,18 +262,24 @@ Build completion does **not** promote the new IAM model. Promotion is a separate
 - **Admin (edged `/edge/v1`) paths:** revisioned CRUD for plans, packages (+rules/tiers/mappings), PMS interfaces (+revisions/secret rotation/lifecycle), guest accounts, voucher batches (reveal/export), devices, entitlements, stays, purchases/settlements/postings (+review), reports, audit.
 - **Reads/reporting/audit** used by operators and telemetry.
 
-**Corrected cutover gates, in order:**
+**Phase-1A approval ladder (identical in §7a and §11), in order:**
 
-1. **Phase 1A implementation approval** (this plan).
-2. **Phase 1A dark-schema acceptance** (§10 passes in a test DB and dark in the appliance).
-3. **Phase 1B vertical-slice implementation** (one credential path end-to-end against `iam_v2`, dark / flagged) — a **confidence milestone only; it does NOT authorize cutover.**
-4. **End-to-end and reboot-persistence acceptance** of that slice.
-5. **Full IAM path completion** — every path in the list above implemented and dark.
-6. **Full-domain acceptance** — the complete B/C/D/E/F acceptance matrix (contract §19) green against `iam_v2`, dark, including reboot/offline/idempotency.
-7. **Explicit Product-Owner cutover approval.**
-8. **Atomic complete-domain routing switch** — **all** IAM services' `search_path`/DSN flipped to `iam_v2` **together**, in one change window; no other subsystem, DB, or network change.
-9. **Observability + bounded rollback window** — old schema/code stay live; rollback is governed by the **two rollback boundaries** below (a routing flip-back is safe **only before the first production write** to `iam_v2`).
-10. **Separate legacy-cleanup approval** — only after the evidence-based cleanup gates (§9 decision C) does a later phase drop the old IAM tables/code.
+1. **Product-Owner approval of the Phase-1A plan.**
+2. **Phase-1A implementation in a dedicated disposable scratch/test database only.**
+3. **Full scratch A-series acceptance** (§10, dark).
+4. **Product-Owner review of scratch evidence.**
+5. **Separate explicit Product-Owner authorization to create dark `iam_v2` in the live `stayconnect_site` database.**
+6. **Live-dark schema creation and acceptance** — no service reads/writes, no DSN or `search_path` change.
+7. **Phase 1B vertical-slice implementation, dark/flagged** (one credential path end-to-end) — a confidence milestone; it does **not** authorize cutover.
+8. **Vertical-slice acceptance** (end-to-end + reboot persistence).
+9. **Full IAM path implementation** (every path in §7a, dark).
+10. **Full-domain acceptance** — the complete B/C/D/E/F matrix (contract §19) green against `iam_v2`, dark, incl. reboot/offline/idempotency.
+11. **Explicit Product-Owner cutover approval.**
+12. **Atomic complete-domain cutover** — all IAM services' `search_path`/DSN flipped to `iam_v2` together, one window; no other subsystem/DB/network change.
+13. **Post-cutover observability and no-return / rollback governance** (§7a two rollback boundaries).
+14. **Separate legacy-cleanup approval** — only after the evidence-based cleanup gates (§9 decision C).
+
+**Every transition requires its own stated Product-Owner approval:** approving the Phase-1A plan does **not** authorize any live-database change; scratch acceptance does **not** automatically authorize live-dark creation; live-dark creation does **not** authorize Phase 1B or cutover.
 
 **Mechanism:** cutover is an **atomic, all-IAM-services** `search_path`/DSN change (every IAM service from the old tables to `iam_v2` in one window). There is **no whole-database swap** and **no per-service/per-flow partial routing**. **Phase 1A executes none of this.**
 
@@ -374,9 +380,24 @@ Run in a **clean test database** and then dark in the appliance's `iam_v2` schem
 ## 11. Build target & authorization boundary
 
 - **Phase 1A implementation is still NOT approved.** This document is a plan awaiting Product-Owner implementation approval.
-- **Recommended first implementation target: a dedicated scratch/test database.** The full A-series (§10) runs there first, dark.
-- **Creating the dark `iam_v2` schema in the live `stayconnect_site` database requires a later, separate Product-Owner authorization** — granted only **after** scratch A-series acceptance. Approving this plan does **not** authorize touching the live database.
-- **Cutover to `iam_v2` is a still-later, separately approved event** (§7a), an atomic complete-domain switch governed by the two rollback boundaries. Approving Phase 1A implementation does **not** authorize cutover.
-- Escalation ladder (each a distinct approval): **plan approval → scratch build/acceptance → live dark `iam_v2` creation → 1B vertical slice → full IAM path completion + full-domain acceptance → cutover approval → atomic cutover → legacy-cleanup approval.**
+- **Recommended first implementation target: a dedicated disposable scratch/test database.** The full A-series (§10) runs there first, dark.
+- **Every transition requires its own stated Product-Owner approval:** approving the Phase-1A plan does **not** authorize any live-database change; scratch acceptance does **not** automatically authorize live-dark creation; live-dark creation does **not** authorize Phase 1B or cutover.
+
+**Phase-1A approval ladder (identical in §7a and §11), in order:**
+
+1. **Product-Owner approval of the Phase-1A plan.**
+2. **Phase-1A implementation in a dedicated disposable scratch/test database only.**
+3. **Full scratch A-series acceptance** (§10, dark).
+4. **Product-Owner review of scratch evidence.**
+5. **Separate explicit Product-Owner authorization to create dark `iam_v2` in the live `stayconnect_site` database.**
+6. **Live-dark schema creation and acceptance** — no service reads/writes, no DSN or `search_path` change.
+7. **Phase 1B vertical-slice implementation, dark/flagged** (one credential path end-to-end) — a confidence milestone; it does **not** authorize cutover.
+8. **Vertical-slice acceptance** (end-to-end + reboot persistence).
+9. **Full IAM path implementation** (every path in §7a, dark).
+10. **Full-domain acceptance** — the complete B/C/D/E/F matrix (contract §19) green against `iam_v2`, dark, incl. reboot/offline/idempotency.
+11. **Explicit Product-Owner cutover approval.**
+12. **Atomic complete-domain cutover** — all IAM services' `search_path`/DSN flipped to `iam_v2` together, one window; no other subsystem/DB/network change.
+13. **Post-cutover observability and no-return / rollback governance** (§7a two rollback boundaries).
+14. **Separate legacy-cleanup approval** — only after the evidence-based cleanup gates (§9 decision C).
 
 **End of Phase 1A plan.** Status **READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL** — planning only; Phase 1A is not implemented or in progress. No migrations, code, providers, services, config, deployment, or PMS traffic are authorized by this document.

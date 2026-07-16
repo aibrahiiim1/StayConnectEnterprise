@@ -9,10 +9,11 @@
 | Approval | **Explicit Product-Owner FINAL approval** |
 | Approving role | **Product Owner** |
 | Approval date | **2026-07-16** |
-| Authoritative baseline | contract `ffe2200`, synchronized handoff `6b4721d` |
+| Current synchronized documentation baseline | **`79bf3e8`** |
+| Historical Phase-0 finalization provenance | contract `ffe2200`, synchronized handoff `6b4721d` (retained as the historical FINAL-approval baseline only) |
 | FINAL documentation commit | *established by the commit that carries this status change* |
 | Phase 0 | **CLOSED** |
-| Next authorized activity | **Phase 1A planning** (see [StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md)) — planning only; implementation remains unauthorized until the Phase 1A plan is separately approved |
+| Next authorized activity | **Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan** (see [StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md), status `READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`). Phase 1A is **NOT started**; no implementation is currently authorized. Plan approval authorizes **scratch/test implementation only**; live-database `iam_v2` creation and cutover need later, separate approvals |
 
 The Phase-0 **protocol and architecture** validation is complete on already-measured live evidence (see §9b/§9c and `docs/spikes/Protel-FIAS-Phase0-Spike.md`) and is now **FINAL**. The approved architecture, DDL, invariants, limitations, measured FIAS findings, and acceptance requirements below are unchanged by this finalization — only the status advanced.
 
@@ -765,7 +766,7 @@ The earlier closure plan incorrectly gated Phase-0 finalization on product behav
 | 3C | Posting-Engine UNKNOWN safety | Posting Engine, `posting_attempts`/`posting_attempt_events`, `pms_interface_pnumber_seq`, Manual-Review workflow | transmitted request → **UNKNOWN** when no matching `PA`; **no auto-retry**; **no auto-allocated second `P#`**; Manual-Review; external Folio reconciliation; audited `CONFIRM_POSTED`/`RETRY_APPROVED`/`ABANDON`; **no duplicate charge** |
 | 3D | Checkout & Checkout-Grace | Stay/Event persistence, Checkout handler, Post-Stay profile, Checkout-Grace Purchase+Entitlement, session reassignment, accounting cutoff, idempotent event processing | healthy-link checkout; link-down checkout; delayed checkout; **stale-cache refusal**; reconnect+resync; **mandatory Checkout Grace** (no intentional disconnect/re-auth); **effective-checkout-timestamp** accounting split; **repeated-checkout idempotency** |
 
-**Finalization — DONE (2026-07-16):** the product owner gave **explicit FINAL approval** of this corrected contract; Phase 0 is **FINAL and CLOSED**. Tier-2 (per-property) and Tier-3 (post-implementation) items were **not** finalization blockers — they are, respectively, deployment prerequisites and binding acceptance requirements that carry forward past FINAL. Deferred limitations are listed in §9d. Next authorized activity: **Phase 1A planning** (implementation still gated on separate approval of the Phase 1A plan).
+**Finalization — DONE (2026-07-16):** the product owner gave **explicit FINAL approval** of this corrected contract; Phase 0 is **FINAL and CLOSED**. Tier-2 (per-property) and Tier-3 (post-implementation) items were **not** finalization blockers — they are, respectively, deployment prerequisites and binding acceptance requirements that carry forward past FINAL. Deferred limitations are listed in §9d. Next authorized activity: **Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan** (the plan is complete, status `READY_FOR_PRODUCT_OWNER_IMPLEMENTATION_APPROVAL`). Phase 1A is NOT started; plan approval authorizes scratch/test implementation only — live-database creation and cutover need later separate approvals.
 
 ### 9d. Deferred limitations (carried past Phase-0 FINAL)
 
@@ -853,4 +854,4 @@ Phases 2 and 3 are parallelizable after 1B. The detailed **Phase 1A execution pl
 
 ---
 
-**End of contract.** Status: **FINAL — Phase 0 CLOSED** (Product-Owner approval, 2026-07-16). The Phase-0 protocol/architecture validation is complete and merged (§9b/§9c). Per-property financial onboarding (§9c Tier 2, incl. Aqua Club) and post-implementation acceptance (§9c Tier 3 / §9d) carry forward as deployment prerequisites and binding acceptance requirements, not finalization blockers. **Next authorized activity: Phase 1A planning only** ([StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md)); no implementation, migration, connector, UI, config, or deployment work is authorized until the Phase 1A plan is separately approved.
+**End of contract.** Status: **FINAL — Phase 0 CLOSED** (Product-Owner approval, 2026-07-16). The Phase-0 protocol/architecture validation is complete and merged (§9b/§9c). Per-property financial onboarding (§9c Tier 2, incl. Aqua Club) and post-implementation acceptance (§9c Tier 3 / §9d) carry forward as deployment prerequisites and binding acceptance requirements, not finalization blockers. **Next authorized activity: Product-Owner review and explicit approval or rejection of the Phase 1A implementation plan** ([StayConnect-IAM-Phase1A-Plan.md](StayConnect-IAM-Phase1A-Plan.md)). Phase 1A is NOT started; no implementation, migration, connector, UI, config, or deployment work is authorized. Plan approval authorizes scratch/test implementation only; live-database creation and cutover need later separate approvals.
