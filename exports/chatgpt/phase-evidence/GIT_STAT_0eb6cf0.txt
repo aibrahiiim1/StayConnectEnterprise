@@ -1,4 +1,0 @@
-commit 0eb6cf070c95996abfd210ac653416ede3ffc77b
-Date:   Fri Jul 17 18:10:01 2026 +0300
-
-    Stage 1/Â§1: correct Phase 1B plan contradictions + structural enforcement
