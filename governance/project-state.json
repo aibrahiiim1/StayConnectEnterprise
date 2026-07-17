@@ -15,7 +15,7 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "1B",
-  "current_activity": "PHASE_1B_IMPLEMENTATION_IN_PROGRESS",
+  "current_activity": "PHASE_1B_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE",
   "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B implementation Product-Owner AUTHORIZED and IN_PROGRESS (W0 complete; Gate P + durable throttle + keyed-HMAC OTP + dark IAM-v2 code + live-dark verification pending); DARK — no production iam_v2 use, no cutover; legacy public-schema auth remains the sole production authority",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -24,18 +24,52 @@
     "cutover_authorized": false,
     "production_iam_v2_access_authorized": false,
     "legacy_production_authoritative": true,
-    "stage": "GATE_P_PENDING (preflight next)"
+    "stage": "LIVE_DARK_DEPLOYED (Gate-P least-privilege cutover + migrations 0007/0008 + keybootstrap OTP gen 1 + pinned dark scd build; reboot-validated). PENDING Product-Owner acceptance (T0010).",
+    "gate_p_least_privilege_cutover": true,
+    "dark_features_enabled": false,
+    "transition_id": "T0010",
+    "transition_accepted": false
   },
   "phases": {
-    "0":  { "status": "FINAL_CLOSED",       "title": "IAM redesign architecture contract + live PMS validation", "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)." },
-    "1A": { "status": "ACCEPTED_AND_CLOSED","title": "Clean-slate IAM core + persistence (iam_v2)",              "maturity": "ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER" },
-    "1B": { "status": "IN_PROGRESS",        "title": "Credential/identity/auth-context (DARK)",                   "maturity": "IMPLEMENTATION_AUTHORIZED_IN_PROGRESS — W0 complete; Gate P/throttle/OTP/dark-code/live-dark pending; DARK, no production iam_v2 use" },
-    "2":  { "status": "NOT_STARTED",        "title": "Packages, revisions, rules, tiers, quotes; free purchases; portal package selection" },
-    "3":  { "status": "NOT_STARTED",        "title": "Stay domain: interfaces/revisions/routing, STRICT resolution, stays/sharers/folios, checkout grace" },
-    "4":  { "status": "NOT_STARTED",        "title": "Financial: settlements, postings + outbox, payments, recovery, manual review" },
-    "5":  { "status": "NOT_STARTED",        "title": "Post-stay (PIN re-auth); cross-PMS transfer workflow" },
-    "6":  { "status": "NOT_STARTED",        "title": "Guest device self-service; optional AGGREGATE_ONLINE_TIME" },
-    "7":  { "status": "NOT_STARTED",        "title": "Cleanup, final docs, full-system re-acceptance" }
+    "0": {
+      "status": "FINAL_CLOSED",
+      "title": "IAM redesign architecture contract + live PMS validation",
+      "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)."
+    },
+    "1A": {
+      "status": "ACCEPTED_AND_CLOSED",
+      "title": "Clean-slate IAM core + persistence (iam_v2)",
+      "maturity": "ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER"
+    },
+    "1B": {
+      "status": "IN_PROGRESS",
+      "title": "Credential/identity/auth-context (DARK)",
+      "maturity": "IMPLEMENTATION_AUTHORIZED_IN_PROGRESS — W0 complete; Gate P/throttle/OTP/dark-code/live-dark pending; DARK, no production iam_v2 use"
+    },
+    "2": {
+      "status": "NOT_STARTED",
+      "title": "Packages, revisions, rules, tiers, quotes; free purchases; portal package selection"
+    },
+    "3": {
+      "status": "NOT_STARTED",
+      "title": "Stay domain: interfaces/revisions/routing, STRICT resolution, stays/sharers/folios, checkout grace"
+    },
+    "4": {
+      "status": "NOT_STARTED",
+      "title": "Financial: settlements, postings + outbox, payments, recovery, manual review"
+    },
+    "5": {
+      "status": "NOT_STARTED",
+      "title": "Post-stay (PIN re-auth); cross-PMS transfer workflow"
+    },
+    "6": {
+      "status": "NOT_STARTED",
+      "title": "Guest device self-service; optional AGGREGATE_ONLINE_TIME"
+    },
+    "7": {
+      "status": "NOT_STARTED",
+      "title": "Cleanup, final docs, full-system re-acceptance"
+    }
   },
   "completed_milestones": [
     "Phase 0 architecture contract FINAL/CLOSED (2026-07-16)",
@@ -47,20 +81,44 @@
     "Phase 1B implementation plan drafted (planning-only) + corrected against binding decisions D1-D9"
   ],
   "verified_evidence": [
-    { "id": "PROD_LIVE_DARK_V2", "path": "iam_v2_scratch/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt", "kind": "read-only production re-verification", "authoritative": true },
-    { "id": "PHASE1A_ACCEPTANCE", "path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md", "kind": "live-dark acceptance record (18/18)", "authoritative": true },
-    { "id": "FIAS_SPIKE", "path": "docs/spikes/Protel-FIAS-Phase0-Spike.md", "kind": "live FIAS spike + Gate 3A PASS", "authoritative": true }
+    {
+      "id": "PROD_LIVE_DARK_V2",
+      "path": "iam_v2_scratch/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt",
+      "kind": "read-only production re-verification",
+      "authoritative": true
+    },
+    {
+      "id": "PHASE1A_ACCEPTANCE",
+      "path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md",
+      "kind": "live-dark acceptance record (18/18)",
+      "authoritative": true
+    },
+    {
+      "id": "FIAS_SPIKE",
+      "path": "docs/spikes/Protel-FIAS-Phase0-Spike.md",
+      "kind": "live FIAS spike + Gate 3A PASS",
+      "authoritative": true
+    },
+    {
+      "id": "PHASE1B_ACCEPTANCE",
+      "path": "docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md",
+      "kind": "Phase 1B live-dark acceptance record (Gate-P cutover, reboot-validated; PENDING PO acceptance)",
+      "authoritative": true
+    }
   ],
   "authoritative_source_commits": {
     "phase1a_live_dark_creation": "22a2e15",
-    "phase1a_migrations": "b2a715f"
+    "phase1a_migrations": "b2a715f",
+    "phase1b_live_dark": "b87a59b"
   },
   "live_scratch_dark_cutover": {
     "live_iam_v2_in_use": false,
     "scratch_verified": true,
     "offline_real_schema_verified": true,
     "dark_created_in_production": true,
-    "cutover_performed": false
+    "cutover_performed": false,
+    "gate_p_least_privilege_cutover": true,
+    "runtime_security_infra_deployed_dark": true
   },
   "database_schema_state": {
     "production_db": "stayconnect_site",
@@ -70,9 +128,13 @@
     "public_structural_fingerprint": "d86ca4c6",
     "iam_v2_dark": true,
     "iam_v2_data_migration": false,
-    "standby": "none (an isolated second-site TEST db stayconnect_site_b exists for isolation tests; NOT a replication standby)"
+    "standby": "none (an isolated second-site TEST db stayconnect_site_b exists for isolation tests; NOT a replication standby)",
+    "migrations_0007_0008_applied": true,
+    "auth_throttle_buckets_present": true,
+    "otp_hmac_key_generations_present": true,
+    "otp_active_generation": 1
   },
-  "service_routing_state": "Legacy public-schema IAM is the SOLE production authority. No service is routed to iam_v2. No DSN/search_path change. All site-DB services currently connect as superuser stayconnect (Gate-P prerequisite to eliminate).",
+  "service_routing_state": "Legacy public-schema IAM is the SOLE production authority. No service is routed to iam_v2. All four site-DB daemons (scd/edged/acctd/netd) now connect under dedicated LEAST-PRIVILEGE Gate-P roles (svc_scd/svc_edged/svc_acctd/svc_netd; NOSUPERUSER, SCRAM) instead of superuser stayconnect — reboot-validated 2026-07-18. All new auth features (durable throttle, keyed-HMAC OTP, IAM-v2) remain OFF (dark).",
   "pms_financial_state": "FIAS lookup-only in production; posting engine is a future component (Phase 4). folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
@@ -91,9 +153,9 @@
     "PMS/FIAS traffic; financial posting; programmatic reversal",
     "HA/topology change; Central changes; legacy IAM removal; guest paid access; Stripe activation"
   ],
-  "next_authorized_action": "complete Phase 1B execution and live-dark verification",
+  "next_authorized_action": "Product-Owner review/acceptance of Phase 1B live-dark deployment (transition T0010). Enabling any dark feature (throttle/OTP-HMAC/IAM-v2) or any iam_v2 cutover is a SEPARATE, explicitly-authorized step.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
   "privilege_matrix": "docs/architecture/Phase1B-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D10",
-  "latest_transition_id": "T0009"
+  "latest_transition_id": "T0010"
 }
