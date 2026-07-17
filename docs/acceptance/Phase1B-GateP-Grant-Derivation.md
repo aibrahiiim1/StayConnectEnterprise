@@ -125,12 +125,36 @@ backup (`gatep-dryrun.sh`), then everything was destroyed. **Production untouche
 - Rollback (`gatep-rollback.sql`, fail-closed on active-conn/ownership, `DROP OWNED BY` + `DROP ROLE`)
   → all `svc_*` removed; **reapply** recreates all 4 cleanly.
 
-**Cluster-global role hygiene:** PostgreSQL roles are cluster-global. The harness now drops the
-disposable DB **before** the roles (else `DROP ROLE` fails while grants remain and leaks roles) and
-refuses to run if `svc_*` roles already exist. A first-run leak of 4 inert roles was detected and
-removed; the corrected run leaves `leaked_svc=0`.
+**Cluster-global role hygiene:** PostgreSQL roles are cluster-global. An earlier harness ran roles in
+the *live* cluster and (before the fix) leaked 4 **inert** roles (no service used them; removed;
+final leaked count zero). The harness was then reworked to use a **genuinely disposable separate
+PostgreSQL/TimescaleDB container** (`timescale/timescaledb:2.16.1-pg16`, matching the appliance) so
+cluster-global roles are created only inside the throwaway cluster, which is destroyed afterward. The
+live `stayconnect-pg` cluster is never used for the dry run (`live_svc=0`, `disp_left=0` after runs).
 
-**§3 Exact grant derivation + Gate-P execution artifacts + isolated validation = PASS.**
+### Harness correctness rework (exit-status based) — final `GATEP_DRYRUN = PASS`
+Every SQL execution is judged by the direct **psql exit status** (`ON_ERROR_STOP=1`), never by grepping
+output. A **self-test** proves intentionally-invalid SQL fails the executor, and a meta mode
+(`--selftest-must-fail`) proves the harness reports `GATEP_DRYRUN = FAIL` with a **non-zero process exit
+(META_EXIT=1)**. This surfaced and fixed check bugs the old grep-harness masked: a `NOT NULL` test-data
+error (INSERT permission was fine — now proven via authoritative `has_table_privilege`); the
+`information_schema` visibility quirk (zero-iam_v2 + idempotency now use `has_*_privilege` /
+`pg_catalog`); a readiness race with the image's `timescaledb-tune` restart (now requires 6 consecutive
+`pg_isready`); and an `ORDER BY 2` on a single-column projection. Effective iam_v2 function execution is
+measured **gated by schema USAGE** (the PUBLIC-default `EXECUTE` is unreachable with `iam_v2` USAGE
+denied; Phase-1A iam_v2 ACLs are not altered).
+
+**Final proofs (disposable cluster, GATEP_DRYRUN = PASS / exit 0):** stable-ready cluster; restore
+42+49; self-test (invalid SQL fails); roles.sql; SCRAM password set (stored `SCRAM-SHA-256`, no
+cleartext; DSN 0600); reconciler grants.sql; all `svc_*` NOSUPERUSER/NOCREATEDB/NOCREATEROLE/NOBYPASSRLS;
+**zero EFFECTIVE iam_v2 (table=0, schema-usage=0, effective-function=0)**; default-privilege denial;
+negatives DENIED (as the role); positive SELECTs (as the role) + write privileges (authoritative
+`has_table_privilege`); **idempotent** (59 role-table grant rows, matrix sha `ae08e7fc…`); rollback →
+roles removed; reapply → 4 roles; disposable cluster destroyed.
+
+Updated `gatep-dryrun.sh` SHA-256: `fe5efcb732e77cef1c9ef0bbf66e5ad867b4d1e6fa5d8d7297e1fc54998d5268`.
+
+**§3 Exact grant derivation + Gate-P execution artifacts + disposable-cluster isolated validation = PASS.**
 
 ## Remaining (deeper positive proof, at Gate-P live dry-run)
 Running each full service **binary/integration suite** under its `svc_*` DSN is the deepest positive
