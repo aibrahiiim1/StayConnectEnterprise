@@ -70,6 +70,29 @@ GRANT SELECT,INSERT,UPDATE       ON public.edge_offline_packages   TO svc_scd; -
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.auth_throttle_buckets   TO svc_scd; -- durable throttle (0007): read/increment/block/cleanup; no sequence (composite PK)
 GRANT SELECT                      ON public.otp_hmac_key_generations TO svc_scd; -- OTP gen metadata READ only (0008); creation/rotation are operational/migration-only
 
+-- svc_scd — secure cross-tenant transition (reconcileTenantOwnership) + tenant/site mirror seed.
+-- On EVERY boot scd runs hasForeignTenantData() which SELECTs EXISTS across tenants/sites and every
+-- tenant-owned table; on a confirmed cross-tenant reassignment it purges (DELETE) all foreign-owned
+-- rows in one transaction. It also upserts the tenant/site mirror rows (INSERT .. ON CONFLICT DO
+-- UPDATE). These grants make scd the owner of that reconciliation without touching iam_v2.
+GRANT UPDATE                      ON public.sites                   TO svc_scd; -- mirror upsert ON CONFLICT DO UPDATE (already had S/I/D)
+GRANT SELECT,DELETE               ON public.accounting_records      TO svc_scd; -- cross-tenant detect + purge
+GRANT SELECT,DELETE               ON public.stripe_events           TO svc_scd; -- cross-tenant detect + purge
+GRANT SELECT,DELETE               ON public.payments                TO svc_scd; -- cross-tenant detect + purge
+GRANT SELECT,DELETE               ON public.voucher_batches         TO svc_scd; -- cross-tenant detect + purge
+GRANT SELECT,DELETE               ON public.stripe_accounts         TO svc_scd; -- cross-tenant detect + purge
+GRANT SELECT,DELETE               ON public.operator_roles          TO svc_scd; -- cross-tenant detect + purge
+GRANT SELECT,DELETE               ON public.operators               TO svc_scd; -- cross-tenant detect + purge
+GRANT DELETE                      ON public.guest_accounts          TO svc_scd; -- cross-tenant purge (already had S/U)
+GRANT DELETE                      ON public.pms_attempts            TO svc_scd; -- cross-tenant purge (already had S/I)
+GRANT DELETE                      ON public.vouchers                TO svc_scd; -- cross-tenant purge (already had S/U)
+GRANT DELETE                      ON public.walled_garden_rules     TO svc_scd; -- cross-tenant purge (already had S)
+GRANT DELETE                      ON public.notification_providers  TO svc_scd; -- cross-tenant purge (already had S/U)
+GRANT DELETE                      ON public.pms_providers           TO svc_scd; -- cross-tenant purge (already had S/U)
+GRANT DELETE                      ON public.social_oauth_providers  TO svc_scd; -- cross-tenant purge (already had S)
+GRANT DELETE                      ON public.tenant_effective_limits TO svc_scd; -- cross-tenant purge (already had S/I/U)
+GRANT DELETE                      ON public.ticket_templates        TO svc_scd; -- cross-tenant purge (already had S)
+
 -- ---------------------------------------------------------------------------
 -- svc_edged : admin API / Hotel-Admin backend (broad CRUD on config)
 -- ---------------------------------------------------------------------------
