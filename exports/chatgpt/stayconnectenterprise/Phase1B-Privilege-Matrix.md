@@ -31,7 +31,7 @@ Legend: S=SELECT I=INSERT U=UPDATE D=DELETE · seq=sequence USAGE/SELECT · fn=f
 | social_oauth_providers | all | ✓ | – | – | – | – | provider config read (`socialloader`) | no write |
 | pms_providers | all | ✓ | – | – | – | – | provider config read (`pmsloader`) | no write |
 | pms_attempts | all | ✓ | ✓ | – | – | ✓ | per-room/IP lockout (`pmsguard/guard.go`) | no UPDATE/DELETE |
-| tenants | auth_methods (read) | ✓ | – | – | – | – | `tenantcfg.Load` reads `auth_methods` | no write to tenants |
+| tenants | all | ✓ | ✓ | ✓ | ✓ | – | `tenantcfg.Load` reads `auth_methods`; mirror seed + cross-tenant purge (`assignment.go`, `tenant_transition.go`) | — |
 | tenant_effective_limits | all | ✓ | – | ✓ | – | – | concurrency/limits (`edge.go`) | — |
 | guest_networks | all | ✓ | – | – | – | – | IP→network mapping (`netcontext.go`) | no write |
 | notification_providers | all | ✓ | – | – | – | – | mail/sms provider (`notifyloader`) | — |
@@ -41,12 +41,31 @@ Legend: S=SELECT I=INSERT U=UPDATE D=DELETE · seq=sequence USAGE/SELECT · fn=f
 | sync_checkpoints | all | ✓ | ✓ | ✓ | – | ✓ | sync watermarks | — |
 | audit_log | all | – | ✓ | – | – | ✓ | audit inserts | no SELECT/UPDATE/DELETE |
 | appliances | all | ✓ | ✓ | ✓ | – | ✓ | enrollment/claim (`applianceauth`) — evidenced INSERT+upsert | no DELETE |
-| sites | all | ✓ | ✓ | – | ✓ | ✓ | local signed-assignment provisioning (`assignment`) | evidenced INSERT+DELETE |
+| sites | all | ✓ | ✓ | ✓ | ✓ | ✓ | mirror upsert `ON CONFLICT DO UPDATE` (`assignment.go`) + cross-tenant purge | UPDATE live-derived 2026-07-18 |
 | edge_executed_commands | all | ✓ | ✓ | – | – | ✓ | command channel (`commands`) | no UPDATE/DELETE |
 | edge_installed_updates | all | ✓ | ✓ | – | – | ✓ | updates (`updates`) — SELECT count + INSERT | no UPDATE/DELETE |
 | edge_offline_packages | all | ✓ | ✓ | ✓ | – | ✓ | offline packages (`updates`) — INSERT+UPDATE | no DELETE |
 | auth_throttle_buckets *(new, §4b)* | all | ✓ | ✓ | ✓ | ✓ | – | durable throttling atomic upsert + cleanup | scope_key stores hash only |
 | **iam_v2.* (any)** | — | – | – | – | – | – | **ZERO — production svc_scd has no iam_v2 grant** | svc_scd cannot SELECT/INSERT any iam_v2 table (isolated-validated 2026-07-17: 0 iam_v2 grants) |
+
+#### 1.1a Cross-tenant reconciliation (`reconcileTenantOwnership` / `tenant_transition.go`)
+
+On **every boot** scd runs `hasForeignTenantData()`, which `SELECT EXISTS` across `tenants`, `sites`
+and all 20 tenant-owned tables; on a confirmed cross-tenant reassignment it purges (`DELETE`) every
+foreign-owned row in one transaction, repoints `guest_networks` (UPDATE), clears `sync_outbox`
+(DELETE) and writes an `audit_log` row (INSERT). These grants make scd the owner of that
+reconciliation and add **no** iam_v2 privilege. Live-derived during the 2026-07-18 Gate-P cutover
+(the fixed-allowlist dry run had not exercised the boot-time detection path, so it initially held the
+appliance fail-closed under `svc_scd`).
+
+| Tables | added grant | why |
+|---|---|---|
+| accounting_records, stripe_events, payments, voucher_batches, stripe_accounts, operator_roles, operators | **SELECT + DELETE** | detection reads + cross-tenant purge |
+| guest_accounts, pms_attempts, vouchers, walled_garden_rules, notification_providers, pms_providers, social_oauth_providers, tenant_effective_limits, ticket_templates | **DELETE** (already had SELECT) | cross-tenant purge |
+| sites | **UPDATE** (already had S/I/D) | mirror upsert `ON CONFLICT DO UPDATE` |
+
+> Note: `accounting_records` is INSERT-only for `svc_acctd` (append-only ledger) but SELECT+DELETE for
+> `svc_scd` (cross-tenant purge owner) — different services, different least-privilege needs.
 
 ### 1.2 `svc_acctd` — accounting
 | Table | S | I | U | D | seq | reason | negative test |

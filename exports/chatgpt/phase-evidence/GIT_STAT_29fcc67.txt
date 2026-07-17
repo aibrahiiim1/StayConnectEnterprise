@@ -1,0 +1,4 @@
+commit 29fcc67ccd0f1c92974a67517aec9603a2b0ed47
+Date:   Sat Jul 18 00:25:44 2026 +0300
+
+    Governance: render updated state blocks into carrier docs (T0010 live-dark)
