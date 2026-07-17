@@ -10,6 +10,36 @@
 
 \set ON_ERROR_STOP on
 
+-- ===========================================================================
+-- RECONCILER PREAMBLE — converge each svc_* role to EXACTLY the allowlist below.
+-- Fail closed on unexpected ownership or membership; revoke everything first so a
+-- re-run is idempotent and any pre-existing excess privilege is removed.
+-- ===========================================================================
+DO $$
+DECLARE r text; n int; who text;
+BEGIN
+  FOREACH r IN ARRAY ARRAY['svc_scd','svc_edged','svc_acctd','svc_netd'] LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=r) THEN CONTINUE; END IF;
+    -- fail closed: runtime role must own NO object
+    SELECT count(*) INTO n FROM pg_class WHERE relowner=(SELECT oid FROM pg_roles WHERE rolname=r);
+    IF n > 0 THEN RAISE EXCEPTION 'GATE-P BLOCKER: role % owns % object(s) — must own nothing', r, n; END IF;
+    -- fail closed: runtime role must be a member of NO role
+    SELECT string_agg(g.rolname, ',') INTO who
+      FROM pg_auth_members m JOIN pg_roles g ON g.oid=m.roleid
+      WHERE m.member=(SELECT oid FROM pg_roles WHERE rolname=r);
+    IF who IS NOT NULL THEN RAISE EXCEPTION 'GATE-P BLOCKER: role % has unexpected membership: %', r, who; END IF;
+    -- revoke everything (public + iam_v2) so the grants below are the exact effective set
+    EXECUTE format('REVOKE ALL PRIVILEGES ON ALL TABLES    IN SCHEMA public FROM %I', r);
+    EXECUTE format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM %I', r);
+    EXECUTE format('REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public FROM %I', r);
+    EXECUTE format('REVOKE ALL ON SCHEMA public FROM %I', r);
+    EXECUTE format('REVOKE ALL PRIVILEGES ON ALL TABLES    IN SCHEMA iam_v2 FROM %I', r);
+    EXECUTE format('REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA iam_v2 FROM %I', r);
+    EXECUTE format('REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA iam_v2 FROM %I', r);
+    EXECUTE format('REVOKE ALL ON SCHEMA iam_v2 FROM %I', r);
+  END LOOP;
+END $$;
+
 -- ---------------------------------------------------------------------------
 -- svc_scd : session / auth / credential / appliance-lifecycle
 -- ---------------------------------------------------------------------------
@@ -129,7 +159,17 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------
--- Deny future owner-created objects to service roles by default.
+-- Deny future objects to service roles by default — explicit FOR ROLE per owner
+-- that creates public objects (current owner `stayconnect`; `site_migrator` when present).
 -- ---------------------------------------------------------------------------
-ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM svc_scd, svc_edged, svc_acctd, svc_netd;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM svc_scd, svc_edged, svc_acctd, svc_netd;
+DO $$
+DECLARE o text;
+BEGIN
+  FOREACH o IN ARRAY ARRAY['stayconnect','site_migrator'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname=o) THEN
+      EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON TABLES    FROM svc_scd, svc_edged, svc_acctd, svc_netd', o);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON SEQUENCES FROM svc_scd, svc_edged, svc_acctd, svc_netd', o);
+      EXECUTE format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM svc_scd, svc_edged, svc_acctd, svc_netd', o);
+    END IF;
+  END LOOP;
+END $$;

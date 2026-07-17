@@ -427,7 +427,7 @@ def _build_planning_pack(src_commit):
         _w(os.path.join(PLAN_PACK,dst),t)
     flat_copy("docs/architecture/StayConnect-IAM-Phase1B-Plan.md","StayConnect-IAM-Phase1B-Plan.md")
     flat_copy("docs/architecture/Phase1B-Privilege-Matrix.md","Phase1B-Privilege-Matrix.md")
-    _w(os.path.join(PLAN_PACK,"MANIFEST.md"),f"# Phase 1B Planning Evidence Pack — MANIFEST\n\n- SOURCE_COMMIT: `{src_commit}`\n- Status: PLANNING ONLY — Phase 1B NOT implemented. Phase 1A accepted/closed.\n- Contents: Phase 1B plan (matrices+blueprint), privilege matrix, three code inventories, blueprint extract, README, two checksum lists.\n- Next authorized action: Product-Owner approval or rejection of the corrected Phase 1B plan.\n")
+    _w(os.path.join(PLAN_PACK,"MANIFEST.md"),f"# Phase 1B Plan Evidence Pack — MANIFEST\n\n- SOURCE_COMMIT: `{src_commit}`\n- Status: Phase 1B implementation is Product-Owner AUTHORIZED and IN_PROGRESS (decision D10). Phase 1A accepted/closed. Legacy production auth authoritative; zero production iam_v2 runtime access; PR #2 not merged; no cutover.\n- Contents: Phase 1B plan (matrices+blueprint), privilege matrix, three code inventories, blueprint extract, README, two checksum lists.\n- Next authorized action: complete Phase 1B execution and live-dark verification, then Product-Owner acceptance or rejection.\n")
     cited=["docs/architecture/StayConnect-IAM-Phase1B-Plan.md","docs/architecture/Phase1B-Privilege-Matrix.md","data-plane/internal/pmsguard/guard.go",
       "data-plane/cmd/scd/main.go","data-plane/cmd/acctd/main.go","data-plane/cmd/edged/main.go","data-plane/cmd/netd/main.go","data-plane/cmd/portald/main.go",
       "data-plane/internal/session/session.go","data-plane/internal/voucher/voucher.go","data-plane/internal/otp/otp.go",
