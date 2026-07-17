@@ -1,0 +1,15 @@
+{
+  "transition_id": "T0008",
+  "seq": 8,
+  "timestamp": "2026-07-17T00:00:00Z",
+  "previous_state": { "phase": "1B", "activity": "PHASE_1B_PLAN_CORRECTION_PENDING_APPROVAL", "phase_status": "PLANNING" },
+  "new_state": { "phase": "1B", "activity": "GOVERNANCE_GITHUB_DELIVERY_RULE_PENDING_APPROVAL", "phase_status": "PLANNING" },
+  "phase_affected": "1B",
+  "po_authorization_ref": "PO permanent GitHub execution/reporting/delivery operating rule (governance/documentation only)",
+  "scope_allowed": "Add the permanent GitHub execution/delivery rule to authoritative instructions, decision register, artifact registry, validators, changed-file-manifest generator and final-report template; commit and push on a dedicated governance branch and open one PR.",
+  "scope_prohibited": "No Phase 1B implementation; no DB/DDL/DML/role/DSN/service/PMS/FIAS/network/deployment/config change; repository is the sole authoritative source.",
+  "evidence_files": ["docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md", "docs/templates/PHASE_FINAL_REPORT_TEMPLATE.md", "tools/generate-change-manifest.py", "governance/decision-register.json", "governance/artifact-registry.json", "governance/project-state.json"],
+  "source_commit": "external",
+  "acceptance_verdict": "GOVERNANCE-ONLY — permanent GitHub execution/delivery rule applied; pending Product-Owner approval",
+  "next_action": "Product-Owner approval of this permanent GitHub execution and delivery operating rule and the corrected Phase 1B plan"
+}

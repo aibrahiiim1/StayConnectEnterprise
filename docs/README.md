@@ -75,6 +75,20 @@ an unpacked appliance to live, licensed guest WiFi and covers day-2 operations.
 - [LICENSING_AND_ENTITLEMENTS.md](LICENSING_AND_ENTITLEMENTS.md)
 - [TERMINAL_DELIVERY_SECURITY_EVIDENCE.md](TERMINAL_DELIVERY_SECURITY_EVIDENCE.md)
 
+## 9. Governance & delivery (permanent rules)
+
+- [GITHUB_EXECUTION_AND_DELIVERY_RULE.md](GITHUB_EXECUTION_AND_DELIVERY_RULE.md) — the
+  GitHub repo `aibrahiiim1/StayConnectEnterprise` is the only authoritative source;
+  one Phase per branch + one PR; every final report embeds the deterministic
+  changed-file manifest.
+- [ZERO_STALE_LEFTOVERS_RULE.md](ZERO_STALE_LEFTOVERS_RULE.md) — no stale/contradictory
+  artifact may survive a completed task; enforced by `tools/project-state.py` and
+  `tools/validate-project-state.sh`.
+- [templates/PHASE_FINAL_REPORT_TEMPLATE.md](templates/PHASE_FINAL_REPORT_TEMPLATE.md) —
+  mandatory 20-section final-report structure.
+- Machine-readable current state: `governance/project-state.json` (validate with
+  `make governance-validate`); changed-file manifest: `tools/generate-change-manifest.py`.
+
 ---
 
 ## Architecture & deep-dive references
