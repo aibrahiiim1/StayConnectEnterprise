@@ -121,7 +121,7 @@ if have_repo; then
     [ -f "$f" ] && grep -q "$MAT" "$f" && ok "maturity present in repo $(basename "$f")" || fail "maturity missing in repo $(basename "$f")"
   done
 else skipped "repo docs maturity presence"; fi
-na=$(grep -rhoiE "next authorized (activity|action|step)[^.]*" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" 2>/dev/null | grep -ciE "acceptance of Phase 1A|acceptance of the live-dark|review of the live-dark|review of the Phase 1A LIVE-DARK|approval or rejection of the .{0,30}Phase 1B plan|approval of the .{0,30}Phase 1B (implementation )?plan|approval[^.]{0,90}Phase 1B plan|complete Phase 1B execution")
+na=$(grep -rhoiE "next authorized (activity|action|step)[^.]*" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" 2>/dev/null | grep -ciE "acceptance of Phase 1A|acceptance of the live-dark|review of the live-dark|review of the Phase 1A LIVE-DARK|approval or rejection of the .{0,30}Phase 1B plan|approval of the .{0,30}Phase 1B (implementation )?plan|approval[^.]{0,90}Phase 1B plan|complete Phase 1B execution|(review/?)?acceptance of[^.]{0,40}Phase 1B live-dark")
 [ "$na" -ge 2 ] && ok "next-action consistent" || fail "next-action inconsistent ($na)"
 
 echo "== 3. conflicting maturity WITHIN a single pack file =="
