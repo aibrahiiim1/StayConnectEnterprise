@@ -1,0 +1,21 @@
+{
+  "transition_id": "T0010",
+  "seq": 10,
+  "timestamp": "2026-07-18T00:00:00Z",
+  "previous_state": { "phase": "1B", "activity": "PHASE_1B_IMPLEMENTATION_IN_PROGRESS", "phase_status": "IN_PROGRESS" },
+  "new_state": { "phase": "1B", "activity": "PHASE_1B_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE", "phase_status": "IN_PROGRESS" },
+  "phase_affected": "1B",
+  "po_authorization_ref": "Product-Owner explicit authorization of complete Phase 1B execution (D10, 2026-07-17); no cutover/acceptance authorization granted",
+  "scope_allowed": "Completed the approved Phase 1B execution in verified stages: durable throttle (D4), keyed-HMAC OTP (D7), local key lifecycle + controlled OTP gen-1 bootstrap, dark IAM-v2 credential/identity/auth-context code (scratch + DB-integration tested), scd wiring (all features OFF by default). Software gate green (build/vet, 16/16 test packages, migration apply/twice/rollback/reapply, Gate-P dry run PASS, dark zero-SQL/stub-refusal/redaction). Live-dark deployment on 172.21.60.23: migrations 0007/0008 applied; throttle + OTP gen-1 keys bootstrapped; Gate-P least-privilege roles created and all four site-DB daemons (scd/edged/acctd/netd) rotated off superuser onto svc_* roles; pinned dark scd build deployed with all features OFF; final reboot re-validated.",
+  "scope_prohibited": "No PR #2 merge; Phase 1B NOT accepted/closed. No cutover; no production iam_v2 reads or writes; no bulk IAM data migration; no Phase 2 or later; no PMS/FIAS or financial traffic; no legacy IAM removal; no guest paid access; no enablement of any dark feature (throttle/OTP-HMAC/IAM-v2). Legacy public-schema authentication remains the sole production authority; iam_v2 stays 49 tables / 0 rows and dark.",
+  "evidence_files": [
+    "docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md",
+    "docs/architecture/Phase1B-Privilege-Matrix.md",
+    "docs/acceptance/Phase1B-GateP-Grant-Derivation.md",
+    "deploy/gatep/gatep-grants.sql",
+    "deploy/gatep/gatep-dryrun.sh"
+  ],
+  "source_commit": "b87a59b",
+  "acceptance_verdict": "PENDING_PO_ACCEPTANCE — Phase 1B live-dark deployment complete and reboot-validated; awaiting Product-Owner acceptance. Not accepted/closed.",
+  "next_action": "Product-Owner review/acceptance of Phase 1B live-dark deployment (T0010); dark-feature enablement and any iam_v2 cutover are separate, explicitly-authorized steps."
+}
