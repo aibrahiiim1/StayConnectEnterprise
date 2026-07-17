@@ -1,0 +1,4 @@
+commit e82d176e38701348163dbabba2af1cff9dd7bf36
+Date:   Fri Jul 17 15:32:37 2026 +0300
+
+    W0: add .gitattributes LF policy (GH-LF-CONSISTENCY) for cross-platform checksum stability
