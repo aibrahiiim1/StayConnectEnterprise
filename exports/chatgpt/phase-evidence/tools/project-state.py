@@ -65,11 +65,12 @@ def git(*a):
 def render_block(st):
     ph = st["phases"]
     def s(k): return ph[k]["status"]
+    p1b_note = "(DARK — implementation in progress; no production iam_v2 use)" if s('1B') == "IN_PROGRESS" else "(NOT implemented)"
     lines = [BEGIN,
         f"<!-- source: governance/project-state.json (schema {st['schema_version']}) @ transition {st['latest_transition_id']} -->",
         f"**Current phase:** {st['current_phase']} — {ph[st['current_phase']].get('title','')}",
         f"**Current activity:** `{st['current_activity']}`",
-        f"**Phase status:** 0 {s('0')} · 1A **{s('1A')}** (DARK, NOT CUT OVER) · 1B {s('1B')} (NOT implemented) · 2 {s('2')} · 3 {s('3')} · 4 {s('4')} · 5 {s('5')} · 6 {s('6')} · 7 {s('7')}",
+        f"**Phase status:** 0 {s('0')} · 1A **{s('1A')}** (DARK, NOT CUT OVER) · 1B {s('1B')} {p1b_note} · 2 {s('2')} · 3 {s('3')} · 4 {s('4')} · 5 {s('5')} · 6 {s('6')} · 7 {s('7')}",
         f"**Phase 1A maturity:** {ph['1A']['maturity']}",
         f"**iam_v2:** {st['database_schema_state']['iam_v2_tables']} tables, {st['database_schema_state']['iam_v2_rows']} rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.",
         f"**Single next authorized action:** {st['next_authorized_action']}",
@@ -173,7 +174,7 @@ def cmd_validate(deep=True):
     if st.get("current_phase") == "1A": fail("Phase 1A must not be the current phase")
     # exactly one non-closed 'current' phase in {1B..} and it equals current_phase
     p1b = st["phases"].get("1B", {}).get("status")
-    if p1b != "PLANNING": fail(f"Phase 1B status {p1b} != PLANNING (must remain planning / not implemented)")
+    if p1b not in ("PLANNING", "IN_PROGRESS"): fail(f"Phase 1B status {p1b} must be PLANNING or IN_PROGRESS (not accepted/closed/cutover until PO acceptance)")
     if st["live_scratch_dark_cutover"].get("cutover_performed"): fail("cutover_performed must be false")
     if st["live_scratch_dark_cutover"].get("live_iam_v2_in_use"): fail("live_iam_v2_in_use must be false in Phase 1B")
     if st["database_schema_state"].get("iam_v2_data_migration"): fail("iam_v2_data_migration must be false")
