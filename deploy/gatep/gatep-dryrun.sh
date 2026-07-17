@@ -15,6 +15,7 @@ DB="stayconnect_site"
 SU="stayconnect"                                  # superuser inside the disposable cluster
 DSN_OUT="/dev/shm/gatep_dryrun_dsn.$$"
 ROLES=(svc_scd svc_edged svc_acctd svc_netd)
+MIG_DIR="${MIG_DIR:-$HERE/../../data-plane/migrations}"   # 0007/0008 applied into the disposable cluster
 FAIL=0
 ok(){ echo "  ok: $*"; }
 bad(){ echo "  *** FAIL: $*"; FAIL=$((FAIL+1)); }
@@ -56,8 +57,22 @@ cat "$DUMP" | docker exec -i "$CNAME" pg_restore -U "$SU" --no-owner -d "$DB" >/
 docker exec "$CNAME" psql -U "$SU" -d "$DB" -c "SELECT timescaledb_post_restore();" >/dev/null 2>&1
 pub=$(q "select count(*) from information_schema.tables where table_schema='public' and table_type='BASE TABLE'")
 iam=$(q "select count(*) from information_schema.tables where table_schema='iam_v2'")
-[ "$pub" = "42" ] && [ "$iam" = "49" ] && ok "restore 42 public + 49 iam_v2" || bad "restore $pub/$iam"
+# Accept a pre-migration (42) or already-migrated (44) backup; 0007/0008 are applied idempotently below.
+{ [ "$pub" = "42" ] || [ "$pub" = "44" ]; } && [ "$iam" = "49" ] && ok "restore $pub public + 49 iam_v2" || bad "restore $pub/$iam"
 echo "  isolated public fingerprint: $(q "select string_agg(table_name||'.'||column_name||':'||data_type,',' order by table_name,ordinal_position) from information_schema.columns where table_schema='public'" | sha256sum | awk '{print $1}')"
+
+echo "=== apply new migrations 0007 (throttle) + 0008 (OTP keys) idempotently ==="
+step "0007 up" exec_file "$MIG_DIR/0007_auth_throttle_buckets.up.sql"
+step "0008 up" exec_file "$MIG_DIR/0008_otp_hmac_keys.up.sql"
+tb=$(q "select to_regclass('public.auth_throttle_buckets') is not null")
+og=$(q "select to_regclass('public.otp_hmac_key_generations') is not null")
+[ "$tb" = "t" ] && [ "$og" = "t" ] && ok "0007/0008 tables present" || bad "0007/0008 tables missing (tb=$tb og=$og)"
+
+echo "=== bootstrap OTP metadata (generation 1 active) as the OPERATIONAL/superuser role ==="
+# Simulates the deploy-time keybootstrap DB write (svc_scd never does this at runtime).
+exec_sql "insert into public.otp_hmac_key_generations(generation,active,note) values(1,true,'gatep dryrun') on conflict (generation) do nothing;" >/dev/null 2>&1
+oa=$(q "select count(*) from public.otp_hmac_key_generations where active")
+[ "$oa" = "1" ] && ok "exactly one active OTP generation bootstrapped" || bad "active OTP generations = $oa (want 1)"
 
 echo "=== SELF-TEST: intentionally invalid SQL MUST fail the executor ==="
 if exec_sql "SELECT gatep_intentionally_invalid_symbol();"; then bad "self-test: invalid SQL did NOT fail (harness broken)"; else ok "self-test: invalid SQL correctly fails (rc!=0)"; fi
@@ -115,6 +130,34 @@ for t in "svc_scd|audit_log|INSERT" "svc_scd|sessions|UPDATE" "svc_scd|guests|IN
   IFS='|' read -r role tbl verb <<<"$t"
   v=$(q "select has_table_privilege('$role','public.$tbl','$verb')")
   [ "$v" = "t" ] && ok "$role $verb $tbl granted" || bad "$role $verb $tbl NOT granted (got '$v')"
+done
+
+echo "=== NEW-TABLE grants: durable throttle (svc_scd full CRUD) — read/increment/block/cleanup as the role ==="
+SK=$(printf 'a%.0s' $(seq 1 64))   # a valid 64-hex scope_key
+# increment (INSERT ... ON CONFLICT DO UPDATE)
+if asrole svc_scd "insert into public.auth_throttle_buckets(scope_kind,scope_key,method,window_start,window_len_s,attempt_count) values('ip','$SK','account',date_trunc('minute',now()),60,1) on conflict on constraint auth_throttle_buckets_pk do update set attempt_count=public.auth_throttle_buckets.attempt_count+1, updated_at=now()"; then ok "svc_scd throttle increment (insert/upsert)"; else bad "svc_scd throttle increment ($(tail -1 /tmp/gp.out))"; fi
+# read
+if asrole svc_scd "select attempt_count from public.auth_throttle_buckets where scope_kind='ip' and scope_key='$SK'"; then ok "svc_scd throttle read (select)"; else bad "svc_scd throttle read ($(tail -1 /tmp/gp.out))"; fi
+# hard block (update blocked_until)
+if asrole svc_scd "update public.auth_throttle_buckets set blocked_until=now()+interval '15 min' where scope_kind='ip' and scope_key='$SK'"; then ok "svc_scd throttle block (update)"; else bad "svc_scd throttle block ($(tail -1 /tmp/gp.out))"; fi
+# bounded-retention cleanup (delete)
+if asrole svc_scd "delete from public.auth_throttle_buckets where window_start < now()-interval '30 days'"; then ok "svc_scd throttle cleanup (delete)"; else bad "svc_scd throttle cleanup ($(tail -1 /tmp/gp.out))"; fi
+# svc_scd must NOT own the (nonexistent) sequence — composite PK, no serial; nothing to grant. Assert no sequence exists.
+seqn=$(q "select count(*) from pg_class where relkind='S' and relname like 'auth_throttle_buckets%'")
+[ "$seqn" = "0" ] && ok "throttle table has no sequence (composite PK; no sequence grant needed)" || bad "unexpected throttle sequence(s): $seqn"
+
+echo "=== NEW-TABLE grants: OTP metadata (svc_scd SELECT-only) ==="
+if asrole svc_scd "select generation,active from public.otp_hmac_key_generations"; then ok "svc_scd OTP metadata read (select)"; else bad "svc_scd OTP metadata read ($(tail -1 /tmp/gp.out))"; fi
+# writes to otp_hmac_key_generations MUST be denied to svc_scd (creation/rotation are operational only)
+if asrole svc_scd "insert into public.otp_hmac_key_generations(generation,active) values(99,false)"; then bad "svc_scd INSERT otp_hmac_key_generations NOT denied"; else ok "svc_scd INSERT OTP generation denied"; fi
+if asrole svc_scd "update public.otp_hmac_key_generations set active=false where generation=1"; then bad "svc_scd UPDATE otp_hmac_key_generations NOT denied"; else ok "svc_scd UPDATE OTP generation denied"; fi
+if asrole svc_scd "delete from public.otp_hmac_key_generations where generation=1"; then bad "svc_scd DELETE otp_hmac_key_generations NOT denied"; else ok "svc_scd DELETE OTP generation denied"; fi
+# other services get NOTHING on the new tables
+for t in "svc_edged|auth_throttle_buckets" "svc_acctd|auth_throttle_buckets" "svc_netd|auth_throttle_buckets" \
+         "svc_edged|otp_hmac_key_generations" "svc_acctd|otp_hmac_key_generations" "svc_netd|otp_hmac_key_generations"; do
+  IFS='|' read -r role tbl <<<"$t"
+  anyp=$(q "select (has_table_privilege('$role','public.$tbl','SELECT') or has_table_privilege('$role','public.$tbl','INSERT') or has_table_privilege('$role','public.$tbl','UPDATE') or has_table_privilege('$role','public.$tbl','DELETE'))")
+  [ "$anyp" = "f" ] && ok "$role has no privilege on $tbl" || bad "$role UNEXPECTEDLY has privilege on $tbl"
 done
 
 echo "=== idempotency: second grants run -> identical effective grants (authoritative has_table_privilege matrix) ==="
