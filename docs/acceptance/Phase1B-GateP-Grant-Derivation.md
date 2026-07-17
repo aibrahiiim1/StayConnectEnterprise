@@ -33,6 +33,19 @@ table, sequence, function) — and no unnecessary `DELETE`. `PHASE_1B_PRODUCTION
 > that scd owns via `applianceauth`/`commands`/`updates`/`identity` imports). To confirm read-vs-write
 > split per table during isolated validation.
 
+> **Live-cutover correction (2026-07-18):** the DSN rotation on the appliance surfaced a class of
+> grants the fixed-allowlist dry run had not exercised — scd's **every-boot** cross-tenant
+> reconciliation (`reconcileTenantOwnership` / `tenant_transition.go`). `hasForeignTenantData()`
+> `SELECT EXISTS` across `tenants`, `sites` and all 20 tenant-owned tables; the purge path `DELETE`s
+> them. Under `svc_scd` this failed permission-denied on `sites` (UPDATE, from the mirror upsert) and
+> `accounting_records` (SELECT), and — because the detection errored — scd held the appliance
+> **fail-closed**. Corrected grants (committed to `gatep-grants.sql`, live-proven): **SELECT+DELETE**
+> on `accounting_records`, `stripe_events`, `payments`, `voucher_batches`, `stripe_accounts`,
+> `operator_roles`, `operators`; **DELETE** on `guest_accounts`, `pms_attempts`, `vouchers`,
+> `walled_garden_rules`, `notification_providers`, `pms_providers`, `social_oauth_providers`,
+> `tenant_effective_limits`, `ticket_templates`; **UPDATE** on `sites`. No iam_v2 privilege added. The
+> Gate-P dry run now asserts these scd cross-tenant grants so the gap is regression-guarded.
+
 ### `svc_edged` (admin API / Hotel-Admin backend)
 `appliance_boot_convergence`, `appliance_recovery_events`, `appliance_service_health`, `audit_log`,
 `backup_records`, `dhcp_pools`, `dhcp_reservations`, `guest_accounts`, `guest_networks`,
@@ -81,8 +94,10 @@ Reconstructed a disposable DB from the verified backup (`42` public + `49` iam_v
 `svc_*` roles, applied `deploy/gatep/gatep-grants.sql`, then dropped it. **Production untouched.**
 - Role attributes: `svc_scd/edged/acctd/netd` all `NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`. ✓
 - **Zero iam_v2 privileges** for every runtime role (`svc_all_iam_v2_grants = 0`). ✓
-- Negative (all DENIED): `svc_scd→iam_v2.guest_principals`; `svc_scd→public.operators`;
-  `svc_netd→public.guests`; `svc_acctd→public.guest_accounts`; `svc_scd CREATE TABLE`; `svc_scd DROP TABLE`. ✓
+- Negative (all DENIED): `svc_scd→iam_v2.guest_principals`; `svc_scd→public.network_interfaces`
+  (netd-owned; svc_scd previously tested against `operators`, but scd now legitimately reads `operators`
+  for cross-tenant detection — see §1.1a); `svc_netd→public.guests`; `svc_acctd→public.guest_accounts`;
+  `svc_scd CREATE TABLE`; `svc_scd DROP TABLE`. ✓
 - Positive (OK): `svc_scd SELECT sessions`; `svc_acctd SELECT vouchers/ticket_templates`;
   `svc_netd SELECT network_interfaces`; `svc_scd INSERT audit_log` privilege confirmed (failed only on a
   test column typo — a post-permission column-resolution error). ✓

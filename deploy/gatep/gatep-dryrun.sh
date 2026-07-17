@@ -105,7 +105,7 @@ exec_sql "drop table public.gp_probe;" >/dev/null 2>&1
 
 echo "=== negatives (as the role) MUST be denied ==="
 for t in "svc_scd|select 1 from iam_v2.guest_principals limit 1|iam_v2" \
-         "svc_scd|select 1 from operators limit 1|out-of-allowlist" \
+         "svc_scd|select 1 from network_interfaces limit 1|out-of-allowlist" \
          "svc_netd|select 1 from guests limit 1|out-of-allowlist" \
          "svc_scd|create table zz(x int)|CREATE" \
          "svc_scd|drop table sessions|DROP"; do
@@ -131,6 +131,20 @@ for t in "svc_scd|audit_log|INSERT" "svc_scd|sessions|UPDATE" "svc_scd|guests|IN
   v=$(q "select has_table_privilege('$role','public.$tbl','$verb')")
   [ "$v" = "t" ] && ok "$role $verb $tbl granted" || bad "$role $verb $tbl NOT granted (got '$v')"
 done
+
+echo "=== svc_scd cross-tenant reconciliation grants (reconcileTenantOwnership / mirror seed) ==="
+# Regression guard for the 2026-07-18 live-cutover gap: scd's every-boot hasForeignTenantData()
+# SELECTs across these tables and the purge DELETEs them; the mirror seed UPDATEs sites.
+for t in accounting_records stripe_events payments voucher_batches stripe_accounts operator_roles operators; do
+  sd=$(q "select has_table_privilege('svc_scd','public.$t','SELECT')::text||has_table_privilege('svc_scd','public.$t','DELETE')::text")
+  [ "$sd" = "truetrue" ] && ok "svc_scd SELECT+DELETE $t (cross-tenant detect+purge)" || bad "svc_scd $t detect+purge grant = $sd"
+done
+for t in guest_accounts pms_attempts vouchers walled_garden_rules notification_providers pms_providers social_oauth_providers tenant_effective_limits ticket_templates; do
+  d=$(q "select has_table_privilege('svc_scd','public.$t','DELETE')")
+  [ "$d" = "t" ] && ok "svc_scd DELETE $t (cross-tenant purge)" || bad "svc_scd DELETE $t = $d"
+done
+su=$(q "select has_table_privilege('svc_scd','public.sites','UPDATE')")
+[ "$su" = "t" ] && ok "svc_scd UPDATE sites (mirror upsert ON CONFLICT DO UPDATE)" || bad "svc_scd UPDATE sites = $su"
 
 echo "=== NEW-TABLE grants: durable throttle (svc_scd full CRUD) — read/increment/block/cleanup as the role ==="
 SK=$(printf 'a%.0s' $(seq 1 64))   # a valid 64-hex scope_key
