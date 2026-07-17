@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,6 +95,13 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 	// applied before the account lookup so it never leaks whether a username
 	// exists. A throttled attempt creates no session/nft/shaping/accounting.
 	if s.loginRL != nil && !s.loginRL.allow(username, ip.String(), mac.String()) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
+		return
+	}
+	// Durable, restart/reboot-surviving throttle (authoritative; no-op unless enabled). The in-memory
+	// loginLimiter above remains only as an optional fast pre-filter.
+	if ok, retry := s.throttleGuard(r.Context(), "account", ip, mac, strings.ToLower(username)); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
 		return
 	}

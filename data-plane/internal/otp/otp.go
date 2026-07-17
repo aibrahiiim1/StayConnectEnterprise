@@ -1,11 +1,11 @@
 // Package otp issues + verifies one-time codes for guest auth.
 //
 // Design:
-//   * 6-digit numeric codes — easy to type on a phone keypad
-//   * SHA-256(per-row salt + code) — fast verify, no global secret needed,
+//   - 6-digit numeric codes — easy to type on a phone keypad
+//   - SHA-256(per-row salt + code) — fast verify, no global secret needed,
 //     OTP lifetime is short (10m default) and rate-limited so brute-force
 //     resistance comes from the attempt cap, not the hash work-factor
-//   * Code is shown to the user once (returned from Issue) and emailed via
+//   - Code is shown to the user once (returned from Issue) and emailed via
 //     the Mailer. We never log it server-side after delivery.
 package otp
 
@@ -13,7 +13,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -22,6 +21,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
 )
 
 const (
@@ -34,14 +34,14 @@ const (
 
 // Errors surfaced to callers (HTTP handlers map to status codes).
 var (
-	ErrCooldown        = errors.New("otp: cooldown — wait before requesting another code")
-	ErrHourlyCap       = errors.New("otp: too many requests this hour")
-	ErrIPRateLimited   = errors.New("otp: too many requests from your network")
-	ErrNotFound        = errors.New("otp: challenge not found")
-	ErrExpired         = errors.New("otp: code expired")
+	ErrCooldown         = errors.New("otp: cooldown — wait before requesting another code")
+	ErrHourlyCap        = errors.New("otp: too many requests this hour")
+	ErrIPRateLimited    = errors.New("otp: too many requests from your network")
+	ErrNotFound         = errors.New("otp: challenge not found")
+	ErrExpired          = errors.New("otp: code expired")
 	ErrAttemptsExceeded = errors.New("otp: too many wrong attempts")
-	ErrAlreadyUsed     = errors.New("otp: code already used")
-	ErrCodeMismatch    = errors.New("otp: incorrect code")
+	ErrAlreadyUsed      = errors.New("otp: code already used")
+	ErrCodeMismatch     = errors.New("otp: incorrect code")
 )
 
 type IssueParams struct {
@@ -62,7 +62,13 @@ type Issued struct {
 
 // Issue creates an OTP row, returns the plaintext code (for the mailer).
 // Enforces cooldown + hourly cap before generating.
-func Issue(ctx context.Context, db *pgxpool.Pool, p IssueParams) (*Issued, error) {
+//
+// When ring is non-nil (keyed-HMAC / D7 enabled) the stored code_hash is a keyed HMAC over the
+// domain-separated (tenant, channel, destination, challenge id) tuple using the ring's ACTIVE
+// generation, and otp_key_generation records that generation. When ring is nil the legacy
+// per-row salt:sha256(salt|code) format is written and otp_key_generation is left NULL — byte-for-byte
+// the previous behavior (safe against a database that has not yet applied migration 0008).
+func Issue(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, p IssueParams) (*Issued, error) {
 	if p.TenantID == "" || p.Channel == "" || p.Destination == "" {
 		return nil, fmt.Errorf("otp: tenant/channel/destination required")
 	}
@@ -104,12 +110,14 @@ func Issue(ctx context.Context, db *pgxpool.Pool, p IssueParams) (*Issued, error
 	}
 
 	code := generate6()
-	salt := randHex(8)
-	hash := hashOTP(salt, code)
 	expires := time.Now().Add(DefaultTTL)
 
-	var id string
-	err := db.QueryRow(ctx, `
+	if ring == nil {
+		// Legacy path — unchanged: per-row salt:sha256, otp_key_generation stays NULL.
+		salt := randHex(8)
+		hash := hashOTP(salt, code)
+		var id string
+		if err := db.QueryRow(ctx, `
         INSERT INTO auth_otps
           (tenant_id, appliance_id, template_id, channel, destination,
            code_hash, expires_at, max_attempts, ip, user_agent)
@@ -120,11 +128,37 @@ func Issue(ctx context.Context, db *pgxpool.Pool, p IssueParams) (*Issued, error
            NULLIF($10,''))
         RETURNING id
     `, p.TenantID, p.ApplianceID, p.TemplateID, p.Channel, dest,
-		salt+":"+hash, expires, DefaultMaxAttempts, p.IP, p.UserAgent).Scan(&id)
-	if err != nil {
-		return nil, fmt.Errorf("otp: insert: %w", err)
+			salt+":"+hash, expires, DefaultMaxAttempts, p.IP, p.UserAgent).Scan(&id); err != nil {
+			return nil, fmt.Errorf("otp: insert: %w", err)
+		}
+		return &Issued{ChallengeID: id, Code: code, ExpiresAt: expires}, nil
 	}
 
+	// Keyed-HMAC path (D7). The digest binds the challenge id, so the id must be known BEFORE the HMAC
+	// is computed — pre-generate it, then insert with the explicit id and its key generation.
+	var id string
+	if err := db.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
+		return nil, fmt.Errorf("otp: id gen: %w", err)
+	}
+	gen, digestHex, err := ring.Issue(otpkey.Challenge{
+		TenantID: p.TenantID, Channel: p.Channel, Destination: dest, ChallengeID: id,
+	}, code)
+	if err != nil {
+		return nil, fmt.Errorf("otp: hmac issue: %w", err)
+	}
+	if _, err := db.Exec(ctx, `
+        INSERT INTO auth_otps
+          (id, tenant_id, appliance_id, template_id, channel, destination,
+           code_hash, otp_key_generation, expires_at, max_attempts, ip, user_agent)
+        VALUES
+          ($1::uuid, $2, NULLIF($3,'')::uuid, NULLIF($4,'')::uuid, $5, $6,
+           $7, $8, $9, $10,
+           CASE WHEN $11 = '' THEN NULL ELSE $11::inet END,
+           NULLIF($12,''))
+    `, id, p.TenantID, p.ApplianceID, p.TemplateID, p.Channel, dest,
+		digestHex, gen, expires, DefaultMaxAttempts, p.IP, p.UserAgent); err != nil {
+		return nil, fmt.Errorf("otp: insert: %w", err)
+	}
 	return &Issued{ChallengeID: id, Code: code, ExpiresAt: expires}, nil
 }
 
@@ -138,7 +172,13 @@ type Verified struct {
 
 // Verify checks the code, records the attempt, and returns details on success.
 // The row is marked consumed on success — single-use.
-func Verify(ctx context.Context, db *pgxpool.Pool, challengeID, code string) (*Verified, error) {
+//
+// When ring is non-nil (D7) a row that pins a key generation is verified with the keyed HMAC for that
+// exact generation; a row with a NULL generation is a legacy salt:sha256 OTP and is accepted only
+// while unexpired (the compatibility window — no new legacy rows are issued once the ring is on). When
+// ring is nil the legacy verify path runs unchanged (and does not reference otp_key_generation, so it
+// is safe against a pre-0008 database). Attempt-increment and consume are atomic in one FOR UPDATE tx.
+func Verify(ctx context.Context, db *pgxpool.Pool, ring *otpkey.Ring, challengeID, code string) (*Verified, error) {
 	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return nil, err
@@ -151,13 +191,24 @@ func Verify(ctx context.Context, db *pgxpool.Pool, challengeID, code string) (*V
 		expiresAt                                time.Time
 		attempts, maxAttempts                    int
 		consumedAt                               *time.Time
+		keyGen                                   *int
 	)
-	err = tx.QueryRow(ctx, `
+	if ring == nil {
+		// Legacy SELECT — does not reference otp_key_generation (pre-0008 safe).
+		err = tx.QueryRow(ctx, `
         SELECT tenant_id::text, channel, destination, code_hash,
                template_id::text, expires_at, attempts, max_attempts, consumed_at
           FROM auth_otps WHERE id = $1 FOR UPDATE
     `, challengeID).Scan(&tenantID, &channel, &destination, &codeHash,
-		&templateID, &expiresAt, &attempts, &maxAttempts, &consumedAt)
+			&templateID, &expiresAt, &attempts, &maxAttempts, &consumedAt)
+	} else {
+		err = tx.QueryRow(ctx, `
+        SELECT tenant_id::text, channel, destination, code_hash,
+               template_id::text, expires_at, attempts, max_attempts, consumed_at, otp_key_generation
+          FROM auth_otps WHERE id = $1 FOR UPDATE
+    `, challengeID).Scan(&tenantID, &channel, &destination, &codeHash,
+			&templateID, &expiresAt, &attempts, &maxAttempts, &consumedAt, &keyGen)
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -179,13 +230,13 @@ func Verify(ctx context.Context, db *pgxpool.Pool, challengeID, code string) (*V
 		return nil, err
 	}
 
-	parts := strings.SplitN(codeHash, ":", 2)
-	if len(parts) != 2 {
-		return nil, fmt.Errorf("otp: malformed hash")
+	match, err := verifyDigest(ring, keyGen, codeHash, otpkey.Challenge{
+		TenantID: tenantID, Channel: channel, Destination: destination, ChallengeID: challengeID,
+	}, strings.TrimSpace(code))
+	if err != nil {
+		return nil, err
 	}
-	want := parts[1]
-	got := hashOTP(parts[0], strings.TrimSpace(code))
-	if subtle.ConstantTimeCompare([]byte(want), []byte(got)) != 1 {
+	if !match {
 		// Persist the attempt count, then fail.
 		if err := tx.Commit(ctx); err != nil {
 			return nil, err
@@ -228,4 +279,23 @@ func randHex(nBytes int) string {
 func hashOTP(salt, code string) string {
 	h := sha256.Sum256([]byte(salt + "|" + code))
 	return hex.EncodeToString(h[:])
+}
+
+// verifyDigest checks a candidate code against the stored digest. A row that pins a key generation
+// (keyGen != nil) is verified with that exact generation's keyed HMAC and REQUIRES a ring — a pinned
+// row with no ring loaded fails closed (a keyed OTP must never fall back to a weaker check). A row
+// with no pinned generation is a legacy salt:sha256 OTP and is verified with the constant-time legacy
+// comparison (compatibility window for already-issued codes).
+func verifyDigest(ring *otpkey.Ring, keyGen *int, stored string, c otpkey.Challenge, code string) (bool, error) {
+	if keyGen != nil {
+		if ring == nil {
+			return false, fmt.Errorf("otp: row pins key generation %d but no OTP key ring is loaded", *keyGen)
+		}
+		return ring.Verify(*keyGen, stored, c, code)
+	}
+	// legacy salt:sha256 (no pinned generation)
+	if !otpkey.IsLegacyFormat(stored) {
+		return false, fmt.Errorf("otp: malformed legacy digest")
+	}
+	return otpkey.VerifyLegacy(stored, code)
 }

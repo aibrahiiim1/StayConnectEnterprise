@@ -156,6 +156,46 @@ type AuthContextSpec struct {
 	Now            time.Time
 }
 
+// subjectFor returns the single subject identifier a method requires, and whether the subject shape is
+// method-compatible (exactly the one field for that method is set, and no other).
+func (s Subject) subjectFor(m Method) (string, bool) {
+	switch m {
+	case MethodVoucher:
+		return s.VoucherID, s.VoucherID != "" && s.GuestAccountID == "" && s.PrincipalID == ""
+	case MethodAccount:
+		return s.GuestAccountID, s.GuestAccountID != "" && s.VoucherID == "" && s.PrincipalID == ""
+	case MethodOTP, MethodSocial:
+		return s.PrincipalID, s.PrincipalID != "" && s.VoucherID == "" && s.GuestAccountID == ""
+	}
+	return "", false
+}
+
+// validate checks every auth_context pin BEFORE any SQL so a malformed spec yields a deterministic
+// ErrInvalidInput (never a NOT NULL / FK / CHECK violation surfaced from the database). Requires
+// tenant, site, a resolved (non-empty) device, a guest network, exactly one method-compatible subject
+// and a strictly positive TTL.
+func (s AuthContextSpec) validate() error {
+	if s.TenantID == "" {
+		return &Error{Code: ErrInvalidInput, Msg: "auth_context: missing tenant"}
+	}
+	if s.SiteID == "" {
+		return &Error{Code: ErrInvalidInput, Msg: "auth_context: missing site"}
+	}
+	if s.DeviceID == "" {
+		return &Error{Code: ErrInvalidInput, Msg: "auth_context: missing device"}
+	}
+	if s.GuestNetworkID == "" {
+		return &Error{Code: ErrInvalidInput, Msg: "auth_context: missing guest network"}
+	}
+	if _, ok := s.Subject.subjectFor(s.Method); !ok {
+		return &Error{Code: ErrInvalidInput, Msg: "auth_context: subject not compatible with method"}
+	}
+	if s.TTL <= 0 {
+		return &Error{Code: ErrInvalidInput, Msg: "auth_context: non-positive TTL"}
+	}
+	return nil
+}
+
 // Clock is injectable.
 type Clock func() time.Time
 

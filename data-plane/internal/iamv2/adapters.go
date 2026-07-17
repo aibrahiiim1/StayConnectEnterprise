@@ -137,18 +137,34 @@ func (a *Authenticator) resolvePrincipalAndFinalize(ctx context.Context, m Metho
 
 // finalize upserts the device and creates the one-time auth_context, returning an allow Result.
 func (a *Authenticator) finalize(ctx context.Context, tx Tx, m Method, subj Subject, req Request, now time.Time) (Result, error) {
-	var deviceID string
-	if req.Device.MAC != "" {
-		id, err := tx.UpsertDevice(ctx, req.TenantID, req.SiteID, req.Device.ApplianceID, req.Device.MAC, req.Device.GuestNetworkID, req.Device.IP, now)
-		if err != nil {
-			return Result{}, err
-		}
-		deviceID = id
+	// Validate the caller-supplied pins (tenant/site/device/guest-network/TTL/subject) up front so a
+	// bad request never reaches the DB as a NOT NULL / FK violation. A device MAC and guest network are
+	// mandatory because auth_contexts pins both NOT NULL.
+	if req.Device.MAC == "" {
+		return Result{}, &Error{Code: ErrInvalidInput, Msg: "auth_context: missing device"}
 	}
-	acID, err := tx.CreateAuthContext(ctx, AuthContextSpec{
+	if req.Device.GuestNetworkID == "" {
+		return Result{}, &Error{Code: ErrInvalidInput, Msg: "auth_context: missing guest network"}
+	}
+	if _, ok := subj.subjectFor(m); !ok {
+		return Result{}, &Error{Code: ErrInvalidInput, Msg: "auth_context: subject not compatible with method"}
+	}
+	if a.ttl <= 0 {
+		return Result{}, &Error{Code: ErrInvalidInput, Msg: "auth_context: non-positive TTL"}
+	}
+	id, err := tx.UpsertDevice(ctx, req.TenantID, req.SiteID, req.Device.ApplianceID, req.Device.MAC, req.Device.GuestNetworkID, req.Device.IP, now)
+	if err != nil {
+		return Result{}, err
+	}
+	deviceID := id
+	spec := AuthContextSpec{
 		TenantID: req.TenantID, SiteID: req.SiteID, Method: m, Subject: subj,
 		DeviceID: deviceID, GuestNetworkID: req.Device.GuestNetworkID, TTL: a.ttl, Now: now,
-	})
+	}
+	if err := spec.validate(); err != nil {
+		return Result{}, err
+	}
+	acID, err := tx.CreateAuthContext(ctx, spec)
 	if err != nil {
 		return Result{}, err
 	}

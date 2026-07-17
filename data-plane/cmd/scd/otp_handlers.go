@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -106,7 +107,15 @@ func (s *server) otpIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issued, err := otp.Issue(r.Context(), s.db, otp.IssueParams{
+	// Durable throttle on issuance (authoritative; no-op unless enabled). otp.Issue also enforces its
+	// own per-destination cooldown + hourly caps; this adds the restart-surviving cross-method layer.
+	if ok, retry := s.throttleGuard(r.Context(), "otp", net.ParseIP(req.IP), nil, dest); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
+		return
+	}
+
+	issued, err := otp.Issue(r.Context(), s.db, s.otpRing, otp.IssueParams{
 		TenantID:    s.tenID,
 		ApplianceID: s.applID,
 		TemplateID:  method.TemplateID,
@@ -187,8 +196,13 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad mac")
 		return
 	}
+	if ok, retry := s.throttleGuard(r.Context(), "otp", ip, mac, ""); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
+		return
+	}
 
-	v, err := otp.Verify(r.Context(), s.db, req.ChallengeID, req.Code)
+	v, err := otp.Verify(r.Context(), s.db, s.otpRing, req.ChallengeID, req.Code)
 	if err != nil {
 		result := "internal"
 		switch {
