@@ -38,6 +38,9 @@ func (spyTx) UpsertDevice(context.Context, string, string, string, string, strin
 	return "", nil
 }
 func (spyTx) CreateAuthContext(context.Context, AuthContextSpec) (string, error) { return "", nil }
+func (spyTx) ConsumeAuthContext(context.Context, string, Method, time.Time) (Subject, error) {
+	return Subject{}, nil
+}
 
 func TestConfigValidateFailClosed(t *testing.T) {
 	if err := DefaultConfig().Validate(); err != nil {

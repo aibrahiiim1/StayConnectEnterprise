@@ -138,6 +138,9 @@ type Tx interface {
 	UpsertDevice(ctx context.Context, tenantID, siteID, applianceID, mac, guestNetworkID, ip string, now time.Time) (deviceID string, err error)
 	// CreateAuthContext writes a one-time auth_context (method<->subject enforced by DB CHECKs).
 	CreateAuthContext(ctx context.Context, spec AuthContextSpec) (id string, err error)
+	// ConsumeAuthContext atomically consumes a one-time auth_context (TTL + one-time; exactly one
+	// concurrent winner). Part of the dark session-after-grant contract (scratch/test only).
+	ConsumeAuthContext(ctx context.Context, id string, expect Method, now time.Time) (Subject, error)
 }
 
 // AuthContextSpec is the one-time authentication context to create.

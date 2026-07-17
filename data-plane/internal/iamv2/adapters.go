@@ -85,7 +85,7 @@ func (a *Authenticator) authVoucher(ctx context.Context, req Request) (Result, e
 		return err
 	})
 	if err != nil {
-		return Result{}, &Error{Code: ErrRepo, Msg: err.Error()}
+		return Result{}, &Error{Code: ErrRepo, Msg: "voucher"}
 	}
 	return res, nil
 }
@@ -130,7 +130,7 @@ func (a *Authenticator) resolvePrincipalAndFinalize(ctx context.Context, m Metho
 		return err
 	})
 	if err != nil {
-		return Result{}, &Error{Code: ErrRepo, Msg: err.Error()}
+		return Result{}, &Error{Code: ErrRepo, Msg: string(m)}
 	}
 	return res, nil
 }
@@ -172,21 +172,44 @@ func mustDummy() string {
 		base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key))
 }
 
+// Argon2id parameter bounds — sized around the hashes StayConnect actually issues (m=65536 KiB,
+// t=1, p=4, 16-byte salt, 32-byte digest) with headroom, and capped to prevent resource exhaustion
+// / integer overflow from a malformed or hostile hash.
+const (
+	argonMinMem    = 8      // KiB
+	argonMaxMem    = 262144 // 256 MiB KiB
+	argonMinT      = 1
+	argonMaxT      = 10
+	argonMinP      = 1
+	argonMaxP      = 16
+	argonMinSalt   = 8
+	argonMaxSalt   = 64
+	argonMinDigest = 16
+	argonMaxDigest = 64
+)
+
 func verifyArgon2id(pw, encoded string) (bool, error) {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" {
 		return false, &Error{Code: ErrInvalidCred, Msg: "hash format"}
 	}
+	if parts[2] != "v=19" {
+		return false, &Error{Code: ErrInvalidCred, Msg: "hash version"}
+	}
 	var m, t, p uint32
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil {
+	if n, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil || n != 3 {
 		return false, &Error{Code: ErrInvalidCred, Msg: "hash params"}
 	}
+	// Bound every parameter BEFORE calling argon2.IDKey (avoid memory/CPU exhaustion, uint8 overflow).
+	if m < argonMinMem || m > argonMaxMem || t < argonMinT || t > argonMaxT || p < argonMinP || p > argonMaxP {
+		return false, &Error{Code: ErrInvalidCred, Msg: "hash params out of range"}
+	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
+	if err != nil || len(salt) < argonMinSalt || len(salt) > argonMaxSalt {
 		return false, &Error{Code: ErrInvalidCred, Msg: "hash salt"}
 	}
 	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil {
+	if err != nil || len(want) < argonMinDigest || len(want) > argonMaxDigest {
 		return false, &Error{Code: ErrInvalidCred, Msg: "hash digest"}
 	}
 	got := argon2.IDKey([]byte(pw), salt, t, m, uint8(p), uint32(len(want)))

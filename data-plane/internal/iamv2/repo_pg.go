@@ -67,32 +67,63 @@ func (t *pgTx) LookupAccount(ctx context.Context, tenantID, username string) (id
 	return id, passwordHash, enabled, vf, vu, locked, e
 }
 
-func (t *pgTx) ResolvePrincipalByIdentity(ctx context.Context, tenantID, factorType, issuer, valueNorm string, now time.Time) (string, error) {
+// resolveExistingPrincipal returns the principal for an existing identity, or "" if none.
+func (t *pgTx) resolveExistingPrincipal(ctx context.Context, tenantID, factorType, issuer, valueNorm string) (string, error) {
 	var pid string
 	err := t.tx.QueryRow(ctx,
 		`SELECT guest_principal_id::text FROM iam_v2.guest_principal_identities
 		  WHERE tenant_id=$1 AND factor_type=$2 AND coalesce(factor_issuer,'')=$3 AND factor_value_norm=$4`,
 		tenantID, factorType, issuer, valueNorm).Scan(&pid)
-	if err == nil {
-		return pid, nil
+	if err == pgx.ErrNoRows {
+		return "", nil
 	}
-	if err != pgx.ErrNoRows {
+	return pid, err
+}
+
+// ResolvePrincipalByIdentity finds or creates the principal for a verified factor identity. It is
+// concurrency-idempotent: the new principal is created inside a SAVEPOINT, the identity is inserted
+// ON CONFLICT DO NOTHING, and if a concurrent caller won the unique identity, the SAVEPOINT is rolled
+// back (discarding this caller's orphan principal) and the winning principal is returned. All
+// concurrent callers converge on ONE principal with no orphan and no unique-violation surfaced.
+func (t *pgTx) ResolvePrincipalByIdentity(ctx context.Context, tenantID, factorType, issuer, valueNorm string, now time.Time) (string, error) {
+	if pid, err := t.resolveExistingPrincipal(ctx, tenantID, factorType, issuer, valueNorm); err != nil || pid != "" {
+		return pid, err
+	}
+	sp, err := t.tx.Begin(ctx) // nested tx == SAVEPOINT
+	if err != nil {
 		return "", err
 	}
-	// create principal + identity
-	if err := t.tx.QueryRow(ctx,
+	var newPID string
+	if err := sp.QueryRow(ctx,
 		`INSERT INTO iam_v2.guest_principals (tenant_id) VALUES ($1) RETURNING id::text`,
-		tenantID).Scan(&pid); err != nil {
+		tenantID).Scan(&newPID); err != nil {
+		_ = sp.Rollback(ctx)
 		return "", err
 	}
-	if _, err := t.tx.Exec(ctx,
+	var wonPID string
+	err = sp.QueryRow(ctx,
 		`INSERT INTO iam_v2.guest_principal_identities
 		     (tenant_id, guest_principal_id, factor_type, factor_issuer, factor_value_norm, verified_at)
-		 VALUES ($1,$2,$3,$4,$5,$6)`,
-		tenantID, pid, factorType, issuer, valueNorm, now); err != nil {
+		 VALUES ($1,$2,$3,$4,$5,$6)
+		 ON CONFLICT (tenant_id, factor_type, factor_issuer, factor_value_norm) DO NOTHING
+		 RETURNING guest_principal_id::text`,
+		tenantID, newPID, factorType, issuer, valueNorm, now).Scan(&wonPID)
+	if err == nil {
+		// we won: keep the new principal + identity
+		if cerr := sp.Commit(ctx); cerr != nil {
+			return "", cerr
+		}
+		return wonPID, nil
+	}
+	if err != pgx.ErrNoRows {
+		_ = sp.Rollback(ctx)
 		return "", err
 	}
-	return pid, nil
+	// a concurrent caller won the unique identity: discard our orphan principal and resolve theirs
+	if rerr := sp.Rollback(ctx); rerr != nil {
+		return "", rerr
+	}
+	return t.resolveExistingPrincipal(ctx, tenantID, factorType, issuer, valueNorm)
 }
 
 func (t *pgTx) UpsertDevice(ctx context.Context, tenantID, siteID, applianceID, mac, guestNetworkID, ip string, now time.Time) (string, error) {
@@ -107,11 +138,15 @@ func (t *pgTx) UpsertDevice(ctx context.Context, tenantID, siteID, applianceID, 
 		return "", err
 	}
 	if guestNetworkID != "" {
-		_, _ = t.tx.Exec(ctx,
+		// A device-appearance failure must roll back the whole device/auth-context transaction — never
+		// return DecisionAllow with a partial device or auth_context.
+		if _, err := t.tx.Exec(ctx,
 			`INSERT INTO iam_v2.device_network_appearances (tenant_id, site_id, device_id, guest_network_id, first_seen, last_seen)
 			 VALUES ($1,$2,$3,$4,$5,$5)
 			 ON CONFLICT (device_id, guest_network_id) DO UPDATE SET last_seen=$5`,
-			tenantID, siteID, id, guestNetworkID, now)
+			tenantID, siteID, id, guestNetworkID, now); err != nil {
+			return "", err
+		}
 	}
 	return id, nil
 }

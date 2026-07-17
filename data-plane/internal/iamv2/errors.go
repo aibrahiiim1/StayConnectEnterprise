@@ -14,6 +14,13 @@ const (
 	ErrSubjectResolve  Code = "subject_resolve"
 	ErrRepo            Code = "repository"
 	ErrSocialStub      Code = "social_stub_refused"
+	// session-after-grant (dark contract)
+	ErrACExpired  Code = "auth_context_expired"
+	ErrACConsumed Code = "auth_context_consumed"
+	ErrACMismatch Code = "auth_context_mismatch"
+	ErrACNotFound Code = "auth_context_not_found"
+	ErrCapacity   Code = "capacity"
+	ErrConflict   Code = "conflict"
 )
 
 // Error is a deterministic typed error. Msg must never contain secrets, codes, OTPs or PII.
