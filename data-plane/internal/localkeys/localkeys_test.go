@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -47,7 +48,7 @@ func TestLoadOrCreateKeyRejectsShort(t *testing.T) {
 
 func TestInsecurePermsRejected(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("no POSIX perms on windows")
+		t.Skip("no POSIX perms on windows (enforced on the Linux appliance)")
 	}
 	dir := t.TempDir()
 	p := filepath.Join(dir, "open.key")
@@ -83,6 +84,61 @@ func TestGenerationKeysAndRotation(t *testing.T) {
 	}
 	if len(keys) != 2 || !bytes.Equal(keys[1], k1) || !bytes.Equal(keys[2], k2) {
 		t.Fatalf("LoadGenerationKeys mismatch: %d gens", len(keys))
+	}
+}
+
+func TestEnsureGenerationConcurrentSingleWinner(t *testing.T) {
+	dir := t.TempDir()
+	const n = 20
+	keys := make([][]byte, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			k, err := EnsureGeneration(dir, "otp_hmac", 1)
+			if err != nil {
+				t.Errorf("goroutine %d: %v", i, err)
+				return
+			}
+			keys[i] = k
+		}(i)
+	}
+	wg.Wait()
+	// every caller must retain the SAME single persisted winner
+	for i := 1; i < n; i++ {
+		if keys[i] == nil || !bytes.Equal(keys[0], keys[i]) {
+			t.Fatalf("concurrent EnsureGeneration returned different keys (i=%d)", i)
+		}
+	}
+}
+
+func TestEnsureGenerationRejectsShortExisting(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "otp_hmac_1.key")
+	if err := os.WriteFile(p, []byte("short"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureGeneration(dir, "otp_hmac", 1); err == nil {
+		t.Fatal("existing short generation key must be rejected")
+	}
+}
+
+func TestEnsureGenerationRejectsSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink perms differ on windows")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, make([]byte, MinKeyLen), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "otp_hmac_1.key")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureGeneration(dir, "otp_hmac", 1); err == nil {
+		t.Fatal("symlinked generation key must be refused")
 	}
 }
 

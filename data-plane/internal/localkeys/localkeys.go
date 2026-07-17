@@ -24,47 +24,75 @@ import (
 // MinKeyLen is the minimum accepted key length in bytes.
 const MinKeyLen = 32
 
-// writeAtomic writes data to path with mode, atomically (temp in same dir, fsync, rename, chmod).
-func writeAtomic(path string, data []byte, mode os.FileMode) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".key-*")
+// checkFile refuses a key path that is not a regular file (e.g. a symlink or device) and, on POSIX,
+// that is group/world accessible.
+func checkFile(path string) error {
+	fi, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) //nolint:errcheck
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close() //nolint:errcheck
-		return err
+	if fi.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("localkeys: %s is a symlink (refused)", path)
 	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close() //nolint:errcheck
-		return err
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("localkeys: %s is not a regular file (refused)", path)
 	}
-	if err := tmp.Chmod(mode); err != nil {
-		tmp.Close() //nolint:errcheck
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpName, path)
-}
-
-// checkPerms refuses a key file that is group/world accessible (skipped on Windows, which has no
-// POSIX bits; production is Linux).
-func checkPerms(path string) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	fi, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	if fi.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
 		return fmt.Errorf("localkeys: %s has insecure permissions %o (want 0600)", path, fi.Mode().Perm())
 	}
 	return nil
+}
+
+// fsyncDir fsyncs a directory so a create/rename is durable across power loss / reboot.
+func fsyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close() //nolint:errcheck
+	if err := d.Sync(); err != nil && runtime.GOOS != "windows" {
+		return err
+	}
+	return nil
+}
+
+// createExclKey atomically creates path (O_CREATE|O_EXCL, 0600) with a fresh crypto-random key, then
+// fsyncs the file and its parent directory. Returns (created=true, key) on success, (false, existing)
+// if another writer won the race (EEXIST) — in which case the single persisted winner is reloaded so
+// no two callers ever retain different keys for the same path.
+func createExclKey(path string) (bool, []byte, error) {
+	key := make([]byte, MinKeyLen)
+	if _, err := rand.Read(key); err != nil {
+		return false, nil, err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		if os.IsExist(err) {
+			if perr := checkFile(path); perr != nil {
+				return false, nil, perr
+			}
+			b, rerr := os.ReadFile(path)
+			if rerr != nil {
+				return false, nil, rerr
+			}
+			if len(b) < MinKeyLen {
+				return false, nil, fmt.Errorf("localkeys: %s too short (%d < %d)", path, len(b), MinKeyLen)
+			}
+			return false, b, nil
+		}
+		return false, nil, err
+	}
+	defer f.Close() //nolint:errcheck
+	if _, err := f.Write(key); err != nil {
+		return false, nil, err
+	}
+	if err := f.Sync(); err != nil {
+		return false, nil, err
+	}
+	if err := fsyncDir(filepath.Dir(path)); err != nil {
+		return false, nil, err
+	}
+	return true, key, nil
 }
 
 // LoadOrCreateKey returns a stable key from path, creating a fresh crypto-random key (>= MinKeyLen,
@@ -72,7 +100,7 @@ func checkPerms(path string) error {
 func LoadOrCreateKey(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err == nil {
-		if perr := checkPerms(path); perr != nil {
+		if perr := checkFile(path); perr != nil {
 			return nil, perr
 		}
 		if len(b) < MinKeyLen {
@@ -83,14 +111,11 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 	if !os.IsNotExist(err) {
 		return nil, err
 	}
-	key := make([]byte, MinKeyLen)
-	if _, err := rand.Read(key); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	if err := writeAtomic(path, key, 0o600); err != nil {
-		return nil, err
-	}
-	return key, nil
+	_, key, err := createExclKey(path) // race-safe: returns the single persisted winner
+	return key, err
 }
 
 var genFileRe = regexp.MustCompile(`^(.+?)_(\d+)\.key$`)
@@ -116,7 +141,7 @@ func LoadGenerationKeys(dir, prefix string) (map[int][]byte, error) {
 		}
 		gen, _ := strconv.Atoi(m[2])
 		p := filepath.Join(dir, e.Name())
-		if err := checkPerms(p); err != nil {
+		if err := checkFile(p); err != nil {
 			return nil, err
 		}
 		b, err := os.ReadFile(p)
@@ -141,20 +166,23 @@ func EnsureGeneration(dir, prefix string, gen int) ([]byte, error) {
 		return nil, err
 	}
 	path := filepath.Join(dir, fmt.Sprintf("%s_%d.key", prefix, gen))
-	if b, err := os.ReadFile(path); err == nil {
-		if perr := checkPerms(path); perr != nil {
+	b, err := os.ReadFile(path)
+	if err == nil {
+		if perr := checkFile(path); perr != nil {
 			return nil, perr
+		}
+		if len(b) < MinKeyLen {
+			return nil, fmt.Errorf("localkeys: %s too short (%d < %d)", path, len(b), MinKeyLen)
 		}
 		return b, nil
 	}
-	key := make([]byte, MinKeyLen)
-	if _, err := rand.Read(key); err != nil {
-		return nil, err
+	if !os.IsNotExist(err) {
+		return nil, err // surface every read error other than not-exist
 	}
-	if err := writeAtomic(path, key, 0o600); err != nil {
-		return nil, err
-	}
-	return key, nil
+	// Race-safe, no-overwrite creation: if a concurrent caller wins, reload and return the winner so
+	// no two callers ever retain different keys for the same generation.
+	_, key, cerr := createExclKey(path)
+	return key, cerr
 }
 
 // ValidateOTPGenerations fails closed when key material and database metadata disagree:

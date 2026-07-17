@@ -72,6 +72,17 @@ func TestAllowUntilLimitThenDeny(t *testing.T) {
 	}
 }
 
+func TestEmptyMethodRejected(t *testing.T) {
+	db := testDB(t)
+	s, _ := New(db, tkey, time.Minute)
+	if _, err := s.Allow(context.Background(), Rule{Kind: ScopeIdentity, Value: "x", Method: "", Limit: 5}); err == nil {
+		t.Fatal("empty method must be rejected (use MethodAny explicitly for a global policy)")
+	}
+	if _, err := s.Allow(context.Background(), Rule{Kind: ScopeIdentity, Value: "x", Method: "bogus", Limit: 5}); err == nil {
+		t.Fatal("invalid method must be rejected")
+	}
+}
+
 func TestConcurrentNoBypass(t *testing.T) {
 	db := testDB(t)
 	s, _ := New(db, tkey, time.Minute)

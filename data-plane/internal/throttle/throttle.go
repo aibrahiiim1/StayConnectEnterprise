@@ -132,7 +132,8 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 		}
 		method := strings.ToLower(strings.TrimSpace(r.Method))
 		if method == "" {
-			method = MethodAny
+			// Explicit method is required; use MethodAny deliberately for a global policy.
+			return Decision{}, errors.New("throttle: rule is missing an explicit method")
 		}
 		if !validMethod(method) {
 			return Decision{}, fmt.Errorf("throttle: invalid method %q", method)
