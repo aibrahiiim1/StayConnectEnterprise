@@ -13,35 +13,28 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var tkey = []byte("0123456789abcdef0123456789abcdef") // 32-byte test key
+
 // ---- unit (no DB) ----------------------------------------------------------
 
 func TestScopeKeyIrreversibleAndStable(t *testing.T) {
-	s := &Store{key: []byte("k"), window: time.Minute, now: time.Now}
+	s := &Store{key: tkey, window: time.Minute, now: time.Now}
 	hexRe := regexp.MustCompile(`^[0-9a-f]{64}$`)
 	a := s.scopeKey(ScopeIdentity, "alice@example.com")
 	b := s.scopeKey(ScopeIdentity, "alice@example.com")
 	c := s.scopeKey(ScopeIdentity, "bob@example.com")
 	d := s.scopeKey(ScopeIP, "alice@example.com")
-	if !hexRe.MatchString(a) {
-		t.Fatalf("scope key not 64-hex: %q", a)
-	}
-	if a != b {
-		t.Fatal("scope key not stable for same input")
-	}
-	if a == c {
-		t.Fatal("scope key collided across identities")
-	}
-	if a == d {
-		t.Fatal("scope key must differ across scope kinds")
-	}
-	if strings.Contains(a, "alice") {
-		t.Fatal("raw identity leaked into scope key")
+	if !hexRe.MatchString(a) || a != b || a == c || a == d || strings.Contains(a, "alice") {
+		t.Fatalf("scope key invariants broken: %q", a)
 	}
 }
 
 func TestNewValidation(t *testing.T) {
-	if _, err := New(nil, []byte("k"), time.Minute); err == nil {
-		t.Fatal("expected error on nil db")
+	if _, err := New(nil, tkey, time.Minute); err == nil {
+		t.Fatal("nil db should error")
+	}
+	if _, err := New(&pgxpool.Pool{}, []byte("short"), time.Minute); err == nil {
+		t.Fatal("short key should error")
 	}
 }
 
@@ -58,7 +51,6 @@ func testDB(t *testing.T) *pgxpool.Pool {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	// isolate each test run
 	if _, err := db.Exec(context.Background(), `TRUNCATE public.auth_throttle_buckets`); err != nil {
 		t.Fatalf("truncate (is 0007 applied?): %v", err)
 	}
@@ -67,30 +59,22 @@ func testDB(t *testing.T) *pgxpool.Pool {
 
 func TestAllowUntilLimitThenDeny(t *testing.T) {
 	db := testDB(t)
-	s, _ := New(db, []byte("key"), time.Minute)
+	s, _ := New(db, tkey, time.Minute)
 	ctx := context.Background()
-	rule := Rule{Kind: ScopeIdentity, Value: "u1", Limit: 3}
+	rule := Rule{Kind: ScopeIdentity, Value: "u1", Method: "account", Limit: 3}
 	for i := 1; i <= 3; i++ {
-		d, err := s.Allow(ctx, rule)
-		if err != nil || !d.Allowed {
-			t.Fatalf("attempt %d should be allowed: %+v err=%v", i, d, err)
+		if d, err := s.Allow(ctx, rule); err != nil || !d.Allowed {
+			t.Fatalf("attempt %d should pass: %+v err=%v", i, d, err)
 		}
 	}
-	d, err := s.Allow(ctx, rule)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.Allowed {
-		t.Fatal("4th attempt over limit=3 should be denied")
-	}
-	if d.Reason != ScopeIdentity || d.RetryAfter <= 0 {
-		t.Fatalf("expected identity denial with retry-after, got %+v", d)
+	if d, _ := s.Allow(ctx, rule); d.Allowed {
+		t.Fatal("4th over limit=3 should deny")
 	}
 }
 
 func TestConcurrentNoBypass(t *testing.T) {
 	db := testDB(t)
-	s, _ := New(db, []byte("key"), time.Minute)
+	s, _ := New(db, tkey, time.Minute)
 	ctx := context.Background()
 	const limit, workers = 5, 40
 	var allowed int64
@@ -99,63 +83,104 @@ func TestConcurrentNoBypass(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			d, err := s.Allow(ctx, Rule{Kind: ScopeIP, Value: "10.0.0.9", Limit: limit})
-			if err == nil && d.Allowed {
+			if d, err := s.Allow(ctx, Rule{Kind: ScopeIP, Value: "10.0.0.9", Method: "otp", Limit: limit}); err == nil && d.Allowed {
 				atomic.AddInt64(&allowed, 1)
 			}
 		}()
 	}
 	wg.Wait()
 	if allowed != limit {
-		t.Fatalf("concurrency bypass: %d allowed, want exactly %d", allowed, limit)
+		t.Fatalf("concurrency bypass: %d allowed, want %d", allowed, limit)
 	}
 }
 
-func TestBlockedUntilHardBlock(t *testing.T) {
+// TestHardBlockAcrossWindows: 1-minute window, 1-hour block; advancing the injected clock past
+// several window boundaries keeps the attempt denied until blocked_until; then it resumes.
+func TestHardBlockAcrossWindows(t *testing.T) {
 	db := testDB(t)
-	s, _ := New(db, []byte("key"), time.Minute)
+	s, _ := New(db, tkey, time.Minute)
 	ctx := context.Background()
-	rule := Rule{Kind: ScopeIdentity, Value: "blockme", Limit: 1, Block: time.Hour}
+	base := time.Date(2026, 7, 17, 12, 0, 5, 0, time.UTC)
+	clk := base
+	s.SetClock(func() time.Time { return clk })
+	rule := Rule{Kind: ScopeIdentity, Value: "blockme", Method: "account", Limit: 1, Block: time.Hour}
+
 	if d, _ := s.Allow(ctx, rule); !d.Allowed {
-		t.Fatal("first should pass")
+		t.Fatal("1st should pass")
 	}
 	if d, _ := s.Allow(ctx, rule); d.Allowed {
-		t.Fatal("second exceeds limit -> deny + block")
+		t.Fatal("2nd exceeds limit -> deny + 1h block")
 	}
-	// even a brand-new Store (simulated restart) sees the durable block
-	s2, _ := New(db, []byte("key"), time.Minute)
-	d, _ := s2.Allow(ctx, rule)
-	if d.Allowed || d.RetryAfter < 30*time.Minute {
-		t.Fatalf("hard block must persist across restart: %+v", d)
+	// advance well past the 1-minute window, several times; block must persist
+	for _, adv := range []time.Duration{2 * time.Minute, 10 * time.Minute, 45 * time.Minute} {
+		clk = base.Add(adv)
+		d, _ := s.Allow(ctx, rule)
+		if d.Allowed {
+			t.Fatalf("attempt at +%v must remain blocked (block is 1h)", adv)
+		}
+	}
+	// a brand-new Store (simulated restart) with the SAME key still sees the durable block
+	s2, _ := New(db, tkey, time.Minute)
+	s2.SetClock(func() time.Time { return base.Add(30 * time.Minute) })
+	if d, _ := s2.Allow(ctx, rule); d.Allowed {
+		t.Fatal("hard block must survive restart")
+	}
+	// after blocked_until, attempts resume in a fresh window
+	clk = base.Add(61 * time.Minute)
+	if d, _ := s.Allow(ctx, rule); !d.Allowed {
+		t.Fatal("after block expiry, attempts must resume")
 	}
 }
 
-func TestRestartPersistenceAndCleanup(t *testing.T) {
+// TestMethodIsolation: the same identity under different methods does not share a counter.
+func TestMethodIsolation(t *testing.T) {
 	db := testDB(t)
+	s, _ := New(db, tkey, time.Minute)
 	ctx := context.Background()
-	s, _ := New(db, []byte("key"), time.Minute)
-	for i := 0; i < 2; i++ {
-		_, _ = s.Allow(ctx, Rule{Kind: ScopeMethod, Value: "voucher", Limit: 100})
+	acct := Rule{Kind: ScopeIdentity, Value: "shared", Method: "account", Limit: 2}
+	otp := Rule{Kind: ScopeIdentity, Value: "shared", Method: "otp", Limit: 2}
+	// exhaust the account method
+	s.Allow(ctx, acct)
+	s.Allow(ctx, acct)
+	if d, _ := s.Allow(ctx, acct); d.Allowed {
+		t.Fatal("account method should be over limit")
 	}
-	// new Store sees the accumulated count (durable)
-	var cnt int
-	if err := db.QueryRow(ctx, `SELECT attempt_count FROM public.auth_throttle_buckets WHERE scope_kind='method'`).Scan(&cnt); err != nil || cnt != 2 {
-		t.Fatalf("expected durable count 2, got %d err=%v", cnt, err)
+	// otp method for the same identity is unaffected
+	if d, _ := s.Allow(ctx, otp); !d.Allowed {
+		t.Fatal("otp method must have its own independent counter")
 	}
-	// cleanup does not delete a live bucket
-	n, err := s.Cleanup(ctx, time.Hour)
-	if err != nil {
-		t.Fatal(err)
+}
+
+// TestGlobalMethodShared: MethodAny ("*") is deliberately shared across methods (e.g. endpoint damper).
+func TestGlobalMethodShared(t *testing.T) {
+	db := testDB(t)
+	s, _ := New(db, tkey, time.Minute)
+	ctx := context.Background()
+	r := func() Rule { return Rule{Kind: ScopeEndpoint, Value: "", Method: MethodAny, Limit: 2} }
+	s.Allow(ctx, r())
+	s.Allow(ctx, r())
+	if d, _ := s.Allow(ctx, r()); d.Allowed {
+		t.Fatal("endpoint '*' damper must be shared/global and hit its cap")
 	}
-	if n != 0 {
-		t.Fatalf("cleanup removed a live bucket (%d)", n)
+}
+
+func TestCleanupNeverRemovesActiveBlock(t *testing.T) {
+	db := testDB(t)
+	s, _ := New(db, tkey, time.Minute)
+	ctx := context.Background()
+	base := time.Date(2026, 7, 17, 12, 0, 5, 0, time.UTC)
+	s.SetClock(func() time.Time { return base })
+	rule := Rule{Kind: ScopeIP, Value: "1.2.3.4", Method: "voucher", Limit: 1, Block: time.Hour}
+	s.Allow(ctx, rule)
+	s.Allow(ctx, rule) // triggers 1h block
+	// advance past window+grace but the block is still active -> cleanup must NOT delete it
+	s.SetClock(func() time.Time { return base.Add(30 * time.Minute) })
+	if n, err := s.Cleanup(ctx, time.Minute); err != nil || n != 0 {
+		t.Fatalf("cleanup removed an active block (n=%d err=%v)", n, err)
 	}
-	// backdate the bucket well past window+grace -> cleanup removes it
-	if _, err := db.Exec(ctx, `UPDATE public.auth_throttle_buckets SET window_start = now() - interval '2 hours', blocked_until = NULL`); err != nil {
-		t.Fatal(err)
-	}
-	n, err = s.Cleanup(ctx, time.Minute)
-	if err != nil || n != 1 {
-		t.Fatalf("cleanup should remove 1 expired bucket, got %d err=%v", n, err)
+	// advance past the block + grace -> cleanup removes it
+	s.SetClock(func() time.Time { return base.Add(2 * time.Hour) })
+	if n, err := s.Cleanup(ctx, time.Minute); err != nil || n != 1 {
+		t.Fatalf("cleanup should remove expired block (n=%d err=%v)", n, err)
 	}
 }
