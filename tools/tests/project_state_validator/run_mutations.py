@@ -113,6 +113,8 @@ MUTATIONS = [
  ("M32 stale HEAD / production-unchanged in current state after T0010", "governance/project-state.json",
    ("replace", [("legacy public-schema auth remains the sole production authority (iam_v2 49/0).",
                  "legacy public-schema auth remains the sole production authority (iam_v2 49/0). HEAD 1844da2 Production unchanged.")])),
+ ("M33 phase 1B marked closed without recorded PO acceptance", "governance/project-state.json",
+   ("replace", [('"transition_accepted": true', '"transition_accepted": false')])),
 ]
 
 def apply(relpath, op):

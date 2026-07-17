@@ -1,8 +1,11 @@
 # StayConnect IAM — Phase 1B Live-Dark Acceptance Record
 
-**Status:** PENDING PRODUCT-OWNER ACCEPTANCE (transition **T0010**). Phase 1B is NOT accepted/closed; no
-cutover, no Phase 2, no iam_v2 production access. Legacy public-schema IAM remains the sole production
-authority.
+**Status:** **ACCEPTED AND CLOSED by the Product Owner at DARK maturity via transition T0011** (decision
+D11, 2026-07-17). Deployment transition **T0010** (2026-07-17T21:18:26Z) recorded the live-dark
+deployment *pending* acceptance; the later transition **T0011** records the Product-Owner acceptance and
+closure — T0010 itself was never "already accepted". This acceptance is at DARK maturity only: **no
+cutover, no Phase 2, no iam_v2 production access, and every dark feature remains OFF.** Legacy
+public-schema IAM remains the sole production authority (iam_v2 49 tables / 0 rows).
 
 **Appliance:** `radius` / `172.21.60.23`, site DB `stayconnect_site` (docker `stayconnect-pg`,
 timescaledb 2.16.1-pg16). **Executed:** 2026-07-17 → 2026-07-18. **Branch/PR:** `phase/1b-dark-auth` / PR #2.
