@@ -1,0 +1,4 @@
+commit c4a627bbd7bd5c86f5e3132a89b2f098356bc0aa
+Date:   Fri Jul 17 19:52:48 2026 +0300
+
+    Â§3 PASS: hardened Gate-P execution artifacts + exact-script end-to-end dry run

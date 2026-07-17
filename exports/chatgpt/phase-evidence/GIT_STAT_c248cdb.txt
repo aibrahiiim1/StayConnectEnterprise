@@ -1,4 +1,0 @@
-commit c248cdbf1ee07face6404d81c61b6c7acd141e95
-Date:   Fri Jul 17 19:33:19 2026 +0300
-
-    Â§3: Gate-P role/grant scripts + isolated validation PASS + matrix correction
