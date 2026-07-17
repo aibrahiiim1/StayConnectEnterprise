@@ -4,6 +4,11 @@
 > Copy this file per delivery; fill every numbered section; delete none. Section 10 must be the
 > **verbatim** output of `python tools/generate-change-manifest.py <base>..HEAD` — no hand-written
 > file lists, no ellipses, no omission of generated or deleted files.
+>
+> **All Git/GitHub operations in this delivery are performed by the authorized AI Agent**
+> (`GIT_OPERATIONS_OWNER: AGENT`, decision `GH-AGENT-ONLY-OPERATIONS`) — the Product Owner is never
+> asked to run routine Git or `gh` commands. Section 12 (Branch and PR information) must reflect
+> Agent-executed push/PR/merge; only unavoidable account/UI settings may be requested from the PO.
 
 ---
 

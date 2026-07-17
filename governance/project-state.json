@@ -9,6 +9,7 @@
     "report_template": "docs/templates/PHASE_FINAL_REPORT_TEMPLATE.md",
     "ci_workflow": ".github/workflows/project-governance.yml",
     "ci_check_name": "governance",
+    "operations_owner": "AGENT",
     "default_branch": "master",
     "branch_strategy": "one complete Phase per branch + one PR (phase/<name>-<purpose>); governance-only uses governance/<purpose>; no direct commits to the protected default branch without explicit PO authorization",
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"

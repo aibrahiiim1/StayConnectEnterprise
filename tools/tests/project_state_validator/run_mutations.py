@@ -87,6 +87,10 @@ MUTATIONS = [
    ("replace", [("pull_request:", "pull_request_disabled:")])),
  ("M21 CI job ignores failures", ".github/workflows/project-governance.yml",
    ("append", "\n    continue-on-error: true\n")),
+ ("M22 agent-only-operations decision removed", "governance/decision-register.json",
+   ("replace", [('"id": "GH-AGENT-ONLY-OPERATIONS"', '"id": "GH-AGENT-ONLY-OPERATIONS-DISABLED"')])),
+ ("M23 rule flipped to require manual PO Git commands", "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md",
+   ("replace", [("GIT_OPERATIONS_OWNER: AGENT", "GIT_OPERATIONS_OWNER: PRODUCT_OWNER")])),
 ]
 
 def apply(relpath, op):

@@ -2,6 +2,9 @@
 
 **Authoritative, permanent Product-Owner operating rule for the remainder of the StayConnect Enterprise project.** It governs how every future Phase and milestone is executed, verified, reported and delivered through GitHub. It is a companion to, and does not replace, the [Zero-Stale-Leftovers rule](ZERO_STALE_LEFTOVERS_RULE.md) or the machine-readable project-state governance (`governance/project-state.json`, `tools/project-state.py`). Where this rule and the project-state governance overlap, both must pass.
 
+<!-- MACHINE ASSERTION - validated by tools/project-state.py -->
+`GIT_OPERATIONS_OWNER: AGENT`  (all Git and GitHub operations are performed by the authorized AI Agent; the Product Owner is never asked to run routine Git or `gh` commands — see §12)
+
 ## 0. Authoritative repository
 
 - Repository: **`https://github.com/aibrahiiim1/StayConnectEnterprise.git`** (remote `aibrahiiim1/StayConnectEnterprise`).
@@ -117,3 +120,9 @@ This rule is enforced by:
 - The decision register entries `GH-SOURCE-OF-TRUTH`, `GH-BRANCH-PR`, `GH-COMPLETE-MANIFEST`, `GH-FINAL-REPORT`, `GH-MANDATORY-CI` (`governance/decision-register.json`).
 
 Run `make governance-validate` before any implement/migrate/deploy/export, and `python tools/generate-change-manifest.py <base>..HEAD` before writing every final report. A delivered PR must additionally show the GitHub **Project Governance** check green before it is called merge-ready.
+
+## 12. Agent-owned Git and GitHub operations (`GIT_OPERATIONS_OWNER: AGENT`)
+
+All Git and GitHub operations are performed by the authorized AI Agent through the authenticated tools. **The Product Owner must not be asked to execute Git, GitHub CLI or repository-management commands as the normal workflow.** Agent-owned operations include: fetch and pull; branch creation and switching; commits; pushes; remote verification; PR creation and updates; CI monitoring; merge execution; post-merge synchronization; branch cleanup; release/tag operations when separately authorized; and changed-file-manifest generation.
+
+The Agent may request Product-Owner intervention **only** for unavoidable account-level or repository-UI settings that cannot be performed through the authenticated tools — for example an unsupported branch-protection setting, billing, organization policy, or an authentication approval. The Agent must not hand the Product Owner Git or `gh` commands to run as the routine path. This is decision `GH-AGENT-ONLY-OPERATIONS`, enforced structurally by `tools/project-state.py validate` (which requires the `GIT_OPERATIONS_OWNER: AGENT` assertion and the decision) and adversarially by the mutation suite.
