@@ -15,12 +15,21 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "1B",
-  "current_activity": "GOVERNANCE_GITHUB_DELIVERY_RULE_PENDING_APPROVAL",
-  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B PLANNING (corrected plan pending Product-Owner approval; NOT implemented); permanent GitHub execution/delivery operating rule applied and pending Product-Owner approval",
+  "current_activity": "PHASE_1B_IMPLEMENTATION_IN_PROGRESS",
+  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B implementation Product-Owner AUTHORIZED and IN_PROGRESS (W0 complete; Gate P + durable throttle + keyed-HMAC OTP + dark IAM-v2 code + live-dark verification pending); DARK — no production iam_v2 use, no cutover; legacy public-schema auth remains the sole production authority",
+  "phase1b_execution": {
+    "implementation_authorized": true,
+    "authorized_on": "2026-07-17",
+    "w0_complete": true,
+    "cutover_authorized": false,
+    "production_iam_v2_access_authorized": false,
+    "legacy_production_authoritative": true,
+    "stage": "GATE_P_PENDING (preflight next)"
+  },
   "phases": {
     "0":  { "status": "FINAL_CLOSED",       "title": "IAM redesign architecture contract + live PMS validation", "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)." },
     "1A": { "status": "ACCEPTED_AND_CLOSED","title": "Clean-slate IAM core + persistence (iam_v2)",              "maturity": "ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER" },
-    "1B": { "status": "PLANNING",           "title": "Credential/identity/auth-context (DARK)",                   "maturity": "PLAN_CORRECTION_PENDING_APPROVAL — NOT IMPLEMENTED" },
+    "1B": { "status": "IN_PROGRESS",        "title": "Credential/identity/auth-context (DARK)",                   "maturity": "IMPLEMENTATION_AUTHORIZED_IN_PROGRESS — W0 complete; Gate P/throttle/OTP/dark-code/live-dark pending; DARK, no production iam_v2 use" },
     "2":  { "status": "NOT_STARTED",        "title": "Packages, revisions, rules, tiers, quotes; free purchases; portal package selection" },
     "3":  { "status": "NOT_STARTED",        "title": "Stay domain: interfaces/revisions/routing, STRICT resolution, stays/sharers/folios, checkout grace" },
     "4":  { "status": "NOT_STARTED",        "title": "Financial: settlements, postings + outbox, payments, recovery, manual review" },
@@ -67,25 +76,24 @@
   "pms_financial_state": "FIAS lookup-only in production; posting engine is a future component (Phase 4). folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
-    "MANDATORY Phase-1B prerequisite (Gate P): site-DB services connect as superuser stayconnect; least-privilege roles + credential rotation required before any iam_v2 runtime routing."
+    "Gate P (first authorized Phase-1B execution step, IN PROGRESS): site-DB services still connect as superuser stayconnect; least-privilege roles + credential rotation are being applied before any iam_v2 runtime routing. Not a blocker to authorization."
   ],
   "allowed_actions": [
-    "Product-Owner approval of this permanent GitHub execution and delivery operating rule and the corrected Phase 1B plan",
+    "Execute the approved Phase 1B plan in verified stages: Gate P (least-privilege roles + credential rotation) -> durable throttle + keyed-HMAC OTP -> dark IAM-v2 credential/identity/auth-context code -> live-dark verification",
     "Read-only inspection and documentation/governance work"
   ],
   "prohibited_actions": [
-    "Implementing Phase 1B (or any Phase)",
+    "Implementing any Phase beyond the authorized Phase 1B dark scope (Phase 2 or any later Phase)",
     "Any production iam_v2 write (including inside a later-rolled-back transaction)",
     "Granting any iam_v2 DML privilege to a runtime service role in production",
-    "DSN/search_path change; routing any service to iam_v2",
+    "DSN/search_path change that routes any service to iam_v2; any iam_v2 cutover",
     "Data migration into iam_v2; dual-read/dual-write; cutover",
     "PMS/FIAS traffic; financial posting; programmatic reversal",
-    "Network/HA/deployment/topology change; Central changes; legacy cleanup",
-    "Guest paid access; Phase 2 or any later Phase"
+    "HA/topology change; Central changes; legacy IAM removal; guest paid access; Stripe activation"
   ],
-  "next_authorized_action": "Product-Owner approval of this permanent GitHub execution and delivery operating rule and the corrected Phase 1B plan",
+  "next_authorized_action": "complete Phase 1B execution and live-dark verification",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
   "privilege_matrix": "docs/architecture/Phase1B-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D9",
-  "latest_transition_id": "T0008"
+  "latest_accepted_po_decision": "D10",
+  "latest_transition_id": "T0009"
 }

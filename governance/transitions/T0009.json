@@ -1,0 +1,15 @@
+{
+  "transition_id": "T0009",
+  "seq": 9,
+  "timestamp": "2026-07-17T13:00:00Z",
+  "previous_state": { "phase": "1B", "activity": "GOVERNANCE_GITHUB_DELIVERY_RULE_PENDING_APPROVAL", "phase_status": "PLANNING" },
+  "new_state": { "phase": "1B", "activity": "PHASE_1B_IMPLEMENTATION_IN_PROGRESS", "phase_status": "IN_PROGRESS" },
+  "phase_affected": "1B",
+  "po_authorization_ref": "Product-Owner explicit authorization of complete Phase 1B execution (D10, 2026-07-17)",
+  "scope_allowed": "Execute the approved Phase 1B plan in verified stages: Gate P (least-privilege roles + credential rotation), durable throttle, keyed-HMAC OTP, dark IAM-v2 credential/identity/auth-context code (scratch-tested), controlled live-dark deployment + verification. W0 (LF portability) complete and CI-verified.",
+  "scope_prohibited": "No cutover; no production iam_v2 reads or writes (incl. rolled-back); no bulk IAM data migration; no Phase 2 or later; no PMS/FIAS or financial traffic; no legacy IAM removal; no guest paid access. Legacy public-schema authentication remains the sole production authority.",
+  "evidence_files": ["docs/architecture/StayConnect-IAM-Phase1B-Plan.md", "docs/architecture/Phase1B-Privilege-Matrix.md", ".gitattributes", "governance/decision-register.json"],
+  "source_commit": "external",
+  "acceptance_verdict": "IN_PROGRESS — Phase 1B implementation authorized and started (W0 done); Gate P -> live-dark pending",
+  "next_action": "complete Phase 1B execution and live-dark verification"
+}
