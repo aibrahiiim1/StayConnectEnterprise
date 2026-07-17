@@ -56,7 +56,7 @@
     { "id": "PROD_LIVE_DARK_V2", "path": "iam_v2_scratch/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt", "kind": "read-only production re-verification", "authoritative": true },
     { "id": "PHASE1A_ACCEPTANCE", "path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md", "kind": "live-dark acceptance record (18/18)", "authoritative": true },
     { "id": "FIAS_SPIKE", "path": "docs/spikes/Protel-FIAS-Phase0-Spike.md", "kind": "live FIAS spike + Gate 3A PASS", "authoritative": true },
-    { "id": "PHASE1B_ACCEPTANCE", "path": "docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md", "kind": "Phase 1B live-dark acceptance record (Gate-P cutover, reboot-validated; PENDING PO acceptance)", "authoritative": true }
+    { "id": "PHASE1B_ACCEPTANCE", "path": "docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md", "kind": "Phase 1B live-dark acceptance record -- Product-Owner ACCEPTED_AND_CLOSED at DARK maturity via D11/T0011", "authoritative": true }
   ],
   "authoritative_source_commits": {
     "phase1a_live_dark_creation": "22a2e15",
@@ -99,7 +99,7 @@
   ],
   "allowed_actions": [
     "Read-only inspection, documentation and governance work",
-    "Merge PR #2 as governance/code delivery only (no live appliance change), then await explicit Product-Owner authorization before any next-phase implementation or dark-feature enablement"
+    "Await explicit Product-Owner authorization before any next-phase implementation or dark-feature (durable throttle / keyed-HMAC OTP / IAM-v2) enablement or any iam_v2 cutover"
   ],
   "prohibited_actions": [
     "Implementing any Phase beyond the authorized Phase 1B dark scope (Phase 2 or any later Phase)",

@@ -117,6 +117,12 @@ MUTATIONS = [
                  "legacy public-schema auth remains the sole production authority (iam_v2 49/0). HEAD 1844da2 Production unchanged.")])),
  ("M33 phase 1B marked closed without recorded PO acceptance", "governance/project-state.json",
    ("replace", [('"transition_accepted": true', '"transition_accepted": false')])),
+ ("M34 closed but evidence still says PENDING PO acceptance", "governance/project-state.json",
+   ("replace", [("Product-Owner ACCEPTED_AND_CLOSED at DARK maturity via D11/T0011",
+                 "reboot-validated; PENDING PO acceptance")])),
+ ("M35 closed/merged but an allowed_action still says merge PR #2", "governance/project-state.json",
+   ("replace", [("Await explicit Product-Owner authorization before any next-phase implementation or dark-feature",
+                 "Merge PR #2 as governance/code delivery only, then await authorization for the next dark-feature")])),
 ]
 
 def apply(relpath, op):

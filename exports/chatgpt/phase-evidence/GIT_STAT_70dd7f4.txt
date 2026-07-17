@@ -1,0 +1,4 @@
+commit 70dd7f4439f01957cd10d9860b72eef5418bf4d5
+Date:   Sat Jul 18 02:34:21 2026 +0300
+
+    Governance: post-merge cleanup â€” retire two stale Phase 1B pending/merge fields (D11/T0011)
