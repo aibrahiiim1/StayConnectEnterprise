@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -110,9 +111,77 @@ func (s *Store) scopeKey(kind ScopeKind, value string) string {
 
 func (s *Store) windowStart(now time.Time) time.Time { return now.Truncate(s.window).UTC() }
 
+// chargeable is a normalized, resolved throttle entry (scope key already HMAC'd).
+type chargeable struct {
+	kind   ScopeKind
+	sk     string
+	method string
+	limit  int
+	block  time.Duration
+}
+
+// normalizeRules validates every rule, resolves its scope key, drops no-op rules (empty non-endpoint
+// value, non-positive limit), then SORTS by (scope_kind, scope_key, method) and DEDUPS identical
+// throttle identities — merging duplicates to the TIGHTEST limit and LONGEST block. The deterministic
+// order guarantees every concurrent Allow acquires the same row locks in the same sequence, so mixed
+// rule orders can never deadlock, and a duplicated scope is charged exactly once.
+func (s *Store) normalizeRules(rules []Rule) ([]chargeable, error) {
+	merged := make(map[string]*chargeable, len(rules))
+	for _, r := range rules {
+		if !r.Kind.valid() {
+			return nil, fmt.Errorf("throttle: invalid scope %q", r.Kind)
+		}
+		method := strings.ToLower(strings.TrimSpace(r.Method))
+		if method == "" {
+			// Explicit method is required; use MethodAny deliberately for a global policy.
+			return nil, errors.New("throttle: rule is missing an explicit method")
+		}
+		if !validMethod(method) {
+			return nil, fmt.Errorf("throttle: invalid method %q", method)
+		}
+		if r.Value == "" && r.Kind != ScopeEndpoint {
+			continue
+		}
+		if r.Limit <= 0 {
+			continue
+		}
+		sk := s.scopeKey(r.Kind, r.Value)
+		id := string(r.Kind) + "\x00" + sk + "\x00" + method
+		if e, ok := merged[id]; ok {
+			if r.Limit < e.limit {
+				e.limit = r.Limit
+			}
+			if r.Block > e.block {
+				e.block = r.Block
+			}
+			continue
+		}
+		merged[id] = &chargeable{kind: r.Kind, sk: sk, method: method, limit: r.Limit, block: r.Block}
+	}
+	out := make([]chargeable, 0, len(merged))
+	for _, e := range merged {
+		out = append(out, *e)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].kind != out[j].kind {
+			return out[i].kind < out[j].kind
+		}
+		if out[i].sk != out[j].sk {
+			return out[i].sk < out[j].sk
+		}
+		return out[i].method < out[j].method
+	})
+	return out, nil
+}
+
 // Allow charges one attempt against every rule and returns whether the attempt may proceed. FAILS
 // CLOSED: any database error denies the attempt. A hard block is honored across window boundaries.
+// Rules are sorted+deduped first (see normalizeRules) so concurrent calls never deadlock.
 func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
+	entries, err := s.normalizeRules(rules)
+	if err != nil {
+		return Decision{}, err
+	}
 	now := s.now().UTC()
 	ws := s.windowStart(now)
 	wl := int(s.window / time.Second)
@@ -126,25 +195,9 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	for _, r := range rules {
-		if !r.Kind.valid() {
-			return Decision{}, fmt.Errorf("throttle: invalid scope %q", r.Kind)
-		}
-		method := strings.ToLower(strings.TrimSpace(r.Method))
-		if method == "" {
-			// Explicit method is required; use MethodAny deliberately for a global policy.
-			return Decision{}, errors.New("throttle: rule is missing an explicit method")
-		}
-		if !validMethod(method) {
-			return Decision{}, fmt.Errorf("throttle: invalid method %q", method)
-		}
-		if r.Value == "" && r.Kind != ScopeEndpoint {
-			continue
-		}
-		if r.Limit <= 0 {
-			continue
-		}
-		sk := s.scopeKey(r.Kind, r.Value)
+	for _, r := range entries {
+		method := r.method
+		sk := r.sk
 
 		// Cross-window active block: the greatest blocked_until for this throttle identity across ALL
 		// windows. A long block therefore stays effective after the fixed window rolls over.
@@ -152,12 +205,12 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 		if err := tx.QueryRow(ctx,
 			`SELECT max(blocked_until) FROM public.auth_throttle_buckets
 			   WHERE scope_kind=$1 AND scope_key=$2 AND method=$3 AND blocked_until > $4`,
-			string(r.Kind), sk, method, now).Scan(&maxBlock); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return Decision{Reason: r.Kind}, fmt.Errorf("throttle: block-read: %w", err)
+			string(r.kind), sk, method, now).Scan(&maxBlock); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return Decision{Reason: r.kind}, fmt.Errorf("throttle: block-read: %w", err)
 		}
 		if maxBlock != nil && maxBlock.After(now) {
 			allowed = false
-			reason = r.Kind
+			reason = r.kind
 			if d := maxBlock.Sub(now); d > worstRetry {
 				worstRetry = d
 			}
@@ -173,23 +226,23 @@ func (s *Store) Allow(ctx context.Context, rules ...Rule) (Decision, error) {
 			 DO UPDATE SET attempt_count = public.auth_throttle_buckets.attempt_count + 1,
 			               updated_at = now()
 			 RETURNING attempt_count`,
-			string(r.Kind), sk, method, ws, wl).Scan(&count); err != nil {
-			return Decision{Reason: r.Kind}, fmt.Errorf("throttle: incr: %w", err)
+			string(r.kind), sk, method, ws, wl).Scan(&count); err != nil {
+			return Decision{Reason: r.kind}, fmt.Errorf("throttle: incr: %w", err)
 		}
 
-		if count > r.Limit {
+		if count > r.limit {
 			allowed = false
-			reason = r.Kind
+			reason = r.kind
 			retry := ws.Add(s.window).Sub(now)
-			if r.Block > 0 {
-				bu := now.Add(r.Block)
+			if r.block > 0 {
+				bu := now.Add(r.block)
 				if _, err := tx.Exec(ctx,
 					`UPDATE public.auth_throttle_buckets SET blocked_until=$5, updated_at=now()
 					   WHERE scope_kind=$1 AND scope_key=$2 AND method=$3 AND window_start=$4`,
-					string(r.Kind), sk, method, ws, bu); err != nil {
-					return Decision{Reason: r.Kind}, fmt.Errorf("throttle: block: %w", err)
+					string(r.kind), sk, method, ws, bu); err != nil {
+					return Decision{Reason: r.kind}, fmt.Errorf("throttle: block: %w", err)
 				}
-				retry = r.Block
+				retry = r.block
 			}
 			if retry > worstRetry {
 				worstRetry = retry

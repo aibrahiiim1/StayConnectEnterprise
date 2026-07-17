@@ -105,6 +105,73 @@ func TestConcurrentNoBypass(t *testing.T) {
 	}
 }
 
+// TestMixedRuleOrderNoDeadlock: many concurrent callers pass the SAME set of multi-scope rules in
+// RANDOMIZED order. Because Allow sorts+dedups before charging, every transaction acquires the row
+// locks in the same global order, so none deadlock — and the shared IP cap is still enforced exactly.
+func TestMixedRuleOrderNoDeadlock(t *testing.T) {
+	db := testDB(t)
+	s, _ := New(db, tkey, time.Minute)
+	ctx := context.Background()
+	const workers, ipLimit = 30, 8
+	// three scopes; the IP scope is the binding cap. Distinct identities/devices per worker so only the
+	// shared IP rule can deny.
+	var allowed int64
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rules := []Rule{
+				{Kind: ScopeIP, Value: "10.9.9.9", Method: "account", Limit: ipLimit},
+				{Kind: ScopeIdentity, Value: "id-mix", Method: "account", Limit: 1000},
+				{Kind: ScopeDevice, Value: "dev-mix", Method: "account", Limit: 1000},
+			}
+			// rotate the slice so callers pass rules in different orders
+			shift := i % 3
+			rules = append(rules[shift:], rules[:shift]...)
+			if d, err := s.Allow(ctx, rules...); err == nil && d.Allowed {
+				atomic.AddInt64(&allowed, 1)
+			} else if err != nil {
+				t.Errorf("worker %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if allowed != ipLimit {
+		t.Fatalf("mixed-order concurrency: %d allowed, want exactly %d (IP cap)", allowed, ipLimit)
+	}
+}
+
+// TestDuplicateRuleChargedOnce: a duplicated scope in one call must be charged only once per attempt
+// (dedup), so the limit reflects attempts, not how many times the caller listed the scope.
+func TestDuplicateRuleChargedOnce(t *testing.T) {
+	db := testDB(t)
+	s, _ := New(db, tkey, time.Minute)
+	ctx := context.Background()
+	// Same identity listed 3x (tightest limit wins on merge). Limit 2 -> first two attempts allowed.
+	dup := func() []Rule {
+		return []Rule{
+			{Kind: ScopeIdentity, Value: "dupe", Method: "voucher", Limit: 5},
+			{Kind: ScopeIdentity, Value: "dupe", Method: "voucher", Limit: 2},
+			{Kind: ScopeIdentity, Value: "dupe", Method: "voucher", Limit: 9},
+		}
+	}
+	for i := 1; i <= 2; i++ {
+		if d, err := s.Allow(ctx, dup()...); err != nil || !d.Allowed {
+			t.Fatalf("attempt %d should pass (charged once, tightest limit=2): %+v err=%v", i, d, err)
+		}
+	}
+	if d, _ := s.Allow(ctx, dup()...); d.Allowed {
+		t.Fatal("3rd attempt must deny (dedup means one charge/attempt, tightest limit=2)")
+	}
+	// exactly one bucket row exists for the identity (not three)
+	var rows int
+	db.QueryRow(ctx, `SELECT count(*) FROM public.auth_throttle_buckets WHERE scope_kind='identity' AND method='voucher'`).Scan(&rows)
+	if rows != 1 {
+		t.Fatalf("dedup must produce one bucket row, got %d", rows)
+	}
+}
+
 // TestHardBlockAcrossWindows: 1-minute window, 1-hour block; advancing the injected clock past
 // several window boundaries keeps the attempt denied until blocked_until; then it resumes.
 func TestHardBlockAcrossWindows(t *testing.T) {
