@@ -147,6 +147,35 @@ def cmd_validate(deep=True):
     if len(open_phases) > 1: fail(f"more than one current/open phase: {open_phases}")
     if open_phases and open_phases[0] != st.get("current_phase"): fail(f"open phase {open_phases[0]} != current_phase {st.get('current_phase')}")
 
+    # Phase-1B live-dark state-consistency: reject stale contradictions that a keyword scan alone missed.
+    act = st.get("current_activity", "")
+    p1b_mat = st.get("phases", {}).get("1B", {}).get("maturity", "")
+    p1b_exec = st.get("phase1b_execution", {}) or {}
+    blockers = st.get("blockers", []) or []
+    allowed = st.get("allowed_actions", []) or []
+    na_txt = na if isinstance(na, str) else ""
+    # A: activity says live-dark deployed, but maturity still says Gate P/throttle/OTP/live-dark PENDING.
+    if "LIVE_DARK_DEPLOYED" in act and re.search(r"(gate\s*p|throttle|otp|dark-code|live-dark)[^.]*pending", p1b_mat, re.I):
+        fail("stale-state contradiction: current_activity says LIVE_DARK_DEPLOYED but phases.1B.maturity still says Gate P/throttle/OTP/live-dark pending")
+    # B: Gate-P cutover recorded done, but a blocker still claims services use the superuser.
+    if p1b_exec.get("gate_p_least_privilege_cutover") is True:
+        for b in blockers:
+            if re.search(r"superuser", str(b), re.I) and re.search(r"still\s+(connect|use)", str(b), re.I):
+                fail("stale-state contradiction: gate_p_least_privilege_cutover=true but a blocker says services still use the superuser")
+    # C: next action is PO acceptance, but allowed_actions still say to execute Phase 1B.
+    if re.search(r"accept", na_txt, re.I):
+        for a in allowed:
+            if re.search(r"execute\s+(the\s+)?(approved\s+)?phase\s*1b", str(a), re.I):
+                fail("stale-state contradiction: next action is Product-Owner acceptance but allowed_actions still say execute Phase 1B")
+    # D: after T0010, no current-state field may present the stale authoritative HEAD or "Production unchanged/untouched".
+    if str(st.get("latest_transition_id", "")) >= "T0010":
+        cur_blob = " ".join([act, st.get("current_maturity", ""), p1b_mat, st.get("service_routing_state", ""),
+                             " ".join(str(x) for x in blockers), " ".join(str(x) for x in allowed), na_txt])
+        if "1844da2" in cur_blob:
+            fail("stale-state contradiction: stale HEAD 1844da2 present in a current-state field after T0010")
+        if re.search(r"production\s+(unchanged|untouched)", cur_blob, re.I):
+            fail("stale-state contradiction: 'Production unchanged/untouched' presented as current state after T0010")
+
     # transitions ordered + snapshot matches latest + no regression + closed cannot reopen
     if trans:
         seqs = [t.get("seq", -1) for t in trans]
@@ -342,8 +371,8 @@ MROWS = [
  ("StayConnect-IAM-Phase0-Contract.md","`docs/architecture/StayConnect-IAM-Phase0-Contract.md`","**Authoritative** *(sanitized)*"),
  ("StayConnect-IAM-Handoff.md","`docs/context/StayConnect-IAM-Handoff.md`","**Authoritative**"),
  ("StayConnect-IAM-Phase1A-Plan.md","`docs/architecture/StayConnect-IAM-Phase1A-Plan.md`","**Authoritative (closed phase)**"),
- ("StayConnect-IAM-Phase1B-Plan.md","`docs/architecture/StayConnect-IAM-Phase1B-Plan.md`","**Authoritative (planning-only)**"),
- ("Phase1B-Privilege-Matrix.md","`docs/architecture/Phase1B-Privilege-Matrix.md`","**Authoritative (planning-only) — grant matrix**"),
+ ("StayConnect-IAM-Phase1B-Plan.md","`docs/architecture/StayConnect-IAM-Phase1B-Plan.md`","**Authoritative — implemented (live-dark deployed, T0010)**"),
+ ("Phase1B-Privilege-Matrix.md","`docs/architecture/Phase1B-Privilege-Matrix.md`","**Authoritative — as-built grant matrix (Gate P deployed)**"),
  ("StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`","**Authoritative (acceptance record)**"),
  ("Protel-FIAS-Phase0-Spike.md","`docs/spikes/Protel-FIAS-Phase0-Spike.md`","**Authoritative** *(sanitized)*"),
  ("ZERO_STALE_LEFTOVERS_RULE.md","`docs/ZERO_STALE_LEFTOVERS_RULE.md`","**Permanent rule**"),

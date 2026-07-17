@@ -1,6 +1,6 @@
 # Phase 1B — Exact Least-Privilege Grant Matrix (machine-reviewable)
 
-**Planning-only.** Authoritative grant specification for Gate P, derived from the completed DB-access inventory (`exports/chatgpt/phase1b-planning/inventory/DB_ACCESS_MAP.md`) and exact query/code inspection. **No grant is applied by this planning document.**
+**As-built (Gate P deployed at transition T0010; pending Product-Owner acceptance).** Authoritative grant specification derived from the completed DB-access inventory (`exports/chatgpt/phase1b-planning/inventory/DB_ACCESS_MAP.md`) and exact query/code inspection, and **applied live** on the appliance during the Phase 1B Gate-P cutover (see `docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md`). §1.1a reflects the `svc_scd` cross-tenant grants live-derived on 2026-07-18.
 
 <!-- MACHINE ASSERTION — validated by tools/project-state.py -->
 `PRODUCTION_IAM_V2_DML: NONE`  (no production runtime service role holds any `iam_v2` INSERT/UPDATE/DELETE/SELECT/EXECUTE grant)

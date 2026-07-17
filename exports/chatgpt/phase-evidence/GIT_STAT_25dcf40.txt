@@ -1,4 +1,0 @@
-commit 25dcf4027197a0abc03b35e0f1624eab791b080c
-Date:   Sat Jul 18 00:44:40 2026 +0300
-
-    Governance: preserve canonical formatting + advance mutation fixtures to T0010
