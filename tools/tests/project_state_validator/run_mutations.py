@@ -91,6 +91,10 @@ MUTATIONS = [
    ("replace", [('"id": "GH-AGENT-ONLY-OPERATIONS"', '"id": "GH-AGENT-ONLY-OPERATIONS-DISABLED"')])),
  ("M23 rule flipped to require manual PO Git commands", "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md",
    ("replace", [("GIT_OPERATIONS_OWNER: AGENT", "GIT_OPERATIONS_OWNER: PRODUCT_OWNER")])),
+ ("M24 LF policy weakened (eol=lf removed)", ".gitattributes",
+   ("replace", [("* text=auto eol=lf", "* text=auto")])),
+ ("M25 .gitattributes missing", ".gitattributes",
+   ("remove", None)),
 ]
 
 def apply(relpath, op):

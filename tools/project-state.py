@@ -182,7 +182,7 @@ def cmd_validate(deep=True):
     dmap = {d["id"]: d for d in dec.get("decisions", [])}
     for need in ["D1","D2","D3","D4","D5","D6","D7","D8","D9","PH-1B-SCOPE","PH-CUTOVER","SEC-NO-IAMV2-PRIV",
                  "GH-SOURCE-OF-TRUTH","GH-BRANCH-PR","GH-COMPLETE-MANIFEST","GH-FINAL-REPORT","GH-MANDATORY-CI",
-                 "GH-AGENT-ONLY-OPERATIONS"]:
+                 "GH-AGENT-ONLY-OPERATIONS","GH-LF-CONSISTENCY"]:
         if need not in dmap: fail(f"decision-register missing {need}")
     if dmap.get("D1", {}).get("reopenable", False) is not False: fail("D1 must not be reopenable")
     if dmap.get("D1", {}).get("status") != "ACTIVE": fail("D1 must be ACTIVE")
@@ -218,6 +218,17 @@ def cmd_validate(deep=True):
         if "git status --porcelain" not in w: fail("governance CI must assert a clean working tree")
         if "Project Governance" not in w: fail("governance CI workflow name must be 'Project Governance'")
         if not re.search(r"(?m)^\s{2,}governance:\s*$", w): fail("governance CI must define the job id 'governance'")
+
+    # cross-platform LF consistency: a committed .gitattributes pins text to LF and marks ZIP binary
+    # (GH-LF-CONSISTENCY) so Windows/Linux/CI produce byte-identical, checksum-stable pack files.
+    ga = os.path.join(ROOT, ".gitattributes")
+    if not os.path.isfile(ga):
+        fail("missing .gitattributes (GH-LF-CONSISTENCY): checksum-controlled text must be pinned to LF")
+    else:
+        g = open(ga, encoding="utf-8").read()
+        if "eol=lf" not in g: fail(".gitattributes must pin text to eol=lf (GH-LF-CONSISTENCY)")
+        if not re.search(r"(?m)^\*\.zip\s+binary\b", g): fail(".gitattributes must mark *.zip as binary (protect pack checksums)")
+        if not re.search(r"(?m)^\*\s+text=auto\s+eol=lf\b", g): fail(".gitattributes must default '* text=auto eol=lf'")
     if dg.get("operations_owner") != "AGENT":
         fail(f"delivery_governance.operations_owner must be 'AGENT' (got: {dg.get('operations_owner')!r})")
     rd_path = os.path.join(ROOT, "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md")
