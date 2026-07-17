@@ -12,7 +12,7 @@
 <!-- END GENERATED PROJECT STATE -->
 
 
-**Status: PLANNING ONLY — NOT APPROVED FOR IMPLEMENTATION, NOT IMPLEMENTED.** This document is a complete, production-grade Phase 1B plan produced under a Product-Owner *planning* authorization (2026-07-16). It authorizes **no** code, DDL/DML, role/credential change, DSN/`search_path` change, service routing to `iam_v2`, dual-read/write, deployment, data migration, PMS/FIAS traffic, financial posting, network change, cutover, or any later Phase. Nothing here executes until a separate explicit Product-Owner **implementation** authorization (the blueprint in §14) is given.
+**Status: IMPLEMENTATION AUTHORIZED — IN PROGRESS (dark / flags-OFF).** Phase 1B implementation is Product-Owner **authorized and IN_PROGRESS** (decision D10, 2026-07-17); the live current-state is the GENERATED PROJECT STATE block above (rendered from `governance/project-state.json`). Delivery is on branch `phase/1b-dark-auth` / **PR #2 (not merged)**. This authorization covers the dark credential/identity/auth-context scope **only**: it does **not** authorize any Production cutover, any Production `iam_v2` runtime read or write, service routing to `iam_v2`, dual-read/write, IAM-v2 data migration, PMS/FIAS traffic, financial posting, network change, or any later Phase. **Legacy Production authentication (`public` schema) remains the sole authority throughout Phase 1B.** Machine sentinel: `PHASE_1B_PRODUCTION_IAM_V2_RUNTIME: NONE` — no Production runtime `iam_v2` read, write, shadow evaluation, or rolled-back transaction; all functional `iam_v2` adapter/repository/engine execution occurs in scratch/test only.
 
 **Baseline this plan builds on (verified):** Phase 0 FINAL/CLOSED; Phase 1A **formally Product-Owner ACCEPTED and CLOSED** at `SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER`; production `iam_v2` = 49 empty tables (fingerprint `bd75026f`), no service reads/writes it, no DSN/`search_path` routing, no data migration; all services connect as PostgreSQL superuser `stayconnect`. **Phase 1B is credential/identity/auth-context implementation in DARK/flags-OFF mode — it is NOT a cutover** (the atomic complete-domain cutover is a later separately approved gate, only after Phases 2–6 and full-domain acceptance). Ladder reference: Phase-1A Plan §7a/§11 (Phase 1B = ladder steps 7–10, dark/flagged, **before** any cutover at step 11).
 
@@ -27,7 +27,7 @@ Scope is derived from FINAL contract §18 (Phase 1B row), §4.4/§4.5/§4.6, §1
 - Credential validation + subject resolution against `iam_v2` for the four contract-listed methods: **VOUCHER** (HMAC/AEAD), **ACCOUNT** (argon2id), **OTP** (email/SMS → `guest_principal_identities`), **SOCIAL** (OAuth → `guest_principal_identities`).
 - `guest_principals` / `guest_principal_identities` resolution (tenant-wide, MAC-is-never-a-factor) and `devices` registry (MAC = device).
 - `auth_contexts` creation (one-time, TTL, method↔subject coherence) for those four methods.
-- The **session-after-grant** portal code path wired to the `iam_v2` engine (`reserve_device_slot`, `ingest_sample`, `close_session`, entitlement guard) **behind flags**, exercised in scratch/test and shadow-only in production.
+- The **session-after-grant** adapter interface to the `iam_v2` engine (`reserve_device_slot`, `ingest_sample`, `close_session`, entitlement guard) **behind flags**, exercised in **scratch/test ONLY**. In Production this code is present but flag-OFF, privilege-denied, and never invoked — **no read, no write, no shadow evaluation, no rolled-back transaction** against `iam_v2`.
 - Feature-flag + kill-switch infrastructure (§5); observability (§11); acceptance (§12).
 
 **EXPLICITLY EXCLUDED from Phase 1B (map to later Phases; do not build here):**
@@ -51,9 +51,9 @@ Scope is derived from FINAL contract §18 (Phase 1B row), §4.4/§4.5/§4.6, §1
 | Social callback → identity | `social_oauth_states` + provider → `guests` by email | §4.4 identities (issuer-scoped) | `guest_principal_identities` (SOCIAL_SUBJECT, issuer-scoped) | resolve/create principal from `(issuer, subject)`; **`social_oauth_states` stays in `public`** | scd | `iam_v2.auth.social` | B4 | flag OFF |
 | auth_context create | (implicit; legacy has no auth_context table) | §4.5 auth_contexts | `iam_v2.auth_contexts` | new one-time context writer (method↔subject CHECK enforced by DB) | scd | (per-method flag) | B6 | flag OFF |
 | Device registry | `guests(tenant,mac)` conflated device+person | §4.6 devices | `iam_v2.devices` + `device_network_appearances` | MAC→device upsert; principal separate | scd | (bundled) | B4 (MAC≠owner) | flag OFF |
-| Session-after-grant (shadow) | `session.Manager.Start*` on `public.sessions` | §4.6 sessions/entitlements | `iam_v2.sessions` + `entitlements` + `entitlement_devices` (+engine) | adapter that *computes* the would-grant via `iam_v2` engine, compares to legacy, **writes nothing to iam_v2 in production dark** | scd | `iam_v2.session.shadow` | B-series in scratch | flag OFF |
+| Session-after-grant (adapter, scratch-only) | `session.Manager.Start*` on `public.sessions` | §4.6 sessions/entitlements | `iam_v2.sessions` + `entitlements` + `entitlement_devices` (+engine) | adapter **interface** to the `iam_v2` engine, exercised **scratch/test ONLY**; Production is flag-OFF, privilege-denied, never invoked (**zero `iam_v2` read/write/shadow**) | scd | `iam_v2.session.adapter` | B-series in scratch | flag OFF |
 
-**Anti-hybrid rule (inherited from Phase-1A §7a/§8):** Phase 1B does **not** create a per-flow/per-service split source of truth. In production, the legacy `public` schema remains the sole authority for real guest sessions throughout Phase 1B; `iam_v2` is exercised only in scratch/test and, at most, read-only shadow evaluation that takes **no** guest-visible decision. A real switch of authority is the **cutover** (ladder step 11+, separate approval).
+**Anti-hybrid rule (inherited from Phase-1A §7a/§8):** Phase 1B does **not** create a per-flow/per-service split source of truth. In production, the legacy `public` schema remains the sole authority for real guest sessions throughout Phase 1B; `iam_v2` is exercised **only in scratch/test**. In Production no runtime service reads or writes `iam_v2` at all — **no shadow evaluation and no rolled-back transaction**. A real switch of authority is the **cutover** (ladder step 11+, separate approval).
 
 ---
 
@@ -81,10 +81,10 @@ Ownership/migration/service separation (extends the existing `iam_v2_scratch/rol
 - `iam_v2_migrator` — **NOLOGIN**, member of `iam_v2_owner` (runs migrations via `SET ROLE`), separate from every service role.
 - `svc_scd` (**LOGIN**) — the runtime role scd connects as. Grants:
   - PUBLIC (legacy, needed today): the exact scd read/write set from the DB-access map (`sessions`, `guests`, `guest_accounts`, `vouchers`, `auth_otps`, `social_oauth_*`, `pms_*`, `sync_outbox`, `sync_checkpoints`, `tenant_effective_limits`, `guest_networks`, `audit_log`, …) — `SELECT`/`INSERT`/`UPDATE` per column-family, `USAGE` on sequences it writes; no `DELETE` unless the code path needs it.
-  - `iam_v2` (prepared for cutover, unused until then): `USAGE` on schema; `SELECT`/`INSERT`/`UPDATE` on the credential/identity/auth/session/entitlement/device tables it will own at cutover; `EXECUTE` on `reserve_device_slot`, `ingest_sample`, `close_session`, `apply_adjustment`; no rights on posting/settlement tables.
-- `svc_edged` (**LOGIN**) — admin CRUD grants on `public` (its current broad admin set) + `iam_v2` credential/account/voucher/entitlement admin tables prepared for cutover; write-only on secret-generation tables (never `SELECT` on ciphertext it does not need).
-- `svc_acctd` (**LOGIN**) — narrow: `public.sessions` (SELECT/UPDATE), `public.accounting_records` (INSERT); `iam_v2` `SELECT` on `sessions`, `INSERT` on `accounting_records`, `EXECUTE ingest_sample`, `UPDATE` entitlement counters only via `apply_adjustment` (no direct counter UPDATE).
-- `svc_netd` (**LOGIN**) — networking `public` tables only; **no** `iam_v2` grant.
+  - `iam_v2`: **ZERO in Phase 1B** — no schema `USAGE`, no table/sequence privilege, no function `EXECUTE`, no DML, no read. (Future cutover grants are **design-only**; see the *FUTURE DESIGN — NOT GRANTED OR APPLIED IN PHASE 1B* appendix at the end of this document. They are never created or applied in Phase 1B.)
+- `svc_edged` (**LOGIN**) — admin CRUD grants on `public` (its current broad admin set) only; **ZERO `iam_v2` privileges** in Phase 1B (future cutover grants: FUTURE DESIGN appendix — not created or applied here).
+- `svc_acctd` (**LOGIN**) — narrow: `public.sessions` (SELECT/UPDATE), `public.accounting_records` (INSERT); **ZERO `iam_v2` privileges** in Phase 1B (future cutover grants: FUTURE DESIGN appendix — not created or applied here).
+- `svc_netd` (**LOGIN**) — networking `public` tables only; **ZERO `iam_v2` grant**.
 
 For **each** service role, the plan specifies (per PO prompt §2): current user & DSN source; exact tables/schemas needed; read/write matrix; dedicated role; LOGIN/NOLOGIN & ownership; schema `USAGE`; table/sequence/function privileges; `ALTER DEFAULT PRIVILEGES` so future owner-created objects are denied to service roles by default; `CONNECTION LIMIT`; `statement_timeout`/`lock_timeout`/`idle_in_transaction_session_timeout` set via `ALTER ROLE … SET`; credential storage (see 2.3); rotation (2.4); deployment order (2.5); rollback (2.6); reboot persistence; negative tests (2.7); audit/monitoring (§11).
 
@@ -177,15 +177,15 @@ Preserved invariants (must not regress): local-first Edge; **signed assignment**
 
 Target flow (dark/flagged; per-method):
 1. **portald** unchanged in structure: resolves MAC (ARP), proxies credential over the Unix socket. No DB, no `iam_v2` awareness. (Its login-tab list comes from scd's license-filtered `/api/auth-methods`.)
-2. **scd owns credential validation and authentication-context creation.** A new `iam_v2` auth adapter, selected per-method by flag, validates the credential against `iam_v2` credential tables and creates an `iam_v2.auth_contexts` row (method↔subject enforced by DB CHECKs `ac_one_subject`/`ac_method_subject`/`ac_pms_pins`). Subject resolution:
+2. **scd owns credential validation and authentication-context creation.** A new `iam_v2` auth adapter, selected per-method by flag, validates the credential against `iam_v2` credential tables and creates an `iam_v2.auth_contexts` row (method↔subject enforced by DB CHECKs `ac_one_subject`/`ac_method_subject`/`ac_pms_pins`). **This adapter is exercised in scratch/test ONLY; in Production it is flag-OFF and privilege-denied and is never invoked (no `iam_v2` read/write).** Subject resolution (scratch/test):
    - VOUCHER → `iam_v2.vouchers` by `code_hmac` (compute HMAC with the active `voucher_code_key_generations`); subject `voucher_id`.
    - ACCOUNT → `iam_v2.guest_access_accounts` by `(tenant, lower(username))`; argon2id verify; subject `guest_account_id`.
    - OTP → verify challenge in `public.auth_otps` (unchanged), then resolve/create `guest_principals`+`guest_principal_identities` (EMAIL/PHONE, tenant-wide); subject `guest_principal_id`.
    - SOCIAL → verify state in `public.social_oauth_states` + provider exchange (unchanged), then resolve/create identity `(SOCIAL_SUBJECT, issuer, subject)` issuer-scoped; subject `guest_principal_id`.
    - Device: MAC → `iam_v2.devices` upsert; `device_id` stamped on the auth_context; `device_network_appearances` records the guest_network.
-3. **Portal → auth service call:** unchanged transport (portald→scd Unix socket). scd's response envelope is unchanged (`{session_id, guest_id, duration_seconds, expires_at}`); in dark mode the **legacy** path still produces that real session, while the `iam_v2` adapter runs in **shadow** (computes the would-be auth_context + would-be grant/session via the engine, compares, logs divergence) and takes **no** guest-visible decision.
+3. **Portal → auth service call:** unchanged transport (portald→scd Unix socket). scd's response envelope is unchanged (`{session_id, guest_id, duration_seconds, expires_at}`). In Production dark mode the **legacy** path is the sole path that produces the real session; the `iam_v2` adapter is **flag-OFF and not invoked in Production** (no read, no write, no shadow, no rolled-back tx). The adapter/engine comparison ("would-be auth_context/grant") is exercised in **scratch/test only**.
 4. **Tenant/site/PMS-interface context** derived exactly as today (signed assignment; IP→guest_network). No new identity source.
-5. **Transaction boundaries:** auth_context creation is a single tx; the (shadow) grant/session computation uses the `iam_v2` engine functions (`reserve_device_slot`, capacity via advisory namespaces `LN_DEVICE_SLOT=11`/`LN_CAPACITY=7`, `ingest_sample`, `close_session`) in a read-mostly/rolled-back tx in production dark (no durable `iam_v2` write in production).
+5. **Transaction boundaries (scratch/test):** auth_context creation is a single tx; the grant/session computation uses the `iam_v2` engine functions (`reserve_device_slot`, capacity via advisory namespaces `LN_DEVICE_SLOT=11`/`LN_CAPACITY=7`, `ingest_sample`, `close_session`). **In Production there is no `iam_v2` transaction at all — no read, no write, and no rolled-back transaction (D1).** All engine execution occurs in scratch/test only.
 6. **Idempotency keys:** auth_contexts one-time (`consumed_at`), TTL 10m; device slot idempotent reconnect (no slot burn); session close idempotent (`ALREADY_ENDED`); accounting watermarked `(session,seq)`.
 7. **Retry/rate-limit/brute-force:** reuse existing layered throttles (account limiter, OTP cooldown/hourly/IP caps, social CSRF single-use + IP/MAC binding); make throttle state durable/shared-ready (address the in-process-resets-on-restart gap) as a hardening item.
 8. **Audit events:** per-method auth result classification (success/failure reason), device admission, flag state — **no** secrets/OTP values/tokens/room/PII in logs (§11).
@@ -408,7 +408,7 @@ Aligns with Phase-1A §7a/§11 (Phase 1B = steps 7–10, before cutover at 11+).
 9. **Documentation & export synchronization** + `ZERO_STALE_LEFTOVERS = PASS`.
 10. **Product-Owner review before any guest-visible activation.**
 
-**Separate authorization still required for:** guest-visible activation (cutover, step 11+); financial posting (Phase 4); cutover; legacy cleanup; any later Phase. Stop conditions (halt + report, do not proceed): any negative-permission failure; any guest-visible regression while dark; any unauthorized `iam_v2` write in production (unless D1 explicitly approved shadow writes); any secret/PII leak; shadow-divergence above threshold; any acceptance red.
+**Separate authorization still required for:** guest-visible activation (cutover, step 11+); financial posting (Phase 4); cutover; legacy cleanup; any later Phase. Stop conditions (halt + report, do not proceed): any negative-permission failure; any guest-visible regression while dark; **any `iam_v2` read or write in production (D1 forbids all production `iam_v2` runtime access, including rolled-back transactions)**; any secret/PII leak; any scratch/test shadow-divergence above threshold; any acceptance red.
 
 ---
 
@@ -459,4 +459,17 @@ This blueprint is a **proposal only** and is not executed by the current plannin
 
 ---
 
-**End of Phase 1B plan. PLANNING ONLY — not approved, not implemented.** Single next authorized action: **Product-Owner approval or rejection of this complete Phase 1B plan.**
+## Appendix Z — FUTURE DESIGN — NOT GRANTED OR APPLIED IN PHASE 1B
+
+The `iam_v2` privileges below are the **future cutover** design for the runtime roles. They are **design reference only**: they are **NOT created, granted, or applied in Phase 1B**, and no Phase 1B role receives them. Applying any of them requires a separate, explicitly-approved cutover authorization (ladder step 11+, after Phases 2–6). During Phase 1B every production runtime role holds **ZERO** `iam_v2` privileges (see §2.2, §2.8, and `Phase1B-Privilege-Matrix.md` → `PRODUCTION_IAM_V2_DML: NONE`).
+
+- **`svc_scd` (future cutover only):** `USAGE` on `iam_v2`; `SELECT`/`INSERT`/`UPDATE` on the credential/identity/auth/session/entitlement/device tables it would own at cutover; `EXECUTE` on `reserve_device_slot`, `ingest_sample`, `close_session`, `apply_adjustment`; no posting/settlement rights.
+- **`svc_edged` (future cutover only):** `iam_v2` credential/account/voucher/entitlement admin tables; write-only on secret-generation tables.
+- **`svc_acctd` (future cutover only):** `iam_v2` `SELECT` on `sessions`, `INSERT` on `accounting_records`, `EXECUTE ingest_sample`, entitlement counters only via `apply_adjustment`.
+- **`svc_netd`:** never receives any `iam_v2` grant (not even at cutover for this phase's design).
+
+**These grants are `FUTURE DESIGN — NOT GRANTED OR APPLIED IN PHASE 1B`.**
+
+---
+
+**End of Phase 1B plan. IMPLEMENTATION AUTHORIZED — IN PROGRESS (dark / flags-OFF; PR #2 not merged).** Single next authorized action: **complete Phase 1B execution and live-dark verification**, then Product-Owner acceptance or rejection. `PHASE_1B_PRODUCTION_IAM_V2_RUNTIME: NONE`.

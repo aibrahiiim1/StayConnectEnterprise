@@ -12,8 +12,8 @@
 <!-- END GENERATED PROJECT STATE -->
 
 ## Provenance
-- **SOURCE_COMMIT (clean source this pack was built from):** `2aa687f`
-- **State transition:** `T0009`  ·  **schema:** `1.0.0`  ·  **build timestamp:** `2026-07-17T13:33:41Z`
+- **SOURCE_COMMIT (clean source this pack was built from):** `0eb6cf0`
+- **State transition:** `T0009`  ·  **schema:** `1.0.0`  ·  **build timestamp:** `2026-07-17T15:10:01Z`
 - **PROJECT_PACK_EXPORT_COMMIT:** *external* — the commit that commits this pack (recorded in the execution report; a pack never contains the commit that commits it). Verify with `git log -1 -- exports/chatgpt/stayconnectenterprise`.
 - **Sanitization:** guest-linked identifiers redacted in the two *(sanitized)* files; no secrets/DSNs/guest PII.
 
@@ -21,23 +21,23 @@
 
 | # | Exported filename | Original repository path | Source | Status | SHA-256 |
 |---|---|---|---|---|---|
-| 1 | `00-START-HERE.md` | *(generated)* | `2aa687f` | Entry point | `43008f48584b97506c9a672b4893ff33fec79e3cb1fb12c37e2f43124502561e` |
-| 2 | `PROJECT-INSTRUCTIONS.md` | *(generated)* | `2aa687f` | Project config | `86c6259b53dc53009a443af59b6b3fa4087050ff5a93a109668ae823fb6b052e` |
-| 3 | `StayConnect-IAM-Phase0-Contract.md` | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | `2aa687f` | **Authoritative** *(sanitized)* | `47fa9ae14b36439627065666fe36d6bbabcc06d878a83812125f7b2d02449239` |
-| 4 | `StayConnect-IAM-Handoff.md` | `docs/context/StayConnect-IAM-Handoff.md` | `2aa687f` | **Authoritative** | `333586b11b946107bec478069a16486d5809b645f941cbdfbf90cc0360391847` |
-| 5 | `StayConnect-IAM-Phase1A-Plan.md` | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | `2aa687f` | **Authoritative (closed phase)** | `80723d7bdf41274ef1a2b5f133e86e48b5318b09aee96c5aba07c5accb91ace1` |
-| 6 | `StayConnect-IAM-Phase1B-Plan.md` | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | `2aa687f` | **Authoritative (planning-only)** | `087460c01d463516ee4b8c7bb79d2666bed8c2d321ca63f0637e7d1c3c55d30c` |
-| 7 | `Phase1B-Privilege-Matrix.md` | `docs/architecture/Phase1B-Privilege-Matrix.md` | `2aa687f` | **Authoritative (planning-only) — grant matrix** | `ebec050db07010ca998b2ddf6680aea76ed70fe5df7483615e1495835ff7d215` |
-| 8 | `StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | `docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | `2aa687f` | **Authoritative (acceptance record)** | `268d38dd93fc8fcc01caab762f6485bf15265a35eff24b0d2032ef17cc80d4c3` |
-| 9 | `Protel-FIAS-Phase0-Spike.md` | `docs/spikes/Protel-FIAS-Phase0-Spike.md` | `2aa687f` | **Authoritative** *(sanitized)* | `a55039b86e098f67a8e92c0f6e14b903a5195f0fe7053701cc6001589b135486` |
-| 10 | `ZERO_STALE_LEFTOVERS_RULE.md` | `docs/ZERO_STALE_LEFTOVERS_RULE.md` | `2aa687f` | **Permanent rule** | `35a4f1d368ade486dff1172b6d4f48355fdc9422bbfcf1e9e0b8f997c1f54a87` |
-| 11 | `GITHUB_EXECUTION_AND_DELIVERY_RULE.md` | `docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md` | `2aa687f` | **Permanent rule** | `78ca0e52167890fe6ffd23a48cf27a08072783dd0c43c1c15a8dd096c8fc6820` |
-| 12 | `SYSTEM_OVERVIEW.md` | `docs/SYSTEM_OVERVIEW.md` | `2aa687f` | Historical snapshot | `3b5cc376451a8bec9907793e0cb5ef70aff231c67b52cf4d05e0e78be53f04e4` |
-| 13 | `TARGET_ARCHITECTURE.md` | `docs/TARGET_ARCHITECTURE.md` | `2aa687f` | Supporting | `dd5b653ade4fbf1bffde1fc97e7f4e2d7fc3d3c9131bd05517b06c6430aa2dda` |
-| 14 | `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | `docs/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | `2aa687f` | Supporting | `37f2022028148769b861b5d446427404a3aaa9545172ada0b24a60451c36e138` |
-| 15 | `DEPLOYMENT_APPLIANCE.md` | `docs/DEPLOYMENT_APPLIANCE.md` | `2aa687f` | Supporting | `7e76f07e06785e58683d95dd5cadbbcc3f7ccbade77df5ab452dbf1c289ed773` |
-| 16 | `OFFLINE_OPERATION.md` | `docs/OFFLINE_OPERATION.md` | `2aa687f` | Supporting | `3232e52f03e7a07089929703e261c27da879258f1dcac67b9c597b8942b69f20` |
-| 17 | `MIGRATION_RUNBOOK.md` | `docs/MIGRATION_RUNBOOK.md` | `2aa687f` | Supporting | `737935641c4d8d0d5de9fd7a7d627aa634d215d2accf9867c76f5d25b658ca55` |
+| 1 | `00-START-HERE.md` | *(generated)* | `0eb6cf0` | Entry point | `43008f48584b97506c9a672b4893ff33fec79e3cb1fb12c37e2f43124502561e` |
+| 2 | `PROJECT-INSTRUCTIONS.md` | *(generated)* | `0eb6cf0` | Project config | `86c6259b53dc53009a443af59b6b3fa4087050ff5a93a109668ae823fb6b052e` |
+| 3 | `StayConnect-IAM-Phase0-Contract.md` | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | `0eb6cf0` | **Authoritative** *(sanitized)* | `47fa9ae14b36439627065666fe36d6bbabcc06d878a83812125f7b2d02449239` |
+| 4 | `StayConnect-IAM-Handoff.md` | `docs/context/StayConnect-IAM-Handoff.md` | `0eb6cf0` | **Authoritative** | `333586b11b946107bec478069a16486d5809b645f941cbdfbf90cc0360391847` |
+| 5 | `StayConnect-IAM-Phase1A-Plan.md` | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | `0eb6cf0` | **Authoritative (closed phase)** | `80723d7bdf41274ef1a2b5f133e86e48b5318b09aee96c5aba07c5accb91ace1` |
+| 6 | `StayConnect-IAM-Phase1B-Plan.md` | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | `0eb6cf0` | **Authoritative (planning-only)** | `85245e30703da0605d6fedfba9b7119a79716d30006aea67c641016fd4f3e4b2` |
+| 7 | `Phase1B-Privilege-Matrix.md` | `docs/architecture/Phase1B-Privilege-Matrix.md` | `0eb6cf0` | **Authoritative (planning-only) — grant matrix** | `ebec050db07010ca998b2ddf6680aea76ed70fe5df7483615e1495835ff7d215` |
+| 8 | `StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | `docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md` | `0eb6cf0` | **Authoritative (acceptance record)** | `268d38dd93fc8fcc01caab762f6485bf15265a35eff24b0d2032ef17cc80d4c3` |
+| 9 | `Protel-FIAS-Phase0-Spike.md` | `docs/spikes/Protel-FIAS-Phase0-Spike.md` | `0eb6cf0` | **Authoritative** *(sanitized)* | `a55039b86e098f67a8e92c0f6e14b903a5195f0fe7053701cc6001589b135486` |
+| 10 | `ZERO_STALE_LEFTOVERS_RULE.md` | `docs/ZERO_STALE_LEFTOVERS_RULE.md` | `0eb6cf0` | **Permanent rule** | `35a4f1d368ade486dff1172b6d4f48355fdc9422bbfcf1e9e0b8f997c1f54a87` |
+| 11 | `GITHUB_EXECUTION_AND_DELIVERY_RULE.md` | `docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md` | `0eb6cf0` | **Permanent rule** | `78ca0e52167890fe6ffd23a48cf27a08072783dd0c43c1c15a8dd096c8fc6820` |
+| 12 | `SYSTEM_OVERVIEW.md` | `docs/SYSTEM_OVERVIEW.md` | `0eb6cf0` | Historical snapshot | `3b5cc376451a8bec9907793e0cb5ef70aff231c67b52cf4d05e0e78be53f04e4` |
+| 13 | `TARGET_ARCHITECTURE.md` | `docs/TARGET_ARCHITECTURE.md` | `0eb6cf0` | Supporting | `dd5b653ade4fbf1bffde1fc97e7f4e2d7fc3d3c9131bd05517b06c6430aa2dda` |
+| 14 | `STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | `docs/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | `0eb6cf0` | Supporting | `37f2022028148769b861b5d446427404a3aaa9545172ada0b24a60451c36e138` |
+| 15 | `DEPLOYMENT_APPLIANCE.md` | `docs/DEPLOYMENT_APPLIANCE.md` | `0eb6cf0` | Supporting | `7e76f07e06785e58683d95dd5cadbbcc3f7ccbade77df5ab452dbf1c289ed773` |
+| 16 | `OFFLINE_OPERATION.md` | `docs/OFFLINE_OPERATION.md` | `0eb6cf0` | Supporting | `3232e52f03e7a07089929703e261c27da879258f1dcac67b9c597b8942b69f20` |
+| 17 | `MIGRATION_RUNBOOK.md` | `docs/MIGRATION_RUNBOOK.md` | `0eb6cf0` | Supporting | `737935641c4d8d0d5de9fd7a7d627aa634d215d2accf9867c76f5d25b658ca55` |
 
 *(MANIFEST is not self-referential.)*
 
