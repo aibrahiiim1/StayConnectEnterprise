@@ -21,7 +21,7 @@ func (a *Authenticator) authAccount(ctx context.Context, req Request) (Result, e
 	now := a.now()
 	var res Result
 	err := a.repo.WithTx(ctx, func(tx Tx) error {
-		id, hash, enabled, vf, vu, locked, err := tx.LookupAccount(ctx, req.TenantID, strings.ToLower(strings.TrimSpace(req.Username)))
+		id, hash, enabled, vf, vu, locked, err := tx.LookupAccount(ctx, req.TenantID, req.SiteID, strings.ToLower(strings.TrimSpace(req.Username)))
 		if err != nil {
 			return err
 		}

@@ -168,8 +168,8 @@ func TestAuthContextConsumeAndDoubleConsume(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			_ = repo.WithTx(ctx, func(tx Tx) error {
-				subj, err := tx.ConsumeAuthContext(ctx, acID, MethodAccount, time.Now())
-				if err == nil && subj.GuestAccountID != "" {
+				cc, err := tx.ConsumeAuthContext(ctx, ConsumeAuthContextRequest{AuthContextID: acID, TenantID: testTenant, SiteID: testSite, ExpectedMethod: MethodAccount, ExpectedDeviceID: res.DeviceID, ExpectedGuestNetworkID: testGN, Now: time.Now()})
+				if err == nil && cc.Subject.GuestAccountID != "" {
 					atomic.AddInt64(&wins, 1)
 					return nil
 				}
@@ -188,7 +188,7 @@ func TestAuthContextConsumeAndDoubleConsume(t *testing.T) {
 	// mismatch: consuming with the wrong method on a fresh context
 	res2, _ := a.Authenticate(ctx, Request{Method: MethodAccount, TenantID: testTenant, SiteID: testSite, Username: "carol", Secret: "pw", Device: gnDevice("de:ad:be:ef:11:23")})
 	_ = repo.WithTx(ctx, func(tx Tx) error {
-		_, err := tx.ConsumeAuthContext(ctx, res2.AuthContextID, MethodOTP, time.Now())
+		_, err := tx.ConsumeAuthContext(ctx, ConsumeAuthContextRequest{AuthContextID: res2.AuthContextID, TenantID: testTenant, SiteID: testSite, ExpectedMethod: MethodOTP, ExpectedDeviceID: res2.DeviceID, ExpectedGuestNetworkID: testGN, Now: time.Now()})
 		if CodeOf(err) != ErrACMismatch {
 			t.Fatalf("wrong method must return mismatch, got %v", CodeOf(err))
 		}
@@ -198,7 +198,7 @@ func TestAuthContextConsumeAndDoubleConsume(t *testing.T) {
 	// expired: force expiry, then consume -> expired
 	db.Exec(ctx, `UPDATE iam_v2.auth_contexts SET expires_at = now() - interval '1 hour' WHERE id=$1`, res2.AuthContextID)
 	_ = repo.WithTx(ctx, func(tx Tx) error {
-		_, err := tx.ConsumeAuthContext(ctx, res2.AuthContextID, MethodAccount, time.Now())
+		_, err := tx.ConsumeAuthContext(ctx, ConsumeAuthContextRequest{AuthContextID: res2.AuthContextID, TenantID: testTenant, SiteID: testSite, ExpectedMethod: MethodAccount, ExpectedDeviceID: res2.DeviceID, ExpectedGuestNetworkID: testGN, Now: time.Now()})
 		if CodeOf(err) != ErrACExpired {
 			t.Fatalf("expired context must return expired, got %v", CodeOf(err))
 		}

@@ -45,22 +45,32 @@ func (t *pgTx) ResolveVoucherByHMAC(ctx context.Context, tenantID, siteID string
 	if err != nil {
 		return "", false, err
 	}
-	redeemable := state != "REDEEMED" && state != "VOID" && state != "EXPIRED"
-	if vf != nil && now.Before(*vf) {
-		redeemable = false
-	}
-	if vu != nil && now.After(*vu) {
-		redeemable = false
-	}
-	return id, redeemable, nil
+	return id, voucherRedeemable(state, vf, vu, now), nil
 }
 
-func (t *pgTx) LookupAccount(ctx context.Context, tenantID, username string) (id, passwordHash string, enabled bool, vf, vu, locked *time.Time, err error) {
+// voucherRedeemable implements the Phase 1B credential-validity rule for a voucher (pure; unit-tested).
+// Canonical states: UNUSED | REDEEMED | REVOKED | REDEMPTION_EXPIRED. Credential-valid only when the
+// state is exactly UNUSED and now is inside [redemption_valid_from, redemption_valid_until) — the
+// upper bound is EXCLUSIVE. Phase 1B does NOT redeem or grant (no state mutation).
+func voucherRedeemable(state string, vf, vu *time.Time, now time.Time) bool {
+	if state != "UNUSED" {
+		return false
+	}
+	if vf != nil && now.Before(*vf) {
+		return false
+	}
+	if vu != nil && !now.Before(*vu) {
+		return false
+	}
+	return true
+}
+
+func (t *pgTx) LookupAccount(ctx context.Context, tenantID, siteID, username string) (id, passwordHash string, enabled bool, vf, vu, locked *time.Time, err error) {
 	e := t.tx.QueryRow(ctx,
 		`SELECT id::text, password_hash, enabled, valid_from, valid_until, locked_until
 		   FROM iam_v2.guest_access_accounts
-		  WHERE tenant_id=$1 AND lower(username)=lower($2)`,
-		tenantID, username).Scan(&id, &passwordHash, &enabled, &vf, &vu, &locked)
+		  WHERE tenant_id=$1 AND site_id=$2 AND lower(username)=lower($3)`,
+		tenantID, siteID, username).Scan(&id, &passwordHash, &enabled, &vf, &vu, &locked)
 	if e == pgx.ErrNoRows {
 		return "", "", false, nil, nil, nil, nil
 	}

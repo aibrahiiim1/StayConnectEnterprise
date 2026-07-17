@@ -130,17 +130,18 @@ type Repository interface {
 type Tx interface {
 	// ResolveVoucherByHMAC returns the voucher id + whether it is currently redeemable.
 	ResolveVoucherByHMAC(ctx context.Context, tenantID, siteID string, codeHMAC []byte, now time.Time) (id string, redeemable bool, err error)
-	// LookupAccount returns the account row needed for validation.
-	LookupAccount(ctx context.Context, tenantID, username string) (id, passwordHash string, enabled bool, validFrom, validUntil *time.Time, lockedUntil *time.Time, err error)
+	// LookupAccount returns the account row needed for validation, scoped to (tenant, site). An
+	// account on a different site returns "" (treated like a nonexistent account).
+	LookupAccount(ctx context.Context, tenantID, siteID, username string) (id, passwordHash string, enabled bool, validFrom, validUntil *time.Time, lockedUntil *time.Time, err error)
 	// ResolvePrincipalByIdentity finds or creates a principal for a verified factor identity.
 	ResolvePrincipalByIdentity(ctx context.Context, tenantID, factorType, issuer, valueNorm string, now time.Time) (principalID string, err error)
 	// UpsertDevice resolves a device by (tenant, mac) and records the network appearance.
 	UpsertDevice(ctx context.Context, tenantID, siteID, applianceID, mac, guestNetworkID, ip string, now time.Time) (deviceID string, err error)
 	// CreateAuthContext writes a one-time auth_context (method<->subject enforced by DB CHECKs).
 	CreateAuthContext(ctx context.Context, spec AuthContextSpec) (id string, err error)
-	// ConsumeAuthContext atomically consumes a one-time auth_context (TTL + one-time; exactly one
-	// concurrent winner). Part of the dark session-after-grant contract (scratch/test only).
-	ConsumeAuthContext(ctx context.Context, id string, expect Method, now time.Time) (Subject, error)
+	// ConsumeAuthContext atomically consumes a one-time auth_context pinned to tenant/site/method/
+	// device/guest-network (TTL + one-time; exactly one concurrent winner). Dark contract (scratch only).
+	ConsumeAuthContext(ctx context.Context, req ConsumeAuthContextRequest) (ConsumedContext, error)
 }
 
 // AuthContextSpec is the one-time authentication context to create.

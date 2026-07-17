@@ -28,7 +28,7 @@ type spyTx struct{}
 func (spyTx) ResolveVoucherByHMAC(context.Context, string, string, []byte, time.Time) (string, bool, error) {
 	return "", false, nil
 }
-func (spyTx) LookupAccount(context.Context, string, string) (string, string, bool, *time.Time, *time.Time, *time.Time, error) {
+func (spyTx) LookupAccount(context.Context, string, string, string) (string, string, bool, *time.Time, *time.Time, *time.Time, error) {
 	return "", "", false, nil, nil, nil, nil
 }
 func (spyTx) ResolvePrincipalByIdentity(context.Context, string, string, string, string, time.Time) (string, error) {
@@ -38,8 +38,8 @@ func (spyTx) UpsertDevice(context.Context, string, string, string, string, strin
 	return "", nil
 }
 func (spyTx) CreateAuthContext(context.Context, AuthContextSpec) (string, error) { return "", nil }
-func (spyTx) ConsumeAuthContext(context.Context, string, Method, time.Time) (Subject, error) {
-	return Subject{}, nil
+func (spyTx) ConsumeAuthContext(context.Context, ConsumeAuthContextRequest) (ConsumedContext, error) {
+	return ConsumedContext{}, nil
 }
 
 func TestConfigValidateFailClosed(t *testing.T) {
