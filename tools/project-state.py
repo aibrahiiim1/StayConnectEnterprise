@@ -65,11 +65,17 @@ def git(*a):
 def render_block(st):
     ph = st["phases"]
     def s(k): return ph[k]["status"]
+    if s('1B') == "IN_PROGRESS":
+        p1b_note = "(DARK — implementation in progress; no production iam_v2 use)"
+    elif s('1B') in CLOSED:
+        p1b_note = "(DARK — accepted & closed; no cutover; no production iam_v2 use)"
+    else:
+        p1b_note = "(NOT implemented)"
     lines = [BEGIN,
         f"<!-- source: governance/project-state.json (schema {st['schema_version']}) @ transition {st['latest_transition_id']} -->",
         f"**Current phase:** {st['current_phase']} — {ph[st['current_phase']].get('title','')}",
         f"**Current activity:** `{st['current_activity']}`",
-        f"**Phase status:** 0 {s('0')} · 1A **{s('1A')}** (DARK, NOT CUT OVER) · 1B {s('1B')} (NOT implemented) · 2 {s('2')} · 3 {s('3')} · 4 {s('4')} · 5 {s('5')} · 6 {s('6')} · 7 {s('7')}",
+        f"**Phase status:** 0 {s('0')} · 1A **{s('1A')}** (DARK, NOT CUT OVER) · 1B {s('1B')} {p1b_note} · 2 {s('2')} · 3 {s('3')} · 4 {s('4')} · 5 {s('5')} · 6 {s('6')} · 7 {s('7')}",
         f"**Phase 1A maturity:** {ph['1A']['maturity']}",
         f"**iam_v2:** {st['database_schema_state']['iam_v2_tables']} tables, {st['database_schema_state']['iam_v2_rows']} rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.",
         f"**Single next authorized action:** {st['next_authorized_action']}",
@@ -146,6 +152,35 @@ def cmd_validate(deep=True):
     if len(open_phases) > 1: fail(f"more than one current/open phase: {open_phases}")
     if open_phases and open_phases[0] != st.get("current_phase"): fail(f"open phase {open_phases[0]} != current_phase {st.get('current_phase')}")
 
+    # Phase-1B live-dark state-consistency: reject stale contradictions that a keyword scan alone missed.
+    act = st.get("current_activity", "")
+    p1b_mat = st.get("phases", {}).get("1B", {}).get("maturity", "")
+    p1b_exec = st.get("phase1b_execution", {}) or {}
+    blockers = st.get("blockers", []) or []
+    allowed = st.get("allowed_actions", []) or []
+    na_txt = na if isinstance(na, str) else ""
+    # A: activity says live-dark deployed, but maturity still says Gate P/throttle/OTP/live-dark PENDING.
+    if "LIVE_DARK_DEPLOYED" in act and re.search(r"(gate\s*p|throttle|otp|dark-code|live-dark)[^.]*pending", p1b_mat, re.I):
+        fail("stale-state contradiction: current_activity says LIVE_DARK_DEPLOYED but phases.1B.maturity still says Gate P/throttle/OTP/live-dark pending")
+    # B: Gate-P cutover recorded done, but a blocker still claims services use the superuser.
+    if p1b_exec.get("gate_p_least_privilege_cutover") is True:
+        for b in blockers:
+            if re.search(r"superuser", str(b), re.I) and re.search(r"still\s+(connect|use)", str(b), re.I):
+                fail("stale-state contradiction: gate_p_least_privilege_cutover=true but a blocker says services still use the superuser")
+    # C: next action is PO acceptance, but allowed_actions still say to execute Phase 1B.
+    if re.search(r"accept", na_txt, re.I):
+        for a in allowed:
+            if re.search(r"execute\s+(the\s+)?(approved\s+)?phase\s*1b", str(a), re.I):
+                fail("stale-state contradiction: next action is Product-Owner acceptance but allowed_actions still say execute Phase 1B")
+    # D: after T0010, no current-state field may present the stale authoritative HEAD or "Production unchanged/untouched".
+    if str(st.get("latest_transition_id", "")) >= "T0010":
+        cur_blob = " ".join([act, st.get("current_maturity", ""), p1b_mat, st.get("service_routing_state", ""),
+                             " ".join(str(x) for x in blockers), " ".join(str(x) for x in allowed), na_txt])
+        if "1844da2" in cur_blob:
+            fail("stale-state contradiction: stale HEAD 1844da2 present in a current-state field after T0010")
+        if re.search(r"production\s+(unchanged|untouched)", cur_blob, re.I):
+            fail("stale-state contradiction: 'Production unchanged/untouched' presented as current state after T0010")
+
     # transitions ordered + snapshot matches latest + no regression + closed cannot reopen
     if trans:
         seqs = [t.get("seq", -1) for t in trans]
@@ -173,7 +208,16 @@ def cmd_validate(deep=True):
     if st.get("current_phase") == "1A": fail("Phase 1A must not be the current phase")
     # exactly one non-closed 'current' phase in {1B..} and it equals current_phase
     p1b = st["phases"].get("1B", {}).get("status")
-    if p1b != "PLANNING": fail(f"Phase 1B status {p1b} != PLANNING (must remain planning / not implemented)")
+    p1b_accepted = st.get("phase1b_execution", {}).get("transition_accepted") is True
+    if p1b_accepted:
+        # PO acceptance recorded (transition_accepted=true): Phase 1B must be ACCEPTED_AND_CLOSED —
+        # closed at DARK maturity, never FINAL_CLOSED and never reopened.
+        if p1b != "ACCEPTED_AND_CLOSED":
+            fail(f"Phase 1B transition_accepted=true but status {p1b} is not ACCEPTED_AND_CLOSED")
+    else:
+        # Until the PO acceptance is recorded, Phase 1B may not be marked accepted/closed/cutover.
+        if p1b not in ("PLANNING", "IN_PROGRESS"):
+            fail(f"Phase 1B status {p1b} must be PLANNING or IN_PROGRESS until PO acceptance is recorded (phase1b_execution.transition_accepted=true)")
     if st["live_scratch_dark_cutover"].get("cutover_performed"): fail("cutover_performed must be false")
     if st["live_scratch_dark_cutover"].get("live_iam_v2_in_use"): fail("live_iam_v2_in_use must be false in Phase 1B")
     if st["database_schema_state"].get("iam_v2_data_migration"): fail("iam_v2_data_migration must be false")
@@ -182,7 +226,7 @@ def cmd_validate(deep=True):
     dmap = {d["id"]: d for d in dec.get("decisions", [])}
     for need in ["D1","D2","D3","D4","D5","D6","D7","D8","D9","PH-1B-SCOPE","PH-CUTOVER","SEC-NO-IAMV2-PRIV",
                  "GH-SOURCE-OF-TRUTH","GH-BRANCH-PR","GH-COMPLETE-MANIFEST","GH-FINAL-REPORT","GH-MANDATORY-CI",
-                 "GH-AGENT-ONLY-OPERATIONS"]:
+                 "GH-AGENT-ONLY-OPERATIONS","GH-LF-CONSISTENCY"]:
         if need not in dmap: fail(f"decision-register missing {need}")
     if dmap.get("D1", {}).get("reopenable", False) is not False: fail("D1 must not be reopenable")
     if dmap.get("D1", {}).get("status") != "ACTIVE": fail("D1 must be ACTIVE")
@@ -218,6 +262,17 @@ def cmd_validate(deep=True):
         if "git status --porcelain" not in w: fail("governance CI must assert a clean working tree")
         if "Project Governance" not in w: fail("governance CI workflow name must be 'Project Governance'")
         if not re.search(r"(?m)^\s{2,}governance:\s*$", w): fail("governance CI must define the job id 'governance'")
+
+    # cross-platform LF consistency: a committed .gitattributes pins text to LF and marks ZIP binary
+    # (GH-LF-CONSISTENCY) so Windows/Linux/CI produce byte-identical, checksum-stable pack files.
+    ga = os.path.join(ROOT, ".gitattributes")
+    if not os.path.isfile(ga):
+        fail("missing .gitattributes (GH-LF-CONSISTENCY): checksum-controlled text must be pinned to LF")
+    else:
+        g = open(ga, encoding="utf-8").read()
+        if "eol=lf" not in g: fail(".gitattributes must pin text to eol=lf (GH-LF-CONSISTENCY)")
+        if not re.search(r"(?m)^\*\.zip\s+binary\b", g): fail(".gitattributes must mark *.zip as binary (protect pack checksums)")
+        if not re.search(r"(?m)^\*\s+text=auto\s+eol=lf\b", g): fail(".gitattributes must default '* text=auto eol=lf'")
     if dg.get("operations_owner") != "AGENT":
         fail(f"delivery_governance.operations_owner must be 'AGENT' (got: {dg.get('operations_owner')!r})")
     rd_path = os.path.join(ROOT, "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md")
@@ -247,6 +302,21 @@ def cmd_validate(deep=True):
         for phrase in ["zero production `iam_v2` write", "ZERO `iam_v2` DML"]:
             pass  # soft
         if "rolled-back" not in pt.lower(): fail("Phase 1B plan must address rolled-back-transaction writes (D1)")
+        # Phase 1B plan / canonical-state coherence (no PLANNING-ONLY vs IN_PROGRESS; no production iam_v2
+        # runtime grant / shadow / rolled-back contradiction). Sentinel + multiple structural assertions,
+        # gated on the live phase status — not a single grep.
+        if "PHASE_1B_PRODUCTION_IAM_V2_RUNTIME: NONE" not in pt:
+            fail("Phase 1B plan missing sentinel 'PHASE_1B_PRODUCTION_IAM_V2_RUNTIME: NONE'")
+        if p1b in ("IN_PROGRESS", "ACCEPTED_AND_CLOSED") and re.search(r"PLANNING ONLY|NOT APPROVED FOR IMPLEMENTATION", pt):
+            fail(f"Phase 1B plan states 'PLANNING ONLY / NOT APPROVED' while Phase 1B is implemented (canonical status {p1b})")
+        _plan_contradictions = [
+            (r"prepared for cutover", "production runtime iam_v2 grant 'prepared for cutover' (Phase 1B production roles hold ZERO iam_v2; future grants belong only in the FUTURE DESIGN appendix)"),
+            (r"read-mostly/rolled-back", "production rolled-back iam_v2 transaction (D1 forbids all production iam_v2 access incl. rolled-back)"),
+            (r"shadow-only in production", "production iam_v2 shadow execution (all iam_v2 adapter/engine execution is scratch/test only)"),
+            (r"unless D1 explicitly approved shadow writes", "stale D1 shadow-write exception (D1 rejects shadow writes)"),
+        ]
+        for pat, why in _plan_contradictions:
+            if re.search(pat, pt): fail(f"Phase 1B plan contradiction: {why}")
 
     # verified evidence + authoritative files exist
     for ev in st.get("verified_evidence", []):
@@ -315,8 +385,8 @@ MROWS = [
  ("StayConnect-IAM-Phase0-Contract.md","`docs/architecture/StayConnect-IAM-Phase0-Contract.md`","**Authoritative** *(sanitized)*"),
  ("StayConnect-IAM-Handoff.md","`docs/context/StayConnect-IAM-Handoff.md`","**Authoritative**"),
  ("StayConnect-IAM-Phase1A-Plan.md","`docs/architecture/StayConnect-IAM-Phase1A-Plan.md`","**Authoritative (closed phase)**"),
- ("StayConnect-IAM-Phase1B-Plan.md","`docs/architecture/StayConnect-IAM-Phase1B-Plan.md`","**Authoritative (planning-only)**"),
- ("Phase1B-Privilege-Matrix.md","`docs/architecture/Phase1B-Privilege-Matrix.md`","**Authoritative (planning-only) — grant matrix**"),
+ ("StayConnect-IAM-Phase1B-Plan.md","`docs/architecture/StayConnect-IAM-Phase1B-Plan.md`","**Authoritative — implemented (live-dark deployed, T0010)**"),
+ ("Phase1B-Privilege-Matrix.md","`docs/architecture/Phase1B-Privilege-Matrix.md`","**Authoritative — as-built grant matrix (Gate P deployed)**"),
  ("StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`","**Authoritative (acceptance record)**"),
  ("Protel-FIAS-Phase0-Spike.md","`docs/spikes/Protel-FIAS-Phase0-Spike.md`","**Authoritative** *(sanitized)*"),
  ("ZERO_STALE_LEFTOVERS_RULE.md","`docs/ZERO_STALE_LEFTOVERS_RULE.md`","**Permanent rule**"),
@@ -400,7 +470,7 @@ def _build_planning_pack(src_commit):
         _w(os.path.join(PLAN_PACK,dst),t)
     flat_copy("docs/architecture/StayConnect-IAM-Phase1B-Plan.md","StayConnect-IAM-Phase1B-Plan.md")
     flat_copy("docs/architecture/Phase1B-Privilege-Matrix.md","Phase1B-Privilege-Matrix.md")
-    _w(os.path.join(PLAN_PACK,"MANIFEST.md"),f"# Phase 1B Planning Evidence Pack — MANIFEST\n\n- SOURCE_COMMIT: `{src_commit}`\n- Status: PLANNING ONLY — Phase 1B NOT implemented. Phase 1A accepted/closed.\n- Contents: Phase 1B plan (matrices+blueprint), privilege matrix, three code inventories, blueprint extract, README, two checksum lists.\n- Next authorized action: Product-Owner approval or rejection of the corrected Phase 1B plan.\n")
+    _w(os.path.join(PLAN_PACK,"MANIFEST.md"),f"# Phase 1B Plan Evidence Pack — MANIFEST\n\n- SOURCE_COMMIT: `{src_commit}`\n- Status: Phase 1B implementation is Product-Owner AUTHORIZED and IN_PROGRESS (decision D10). Phase 1A accepted/closed. Legacy production auth authoritative; zero production iam_v2 runtime access; PR #2 not merged; no cutover.\n- Contents: Phase 1B plan (matrices+blueprint), privilege matrix, three code inventories, blueprint extract, README, two checksum lists.\n- Next authorized action: complete Phase 1B execution and live-dark verification, then Product-Owner acceptance or rejection.\n")
     cited=["docs/architecture/StayConnect-IAM-Phase1B-Plan.md","docs/architecture/Phase1B-Privilege-Matrix.md","data-plane/internal/pmsguard/guard.go",
       "data-plane/cmd/scd/main.go","data-plane/cmd/acctd/main.go","data-plane/cmd/edged/main.go","data-plane/cmd/netd/main.go","data-plane/cmd/portald/main.go",
       "data-plane/internal/session/session.go","data-plane/internal/voucher/voucher.go","data-plane/internal/otp/otp.go",

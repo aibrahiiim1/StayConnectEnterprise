@@ -1,0 +1,155 @@
+================================================================================
+PHASE 1B — T0010 LIVE-DARK DEPLOYMENT EVIDENCE (read-only re-verification)
+================================================================================
+Purpose : Immutable, sanitized proof of the deployed live-dark state on the target
+          appliance. Read-only collection; no service/credential/schema mutation.
+Status  : PENDING PRODUCT-OWNER ACCEPTANCE (T0010). Not accepted/closed.
+Collected (UTC): 2026-07-17T21:58:44Z  (appliance timezone = Etc/UTC)
+Sanitization: no DB credentials/DSNs, no guest data, no key bytes or key-derived
+              digests. machine-id shown only as a SHA-256 hash. Key files show
+              metadata (path/owner/mode/size/mtime) only.
+
+--------------------------------------------------------------------------------
+1. HOST IDENTITY
+--------------------------------------------------------------------------------
+  hostname               : radius
+  machine-id (sha256)    : c572f3aaa512726f39187c374019b7bab6ea1ca16b37945f6378fab86100619a
+  management IP          : 172.21.60.23/24  (ens160)
+  OS / kernel            : Ubuntu 22.04.5 LTS / 5.15.0-185-generic
+  timezone               : Etc/UTC (localtime UTC+0000)  -> all timestamps below are true UTC
+  PostgreSQL             : PostgreSQL 16.3 (x86_64-pc-linux-musl)
+  TimescaleDB            : 2.16.1
+  verification timestamp : 2026-07-17T21:58:44Z
+
+--------------------------------------------------------------------------------
+2. SOURCE & DEPLOYED BINARY  (provenance of the running scd)
+--------------------------------------------------------------------------------
+  branch                    : phase/1b-dark-auth
+  repo HEAD (report time)   : 5cb524ea91787388d9a0239cd06b23c6462d5b5f
+  deployed scd sha256       : dc2033a9a45d23c6ac519ac2841cbe11db0c4f590f3988a05b019c0bf2de713d
+    (installed at /opt/stayconnect/bin/scd; == the sha of the artifact scp'd + installed)
+  deployed scd size (bytes) : 26198247
+  scd main PID / started    : 2053 / 2026-07-17T21:18:26Z (systemd ActiveEnterTimestamp, post-reboot)
+
+  Embedded build provenance of the deployed binary (`go version -m /opt/.../scd`):
+    path            = github.com/stayconnect/enterprise/data-plane/cmd/scd
+    GOOS=linux GOARCH=amd64  -trimpath=true  -buildmode=exe  compiler=gc
+    vcs=git
+    vcs.revision    = 7618dc43ebf88dbd7a9284873d84a94c7b3bd35c   <-- reviewable PR commit
+    vcs.time        = 2026-07-17T21:00:13Z
+    vcs.modified    = true    (a concurrent uncommitted deploy/gatep/gatep-grants.sql edit)
+
+  Source<->binary proof:
+    * 0 commits after 7618dc4 touch the deployed scd sources
+      (cmd/scd, internal/{otp,iamv2,throttle,localkeys,otpkey,keybootstrap}) — verified via
+      `git log 7618dc4..HEAD -- <those paths>` = 0.
+    * The deployed binary embeds vcs.revision=7618dc4, cryptographically tying the running
+      scd to that exact reviewable commit in PR #2.
+    * DETERMINISTIC reproducible build (source-only, VCS stamp stripped):
+        GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false ./cmd/scd
+        -> sha256 = 2afb08d905943333356362310bc31bb16598c6ba34645acd0f9c8069981228a2
+        (identical across repeated builds). The deployed binary = this source-only binary
+        PLUS Go's embedded VCS stamp (vcs.revision/time/modified). A byte-identical rebuild of
+        the *stamped* binary is not achievable post-hoc because Go stamps the transient git
+        HEAD + dirty flag at build time and the branch has since advanced — an expected Go
+        build-stamp property, NOT a source discrepancy.
+
+--------------------------------------------------------------------------------
+3. BACKUP  (pre-change safety net)
+--------------------------------------------------------------------------------
+  path        : /root/phase1b-deploy/pre_phase1b_20260718.dump   (custom-format pg_dump)
+  sha256      : 2671b008216e377aaea32dc02fb35806772cc4371f725480a109db11fddb4d0b
+  size (bytes): 885342
+  created     : 2026-07-17 (pre-migration, before any Phase 1B live change)
+  note        : contains no plaintext credentials; retained for rollback.
+
+--------------------------------------------------------------------------------
+4. REBOOT PROOF  (verification occurred AFTER the final reboot)
+--------------------------------------------------------------------------------
+  boot id           : 11ab63a9-ad4f-4732-b0e2-1e7b6ec7c7c7
+  boot time (UTC)   : 2026-07-17T21:17:32Z
+  last reboot       : "reboot system boot 5.15.0-185-generic Fri Jul 17 21:17 still running"
+  uptime@collection : up 41 minutes  (=> collected at ~21:58Z, well after the 21:17Z boot)
+  scd (post-reboot) : ActiveEnterTimestamp 2026-07-17T21:18:26Z (after boot => reboot-verified)
+
+--------------------------------------------------------------------------------
+5. SERVICES  (the "5 active" and the full guest-plane set)
+--------------------------------------------------------------------------------
+  is-active (scd,edged,acctd,netd,portald,hotel-admin,caddy): active active active active active active active
+  Per daemon (is-active / is-enabled / MainPID):
+    scd    active / enabled / 2053
+    edged  active / enabled / 1900
+    acctd  active / enabled / 1899
+    netd   active / enabled / 2034
+  scd health (unix socket GET /v1/health)         : 200
+  scd read endpoint  (GET /v1/tenant/auth-methods): 200
+  scd fail-closed / permission-denied lines (this boot): 0
+
+--------------------------------------------------------------------------------
+6. DEDICATED LEAST-PRIVILEGE DB ROLES  (no daemon uses superuser stayconnect)
+--------------------------------------------------------------------------------
+  Daemon -> DSN role (from /etc/stayconnect/<svc>.env, password redacted):
+    scd -> svc_scd,  edged -> svc_edged,  acctd -> svc_acctd,  netd -> svc_netd
+  Live connections by role (pg_stat_activity, db=stayconnect_site):
+    svc_scd=4  svc_edged=1  svc_acctd=1  svc_netd=1  stayconnect=2
+  The 2 remaining `stayconnect` connections are NON-daemon:
+    - "TimescaleDB Background Worker Scheduler" (backend_type = bg worker, unix)
+    - "psql" (this read-only verification session, unix)
+  Role attributes (pg_roles) — all four:
+    super=false createdb=false createrole=false replication=false bypassrls=false login=true
+  Effective iam_v2 privileges across all svc_* roles:
+    iam_v2 table SELECT/INSERT/UPDATE/DELETE grants : 0
+    iam_v2 schema USAGE                             : 0
+  Public grant-set hash (svc_* x public tables, SIUD matrix, md5): 7d0d5aa34334fc8039d50f6f749daebd
+
+--------------------------------------------------------------------------------
+7. MIGRATIONS & SCHEMA
+--------------------------------------------------------------------------------
+  schema_migrations rows present : 0007_auth_throttle_buckets, 0008_otp_hmac_keys
+  auth_throttle_buckets owner    : stayconnect (superuser-owned; svc_scd granted DML only)
+  otp_hmac_key_generations owner : stayconnect
+  auth_otps.otp_key_generation   : present (1 column)
+  iam_v2 tables / live rows      : 49 / 0
+  auth_throttle_buckets rows     : 0   (durable throttle dark => no attempts recorded)
+  OTP active generation          : gen=1 active=true created=2026-07-17T21:08:03Z (exactly one active)
+
+  Public-schema structural fingerprints (see the acceptance record §6 for naming):
+    Phase-1A baseline  MD5 (cols+cons+idx, excl. guest_networks_tsi_anchor):
+        d86ca4c6aed4bb868c173a0d328e0dde   (pre-Phase-1B; superseded by the authorized additive 0007/0008)
+    Gate-P/Phase-1B    SHA-256 (information_schema.columns, table.column:data_type):
+        pre-0007/0008 : 8659c08db41624d5cab946027c0d6c2d37251fc1550ec35929241827acf852f9
+        post-0007/0008: 7241b1cd76201cd48df0eaa0055c336d0951aa218830545d7dbbe92bd61a0fcc  (current)
+    The delta between the pre/post SHA-256 values is exactly the additive 0007/0008 objects.
+
+--------------------------------------------------------------------------------
+8. KEY FILES  (metadata only — never contents/digests)
+--------------------------------------------------------------------------------
+  /etc/stayconnect/secrets/           mode=700  owner=root:root
+  /etc/stayconnect/secrets/throttle.key   owner=root:root mode=600 size=32 mtime=2026-07-17T21:08:03Z
+  /etc/stayconnect/secrets/otp_hmac_1.key owner=root:root mode=600 size=32 mtime=2026-07-17T21:08:03Z
+
+--------------------------------------------------------------------------------
+9. DARKNESS  (every new auth feature OFF; zero IAM-v2 SQL)
+--------------------------------------------------------------------------------
+  scd dark-auth env flags (SCD_DURABLE_THROTTLE / SCD_OTP_HMAC / STAYCONNECT_IAMV2_*): NONE SET
+  scd boot log:
+    "iamv2 dark authenticator constructed",
+    "flags":"iamv2 master=false VOUCHER=false ACCOUNT=false OTP=false SOCIAL=false social_stub=false"
+  "durable auth throttle enabled" log lines this boot : 0  (ring not loaded)
+  "keyed-HMAC OTP ring enabled"  log lines this boot  : 0  (ring not loaded)
+  => durable throttle OFF, OTP-HMAC OFF, IAM-v2 master OFF, all IAM-v2 methods OFF,
+     Social Stub refused in Production mode (unit-proven: TestSocialStubRefusedInProduction),
+     no IAM-v2 SQL issued (dark authenticator short-circuits before any repository call;
+     unit-proven: TestDarkIAMv2WiringIssuesZeroSQL with a repository that panics if entered).
+
+--------------------------------------------------------------------------------
+10. HEALTH & LEGACY AUTHORITY
+--------------------------------------------------------------------------------
+  scd not fail-closed (0 FAIL-CLOSED lines this boot); health 200; auth-methods 200.
+  portald / hotel-admin / caddy / acctd / netd all active.
+  Legacy public-schema authentication remains the SOLE production authority:
+    no service is routed to iam_v2 (0 iam_v2 privileges on any svc_* role; no search_path change).
+  No PMS/FIAS or financial traffic was generated by this verification (read-only checks only).
+================================================================================
+END OF EVIDENCE
+================================================================================

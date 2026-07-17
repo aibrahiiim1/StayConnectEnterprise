@@ -1,14 +1,14 @@
 # StayConnect Enterprise — START HERE (ChatGPT Project entry point)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0008 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0011 -->
 **Current phase:** 1B — Credential/identity/auth-context (DARK)
-**Current activity:** `GOVERNANCE_GITHUB_DELIVERY_RULE_PENDING_APPROVAL`
-**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B PLANNING (NOT implemented) · 2 NOT_STARTED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
+**Current activity:** `PHASE_1B_ACCEPTED_AND_CLOSED`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 NOT_STARTED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Product-Owner approval of this permanent GitHub execution and delivery operating rule and the corrected Phase 1B plan
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D9`.
+**Single next authorized action:** No next-phase implementation is authorized. Await explicit Product-Owner authorization before beginning any subsequent phase or enabling any dark feature (durable throttle / keyed-HMAC OTP / IAM-v2) or any iam_v2 cutover.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D11`.
 <!-- END GENERATED PROJECT STATE -->
 
 
@@ -82,11 +82,11 @@ Build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL s
 
 ## 9. Next authorized action
 
-The single **next authorized action** is Product-Owner **approval of this permanent GitHub execution/delivery operating rule together with the complete Phase 1B plan** (`StayConnect-IAM-Phase1B-Plan.md`, planning-only; the operating rule is `GITHUB_EXECUTION_AND_DELIVERY_RULE.md`). The Phase 1A LIVE-DARK acceptance record is unchanged (review of the Phase 1A LIVE-DARK acceptance remains available). Phase 1B is **not implemented**; approving the plan does not authorize implementation (the mandatory least-privilege / superuser-elimination prerequisite is inside the plan, §2/§14).
+The single **next authorized action** is **complete Phase 1B execution and live-dark verification.** Phase 1B implementation is Product-Owner **authorized and IN_PROGRESS** (decision `D10`, 2026-07-17; W0 complete). Execution proceeds in verified stages on branch `phase/1b-dark-auth` (PR #2, **not merged**): Gate P (least-privilege roles + credential rotation) → durable throttle + keyed-HMAC OTP → dark IAM-v2 credential/identity/auth-context code (scratch-tested) → controlled live-dark verification. This does **not** authorize cutover, Phase 2, production `iam_v2` reads/writes, bulk IAM migration, PMS posting, or legacy removal; **legacy public-schema authentication remains the sole production authority.**
 
-**Product-Owner review of the Phase 1A LIVE-DARK acceptance** (`StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`, 18/18; authoritative production evidence is `PROD_LIVE_DARK_EVIDENCE_V2.txt`, captured read-only — the earlier `PROD_LIVE_DARK_EVIDENCE.txt` is **superseded/erroneous**) — **before any Phase 1B authorization**. The dark `iam_v2` schema is created + verified in production but **NOT cut over**; no service reads/writes it, no DSN/`search_path` change. Phase 1B (credential/portal, dark/flagged), cutover, IAM data migration, and legacy cleanup each need their **own** separate PO approval (plan §7a/§11 ladder). Nothing downstream is authorized yet.
+The **Phase 1A LIVE-DARK acceptance record** (`StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`, 18/18; authoritative production evidence `PROD_LIVE_DARK_EVIDENCE_V2.txt`, read-only — the earlier `PROD_LIVE_DARK_EVIDENCE.txt` is **superseded/erroneous**) stands unchanged. The dark `iam_v2` schema is created + verified in production but **NOT cut over**; no service reads/writes it, no DSN/`search_path` change. Cutover, IAM data migration, and legacy cleanup remain **separately gated** future events (plan §7a/§11 ladder) and are **not** authorized by Phase 1B.
 
-**Mandatory Phase-1B prerequisite (superuser deviation).** Production services currently connect to `stayconnect_site` as the PostgreSQL superuser `stayconnect` (`rolsuper=true`). The least-privilege `iam_v2` service roles therefore do **not** yet bind them; the schema's darkness rests on *zero code references + no `search_path` change*, not on grant isolation. No service may be routed to `iam_v2` until a separately reviewed least-privilege service-role + credential-rotation plan is approved and applied. This blocks Phase-1B runtime integration; it is **not** a defect in the dark schema.
+**Gate P (in progress).** Production services currently connect to `stayconnect_site` as the PostgreSQL superuser `stayconnect` (`rolsuper=true`); the schema's darkness rests on *zero code references + no `search_path` change*, not on grant isolation. Gate P — the first authorized Phase-1B execution step — replaces superuser use with least-privilege `svc_*` roles (per `Phase1B-Privilege-Matrix.md`) holding **zero** `iam_v2` privileges. Routing any service **to** `iam_v2` remains a later cutover event, out of Phase 1B scope.
 
 ## 10. Forbidden until explicitly approved
 

@@ -1,0 +1,83 @@
+================================================================================
+PHASE 1B — T0010 SOFTWARE GATE EVIDENCE
+================================================================================
+Scope   : Local build/vet/test + migration + Gate-P dry-run gate for the Phase 1B
+          code. Recorded from actual command runs in this delivery.
+Note    : These are LOCAL developer-gate results. The GitHub "Project Governance"
+          Action enforces the governance validators + mutation suite (see §Governance),
+          NOT the Go software tests below — do not conflate the two.
+Toolchain: go1.26.2 windows/amd64 ; module dir data-plane/
+Fresh re-run (UTC): 2026-07-17T22:04:55Z
+
+--------------------------------------------------------------------------------
+A. BUILD / VET / TEST  (fresh re-run this pass)
+--------------------------------------------------------------------------------
+  cmd: go build ./...            (cwd data-plane)   -> exit 0  (~5s)
+  cmd: go vet ./...              (cwd data-plane)   -> exit 0
+  cmd: go test ./...             (cwd data-plane)   -> 16 packages ok, 0 FAIL
+    ok  cmd/scd            ok  internal/iamv2       ok  internal/keybootstrap
+    ok  internal/localkeys ok  internal/otp         ok  internal/otpkey
+    ok  internal/throttle  ok  cmd/sitemigrate      ok  internal/assignment ... (16 total)
+  NOTE: DB-backed cases in iamv2/throttle/otp/keybootstrap SKIP when their *_TEST_DSN
+        env vars are unset (the disposable databases were torn down after the gate);
+        they were run GREEN earlier this delivery against disposable databases — see §B.
+
+--------------------------------------------------------------------------------
+B. DB-BACKED TESTS  (run earlier against disposable databases; then torn down)
+--------------------------------------------------------------------------------
+  Disposable container thr_test_pg on the appliance (127.0.0.1:15432, tunneled),
+  disposable DBs iamv2_test / thr_test / otpfull_test / otpboot_test / mig_test.
+  Recorded PASS results:
+    internal/iamv2      : 18/18 incl. TestVoucherScratchIntegration (real iam_v2 DDL:
+                          resolve-by-HMAC, pinned VOUCHER auth_context, voucher stays UNUSED,
+                          zero purchase/settlement/entitlement/adjustment/session rows),
+                          TestConfigValidateFailClosed, TestDisabledNeverInvokesRepository,
+                          TestSocialStubRefusedInProduction, TestRedactScrubsSecrets,
+                          pin-validation (TestAuthContextSpecValidate / FinalizeMissingNetworkNoSQL).
+    internal/throttle   : mixed-order-no-deadlock, duplicate-charged-once, concurrent-no-bypass,
+                          method isolation, cross-window hard block, cleanup.
+    internal/otp        : keyed issue/verify, legacy salt:sha256 compat, attempt-cap,
+                          20-worker single-consume, legacy-issue-unchanged.
+    internal/keybootstrap: fresh gen-1 create + idempotent re-run, DB-meta-but-no-key fail,
+                          >1-active fail, key-present-no-DB reconcile, ambiguous-keys fail,
+                          referenced-gen-missing-key fail.
+    (all torn down afterwards; appliance disposable container removed.)
+
+--------------------------------------------------------------------------------
+C. MIGRATIONS 0007 / 0008  (disposable DB: apply / apply-twice / rollback / reapply)
+--------------------------------------------------------------------------------
+  0007_auth_throttle_buckets  up / up-again(idempotent) / down / up  -> all rc=0
+  0008_otp_hmac_keys          up / up-again(idempotent) / down / up  -> all rc=0
+  Final state: both tables present + auth_otps.otp_key_generation column present.
+
+--------------------------------------------------------------------------------
+D. GATE-P DRY RUN  (genuinely disposable timescaledb cluster, exact committed scripts)
+--------------------------------------------------------------------------------
+  GATEP_DRYRUN = PASS
+    restore backup -> apply 0007/0008 -> bootstrap OTP gen 1 -> create roles ->
+    set SCRAM passwords (log-safety verified) -> apply grants -> positive/negative
+    tests -> svc_scd cross-tenant reconciliation grant assertions -> new-table throttle/
+    OTP grant tests -> 2nd-run idempotent grant matrix (68 role-table rows,
+    matrix sha a12c33df...) -> rollback -> reapply -> destroy cluster.
+  Self-test: intentionally-invalid SQL FAILS the executor (harness is exit-status based).
+  Zero effective iam_v2 privileges on every svc_* role.
+
+--------------------------------------------------------------------------------
+E. DARK / SECURITY UNIT PROOFS
+--------------------------------------------------------------------------------
+  TestDarkIAMv2WiringIssuesZeroSQL : dark authenticator wired with a repository that
+        fails the test if entered; every method returns DecisionDisabled -> zero IAM-v2 SQL.
+  TestSocialStubRefusedInProduction: Social "Stub" provider refused before any repo call.
+  TestRedactScrubsSecrets          : email/MAC/long-digit-run redaction.
+  localkeys                        : runtime LoadExistingKey fails closed on absent key;
+                                     concurrent bootstrap single-winner; insecure-perms/short reject.
+
+--------------------------------------------------------------------------------
+Governance (separate enforcement layer)
+--------------------------------------------------------------------------------
+  GitHub Action "Project Governance" runs: project-state validate, generated-block check,
+  keyword/zero-stale validate, and the adversarial mutation suite. It does NOT run the Go
+  software tests above. CI success is recorded per push in the PR checks.
+================================================================================
+END
+================================================================================

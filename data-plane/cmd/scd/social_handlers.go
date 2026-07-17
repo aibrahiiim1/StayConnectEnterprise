@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +59,12 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 	method, ok := cfg.Social[req.Provider]
 	if !ok || method == nil || !method.Enabled {
 		httpErr(w, http.StatusForbidden, "provider not enabled for this tenant")
+		return
+	}
+
+	if ok, retry := s.throttleGuard(r.Context(), "social", net.ParseIP(req.IP), nil, ""); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
 		return
 	}
 
@@ -126,6 +133,11 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 	mac, err := net.ParseMAC(req.MAC)
 	if err != nil {
 		httpErr(w, http.StatusBadRequest, "bad mac")
+		return
+	}
+	if ok, retry := s.throttleGuard(r.Context(), "social", ip, mac, ""); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
 		return
 	}
 

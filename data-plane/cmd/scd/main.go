@@ -39,12 +39,14 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/buildprofile"
 	"github.com/stayconnect/enterprise/data-plane/internal/hwid"
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/mail"
 	"github.com/stayconnect/enterprise/data-plane/internal/metrics"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 	"github.com/stayconnect/enterprise/data-plane/internal/notifyloader"
+	"github.com/stayconnect/enterprise/data-plane/internal/otpkey"
 	"github.com/stayconnect/enterprise/data-plane/internal/outbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
@@ -54,6 +56,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
+	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
 	"github.com/stayconnect/enterprise/data-plane/internal/voucher"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -104,6 +107,18 @@ type cfg struct {
 	// cert, no username/password) instead of SCD_NATS_URL. Staged cutover: set
 	// this to the :4223 endpoint; SCD_NATS_URL remains as documented rollback.
 	NATSMTLSURL string
+
+	// Phase 1B dark-auth. All default OFF so a normal build is byte-for-byte legacy.
+	//   SecretsDir       — appliance-local key files (throttle.key, otp_hmac_<gen>.key)
+	//   DurableThrottle  — when true, load throttle.key (fail startup if absent) and enforce the
+	//                      durable DB throttle on every auth handler; legacy in-memory stays as a
+	//                      fast pre-filter only.
+	//   OTPHMAC          — when true, load the OTP key ring + validate DB metadata (fail startup on
+	//                      mismatch) and issue keyed-HMAC OTPs; existing legacy rows still verify.
+	// IAM-v2 flags are read separately by iamv2.LoadConfigFromEnv (STAYCONNECT_IAMV2_*), all OFF.
+	SecretsDir      string
+	DurableThrottle bool
+	OTPHMAC         bool
 }
 
 func loadCfg() cfg {
@@ -133,6 +148,10 @@ func loadCfg() cfg {
 		CertDir:     envOr("SCD_CERT_DIR", "/etc/stayconnect/certs"),
 		MTLSBase:    os.Getenv("SCD_MTLS_BASE"),
 		NATSMTLSURL: os.Getenv("SCD_NATS_MTLS_URL"),
+
+		SecretsDir:      envOr("SCD_SECRETS_DIR", "/etc/stayconnect/secrets"),
+		DurableThrottle: os.Getenv("SCD_DURABLE_THROTTLE") == "true",
+		OTPHMAC:         os.Getenv("SCD_OTP_HMAC") == "true",
 	}
 }
 
@@ -164,7 +183,16 @@ type server struct {
 	mail      mail.Mailer
 	sms       sms.Sender
 	socialReg *social.Registry
-	loginRL   *loginLimiter // layered throttling for guest username/password logins
+	loginRL   *loginLimiter // layered throttling for guest username/password logins (optional fast in-memory layer)
+
+	// Phase 1B dark-auth machinery. All are inert unless explicitly enabled at deploy time:
+	//   - authThrottle: durable, DB-backed authoritative throttle (D4). nil => legacy in-memory only.
+	//   - otpRing:      keyed-HMAC OTP ring (D7). nil => legacy per-row salt:sha256.
+	//   - iamv2Auth:    dark IAM-v2 authenticator; constructed with all method flags OFF, so it never
+	//                   touches its repository (which is nil when the master flag is off).
+	authThrottle *throttle.Store
+	otpRing      *otpkey.Ring
+	iamv2Auth    *iamv2.Authenticator
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -312,6 +340,13 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	mac, err := net.ParseMAC(req.MAC)
 	if err != nil {
 		httpErr(w, http.StatusBadRequest, "bad mac")
+		return
+	}
+	// Durable auth throttle (authoritative; no-op unless enabled). Charged before validation so a
+	// throttled attempt creates no session/nft/shaping/accounting.
+	if ok, retry := s.throttleGuard(r.Context(), "voucher", ip, mac, ""); !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
 		return
 	}
 	red, err := s.vou.Validate(r.Context(), s.tenID, req.Voucher)
@@ -612,6 +647,15 @@ func main() {
 	// were constructed before s existed (nft wrapper).
 	s.nft.SetMetrics(s.met)
 
+	// Phase 1B dark-auth machinery (durable throttle, keyed-HMAC OTP ring, dark IAM-v2). Constructed
+	// here so handlers can reference the fields. All features are OFF unless explicitly enabled; an
+	// enabled feature with missing/invalid key material fails startup (fail closed). IAM-v2 is
+	// constructed dark (all flags OFF, nil repo) and issues zero SQL.
+	if err := s.initAuthSecurity(rootCtx, pool, c, slog.Default()); err != nil {
+		slog.Error("auth-security init failed", "err", err)
+		os.Exit(1)
+	}
+
 	// Ensure the appliance-local tenant/site mirror rows exist for the current
 	// assignment on EVERY boot (idempotent). Guest-domain tables FK to these, so a
 	// (re)assigned appliance whose tenant/site was not previously mirrored locally
@@ -813,6 +857,11 @@ func main() {
 	// missed delivery can leave us stale. A 10-minute background sweep
 	// guarantees eventual consistency from the DB.
 	go s.pmsReloadSafetyLoop(rootCtx)
+
+	// Phase 1B — bounded-retention cleanup of durable throttle buckets (only when enabled).
+	if s.authThrottle != nil {
+		go s.authThrottle.RunCleanup(rootCtx, 5*time.Minute, time.Minute)
+	}
 
 	// Phase 5.2 — NATS RPC surface. When SCD_NATS_URL is set, subscribe to
 	// scd.{applianceID}.> so the control plane can drive admin calls without

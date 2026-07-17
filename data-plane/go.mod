@@ -24,13 +24,15 @@ require (
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
-	golang.org/x/crypto v0.49.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.35.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 )
 
-require github.com/stayconnect/enterprise/license v0.0.0
+require (
+	github.com/stayconnect/enterprise/license v0.0.0
+	golang.org/x/crypto v0.49.0
+)
 
 replace github.com/stayconnect/enterprise/license => ../license

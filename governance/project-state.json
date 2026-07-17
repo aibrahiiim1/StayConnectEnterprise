@@ -15,12 +15,25 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "1B",
-  "current_activity": "GOVERNANCE_GITHUB_DELIVERY_RULE_PENDING_APPROVAL",
-  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B PLANNING (corrected plan pending Product-Owner approval; NOT implemented); permanent GitHub execution/delivery operating rule applied and pending Product-Owner approval",
+  "current_activity": "PHASE_1B_ACCEPTED_AND_CLOSED",
+  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B ACCEPTED AND CLOSED by the Product Owner at verified DARK maturity (T0011, decision D11) -- implementation + live-dark deployment + reboot verification complete. DARK -- every new auth feature OFF, no production iam_v2 use, no cutover; legacy public-schema auth remains the sole production authority (iam_v2 49/0). No next-phase implementation is authorized.",
+  "phase1b_execution": {
+    "implementation_authorized": true,
+    "authorized_on": "2026-07-17",
+    "w0_complete": true,
+    "cutover_authorized": false,
+    "production_iam_v2_access_authorized": false,
+    "legacy_production_authoritative": true,
+    "stage": "ACCEPTED_AND_CLOSED at DARK maturity (T0011, decision D11). Implementation + live-dark deployment + reboot verification complete; all dark features OFF; no cutover.",
+    "gate_p_least_privilege_cutover": true,
+    "dark_features_enabled": false,
+    "transition_id": "T0011",
+    "transition_accepted": true
+  },
   "phases": {
     "0":  { "status": "FINAL_CLOSED",       "title": "IAM redesign architecture contract + live PMS validation", "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)." },
     "1A": { "status": "ACCEPTED_AND_CLOSED","title": "Clean-slate IAM core + persistence (iam_v2)",              "maturity": "ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER" },
-    "1B": { "status": "PLANNING",           "title": "Credential/identity/auth-context (DARK)",                   "maturity": "PLAN_CORRECTION_PENDING_APPROVAL — NOT IMPLEMENTED" },
+    "1B": { "status": "ACCEPTED_AND_CLOSED",        "title": "Credential/identity/auth-context (DARK)",                   "maturity": "IMPLEMENTATION + LIVE-DARK DEPLOYMENT COMPLETE; reboot verification COMPLETE; ACCEPTED AND CLOSED by the Product Owner at DARK maturity (T0011, decision D11). No IAM-v2 cutover; all dark features OFF (durable throttle / keyed-HMAC OTP / IAM-v2 all dark); zero runtime iam_v2 privileges; iam_v2 49 tables/0 rows; legacy public-schema auth is the sole production authority." },
     "2":  { "status": "NOT_STARTED",        "title": "Packages, revisions, rules, tiers, quotes; free purchases; portal package selection" },
     "3":  { "status": "NOT_STARTED",        "title": "Stay domain: interfaces/revisions/routing, STRICT resolution, stays/sharers/folios, checkout grace" },
     "4":  { "status": "NOT_STARTED",        "title": "Financial: settlements, postings + outbox, payments, recovery, manual review" },
@@ -35,57 +48,71 @@
     "Phase 1A offline-real-schema-compatibility verified (9/9)",
     "Phase 1A production iam_v2 LIVE-DARK created + verified (18/18, 2026-07-16)",
     "Phase 1A formally Product-Owner ACCEPTED and CLOSED at its DARK maturity (2026-07-16)",
-    "Phase 1B implementation plan drafted (planning-only) + corrected against binding decisions D1-D9"
+    "Phase 1B implementation plan drafted (planning-only) + corrected against binding decisions D1-D9",
+    "Phase 1B implementation + live-dark deployment COMPLETED and reboot-verified on the appliance (Gate P least-privilege cutover, migrations 0007/0008, keyed OTP gen-1 bootstrap, pinned dark scd build) -- pending Product-Owner acceptance (T0010)",
+    "Phase 1B formally Product-Owner ACCEPTED and CLOSED at verified DARK maturity (2026-07-17, decision D11, transition T0011); all dark features remain OFF; no IAM-v2 cutover"
   ],
   "verified_evidence": [
     { "id": "PROD_LIVE_DARK_V2", "path": "iam_v2_scratch/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt", "kind": "read-only production re-verification", "authoritative": true },
     { "id": "PHASE1A_ACCEPTANCE", "path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md", "kind": "live-dark acceptance record (18/18)", "authoritative": true },
-    { "id": "FIAS_SPIKE", "path": "docs/spikes/Protel-FIAS-Phase0-Spike.md", "kind": "live FIAS spike + Gate 3A PASS", "authoritative": true }
+    { "id": "FIAS_SPIKE", "path": "docs/spikes/Protel-FIAS-Phase0-Spike.md", "kind": "live FIAS spike + Gate 3A PASS", "authoritative": true },
+    { "id": "PHASE1B_ACCEPTANCE", "path": "docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md", "kind": "Phase 1B live-dark acceptance record (Gate-P cutover, reboot-validated; PENDING PO acceptance)", "authoritative": true }
   ],
   "authoritative_source_commits": {
     "phase1a_live_dark_creation": "22a2e15",
-    "phase1a_migrations": "b2a715f"
+    "phase1a_migrations": "b2a715f",
+    "phase1b_live_dark": "b87a59b"
   },
   "live_scratch_dark_cutover": {
     "live_iam_v2_in_use": false,
     "scratch_verified": true,
     "offline_real_schema_verified": true,
     "dark_created_in_production": true,
-    "cutover_performed": false
+    "cutover_performed": false,
+    "gate_p_least_privilege_cutover": true,
+    "runtime_security_infra_deployed_dark": true
   },
   "database_schema_state": {
     "production_db": "stayconnect_site",
     "iam_v2_tables": 49,
     "iam_v2_rows": 0,
     "iam_v2_fingerprint": "bd75026f",
-    "public_structural_fingerprint": "d86ca4c6",
+    "public_structural_fingerprint_phase1a_md5": "d86ca4c6aed4bb868c173a0d328e0dde",
+    "public_structural_fingerprint_phase1a_md5_algorithm": "MD5 of sorted public-schema {columns + constraints + indexes} excluding the Phase-1A MG-0 anchor index guest_networks_tsi_anchor (iam_v2_scratch/prod_live_dark.sh). Phase-1A baseline; PRE-Phase-1B / pre-0007-0008.",
+    "public_columns_sha256_pre_0007_0008": "8659c08db41624d5cab946027c0d6c2d37251fc1550ec35929241827acf852f9",
+    "public_columns_sha256_current": "7241b1cd76201cd48df0eaa0055c336d0951aa218830545d7dbbe92bd61a0fcc",
+    "public_columns_sha256_algorithm": "SHA-256 of information_schema.columns table.column:data_type (Gate-P/Phase-1B). Distinct algorithm from the Phase-1A MD5 above; NOT comparable to it.",
+    "public_structure_change_note": "The Phase-1A structural baseline was intentionally superseded by the AUTHORIZED additive migrations 0007/0008 (auth_throttle_buckets, otp_hmac_key_generations, auth_otps.otp_key_generation). The pre->post SHA-256 delta (8659c08d -> 7241b1cd) is exactly those additive objects; this is authorized schema evolution, not drift.",
     "iam_v2_dark": true,
     "iam_v2_data_migration": false,
+    "migrations_0007_0008_applied": true,
+    "auth_throttle_buckets_present": true,
+    "otp_hmac_key_generations_present": true,
+    "otp_active_generation": 1,
     "standby": "none (an isolated second-site TEST db stayconnect_site_b exists for isolation tests; NOT a replication standby)"
   },
-  "service_routing_state": "Legacy public-schema IAM is the SOLE production authority. No service is routed to iam_v2. No DSN/search_path change. All site-DB services currently connect as superuser stayconnect (Gate-P prerequisite to eliminate).",
+  "service_routing_state": "Legacy public-schema IAM is the SOLE production authority. No service is routed to iam_v2. All four site-DB daemons (scd/edged/acctd/netd) now connect under dedicated LEAST-PRIVILEGE Gate-P roles (svc_scd/svc_edged/svc_acctd/svc_netd; NOSUPERUSER, SCRAM) instead of superuser stayconnect — reboot-validated 2026-07-18. All new auth features (durable throttle, keyed-HMAC OTP, IAM-v2) remain OFF (dark).",
   "pms_financial_state": "FIAS lookup-only in production; posting engine is a future component (Phase 4). folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
-    "MANDATORY Phase-1B prerequisite (Gate P): site-DB services connect as superuser stayconnect; least-privilege roles + credential rotation required before any iam_v2 runtime routing."
+    "None. Phase 1B is ACCEPTED AND CLOSED at DARK maturity (T0011). No Phase 1B implementation or acceptance blocker remains; no next-phase work is authorized."
   ],
   "allowed_actions": [
-    "Product-Owner approval of this permanent GitHub execution and delivery operating rule and the corrected Phase 1B plan",
-    "Read-only inspection and documentation/governance work"
+    "Read-only inspection, documentation and governance work",
+    "Merge PR #2 as governance/code delivery only (no live appliance change), then await explicit Product-Owner authorization before any next-phase implementation or dark-feature enablement"
   ],
   "prohibited_actions": [
-    "Implementing Phase 1B (or any Phase)",
+    "Implementing any Phase beyond the authorized Phase 1B dark scope (Phase 2 or any later Phase)",
     "Any production iam_v2 write (including inside a later-rolled-back transaction)",
     "Granting any iam_v2 DML privilege to a runtime service role in production",
-    "DSN/search_path change; routing any service to iam_v2",
+    "DSN/search_path change that routes any service to iam_v2; any iam_v2 cutover",
     "Data migration into iam_v2; dual-read/dual-write; cutover",
     "PMS/FIAS traffic; financial posting; programmatic reversal",
-    "Network/HA/deployment/topology change; Central changes; legacy cleanup",
-    "Guest paid access; Phase 2 or any later Phase"
+    "HA/topology change; Central changes; legacy IAM removal; guest paid access; Stripe activation"
   ],
-  "next_authorized_action": "Product-Owner approval of this permanent GitHub execution and delivery operating rule and the corrected Phase 1B plan",
+  "next_authorized_action": "No next-phase implementation is authorized. Await explicit Product-Owner authorization before beginning any subsequent phase or enabling any dark feature (durable throttle / keyed-HMAC OTP / IAM-v2) or any iam_v2 cutover.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
   "privilege_matrix": "docs/architecture/Phase1B-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D9",
-  "latest_transition_id": "T0008"
+  "latest_accepted_po_decision": "D11",
+  "latest_transition_id": "T0011"
 }

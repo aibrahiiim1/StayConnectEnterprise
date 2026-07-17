@@ -1,0 +1,53 @@
+# StayConnect Enterprise — line-ending & binary policy (W0, GH-LF-CONSISTENCY).
+#
+# Governance checksums (deterministic export packs, PACK_SHA256SUMS, MANIFEST) are computed
+# over LF content. Without this policy, a Windows checkout (core.autocrlf=true) materializes
+# tracked text as CRLF, so `sha256sum` in tools/validate-project-state.sh mismatches the stored
+# LF checksums and reports false failures. Pinning text to LF makes Windows and Linux (and CI)
+# byte-identical for all checksum-controlled files.
+
+# Default: treat all files as text, auto-detect, and ALWAYS check out with LF on every platform.
+* text=auto eol=lf
+
+# --- Explicit LF for governance / docs / migrations / scripts / config / source ---
+*.md        text eol=lf
+*.txt       text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.py        text eol=lf
+*.sh        text eol=lf
+*.sql       text eol=lf
+*.go        text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.mjs       text eol=lf
+*.css       text eol=lf
+*.html      text eol=lf
+*.toml      text eol=lf
+*.cfg       text eol=lf
+*.conf      text eol=lf
+*.env.example text eol=lf
+Makefile    text eol=lf
+.gitignore  text eol=lf
+.gitattributes text eol=lf
+
+# --- Binary artifacts: never normalized (protects deterministic pack checksums & assets) ---
+*.zip   binary
+*.tgz   binary
+*.gz    binary
+*.tar   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.svg   binary
+*.pdf   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.mp4   binary
+*.webp  binary
