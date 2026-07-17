@@ -1,4 +1,0 @@
-commit 89e6294ca2080c47d201605d3a0c5b47520beb01
-Date:   Sat Jul 18 01:42:21 2026 +0300
-
-    Governance: allow post-closure next-action phrasing in ZERO_STALE validator

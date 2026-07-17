@@ -1,0 +1,4 @@
+commit 14f73e15705251b656b2b9a74c128c8250a7f844
+Date:   Sat Jul 18 01:46:46 2026 +0300
+
+    Governance: post-closure allowed_actions + advance mutation fixtures (M04/M08/M29/M30/M31) to T0011
