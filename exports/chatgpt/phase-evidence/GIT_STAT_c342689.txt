@@ -1,4 +1,0 @@
-commit c34268963281763fea5db78217407ab0b5a3c0da
-Date:   Sat Jul 18 01:21:03 2026 +0300
-
-    Phase 1B final acceptance reconciliation: evidence, governance sync, stale-state guards (T0010)
