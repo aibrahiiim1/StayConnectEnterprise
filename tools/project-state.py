@@ -259,6 +259,21 @@ def cmd_validate(deep=True):
         for phrase in ["zero production `iam_v2` write", "ZERO `iam_v2` DML"]:
             pass  # soft
         if "rolled-back" not in pt.lower(): fail("Phase 1B plan must address rolled-back-transaction writes (D1)")
+        # Phase 1B plan / canonical-state coherence (no PLANNING-ONLY vs IN_PROGRESS; no production iam_v2
+        # runtime grant / shadow / rolled-back contradiction). Sentinel + multiple structural assertions,
+        # gated on the live phase status — not a single grep.
+        if "PHASE_1B_PRODUCTION_IAM_V2_RUNTIME: NONE" not in pt:
+            fail("Phase 1B plan missing sentinel 'PHASE_1B_PRODUCTION_IAM_V2_RUNTIME: NONE'")
+        if p1b == "IN_PROGRESS" and re.search(r"PLANNING ONLY", pt):
+            fail("Phase 1B plan states 'PLANNING ONLY' while canonical Phase 1B status is IN_PROGRESS")
+        _plan_contradictions = [
+            (r"prepared for cutover", "production runtime iam_v2 grant 'prepared for cutover' (Phase 1B production roles hold ZERO iam_v2; future grants belong only in the FUTURE DESIGN appendix)"),
+            (r"read-mostly/rolled-back", "production rolled-back iam_v2 transaction (D1 forbids all production iam_v2 access incl. rolled-back)"),
+            (r"shadow-only in production", "production iam_v2 shadow execution (all iam_v2 adapter/engine execution is scratch/test only)"),
+            (r"unless D1 explicitly approved shadow writes", "stale D1 shadow-write exception (D1 rejects shadow writes)"),
+        ]
+        for pat, why in _plan_contradictions:
+            if re.search(pat, pt): fail(f"Phase 1B plan contradiction: {why}")
 
     # verified evidence + authoritative files exist
     for ev in st.get("verified_evidence", []):
