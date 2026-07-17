@@ -307,8 +307,8 @@ def cmd_validate(deep=True):
         # gated on the live phase status — not a single grep.
         if "PHASE_1B_PRODUCTION_IAM_V2_RUNTIME: NONE" not in pt:
             fail("Phase 1B plan missing sentinel 'PHASE_1B_PRODUCTION_IAM_V2_RUNTIME: NONE'")
-        if p1b == "IN_PROGRESS" and re.search(r"PLANNING ONLY", pt):
-            fail("Phase 1B plan states 'PLANNING ONLY' while canonical Phase 1B status is IN_PROGRESS")
+        if p1b in ("IN_PROGRESS", "ACCEPTED_AND_CLOSED") and re.search(r"PLANNING ONLY|NOT APPROVED FOR IMPLEMENTATION", pt):
+            fail(f"Phase 1B plan states 'PLANNING ONLY / NOT APPROVED' while Phase 1B is implemented (canonical status {p1b})")
         _plan_contradictions = [
             (r"prepared for cutover", "production runtime iam_v2 grant 'prepared for cutover' (Phase 1B production roles hold ZERO iam_v2; future grants belong only in the FUTURE DESIGN appendix)"),
             (r"read-mostly/rolled-back", "production rolled-back iam_v2 transaction (D1 forbids all production iam_v2 access incl. rolled-back)"),
