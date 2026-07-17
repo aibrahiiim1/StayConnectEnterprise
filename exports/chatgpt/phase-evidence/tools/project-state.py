@@ -181,7 +181,8 @@ def cmd_validate(deep=True):
     # decision register agreement: D1 not reopenable; D9 active; required decisions present
     dmap = {d["id"]: d for d in dec.get("decisions", [])}
     for need in ["D1","D2","D3","D4","D5","D6","D7","D8","D9","PH-1B-SCOPE","PH-CUTOVER","SEC-NO-IAMV2-PRIV",
-                 "GH-SOURCE-OF-TRUTH","GH-BRANCH-PR","GH-COMPLETE-MANIFEST","GH-FINAL-REPORT","GH-MANDATORY-CI"]:
+                 "GH-SOURCE-OF-TRUTH","GH-BRANCH-PR","GH-COMPLETE-MANIFEST","GH-FINAL-REPORT","GH-MANDATORY-CI",
+                 "GH-AGENT-ONLY-OPERATIONS"]:
         if need not in dmap: fail(f"decision-register missing {need}")
     if dmap.get("D1", {}).get("reopenable", False) is not False: fail("D1 must not be reopenable")
     if dmap.get("D1", {}).get("status") != "ACTIVE": fail("D1 must be ACTIVE")
@@ -217,12 +218,19 @@ def cmd_validate(deep=True):
         if "git status --porcelain" not in w: fail("governance CI must assert a clean working tree")
         if "Project Governance" not in w: fail("governance CI workflow name must be 'Project Governance'")
         if not re.search(r"(?m)^\s{2,}governance:\s*$", w): fail("governance CI must define the job id 'governance'")
+    if dg.get("operations_owner") != "AGENT":
+        fail(f"delivery_governance.operations_owner must be 'AGENT' (got: {dg.get('operations_owner')!r})")
     rd_path = os.path.join(ROOT, "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md")
     if os.path.isfile(rd_path):
         rd = open(rd_path, encoding="utf-8").read()
         for tok in ["aibrahiiim1/StayConnectEnterprise","CREATED","MODIFIED","DELETED","RENAMED",
                     "COPIED","GENERATED","EXPORTED","UNCHANGED-BUT-VERIFIED"]:
             if tok not in rd: fail(f"GitHub delivery rule doc missing required token: {tok}")
+        # agent-owned Git/GitHub operations (GH-AGENT-ONLY-OPERATIONS)
+        if "GIT_OPERATIONS_OWNER: AGENT" not in rd:
+            fail("GitHub delivery rule doc missing assertion GIT_OPERATIONS_OWNER: AGENT")
+        if re.search(r"GIT_OPERATIONS_OWNER:\s*(PRODUCT_OWNER|PO\b|MANUAL|HUMAN)", rd):
+            fail("GitHub delivery rule doc must not assign Git operations to the Product Owner (GIT_OPERATIONS_OWNER must be AGENT)")
 
     # current phase plan matches canonical + exists; privilege matrix agreement
     plan = st.get("current_phase_plan")

@@ -1,4 +1,4 @@
-# cited committed source, not packaged. Verify at SOURCE_COMMIT cadc302.
+# cited committed source, not packaged. Verify at SOURCE_COMMIT 59c5b4b.
 d5fc05d8ec9dfa6c421430539a01229e75759ea39737d636cd1544136bb1490d  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
 ebec050db07010ca998b2ddf6680aea76ed70fe5df7483615e1495835ff7d215  docs/architecture/Phase1B-Privilege-Matrix.md
 2951201822a3df82f3c6252bd831ba95567c115d7067d7c3730e04cb7cd7de60  data-plane/internal/pmsguard/guard.go

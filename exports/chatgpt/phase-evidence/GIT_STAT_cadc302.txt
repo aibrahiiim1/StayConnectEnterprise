@@ -1,4 +1,0 @@
-commit cadc302ecb22e5fedf9a05a4cc785b1e2170256e
-Date:   Fri Jul 17 02:59:17 2026 +0300
-
-    Add mandatory GitHub Actions governance CI + manifest Workstream column

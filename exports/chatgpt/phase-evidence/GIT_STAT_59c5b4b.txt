@@ -1,0 +1,4 @@
+commit 59c5b4b7bf1146322340cf10aefa16ecc4b50812
+Date:   Fri Jul 17 05:36:57 2026 +0300
+
+    Add GH-AGENT-ONLY-OPERATIONS: all Git/GitHub operations are Agent-owned
