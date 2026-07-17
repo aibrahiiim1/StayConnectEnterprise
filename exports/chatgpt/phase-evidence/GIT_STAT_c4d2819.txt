@@ -1,4 +1,0 @@
-commit c4d2819fad3b6fbf02a70c79a50449c9b0a0ee04
-Date:   Sat Jul 18 00:28:03 2026 +0300
-
-    Governance: allow Phase 1B live-dark next-action phrasing in ZERO_STALE validator
