@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"time"
 )
 
 // MinKeyLen is the minimum accepted key length in bytes.
@@ -68,17 +69,26 @@ func createExclKey(path string) (bool, []byte, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
-			if perr := checkFile(path); perr != nil {
-				return false, nil, perr
+			// Another caller won the O_EXCL create. It may still be mid-write, so retry-read until the
+			// file is complete (>= MinKeyLen) rather than returning a partial/empty key.
+			for i := 0; i < 100; i++ {
+				b, rerr := os.ReadFile(path)
+				if rerr == nil && len(b) >= MinKeyLen {
+					if perr := checkFile(path); perr != nil {
+						return false, nil, perr
+					}
+					return false, b, nil
+				}
+				if rerr != nil && !os.IsNotExist(rerr) {
+					return false, nil, rerr
+				}
+				time.Sleep(2 * time.Millisecond)
 			}
-			b, rerr := os.ReadFile(path)
-			if rerr != nil {
-				return false, nil, rerr
-			}
-			if len(b) < MinKeyLen {
+			// If it exists but is genuinely short (not a mid-write), surface that.
+			if b, rerr := os.ReadFile(path); rerr == nil && len(b) < MinKeyLen {
 				return false, nil, fmt.Errorf("localkeys: %s too short (%d < %d)", path, len(b), MinKeyLen)
 			}
-			return false, b, nil
+			return false, nil, fmt.Errorf("localkeys: %s did not become readable", path)
 		}
 		return false, nil, err
 	}
