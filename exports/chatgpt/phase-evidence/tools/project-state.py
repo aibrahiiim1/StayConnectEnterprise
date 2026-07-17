@@ -214,6 +214,14 @@ def cmd_validate(deep=True):
         # closed at DARK maturity, never FINAL_CLOSED and never reopened.
         if p1b != "ACCEPTED_AND_CLOSED":
             fail(f"Phase 1B transition_accepted=true but status {p1b} is not ACCEPTED_AND_CLOSED")
+        # Post-acceptance stale-field guards: no current field may still say acceptance is pending, and
+        # no allowed action may still instruct merging the (already-merged) PR #2.
+        for e in st.get("verified_evidence", []) or []:
+            if re.search(r"pending (po|product-owner) acceptance", str(e.get("kind", "")), re.I):
+                fail("stale-state contradiction: Phase 1B is ACCEPTED_AND_CLOSED but a verified-evidence entry still says PENDING PO acceptance")
+        for a in st.get("allowed_actions", []) or []:
+            if re.search(r"merge\s+pr\s*#?\s*2\b", str(a), re.I):
+                fail("stale-state contradiction: Phase 1B is closed/merged but an allowed_action still instructs merging PR #2")
     else:
         # Until the PO acceptance is recorded, Phase 1B may not be marked accepted/closed/cutover.
         if p1b not in ("PLANNING", "IN_PROGRESS"):
