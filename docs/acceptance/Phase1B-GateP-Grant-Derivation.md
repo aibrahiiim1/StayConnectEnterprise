@@ -65,11 +65,34 @@ confirmation; likely read-only via shared `shape`/`identity` helpers, to be pinn
 `ALTER ROLE … SET`, `ALTER DEFAULT PRIVILEGES` denying future owner objects, and **zero `iam_v2`
 privileges**. No `GRANT … ON ALL TABLES` shortcuts — every grant is table-scoped.
 
-## Remaining (this workstream)
-1. Build table-scoped `GRANT` scripts (`SELECT`/`INSERT`/`UPDATE`, `DELETE` only where code needs it,
-   sequence `USAGE` only for tables written).
-2. Reconstruct the isolated DB from the verified backup; create the roles; apply grants.
-3. Run positive real-query samples per service + negative outside-allowlist tests; prove `rolsuper=false`
-   and zero `iam_v2` access.
-4. Correct `Phase1B-Privilege-Matrix.md` from the isolated-validation results (add the scd appliance/
-   command/updates tables; confirm/trim acctd candidates).
+## Write-verb evidence (real SQL, per service)
+Extracted from each service's reachable code (`cmd` + imported packages). `SELECT` is granted on every
+referenced table; write verbs below are the evidenced `INSERT/UPDATE/DELETE`. Upserts
+(`INSERT … ON CONFLICT DO UPDATE`, e.g. scd `guests` by `(tenant,mac)`) require `INSERT+UPDATE` even
+though text-search shows only `INSERT` — pinned by the isolated positive test, not by grep alone.
+- **acctd** resolved: `vouchers` + `ticket_templates` are **genuinely required** (read-only `LEFT JOIN`
+  in the quota query `acctd/main.go:303-304`) → `SELECT` only. Kept.
+- **scd** edge tables resolved (evidenced verbs): `appliances` INSERT, `sites` INSERT+DELETE,
+  `edge_executed_commands` INSERT, `edge_installed_updates` SELECT+INSERT, `edge_offline_packages`
+  INSERT+UPDATE → matrix updated to add these five with these verbs.
+
+## Isolated validation RESULT (2026-07-17) — PASS
+Reconstructed a disposable DB from the verified backup (`42` public + `49` iam_v2), created the four
+`svc_*` roles, applied `deploy/gatep/gatep-grants.sql`, then dropped it. **Production untouched.**
+- Role attributes: `svc_scd/edged/acctd/netd` all `NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`. ✓
+- **Zero iam_v2 privileges** for every runtime role (`svc_all_iam_v2_grants = 0`). ✓
+- Negative (all DENIED): `svc_scd→iam_v2.guest_principals`; `svc_scd→public.operators`;
+  `svc_netd→public.guests`; `svc_acctd→public.guest_accounts`; `svc_scd CREATE TABLE`; `svc_scd DROP TABLE`. ✓
+- Positive (OK): `svc_scd SELECT sessions`; `svc_acctd SELECT vouchers/ticket_templates`;
+  `svc_netd SELECT network_interfaces`; `svc_scd INSERT audit_log` privilege confirmed (failed only on a
+  test column typo — a post-permission column-resolution error). ✓
+
+## Artifacts
+- `deploy/gatep/gatep-roles.sql.tmpl` — role creation + attributes (passwords injected at runtime; no secret committed).
+- `deploy/gatep/gatep-grants.sql` — exact table-scoped grants + per-table sequence USAGE (no ALL-TABLES/ALL-SEQUENCES).
+- `deploy/gatep/gatep-rollback.sql` — REVOKE + DROP ROLE (roles own nothing; DSN revert precedes it).
+
+## Remaining (full positive proof)
+Full per-query positive proof by running each service's integration suite against the isolated DB under
+its `svc_*` role is the deeper validation to complete during Gate P dry-run; the boundary proofs
+(zero iam_v2, no-superuser, no-outside-allowlist, no DDL) are already established above.

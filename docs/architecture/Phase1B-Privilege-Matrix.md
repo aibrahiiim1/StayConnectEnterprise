@@ -40,8 +40,13 @@ Legend: S=SELECT I=INSERT U=UPDATE D=DELETE · seq=sequence USAGE/SELECT · fn=f
 | sync_outbox | all | ✓ | ✓ | ✓ | – | ✓ | durable telemetry outbox | — |
 | sync_checkpoints | all | ✓ | ✓ | ✓ | – | ✓ | sync watermarks | — |
 | audit_log | all | – | ✓ | – | – | ✓ | audit inserts | no SELECT/UPDATE/DELETE |
+| appliances | all | ✓ | ✓ | ✓ | – | ✓ | enrollment/claim (`applianceauth`) — evidenced INSERT+upsert | no DELETE |
+| sites | all | ✓ | ✓ | – | ✓ | ✓ | local signed-assignment provisioning (`assignment`) | evidenced INSERT+DELETE |
+| edge_executed_commands | all | ✓ | ✓ | – | – | ✓ | command channel (`commands`) | no UPDATE/DELETE |
+| edge_installed_updates | all | ✓ | ✓ | – | – | ✓ | updates (`updates`) — SELECT count + INSERT | no UPDATE/DELETE |
+| edge_offline_packages | all | ✓ | ✓ | ✓ | – | ✓ | offline packages (`updates`) — INSERT+UPDATE | no DELETE |
 | auth_throttle_buckets *(new, §4b)* | all | ✓ | ✓ | ✓ | ✓ | – | durable throttling atomic upsert + cleanup | scope_key stores hash only |
-| **iam_v2.* (any)** | — | – | – | – | – | – | **ZERO — production svc_scd has no iam_v2 grant** | svc_scd cannot SELECT/INSERT any iam_v2 table |
+| **iam_v2.* (any)** | — | – | – | – | – | – | **ZERO — production svc_scd has no iam_v2 grant** | svc_scd cannot SELECT/INSERT any iam_v2 table (isolated-validated 2026-07-17: 0 iam_v2 grants) |
 
 ### 1.2 `svc_acctd` — accounting
 | Table | S | I | U | D | seq | reason | negative test |
