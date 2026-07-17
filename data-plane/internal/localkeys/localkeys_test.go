@@ -9,40 +9,78 @@ import (
 	"testing"
 )
 
-func TestLoadOrCreateKeyStableAcrossRestart(t *testing.T) {
+func TestKeyBootstrapAndRuntimeLoad(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, "throttle.key")
-	k1, err := LoadOrCreateKey(p)
-	if err != nil {
-		t.Fatal(err)
+	p := filepath.Join(dir, "sub", "throttle.key") // parent dir created by bootstrap
+	// bootstrap creates one key
+	k1, err := CreateKeyIfAbsent(p)
+	if err != nil || len(k1) < MinKeyLen {
+		t.Fatalf("bootstrap: len=%d err=%v", len(k1), err)
 	}
-	if len(k1) < MinKeyLen {
-		t.Fatalf("key too short: %d", len(k1))
+	// repeated bootstrap returns the SAME key (never overwrites)
+	k2, err := CreateKeyIfAbsent(p)
+	if err != nil || !bytes.Equal(k1, k2) {
+		t.Fatal("repeated bootstrap must return the same key")
 	}
-	// "restart": load again -> SAME key (no regeneration)
-	k2, err := LoadOrCreateKey(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(k1, k2) {
-		t.Fatal("key must be stable across restart (not regenerated)")
+	// runtime load-only returns the same key
+	k3, err := LoadExistingKey(p)
+	if err != nil || !bytes.Equal(k1, k3) {
+		t.Fatalf("runtime load must return the bootstrapped key: %v", err)
 	}
 	if runtime.GOOS != "windows" {
 		fi, _ := os.Stat(p)
 		if fi.Mode().Perm() != 0o600 {
-			t.Fatalf("key file perms %o, want 0600", fi.Mode().Perm())
+			t.Fatalf("key perms %o, want 0600", fi.Mode().Perm())
+		}
+		di, _ := os.Stat(filepath.Dir(p))
+		if di.Mode().Perm() != 0o700 {
+			t.Fatalf("key dir perms %o, want 0700", di.Mode().Perm())
 		}
 	}
 }
 
-func TestLoadOrCreateKeyRejectsShort(t *testing.T) {
+func TestRuntimeLoadMissingFailsClosed(t *testing.T) {
+	dir := t.TempDir()
+	// runtime load of an absent key must FAIL (never regenerate — would reset throttle enforcement)
+	if _, err := LoadExistingKey(filepath.Join(dir, "absent.key")); err == nil {
+		t.Fatal("runtime load of absent key must fail closed")
+	}
+}
+
+func TestLoadExistingKeyRejectsShort(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "short.key")
 	if err := os.WriteFile(p, []byte("tooshort"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadOrCreateKey(p); err == nil {
+	if _, err := LoadExistingKey(p); err == nil {
 		t.Fatal("short key must be rejected")
+	}
+}
+
+func TestCreateKeyIfAbsentConcurrentSingleWinner(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "throttle.key")
+	const n = 20
+	keys := make([][]byte, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			k, err := CreateKeyIfAbsent(p)
+			if err != nil {
+				t.Errorf("g%d: %v", i, err)
+				return
+			}
+			keys[i] = k
+		}(i)
+	}
+	wg.Wait()
+	for i := 1; i < n; i++ {
+		if keys[i] == nil || !bytes.Equal(keys[0], keys[i]) {
+			t.Fatalf("concurrent bootstrap produced different keys (i=%d)", i)
+		}
 	}
 }
 
@@ -55,7 +93,7 @@ func TestInsecurePermsRejected(t *testing.T) {
 	if err := os.WriteFile(p, make([]byte, MinKeyLen), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadOrCreateKey(p); err == nil {
+	if _, err := LoadExistingKey(p); err == nil {
 		t.Fatal("group/world-readable key must be rejected")
 	}
 }

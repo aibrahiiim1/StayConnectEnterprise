@@ -67,6 +67,8 @@ GRANT SELECT,INSERT,DELETE        ON public.sites                  TO svc_scd; -
 GRANT SELECT,INSERT              ON public.edge_executed_commands  TO svc_scd; -- command channel
 GRANT SELECT,INSERT              ON public.edge_installed_updates  TO svc_scd; -- updates
 GRANT SELECT,INSERT,UPDATE       ON public.edge_offline_packages   TO svc_scd; -- offline pkgs
+GRANT SELECT,INSERT,UPDATE,DELETE ON public.auth_throttle_buckets   TO svc_scd; -- durable throttle (0007): read/increment/block/cleanup; no sequence (composite PK)
+GRANT SELECT                      ON public.otp_hmac_key_generations TO svc_scd; -- OTP gen metadata READ only (0008); creation/rotation are operational/migration-only
 
 -- ---------------------------------------------------------------------------
 -- svc_edged : admin API / Hotel-Admin backend (broad CRUD on config)

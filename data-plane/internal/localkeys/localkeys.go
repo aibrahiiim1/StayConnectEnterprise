@@ -105,11 +105,32 @@ func createExclKey(path string) (bool, []byte, error) {
 	return true, key, nil
 }
 
-// LoadOrCreateKey returns a stable key from path, creating a fresh crypto-random key (>= MinKeyLen,
-// 0600) if the file does not yet exist. The same key is returned on every subsequent call/restart.
-func LoadOrCreateKey(path string) ([]byte, error) {
+// LoadExistingKey returns a stable key from path for NORMAL RUNTIME. It NEVER creates a key: an
+// absent file is a startup failure (so a service can never silently mint a replacement and reset
+// enforcement). It rejects symlinks/non-regular files, insecure permissions and short keys.
+func LoadExistingKey(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
-	if err == nil {
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("localkeys: key %s is absent (runtime is load-only; bootstrap it during deployment)", path)
+		}
+		return nil, err
+	}
+	if perr := checkFile(path); perr != nil {
+		return nil, perr
+	}
+	if len(b) < MinKeyLen {
+		return nil, fmt.Errorf("localkeys: %s too short (%d < %d)", path, len(b), MinKeyLen)
+	}
+	return b, nil
+}
+
+// CreateKeyIfAbsent is the DEPLOYMENT/BOOTSTRAP operation: it returns the existing key or, if absent,
+// creates a fresh crypto-random key (>= MinKeyLen, 0600, parent dir 0700, fsync'd, race-safe
+// single-winner). It never overwrites an existing key. Use it only from a controlled bootstrap
+// helper — never on the normal service-start path.
+func CreateKeyIfAbsent(path string) ([]byte, error) {
+	if b, err := os.ReadFile(path); err == nil {
 		if perr := checkFile(path); perr != nil {
 			return nil, perr
 		}
@@ -117,8 +138,7 @@ func LoadOrCreateKey(path string) ([]byte, error) {
 			return nil, fmt.Errorf("localkeys: %s too short (%d < %d)", path, len(b), MinKeyLen)
 		}
 		return b, nil
-	}
-	if !os.IsNotExist(err) {
+	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
