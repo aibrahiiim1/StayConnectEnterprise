@@ -1,7 +1,8 @@
 {
+  "timestamp_note": "Reboot-verified live-dark state marker: post-reboot scd systemd ActiveEnterTimestamp on the appliance (timezone Etc/UTC, so genuine UTC). Boot 2026-07-17T21:17:32Z; scd up 2026-07-17T21:18:26Z; see docs/acceptance/evidence/phase1b/T0010-LIVE-EVIDENCE.txt.",
   "transition_id": "T0010",
   "seq": 10,
-  "timestamp": "2026-07-18T00:00:00Z",
+  "timestamp": "2026-07-17T21:18:26Z",
   "previous_state": { "phase": "1B", "activity": "PHASE_1B_IMPLEMENTATION_IN_PROGRESS", "phase_status": "IN_PROGRESS" },
   "new_state": { "phase": "1B", "activity": "PHASE_1B_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE", "phase_status": "IN_PROGRESS" },
   "phase_affected": "1B",
@@ -10,6 +11,8 @@
   "scope_prohibited": "No PR #2 merge; Phase 1B NOT accepted/closed. No cutover; no production iam_v2 reads or writes; no bulk IAM data migration; no Phase 2 or later; no PMS/FIAS or financial traffic; no legacy IAM removal; no guest paid access; no enablement of any dark feature (throttle/OTP-HMAC/IAM-v2). Legacy public-schema authentication remains the sole production authority; iam_v2 stays 49 tables / 0 rows and dark.",
   "evidence_files": [
     "docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md",
+    "docs/acceptance/evidence/phase1b/T0010-LIVE-EVIDENCE.txt",
+    "docs/acceptance/evidence/phase1b/T0010-SOFTWARE-GATE.txt",
     "docs/architecture/Phase1B-Privilege-Matrix.md",
     "docs/acceptance/Phase1B-GateP-Grant-Derivation.md",
     "deploy/gatep/gatep-grants.sql",

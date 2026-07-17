@@ -16,7 +16,7 @@
   },
   "current_phase": "1B",
   "current_activity": "PHASE_1B_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE",
-  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B implementation Product-Owner AUTHORIZED and IN_PROGRESS (W0 complete; Gate P + durable throttle + keyed-HMAC OTP + dark IAM-v2 code + live-dark verification pending); DARK — no production iam_v2 use, no cutover; legacy public-schema auth remains the sole production authority",
+  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B implementation + live-dark deployment COMPLETED and reboot-verified on the appliance (Gate P least-privilege cutover, migrations 0007/0008, keyed OTP gen-1 bootstrap, pinned dark scd build). Still IN_PROGRESS only because Product-Owner acceptance is pending. DARK -- every new auth feature OFF, no production iam_v2 use, no cutover; legacy public-schema auth remains the sole production authority (iam_v2 49/0).",
   "phase1b_execution": {
     "implementation_authorized": true,
     "authorized_on": "2026-07-17",
@@ -33,7 +33,7 @@
   "phases": {
     "0":  { "status": "FINAL_CLOSED",       "title": "IAM redesign architecture contract + live PMS validation", "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)." },
     "1A": { "status": "ACCEPTED_AND_CLOSED","title": "Clean-slate IAM core + persistence (iam_v2)",              "maturity": "ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER" },
-    "1B": { "status": "IN_PROGRESS",        "title": "Credential/identity/auth-context (DARK)",                   "maturity": "IMPLEMENTATION_AUTHORIZED_IN_PROGRESS — W0 complete; Gate P/throttle/OTP/dark-code/live-dark pending; DARK, no production iam_v2 use" },
+    "1B": { "status": "IN_PROGRESS",        "title": "Credential/identity/auth-context (DARK)",                   "maturity": "IMPLEMENTATION + LIVE-DARK DEPLOYMENT COMPLETED and reboot-verified (Gate P least-privilege cutover done; migrations 0007/0008 live; runtime-security infra deployed DARK; all new auth features OFF). Pending Product-Owner acceptance (T0010). DARK, no production iam_v2 use." },
     "2":  { "status": "NOT_STARTED",        "title": "Packages, revisions, rules, tiers, quotes; free purchases; portal package selection" },
     "3":  { "status": "NOT_STARTED",        "title": "Stay domain: interfaces/revisions/routing, STRICT resolution, stays/sharers/folios, checkout grace" },
     "4":  { "status": "NOT_STARTED",        "title": "Financial: settlements, postings + outbox, payments, recovery, manual review" },
@@ -48,7 +48,8 @@
     "Phase 1A offline-real-schema-compatibility verified (9/9)",
     "Phase 1A production iam_v2 LIVE-DARK created + verified (18/18, 2026-07-16)",
     "Phase 1A formally Product-Owner ACCEPTED and CLOSED at its DARK maturity (2026-07-16)",
-    "Phase 1B implementation plan drafted (planning-only) + corrected against binding decisions D1-D9"
+    "Phase 1B implementation plan drafted (planning-only) + corrected against binding decisions D1-D9",
+    "Phase 1B implementation + live-dark deployment COMPLETED and reboot-verified on the appliance (Gate P least-privilege cutover, migrations 0007/0008, keyed OTP gen-1 bootstrap, pinned dark scd build) -- pending Product-Owner acceptance (T0010)"
   ],
   "verified_evidence": [
     { "id": "PROD_LIVE_DARK_V2", "path": "iam_v2_scratch/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt", "kind": "read-only production re-verification", "authoritative": true },
@@ -75,7 +76,12 @@
     "iam_v2_tables": 49,
     "iam_v2_rows": 0,
     "iam_v2_fingerprint": "bd75026f",
-    "public_structural_fingerprint": "d86ca4c6",
+    "public_structural_fingerprint_phase1a_md5": "d86ca4c6aed4bb868c173a0d328e0dde",
+    "public_structural_fingerprint_phase1a_md5_algorithm": "MD5 of sorted public-schema {columns + constraints + indexes} excluding the Phase-1A MG-0 anchor index guest_networks_tsi_anchor (iam_v2_scratch/prod_live_dark.sh). Phase-1A baseline; PRE-Phase-1B / pre-0007-0008.",
+    "public_columns_sha256_pre_0007_0008": "8659c08db41624d5cab946027c0d6c2d37251fc1550ec35929241827acf852f9",
+    "public_columns_sha256_current": "7241b1cd76201cd48df0eaa0055c336d0951aa218830545d7dbbe92bd61a0fcc",
+    "public_columns_sha256_algorithm": "SHA-256 of information_schema.columns table.column:data_type (Gate-P/Phase-1B). Distinct algorithm from the Phase-1A MD5 above; NOT comparable to it.",
+    "public_structure_change_note": "The Phase-1A structural baseline was intentionally superseded by the AUTHORIZED additive migrations 0007/0008 (auth_throttle_buckets, otp_hmac_key_generations, auth_otps.otp_key_generation). The pre->post SHA-256 delta (8659c08d -> 7241b1cd) is exactly those additive objects; this is authorized schema evolution, not drift.",
     "iam_v2_dark": true,
     "iam_v2_data_migration": false,
     "migrations_0007_0008_applied": true,
@@ -88,11 +94,11 @@
   "pms_financial_state": "FIAS lookup-only in production; posting engine is a future component (Phase 4). folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
-    "Gate P (first authorized Phase-1B execution step, IN PROGRESS): site-DB services still connect as superuser stayconnect; least-privilege roles + credential rotation are being applied before any iam_v2 runtime routing. Not a blocker to authorization."
+    "None (technical). Phase 1B implementation and live-dark deployment are complete and reboot-verified; Gate P least-privilege cutover done, migrations 0007/0008 live, runtime-security infra deployed DARK. The only outstanding item is Product-Owner acceptance of T0010 -- a governance gate, NOT a technical implementation blocker."
   ],
   "allowed_actions": [
-    "Execute the approved Phase 1B plan in verified stages: Gate P (least-privilege roles + credential rotation) -> durable throttle + keyed-HMAC OTP -> dark IAM-v2 credential/identity/auth-context code -> live-dark verification",
-    "Read-only inspection and documentation/governance work"
+    "Read-only live verification, documentation, governance and evidence work",
+    "Await Product-Owner acceptance or rejection of the Phase 1B live-dark deployment (T0010)"
   ],
   "prohibited_actions": [
     "Implementing any Phase beyond the authorized Phase 1B dark scope (Phase 2 or any later Phase)",

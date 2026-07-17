@@ -101,6 +101,18 @@ MUTATIONS = [
    ("replace", [("PHASE_1B_PRODUCTION_IAM_V2_RUNTIME: NONE", "PHASE_1B_PRODUCTION_IAM_V2_RUNTIME: SHADOW")])),
  ("M28 plan reintroduces production iam_v2 runtime grant", "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
    ("append", "\n\n- `svc_scd` iam_v2 grants prepared for cutover: USAGE + SELECT/INSERT/UPDATE.\n")),
+ # --- T0010 live-dark stale-state contradictions (must be caught by project-state.py) ---
+ ("M29 activity deployed but maturity says Gate P pending", "governance/project-state.json",
+   ("replace", [("cutover done; migrations 0007/0008 live", "cutover pending; migrations 0007/0008 live")])),
+ ("M30 gate_p cutover done but blocker says superuser", "governance/project-state.json",
+   ("replace", [("None (technical). Phase 1B implementation and live-dark deployment are complete and reboot-verified",
+                 "Site-DB services still connect as superuser stayconnect and least-privilege roles are not yet applied")])),
+ ("M31 next action is PO acceptance but allowed says execute Phase 1B", "governance/project-state.json",
+   ("replace", [("Read-only live verification, documentation, governance and evidence work",
+                 "Execute the approved Phase 1B plan in verified stages")])),
+ ("M32 stale HEAD / production-unchanged in current state after T0010", "governance/project-state.json",
+   ("replace", [("legacy public-schema auth remains the sole production authority (iam_v2 49/0).",
+                 "legacy public-schema auth remains the sole production authority (iam_v2 49/0). HEAD 1844da2 Production unchanged.")])),
 ]
 
 def apply(relpath, op):
