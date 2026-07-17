@@ -1,13 +1,13 @@
 # StayConnect IAM — Phase 1B Implementation Plan (Credential/Portal Integration, DARK)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0009 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0010 -->
 **Current phase:** 1B — Credential/identity/auth-context (DARK)
-**Current activity:** `PHASE_1B_IMPLEMENTATION_IN_PROGRESS`
+**Current activity:** `PHASE_1B_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B IN_PROGRESS (DARK — implementation in progress; no production iam_v2 use) · 2 NOT_STARTED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** complete Phase 1B execution and live-dark verification
+**Single next authorized action:** Product-Owner review/acceptance of Phase 1B live-dark deployment (transition T0010). Enabling any dark feature (throttle/OTP-HMAC/IAM-v2) or any iam_v2 cutover is a SEPARATE, explicitly-authorized step.
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D10`.
 <!-- END GENERATED PROJECT STATE -->
 
