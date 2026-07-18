@@ -1,93 +1,118 @@
 -- 0010 — Phase 3 (PMS Stay Domain, STRICT resolution, Checkout Grace) additive iam_v2 hardening.
 -- ADDITIVE + reversible. DARK; no data. Owner-inherited (iam_v2_owner in prod, as with 0009).
--- Scope is proven by docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md against a disposable PG16.
--- The canonical mg1..mg9 schema already provides all 18 Phase-3 base tables; this migration adds ONLY:
---   (1) pms_interface_runtime — durable PMS connector runtime state, FOUR INDEPENDENT axes;
---   (2) one-way stays.status transition + monotonic lifecycle_version/last_applied_event_version guard;
---   (3) NO stays.checkout_episode — the episode IS stays.lifecycle_version (purchases.checkout_episode is
---       populated from the locked Stay's lifecycle_version; existing one_conversion_per_episode key stands);
---   (4) stays.effective_checkout_at + per-Stay occupancy-evidence fields (occupancy freshness axis) +
---       typed grace scalar columns on site_checkout_grace_config (validated bounds);
---   (5) auth_resolutions.resolution_request_id — server-side resolution-request idempotency key;
---   (6) stay_events append-only guard (immutable identity/normalization; one-way terminal processing_status).
+-- Scope proven by docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md against a disposable PG16.
+--
+-- The triggers below are STRUCTURAL state-machine guards ONLY. A raw SQL update that sets
+-- status='IN_HOUSE' + lifecycle_version+1 is NOT proof of a trusted source; the AUTHORIZATION boundary
+-- (trusted normalized PMS event application, or privileged Hotel-Admin Reinstatement with RBAC + password
+-- step-up + reason + immutable audit + version check) is implemented in Increment 4 through controlled
+-- Stay-domain write operations. Ordinary runtime roles receive NO direct UPDATE grant on Stay lifecycle
+-- columns (privilege model: zero runtime grants while DARK; Gate-P least privilege preserved).
+--
+-- Adds ONLY:
+--   (1) pms_interface_runtime — durable PMS connector runtime state, FOUR INDEPENDENT axes (NO stored
+--       derived-freshness field: the resolver derives availability from the axes + revision thresholds).
+--   (2) one-way stays.status transition guard; lifecycle_version is a STRICT episode counter that changes
+--       ONLY on a CHECKED_OUT->IN_HOUSE reinstatement (+1); monotonic last_applied_event_version.
+--   (3) NO stays.checkout_episode — the episode IS stays.lifecycle_version.
+--   (4) stays.effective_checkout_at + per-Stay occupancy-evidence (composite-FK-pinned, all-or-none) +
+--       typed grace scalar columns (bytes) on site_checkout_grace_config with validated bounds.
+--   (5) auth_resolutions.resolution_request_id — server-side resolution-request idempotency key.
+--   (6) stay_events append-only guard (immutable identity/normalization; one-way terminal processing_status;
+--       stay_id may go NULL->same-interface Stay only in the same tx that makes the event terminal).
 -- No public-schema mutation. No SECURITY DEFINER. Zero runtime grants (dark).
 BEGIN;
 
 -- ============================================================================
--- (1) pms_interface_runtime — durable connector runtime state, FOUR axes.
---     One row per (tenant,site,pms_interface_id). A derived overall status MAY be
---     exposed but is NOT the stored replacement for the four independent axes.
+-- (1) pms_interface_runtime — FOUR independent axes; NO stored derived freshness.
 -- ============================================================================
 CREATE TABLE iam_v2.pms_interface_runtime (
   tenant_id uuid NOT NULL,
   site_id uuid NOT NULL,
   pms_interface_id uuid NOT NULL,
-  pinned_revision_id uuid,                                 -- revision the connector opened with
-  runtime_generation bigint NOT NULL DEFAULT 0,            -- ++ each connector (re)start (single-owner)
+  pinned_revision_id uuid,
+  runtime_generation bigint NOT NULL DEFAULT 0,
   updated_at timestamptz NOT NULL DEFAULT now(),
 
-  -- axis 1: transport / heartbeat health
+  -- axis 1: transport / heartbeat
   transport_status text NOT NULL DEFAULT 'UNKNOWN'
     CHECK (transport_status IN ('UNKNOWN','CONNECTING','CONNECTED','DISCONNECTED','ERROR')),
   last_connect_attempt_at timestamptz,
   last_connected_at timestamptz,
   last_heartbeat_at timestamptz,
   disconnected_since timestamptz,
-  transport_error_code text,                              -- sanitized code only; never credentials/payload
+  transport_error_code text,
 
-  -- axis 2: feed-continuity health
+  -- axis 2: feed continuity
   continuity_status text NOT NULL DEFAULT 'UNKNOWN'
     CHECK (continuity_status IN ('UNKNOWN','CONTINUOUS','DISCONTINUOUS','GAP_DETECTED')),
   last_valid_event_at timestamptz,
-  last_event_cursor text,                                 -- protocol sequence/cursor where supported
+  last_event_cursor text,
   discontinuity_detected_at timestamptz,
-  last_resync_marker_at timestamptz,                      -- observed resync / night-audit marker
+  last_resync_marker_at timestamptz,
 
-  -- axis 3: last complete synchronization / resync health
+  -- axis 3: complete sync / resync
   sync_status text NOT NULL DEFAULT 'UNKNOWN'
     CHECK (sync_status IN ('UNKNOWN','IN_SYNC','RESYNC_REQUIRED','RESYNC_IN_PROGRESS','SYNC_FAILED')),
   resync_requested_at timestamptz,
   resync_started_at timestamptz,
   last_complete_sync_at timestamptz,
-  sync_cursor text,                                       -- durable checkpoint
+  sync_cursor text,
   last_sync_failure_code text,
-
-  -- derived overall (NON-authoritative convenience for UI/resolver; not a replacement for the four axes)
-  derived_freshness text NOT NULL DEFAULT 'UNAVAILABLE'
-    CHECK (derived_freshness IN ('HEALTHY','UNAVAILABLE','STALE','DEGRADED_FRESHNESS','RESYNC_REQUIRED','UNSUPPORTED_EVIDENCE')),
 
   PRIMARY KEY (tenant_id, site_id, pms_interface_id),
   FOREIGN KEY (tenant_id, site_id, pms_interface_id)
     REFERENCES iam_v2.pms_interfaces (tenant_id, site_id, id) ON DELETE CASCADE,
   FOREIGN KEY (tenant_id, site_id, pms_interface_id, pinned_revision_id)
-    REFERENCES iam_v2.pms_interface_revisions (tenant_id, site_id, pms_interface_id, id)
+    REFERENCES iam_v2.pms_interface_revisions (tenant_id, site_id, pms_interface_id, id),
+
+  -- structural coherence (no now()-dependent logic; time-threshold decisions live in the domain)
+  CONSTRAINT pir_generation_nonneg CHECK (runtime_generation >= 0),
+  CONSTRAINT pir_connected_pins CHECK (
+    transport_status <> 'CONNECTED' OR (pinned_revision_id IS NOT NULL AND last_connected_at IS NOT NULL)),
+  CONSTRAINT pir_heartbeat_not_future CHECK (last_heartbeat_at IS NULL OR last_heartbeat_at <= updated_at),
+  CONSTRAINT pir_resync_coherent CHECK (
+        (resync_started_at IS NULL OR resync_requested_at IS NOT NULL)
+    AND (resync_started_at IS NULL OR resync_requested_at IS NULL OR resync_started_at >= resync_requested_at)),
+  CONSTRAINT pir_bounded_lengths CHECK (
+        (transport_error_code   IS NULL OR length(transport_error_code)   <= 200)
+    AND (last_sync_failure_code IS NULL OR length(last_sync_failure_code) <= 200)
+    AND (last_event_cursor      IS NULL OR length(last_event_cursor)      <= 4096)
+    AND (sync_cursor            IS NULL OR length(sync_cursor)            <= 4096))
 );
-CREATE INDEX pms_interface_runtime_fresh
-  ON iam_v2.pms_interface_runtime (tenant_id, site_id, derived_freshness);
 
 -- ============================================================================
--- (4) stays: effective checkout boundary + per-Stay occupancy-evidence (occupancy axis).
---     A Stay's freshness is never inferred only from the Interface's last event time.
+-- (4) stays: effective checkout + per-Stay occupancy evidence (composite-FK pinned, all-or-none).
 -- ============================================================================
 ALTER TABLE iam_v2.stays
   ADD COLUMN effective_checkout_at timestamptz,
-  ADD COLUMN occupancy_evidence_at timestamptz,            -- source ts of the occupancy evidence authoritative for this Stay
-  ADD COLUMN occupancy_ingested_at timestamptz,            -- when that evidence was ingested
-  ADD COLUMN occupancy_revision_id uuid,                   -- pinned interface revision for that evidence
+  ADD COLUMN occupancy_evidence_at timestamptz,
+  ADD COLUMN occupancy_ingested_at timestamptz,
+  ADD COLUMN occupancy_revision_id uuid,
   ADD COLUMN occupancy_normalization_version int,
   ADD COLUMN occupancy_clock_suspect boolean;
--- effective_checkout_at is meaningful only once the Stay has left IN_HOUSE; reinstatement (->IN_HOUSE)
--- must clear it (new episode). Enforced structurally:
 ALTER TABLE iam_v2.stays
   ADD CONSTRAINT stays_effco_only_after_checkout
-    CHECK (effective_checkout_at IS NULL OR status IN ('CHECKED_OUT','POST_STAY_ACTIVE'));
+    CHECK (effective_checkout_at IS NULL OR status IN ('CHECKED_OUT','POST_STAY_ACTIVE')),
+  -- all-or-none occupancy evidence tuple
+  ADD CONSTRAINT stays_occupancy_all_or_none CHECK (
+    (occupancy_evidence_at IS NULL AND occupancy_ingested_at IS NULL AND occupancy_revision_id IS NULL
+       AND occupancy_normalization_version IS NULL AND occupancy_clock_suspect IS NULL)
+    OR
+    (occupancy_evidence_at IS NOT NULL AND occupancy_ingested_at IS NOT NULL AND occupancy_revision_id IS NOT NULL
+       AND occupancy_normalization_version IS NOT NULL AND occupancy_clock_suspect IS NOT NULL)),
+  ADD CONSTRAINT stays_occupancy_norm_pos
+    CHECK (occupancy_normalization_version IS NULL OR occupancy_normalization_version > 0),
+  -- occupancy evidence Revision must belong to the SAME interface (historical revision, not necessarily current)
+  ADD CONSTRAINT stays_occupancy_revision_fk
+    FOREIGN KEY (tenant_id, site_id, pms_interface_id, occupancy_revision_id)
+    REFERENCES iam_v2.pms_interface_revisions (tenant_id, site_id, pms_interface_id, id);
 CREATE INDEX stays_effective_checkout
   ON iam_v2.stays (tenant_id, site_id, pms_interface_id, effective_checkout_at)
   WHERE effective_checkout_at IS NOT NULL;
 
 -- ============================================================================
--- (5) auth_resolutions: server-side resolution-request idempotency key (replay-safe).
---     Nullable for backward compatibility; Phase-3 resolver writes always supply it.
+-- (5) auth_resolutions server-side resolution-request idempotency key.
 -- ============================================================================
 ALTER TABLE iam_v2.auth_resolutions
   ADD COLUMN resolution_request_id uuid;
@@ -96,35 +121,47 @@ CREATE UNIQUE INDEX auth_resolutions_req_idem
   WHERE resolution_request_id IS NOT NULL;
 
 -- ============================================================================
--- (4b) site_checkout_grace_config: typed grace scalars with validated bounds.
+-- (4b) site_checkout_grace_config: typed grace scalars; quota in BYTES; canonical device-limit-policy
+--      vocabulary reused (service_plan_revisions.device_limit_policy). The typed columns are the
+--      AUTHORITATIVE grace policy; config jsonb must NOT be a second source of truth for these fields.
 -- ============================================================================
 ALTER TABLE iam_v2.site_checkout_grace_config
   ADD COLUMN eligibility_window_seconds int NOT NULL DEFAULT 86400,   -- 24h default
   ADD COLUMN grace_duration_seconds int,
   ADD COLUMN grace_down_kbps int,
   ADD COLUMN grace_up_kbps int,
-  ADD COLUMN grace_data_quota_mb int,
+  ADD COLUMN grace_data_quota_bytes bigint,                          -- BYTES are the authoritative unit
   ADD COLUMN grace_device_limit int,
-  ADD COLUMN grace_new_device_policy text
-    CHECK (grace_new_device_policy IS NULL OR grace_new_device_policy IN ('REJECT_NEW','ALLOW_UNTIL_LIMIT'));
+  ADD COLUMN grace_device_limit_policy text                          -- reuse canonical vocabulary (mg2)
+    CHECK (grace_device_limit_policy IS NULL
+           OR grace_device_limit_policy IN ('REJECT_NEW_DEVICE','DISCONNECT_OLDEST','ADMIN_APPROVAL'));
 ALTER TABLE iam_v2.site_checkout_grace_config
   ADD CONSTRAINT grace_bounds CHECK (
         eligibility_window_seconds > 0 AND eligibility_window_seconds <= 604800
-    AND (grace_duration_seconds IS NULL OR (grace_duration_seconds > 0 AND grace_duration_seconds <= 604800))
-    AND (grace_down_kbps      IS NULL OR (grace_down_kbps      > 0 AND grace_down_kbps      <= 10000000))
-    AND (grace_up_kbps        IS NULL OR (grace_up_kbps        > 0 AND grace_up_kbps        <= 10000000))
-    AND (grace_data_quota_mb  IS NULL OR (grace_data_quota_mb  > 0 AND grace_data_quota_mb  <= 1048576))
-    AND (grace_device_limit   IS NULL OR (grace_device_limit   > 0 AND grace_device_limit   <= 1000)));
+    AND (grace_duration_seconds  IS NULL OR (grace_duration_seconds  > 0 AND grace_duration_seconds  <= 604800))
+    AND (grace_down_kbps         IS NULL OR (grace_down_kbps         > 0 AND grace_down_kbps         <= 10000000))
+    AND (grace_up_kbps           IS NULL OR (grace_up_kbps           > 0 AND grace_up_kbps           <= 10000000))
+    AND (grace_data_quota_bytes  IS NULL OR (grace_data_quota_bytes  > 0 AND grace_data_quota_bytes  <= 1099511627776))
+    AND (grace_device_limit      IS NULL OR (grace_device_limit      > 0 AND grace_device_limit      <= 1000)));
 
 -- ============================================================================
--- (6) stay_events append-only guard: immutable identity/normalization; one-way terminal status.
+-- (6) stay_events: application-result columns + append-only lineage guard.
 -- ============================================================================
+ALTER TABLE iam_v2.stay_events
+  ADD COLUMN processed_at timestamptz,
+  ADD COLUMN review_code text
+    CHECK (review_code IS NULL OR length(review_code) <= 200);
+
 CREATE OR REPLACE FUNCTION iam_v2.p3_stay_event_appendonly() RETURNS trigger
-  LANGUAGE plpgsql AS $fn$
+  LANGUAGE plpgsql
+  SET search_path = iam_v2, pg_temp
+  AS $fn$
+DECLARE ok_stay int;
 BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'stay_events is append-only (DELETE rejected)';
   END IF;
+  -- immutable identity / normalization columns
   IF   NEW.tenant_id             IS DISTINCT FROM OLD.tenant_id
     OR NEW.site_id               IS DISTINCT FROM OLD.site_id
     OR NEW.pms_interface_id      IS DISTINCT FROM OLD.pms_interface_id
@@ -133,6 +170,7 @@ BEGIN
     OR NEW.pms_timestamp_raw     IS DISTINCT FROM OLD.pms_timestamp_raw
     OR NEW.pms_timestamp_utc     IS DISTINCT FROM OLD.pms_timestamp_utc
     OR NEW.source_timezone       IS DISTINCT FROM OLD.source_timezone
+    OR NEW.received_at           IS DISTINCT FROM OLD.received_at
     OR NEW.sequence_version      IS DISTINCT FROM OLD.sequence_version
     OR NEW.normalization_version IS DISTINCT FROM OLD.normalization_version
     OR NEW.clock_suspect         IS DISTINCT FROM OLD.clock_suspect
@@ -140,7 +178,30 @@ BEGIN
   THEN
     RAISE EXCEPTION 'stay_events identity/normalization columns are immutable (append-only)';
   END IF;
-  -- processing_status: one-way, terminal, only from PENDING
+
+  -- stay_id lineage: only NULL -> a same-interface Stay, and only while the event is being made terminal.
+  IF NEW.stay_id IS DISTINCT FROM OLD.stay_id THEN
+    IF OLD.processing_status <> 'PENDING' THEN
+      RAISE EXCEPTION 'terminal stay_events row cannot be repointed (stay_id immutable after terminal)';
+    END IF;
+    IF OLD.stay_id IS NOT NULL THEN
+      RAISE EXCEPTION 'stay_events.stay_id may only go from NULL to a resolved Stay';
+    END IF;
+    IF NEW.stay_id IS NULL THEN
+      RAISE EXCEPTION 'stay_events.stay_id cannot be cleared';
+    END IF;
+    IF NEW.processing_status = 'PENDING' THEN
+      RAISE EXCEPTION 'stay_events.stay_id may only be set in the same update that makes the event terminal';
+    END IF;
+    SELECT count(*) INTO ok_stay FROM iam_v2.stays s
+      WHERE s.id = NEW.stay_id AND s.tenant_id = NEW.tenant_id
+        AND s.site_id = NEW.site_id AND s.pms_interface_id = NEW.pms_interface_id;
+    IF ok_stay <> 1 THEN
+      RAISE EXCEPTION 'stay_events.stay_id must reference a Stay in the same tenant/site/pms_interface';
+    END IF;
+  END IF;
+
+  -- processing_status: one-way terminal, only from PENDING
   IF OLD.processing_status <> NEW.processing_status THEN
     IF OLD.processing_status <> 'PENDING' THEN
       RAISE EXCEPTION 'stay_events.processing_status is terminal (% cannot change)', OLD.processing_status;
@@ -156,37 +217,41 @@ CREATE TRIGGER p3_stay_event_guard
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_stay_event_appendonly();
 
 -- ============================================================================
--- (2) stays one-way status transition + monotonic version guard.
---     Reinstatement (CHECKED_OUT->IN_HOUSE) requires lifecycle_version to increment
---     exactly once in the SAME update (proof of a trusted reinstatement, not a bare version bump).
+-- (2) stays one-way status guard; lifecycle_version = STRICT episode counter.
+--     lifecycle_version changes ONLY on a CHECKED_OUT->IN_HOUSE reinstatement (+1). Every other
+--     lifecycle_version change (same-status ++, checkout ++, room-move ++, decrease, jump) is rejected.
+--     POST_STAY_ACTIVE has NO executable transition (Phase 5); the enum is retained for forward compat.
 -- ============================================================================
 CREATE OR REPLACE FUNCTION iam_v2.p3_stay_lifecycle_guard() RETURNS trigger
-  LANGUAGE plpgsql AS $fn$
-DECLARE allowed boolean;
+  LANGUAGE plpgsql
+  SET search_path = iam_v2, pg_temp
+  AS $fn$
+DECLARE allowed boolean; is_reinstate boolean;
 BEGIN
   IF NEW.last_applied_event_version < OLD.last_applied_event_version THEN
     RAISE EXCEPTION 'stays.last_applied_event_version cannot decrease (% -> %)',
       OLD.last_applied_event_version, NEW.last_applied_event_version;
   END IF;
-  IF NEW.lifecycle_version < OLD.lifecycle_version THEN
-    RAISE EXCEPTION 'stays.lifecycle_version cannot decrease (% -> %)', OLD.lifecycle_version, NEW.lifecycle_version;
+
+  is_reinstate := (OLD.status = 'CHECKED_OUT' AND NEW.status = 'IN_HOUSE');
+
+  IF NEW.lifecycle_version <> OLD.lifecycle_version THEN
+    IF NOT (NEW.lifecycle_version = OLD.lifecycle_version + 1 AND is_reinstate) THEN
+      RAISE EXCEPTION 'stays.lifecycle_version may increment by exactly 1 ONLY during a CHECKED_OUT->IN_HOUSE reinstatement (% -> %, % -> %)',
+        OLD.lifecycle_version, NEW.lifecycle_version, OLD.status, NEW.status;
+    END IF;
   END IF;
-  IF NEW.lifecycle_version > OLD.lifecycle_version + 1 THEN
-    RAISE EXCEPTION 'stays.lifecycle_version may increase by at most 1 per update (% -> %)',
-      OLD.lifecycle_version, NEW.lifecycle_version;
-  END IF;
+
   IF NEW.status <> OLD.status THEN
     allowed := CASE
-      WHEN OLD.status='RESERVED'         AND NEW.status IN ('IN_HOUSE','CANCELLED','NO_SHOW') THEN true
-      WHEN OLD.status='IN_HOUSE'         AND NEW.status IN ('CHECKED_OUT')                    THEN true
-      WHEN OLD.status='CHECKED_OUT'      AND NEW.status IN ('IN_HOUSE','POST_STAY_ACTIVE')    THEN true
-      WHEN OLD.status='POST_STAY_ACTIVE' AND NEW.status IN ('CHECKED_OUT')                    THEN true
+      WHEN OLD.status='RESERVED'    AND NEW.status IN ('IN_HOUSE','CANCELLED','NO_SHOW') THEN true
+      WHEN OLD.status='IN_HOUSE'    AND NEW.status IN ('CHECKED_OUT')                    THEN true
+      WHEN OLD.status='CHECKED_OUT' AND NEW.status IN ('IN_HOUSE')                       THEN true  -- reinstatement
       ELSE false END;
     IF NOT allowed THEN
-      RAISE EXCEPTION 'illegal stays.status transition % -> %', OLD.status, NEW.status;
+      RAISE EXCEPTION 'illegal stays.status transition % -> % (POST_STAY_ACTIVE transitions are Phase 5)', OLD.status, NEW.status;
     END IF;
-    IF OLD.status='CHECKED_OUT' AND NEW.status='IN_HOUSE'
-       AND NEW.lifecycle_version <> OLD.lifecycle_version + 1 THEN
+    IF is_reinstate AND NEW.lifecycle_version <> OLD.lifecycle_version + 1 THEN
       RAISE EXCEPTION 'reinstatement (CHECKED_OUT->IN_HOUSE) must increment lifecycle_version exactly once';
     END IF;
   END IF;
@@ -195,5 +260,14 @@ END $fn$;
 CREATE TRIGGER p3_stay_lifecycle_guard
   BEFORE UPDATE ON iam_v2.stays
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_stay_lifecycle_guard();
+
+-- Privilege hardening: the trigger functions are SECURITY INVOKER (run as the caller, not the owner);
+-- revoke the implicit PUBLIC EXECUTE so they cannot be invoked directly outside their trigger context.
+-- Runtime service roles receive NO privileges on the new objects (dark; Gate-P least privilege preserved).
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_stay_event_appendonly() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_stay_lifecycle_guard() FROM PUBLIC;
+
+-- migration ledger (prod parity with 0009; the authoritative runner scripts/edge-migrate.sh gates on this)
+INSERT INTO public.schema_migrations (version) VALUES ('0010_phase3_stay_resolution') ON CONFLICT DO NOTHING;
 
 COMMIT;

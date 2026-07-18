@@ -13,8 +13,10 @@
 
 **Catalog fingerprints** (md5 over iam_v2 columns+triggers+indexes+constraints):
 - pre-0010 = `ead4a4de465f9a8b23a604ac52ff8622`
-- post-0010 = `651cf7cba32c0cd9a482a966a50c075a`
+- post-0010 (final hardened design) = `4a7e4f476444f2ed67d5f7a18088b8ba`
 - after rollback == pre-0010 (verified); after reapply == post-0010 (verified).
+
+**Final hardened design (Increment-2 corrections):** episode = `stays.lifecycle_version` (strict counter — changes ONLY on a CHECKED_OUT→IN_HOUSE reinstatement); freshness = four independent axes with **no stored `derived_freshness`** (removed; the resolver derives availability from the axes + revision thresholds); `stay_events` gains `processed_at`+`review_code` and a full lineage guard (`stay_id` may go NULL→same-interface Stay only in the tx that makes the event terminal; terminal rows never repointed/cleared); occupancy evidence is composite-FK-pinned to the SAME interface's (possibly historical) revision, all-or-none, `normalization_version>0`; grace quota is **bytes** (`grace_data_quota_bytes bigint`) and `grace_device_limit_policy` reuses the canonical `service_plan_revisions.device_limit_policy` vocabulary `('REJECT_NEW_DEVICE','DISCONNECT_OLDEST','ADMIN_APPROVAL')`; the typed grace columns are the authoritative policy (the pre-existing `config jsonb` is NOT a second source of truth for duration/rates/quota/device-limit/policy/eligibility). Post-Stay (`POST_STAY_ACTIVE`) has NO executable transition (Phase 5). The two triggers are **structural state-machine guards ONLY** — a raw `status='IN_HOUSE' + lifecycle_version+1` update is NOT proof of a trusted source; the authorization boundary (trusted normalized PMS event / privileged Hotel-Admin Reinstatement with RBAC+step-up+reason+audit+version-check) is Increment 4. Trigger functions are SECURITY INVOKER with `EXECUTE` revoked from PUBLIC; no runtime grants (dark).
 
 ## Gap matrix (live catalog evidence)
 
@@ -44,6 +46,18 @@
 - **No unvalidated JSON blob** for runtime state — all axes are typed columns with CHECK-constrained enums.
 - **Ownership / privileges:** 0010 objects inherit `iam_v2_owner` (as with 0009); no `SECURITY DEFINER`; zero runtime grants while dark.
 
-## Verification (`iam_v2_scratch/phase3_0010_lifecycle.sh`) — 29/29 PASS
+## Verification (`iam_v2_scratch/phase3_0010_lifecycle.sh`) — 55/55 PASS
 
-apply 0010 · raw re-apply errors "already exists" (ledger ⇒ no-op) · catalog stable · all expected objects (runtime table, `p3_stay_event_guard` + `p3_stay_lifecycle_guard`, 6 stays columns, 7 grace columns, `resolution_request_id`, **no** `stays.checkout_episode`) · FK rejects unknown interface · RESERVED→IN_HOUSE→CHECKED_OUT allowed, backward rejected, event-version monotonic, reinstatement requires `lifecycle_version++` **and** cleared `effective_checkout_at`, lifecycle_version cannot jump >1 · stay_events identity immutable, DELETE rejected, PENDING→APPLIED allowed, terminal status immutable · grace bounds enforced · rollback catalog == pre-0010 · reapply catalog == post-0010. **No Production database was accessed;** all evidence is from the disposable PG16 container, destroyed after the run.
+Self-contained gate (fresh disposable PG16 → accepted schema → gate → teardown):
+- **Runner idempotency (`scripts/edge-migrate.sh --only 0010`, twice):** run#1 applies (ledger records 0010, `applied=1`); run#2 skips (`applied=0`); ledger has exactly **one** 0010 record; catalog identical between invocations.
+- **Raw re-apply:** errors `already exists`; transaction rolls back; catalog unchanged.
+- **Removals/units:** no stored `derived_freshness`, no derived-freshness index; `grace_data_quota_bytes` present, `grace_data_quota_mb` absent; no `stays.checkout_episode`; `stay_events.processed_at`+`review_code` present.
+- **Privilege (§3):** PUBLIC has NO EXECUTE on either `p3_*` function; no non-owner grants on `pms_interface_runtime`; no `SECURITY DEFINER` on any `p3_*` function.
+- **Runtime constraints (§8):** `runtime_generation>=0`; CONNECTED requires pinned revision; heartbeat ≤ updated_at; resync coherence; bounded error-code/cursor lengths; the four axes are independently settable (no contradictory stored-HEALTHY possible).
+- **Occupancy (§6):** partial tuple rejected (all-or-none); `normalization_version>0`; cross-interface revision rejected (composite FK); full same-interface tuple allowed.
+- **Lifecycle/status (§2/§4):** RESERVED→IN_HOUSE→CHECKED_OUT allowed; IN_HOUSE→IN_HOUSE + `lifecycle++` rejected; Room Move + `lifecycle++` rejected; Room Move (no version change) allowed; CHECKED_OUT→CHECKED_OUT + `lifecycle++` rejected; CHECKED_OUT→POST_STAY_ACTIVE and POST_STAY_ACTIVE→CHECKED_OUT rejected; reinstatement without `lifecycle++` rejected; reinstatement CHECKED_OUT→IN_HOUSE + `lifecycle++` allowed **(structural-only; trust is Increment 4)**.
+- **Event lineage (§5):** identity immutable; DELETE rejected; PENDING `stay_id` set-without-terminal rejected; PENDING→APPLIED with a cross-interface Stay rejected; PENDING→APPLIED with a same-interface Stay + `processed_at` allowed; terminal `stay_id` substitution/`NULL` rejected; terminal status immutable.
+- **Grace (§9):** non-canonical device policy rejected; `REJECT_NEW_DEVICE` + byte quota accepted; eligibility window >0.
+- **Lifecycle:** rollback catalog == pre-0010; ledger 0010 removed on down; reapply catalog == first post-0010.
+
+**No Production database or appliance was accessed;** all evidence is from the disposable PG16 container, destroyed after the run.
