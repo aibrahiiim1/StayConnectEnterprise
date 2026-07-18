@@ -1,0 +1,4 @@
+commit 740db8941cc42fec0d44f8e130cd6ca0bd74fd3f
+Date:   Sat Jul 18 03:12:02 2026 +0300
+
+    Phase 2 (governance start): record D12 authorization + T0012 transition; Phase 2 IN_PROGRESS
