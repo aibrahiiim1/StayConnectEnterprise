@@ -75,6 +75,19 @@ git log --oneline <base>..HEAD
 
 The final report may add explanation, but it must not omit or contradict the generated Git manifest. **If the report's file list differs from Git, the delivery fails.**
 
+### 4.1 Manifest self-reference protocol (`inventory_head` / `delivery_head`)
+
+The complete-manifest rule requires that **every path changed between the Phase base and the final PR delivery HEAD is represented exactly once**. Because a committed manifest cannot contain the commit SHA that commits the manifest itself, use this deterministic, non-self-referential protocol:
+
+- **`inventory_head`** — the committed HEAD immediately before the final delivery-only commit. It is the manifest's generation/provenance HEAD and is recorded in `governance/project-state.json` as `acceptance_candidate_head` (and `inventory_head`).
+- **`delivery_head`** — the final PR HEAD (the delivery-only commit).
+- The committed manifest must include the **complete `base..delivery_head`** path/status inventory. The manifest **records `inventory_head`** as its generation/provenance HEAD (its `HEAD commit:` line).
+- The final delivery-only commit **may modify only paths already represented in the manifest** and must **introduce zero unlisted paths** (it (re)builds the manifest, export packs, checksums and the pointer/provenance only). Equivalently, every path that will exist in the final PR diff already exists in, or is enumerated by, the manifest generated for `delivery_head`.
+- Governance CI **compares the manifest's complete path/status set against the actual** `git diff --name-status <base>..<delivery_head>`. **Any missing, extra, or status-mismatched path fails governance.** Export packs, checksums, manifests and provenance files are **not exempt** from the inventory.
+- The Final Report and the PR body must record **both** HEADs (`inventory_head` and `delivery_head`) and the **actual final Git changed-file count**.
+
+A substantive-only manifest (for example, one that lists the substantive source commit but omits the export packs/manifest/pointer paths that the final PR diff actually contains) **does not** satisfy this rule: it is not permissible for the committed manifest to represent fewer paths than `git diff --name-status base..delivery_head`.
+
 ## 5. Mandatory final report structure
 
 Every Phase or milestone report must contain, in order: (1) simple Egyptian-Arabic explanation; (2) current Phase and authorized scope; (3) what was implemented; (4) practical effect; (5) risks and limitations; (6) acceptance tests with PASS/FAIL/DEFERRED/NOT-AUTHORIZED; (7) production and guest impact; (8) rollback status; (9) security and isolation results; (10) the complete generated changed-file manifest; (11) all commits created; (12) branch and PR information; (13) remote reachability of HEAD; (14) full working-tree status; (15) documentation and governance synchronization; (16) Project/Evidence Pack paths and checksums where applicable; (17) `PROJECT_STATE_GOVERNANCE` result; (18) `ZERO_STALE_LEFTOVERS` result; (19) remaining blockers; (20) exactly one next proposed action.
