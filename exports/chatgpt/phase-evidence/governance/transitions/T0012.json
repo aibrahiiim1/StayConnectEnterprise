@@ -1,0 +1,19 @@
+{
+  "transition_id": "T0012",
+  "seq": 12,
+  "timestamp": "2026-07-18T00:06:09Z",
+  "previous_state": { "phase": "1B", "activity": "PHASE_1B_ACCEPTED_AND_CLOSED", "phase_status": "ACCEPTED_AND_CLOSED" },
+  "new_state": { "phase": "2", "activity": "PHASE_2_IMPLEMENTATION_IN_PROGRESS", "phase_status": "IN_PROGRESS" },
+  "phase_affected": "2",
+  "po_authorization_ref": "Product-Owner explicit authorization of complete end-to-end Phase 2 execution as ONE Phase (decision D12, 2026-07-18). Phase 1B remains ACCEPTED_AND_CLOSED (T0011/D11); Phase 3 remains NOT_STARTED and unauthorized.",
+  "scope_allowed": "Execute Phase 2 (commercial packages) end-to-end as one Phase: authoritative plan, schema/additive migrations, domain (typed eligibility, ordered grant tiers, server-resolved 5-min offer quotes, atomic quote+auth-context consumption, FREE purchases only, entitlement/session-after-grant boundary), guest Portal discovery/selection/quote/free-purchase, Hotel Admin revisioned CRUD + grace config UI, C-series concurrency+security tests, disposable-database acceptance, live-dark deployment + one reboot + post-reboot verification, evidence and documentation, and one final acceptance report. Delivered DARK: all Phase-2 flags default OFF; legacy public-schema pipeline unchanged.",
+  "scope_prohibited": "No paid access; no PMS settlement/posting/folio; no Stripe/payment; no IAM-v2 cutover; no dual read/write; no data migration; no dark-feature live enablement during the initial Phase-2 deployment; no Phase 3; no legacy IAM removal; no network/HA changes. Free package acquisition only (price 0, settlement NOT_REQUIRED).",
+  "evidence_files": [
+    "docs/architecture/StayConnect-IAM-Phase2-Plan.md",
+    "data-plane/migrations/0009_phase2_commerce.up.sql",
+    "governance/decision-register.json"
+  ],
+  "source_commit": "25d6521",
+  "acceptance_verdict": "IN_PROGRESS -- Phase 2 implementation authorized and started (WS-A/B plan+migration + WS-C1 domain committed; WS-C2 engine/tests next). Not accepted/closed.",
+  "next_action": "Complete Phase 2 execution end-to-end, then return one final report for a single Product-Owner Phase-2 acceptance decision."
+}

@@ -1,0 +1,21 @@
+{
+  "transition_id": "T0014",
+  "seq": 14,
+  "timestamp": "2026-07-18T16:45:00Z",
+  "previous_state": { "phase": "2", "activity": "PHASE_2_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE", "phase_status": "IN_PROGRESS" },
+  "new_state": { "phase": "2", "activity": "PHASE_2_ACCEPTED_AND_CLOSED", "phase_status": "ACCEPTED_AND_CLOSED" },
+  "phase_affected": "2",
+  "po_authorization_ref": "Product-Owner acceptance decision D13 (2026-07-18): Phase 2 (commercial packages) ACCEPTED AND CLOSED at verified DARK maturity. This transition records the explicit Product-Owner acceptance and closure of Phase 2; it is NOT a self-acceptance. Preserves T0012 (D12 authorization/start) and T0013 (live-dark deployment/reboot evidence) as prior immutable transitions.",
+  "scope_allowed": "Record that Phase 2 is ACCEPTED_AND_CLOSED at DARK maturity per D13 against the accepted PR #4 baseline (base 4e3c3ee; substantive HEAD 45323ad; final pre-acceptance PR HEAD a8c3b3c; Governance CI 29649900358 SUCCESS). All Phase-2 feature flags remain OFF; migration 0009 applied; zero runtime iam_v2 privileges; iam_v2 49 tables/0 rows; legacy public-schema authentication the sole production authority. Merge PR #4 to master with provenance preserved. No deployment/restart/reboot/migration/privilege/credential/flag change is part of this acceptance-and-merge operation.",
+  "scope_prohibited": "No Phase-2 flag enablement (STAYCONNECT_PHASE2_* / NEXT_PUBLIC_PHASE2_ADMIN); no production iam_v2 read/write; no IAM-v2 cutover; no data migration or dual read/write; no guest paid access; no Stripe; no PMS settlement/posting; no financial outbox/retry/reversal; no Phase 3; no PMS traffic; no networking/HA/Central Control Plane changes; no legacy IAM removal.",
+  "evidence_files": [
+    "docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md",
+    "docs/reports/StayConnect-IAM-Phase2-Final-Report.md",
+    "docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md",
+    "docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md",
+    "docs/manifests/Phase2-change-manifest.md"
+  ],
+  "source_commit": "a8c3b3c",
+  "acceptance_verdict": "ACCEPTED_AND_CLOSED -- Phase 2 (commercial packages) formally accepted by the Product Owner (decision D13) at verified DARK maturity and closed. All Phase-2 flags OFF; no cutover; no paid access; no PMS settlement; zero runtime iam_v2 privileges. PR #4 authorized to merge to master.",
+  "next_action": "Merge PR #4 to master (provenance preserved) and perform post-merge governance verification. Phase 3 remains NOT_STARTED and unauthorized; a separate Product-Owner decision is required to authorize any later phase or any IAM-v2 authentication cutover."
+}

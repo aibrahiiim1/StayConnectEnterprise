@@ -1,0 +1,4 @@
+commit 17899b8a251185c9c41b325428325af0b114ecce
+Date:   Sat Jul 18 19:54:57 2026 +0300
+
+    @ Phase 2 acceptance + closure (inventory_head): D13, T0014, ACCEPTED_AND_CLOSED, manifest self-reference protocol

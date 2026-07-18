@@ -194,6 +194,12 @@ type server struct {
 	otpRing      *otpkey.Ring
 	iamv2Auth    *iamv2.Authenticator
 
+	// Phase 2 dark commerce (commercial packages). commerce is ALWAYS constructed but holds a nil
+	// repository while the master flag is OFF, so it issues zero Phase-2 SQL; commerceCfg gates whether
+	// the guest portal commerce routes are mounted at all (they are absent unless PortalOn()).
+	commerce    *iamv2.CommerceEngine
+	commerceCfg iamv2.CommerceConfig
+
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
 	// pmsMu. pmsBuilt holds the current generation's providers so we can
@@ -797,6 +803,15 @@ func main() {
 	r.Get("/v1/setup/status", s.setupStatus)
 	r.Post("/v1/setup/enroll", s.setupEnroll)
 	r.Post("/v1/setup/offline-import", s.setupOfflineImport)
+
+	// Phase 2 (DARK): guest-portal commerce routes are mounted ONLY when the portal surface is ON. While
+	// dark they are ABSENT (404) and the commerce engine holds a nil repository, so zero Phase-2 SQL runs.
+	if s.commerceCfg.PortalOn() {
+		r.Get("/v1/commerce/packages", s.commercePackages)
+		r.Post("/v1/commerce/quote", s.commerceQuote)
+		r.Post("/v1/commerce/confirm", s.commerceConfirm)
+		slog.Info("phase2 portal commerce routes mounted")
+	}
 
 	_ = os.MkdirAll("/run/stayconnect", 0o755)
 	_ = os.Remove(c.SocketPath)

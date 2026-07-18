@@ -25,6 +25,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
@@ -61,6 +62,11 @@ type handler struct {
 	tmplLand *template.Template
 	tmplSucc *template.Template
 	arpCache arpLookup
+
+	// Phase 2 DARK commerce bridge. commerceCfg gates whether the guest commerce routes are mounted;
+	// commerceSessions holds trusted server-derived pins (empty while IAM-v2 auth is dark).
+	commerceCfg      iamv2.CommerceConfig
+	commerceSessions *commerceSessionStore
 }
 
 func newHandler(c cfg) (*handler, error) {
@@ -78,12 +84,19 @@ func newHandler(c cfg) (*handler, error) {
 			return d.DialContext(ctx, "unix", c.ScdSocket)
 		},
 	}
+	// Phase 2 DARK commerce config (env-only, all flags default OFF; fail closed on a malformed value).
+	commCfg, err := iamv2.LoadCommerceConfigFromEnv(os.Getenv)
+	if err != nil {
+		return nil, err
+	}
 	return &handler{
-		cfg:      c,
-		scd:      &http.Client{Transport: tr, Timeout: 5 * time.Second},
-		tmplLand: tland,
-		tmplSucc: tsucc,
-		arpCache: defaultArp,
+		cfg:              c,
+		scd:              &http.Client{Transport: tr, Timeout: 5 * time.Second},
+		tmplLand:         tland,
+		tmplSucc:         tsucc,
+		arpCache:         defaultArp,
+		commerceCfg:      commCfg,
+		commerceSessions: newCommerceSessionStore(),
 	}, nil
 }
 
@@ -238,6 +251,8 @@ func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 		"SessionID":       r.URL.Query().Get("s"),
 		"DurationSeconds": int(dur.Seconds()),
 		"HumanRemaining":  humanDuration(dur),
+		// Phase 2 DARK: the guest commerce panel renders only when the portal surface is ON.
+		"CommerceEnabled": h.commerceCfg.PortalOn(),
 	})
 }
 
@@ -305,6 +320,15 @@ func (h *handler) routes() http.Handler {
 	r.Post("/api/oauth/stub/authorize-confirm", h.stubAuthorizeConfirm)
 	r.Post("/auth/pms/verify", h.authPMS)
 	r.Get("/api/auth-methods", h.authMethods)
+
+	// Phase 2 (DARK): guest commerce bridge routes are mounted ONLY when the portal surface is ON. While
+	// dark they are absent (404) and no scd commerce call is ever made.
+	if h.commerceCfg.PortalOn() {
+		r.Get("/api/commerce/packages", h.commercePackages)
+		r.Post("/api/commerce/quote", h.commerceQuote)
+		r.Post("/api/commerce/confirm", h.commerceConfirm)
+	}
+
 	r.Get("/success", h.success)
 	r.Post("/logout", h.logout)
 	r.Get("/status", h.status)

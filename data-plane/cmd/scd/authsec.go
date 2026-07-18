@@ -48,6 +48,25 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 	s.iamv2Auth = auth
 	log.Info("iamv2 dark authenticator constructed", "flags", iamCfg.SafeFlagSummary())
 
+	// --- dark Phase-2 commerce (always constructed, inert unless env flags are set) ---
+	commCfg, err := iamv2.LoadCommerceConfigFromEnv(os.Getenv)
+	if err != nil {
+		return fmt.Errorf("phase2 commerce config: %w", err)
+	}
+	var commRepo iamv2.CommerceRepository // nil: NO repository while the master flag is OFF
+	if commCfg.MasterEnabled {
+		// Not reachable in the dark deployment (flags OFF); wiring a production commerce repository is a
+		// Phase-2 cutover step, deliberately not performed here.
+		return fmt.Errorf("phase2 commerce master flag is enabled but no production repository is wired (cutover only)")
+	}
+	comm, err := iamv2.NewCommerceEngine(commCfg, commRepo, iamv2.NopObserver{})
+	if err != nil {
+		return fmt.Errorf("phase2 commerce new: %w", err)
+	}
+	s.commerce = comm
+	s.commerceCfg = commCfg
+	log.Info("phase2 dark commerce engine constructed", "flags", commCfg.SafeFlagSummary())
+
 	// --- durable throttle (D4) ---
 	if c.DurableThrottle {
 		keyPath := filepath.Join(c.SecretsDir, "throttle.key")

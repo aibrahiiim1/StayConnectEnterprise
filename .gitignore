@@ -26,3 +26,4 @@ coverage/
 
 # Built Next standalone deploy tarballs
 *-deploy.tgz
+__pycache__/

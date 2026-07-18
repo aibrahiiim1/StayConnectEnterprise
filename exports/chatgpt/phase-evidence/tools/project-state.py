@@ -120,7 +120,7 @@ def cmd_check_generated(st):
     return bad
 
 # ---------- validation ----------
-def cmd_validate(deep=True):
+def cmd_validate(deep=True, manifest_equality=True):
     fails = []
     def fail(m): fails.append(m)
     # JSON parse + required fields
@@ -232,7 +232,7 @@ def cmd_validate(deep=True):
 
     # decision register agreement: D1 not reopenable; D9 active; required decisions present
     dmap = {d["id"]: d for d in dec.get("decisions", [])}
-    for need in ["D1","D2","D3","D4","D5","D6","D7","D8","D9","PH-1B-SCOPE","PH-CUTOVER","SEC-NO-IAMV2-PRIV",
+    for need in ["D1","D2","D3","D4","D5","D6","D7","D8","D9","D10","D11","D12","D13","PH-1B-SCOPE","PH-CUTOVER","SEC-NO-IAMV2-PRIV",
                  "GH-SOURCE-OF-TRUTH","GH-BRANCH-PR","GH-COMPLETE-MANIFEST","GH-FINAL-REPORT","GH-MANDATORY-CI",
                  "GH-AGENT-ONLY-OPERATIONS","GH-LF-CONSISTENCY"]:
         if need not in dmap: fail(f"decision-register missing {need}")
@@ -295,20 +295,215 @@ def cmd_validate(deep=True):
         if re.search(r"GIT_OPERATIONS_OWNER:\s*(PRODUCT_OWNER|PO\b|MANUAL|HUMAN)", rd):
             fail("GitHub delivery rule doc must not assign Git operations to the Product Owner (GIT_OPERATIONS_OWNER must be AGENT)")
 
-    # current phase plan matches canonical + exists; privilege matrix agreement
+    # Phase-scope self-consistency (deterministic): once the authorized current phase advances, the
+    # prohibition set must NOT still forbid implementing the current phase itself (a stale prior-phase
+    # prohibition), and it MUST still forbid the next phase. Fails in BOTH directions.
+    cp = str(st.get("current_phase", ""))
+    prohibited = st.get("prohibited_actions", []) or []
+    if cp == "2":
+        for pa in prohibited:
+            s = str(pa)
+            forbids_current = (
+                re.search(r"beyond\s+(the\s+authorized\s+)?phase\s*1b", s, re.I)  # forbids everything after 1B (incl. Phase 2)
+                or re.search(r"implement\w*\s+phase\s*2\b", s, re.I)              # explicitly forbids implementing Phase 2
+                or re.search(r"\(\s*phase\s*2\b", s, re.I)                        # names Phase 2 inside the forbidden set
+            )
+            if forbids_current:
+                fail("Phase-2 scope contradiction: current_phase=2 but a prohibited_action still forbids implementing Phase 2")
+        if not any(re.search(r"beyond\s+the\s+authorized\s+phase\s*2|phase\s*3\b", str(pa), re.I) for pa in prohibited):
+            fail("Phase-2 scope guard: prohibited_actions must still forbid Phase 3+ (beyond the authorized Phase 2)")
+
+    # Phase-2 transition-pointer coherence (deterministic): once the ledger has advanced to the live-dark
+    # deployment transition (T0013) and the activity reflects it, phase2_execution.transition_id must point
+    # at the CURRENT (deployment) transition — not still at the T0012 authorization/start transition. The
+    # authorization transition is preserved separately in phase2_execution.authorization_transition_id.
+    p2exec = st.get("phase2_execution", {}) or {}
+    if str(st.get("latest_transition_id", "")) == "T0013" and cp == "2" \
+       and "LIVE_DARK_DEPLOYED" in str(st.get("current_activity", "")):
+        if p2exec.get("transition_id") != "T0013":
+            fail("stale-state contradiction: latest transition is T0013 and activity is live-dark deployed, "
+                 "but phase2_execution.transition_id does not point at T0013")
+        if p2exec.get("authorization_transition_id") != "T0012":
+            fail("phase2_execution.authorization_transition_id must record the D12 authorization transition T0012")
+    # Once the ledger has advanced to the closure transition (T0014) and the activity reflects acceptance,
+    # phase2_execution.transition_id must point at the CLOSURE transition, the D12 authorization transition
+    # must remain recorded separately, and transition_accepted must be true.
+    if str(st.get("latest_transition_id", "")) == "T0014" and cp == "2" \
+       and "ACCEPTED_AND_CLOSED" in str(st.get("current_activity", "")):
+        if p2exec.get("transition_id") != "T0014":
+            fail("stale-state contradiction: latest transition is T0014 (Phase-2 closure) but phase2_execution.transition_id does not point at T0014")
+        if p2exec.get("authorization_transition_id") != "T0012":
+            fail("phase2_execution.authorization_transition_id must record the D12 authorization transition T0012")
+        if p2exec.get("transition_accepted") is not True:
+            fail("Phase 2 is closed (T0014) but phase2_execution.transition_accepted is not true")
+
+    # Manifest-HEAD coherence: when an acceptance-candidate HEAD is recorded and a change-manifest exists,
+    # the manifest's recorded HEAD commit must equal that acceptance-candidate HEAD (they cannot drift
+    # apart between the final report / PR and the generated manifest).
+    ach = st.get("acceptance_candidate_head")
+    man_path = os.path.join(ROOT, "docs/manifests/Phase2-change-manifest.md")
+    if manifest_equality and ach and os.path.isfile(man_path):
+        mtext = open(man_path, encoding="utf-8").read()
+        m = re.search(r"HEAD commit:\*\*\s*`([0-9a-f]{7,40})`", mtext)
+        head_in_manifest = m.group(1) if m else ""
+        if not head_in_manifest:
+            fail("change-manifest has no recorded HEAD commit")
+        elif not (head_in_manifest.startswith(ach) or ach.startswith(head_in_manifest)):
+            fail(f"manifest HEAD {head_in_manifest} != acceptance_candidate_head {ach}")
+
+    # Manifest <-> Git path/status equality (GH-COMPLETE-MANIFEST + self-reference protocol 4.1):
+    # the committed manifest's complete {path: git-status-letter} set must equal
+    # `git diff --name-status base..HEAD`. The manifest is generated at inventory_head but, because
+    # the delivery-only commit introduces zero unlisted paths, its path/status set equals
+    # base..delivery_head (the current HEAD at final validation). Skipped inside build-packs
+    # (manifest_equality=False), which validates a pre-regeneration source tree.
+    if manifest_equality and os.path.isfile(man_path):
+        mtext = open(man_path, encoding="utf-8").read()
+        bmm = re.search(r"Base commit:\*\*\s*`([0-9a-f]{7,40})`", mtext)
+        base_sha = bmm.group(1) if bmm else ""
+        # only enforce when the base commit is resolvable in this checkout (CI does a full checkout;
+        # a shallow/partial clone that cannot resolve base is skipped rather than falsely failed).
+        if base_sha and git("cat-file", "-t", base_sha) == "commit":
+            man_map = {}
+            for row in re.finditer(r"^\|\s*`([^`]+)`\s*\|[^|]*\|\s*`([^`]+)`\s*\|", mtext, re.M):
+                disp = row.group(1).strip(); letter = row.group(2).strip()[:1]
+                path = disp.split(" -> ")[-1].strip() if " -> " in disp else disp
+                man_map[path] = letter
+            git_map = {}
+            for line in git("diff", "--name-status", "--find-renames", "--find-copies", f"{base_sha}..HEAD").splitlines():
+                if not line.strip(): continue
+                parts = line.split("\t")
+                letter = parts[0][:1]
+                path = parts[2] if (letter in ("R", "C") and len(parts) >= 3) else parts[-1]
+                git_map[path] = letter
+            missing = sorted(set(git_map) - set(man_map))
+            extra = sorted(set(man_map) - set(git_map))
+            mismatch = sorted(p for p in (set(man_map) & set(git_map)) if man_map[p] != git_map[p])
+            if missing: fail(f"manifest omits {len(missing)} path(s) present in git base..HEAD (e.g. {missing[:3]}) — complete-manifest self-reference protocol (docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md §4.1)")
+            if extra:   fail(f"manifest lists {len(extra)} path(s) not in git base..HEAD (e.g. {extra[:3]})")
+            if mismatch:fail(f"manifest status differs from git for {len(mismatch)} path(s) (e.g. {mismatch[:3]})")
+
+    # current phase plan + privilege matrix exist; each asserts the ZERO-production-iam_v2 posture.
     plan = st.get("current_phase_plan")
     if not plan or not os.path.isfile(os.path.join(ROOT, plan)): fail(f"current_phase_plan missing/not found: {plan}")
     mtx = st.get("privilege_matrix")
     if not mtx or not os.path.isfile(os.path.join(ROOT, mtx)): fail(f"privilege_matrix missing/not found: {mtx}")
     else:
         mt = open(os.path.join(ROOT, mtx), encoding="utf-8").read()
-        # machine assertion: production runtime roles hold ZERO iam_v2 DML/EXECUTE
+        # machine assertion: production runtime roles hold ZERO iam_v2 DML/EXECUTE (current-phase matrix)
         if "PRODUCTION_IAM_V2_DML: NONE" not in mt: fail("privilege matrix missing machine assertion PRODUCTION_IAM_V2_DML: NONE")
         if re.search(r"PRODUCTION_IAM_V2_DML:\s*(GRANTED|SOME|ANY)", mt): fail("privilege matrix asserts a production iam_v2 grant (must be NONE)")
-        pt = open(os.path.join(ROOT, plan), encoding="utf-8").read() if plan else ""
+    # current-phase plan self-consistency: the Phase-2 plan must carry its DARK runtime sentinel so the
+    # current pointer can never go stale relative to the phase it names.
+    if cp == "2" and plan and os.path.isfile(os.path.join(ROOT, plan)):
+        p2t = open(os.path.join(ROOT, plan), encoding="utf-8").read()
+        if "PHASE_2_PRODUCTION_RUNTIME: DARK" not in p2t:
+            fail("Phase 2 plan missing sentinel 'PHASE_2_PRODUCTION_RUNTIME: DARK'")
+
+    # ---- Phase-2 Zero-Stale reconciliation guards (narrow, deterministic) ----
+    def _read(rel):
+        p = os.path.join(ROOT, rel)
+        return open(p, encoding="utf-8").read() if os.path.isfile(p) else None
+    rep = _read("docs/reports/StayConnect-IAM-Phase2-Final-Report.md")
+    gate = _read("docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md")
+    live = _read("docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md")
+    man = _read("docs/manifests/Phase2-change-manifest.md")
+    # 1. report cannot claim "no UI test harness" once the software gate records UI tests
+    if rep and gate and re.search(r"Vitest|Playwright|\b36\b\s*(component|Vitest|tests)", gate):
+        if re.search(r"no\s+JS\s+component/?E2E\s+test\s+harness\s+exists|no\s+UI\s+test\s+harness", rep, re.I):
+            fail("Phase-2 report claims no UI test harness while the software gate records UI tests")
+    # 2. report changed-file count must match the manifest and must not present 67 as current
+    if rep and man:
+        mm = re.search(r"Changed files:\*\*\s*(\d+)", man)
+        if mm:
+            cnt = mm.group(1)
+            if cnt not in rep:
+                fail(f"Phase-2 report does not state the manifest changed-file count ({cnt})")
+        # the legitimate superseded mention uses "67 files"; presenting "67 changed files" is the stale claim.
+        if re.search(r"\b67\b\s+changed\s+files?", rep, re.I):
+            fail("Phase-2 report presents 67 changed files as current (must be the acceptance-candidate manifest count)")
+    # 3. live-evidence current artifact table must show the current hotel-admin bundle, not the superseded one
+    if live:
+        cur_ui = "678c793ea46f23241eba05bde66929b19a5473fc8d3752d2a5eb083f4ff0dd95"
+        old_ui = "e25126737341d8f248ae3a4589ba3a72778705a00f25b8caf6312c64a723999d"
+        if cur_ui not in live:
+            fail("Phase-2 live evidence missing the current hotel-admin bundle hash 678c793e")
+        if old_ui in live:
+            idx = live.index(old_ui)
+            preceding = live[:idx]
+            if "HISTORICAL" not in preceding and not re.search(r"supersed", live[max(0, idx-200):idx+200], re.I):
+                fail("Phase-2 live evidence presents the superseded hotel-admin bundle e25126737341 as current (needs a HISTORICAL/superseded marker)")
+    # 4. pending PO acceptance must not coexist with an allowed_action to keep implementing Phase 2
+    if "PENDING_PO_ACCEPTANCE" in str(st.get("current_activity", "")):
+        for a in st.get("allowed_actions", []) or []:
+            if re.search(r"(execute|implement|continue)[^.]{0,60}phase\s*2", str(a), re.I) and re.search(r"end-to-end|implement", str(a), re.I):
+                fail("Phase 2 is pending PO acceptance but an allowed_action still says to continue implementing Phase 2")
+    # 4b. Phase-2 acceptance/closure coherence (mirrors the Phase-1B acceptance guards). Once
+    #     phase2_execution.transition_accepted=true, Phase 2 must be ACCEPTED_AND_CLOSED, the activity must
+    #     reflect it, the recorded acceptance decision must be a registered decision, and no current field
+    #     may still present acceptance as pending/candidate. Until then Phase 2 stays IN_PROGRESS.
+    if cp == "2":
+        p2 = st["phases"].get("2", {}).get("status")
+        p2acc = (st.get("phase2_execution", {}) or {}).get("transition_accepted") is True
+        if p2acc:
+            if p2 != "ACCEPTED_AND_CLOSED":
+                fail(f"Phase 2 transition_accepted=true but phases.2 status {p2} is not ACCEPTED_AND_CLOSED")
+            if str(st.get("current_activity", "")) != "PHASE_2_ACCEPTED_AND_CLOSED":
+                fail("Phase 2 accepted but current_activity is not PHASE_2_ACCEPTED_AND_CLOSED")
+            if "PENDING_PO_ACCEPTANCE" in str(st.get("current_activity", "")):
+                fail("Phase 2 accepted but current_activity still says PENDING_PO_ACCEPTANCE")
+            if st.get("latest_accepted_po_decision") not in dmap:
+                fail(f"latest_accepted_po_decision {st.get('latest_accepted_po_decision')!r} is not a registered decision")
+            for e in st.get("verified_evidence", []) or []:
+                if re.search(r"pending.*(po|product-owner).*(decision|acceptance)|acceptance\s+candidate|candidate\s*--\s*pending", str(e.get("kind", "")), re.I):
+                    fail("Phase 2 is ACCEPTED_AND_CLOSED but a verified-evidence entry still says pending PO acceptance / candidate")
+            for a in st.get("allowed_actions", []) or []:
+                if re.search(r"(execute|implement)[^.]{0,60}phase\s*2\b", str(a), re.I) and re.search(r"end-to-end|implement|dark", str(a), re.I):
+                    fail("Phase 2 is ACCEPTED_AND_CLOSED but an allowed_action still says to execute/implement Phase 2")
+        else:
+            if p2 not in ("IN_PROGRESS",):
+                fail(f"Phase 2 transition_accepted!=true but phases.2 status {p2} is not IN_PROGRESS (PO acceptance not yet recorded)")
+    # 5. the Project Pack SOURCE list must include the current Phase-2 plan/acceptance/evidence (checking the
+    #    build source list, not the extracted dir, so this never deadlocks the pack rebuild).
+    for req in ["StayConnect-IAM-Phase2-Plan.md", "StayConnect-IAM-Phase2-Final-Report.md",
+                "StayConnect-IAM-Phase2-Live-Dark-Acceptance.md", "StayConnect-IAM-Phase2-Software-Gate.md",
+                "StayConnect-IAM-Phase2-Live-Dark-Evidence.md"]:
+        if req not in PACK_DOCS:
+            fail(f"Project Pack source list (PACK_DOCS) omits the current Phase-2 file {req}")
+    # 6. the Phase Evidence Pack SOURCE list must include the Phase-2 evidence set.
+    for req in ["docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md",
+                "docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md"]:
+        if req not in EVIDENCE_PHASE2_DOCS:
+            fail(f"Phase Evidence Pack source list (EVIDENCE_PHASE2_DOCS) omits {req}")
+    # once a Project Pack has been built, it must physically contain the Phase-2 final report (post-build check).
+    built_report = os.path.join(ROOT, "exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Final-Report.md")
+    built_manifest = os.path.join(ROOT, "exports/chatgpt/stayconnectenterprise/MANIFEST.md")
+    if os.path.isfile(built_manifest) and "StayConnect-IAM-Phase2-Final-Report.md" in open(built_manifest, encoding="utf-8").read() and not os.path.isfile(built_report):
+        fail("Project Pack MANIFEST lists the Phase-2 Final Report but the file is not in the pack")
+    # 7. the Phase-1B Planning Pack MANIFEST generator must mark the pack HISTORICAL (checking the generator
+    #    source, not the extracted file, so it holds at the delivery-wrapper HEAD and never deadlocks a rebuild).
+    self_src = _read("tools/project-state.py") or ""
+    if not re.search(r"PLANNING_PACK_STATUS:\s+HISTORICAL", self_src):
+        fail("Phase-1B Planning Pack MANIFEST generator does not mark the pack HISTORICAL (sentinel missing)")
+    # 8. two named public-column fingerprints must carry a reconciliation note (never conflicting unnamed values)
+    dss = st.get("database_schema_state", {}) or {}
+    if dss.get("public_columns_sha256_current") and dss.get("public_columns_phase2_livedark_sha256"):
+        if dss["public_columns_sha256_current"] != dss["public_columns_phase2_livedark_sha256"] and not dss.get("public_columns_fingerprint_reconciliation"):
+            fail("public column fingerprints differ but carry no reconciliation note (must be distinctly named + documented, not comparable)")
+
+    # The Phase-1B least-privilege artifacts remain the authoritative BASE for every later DARK phase
+    # (D1 rolled-back-write ban, zero production iam_v2 runtime, matrix NONE). Validate them by FIXED path
+    # regardless of which phase's plan/matrix is the current pointer, so the base posture cannot be
+    # silently weakened by repointing the current-phase fields.
+    base_mtx_p = os.path.join(ROOT, "docs/architecture/Phase1B-Privilege-Matrix.md")
+    if os.path.isfile(base_mtx_p):
+        bm = open(base_mtx_p, encoding="utf-8").read()
+        if "PRODUCTION_IAM_V2_DML: NONE" not in bm: fail("Phase 1B base matrix missing PRODUCTION_IAM_V2_DML: NONE")
+        if re.search(r"PRODUCTION_IAM_V2_DML:\s*(GRANTED|SOME|ANY)", bm): fail("Phase 1B base matrix asserts a production iam_v2 grant (must be NONE)")
+    base_plan_p = os.path.join(ROOT, "docs/architecture/StayConnect-IAM-Phase1B-Plan.md")
+    if os.path.isfile(base_plan_p):
+        pt = open(base_plan_p, encoding="utf-8").read()
         if "Phase1B-Privilege-Matrix.md" not in pt: fail("Phase 1B plan does not reference the privilege matrix")
-        for phrase in ["zero production `iam_v2` write", "ZERO `iam_v2` DML"]:
-            pass  # soft
         if "rolled-back" not in pt.lower(): fail("Phase 1B plan must address rolled-back-transaction writes (D1)")
         # Phase 1B plan / canonical-state coherence (no PLANNING-ONLY vs IN_PROGRESS; no production iam_v2
         # runtime grant / shadow / rolled-back contradiction). Sentinel + multiple structural assertions,
@@ -374,6 +569,13 @@ PACK_DOCS = {
  "StayConnect-IAM-Phase1A-Plan.md": ("docs/architecture/StayConnect-IAM-Phase1A-Plan.md",None),
  "StayConnect-IAM-Phase1B-Plan.md": ("docs/architecture/StayConnect-IAM-Phase1B-Plan.md",None),
  "Phase1B-Privilege-Matrix.md": ("docs/architecture/Phase1B-Privilege-Matrix.md",None),
+ "StayConnect-IAM-Phase2-Plan.md": ("docs/architecture/StayConnect-IAM-Phase2-Plan.md",None),
+ "Phase2-Privilege-Matrix.md": ("docs/architecture/Phase2-Privilege-Matrix.md",None),
+ "StayConnect-IAM-Phase2-Software-Gate.md": ("docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md",None),
+ "StayConnect-IAM-Phase2-Live-Dark-Evidence.md": ("docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md",None),
+ "StayConnect-IAM-Phase2-Live-Dark-Acceptance.md": ("docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md",None),
+ "StayConnect-IAM-Phase2-Final-Report.md": ("docs/reports/StayConnect-IAM-Phase2-Final-Report.md",None),
+ "Phase2-change-manifest.md": ("docs/manifests/Phase2-change-manifest.md",None),
  "StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md": ("docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md",None),
  "Protel-FIAS-Phase0-Spike.md": ("docs/spikes/Protel-FIAS-Phase0-Spike.md","spike"),
  "ZERO_STALE_LEFTOVERS_RULE.md": ("docs/ZERO_STALE_LEFTOVERS_RULE.md",None),
@@ -386,6 +588,14 @@ PACK_DOCS = {
  "MIGRATION_RUNBOOK.md": ("docs/MIGRATION_RUNBOOK.md",None),
 }
 PACKED_NAMES = set(PACK_DOCS) | {"00-START-HERE.md","PROJECT-INSTRUCTIONS.md","MANIFEST.md"}
+# Phase-2 evidence docs copied into the Phase Evidence Pack (also asserted present by the reconciliation guard).
+EVIDENCE_PHASE2_DOCS = [
+ "docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md",
+ "docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md",
+ "docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md",
+ "docs/reports/StayConnect-IAM-Phase2-Final-Report.md",
+ "docs/manifests/Phase2-change-manifest.md",
+]
 # MANIFEST row order + status label
 MROWS = [
  ("00-START-HERE.md","*(generated)*","Entry point"),
@@ -393,8 +603,15 @@ MROWS = [
  ("StayConnect-IAM-Phase0-Contract.md","`docs/architecture/StayConnect-IAM-Phase0-Contract.md`","**Authoritative** *(sanitized)*"),
  ("StayConnect-IAM-Handoff.md","`docs/context/StayConnect-IAM-Handoff.md`","**Authoritative**"),
  ("StayConnect-IAM-Phase1A-Plan.md","`docs/architecture/StayConnect-IAM-Phase1A-Plan.md`","**Authoritative (closed phase)**"),
- ("StayConnect-IAM-Phase1B-Plan.md","`docs/architecture/StayConnect-IAM-Phase1B-Plan.md`","**Authoritative — implemented (live-dark deployed, T0010)**"),
+ ("StayConnect-IAM-Phase1B-Plan.md","`docs/architecture/StayConnect-IAM-Phase1B-Plan.md`","**Authoritative — ACCEPTED_AND_CLOSED at DARK maturity (D11/T0011); PR #2 merged**"),
  ("Phase1B-Privilege-Matrix.md","`docs/architecture/Phase1B-Privilege-Matrix.md`","**Authoritative — as-built grant matrix (Gate P deployed)**"),
+ ("StayConnect-IAM-Phase2-Plan.md","`docs/architecture/StayConnect-IAM-Phase2-Plan.md`","**Authoritative — Phase 2 ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014); PR #4 authorized to merge**"),
+ ("Phase2-Privilege-Matrix.md","`docs/architecture/Phase2-Privilege-Matrix.md`","**Authoritative — zero new Phase-2 runtime privilege (live-verified)**"),
+ ("StayConnect-IAM-Phase2-Software-Gate.md","`docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md`","**Authoritative — Phase 2 software-gate evidence (Go + 45 UI tests + build)**"),
+ ("StayConnect-IAM-Phase2-Live-Dark-Evidence.md","`docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md`","**Authoritative — Phase 2 live-dark + two-reboot darkness evidence**"),
+ ("StayConnect-IAM-Phase2-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md`","**Acceptance record — PRODUCT-OWNER ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014)**"),
+ ("StayConnect-IAM-Phase2-Final-Report.md","`docs/reports/StayConnect-IAM-Phase2-Final-Report.md`","**Authoritative — Phase 2 final report (accepted)**"),
+ ("Phase2-change-manifest.md","`docs/manifests/Phase2-change-manifest.md`","**Generated — complete Phase 2 changed-file manifest (base..delivery_head; inventory_head provenance)**"),
  ("StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`","**Authoritative (acceptance record)**"),
  ("Protel-FIAS-Phase0-Spike.md","`docs/spikes/Protel-FIAS-Phase0-Spike.md`","**Authoritative** *(sanitized)*"),
  ("ZERO_STALE_LEFTOVERS_RULE.md","`docs/ZERO_STALE_LEFTOVERS_RULE.md`","**Permanent rule**"),
@@ -422,7 +639,13 @@ def _w(p,txt):
     os.makedirs(os.path.dirname(p),exist_ok=True)
     with open(p,"w",encoding="utf-8",newline="\n") as f: f.write(txt)
 def _cp(src,dst):
-    os.makedirs(os.path.dirname(dst),exist_ok=True); shutil.copyfile(src,dst)
+    # Normalize CRLF->LF so packed text is byte-identical regardless of the builder's OS / working-tree
+    # line endings (git stores LF via .gitattributes; a CRLF working copy must not change pack checksums).
+    os.makedirs(os.path.dirname(dst),exist_ok=True)
+    with open(src,"rb") as f: data=f.read()
+    if b"\x00" not in data:  # text file: force LF
+        data=data.replace(b"\r\n",b"\n")
+    with open(dst,"wb") as f: f.write(data)
 
 def _build_project_pack(block, src_commit, tid, schema, ts):
     for name,(rel,mode) in PACK_DOCS.items():
@@ -458,7 +681,16 @@ def _build_evidence_pack(src_commit):
     for fn in ["PROD_LIVE_DARK_EVIDENCE_V2.txt","PROD_LIVE_DARK_EVIDENCE.txt"]:
         _cp(os.path.join(ROOT,"iam_v2_scratch/review/prod",fn),os.path.join(EVID,"review/prod",fn))
     _cp(os.path.join(ROOT,"iam_v2_scratch/EVIDENCE.txt"),os.path.join(EVID,"EVIDENCE.txt"))
+    # Phase 1A + 1B acceptance records — retained as CLOSED historical baselines
     _cp(os.path.join(ROOT,"docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"),os.path.join(EVID,"StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"))
+    _cp(os.path.join(ROOT,"docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md"),os.path.join(EVID,"StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md"))
+    # Phase 2 authoritative evidence set (current)
+    for rel in EVIDENCE_PHASE2_DOCS:
+        _cp(os.path.join(ROOT,rel),os.path.join(EVID,os.path.basename(rel)))
+    # D12/D13 + T0012 (authorization) + T0013 (live-dark deployment) + T0014 (PO acceptance/closure) records
+    _cp(os.path.join(ROOT,"governance/decision-register.json"),os.path.join(EVID,"governance","decision-register.json"))
+    for tid in ["T0012","T0013","T0014"]:
+        _cp(os.path.join(ROOT,"governance/transitions",tid+".json"),os.path.join(EVID,"governance","transitions",tid+".json"))
     _cp(os.path.join(ROOT,"tools/validate-project-state.sh"),os.path.join(EVID,"tools/validate-project-state.sh"))
     _cp(os.path.join(ROOT,"tools/project-state.py"),os.path.join(EVID,"tools/project-state.py"))
     migs=[os.path.join("iam_v2_scratch",x) for x in (["mg0.sh"]+["migrations/"+f for f in sorted(os.listdir(os.path.join(ROOT,"iam_v2_scratch/migrations")))])]
@@ -478,7 +710,7 @@ def _build_planning_pack(src_commit):
         _w(os.path.join(PLAN_PACK,dst),t)
     flat_copy("docs/architecture/StayConnect-IAM-Phase1B-Plan.md","StayConnect-IAM-Phase1B-Plan.md")
     flat_copy("docs/architecture/Phase1B-Privilege-Matrix.md","Phase1B-Privilege-Matrix.md")
-    _w(os.path.join(PLAN_PACK,"MANIFEST.md"),f"# Phase 1B Plan Evidence Pack — MANIFEST\n\n- SOURCE_COMMIT: `{src_commit}`\n- Status: Phase 1B implementation is Product-Owner AUTHORIZED and IN_PROGRESS (decision D10). Phase 1A accepted/closed. Legacy production auth authoritative; zero production iam_v2 runtime access; PR #2 not merged; no cutover.\n- Contents: Phase 1B plan (matrices+blueprint), privilege matrix, three code inventories, blueprint extract, README, two checksum lists.\n- Next authorized action: complete Phase 1B execution and live-dark verification, then Product-Owner acceptance or rejection.\n")
+    _w(os.path.join(PLAN_PACK,"MANIFEST.md"),f"# Phase 1B Plan Evidence Pack — MANIFEST  (HISTORICAL)\n\n<!-- PLANNING_PACK_STATUS: HISTORICAL -->\n\n> **HISTORICAL — Phase-1B planning artifact.** Phase 1B was **ACCEPTED_AND_CLOSED at DARK maturity** via decision **D11** / transition **T0011**, and **PR #2 was merged**. This pack is retained for provenance of the Phase-1B planning stage only; it is **not** a current status/evidence pack. For current state see the Project Pack (`00-START-HERE.md`, Phase-2 Plan, Phase-2 Final Report, Phase-2 acceptance candidate) and the Phase Evidence Pack.\n\n- SOURCE_COMMIT: `{src_commit}`\n- HISTORICAL status at the time this planning pack was authored: Phase 1B planning (the earlier D10/IN_PROGRESS wording is superseded — Phase 1B is now accepted/closed via D11/T0011 and PR #2 merged; current phase is Phase 2, live-dark deployed and pending one Product-Owner acceptance decision).\n- Contents: Phase 1B plan (matrices+blueprint), privilege matrix, three code inventories, blueprint extract, README, two checksum lists.\n- Current next authorized action (see project-state): one Product-Owner Phase-2 acceptance decision.\n")
     cited=["docs/architecture/StayConnect-IAM-Phase1B-Plan.md","docs/architecture/Phase1B-Privilege-Matrix.md","data-plane/internal/pmsguard/guard.go",
       "data-plane/cmd/scd/main.go","data-plane/cmd/acctd/main.go","data-plane/cmd/edged/main.go","data-plane/cmd/netd/main.go","data-plane/cmd/portald/main.go",
       "data-plane/internal/session/session.go","data-plane/internal/voucher/voucher.go","data-plane/internal/otp/otp.go",
@@ -551,13 +783,20 @@ def _verify_extracted(proj, evid):
                 if pii.search(txt.replace("«","")): errs.append(f"PII token in {os.path.relpath(fp,baseD)}")
     return errs
 
-def cmd_build_packs():
-    # clean-source check scoped to governance-relevant paths (ignores unrelated build artifacts)
-    dirty=git("status","--porcelain","--","governance","docs","tools","iam_v2_scratch")
-    if dirty.strip():
-        print("BUILD-PACKS REFUSED — governance source is dirty. Commit source first.\n"+dirty); return 3
+def cmd_build_packs(allow_dirty=False):
+    # clean-source check scoped to governance-relevant paths (ignores unrelated build artifacts).
+    # --allow-dirty is used ONLY for the final delivery-only commit, which intentionally bundles the
+    # finalized source docs (regenerated manifest, report changed-file count, pointer/provenance) with
+    # their freshly built packs in one commit; the delivery HEAD is still fully validated afterwards.
+    if not allow_dirty:
+        dirty=git("status","--porcelain","--","governance","docs","tools","iam_v2_scratch")
+        if dirty.strip():
+            print("BUILD-PACKS REFUSED — governance source is dirty. Commit source first (or use --allow-dirty for the delivery-only commit).\n"+dirty); return 3
     src_commit=git("rev-parse","--short","HEAD")
-    rc,st=cmd_validate(deep=True)
+    # skip the manifest<->Git equality guard here: build-packs validates the pre-regeneration source tree,
+    # where the on-disk manifest may not yet describe the not-yet-committed delivery HEAD. The delivery
+    # HEAD itself is validated (with the equality guard ON) after the commit.
+    rc,st=cmd_validate(deep=True, manifest_equality=False)
     if rc!=0: print("BUILD-PACKS REFUSED — structural validation failed."); return rc
     if cmd_check_generated(st): print("BUILD-PACKS REFUSED — generated block drift."); return 4
     block=render_block(st)
@@ -604,7 +843,7 @@ def main():
     elif cmd == "transition":
         sys.exit(cmd_transition(sys.argv[2:]))
     elif cmd == "build-packs":
-        sys.exit(cmd_build_packs())
+        sys.exit(cmd_build_packs(allow_dirty=("--allow-dirty" in sys.argv[2:])))
     else:
         print(__doc__); sys.exit(2)
 

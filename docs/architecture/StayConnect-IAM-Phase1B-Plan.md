@@ -1,14 +1,14 @@
 # StayConnect IAM — Phase 1B Implementation Plan (Credential/Portal Integration, DARK)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0011 -->
-**Current phase:** 1B — Credential/identity/auth-context (DARK)
-**Current activity:** `PHASE_1B_ACCEPTED_AND_CLOSED`
-**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 NOT_STARTED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0014 -->
+**Current phase:** 2 — Packages, revisions, rules, tiers, quotes; free purchases; portal package selection
+**Current activity:** `PHASE_2_ACCEPTED_AND_CLOSED`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** No next-phase implementation is authorized. Await explicit Product-Owner authorization before beginning any subsequent phase or enabling any dark feature (durable throttle / keyed-HMAC OTP / IAM-v2) or any iam_v2 cutover.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D11`.
+**Single next authorized action:** Merge PR #4 to master with provenance preserved and run post-merge governance verification (Phase 2 accepted and closed at DARK maturity per D13/T0014). Phase 3 remains NOT_STARTED and unauthorized.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D13`.
 <!-- END GENERATED PROJECT STATE -->
 
 

@@ -14,9 +14,9 @@
     "branch_strategy": "one complete Phase per branch + one PR (phase/<name>-<purpose>); governance-only uses governance/<purpose>; no direct commits to the protected default branch without explicit PO authorization",
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
-  "current_phase": "1B",
-  "current_activity": "PHASE_1B_ACCEPTED_AND_CLOSED",
-  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B ACCEPTED AND CLOSED by the Product Owner at verified DARK maturity (T0011, decision D11) -- implementation + live-dark deployment + reboot verification complete. DARK -- every new auth feature OFF, no production iam_v2 use, no cutover; legacy public-schema auth remains the sole production authority (iam_v2 49/0). No next-phase implementation is authorized.",
+  "current_phase": "2",
+  "current_activity": "PHASE_2_ACCEPTED_AND_CLOSED",
+  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B ACCEPTED AND CLOSED by the Product Owner at verified DARK maturity (T0011, decision D11). DARK -- every new auth feature OFF, no production iam_v2 use, no cutover; legacy public-schema auth remains the sole production authority (iam_v2 49/0). Phase 2 (commercial packages) ACCEPTED AND CLOSED by the Product Owner at verified DARK maturity (T0014, decision D13) -- implementation + live-dark deployment + two reboot verifications complete on 172.21.60.23; migration 0009 applied; all Phase-2 flags OFF; zero runtime iam_v2 privileges; no cutover, no paid access, no PMS settlement; legacy public-schema pipeline remains the sole production authority. PR #4 authorized to merge to master. Phase 3 is NOT_STARTED and unauthorized; a separate Product-Owner decision is required for any later phase or any IAM-v2 authentication cutover.",
   "phase1b_execution": {
     "implementation_authorized": true,
     "authorized_on": "2026-07-17",
@@ -30,11 +30,30 @@
     "transition_id": "T0011",
     "transition_accepted": true
   },
+  "phase2_execution": {
+    "implementation_authorized": true,
+    "authorized_on": "2026-07-18",
+    "one_end_to_end_phase": true,
+    "cutover_authorized": false,
+    "paid_access_authorized": false,
+    "pms_settlement_authorized": false,
+    "dark_features_enabled": false,
+    "authorization_transition_id": "T0012",
+    "transition_id": "T0014",
+    "transition_accepted": true,
+    "accepted_po_decision": "D13",
+    "live_dark_deployed": true,
+    "reboot_verified": true,
+    "accepted_pr_head": "a8c3b3caac6baf8ac41fa581fca5350c97219bb8",
+    "accepted_base": "4e3c3ee27a8caa2d0656b57b419e8ed5e0d87b68",
+    "accepted_governance_ci_run": "29649900358",
+    "stage": "ACCEPTED_AND_CLOSED at verified DARK maturity (T0014, decision D13). Implementation + live-dark deployment + TWO reboot verifications (2026-07-18 08:35:06 and 11:56:34) complete on 172.21.60.23. COMPLETE: WS-A/B (plan+migration 0009); WS-C1..C5 domain/engine/hardening; WS-D APIs (scd guest quote/confirm + eligible-package listing, edged full Hotel-Admin commerce-admin: packages/plan-revisions/rules-tiers/grace/inspection with RBAC+audit+step-up, portald trusted server bridge, scd internal-socket trust hardening); WS-E UI (guest Portal commerce panel + full Hotel-Admin management UI), all dark/flag-gated. Migration 0009 applied (2 triggers + 6 indexes, iam_v2_owner-owned; revision immutability provided by Phase-1A MG-9 and preserved; no separate free-only schema trigger); pinned scd/edged/portald binaries + hotel-admin standalone bundle (678c793e, release 20260718-115608) deployed. 45 automated UI tests (36 Vitest+RTL, 9 Playwright E2E) + authoritative 31/31 Next production build. All Phase-2 flags OFF; no cutover; no runtime iam_v2 privileges; legacy public-schema auth sole authority. PR #4 authorized to merge to master (D13/T0014)."
+  },
   "phases": {
     "0":  { "status": "FINAL_CLOSED",       "title": "IAM redesign architecture contract + live PMS validation", "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)." },
     "1A": { "status": "ACCEPTED_AND_CLOSED","title": "Clean-slate IAM core + persistence (iam_v2)",              "maturity": "ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER" },
     "1B": { "status": "ACCEPTED_AND_CLOSED",        "title": "Credential/identity/auth-context (DARK)",                   "maturity": "IMPLEMENTATION + LIVE-DARK DEPLOYMENT COMPLETE; reboot verification COMPLETE; ACCEPTED AND CLOSED by the Product Owner at DARK maturity (T0011, decision D11). No IAM-v2 cutover; all dark features OFF (durable throttle / keyed-HMAC OTP / IAM-v2 all dark); zero runtime iam_v2 privileges; iam_v2 49 tables/0 rows; legacy public-schema auth is the sole production authority." },
-    "2":  { "status": "NOT_STARTED",        "title": "Packages, revisions, rules, tiers, quotes; free purchases; portal package selection" },
+    "2":  { "status": "ACCEPTED_AND_CLOSED", "title": "Packages, revisions, rules, tiers, quotes; free purchases; portal package selection", "maturity": "IMPLEMENTATION + LIVE-DARK DEPLOYMENT + TWO REBOOT VERIFICATIONS COMPLETE; ACCEPTED AND CLOSED by the Product Owner at verified DARK maturity (T0014, decision D13). DARK -- all Phase-2 flags OFF; no cutover, no paid access, no PMS settlement; zero runtime iam_v2 privileges; iam_v2 49/0; migration 0009 applied; legacy public-schema auth sole authority. PR #4 authorized to merge to master." },
     "3":  { "status": "NOT_STARTED",        "title": "Stay domain: interfaces/revisions/routing, STRICT resolution, stays/sharers/folios, checkout grace" },
     "4":  { "status": "NOT_STARTED",        "title": "Financial: settlements, postings + outbox, payments, recovery, manual review" },
     "5":  { "status": "NOT_STARTED",        "title": "Post-stay (PIN re-auth); cross-PMS transfer workflow" },
@@ -50,18 +69,33 @@
     "Phase 1A formally Product-Owner ACCEPTED and CLOSED at its DARK maturity (2026-07-16)",
     "Phase 1B implementation plan drafted (planning-only) + corrected against binding decisions D1-D9",
     "Phase 1B implementation + live-dark deployment COMPLETED and reboot-verified on the appliance (Gate P least-privilege cutover, migrations 0007/0008, keyed OTP gen-1 bootstrap, pinned dark scd build) -- pending Product-Owner acceptance (T0010)",
-    "Phase 1B formally Product-Owner ACCEPTED and CLOSED at verified DARK maturity (2026-07-17, decision D11, transition T0011); all dark features remain OFF; no IAM-v2 cutover"
+    "Phase 1B formally Product-Owner ACCEPTED and CLOSED at verified DARK maturity (2026-07-17, decision D11, transition T0011); all dark features remain OFF; no IAM-v2 cutover",
+    "Phase 2 (commercial packages) implemented end-to-end and DEPLOYED LIVE-DARK + reboot-verified on 172.21.60.23 (2026-07-18): migration 0009 applied, pinned scd/edged/portald binaries + hotel-admin standalone bundle deployed, all Phase-2 flags OFF, zero runtime iam_v2 privileges, iam_v2 49/0, public schema unchanged",
+    "Phase 2 (commercial packages) formally Product-Owner ACCEPTED and CLOSED at verified DARK maturity (2026-07-18, decision D13, transition T0014); accepted PR #4 baseline base 4e3c3ee / substantive HEAD 45323ad / final pre-acceptance PR HEAD a8c3b3c / Governance CI 29649900358 SUCCESS; all Phase-2 flags remain OFF; no IAM-v2 cutover; PR #4 authorized to merge to master"
   ],
   "verified_evidence": [
     { "id": "PROD_LIVE_DARK_V2", "path": "iam_v2_scratch/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt", "kind": "read-only production re-verification", "authoritative": true },
     { "id": "PHASE1A_ACCEPTANCE", "path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md", "kind": "live-dark acceptance record (18/18)", "authoritative": true },
     { "id": "FIAS_SPIKE", "path": "docs/spikes/Protel-FIAS-Phase0-Spike.md", "kind": "live FIAS spike + Gate 3A PASS", "authoritative": true },
-    { "id": "PHASE1B_ACCEPTANCE", "path": "docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md", "kind": "Phase 1B live-dark acceptance record -- Product-Owner ACCEPTED_AND_CLOSED at DARK maturity via D11/T0011", "authoritative": true }
+    { "id": "PHASE1B_ACCEPTANCE", "path": "docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md", "kind": "Phase 1B live-dark acceptance record -- Product-Owner ACCEPTED_AND_CLOSED at DARK maturity via D11/T0011", "authoritative": true },
+    { "id": "PHASE2_SOFTWARE_GATE", "path": "docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md", "kind": "Phase 2 software-gate evidence (build/vet/test/tsc + darkness)", "authoritative": true },
+    { "id": "PHASE2_LIVE_DARK", "path": "docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md", "kind": "Phase 2 live-dark deployment + reboot darkness evidence", "authoritative": true },
+    { "id": "PHASE2_ACCEPTANCE", "path": "docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md", "kind": "Phase 2 live-dark acceptance record -- Product-Owner ACCEPTED_AND_CLOSED at verified DARK maturity via D13/T0014", "authoritative": true },
+    { "id": "PHASE2_FINAL_REPORT", "path": "docs/reports/StayConnect-IAM-Phase2-Final-Report.md", "kind": "Phase 2 final report (20-section) -- accepted baseline", "authoritative": true }
   ],
   "authoritative_source_commits": {
     "phase1a_live_dark_creation": "22a2e15",
     "phase1a_migrations": "b2a715f",
-    "phase1b_live_dark": "b87a59b"
+    "phase1b_live_dark": "b87a59b",
+    "phase2_migration_0009": "c8f7a1c",
+    "phase2_domain_engine": "1f4eae6",
+    "phase2_apis_scd_edged_portald": "2ed86c1",
+    "phase2_ui": "a0578e4",
+    "phase2_live_dark_evidence": "42f53aa",
+    "phase2_ui_test_automation": "9c78b78",
+    "phase2_final_gate_pinned_binaries_source": "b89a744",
+    "phase2_deployed_hotel_admin_bundle_sha256": "678c793ea46f23241eba05bde66929b19a5473fc8d3752d2a5eb083f4ff0dd95",
+    "phase2_deployed_go_binaries_sha256": { "scd": "1e25f9ef44b544d08d112d44f0847a674d51602362b01b9d2cb266ec740e1e86", "edged": "30ed45f15059390e559db4298295bbf5f6b48fb17595ee705eb1be8b44be9c34", "portald": "bf40065409504065bd24d75aaa8c9fa3b58ab47b47b0569755a1bb4ebe2ebd14" }
   },
   "live_scratch_dark_cutover": {
     "live_iam_v2_in_use": false,
@@ -81,11 +115,16 @@
     "public_structural_fingerprint_phase1a_md5_algorithm": "MD5 of sorted public-schema {columns + constraints + indexes} excluding the Phase-1A MG-0 anchor index guest_networks_tsi_anchor (iam_v2_scratch/prod_live_dark.sh). Phase-1A baseline; PRE-Phase-1B / pre-0007-0008.",
     "public_columns_sha256_pre_0007_0008": "8659c08db41624d5cab946027c0d6c2d37251fc1550ec35929241827acf852f9",
     "public_columns_sha256_current": "7241b1cd76201cd48df0eaa0055c336d0951aa218830545d7dbbe92bd61a0fcc",
-    "public_columns_sha256_algorithm": "SHA-256 of information_schema.columns table.column:data_type (Gate-P/Phase-1B). Distinct algorithm from the Phase-1A MD5 above; NOT comparable to it.",
+    "public_columns_sha256_algorithm": "Phase-1B/Gate-P value. SHA-256 over information_schema.columns table.column:data_type, computed by the Gate-P tooling (iam_v2_scratch/prod_live_dark.sh). Distinct algorithm from the Phase-1A MD5 above; NOT comparable to it.",
+    "public_columns_phase2_livedark_sha256": "833c3d6740af4ac79731bb038616559b999109df2f0bef37e95173ffe3a26bfb",
+    "public_columns_phase2_livedark_algorithm": "Phase-2 live-dark value. encode(digest(string_agg(table_name||'.'||column_name||':'||data_type, chr(10) ORDER BY 1),'sha256'),'hex') over information_schema.columns WHERE table_schema='public', computed read-only on 172.21.60.23 during the Phase-2 live-dark deploy.",
+    "public_columns_fingerprint_reconciliation": "public_columns_sha256_current (7241b1cd, Phase-1B/Gate-P) and public_columns_phase2_livedark_sha256 (833c3d67, Phase-2 live-dark) use DIFFERENT serializations (per-object Gate-P method vs aggregate string_agg+newline+digest). They were NOT re-verified against each other on the appliance (this reconciliation does not touch the appliance), so they are recorded as SEPARATE, NOT-directly-comparable fields. The Phase-2 darkness invariant is that the 833c3d67 value is IDENTICAL pre- and post-migration-0009 (public schema unchanged by 0009) -- proven in docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md -- not equality between the two named fields.",
     "public_structure_change_note": "The Phase-1A structural baseline was intentionally superseded by the AUTHORIZED additive migrations 0007/0008 (auth_throttle_buckets, otp_hmac_key_generations, auth_otps.otp_key_generation). The pre->post SHA-256 delta (8659c08d -> 7241b1cd) is exactly those additive objects; this is authorized schema evolution, not drift.",
     "iam_v2_dark": true,
     "iam_v2_data_migration": false,
     "migrations_0007_0008_applied": true,
+    "migration_0009_applied": true,
+    "migration_0009_note": "Phase-2 additive iam_v2 migration 0009_phase2_commerce applied live on 172.21.60.23 (2 trigger functions + 2 triggers + 6 lookup indexes, owned by iam_v2_owner). The public-schema columns SHA-256 is unchanged pre->post (public schema untouched); iam_v2 remains 0 rows.",
     "auth_throttle_buckets_present": true,
     "otp_hmac_key_generations_present": true,
     "otp_active_generation": 1,
@@ -95,14 +134,15 @@
   "pms_financial_state": "FIAS lookup-only in production; posting engine is a future component (Phase 4). folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
-    "None. Phase 1B is ACCEPTED AND CLOSED at DARK maturity (T0011). No Phase 1B implementation or acceptance blocker remains; no next-phase work is authorized."
+    "No technical Phase-2 blocker and no open Phase-2 work: Phase 2 (commercial packages) is ACCEPTED_AND_CLOSED at verified DARK maturity by the Product Owner (decision D13, transition T0014); all flags OFF. Phase 1B remains ACCEPTED_AND_CLOSED; Phase 3 remains NOT_STARTED and unauthorized (a separate Product-Owner decision is required for any later phase or any IAM-v2 authentication cutover)."
   ],
   "allowed_actions": [
-    "Read-only inspection, documentation and governance work",
-    "Await explicit Product-Owner authorization before any next-phase implementation or dark-feature (durable throttle / keyed-HMAC OTP / IAM-v2) enablement or any iam_v2 cutover"
+    "Merge PR #4 to master with provenance preserved and run post-merge governance verification (authorized by decision D13 / transition T0014); no deployment, restart, reboot, migration, privilege, credential or feature-flag change is part of the acceptance-and-merge operation",
+    "Read-only verification and inspection of the accepted, closed, live-dark Phase 2 (commercial packages)",
+    "Governance and documentation reconciliation only (no runtime code change, no migration, no appliance deploy/restart/reboot, no flag enablement)"
   ],
   "prohibited_actions": [
-    "Implementing any Phase beyond the authorized Phase 1B dark scope (Phase 2 or any later Phase)",
+    "Implementing any Phase beyond the authorized Phase 2 dark scope (Phase 3 or any later Phase)",
     "Any production iam_v2 write (including inside a later-rolled-back transaction)",
     "Granting any iam_v2 DML privilege to a runtime service role in production",
     "DSN/search_path change that routes any service to iam_v2; any iam_v2 cutover",
@@ -110,9 +150,13 @@
     "PMS/FIAS traffic; financial posting; programmatic reversal",
     "HA/topology change; Central changes; legacy IAM removal; guest paid access; Stripe activation"
   ],
-  "next_authorized_action": "No next-phase implementation is authorized. Await explicit Product-Owner authorization before beginning any subsequent phase or enabling any dark feature (durable throttle / keyed-HMAC OTP / IAM-v2) or any iam_v2 cutover.",
-  "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
-  "privilege_matrix": "docs/architecture/Phase1B-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D11",
-  "latest_transition_id": "T0011"
+  "next_authorized_action": "Merge PR #4 to master with provenance preserved and run post-merge governance verification (Phase 2 accepted and closed at DARK maturity per D13/T0014). Phase 3 remains NOT_STARTED and unauthorized.",
+  "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase2-Plan.md",
+  "privilege_matrix": "docs/architecture/Phase2-Privilege-Matrix.md",
+  "latest_accepted_po_decision": "D13",
+  "latest_transition_id": "T0014",
+  "acceptance_candidate_head": "17899b8a251185c9c41b325428325af0b114ecce",
+  "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase2-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the final PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
+  "inventory_head": "17899b8a251185c9c41b325428325af0b114ecce",
+  "delivery_head_note": "delivery_head (the final PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #4 body and the Final Report, not self-referenced inside a committed artifact."
 }

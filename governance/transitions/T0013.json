@@ -1,0 +1,19 @@
+{
+  "transition_id": "T0013",
+  "seq": 13,
+  "timestamp": "2026-07-18T08:36:00Z",
+  "previous_state": { "phase": "2", "activity": "PHASE_2_IMPLEMENTATION_IN_PROGRESS", "phase_status": "IN_PROGRESS" },
+  "new_state": { "phase": "2", "activity": "PHASE_2_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE", "phase_status": "IN_PROGRESS" },
+  "phase_affected": "2",
+  "po_authorization_ref": "Within the existing Product-Owner authorization D12 (T0012). This transition records a factual state advancement (implementation complete + live-dark deployment + reboot verification) only; it is NOT a Product-Owner acceptance and does not close Phase 2. Acceptance remains a separate PO decision.",
+  "scope_allowed": "Record that Phase 2 (commercial packages) is implemented end-to-end and deployed LIVE-DARK with post-reboot verification on 172.21.60.23: additive migration 0009 applied (iam_v2_owner-owned triggers/indexes, public schema unchanged); pinned scd/edged/portald binaries + hotel-admin standalone bundle deployed; guest Portal + Hotel Admin commerce surfaces present but inert behind OFF flags; one reboot performed and all darkness/darkness-smoke checks re-verified.",
+  "scope_prohibited": "No Phase-2 flag enabled; no paid access; no PMS settlement; no IAM-v2 cutover; no data migration; no runtime iam_v2 privileges; no self-acceptance; no Phase 3; PR #4 not merged.",
+  "evidence_files": [
+    "docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md",
+    "docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md",
+    "docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md"
+  ],
+  "source_commit": "b89a744",
+  "acceptance_verdict": "IN_PROGRESS -- Phase 2 implemented + deployed live-dark + reboot-verified at DARK maturity; PENDING a single Product-Owner acceptance decision. Not accepted/closed.",
+  "next_action": "Return the single final Phase-2 report for one Product-Owner acceptance decision at verified DARK maturity."
+}

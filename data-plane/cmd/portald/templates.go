@@ -270,11 +270,20 @@ const successHTML = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connected</title>
 <style>
-  body { font-family: -apple-system, system-ui, sans-serif; max-width: 420px; margin: 10vh auto; padding: 24px; text-align:center; }
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 460px; margin: 8vh auto; padding: 24px; text-align:center; }
   .ok { font-size: 3rem; color: #1a9e4a; }
   h1 { margin: 8px 0; }
   p { color: #666; }
   a.btn { display:inline-block; margin-top:16px; padding:10px 16px; border:1px solid #ccc; border-radius:8px; color:#333; text-decoration:none; }
+  #commerce { margin-top:28px; text-align:left; border-top:1px solid #eee; padding-top:18px; }
+  #commerce h2 { font-size:1.05rem; }
+  .pkg { border:1px solid #ddd; border-radius:10px; padding:12px 14px; margin:10px 0; }
+  .pkg h3 { margin:0 0 6px; font-size:1rem; }
+  .pkg .meta { color:#666; font-size:.85rem; line-height:1.5; }
+  .pkg button, #cx-confirm { padding:8px 14px; border:1px solid #0a6cff; background:#0a6cff; color:#fff; border-radius:8px; cursor:pointer; }
+  .pkg button[disabled], #cx-confirm[disabled] { opacity:.5; cursor:default; }
+  #cx-note { color:#666; font-size:.85rem; margin-top:8px; }
+  .cx-err { color:#b00020; }
 </style>
 </head><body>
   <div class="ok">✓</div>
@@ -283,4 +292,86 @@ const successHTML = `<!doctype html>
      {{if .DurationSeconds}}Time remaining: {{.HumanRemaining}}{{else}}No time limit{{end}}</p>
   <a class="btn" href="/status">Status</a>
   <form method="POST" action="/logout" style="display:inline"><button type="submit" style="margin-left:8px">Disconnect</button></form>
+
+  {{if .CommerceEnabled}}
+  <div id="commerce" data-commerce="on">
+    <h2>Available packages</h2>
+    <div id="cx-list">Loading…</div>
+    <div id="cx-quote" hidden></div>
+    <div id="cx-note"></div>
+  </div>
+  <script>
+  (function(){
+    var list = document.getElementById('cx-list');
+    var quoteBox = document.getElementById('cx-quote');
+    var note = document.getElementById('cx-note');
+    var busy = false;
+    function fmtBytes(n){ if(!n) return '∞'; var u=['B','KB','MB','GB','TB']; var i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(n<10&&i>0?1:0)+u[i]; }
+    function fmtDur(s){ if(!s) return '∞'; var h=Math.floor(s/3600),m=Math.floor((s%3600)/60); return h>0?(h+'h'+(m?(' '+m+'m'):'')):(m+'m'); }
+    function unavailable(msg){ note.className='cx-err'; note.textContent = msg||'This option is unavailable right now.'; }
+    function clearNote(){ note.className=''; note.textContent=''; }
+    function loadPackages(){
+      clearNote();
+      fetch('/api/commerce/packages', {headers:{'Accept':'application/json'}}).then(function(r){
+        if(!r.ok){ list.textContent=''; unavailable(); return null; }
+        return r.json();
+      }).then(function(data){
+        if(!data){ return; }
+        var pkgs = (data.packages||[]);
+        if(pkgs.length===0){ list.textContent='No packages are available for you right now.'; return; }
+        list.innerHTML='';
+        pkgs.forEach(function(p){
+          var d = p.display||{};
+          var el = document.createElement('div'); el.className='pkg';
+          var speed = (d.down_kbps? (Math.round(d.down_kbps/1000)+' Mbps down'):'')+(d.up_kbps? (' / '+Math.round(d.up_kbps/1000)+' up'):'');
+          el.innerHTML = '<h3></h3><div class="meta"></div>';
+          el.querySelector('h3').textContent = d.name || 'Package';
+          el.querySelector('.meta').textContent =
+            (speed? (speed+' · '):'') +
+            'Data: '+fmtBytes(d.data_quota_bytes)+' · Time: '+fmtDur(d.time_quota_seconds)+
+            ' · Devices: '+(d.max_concurrent_devices||1)+' · Ends: '+(d.end_mode||'MANUAL_END');
+          var btn = document.createElement('button'); btn.textContent='Select';
+          btn.addEventListener('click', function(){ requestQuote(p.package_id, btn); });
+          el.appendChild(btn);
+          list.appendChild(el);
+        });
+      }).catch(function(){ unavailable(); });
+    }
+    function requestQuote(pkgId, btn){
+      if(busy) return; busy=true; if(btn) btn.disabled=true; clearNote();
+      fetch('/api/commerce/quote', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({package_id: pkgId})})
+        .then(function(r){ return r.ok? r.json() : null; })
+        .then(function(q){
+          busy=false; if(btn) btn.disabled=false;
+          if(!q || !q.quote_id){ unavailable(); return; }
+          showQuote(q);
+        }).catch(function(){ busy=false; if(btn) btn.disabled=false; unavailable(); });
+    }
+    function showQuote(q){
+      var d = q.display||{};
+      quoteBox.hidden=false;
+      quoteBox.innerHTML =
+        '<div class="pkg"><h3>Confirm your package</h3>'+
+        '<div class="meta">'+(d.name||'Package')+' — free · Devices: '+(d.max_concurrent_devices||1)+
+        ' · Ends: '+(d.end_mode||'MANUAL_END')+'</div>'+
+        '<div class="meta">Offer expires: '+ (q.expires_at||'') +'</div>'+
+        '<button id="cx-confirm">Confirm</button></div>';
+      var cbtn = document.getElementById('cx-confirm');
+      cbtn.addEventListener('click', function(){ confirmQuote(q.quote_id, cbtn); });
+      list.hidden = true;
+    }
+    function confirmQuote(quoteId, cbtn){
+      if(busy) return; busy=true; cbtn.disabled=true; clearNote();
+      fetch('/api/commerce/confirm', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({quote_id: quoteId})})
+        .then(function(r){ return r.ok? r.json() : null; })
+        .then(function(res){
+          busy=false;
+          if(!res || !res.entitlement_id){ cbtn.disabled=false; unavailable('That offer expired or is no longer available.'); return; }
+          quoteBox.innerHTML = '<div class="pkg"><h3>Package active</h3><div class="meta">Your package is now active. Enjoy your connection.</div></div>';
+        }).catch(function(){ busy=false; cbtn.disabled=false; unavailable(); });
+    }
+    loadPackages();
+  })();
+  </script>
+  {{end}}
 </body></html>`
