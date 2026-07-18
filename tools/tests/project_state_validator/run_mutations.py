@@ -154,6 +154,13 @@ MUTATIONS = [
    ("replace", [('"id": "D13"', '"id": "D13-DISABLED"')])),
  ("M48 manifest base repointed so its path/status set no longer equals git base..delivery_head", "docs/manifests/Phase2-change-manifest.md",
    ("replace", [("4e3c3ee27a8caa2d0656b57b419e8ed5e0d87b68", "a8c3b3caac6baf8ac41fa581fca5350c97219bb8")])),
+ # --- post-merge stale-action contradiction classes (Phase 2 accepted + merged, but a current field still says to merge) ---
+ ("M49 next_authorized_action still points to the already-completed PR #4 merge", "governance/project-state.json",
+   ("replace", [('"next_authorized_action": "Await explicit Product-Owner authorization for Phase 3',
+                 '"next_authorized_action": "Merge PR #4 to master with provenance preserved and run post-merge governance verification. Await explicit Product-Owner authorization for Phase 3')])),
+ ("M50 phases.2 maturity still says PR #4 authorized to merge after merge", "governance/project-state.json",
+   ("replace", [("PR #4 merged to master (merge commit fe6a0d1); no open Phase-2 work remains.",
+                 "PR #4 authorized to merge to master.")])),
 ]
 
 def apply(relpath, op):

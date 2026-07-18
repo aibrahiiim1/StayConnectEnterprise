@@ -1,6 +1,6 @@
 # StayConnect IAM — Phase 2 (Commercial Packages) Final Report
 
-**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED at verified DARK maturity (decision D13, closure transition T0014, 2026-07-18). PR #4 authorized to merge to master with provenance preserved.** Maturity: verified DARK (implementation + automated UI tests + live-dark deployment + TWO reboots with post-reboot re-verification each).
+**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED at verified DARK maturity (decision D13, closure transition T0014, 2026-07-18). PR #4 MERGED and CLOSED (merge commit `fe6a0d12a49f74b7b7b84ef0c848a38512273370`); post-merge Governance CI green; no open Phase-2 work remains.** Maturity: verified DARK (implementation + automated UI tests + live-dark deployment + TWO reboots with post-reboot re-verification each).
 
 Branch `phase/2-commercial-packages` · PR #4 · **authorized** under **D12** / transition **T0012** · **live-dark deployment** transition **T0013** · **accepted and closed** under **D13** / closure transition **T0014** · appliance `radius` / `172.21.60.23`.
 
@@ -12,7 +12,7 @@ Branch `phase/2-commercial-packages` · PR #4 · **authorized** under **D12** / 
 
 ## 0. Product-Owner acceptance and closure
 
-Phase 2 (Commercial Packages) is **ACCEPTED at verified DARK maturity and CLOSED** by Product-Owner decision **D13** / closure transition **T0014** (2026-07-18). PR #4 is authorized to merge to master with provenance preserved. Acceptance is at DARK maturity only: no flag enablement, no IAM-v2 cutover, no paid access, no PMS settlement, no Phase 3. Phase 3 remains `NOT_STARTED` and unauthorized; enabling guest Commerce requires a separately authorized IAM-v2 authentication cutover. The earlier final acceptance gate (below) added real UI test automation, an authoritative production build, and governance/evidence reconciliation; no rollback, no flag enablement, no cutover.
+Phase 2 (Commercial Packages) is **ACCEPTED at verified DARK maturity and CLOSED** by Product-Owner decision **D13** / closure transition **T0014** (2026-07-18), and **MERGED to master** (merge commit `fe6a0d12a49f74b7b7b84ef0c848a38512273370`; post-merge Governance CI green). Acceptance is at DARK maturity only: no flag enablement, no IAM-v2 cutover, no paid access, no PMS settlement, no Phase 3. Phase 3 remains `NOT_STARTED` and unauthorized; enabling guest Commerce requires a separately authorized IAM-v2 authentication cutover. The earlier final acceptance gate (below) added real UI test automation, an authoritative production build, and governance/evidence reconciliation; no rollback, no flag enablement, no cutover.
 
 - **UI tests (45 total, all green).** Component/unit: **36** (Vitest + React Testing Library). E2E: **9** (Playwright driving locally-installed Chrome) — 3 Hotel Admin (real Next app, edged mocked) + 6 Guest Portal (the real portald success-page template, `/api/commerce/*` mocked). The Guest Portal E2E proves the browser submits ONLY opaque `package_id`/`quote_id` and that double-submit yields exactly one confirm.
 - **Authoritative production build.** `NODE_OPTIONS=--max-old-space-size=12288 npm run build` on host CHV-MISMGR, START `2026-07-18T11:52:54Z` → END `2026-07-18T11:53:39Z`, **EXIT 0**, `✓ Compiled successfully` + `✓ Generating static pages (31/31)`. Standalone tarball SHA-256 `678c793ea46f23241eba05bde66929b19a5473fc8d3752d2a5eb083f4ff0dd95`. The earlier prerender OOM is an environment memory limit (recorded as an observation), now superseded by this successful build.
@@ -87,7 +87,7 @@ Zero observable change today: every surface is inert behind OFF flags. When late
 
 ## 12. Branch and PR information
 - Branch: `phase/2-commercial-packages`; base `master@4e3c3ee`.
-- PR: **#4** — Product-Owner accepted (D13/T0014); authorized to merge to master with provenance preserved. Body updated to the accepted HEADs/status.
+- PR: **#4** — Product-Owner accepted (D13/T0014); **MERGED and CLOSED** to master (merge commit `fe6a0d12a49f74b7b7b84ef0c848a38512273370`, provenance preserved). Remote branch deleted.
 
 ## 13. Remote reachability of HEAD + Governance CI
 - Final pre-acceptance PR HEAD `a8c3b3c` — Governance CI run **29649900358** = **SUCCESS**.
@@ -115,4 +115,4 @@ The export packs are rebuilt from `inventory_head` in the delivery-only commit; 
 - None. Phase 2 is accepted and closed at DARK maturity. Enabling the Phase-2 guest flow in production additionally requires the (separately authorized) IAM-v2 authentication cutover; out of this Phase's DARK scope. Phase 3 remains `NOT_STARTED` and unauthorized.
 
 ## 20. Single next proposed action
-Merge PR #4 to master with provenance preserved (authorized by Product-Owner decision D13 / closure transition T0014) and run post-merge Governance verification. No enablement, no cutover, no deployment/reboot, and no Phase 3.
+Await explicit Product-Owner authorization for Phase 3 or for a separately gated IAM-v2 authentication cutover. Phase 2 is accepted, closed and merged to master (merge commit `fe6a0d1`); no open Phase-2 work remains. No enablement, no cutover, no deployment/reboot, and no Phase 3.
