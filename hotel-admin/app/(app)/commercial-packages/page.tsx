@@ -17,6 +17,8 @@ import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Plus, X } from "lucide-react";
+import { PublishPackageForm } from "./publish-form";
+import type { PublishPayload } from "@/lib/commerce-form";
 
 type PackageSummary = { package_id: string; code: string; active: boolean; current_revision_id: string; revision_count: number };
 type PlanSummary = { plan_id: string; code: string; enabled: boolean; current_revision_id: string; revision_count: number };
@@ -105,31 +107,11 @@ function PackagesTab({ guard, setErr }: TabProps) {
     } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Failed"); }
   }
 
-  async function onPublish(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault(); setBusy(true); setErr(null);
-    const el = e.currentTarget; const f = new FormData(el);
-    const s = (k: string) => ((f.get(k) as string) || "").trim();
-    const n = (k: string) => { const v = s(k); return v === "" ? undefined : Number(v); };
-    const grant: Record<string, number> = {};
-    const dk = n("down_kbps"); if (dk !== undefined) grant.down_kbps = dk;
-    const uk = n("up_kbps"); if (uk !== undefined) grant.up_kbps = uk;
-    const endMode = s("end_mode") || "MANUAL_END";
-    const duration: Record<string, unknown> = { end_mode: endMode };
-    if (endMode === "VALIDITY_WINDOW") { const secs = n("duration_seconds"); if (secs !== undefined) duration.duration_seconds = secs; }
-    const methods = s("methods");
-    const rules = methods ? [{ type: "AUTH_METHOD", value: { methods: methods.split(",").map((m) => m.trim()).filter(Boolean) } }] : [];
+  async function handlePublish(payload: PublishPayload) {
+    setBusy(true); setErr(null);
     try {
-      await api.post("/commercial-packages", {
-        code: s("code"),
-        service_plan_revision_id: s("service_plan_revision_id"),
-        display: { name: s("name") || s("code") },
-        duration_policy: duration,
-        eligibility_rules: rules,
-        grant_tiers: [{ order: 10, grant }],
-        visible_from: s("visible_from") ? new Date(s("visible_from")).toISOString() : undefined,
-        visible_until: s("visible_until") ? new Date(s("visible_until")).toISOString() : undefined,
-      });
-      el.reset(); setShowNew(false); await load();
+      await api.post("/commercial-packages", payload);
+      setShowNew(false); await load();
     } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Publish failed"); }
     finally { setBusy(false); }
   }
@@ -160,33 +142,7 @@ function PackagesTab({ guard, setErr }: TabProps) {
         <Card>
           <CardHeader><CardTitle>Publish a free package revision</CardTitle></CardHeader>
           <CardBody>
-            <form onSubmit={onPublish} className="grid grid-cols-2 gap-3">
-              <div><Label>Code</Label><Input name="code" required placeholder="FREEWIFI" /></div>
-              <div><Label>Display name</Label><Input name="name" placeholder="Free WiFi" /></div>
-              <div className="col-span-2">
-                <Label>Service plan</Label>
-                <select name="service_plan_revision_id" required className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm">
-                  <option value="">Select a plan…</option>
-                  {plans.filter((p) => p.current_revision_id).map((p) => (
-                    <option key={p.plan_id} value={p.current_revision_id}>{p.code} (current revision)</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <Label>End mode</Label>
-                <select name="end_mode" className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm">
-                  <option value="MANUAL_END">Manual end</option>
-                  <option value="VALIDITY_WINDOW">Validity window</option>
-                </select>
-              </div>
-              <div><Label>Duration seconds (validity window)</Label><Input name="duration_seconds" type="number" min={1} /></div>
-              <div><Label>Down kbps (tier override)</Label><Input name="down_kbps" type="number" min={0} /></div>
-              <div><Label>Up kbps (tier override)</Label><Input name="up_kbps" type="number" min={0} /></div>
-              <div><Label>Visible from</Label><Input name="visible_from" type="datetime-local" /></div>
-              <div><Label>Visible until</Label><Input name="visible_until" type="datetime-local" /></div>
-              <div className="col-span-2"><Label>Auth methods (optional, comma-separated)</Label><Input name="methods" placeholder="account, voucher" /></div>
-              <div className="col-span-2"><Button type="submit" disabled={busy}>{busy ? "Publishing…" : "Publish"}</Button></div>
-            </form>
+            <PublishPackageForm plans={plans} busy={busy} onPublish={handlePublish} />
           </CardBody>
         </Card>
       )}
