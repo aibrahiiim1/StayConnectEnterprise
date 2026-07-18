@@ -186,3 +186,20 @@ func TestCommercePackagesUsesSessionPins(t *testing.T) {
 		t.Fatalf("packages must use SESSION pins, got %+v", cap.query)
 	}
 }
+
+// The guest commerce panel renders on /success ONLY when the portal surface is ON.
+func TestSuccessCommercePanelGatedByFlag(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		cap := &capture{}
+		h, closeFn := newBridgeHandler(t, on, cap)
+		r := httptest.NewRequest("GET", "/success?s=sess-1&t=3600", nil)
+		w := httptest.NewRecorder()
+		h.success(w, r)
+		body := w.Body.String()
+		has := strings.Contains(body, `data-commerce="on"`)
+		if has != on {
+			t.Fatalf("commerce panel present=%v, want %v (portalOn=%v)", has, on, on)
+		}
+		closeFn()
+	}
+}

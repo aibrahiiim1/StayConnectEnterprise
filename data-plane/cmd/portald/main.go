@@ -251,6 +251,8 @@ func (h *handler) success(w http.ResponseWriter, r *http.Request) {
 		"SessionID":       r.URL.Query().Get("s"),
 		"DurationSeconds": int(dur.Seconds()),
 		"HumanRemaining":  humanDuration(dur),
+		// Phase 2 DARK: the guest commerce panel renders only when the portal surface is ON.
+		"CommerceEnabled": h.commerceCfg.PortalOn(),
 	})
 }
 
