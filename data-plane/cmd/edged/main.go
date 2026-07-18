@@ -34,6 +34,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
@@ -78,6 +79,11 @@ type server struct {
 	tenantID string
 	siteID   string
 	secure   bool
+
+	// Phase 2 DARK Hotel-Admin commerce. commerce is ALWAYS constructed but holds a nil repository while
+	// the master flag is OFF (zero Phase-2 SQL); commerceCfg gates whether the admin routes are mounted.
+	commerce    *iamv2.CommerceAdmin
+	commerceCfg iamv2.CommerceConfig
 }
 
 func main() {
@@ -172,6 +178,28 @@ func main() {
 		secure:   c.CookieSecure,
 	}
 
+	// Phase 2 DARK Hotel-Admin commerce. Config from env (all flags default OFF); nil repository while the
+	// master flag is OFF (zero Phase-2 SQL). Fail closed if the master flag is set without a wired repo
+	// (cutover only) — edged holds ZERO iam_v2 privileges under its Gate-P role while dark.
+	commCfg, err := iamv2.LoadCommerceConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("phase2 commerce config", "err", err)
+		os.Exit(2)
+	}
+	var commRepo iamv2.CommerceAdminRepository // nil while dark
+	if commCfg.MasterEnabled {
+		slog.Error("phase2 commerce master flag enabled but no production admin repository is wired (cutover only)")
+		os.Exit(2)
+	}
+	commAdmin, err := iamv2.NewCommerceAdmin(commCfg, commRepo, iamv2.NopObserver{})
+	if err != nil {
+		slog.Error("phase2 commerce admin new", "err", err)
+		os.Exit(2)
+	}
+	s.commerce = commAdmin
+	s.commerceCfg = commCfg
+	slog.Info("phase2 dark commerce admin constructed", "flags", commCfg.SafeFlagSummary())
+
 	// Appliance Health Supervisor: observe/diagnose every critical service,
 	// persist the authoritative health model, track boot convergence and push
 	// sanitized telemetry. It never controls restarts (systemd + adaptive
@@ -229,6 +257,11 @@ func main() {
 			mountResource(r, s, "stripe-accounts", s.stripeAccountsRoutes)
 			mountResource(r, s, "notification-providers", s.notificationProvidersRoutes)
 			mountResource(r, s, "social-providers", s.socialProvidersRoutes)
+			// Phase 2 (DARK): the commercial-packages admin resource is mounted ONLY when the admin
+			// surface is ON; while dark it is absent and the admin engine holds a nil repository.
+			if s.commerceCfg.AdminOn() {
+				mountResource(r, s, "commercial-packages", s.commercialPackagesRoutes)
+			}
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "reports", s.reportsRoutes)
 			mountResource(r, s, "backups", s.backupsRoutes)

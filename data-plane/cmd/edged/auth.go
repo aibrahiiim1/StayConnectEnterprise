@@ -158,8 +158,10 @@ var rolePerms = map[string]map[string]perm{
 		"auth-methods": permWrite, "walled-garden": permWrite,
 		"portal-branding": permWrite, "notification-providers": permWrite,
 		"social-providers": permWrite, "stripe-accounts": permWrite,
-		"network":  permWrite,
-		"payments": permRead, "operators": permRead, "audit": permRead,
+		"network": permWrite,
+		// Phase 2 (DARK) commercial packages: revisioned CRUD is a manager action.
+		"commercial-packages": permWrite,
+		"payments":            permRead, "operators": permRead, "audit": permRead,
 		"reports": permRead, "backups": permRead, "license": permRead,
 		// Health & diagnostics: managers may run Recheck/Restart (write, step-up).
 		"diagnostics": permWrite,
@@ -195,6 +197,7 @@ var rolePerms = map[string]map[string]perm{
 		"notification-providers": permRead, "social-providers": permRead,
 		"stripe-accounts": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,
+		"commercial-packages": permRead,
 	},
 	// Legacy tenant roles accepted for migrated operators.
 	"tenant_admin":    nil, // treated like site_admin below
