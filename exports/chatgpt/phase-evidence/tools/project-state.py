@@ -571,7 +571,13 @@ def _w(p,txt):
     os.makedirs(os.path.dirname(p),exist_ok=True)
     with open(p,"w",encoding="utf-8",newline="\n") as f: f.write(txt)
 def _cp(src,dst):
-    os.makedirs(os.path.dirname(dst),exist_ok=True); shutil.copyfile(src,dst)
+    # Normalize CRLF->LF so packed text is byte-identical regardless of the builder's OS / working-tree
+    # line endings (git stores LF via .gitattributes; a CRLF working copy must not change pack checksums).
+    os.makedirs(os.path.dirname(dst),exist_ok=True)
+    with open(src,"rb") as f: data=f.read()
+    if b"\x00" not in data:  # text file: force LF
+        data=data.replace(b"\r\n",b"\n")
+    with open(dst,"wb") as f: f.write(data)
 
 def _build_project_pack(block, src_commit, tid, schema, ts):
     for name,(rel,mode) in PACK_DOCS.items():
