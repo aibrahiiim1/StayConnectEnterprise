@@ -341,7 +341,8 @@ def cmd_validate(deep=True, manifest_equality=True):
     # the manifest's recorded HEAD commit must equal that acceptance-candidate HEAD (they cannot drift
     # apart between the final report / PR and the generated manifest).
     ach = st.get("acceptance_candidate_head")
-    man_path = os.path.join(ROOT, "docs/manifests/Phase2-change-manifest.md")
+    # the CURRENT delivery's change-manifest is phase-scoped: docs/manifests/Phase{N}-change-manifest.md
+    man_path = os.path.join(ROOT, f"docs/manifests/Phase{cp}-change-manifest.md")
     if manifest_equality and ach and os.path.isfile(man_path):
         mtext = open(man_path, encoding="utf-8").read()
         m = re.search(r"HEAD commit:\*\*\s*`([0-9a-f]{7,40})`", mtext)
@@ -399,6 +400,46 @@ def cmd_validate(deep=True, manifest_equality=True):
         p2t = open(os.path.join(ROOT, plan), encoding="utf-8").read()
         if "PHASE_2_PRODUCTION_RUNTIME: DARK" not in p2t:
             fail("Phase 2 plan missing sentinel 'PHASE_2_PRODUCTION_RUNTIME: DARK'")
+
+    # ---- Phase-3 governance guards (D14/T0015; DARK; no financial posting; Phase 4 gated) ----
+    if cp == "3":
+        p3 = st["phases"].get("3", {}).get("status")
+        p3x = st.get("phase3_execution", {}) or {}
+        # Phase 3 IN_PROGRESS requires the D14 authorization + T0015 start transition, coherently pointed.
+        if p3 == "IN_PROGRESS":
+            if "D14" not in dmap:
+                fail("Phase 3 is IN_PROGRESS but decision D14 is not in the register")
+            if not os.path.isfile(os.path.join(TRANSITIONS, "T0015.json")):
+                fail("Phase 3 is IN_PROGRESS but start transition T0015 is missing")
+            if p3x.get("authorization_decision") != "D14":
+                fail("phase3_execution.authorization_decision must be D14")
+            if p3x.get("authorization_transition_id") != "T0015":
+                fail("phase3_execution.authorization_transition_id must be T0015")
+            if p3x.get("transition_id") != "T0015":
+                fail("phase3_execution.transition_id must point at T0015 while Phase 3 is in progress")
+        # scope: prohibited must forbid Phase 4+ and must NOT forbid implementing Phase 3.
+        for pa in prohibited:
+            s = str(pa)
+            if re.search(r"implement\w*\s+phase\s*3\b", s, re.I) or re.search(r"beyond\s+(the\s+authorized\s+)?phase\s*2\b", s, re.I):
+                fail("Phase-3 scope contradiction: current_phase=3 but a prohibited_action still forbids implementing Phase 3")
+        if not any(re.search(r"beyond\s+the\s+authorized\s+phase\s*3|phase\s*4\b", str(pa), re.I) for pa in prohibited):
+            fail("Phase-3 scope guard: prohibited_actions must still forbid Phase 4+ (beyond the authorized Phase 3)")
+        # no stale "Phase 3 NOT_STARTED and unauthorized" / "not authorized" in current-state fields after D14/T0015.
+        cur3 = " ".join([str(st.get("current_maturity", "")), str(st.get("next_authorized_action", "")),
+                         str(p3x.get("stage", "")), str(st["phases"].get("3", {}).get("maturity", ""))]
+                        + [str(x) for x in (st.get("allowed_actions", []) or [])]
+                        + [str(x) for x in (st.get("blockers", []) or [])])
+        if re.search(r"phase\s*3[^.]{0,40}(not[_\s]started[^.]{0,20}unauthoriz|is\s+not\s+authoriz|awaiting\s+authoriz)", cur3, re.I):
+            fail("stale-state contradiction: Phase 3 is authorized (D14/T0015) but a current-state field still says Phase 3 is not-started/unauthorized")
+        # plan sentinels: DARK runtime + no-financial-posting + F8/F9 not claimed.
+        if plan and os.path.isfile(os.path.join(ROOT, plan)):
+            p3t = open(os.path.join(ROOT, plan), encoding="utf-8").read()
+            if "PHASE_3_PRODUCTION_RUNTIME: DARK" not in p3t:
+                fail("Phase 3 plan missing sentinel 'PHASE_3_PRODUCTION_RUNTIME: DARK'")
+            if "PHASE_3_NO_FINANCIAL_POSTING: TRUE" not in p3t:
+                fail("Phase 3 plan missing sentinel 'PHASE_3_NO_FINANCIAL_POSTING: TRUE' (no PS sender / Posting Engine in Phase 3)")
+            if not re.search(r"F8/F9\s+NOT\s+implemented", p3t):
+                fail("Phase 3 plan must state F8/F9 (Post-Stay PIN / Cross-PMS transfer) are NOT implemented in Phase 3")
 
     # ---- Phase-2 Zero-Stale reconciliation guards (narrow, deterministic) ----
     def _read(rel):
@@ -595,6 +636,9 @@ PACK_DOCS = {
  "StayConnect-IAM-Phase2-Live-Dark-Acceptance.md": ("docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md",None),
  "StayConnect-IAM-Phase2-Final-Report.md": ("docs/reports/StayConnect-IAM-Phase2-Final-Report.md",None),
  "Phase2-change-manifest.md": ("docs/manifests/Phase2-change-manifest.md",None),
+ "StayConnect-IAM-Phase3-Plan.md": ("docs/architecture/StayConnect-IAM-Phase3-Plan.md",None),
+ "Phase3-Privilege-Matrix.md": ("docs/architecture/Phase3-Privilege-Matrix.md",None),
+ "Phase3-change-manifest.md": ("docs/manifests/Phase3-change-manifest.md",None),
  "StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md": ("docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md",None),
  "Protel-FIAS-Phase0-Spike.md": ("docs/spikes/Protel-FIAS-Phase0-Spike.md","spike"),
  "ZERO_STALE_LEFTOVERS_RULE.md": ("docs/ZERO_STALE_LEFTOVERS_RULE.md",None),
@@ -631,6 +675,9 @@ MROWS = [
  ("StayConnect-IAM-Phase2-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md`","**Acceptance record — PRODUCT-OWNER ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014)**"),
  ("StayConnect-IAM-Phase2-Final-Report.md","`docs/reports/StayConnect-IAM-Phase2-Final-Report.md`","**Authoritative — Phase 2 final report (accepted)**"),
  ("Phase2-change-manifest.md","`docs/manifests/Phase2-change-manifest.md`","**Generated — complete Phase 2 changed-file manifest (base..delivery_head; inventory_head provenance)**"),
+ ("StayConnect-IAM-Phase3-Plan.md","`docs/architecture/StayConnect-IAM-Phase3-Plan.md`","**Authoritative — Phase 3 plan (D14/T0015; IMPLEMENTATION IN PROGRESS, DARK)**"),
+ ("Phase3-Privilege-Matrix.md","`docs/architecture/Phase3-Privilege-Matrix.md`","**Authoritative — Phase 3 privilege matrix (PRODUCTION_IAM_V2_DML: NONE; DARK)**"),
+ ("Phase3-change-manifest.md","`docs/manifests/Phase3-change-manifest.md`","**Generated — complete Phase 3 changed-file manifest (base..delivery_head; inventory_head provenance)**"),
  ("StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`","**Authoritative (acceptance record)**"),
  ("Protel-FIAS-Phase0-Spike.md","`docs/spikes/Protel-FIAS-Phase0-Spike.md`","**Authoritative** *(sanitized)*"),
  ("ZERO_STALE_LEFTOVERS_RULE.md","`docs/ZERO_STALE_LEFTOVERS_RULE.md`","**Permanent rule**"),

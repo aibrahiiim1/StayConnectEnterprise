@@ -14,9 +14,9 @@
     "branch_strategy": "one complete Phase per branch + one PR (phase/<name>-<purpose>); governance-only uses governance/<purpose>; no direct commits to the protected default branch without explicit PO authorization",
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
-  "current_phase": "2",
-  "current_activity": "PHASE_2_ACCEPTED_AND_CLOSED",
-  "current_maturity": "Phase 1A ACCEPTED_AND_CLOSED at its DARK maturity; Phase 1B ACCEPTED AND CLOSED by the Product Owner at verified DARK maturity (T0011, decision D11). DARK -- every new auth feature OFF, no production iam_v2 use, no cutover; legacy public-schema auth remains the sole production authority (iam_v2 49/0). Phase 2 (commercial packages) ACCEPTED AND CLOSED by the Product Owner at verified DARK maturity (T0014, decision D13) -- implementation + live-dark deployment + two reboot verifications complete on 172.21.60.23; migration 0009 applied; all Phase-2 flags OFF; zero runtime iam_v2 privileges; no cutover, no paid access, no PMS settlement; legacy public-schema pipeline remains the sole production authority. PR #4 is MERGED and CLOSED (merge commit fe6a0d12a49f74b7b7b84ef0c848a38512273370); post-merge Governance CI verified green; no open Phase-2 implementation, acceptance, merge or cleanup work remains. Phase 3 is NOT_STARTED and unauthorized; a separate Product-Owner decision is required for any later phase or any IAM-v2 authentication cutover.",
+  "current_phase": "3",
+  "current_activity": "PHASE_3_IMPLEMENTATION_IN_PROGRESS",
+  "current_maturity": "Phase 1A/1B/2 all ACCEPTED_AND_CLOSED at DARK maturity (Phase 2 merged to master via D13/T0014, merge commit fe6a0d12a49f74b7b7b84ef0c848a38512273370). DARK -- every new auth/commerce feature OFF, no production iam_v2 use, no cutover; legacy public-schema auth remains the sole production authority (iam_v2 49/0). Phase 3 (PMS Stay Domain, STRICT Multi-PMS Resolution, Room Movement, Checkout Grace and Reinstatement) is Product-Owner AUTHORIZED (decision D14, start transition T0015) and IMPLEMENTATION IN PROGRESS as one end-to-end Phase, DARK: all Phase-3 flags default OFF; additive migrations after 0009; a dedicated read-only PMS connector runtime; live PMS verification is READ-ONLY with disposable-test-DB persistence only; no financial posting, no PS sender, no Posting Engine, no IAM-v2 cutover, no Phase 4+. Phase 4 remains NOT_STARTED and unauthorized.",
   "phase1b_execution": {
     "implementation_authorized": true,
     "authorized_on": "2026-07-17",
@@ -55,12 +55,31 @@
     "post_merge_ci_runs": ["29653425556", "29653447592"],
     "remote_branch_deleted": true
   },
+  "phase3_execution": {
+    "implementation_authorized": true,
+    "authorized_on": "2026-07-18",
+    "authorization_decision": "D14",
+    "authorization_transition_id": "T0015",
+    "one_end_to_end_phase": true,
+    "cutover_authorized": false,
+    "paid_access_authorized": false,
+    "pms_posting_authorized": false,
+    "dark_features_enabled": false,
+    "transition_id": "T0015",
+    "transition_accepted": false,
+    "base_master_head": "ffb68e1ad325f5dd6d2096f2e30a782f8caef059",
+    "branch": "phase/3-stay-resolution-grace",
+    "pr": 6,
+    "stage": "IMPLEMENTATION IN PROGRESS (INCREMENT 1: governance + planning). DONE this increment: baseline verification; read-only architecture + schema audit (all 18 Phase-3 iam_v2 tables already exist in mg1-mg9; migration 0010_phase3_stay_resolution scoped to 6 additive gaps -- connector-freshness/cursor persistence, one-way stays.status + monotonic lifecycle_version/last_applied_event_version triggers, checkout-episode source-of-truth on stays, effective-checkout/grace-window fields, optional auth_resolutions dedup key + stay_events append-only guard); connector ADR (dedicated pmsd owns each PMS Interface socket under a DB advisory single-owner lock, reusing the proven data-plane/internal/pms/protel_fias.go protocol layer -- NOT a socket inside scd/portald/edged); Phase-3 Plan + Privilege Matrix; Phase-3 governance guards + mutations; D14/T0015 recorded; branch + PR #6. NOT YET DONE (subsequent increments): migration 0010; pmsd runtime; Stay/Event/Folio engine; STRICT resolver; PMS Auth Context; Phase-2 Commerce integration (enable capability-disabled STAY_* rule types via authoritative EligibilitySubject); Room Move; Checkout Grace + emergency fallback; Reinstatement; Guest Portal + Hotel Admin UI; D1-D11/F1-F7/concurrency tests; live READ-ONLY PMS verification; live-dark deployment + reboot; final acceptance report. All Phase-3 flags OFF; no PMS connection; zero Phase-3 SQL in production; no runtime iam_v2 grants; no PMS financial posting; no live guest use.",
+    "increment": 1,
+    "flags": ["STAYCONNECT_PHASE3_MASTER", "STAYCONNECT_PHASE3_PMS_CONNECTOR", "STAYCONNECT_PHASE3_PMS_INGEST", "STAYCONNECT_PHASE3_PMS_AUTH", "STAYCONNECT_PHASE3_CHECKOUT_GRACE", "STAYCONNECT_PHASE3_ADMIN", "NEXT_PUBLIC_PHASE3_ADMIN"]
+  },
   "phases": {
     "0":  { "status": "FINAL_CLOSED",       "title": "IAM redesign architecture contract + live PMS validation", "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)." },
     "1A": { "status": "ACCEPTED_AND_CLOSED","title": "Clean-slate IAM core + persistence (iam_v2)",              "maturity": "ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER" },
     "1B": { "status": "ACCEPTED_AND_CLOSED",        "title": "Credential/identity/auth-context (DARK)",                   "maturity": "IMPLEMENTATION + LIVE-DARK DEPLOYMENT COMPLETE; reboot verification COMPLETE; ACCEPTED AND CLOSED by the Product Owner at DARK maturity (T0011, decision D11). No IAM-v2 cutover; all dark features OFF (durable throttle / keyed-HMAC OTP / IAM-v2 all dark); zero runtime iam_v2 privileges; iam_v2 49 tables/0 rows; legacy public-schema auth is the sole production authority." },
     "2":  { "status": "ACCEPTED_AND_CLOSED", "title": "Packages, revisions, rules, tiers, quotes; free purchases; portal package selection", "maturity": "IMPLEMENTATION + LIVE-DARK DEPLOYMENT + TWO REBOOT VERIFICATIONS COMPLETE; ACCEPTED AND CLOSED by the Product Owner at verified DARK maturity (T0014, decision D13). DARK -- all Phase-2 flags OFF; no cutover, no paid access, no PMS settlement; zero runtime iam_v2 privileges; iam_v2 49/0; migration 0009 applied; legacy public-schema auth sole authority. PR #4 merged to master (merge commit fe6a0d1); no open Phase-2 work remains." },
-    "3":  { "status": "NOT_STARTED",        "title": "Stay domain: interfaces/revisions/routing, STRICT resolution, stays/sharers/folios, checkout grace" },
+    "3":  { "status": "IN_PROGRESS",        "title": "PMS Stay Domain, STRICT Multi-PMS Resolution, Room Movement, Checkout Grace and Reinstatement", "maturity": "IMPLEMENTATION IN PROGRESS as one end-to-end Phase (D14, start transition T0015), DARK. Increment 1 (governance + planning) delivered; all Phase-3 flags OFF; additive migrations after 0009; dedicated read-only PMS connector (pmsd) planned; live PMS verification is READ-ONLY to a disposable test DB; no financial posting, no PS sender, no IAM-v2 cutover, no Phase 4+. Not accepted/closed; awaiting complete execution + one final Product-Owner acceptance decision." },
     "4":  { "status": "NOT_STARTED",        "title": "Financial: settlements, postings + outbox, payments, recovery, manual review" },
     "5":  { "status": "NOT_STARTED",        "title": "Post-stay (PIN re-auth); cross-PMS transfer workflow" },
     "6":  { "status": "NOT_STARTED",        "title": "Guest device self-service; optional AGGREGATE_ONLINE_TIME" },
@@ -78,7 +97,8 @@
     "Phase 1B formally Product-Owner ACCEPTED and CLOSED at verified DARK maturity (2026-07-17, decision D11, transition T0011); all dark features remain OFF; no IAM-v2 cutover",
     "Phase 2 (commercial packages) implemented end-to-end and DEPLOYED LIVE-DARK + reboot-verified on 172.21.60.23 (2026-07-18): migration 0009 applied, pinned scd/edged/portald binaries + hotel-admin standalone bundle deployed, all Phase-2 flags OFF, zero runtime iam_v2 privileges, iam_v2 49/0, public schema unchanged",
     "Phase 2 (commercial packages) formally Product-Owner ACCEPTED and CLOSED at verified DARK maturity (2026-07-18, decision D13, transition T0014); accepted PR #4 baseline base 4e3c3ee / substantive HEAD 45323ad / final pre-acceptance PR HEAD a8c3b3c / Governance CI 29649900358 SUCCESS; all Phase-2 flags remain OFF; no IAM-v2 cutover",
-    "Phase 2 (commercial packages) delivery MERGED to master (2026-07-18): PR #4 merged/closed at merge commit fe6a0d12a49f74b7b7b84ef0c848a38512273370 (delivery HEAD d440fbe); pre-merge Governance CI 29653365860, post-merge push CI 29653425556 and dispatch CI 29653447592 all SUCCESS; remote branch phase/2-commercial-packages deleted; no open Phase-2 work remains"
+    "Phase 2 (commercial packages) delivery MERGED to master (2026-07-18): PR #4 merged/closed at merge commit fe6a0d12a49f74b7b7b84ef0c848a38512273370 (delivery HEAD d440fbe); pre-merge Governance CI 29653365860, post-merge push CI 29653425556 and dispatch CI 29653447592 all SUCCESS; remote branch phase/2-commercial-packages deleted; no open Phase-2 work remains",
+    "Phase 3 (PMS Stay Domain, STRICT Multi-PMS Resolution, Room Movement, Checkout Grace and Reinstatement) Product-Owner AUTHORIZED for complete end-to-end execution (2026-07-18, decision D14, start transition T0015); base master HEAD ffb68e1; branch phase/3-stay-resolution-grace / PR #6; DARK, all Phase-3 flags OFF; increment 1 (governance + planning + architecture/schema audit) in delivery"
   ],
   "verified_evidence": [
     { "id": "PROD_LIVE_DARK_V2", "path": "iam_v2_scratch/review/prod/PROD_LIVE_DARK_EVIDENCE_V2.txt", "kind": "read-only production re-verification", "authoritative": true },
@@ -141,30 +161,30 @@
   "pms_financial_state": "FIAS lookup-only in production; posting engine is a future component (Phase 4). folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
-    "No technical Phase-2 blocker and no open Phase-2 work: Phase 2 (commercial packages) is ACCEPTED_AND_CLOSED at verified DARK maturity by the Product Owner (decision D13, transition T0014); all flags OFF. Phase 1B remains ACCEPTED_AND_CLOSED; Phase 3 remains NOT_STARTED and unauthorized (a separate Product-Owner decision is required for any later phase or any IAM-v2 authentication cutover)."
+    "No governance blocker: Phase 3 (PMS Stay Domain, STRICT resolution, Room Move, Checkout Grace, Reinstatement) is Product-Owner AUTHORIZED (decision D14, start transition T0015) and IMPLEMENTATION IN PROGRESS as one end-to-end Phase, DARK. Phase 1A/1B/2 remain ACCEPTED_AND_CLOSED. Two external live-action dependencies apply only to LATER Phase-3 workstreams (not this planning increment): appliance SSH access for the eventual live-dark deployment (Section 42), and a controlled PMS test reservation created by authorized hotel staff for live READ-ONLY verification (Section 39). Phase 4 remains NOT_STARTED and unauthorized."
   ],
   "allowed_actions": [
-    "Read-only verification and inspection of the accepted, closed, merged Phase 2 (commercial packages)",
-    "Governance and documentation maintenance only (no runtime code change, no migration, no appliance deploy/restart/reboot, no flag enablement)",
-    "Preparation of a Phase-3 proposal or execution prompt WITHOUT implementation (no code, migration, grant, credential, flag or appliance change)",
-    "Execution of any Phase-3 or IAM-v2 authentication cutover work ONLY after an explicit new Product-Owner authorization"
+    "Execute the authorized Phase 3 (PMS Stay Domain, STRICT resolution, Room Move, Checkout Grace, Reinstatement) end-to-end as one Phase, DARK, per docs/architecture/StayConnect-IAM-Phase3-Plan.md (additive migrations after 0009, dedicated read-only PMS connector, Stay/Event/Folio engine, STRICT resolver, PMS Auth Context, Commerce integration in test mode, Room Move, Checkout Grace + emergency fallback, Reinstatement, Guest Portal + Hotel Admin UI, automated tests)",
+    "Live READ-ONLY PMS protocol verification against already-configured Interfaces, with persistence to an isolated disposable test DB only (never Production iam_v2); no financial posting, no PS transaction",
+    "Controlled live-dark deployment of Phase-3 artifacts to the development appliance: additive iam_v2 migration application, systemd unit changes, deploying changed binaries/UI, controlled service restarts, and one final reboot, with post-reboot read-only verification -- all Phase-3 flags remaining OFF",
+    "Governance and documentation maintenance for Phase 3"
   ],
   "prohibited_actions": [
-    "Implementing any Phase beyond the authorized Phase 2 dark scope (Phase 3 or any later Phase)",
-    "Any production iam_v2 write (including inside a later-rolled-back transaction)",
-    "Granting any iam_v2 DML privilege to a runtime service role in production",
-    "DSN/search_path change that routes any service to iam_v2; any iam_v2 cutover",
-    "Data migration into iam_v2; dual-read/dual-write; cutover",
-    "PMS/FIAS traffic; financial posting; programmatic reversal",
-    "HA/topology change; Central changes; legacy IAM removal; guest paid access; Stripe activation"
+    "Implementing any Phase beyond the authorized Phase 3 scope (Phase 4 or any later Phase)",
+    "Any PMS financial posting, FIAS PS transaction, Posting Engine, posting outbox/worker, charge retry, financial UNKNOWN handling, or any executable PS sender / dormant financial worker / hidden Posting path",
+    "Payments/Stripe/refunds/programmatic reversal/settlement execution; guest paid access",
+    "IAM-v2 production authentication cutover; production iam_v2 runtime reads/writes; granting any iam_v2 DML privilege to a runtime service role; DSN/search_path routing to iam_v2",
+    "Data migration into iam_v2; dual-read/dual-write; legacy IAM removal; enabling any Phase-3 feature flag on the appliance",
+    "Central Control Plane changes; WAN/LAN/VLAN/DHCP changes; HA/appliance-topology changes",
+    "Writing any Production Stay/Guest/Folio/Event/Auth-Context row to Production iam_v2 while dark (live PMS test persistence targets a disposable test DB only)"
   ],
-  "next_authorized_action": "Await explicit Product-Owner authorization for Phase 3 or for a separately gated IAM-v2 authentication cutover. No Phase 3, cutover, paid access or PMS settlement work is currently authorized.",
-  "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase2-Plan.md",
-  "privilege_matrix": "docs/architecture/Phase2-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D13",
-  "latest_transition_id": "T0014",
-  "acceptance_candidate_head": "9a1f356abc05c942be0fe0e67a9a6f0f4811cab5",
-  "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase2-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the final PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "9a1f356abc05c942be0fe0e67a9a6f0f4811cab5",
-  "delivery_head_note": "delivery_head (the final PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #4 body and the Final Report, not self-referenced inside a committed artifact."
+  "next_authorized_action": "Execute the authorized Phase 3 end-to-end as one Phase, DARK, per docs/architecture/StayConnect-IAM-Phase3-Plan.md, then return one final Phase-3 acceptance report at verified DARK maturity. No Phase 4, no PMS financial posting, no IAM-v2 cutover.",
+  "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+  "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
+  "latest_accepted_po_decision": "D14",
+  "latest_transition_id": "T0015",
+  "acceptance_candidate_head": "PHASE3_INV_PLACEHOLDER",
+  "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
+  "inventory_head": "PHASE3_INV_PLACEHOLDER",
+  "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }
