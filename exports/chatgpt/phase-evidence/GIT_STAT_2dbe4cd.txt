@@ -1,0 +1,4 @@
+commit 2dbe4cd41644b535bfd9b24b4a0e6950ae53ee13
+Date:   Sun Jul 19 01:58:08 2026 +0300
+
+    @ Phase 3 increment 2 final invariants (inventory_head): event append-first/terminal rules, grace all-or-none, runner scope hardening
