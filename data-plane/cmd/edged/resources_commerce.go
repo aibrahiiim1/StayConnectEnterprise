@@ -8,6 +8,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,10 +18,174 @@ import (
 
 func (s *server) commercialPackagesRoutes() http.Handler {
 	r := chi.NewRouter()
+	// packages
 	r.Get("/", s.listCommercialPackages)
 	r.Post("/", s.publishCommercialPackage)
+	// service plans (static paths matched before the /{id} param routes)
+	r.Get("/plans", s.listServicePlans)
+	r.Post("/plans", s.publishServicePlan)
+	r.Get("/plans/{id}/revisions", s.listServicePlanRevisions)
+	// site checkout-grace configuration
+	r.Get("/grace", s.getGraceConfig)
+	r.Put("/grace", s.setGraceConfig)
+	// read-only inspection (guest-PII-free)
+	r.Get("/quotes", s.listCommerceQuotes)
+	r.Get("/purchases", s.listCommercePurchases)
+	// package-scoped
+	r.Get("/{id}/revisions", s.listCommercialPackageRevisions)
 	r.Post("/{id}/active", s.setCommercialPackageActive)
 	return r
+}
+
+func (s *server) listServicePlans(w http.ResponseWriter, r *http.Request) {
+	plans, disabled, err := s.commerce.ListPlans(r.Context(), s.tenantID, s.siteID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
+		return
+	}
+	if disabled {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	writeList(w, plans)
+}
+
+type publishPlanReq struct {
+	Code                        string `json:"code"`
+	Name                        string `json:"name"`
+	DownKbps                    *int   `json:"down_kbps"`
+	UpKbps                      *int   `json:"up_kbps"`
+	MaxConcurrentDevices        int    `json:"max_concurrent_devices"`
+	DeviceLimitPolicy           string `json:"device_limit_policy"`
+	IdleTimeoutSeconds          *int   `json:"idle_timeout_seconds"`
+	MaxContinuousSessionSeconds *int   `json:"max_continuous_session_seconds"`
+	TimeQuotaSeconds            *int64 `json:"time_quota_seconds"`
+	DataQuotaBytes              *int64 `json:"data_quota_bytes"`
+	TimeAccountingMode          string `json:"time_accounting_mode"`
+}
+
+func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
+	var in publishPlanReq
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	res, err := s.commerce.PublishPlanRevision(r.Context(), iamv2.PlanPublishSpec{
+		TenantID: s.tenantID, SiteID: s.siteID, PlanCode: in.Code, Name: in.Name,
+		DownKbps: in.DownKbps, UpKbps: in.UpKbps, MaxConcurrentDevices: in.MaxConcurrentDevices,
+		DeviceLimitPolicy: in.DeviceLimitPolicy, IdleTimeoutSeconds: in.IdleTimeoutSeconds,
+		MaxContinuousSessionSeconds: in.MaxContinuousSessionSeconds, TimeQuotaSeconds: in.TimeQuotaSeconds,
+		DataQuotaBytes: in.DataQuotaBytes, TimeAccountingMode: in.TimeAccountingMode,
+	})
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "publish failed")
+		return
+	}
+	if res.Disabled {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	if res.Reason != "published" {
+		jsonErr(w, http.StatusBadRequest, "validation", res.Reason)
+		return
+	}
+	s.audit(r, "service_plan.published", "service_plan", res.PackageID, map[string]any{
+		"revision_id": res.CurrentRevisionID, "code": in.Code,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"plan_id": res.PackageID, "current_revision_id": res.CurrentRevisionID})
+}
+
+func (s *server) listServicePlanRevisions(w http.ResponseWriter, r *http.Request) {
+	revs, disabled, err := s.commerce.PlanRevisions(r.Context(), s.tenantID, s.siteID, chi.URLParam(r, "id"))
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
+		return
+	}
+	if disabled {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	writeList(w, revs)
+}
+
+func (s *server) listCommercialPackageRevisions(w http.ResponseWriter, r *http.Request) {
+	revs, disabled, err := s.commerce.PackageRevisions(r.Context(), s.tenantID, s.siteID, chi.URLParam(r, "id"))
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
+		return
+	}
+	if disabled {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	writeList(w, revs)
+}
+
+func (s *server) getGraceConfig(w http.ResponseWriter, r *http.Request) {
+	gc, disabled, err := s.commerce.GetGrace(r.Context(), s.tenantID, s.siteID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "load failed")
+		return
+	}
+	if disabled {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	writeJSON(w, http.StatusOK, gc)
+}
+
+type setGraceReq struct {
+	GracePackageRevisionID string         `json:"grace_package_revision_id"`
+	Config                 map[string]any `json:"config"`
+}
+
+func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
+	var in setGraceReq
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	res, err := s.commerce.SetGrace(r.Context(), s.tenantID, s.siteID, in.GracePackageRevisionID, in.Config)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "update failed")
+		return
+	}
+	if res.Disabled {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	if res.Reason != "ok" {
+		jsonErr(w, http.StatusBadRequest, "validation", res.Reason)
+		return
+	}
+	s.audit(r, "commercial_grace.configured", "commercial_grace", in.GracePackageRevisionID, nil)
+	writeJSON(w, http.StatusOK, map[string]any{"grace_package_revision_id": in.GracePackageRevisionID})
+}
+
+func (s *server) listCommerceQuotes(w http.ResponseWriter, r *http.Request) {
+	q, disabled, err := s.commerce.Quotes(r.Context(), s.tenantID, s.siteID, 100)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
+		return
+	}
+	if disabled {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	writeList(w, q)
+}
+
+func (s *server) listCommercePurchases(w http.ResponseWriter, r *http.Request) {
+	p, disabled, err := s.commerce.Purchases(r.Context(), s.tenantID, s.siteID, 100)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
+		return
+	}
+	if disabled {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	writeList(w, p)
 }
 
 func (s *server) listCommercialPackages(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +261,9 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 }
 
 type setActiveReq struct {
-	Active bool `json:"active"`
+	Active   bool   `json:"active"`
+	Password string `json:"password"` // step-up, required for destructive deactivation
+	Reason   string `json:"reason"`
 }
 
 func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +272,18 @@ func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Reque
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
+	}
+	// Deactivation is destructive (it withdraws a live package from guests): require a reason + password
+	// step-up, mirroring the destructive service-restart / cert-rotate policy.
+	if !in.Active {
+		if strings.TrimSpace(in.Reason) == "" {
+			jsonErr(w, http.StatusBadRequest, "reason_required", "a reason is required to deactivate a package")
+			return
+		}
+		if !s.reauth(r, in.Password) {
+			jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+			return
+		}
 	}
 	res, err := s.commerce.SetActive(r.Context(), s.tenantID, s.siteID, id, in.Active)
 	if err != nil {

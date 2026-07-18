@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -154,5 +155,106 @@ func TestCommerceAdminPublishRejectsInvalid(t *testing.T) {
 	// no partial package/revision persisted by any rejected publish
 	if n := count(t, db, `SELECT count(*) FROM iam_v2.internet_packages WHERE code='BAD'`); n != 0 {
 		t.Fatalf("rejected publishes left %d packages", n)
+	}
+}
+
+func TestCommerceAdminServicePlans(t *testing.T) {
+	db := p2DB(t)
+	if _, err := db.Exec(context.Background(), `INSERT INTO public.guest_networks (id,tenant_id,site_id,name) VALUES ($1,$2,$3,'net') ON CONFLICT (id) DO NOTHING`, p2GN, p2Tenant, p2Site); err != nil {
+		t.Fatalf("gn: %v", err)
+	}
+	a := newAdmin(t, db)
+	ctx := context.Background()
+
+	dk := 5000
+	spec := PlanPublishSpec{TenantID: p2Tenant, SiteID: p2Site, PlanCode: "GOLD", Name: "Gold", DownKbps: &dk, MaxConcurrentDevices: 3}
+	r1, err := a.PublishPlanRevision(ctx, spec)
+	if err != nil || r1.Reason != "published" || r1.PackageID == "" {
+		t.Fatalf("publish plan: %+v %v", r1, err)
+	}
+	// list plans
+	plans, disabled, err := a.ListPlans(ctx, p2Tenant, p2Site)
+	if err != nil || disabled || len(plans) != 1 || plans[0].Code != "GOLD" || plans[0].RevisionCount != 1 {
+		t.Fatalf("list plans: %+v disabled=%v err=%v", plans, disabled, err)
+	}
+	// publish a second revision -> pointer moves, 2 revisions
+	r2, err := a.PublishPlanRevision(ctx, spec)
+	if err != nil || r2.CurrentRevisionID == r1.CurrentRevisionID {
+		t.Fatalf("publish plan rev2: %+v %v", r2, err)
+	}
+	revs, _, err := a.PlanRevisions(ctx, p2Tenant, p2Site, r1.PackageID)
+	if err != nil || len(revs) != 2 || !revs[0].IsCurrent || revs[0].RevisionNo != 2 {
+		t.Fatalf("plan revisions: %+v %v", revs, err)
+	}
+	// AGGREGATE accounting is capability-disabled
+	bad := spec
+	bad.TimeAccountingMode = "AGGREGATE_ONLINE_TIME"
+	if res, _ := a.PublishPlanRevision(ctx, bad); res.Reason != "invalid_plan_spec" {
+		t.Fatalf("AGGREGATE plan must be rejected, got %+v", res)
+	}
+}
+
+func TestCommerceAdminGraceValidation(t *testing.T) {
+	db := p2DB(t)
+	planRev := seedPlanOnly(t, db)
+	a := newAdmin(t, db)
+	ctx := context.Background()
+
+	mkPkg := func(code, ptype string, price int64, settlement string) string {
+		pkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active) VALUES ($1,$2,$3,true) RETURNING id::text`, p2Tenant, p2Site, code)
+		rev := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
+			(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy)
+			VALUES ($1,$2,$3,1,$4,$5,$6,'USD',2,$7::text[],'{"end_mode":"MANUAL_END"}'::jsonb) RETURNING id::text`,
+			p2Tenant, p2Site, pkg, planRev, ptype, price, settlement)
+		if _, err := db.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2`, rev, pkg); err != nil {
+			t.Fatalf("pointer: %v", err)
+		}
+		return rev
+	}
+	// valid: CHECKOUT_GRACE, free, NOT_REQUIRED, valid plan
+	graceRev := mkPkg("GRACE", "CHECKOUT_GRACE", 0, "{NOT_REQUIRED}")
+	if res, err := a.SetGrace(ctx, p2Tenant, p2Site, graceRev, map[string]any{"grace_minutes": 30}); err != nil || res.Reason != "ok" {
+		t.Fatalf("valid grace must be accepted: %+v %v", res, err)
+	}
+	if gc, _, _ := a.GetGrace(ctx, p2Tenant, p2Site); gc.GracePackageRevisionID != graceRev {
+		t.Fatalf("grace not stored: %+v", gc)
+	}
+	// wrong type
+	genRev := mkPkg("GEN", "GENERAL", 0, "{NOT_REQUIRED}")
+	if res, _ := a.SetGrace(ctx, p2Tenant, p2Site, genRev, nil); res.Reason != "grace_package_wrong_type" {
+		t.Fatalf("GENERAL grace must be rejected, got %+v", res)
+	}
+	// priced
+	pricedRev := mkPkg("PGRACE", "CHECKOUT_GRACE", 500, "{NOT_REQUIRED}")
+	if res, _ := a.SetGrace(ctx, p2Tenant, p2Site, pricedRev, nil); res.Reason != "grace_package_not_free" {
+		t.Fatalf("priced grace must be rejected, got %+v", res)
+	}
+	// not-found
+	if res, _ := a.SetGrace(ctx, p2Tenant, p2Site, "99999999-9999-9999-9999-999999999999", nil); res.Reason != "grace_package_not_found" {
+		t.Fatalf("missing grace revision must be rejected, got %+v", res)
+	}
+}
+
+func TestCommerceAdminInspectionPIIFree(t *testing.T) {
+	db := p2DB(t)
+	s := seedFreeCommerce(t, db, nil)
+	e := newEngine(t, db, 5*time.Minute)
+	a := newAdmin(t, db)
+	ctx := context.Background()
+	// create a quote + confirm to populate inspection rows
+	q, err := e.CreateQuote(ctx, req(s))
+	if err != nil || q.QuoteID == "" {
+		t.Fatalf("quote: %+v %v", q, err)
+	}
+	if pr, err := e.ConfirmFreePurchase(ctx, ConfirmRequest{TenantID: p2Tenant, SiteID: p2Site, QuoteID: q.QuoteID, DeviceID: s.deviceID, GuestNetworkID: p2GN}); err != nil || pr.Reason != "granted" {
+		t.Fatalf("confirm: %+v %v", pr, err)
+	}
+	quotes, disabled, err := a.Quotes(ctx, p2Tenant, p2Site, 100)
+	if err != nil || disabled || len(quotes) != 1 || quotes[0].PriceMinor != 0 {
+		t.Fatalf("quotes inspect: %+v disabled=%v err=%v", quotes, disabled, err)
+	}
+	purchases, _, err := a.Purchases(ctx, p2Tenant, p2Site, 100)
+	if err != nil || len(purchases) != 1 || purchases[0].State != "GRANTED" {
+		t.Fatalf("purchases inspect: %+v %v", purchases, err)
 	}
 }
