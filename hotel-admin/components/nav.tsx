@@ -6,12 +6,18 @@ import { canRead } from "@/lib/roles";
 import {
   LayoutDashboard, Ticket, Users, LogOut, Monitor, FileText,
   Shield, ScrollText, Hotel, Send, KeyRound, Wallet, BadgeCheck,
-  Paintbrush, Archive, Network, Wifi, History, Router, Cloud, ServerCog, Lock, Activity,
+  Paintbrush, Archive, Network, Wifi, History, Router, Cloud, ServerCog, Lock, Activity, Package,
 } from "lucide-react";
+
+// Phase 2 (DARK) commercial packages: the admin surface is off by default and the nav item stays hidden
+// unless the deployment sets NEXT_PUBLIC_PHASE2_ADMIN=1 (mirrors the edged STAYCONNECT_PHASE2_* flags).
+// Even when shown, the edged routes are the authority — they are absent unless the backend flag is on.
+const PHASE2_ADMIN = process.env.NEXT_PUBLIC_PHASE2_ADMIN === "1";
 
 // Each item names the edged resource that gates its visibility. Items the
 // operator's roles cannot read are hidden (edged still enforces server-side).
-type Item = { href: string; label: string; icon: any; resource: string };
+// `enabled: false` hides an item behind a dark feature flag regardless of role.
+type Item = { href: string; label: string; icon: any; resource: string; enabled?: boolean };
 type Section = { title: string; items: Item[] };
 
 const SECTIONS: Section[] = [
@@ -27,6 +33,7 @@ const SECTIONS: Section[] = [
       { href: "/guest-access-plans", label: "Guest access plans", icon: FileText, resource: "guest-access-plans" },
       { href: "/voucher-batches",    label: "Voucher batches",    icon: Ticket,   resource: "voucher-batches" },
       { href: "/guest-accounts",     label: "Guest accounts",     icon: KeyRound, resource: "guest-accounts" },
+      { href: "/commercial-packages", label: "Commercial packages", icon: Package, resource: "commercial-packages", enabled: PHASE2_ADMIN },
       { href: "/sessions",           label: "Sessions",           icon: Monitor,  resource: "sessions" },
     ],
   },
@@ -82,7 +89,7 @@ export function Nav({
       </div>
       <nav className="flex-1 p-2 text-sm overflow-y-auto">
         {SECTIONS.map((sec) => {
-          const visible = sec.items.filter((it) => canRead(it.resource, roles));
+          const visible = sec.items.filter((it) => it.enabled !== false && canRead(it.resource, roles));
           if (visible.length === 0) return null;
           return (
             <div key={sec.title} className="mb-2">
