@@ -124,6 +124,9 @@ MUTATIONS = [
  ("M36 stale prohibition still forbids the authorized current Phase 2", "governance/project-state.json",
    ("replace", [("Implementing any Phase beyond the authorized Phase 2 dark scope (Phase 3 or any later Phase)",
                  "Implementing any Phase beyond the authorized Phase 1B dark scope (Phase 2 or any later Phase)")])),
+ ("M37 phase2 transition pointer stuck at T0012 after live-dark deploy (T0013)", "governance/project-state.json",
+   ("replace", [('"transition_id": "T0013",\n    "transition_accepted": false',
+                 '"transition_id": "T0012",\n    "transition_accepted": false')])),
 ]
 
 def apply(relpath, op):

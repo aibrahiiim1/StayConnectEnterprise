@@ -23,12 +23,28 @@ Phase-2-relevant test packages (all green):
 
 ## Hotel Admin UI (`hotel-admin/`)
 
-| Step | Command | Result |
-|---|---|---|
-| Typecheck | `npx tsc --noEmit` | **EXIT 0 / PASS** (2026-07-18T08:02:20Z) |
-| Build (compile) | `npx next build` | **`✓ Compiled successfully` + types valid** |
+### Automated UI tests (added in the final acceptance gate)
 
-Note: `next build` static-prerender of all 31 routes OOMs on the dev workstation (V8 heap ceiling); this is an environment memory limit, not a code defect — the commercial-packages page is `"use client"` (dynamic, not prerendered), and both the compile and the TypeScript validity passes succeed. The standalone release build runs on the deployment host.
+| Suite | Tool | Command | Result |
+|---|---|---|---|
+| Component/unit | Vitest + React Testing Library (jsdom) | `npm test` | **36 tests / 4 files PASS** |
+| Hotel Admin E2E | Playwright (system Chrome via `channel`) | `npm run e2e -- e2e/hotel-admin.spec.ts` | **3 tests PASS** |
+| Guest Portal E2E | Playwright (renders the real portald success template) | `npm run e2e -- e2e/guest-portal.spec.ts` | **6 tests PASS** |
+
+Component/unit coverage: nav gating by `NEXT_PUBLIC_PHASE2_ADMIN` + role; 503 → approved disabled state; plan-revision selector (no raw UUID); revision-history current/immutable; typed eligibility editor lists only the five supported non-PMS rule types (PMS types absent); ordered grant-tier serialization; duration validation (manual/window/fixed; PMS/checkout modes not representable); sale-window validation; free-only payload (no price/settlement/pms/tax/currency keys, no such inputs); grace validation error; deactivation reason+password step-up (aborts on cancel); PII-free inspection; failed publish shows an error without a false success.
+
+E2E coverage: real Chrome drives the real Next app (Hotel Admin, `next dev` flag-ON, edged mocked at the network layer) and the real portald success-page template (Guest Portal). Guest flow proves the browser submits ONLY opaque `package_id`/`quote_id` (no tenant/site/auth-context/device/guest-network), double-submit yields exactly one confirm, and expired/failed quotes show generic unavailable with no active state.
+
+### Type-check + production build
+
+| Step | Command | Host | Result |
+|---|---|---|---|
+| Typecheck | `npx tsc --noEmit` | dev workstation | **EXIT 0 / PASS** |
+| **Authoritative production build** | `NODE_OPTIONS=--max-old-space-size=12288 npm run build` | CHV-MISMGR (Windows, 31.7 GB) | **EXIT 0** — `✓ Compiled successfully`, **`✓ Generating static pages (31/31)`**, standalone bundle produced. START `2026-07-18T11:52:54Z` → END `2026-07-18T11:53:39Z`. |
+
+Standalone bundle: `.next/standalone/server.js` present; deploy tarball SHA-256 `678c793ea46f23241eba05bde66929b19a5473fc8d3752d2a5eb083f4ff0dd95`. `/commercial-packages` builds as a static (`○`) route (8.35 kB); with `NEXT_PUBLIC_PHASE2_ADMIN` unset the nav item is hidden (dark).
+
+**Environment observation (not a code defect), kept for the record:** the production build OOMs at the whole-app static-prerender step when the workstation has < ~7 GB free (V8 heap ceiling under memory pressure). It is NOT a build failure of the code — with adequate free memory + a 12 GB Node heap the build completes all 31 routes (the authoritative result above). This is distinct from, and supersedes, the earlier partial run that stopped at prerender under memory pressure. The Final Report reflects the successful authoritative build.
 
 ## Governance
 

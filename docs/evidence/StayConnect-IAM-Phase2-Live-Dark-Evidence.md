@@ -49,5 +49,13 @@ Boot before: `2026-07-17 21:17:32`. **Final reboot** → boot after: `2026-07-18
 | svc roles iam_v2 grants | **ALL_ZERO** |
 | Legacy smoke (portald `/`, portald `/generate_204`, hotel-admin `/login`, edged `/edge/v1/health`, scd auth-methods) | 200 / 302 / 200 / 200 / 200 |
 
+## Final acceptance gate — UI bundle redeploy + second reboot (2026-07-18)
+
+The final acceptance gate refactored the Hotel-Admin commercial-packages UI (typed publish form) and added the automated UI test suites. This changed a deployed runtime artifact (the hotel-admin bundle only — the Go `scd`/`edged`/`portald` binaries were NOT changed and keep their hashes above). The updated bundle was rebuilt (authoritative production build) and redeployed; a second reboot was performed and darkness re-verified.
+
+- New hotel-admin bundle tarball SHA-256: `678c793ea46f23241eba05bde66929b19a5473fc8d3752d2a5eb083f4ff0dd95` → release `20260718-115608` (stamp `20260718T115435Z-phase2-final`); prior release retained via `hotel-admin.previous`.
+- Go binaries unchanged (verified after reboot): scd `1e25f9ef…`, edged `30ed45f1…`, portald `bf400654…`.
+- Second reboot → boot `2026-07-18 11:56:34`. Re-verified: all six services active; hotel-admin `/login` 200; Phase-2 flags none set (hotel-admin env has no `NEXT_PUBLIC_PHASE2_ADMIN`); scd `/v1/commerce/{packages,quote,confirm}` **404**; dark construction `phase2 master=false portal=false admin=false`; iam_v2 **49/0**; `schema_migrations` 0009 present; iam_v2 commerce data **0**; `svc_scd`/`svc_edged`/`svc_acctd`/`svc_netd` **zero** iam_v2 grants; legacy smoke (portald `/`, scd health, edged health) all 200.
+
 ## Conclusion
-Phase 2 is deployed **live-dark** and **reboot-verified**: the commercial-packages code, migration 0009, pinned binaries and UI bundle are on the appliance; every surface is inert behind OFF flags; legacy public-schema authentication remains the sole production authority; iam_v2 remains empty except authorized schema metadata. No Phase-2 functionality is enabled and no IAM-v2 cutover was performed.
+Phase 2 is deployed **live-dark** and **reboot-verified** (twice): the commercial-packages code, migration 0009, pinned binaries and the final UI bundle are on the appliance; every surface is inert behind OFF flags; legacy public-schema authentication remains the sole production authority; iam_v2 remains empty except authorized schema metadata. No Phase-2 functionality is enabled and no IAM-v2 cutover was performed.

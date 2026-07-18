@@ -2,8 +2,11 @@
 
 **Status: CANDIDATE — pending a single Product-Owner acceptance decision. NOT self-accepted; NOT closed. PR #4 remains unmerged.**
 
-- Phase: 2 (Commercial Packages) — one end-to-end Phase under Product-Owner authorization **D12**, transition **T0012** (`transition_accepted: false`).
-- Branch: `phase/2-commercial-packages`; PR #4.
+- Phase: 2 (Commercial Packages) — one end-to-end Phase.
+- **Authorized** under Product-Owner decision **D12**, authorization/start transition **T0012**.
+- **Deployment candidate** recorded by transition **T0013** (live-dark deploy + reboot; `transition_accepted: false`).
+- **Not yet Product-Owner accepted** — this record requests that decision; it does not self-accept.
+- Branch: `phase/2-commercial-packages`; PR #4 (unmerged).
 - Maturity offered for acceptance: **verified DARK** (implementation + live-dark deployment + one reboot + post-reboot re-verification).
 - Appliance: `radius` / `172.21.60.23`.
 

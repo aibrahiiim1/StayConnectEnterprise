@@ -2,7 +2,18 @@
 
 **Maturity offered: verified DARK (implementation + live-dark deployment + one reboot + post-reboot re-verification). Pending a single Product-Owner acceptance decision. Not self-accepted; PR #4 unmerged.**
 
-Branch `phase/2-commercial-packages` · PR #4 · authorization **D12** · transition **T0013** (within D12; `transition_accepted: false`) · appliance `radius` / `172.21.60.23`.
+Branch `phase/2-commercial-packages` · PR #4 · **authorized** under **D12** / transition **T0012** · **deployment candidate** transition **T0013** (`transition_accepted: false`) · appliance `radius` / `172.21.60.23`.
+
+---
+
+## 0. Final acceptance gate — UI automation + evidence reconciliation
+
+This gate added real UI test automation, an authoritative production build, and governance/evidence reconciliation. No rollback, no flag enablement, no cutover, no merge, no self-acceptance.
+
+- **UI tests (45 total, all green).** Component/unit: **36** (Vitest + React Testing Library). E2E: **9** (Playwright driving locally-installed Chrome) — 3 Hotel Admin (real Next app, edged mocked) + 6 Guest Portal (the real portald success-page template, `/api/commerce/*` mocked). The Guest Portal E2E proves the browser submits ONLY opaque `package_id`/`quote_id` and that double-submit yields exactly one confirm.
+- **Authoritative production build.** `NODE_OPTIONS=--max-old-space-size=12288 npm run build` on host CHV-MISMGR, START `2026-07-18T11:52:54Z` → END `2026-07-18T11:53:39Z`, **EXIT 0**, `✓ Compiled successfully` + `✓ Generating static pages (31/31)`. Standalone tarball SHA-256 `678c793ea46f23241eba05bde66929b19a5473fc8d3752d2a5eb083f4ff0dd95`. The earlier prerender OOM is an environment memory limit (recorded as an observation), now superseded by this successful build.
+- **Runtime artifact change → targeted redeploy + reboot.** The Hotel-Admin UI (typed publish form) changed; the Go `scd`/`edged`/`portald` binaries did **not**. The new UI bundle (`678c793e…`, release `20260718-115608`) was deployed; a **second reboot** (boot `2026-07-18 11:56:34`) re-verified darkness: services active, Go hashes unchanged (`1e25f9ef`/`30ed45f1`/`bf400654`), flags OFF, scd commerce routes 404, iam_v2 **49/0**, `schema_migrations` 0009 present, commerce data **0**, svc roles **zero** iam_v2 grants, legacy smoke 200.
+- **Governance.** `phase2_execution.transition_id` now points at the deployment transition **T0013**; the D12 authorization/start transition **T0012** is preserved in `authorization_transition_id`. New deterministic guards: transition-pointer drift (T0012 vs T0013) and manifest-HEAD coherence; adversarial mutation M37 covers the pointer drift.
 
 ---
 

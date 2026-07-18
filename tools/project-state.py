@@ -313,6 +313,33 @@ def cmd_validate(deep=True):
         if not any(re.search(r"beyond\s+the\s+authorized\s+phase\s*2|phase\s*3\b", str(pa), re.I) for pa in prohibited):
             fail("Phase-2 scope guard: prohibited_actions must still forbid Phase 3+ (beyond the authorized Phase 2)")
 
+    # Phase-2 transition-pointer coherence (deterministic): once the ledger has advanced to the live-dark
+    # deployment transition (T0013) and the activity reflects it, phase2_execution.transition_id must point
+    # at the CURRENT (deployment) transition — not still at the T0012 authorization/start transition. The
+    # authorization transition is preserved separately in phase2_execution.authorization_transition_id.
+    p2exec = st.get("phase2_execution", {}) or {}
+    if str(st.get("latest_transition_id", "")) == "T0013" and cp == "2" \
+       and "LIVE_DARK_DEPLOYED" in str(st.get("current_activity", "")):
+        if p2exec.get("transition_id") != "T0013":
+            fail("stale-state contradiction: latest transition is T0013 and activity is live-dark deployed, "
+                 "but phase2_execution.transition_id does not point at T0013")
+        if p2exec.get("authorization_transition_id") != "T0012":
+            fail("phase2_execution.authorization_transition_id must record the D12 authorization transition T0012")
+
+    # Manifest-HEAD coherence: when an acceptance-candidate HEAD is recorded and a change-manifest exists,
+    # the manifest's recorded HEAD commit must equal that acceptance-candidate HEAD (they cannot drift
+    # apart between the final report / PR and the generated manifest).
+    ach = st.get("acceptance_candidate_head")
+    man_path = os.path.join(ROOT, "docs/manifests/Phase2-change-manifest.md")
+    if ach and os.path.isfile(man_path):
+        mtext = open(man_path, encoding="utf-8").read()
+        m = re.search(r"HEAD commit:\*\*\s*`([0-9a-f]{7,40})`", mtext)
+        head_in_manifest = m.group(1) if m else ""
+        if not head_in_manifest:
+            fail("change-manifest has no recorded HEAD commit")
+        elif not (head_in_manifest.startswith(ach) or ach.startswith(head_in_manifest)):
+            fail(f"manifest HEAD {head_in_manifest} != acceptance_candidate_head {ach}")
+
     # current phase plan + privilege matrix exist; each asserts the ZERO-production-iam_v2 posture.
     plan = st.get("current_phase_plan")
     if not plan or not os.path.isfile(os.path.join(ROOT, plan)): fail(f"current_phase_plan missing/not found: {plan}")
