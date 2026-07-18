@@ -55,7 +55,7 @@ MUTATIONS = [
  ("M06 Phase 1B rolled-back production write allowed", "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
    ("replace", [("rolled-back", "committed")])),
  ("M07 modified generated block", "docs/context/StayConnect-IAM-Handoff.md",
-   ("replace", [("**Current phase:** 2", "**Current phase:** 9Z")])),
+   ("replace", [("**Current phase:** 3", "**Current phase:** 9Z")])),
  ("M08 stale source commit / snapshot mismatch", "governance/project-state.json",
    ("replace", [('"latest_transition_id": "T0015"', '"latest_transition_id": "T0008"')])),
  ("M09 missing acceptance record", "governance/project-state.json",

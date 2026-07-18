@@ -1,0 +1,4 @@
+commit b08b6cc141b298c8732db36a83d2277b0c3d0e23
+Date:   Sat Jul 18 22:35:38 2026 +0300
+
+    @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards

@@ -1,14 +1,14 @@
 # StayConnect IAM — Context Handoff
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0014 -->
-**Current phase:** 2 — Packages, revisions, rules, tiers, quotes; free purchases; portal package selection
-**Current activity:** `PHASE_2_ACCEPTED_AND_CLOSED`
-**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0015 -->
+**Current phase:** 3 — PMS Stay Domain, STRICT Multi-PMS Resolution, Room Movement, Checkout Grace and Reinstatement
+**Current activity:** `PHASE_3_IMPLEMENTATION_IN_PROGRESS`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 IN_PROGRESS · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Await explicit Product-Owner authorization for Phase 3 or for a separately gated IAM-v2 authentication cutover. No Phase 3, cutover, paid access or PMS settlement work is currently authorized.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D13`.
+**Single next authorized action:** Execute the authorized Phase 3 end-to-end as one Phase, DARK, per docs/architecture/StayConnect-IAM-Phase3-Plan.md, then return one final Phase-3 acceptance report at verified DARK maturity. No Phase 4, no PMS financial posting, no IAM-v2 cutover.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D14`.
 <!-- END GENERATED PROJECT STATE -->
 
 
@@ -104,13 +104,13 @@ Before financial Posting is enabled for **any** Property, that Property must ind
 
 ## Next Authorized Step
 
-**The single authoritative current next action is the GENERATED PROJECT STATE block at the top of this file.** As of the current state that is: **await an explicit Product-Owner authorization for Phase 3 or for a separately gated IAM-v2 authentication cutover** — Phase 2 (Commercial Packages) is **ACCEPTED_AND_CLOSED at verified DARK maturity** by Product-Owner decision **D13** / closure transition **T0014** (2026-07-18) and **MERGED to master** (merge commit `fe6a0d1`); no open Phase-2 work remains; no cutover; no Phase 3 (NOT_STARTED and unauthorized).
+**The single authoritative current next action is the GENERATED PROJECT STATE block at the top of this file.** As of the current state that is: **execute the authorized Phase 3 (PMS Stay Domain, STRICT Multi-PMS Resolution, Room Movement, Checkout Grace, Reinstatement) end-to-end as one Phase, DARK, per [Phase 3 plan](StayConnect-IAM-Phase3-Plan.md), then return one final Phase-3 acceptance report** — Phase 3 is **Product-Owner AUTHORIZED (decision D14, start transition T0015, 2026-07-18)** and **IMPLEMENTATION IN PROGRESS** on branch `phase/3-stay-resolution-grace` / PR #6; all Phase-3 flags OFF; no PMS financial posting; no IAM-v2 cutover; no Phase 4. Phase 1A/1B/2 remain ACCEPTED_AND_CLOSED (Phase 2 merged to master, merge commit `fe6a0d1`).
 
 *HISTORICAL ladder (superseded — retained for provenance; NOT the current next action):*
 1. ~~Product-Owner approval or rejection of the Phase 1B plan.~~ **DONE** — Phase 1B plan approved, implemented, and ACCEPTED_AND_CLOSED at DARK maturity (D11/T0011); PR #2 merged.
 2. ~~Phase 1B implementation under its own PO authorization.~~ **DONE** (dark; least-privilege Gate P complete + reboot-verified).
 3. ~~Product-Owner acceptance of Phase 2 (Commercial Packages) at DARK maturity.~~ **DONE** — accepted and closed (D13/T0014); PR #4 MERGED and CLOSED (merge commit `fe6a0d1`); post-merge Governance CI green.
-4. Guest-visible activation / cutover, DSN/`search_path` routing, IAM data migration, legacy cleanup, and **Phase 3** remain **separately gated** future ladder steps, each needing its own PO approval — none is requested now. Enabling guest Commerce requires a separately authorized IAM-v2 authentication cutover.
+4. ~~Product-Owner authorization of Phase 3.~~ **DONE** — Phase 3 authorized (D14/T0015) and implementation in progress (DARK). Guest-visible activation / IAM-v2 cutover / DSN-`search_path` routing / IAM data migration / legacy cleanup / **Phase 4** remain **separately gated** future steps, each needing its own PO approval.
 
 Per-property onboarding (Tier 2, incl. Aqua Club) and post-implementation acceptance (Tier 3 / Gates 3C, 3D) are **not** Phase-0 finalization blockers; they carry forward as, respectively, a deployment prerequisite and binding acceptance requirements.
 
