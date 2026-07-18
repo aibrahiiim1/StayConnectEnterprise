@@ -10,7 +10,7 @@ Purchase/Entitlement row created in production while flags are OFF)
 
 ## AS-BUILT FINAL STATUS
 
-**`IMPLEMENTED + LIVE-DARK DEPLOYED + REBOOT VERIFIED; PENDING PRODUCT-OWNER ACCEPTANCE`** (authorized D12/T0012; deployment candidate T0013; `transition_accepted: false`; not merged; no cutover; no Phase 3).
+**`IMPLEMENTED + LIVE-DARK DEPLOYED + REBOOT VERIFIED; ACCEPTED_AND_CLOSED AT VERIFIED DARK MATURITY`** (authorized D12/T0012; live-dark deployment T0013; **Product-Owner ACCEPTED and CLOSED by decision D13 / closure transition T0014 (`transition_accepted: true`), 2026-07-18**; PR #4 authorized to merge to master; no cutover; no paid access; no PMS settlement; no Phase 3). Phase 3 remains `NOT_STARTED` and unauthorized; enabling guest Commerce requires a separately authorized IAM-v2 authentication cutover.
 
 The sections below are the **approved plan** (retained). Where the pre-implementation wording differs from what was actually built, the following as-built corrections govern (and are applied inline in §2/§4/§5/§7):
 

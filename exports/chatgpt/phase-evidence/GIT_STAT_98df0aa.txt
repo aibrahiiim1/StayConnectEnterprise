@@ -1,4 +1,0 @@
-commit 98df0aaae6ac1a3d85bbe438a37b74020c0b08f8
-Date:   Sat Jul 18 17:53:43 2026 +0300
-
-    Phase 2 Zero-Stale reconciliation (delivery fix): LF-normalize packed text

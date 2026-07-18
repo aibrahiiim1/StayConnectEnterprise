@@ -1,12 +1,13 @@
-# StayConnect IAM Phase 2 — Live-Dark Acceptance **Candidate**
+# StayConnect IAM Phase 2 — Live-Dark Acceptance
 
-**Status: CANDIDATE — pending a single Product-Owner acceptance decision. NOT self-accepted; NOT closed. PR #4 remains unmerged.**
+**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED AT VERIFIED DARK MATURITY (decision D13, transition T0014, 2026-07-18). PR #4 authorized to merge to master with provenance preserved.**
 
 - Phase: 2 (Commercial Packages) — one end-to-end Phase.
 - **Authorized** under Product-Owner decision **D12**, authorization/start transition **T0012**.
-- **Deployment candidate** recorded by transition **T0013** (live-dark deploy + reboot; `transition_accepted: false`).
-- **Not yet Product-Owner accepted** — this record requests that decision; it does not self-accept.
-- Branch: `phase/2-commercial-packages`; PR #4 (unmerged).
+- **Live-dark deployment** recorded by transition **T0013** (live-dark deploy + reboot).
+- **Product-Owner ACCEPTED and CLOSED** by decision **D13**, closure transition **T0014** (`transition_accepted: true`) at verified DARK maturity.
+- **Accepted baseline:** base `master@4e3c3ee27a8caa2d0656b57b419e8ed5e0d87b68`; substantive reconciliation HEAD `45323ad5cb8f70e64e1dcd727ac92b52cc878c37`; final pre-acceptance PR HEAD `a8c3b3caac6baf8ac41fa581fca5350c97219bb8`; Governance CI `29649900358` SUCCESS.
+- Branch: `phase/2-commercial-packages`; PR #4 (authorized to merge).
 - Maturity offered for acceptance: **verified DARK** (implementation + automated UI tests + live-dark deployment + **two** reboots, each with post-reboot re-verification).
 - Appliance: `radius` / `172.21.60.23`.
 
@@ -15,7 +16,7 @@
 - **Authoritative production build:** `NODE_OPTIONS=--max-old-space-size=12288 npm run build` — EXIT 0, `✓ Compiled successfully`, **`✓ Generating static pages (31/31)`**.
 - **Current deployed hotel-admin bundle SHA-256:** `678c793ea46f23241eba05bde66929b19a5473fc8d3752d2a5eb083f4ff0dd95` (release `20260718-115608`). Go binaries unchanged (`1e25f9ef`/`30ed45f1`/`bf400654`).
 - **Two reboot verifications:** first at `2026-07-18 08:35:06` (initial deployment), second at `2026-07-18 11:56:34` (final UI-only redeploy). Both re-verified full darkness.
-- Governance: authorized under D12/T0012; deployment candidate transition T0013; `transition_accepted: false`.
+- Governance: authorized under D12/T0012; live-dark deployment transition T0013; **Product-Owner accepted and closed by D13 / closure transition T0014 (`transition_accepted: true`)**.
 
 ## What is delivered (all DARK, flags OFF)
 - **Schema** — additive migration `0009_phase2_commerce` (null-safe Purchase↔Quote money-pin equality trigger; offer-quote immutability-except-one-time-consume trigger; lookup indexes). Applied live, `iam_v2_owner`-owned, public schema unchanged.
@@ -28,8 +29,9 @@
 - Live-dark + reboots: `docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md` (current + historical artifact hashes; migration 0009; darkness verified before AND after BOTH reboots; zero runtime iam_v2 privileges; iam_v2 49/0; public schema unchanged; legacy auth sole authority).
 - Final report: `docs/reports/StayConnect-IAM-Phase2-Final-Report.md`. Change manifest: `docs/manifests/Phase2-change-manifest.md`.
 
-## Explicitly NOT done (out of scope / requires separate authorization)
-- No Phase-2 flag enabled; no guest paid access; no PMS settlement/posting/folio/tax; no IAM-v2 cutover or data migration; no Phase 3; no self-acceptance; PR #4 not merged.
+## Explicitly NOT authorized by this acceptance (requires separate authorization)
+- No Phase-2 flag enabled (`STAYCONNECT_PHASE2_*` / `NEXT_PUBLIC_PHASE2_ADMIN`); no guest paid access; no PMS settlement/posting/folio/tax; no financial outbox/retry/reversal; no IAM-v2 cutover or data migration; no Phase 3; no PMS traffic; no networking/HA/Central changes; no legacy IAM removal.
+- **Known dependency:** enabled guest Commerce requires a separately authorized IAM-v2 authentication cutover.
 
-## Requested decision
-Accept Phase 2 at verified DARK maturity (record acceptance decision + transition), **or** return findings. No enablement or cutover is requested by this record.
+## Product-Owner decision (recorded)
+Phase 2 is **ACCEPTED at verified DARK maturity and CLOSED** by Product-Owner decision **D13** / closure transition **T0014** (2026-07-18). PR #4 is authorized to merge to master with provenance preserved. Acceptance is at DARK maturity only; no enablement, cutover, paid access, PMS settlement, or Phase 3 is authorized. Phase 3 remains NOT_STARTED and unauthorized.

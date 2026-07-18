@@ -102,8 +102,9 @@ MUTATIONS = [
  ("M28 plan reintroduces production iam_v2 runtime grant", "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
    ("append", "\n\n- `svc_scd` iam_v2 grants prepared for cutover: USAGE + SELECT/INSERT/UPDATE.\n")),
  # --- live-dark / acceptance stale-state contradictions (must be caught by project-state.py) ---
- ("M29 activity deployed but maturity says Gate P pending", "governance/project-state.json",
-   ("replace", [("IMPLEMENTATION + LIVE-DARK DEPLOYMENT COMPLETE; reboot", "IMPLEMENTATION with Gate P pending; reboot")])),
+ ("M29 current_activity says pending while ledger/transition say ACCEPTED_AND_CLOSED", "governance/project-state.json",
+   ("replace", [('"current_activity": "PHASE_2_ACCEPTED_AND_CLOSED"',
+                 '"current_activity": "PHASE_2_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE"')])),
  ("M30 gate_p cutover done but blocker says superuser", "governance/project-state.json",
    ("replace", [("No technical Phase-2 blocker and no open Phase-2 work: Phase 2 (commercial packages) is ACCEPTED_AND_CLOSED",
                  "Site-DB services still connect as superuser stayconnect and least-privilege roles are not yet applied. Phase 2 (commercial packages) is ACCEPTED_AND_CLOSED")])),

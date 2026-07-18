@@ -120,7 +120,7 @@ def cmd_check_generated(st):
     return bad
 
 # ---------- validation ----------
-def cmd_validate(deep=True):
+def cmd_validate(deep=True, manifest_equality=True):
     fails = []
     def fail(m): fails.append(m)
     # JSON parse + required fields
@@ -232,7 +232,7 @@ def cmd_validate(deep=True):
 
     # decision register agreement: D1 not reopenable; D9 active; required decisions present
     dmap = {d["id"]: d for d in dec.get("decisions", [])}
-    for need in ["D1","D2","D3","D4","D5","D6","D7","D8","D9","PH-1B-SCOPE","PH-CUTOVER","SEC-NO-IAMV2-PRIV",
+    for need in ["D1","D2","D3","D4","D5","D6","D7","D8","D9","D10","D11","D12","D13","PH-1B-SCOPE","PH-CUTOVER","SEC-NO-IAMV2-PRIV",
                  "GH-SOURCE-OF-TRUTH","GH-BRANCH-PR","GH-COMPLETE-MANIFEST","GH-FINAL-REPORT","GH-MANDATORY-CI",
                  "GH-AGENT-ONLY-OPERATIONS","GH-LF-CONSISTENCY"]:
         if need not in dmap: fail(f"decision-register missing {need}")
@@ -325,13 +325,24 @@ def cmd_validate(deep=True):
                  "but phase2_execution.transition_id does not point at T0013")
         if p2exec.get("authorization_transition_id") != "T0012":
             fail("phase2_execution.authorization_transition_id must record the D12 authorization transition T0012")
+    # Once the ledger has advanced to the closure transition (T0014) and the activity reflects acceptance,
+    # phase2_execution.transition_id must point at the CLOSURE transition, the D12 authorization transition
+    # must remain recorded separately, and transition_accepted must be true.
+    if str(st.get("latest_transition_id", "")) == "T0014" and cp == "2" \
+       and "ACCEPTED_AND_CLOSED" in str(st.get("current_activity", "")):
+        if p2exec.get("transition_id") != "T0014":
+            fail("stale-state contradiction: latest transition is T0014 (Phase-2 closure) but phase2_execution.transition_id does not point at T0014")
+        if p2exec.get("authorization_transition_id") != "T0012":
+            fail("phase2_execution.authorization_transition_id must record the D12 authorization transition T0012")
+        if p2exec.get("transition_accepted") is not True:
+            fail("Phase 2 is closed (T0014) but phase2_execution.transition_accepted is not true")
 
     # Manifest-HEAD coherence: when an acceptance-candidate HEAD is recorded and a change-manifest exists,
     # the manifest's recorded HEAD commit must equal that acceptance-candidate HEAD (they cannot drift
     # apart between the final report / PR and the generated manifest).
     ach = st.get("acceptance_candidate_head")
     man_path = os.path.join(ROOT, "docs/manifests/Phase2-change-manifest.md")
-    if ach and os.path.isfile(man_path):
+    if manifest_equality and ach and os.path.isfile(man_path):
         mtext = open(man_path, encoding="utf-8").read()
         m = re.search(r"HEAD commit:\*\*\s*`([0-9a-f]{7,40})`", mtext)
         head_in_manifest = m.group(1) if m else ""
@@ -339,6 +350,38 @@ def cmd_validate(deep=True):
             fail("change-manifest has no recorded HEAD commit")
         elif not (head_in_manifest.startswith(ach) or ach.startswith(head_in_manifest)):
             fail(f"manifest HEAD {head_in_manifest} != acceptance_candidate_head {ach}")
+
+    # Manifest <-> Git path/status equality (GH-COMPLETE-MANIFEST + self-reference protocol 4.1):
+    # the committed manifest's complete {path: git-status-letter} set must equal
+    # `git diff --name-status base..HEAD`. The manifest is generated at inventory_head but, because
+    # the delivery-only commit introduces zero unlisted paths, its path/status set equals
+    # base..delivery_head (the current HEAD at final validation). Skipped inside build-packs
+    # (manifest_equality=False), which validates a pre-regeneration source tree.
+    if manifest_equality and os.path.isfile(man_path):
+        mtext = open(man_path, encoding="utf-8").read()
+        bmm = re.search(r"Base commit:\*\*\s*`([0-9a-f]{7,40})`", mtext)
+        base_sha = bmm.group(1) if bmm else ""
+        # only enforce when the base commit is resolvable in this checkout (CI does a full checkout;
+        # a shallow/partial clone that cannot resolve base is skipped rather than falsely failed).
+        if base_sha and git("cat-file", "-t", base_sha) == "commit":
+            man_map = {}
+            for row in re.finditer(r"^\|\s*`([^`]+)`\s*\|[^|]*\|\s*`([^`]+)`\s*\|", mtext, re.M):
+                disp = row.group(1).strip(); letter = row.group(2).strip()[:1]
+                path = disp.split(" -> ")[-1].strip() if " -> " in disp else disp
+                man_map[path] = letter
+            git_map = {}
+            for line in git("diff", "--name-status", "--find-renames", "--find-copies", f"{base_sha}..HEAD").splitlines():
+                if not line.strip(): continue
+                parts = line.split("\t")
+                letter = parts[0][:1]
+                path = parts[2] if (letter in ("R", "C") and len(parts) >= 3) else parts[-1]
+                git_map[path] = letter
+            missing = sorted(set(git_map) - set(man_map))
+            extra = sorted(set(man_map) - set(git_map))
+            mismatch = sorted(p for p in (set(man_map) & set(git_map)) if man_map[p] != git_map[p])
+            if missing: fail(f"manifest omits {len(missing)} path(s) present in git base..HEAD (e.g. {missing[:3]}) — complete-manifest self-reference protocol (docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md §4.1)")
+            if extra:   fail(f"manifest lists {len(extra)} path(s) not in git base..HEAD (e.g. {extra[:3]})")
+            if mismatch:fail(f"manifest status differs from git for {len(mismatch)} path(s) (e.g. {mismatch[:3]})")
 
     # current phase plan + privilege matrix exist; each asserts the ZERO-production-iam_v2 posture.
     plan = st.get("current_phase_plan")
@@ -395,6 +438,31 @@ def cmd_validate(deep=True):
         for a in st.get("allowed_actions", []) or []:
             if re.search(r"(execute|implement|continue)[^.]{0,60}phase\s*2", str(a), re.I) and re.search(r"end-to-end|implement", str(a), re.I):
                 fail("Phase 2 is pending PO acceptance but an allowed_action still says to continue implementing Phase 2")
+    # 4b. Phase-2 acceptance/closure coherence (mirrors the Phase-1B acceptance guards). Once
+    #     phase2_execution.transition_accepted=true, Phase 2 must be ACCEPTED_AND_CLOSED, the activity must
+    #     reflect it, the recorded acceptance decision must be a registered decision, and no current field
+    #     may still present acceptance as pending/candidate. Until then Phase 2 stays IN_PROGRESS.
+    if cp == "2":
+        p2 = st["phases"].get("2", {}).get("status")
+        p2acc = (st.get("phase2_execution", {}) or {}).get("transition_accepted") is True
+        if p2acc:
+            if p2 != "ACCEPTED_AND_CLOSED":
+                fail(f"Phase 2 transition_accepted=true but phases.2 status {p2} is not ACCEPTED_AND_CLOSED")
+            if str(st.get("current_activity", "")) != "PHASE_2_ACCEPTED_AND_CLOSED":
+                fail("Phase 2 accepted but current_activity is not PHASE_2_ACCEPTED_AND_CLOSED")
+            if "PENDING_PO_ACCEPTANCE" in str(st.get("current_activity", "")):
+                fail("Phase 2 accepted but current_activity still says PENDING_PO_ACCEPTANCE")
+            if st.get("latest_accepted_po_decision") not in dmap:
+                fail(f"latest_accepted_po_decision {st.get('latest_accepted_po_decision')!r} is not a registered decision")
+            for e in st.get("verified_evidence", []) or []:
+                if re.search(r"pending.*(po|product-owner).*(decision|acceptance)|acceptance\s+candidate|candidate\s*--\s*pending", str(e.get("kind", "")), re.I):
+                    fail("Phase 2 is ACCEPTED_AND_CLOSED but a verified-evidence entry still says pending PO acceptance / candidate")
+            for a in st.get("allowed_actions", []) or []:
+                if re.search(r"(execute|implement)[^.]{0,60}phase\s*2\b", str(a), re.I) and re.search(r"end-to-end|implement|dark", str(a), re.I):
+                    fail("Phase 2 is ACCEPTED_AND_CLOSED but an allowed_action still says to execute/implement Phase 2")
+        else:
+            if p2 not in ("IN_PROGRESS",):
+                fail(f"Phase 2 transition_accepted!=true but phases.2 status {p2} is not IN_PROGRESS (PO acceptance not yet recorded)")
     # 5. the Project Pack SOURCE list must include the current Phase-2 plan/acceptance/evidence (checking the
     #    build source list, not the extracted dir, so this never deadlocks the pack rebuild).
     for req in ["StayConnect-IAM-Phase2-Plan.md", "StayConnect-IAM-Phase2-Final-Report.md",
@@ -537,13 +605,13 @@ MROWS = [
  ("StayConnect-IAM-Phase1A-Plan.md","`docs/architecture/StayConnect-IAM-Phase1A-Plan.md`","**Authoritative (closed phase)**"),
  ("StayConnect-IAM-Phase1B-Plan.md","`docs/architecture/StayConnect-IAM-Phase1B-Plan.md`","**Authoritative — ACCEPTED_AND_CLOSED at DARK maturity (D11/T0011); PR #2 merged**"),
  ("Phase1B-Privilege-Matrix.md","`docs/architecture/Phase1B-Privilege-Matrix.md`","**Authoritative — as-built grant matrix (Gate P deployed)**"),
- ("StayConnect-IAM-Phase2-Plan.md","`docs/architecture/StayConnect-IAM-Phase2-Plan.md`","**Authoritative — Phase 2 implemented + live-dark deployed + reboot-verified; pending PO acceptance (D12/T0012, T0013)**"),
+ ("StayConnect-IAM-Phase2-Plan.md","`docs/architecture/StayConnect-IAM-Phase2-Plan.md`","**Authoritative — Phase 2 ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014); PR #4 authorized to merge**"),
  ("Phase2-Privilege-Matrix.md","`docs/architecture/Phase2-Privilege-Matrix.md`","**Authoritative — zero new Phase-2 runtime privilege (live-verified)**"),
  ("StayConnect-IAM-Phase2-Software-Gate.md","`docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md`","**Authoritative — Phase 2 software-gate evidence (Go + 45 UI tests + build)**"),
  ("StayConnect-IAM-Phase2-Live-Dark-Evidence.md","`docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md`","**Authoritative — Phase 2 live-dark + two-reboot darkness evidence**"),
- ("StayConnect-IAM-Phase2-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md`","**Acceptance CANDIDATE — pending one PO decision (not accepted)**"),
- ("StayConnect-IAM-Phase2-Final-Report.md","`docs/reports/StayConnect-IAM-Phase2-Final-Report.md`","**Authoritative — Phase 2 final report**"),
- ("Phase2-change-manifest.md","`docs/manifests/Phase2-change-manifest.md`","**Generated — Phase 2 changed-file manifest (acceptance-candidate HEAD)**"),
+ ("StayConnect-IAM-Phase2-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md`","**Acceptance record — PRODUCT-OWNER ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014)**"),
+ ("StayConnect-IAM-Phase2-Final-Report.md","`docs/reports/StayConnect-IAM-Phase2-Final-Report.md`","**Authoritative — Phase 2 final report (accepted)**"),
+ ("Phase2-change-manifest.md","`docs/manifests/Phase2-change-manifest.md`","**Generated — complete Phase 2 changed-file manifest (base..delivery_head; inventory_head provenance)**"),
  ("StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`","**Authoritative (acceptance record)**"),
  ("Protel-FIAS-Phase0-Spike.md","`docs/spikes/Protel-FIAS-Phase0-Spike.md`","**Authoritative** *(sanitized)*"),
  ("ZERO_STALE_LEFTOVERS_RULE.md","`docs/ZERO_STALE_LEFTOVERS_RULE.md`","**Permanent rule**"),
@@ -619,9 +687,9 @@ def _build_evidence_pack(src_commit):
     # Phase 2 authoritative evidence set (current)
     for rel in EVIDENCE_PHASE2_DOCS:
         _cp(os.path.join(ROOT,rel),os.path.join(EVID,os.path.basename(rel)))
-    # D12 / T0012 (authorization) + T0013 (live-dark deployment) records
+    # D12/D13 + T0012 (authorization) + T0013 (live-dark deployment) + T0014 (PO acceptance/closure) records
     _cp(os.path.join(ROOT,"governance/decision-register.json"),os.path.join(EVID,"governance","decision-register.json"))
-    for tid in ["T0012","T0013"]:
+    for tid in ["T0012","T0013","T0014"]:
         _cp(os.path.join(ROOT,"governance/transitions",tid+".json"),os.path.join(EVID,"governance","transitions",tid+".json"))
     _cp(os.path.join(ROOT,"tools/validate-project-state.sh"),os.path.join(EVID,"tools/validate-project-state.sh"))
     _cp(os.path.join(ROOT,"tools/project-state.py"),os.path.join(EVID,"tools/project-state.py"))
@@ -715,13 +783,20 @@ def _verify_extracted(proj, evid):
                 if pii.search(txt.replace("«","")): errs.append(f"PII token in {os.path.relpath(fp,baseD)}")
     return errs
 
-def cmd_build_packs():
-    # clean-source check scoped to governance-relevant paths (ignores unrelated build artifacts)
-    dirty=git("status","--porcelain","--","governance","docs","tools","iam_v2_scratch")
-    if dirty.strip():
-        print("BUILD-PACKS REFUSED — governance source is dirty. Commit source first.\n"+dirty); return 3
+def cmd_build_packs(allow_dirty=False):
+    # clean-source check scoped to governance-relevant paths (ignores unrelated build artifacts).
+    # --allow-dirty is used ONLY for the final delivery-only commit, which intentionally bundles the
+    # finalized source docs (regenerated manifest, report changed-file count, pointer/provenance) with
+    # their freshly built packs in one commit; the delivery HEAD is still fully validated afterwards.
+    if not allow_dirty:
+        dirty=git("status","--porcelain","--","governance","docs","tools","iam_v2_scratch")
+        if dirty.strip():
+            print("BUILD-PACKS REFUSED — governance source is dirty. Commit source first (or use --allow-dirty for the delivery-only commit).\n"+dirty); return 3
     src_commit=git("rev-parse","--short","HEAD")
-    rc,st=cmd_validate(deep=True)
+    # skip the manifest<->Git equality guard here: build-packs validates the pre-regeneration source tree,
+    # where the on-disk manifest may not yet describe the not-yet-committed delivery HEAD. The delivery
+    # HEAD itself is validated (with the equality guard ON) after the commit.
+    rc,st=cmd_validate(deep=True, manifest_equality=False)
     if rc!=0: print("BUILD-PACKS REFUSED — structural validation failed."); return rc
     if cmd_check_generated(st): print("BUILD-PACKS REFUSED — generated block drift."); return 4
     block=render_block(st)
@@ -768,7 +843,7 @@ def main():
     elif cmd == "transition":
         sys.exit(cmd_transition(sys.argv[2:]))
     elif cmd == "build-packs":
-        sys.exit(cmd_build_packs())
+        sys.exit(cmd_build_packs(allow_dirty=("--allow-dirty" in sys.argv[2:])))
     else:
         print(__doc__); sys.exit(2)
 
