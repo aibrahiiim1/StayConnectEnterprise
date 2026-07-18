@@ -3,6 +3,8 @@ BEGIN;
 
 DROP TRIGGER IF EXISTS purchase_quote_pin_equal ON iam_v2.purchases;
 DROP FUNCTION IF EXISTS iam_v2.trg_purchase_quote_pin_equal();
+DROP TRIGGER IF EXISTS offer_quote_immutable ON iam_v2.offer_quotes;
+DROP FUNCTION IF EXISTS iam_v2.trg_offer_quote_immutable();
 
 DROP INDEX IF EXISTS iam_v2.internet_packages_active_lookup;
 DROP INDEX IF EXISTS iam_v2.package_revision_visibility;

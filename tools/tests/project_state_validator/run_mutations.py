@@ -122,6 +122,9 @@ MUTATIONS = [
  ("M35 closed/merged but an allowed_action still says merge PR #2", "governance/project-state.json",
    ("replace", [("Execute the authorized Phase 2 (commercial packages) end-to-end as one Phase",
                  "Merge PR #2 as governance/code delivery only")])),
+ ("M36 stale prohibition still forbids the authorized current Phase 2", "governance/project-state.json",
+   ("replace", [("Implementing any Phase beyond the authorized Phase 2 dark scope (Phase 3 or any later Phase)",
+                 "Implementing any Phase beyond the authorized Phase 1B dark scope (Phase 2 or any later Phase)")])),
 ]
 
 def apply(relpath, op):

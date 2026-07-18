@@ -1,6 +1,7 @@
 package iamv2
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -10,6 +11,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// unmarshalNumberAware decodes JSON preserving numeric literals as json.Number so grant validation can
+// reject non-integer (float) values (e.g. 5.5) rather than silently coercing them.
+func unmarshalNumberAware(b []byte) map[string]any {
+	m := map[string]any{}
+	if len(b) == 0 {
+		return m
+	}
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber()
+	_ = dec.Decode(&m)
+	return m
+}
 
 // PgCommerceRepository is the production/scratch Phase-2 commerce repository over iam_v2. It is
 // constructed only when the Phase-2 master flag is ON; while dark the engine holds a nil repository.
@@ -98,28 +112,35 @@ func (t *pgCommerceTx) loadAuthContext(ctx context.Context, tenantID, siteID, id
 
 func (t *pgCommerceTx) ResolveActivePackageRevision(ctx context.Context, tenantID, siteID, packageID string) (PackageRevisionRow, error) {
 	var row PackageRevisionRow
-	var display []byte
+	var display, duration []byte
 	var settlement []string
+	var cexp *int
 	err := t.tx.QueryRow(ctx,
 		`SELECT r.id::text, r.package_id::text, r.service_plan_revision_id::text, r.package_type,
 		        r.price_minor, r.currency, r.currency_exponent, r.settlement_methods,
 		        r.visible_from, r.visible_until, p.active, (p.current_revision_id = r.id) AS is_current,
-		        r.display
+		        r.display, r.duration_policy
 		   FROM iam_v2.internet_packages p
 		   JOIN iam_v2.internet_package_revisions r ON r.id = p.current_revision_id
 		  WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.id=$3`,
 		tenantID, siteID, packageID).Scan(&row.ID, &row.PackageID, &row.PlanRevisionID, &row.PackageType,
-		&row.PriceMinor, &row.Currency, &row.CurrencyExponent, &settlement, &row.VisibleFrom, &row.VisibleUntil,
-		&row.PackageActive, &row.IsCurrent, &display)
+		&row.PriceMinor, &row.Currency, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
+		&row.PackageActive, &row.IsCurrent, &display, &duration)
 	if err == pgx.ErrNoRows {
 		return PackageRevisionRow{}, &Error{Code: ErrInvalidInput, Msg: "package_not_found"}
 	}
 	if err != nil {
 		return PackageRevisionRow{}, err
 	}
+	if cexp != nil {
+		row.CurrencyExponent = *cexp
+	}
 	row.SettlementMethods = settlement
 	if len(display) > 0 {
 		_ = json.Unmarshal(display, &row.Display)
+	}
+	if len(duration) > 0 {
+		row.DurationPolicy = unmarshalNumberAware(duration)
 	}
 	return row, nil
 }
@@ -188,9 +209,7 @@ func (t *pgCommerceTx) LoadGrantTiers(ctx context.Context, packageRevisionID str
 		if err := rows.Scan(&ord, &gv); err != nil {
 			return nil, err
 		}
-		m := map[string]any{}
-		_ = json.Unmarshal(gv, &m)
-		out = append(out, GrantTier{Order: ord, Value: m})
+		out = append(out, GrantTier{Order: ord, Value: unmarshalNumberAware(gv)})
 	}
 	return out, rows.Err()
 }
@@ -210,13 +229,14 @@ func (t *pgCommerceTx) HasPriorPurchase(ctx context.Context, tenantID, siteID, p
 }
 
 func (t *pgCommerceTx) InsertOfferQuote(ctx context.Context, q OfferQuoteSpec) (string, error) {
-	snap, _ := json.Marshal(q.GrantSnapshot)
 	var id string
+	// pms_interface_id / settlement_mapping_id / tax_* are left NULL (free quote); grant_snapshot is the
+	// canonical typed snapshot.
 	err := t.tx.QueryRow(ctx,
 		`INSERT INTO iam_v2.offer_quotes
 		   (tenant_id, site_id, auth_context_id, package_revision_id, price_minor, currency, currency_exponent, grant_snapshot, expires_at)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text`,
-		q.TenantID, q.SiteID, q.AuthContextID, q.PackageRevisionID, q.PriceMinor, q.Currency, q.CurrencyExponent, snap, q.ExpiresAt).Scan(&id)
+		q.TenantID, q.SiteID, q.AuthContextID, q.PackageRevisionID, q.PriceMinor, q.Currency, q.CurrencyExponent, q.GrantSnapshot.Canonical(), q.ExpiresAt).Scan(&id)
 	return id, err
 }
 
@@ -224,21 +244,30 @@ func (t *pgCommerceTx) LockOfferQuoteForUpdate(ctx context.Context, tenantID, si
 	var row OfferQuoteRow
 	var snap []byte
 	var consumed *time.Time
+	var cexp *int
 	err := t.tx.QueryRow(ctx,
 		`SELECT id::text, tenant_id::text, site_id::text, auth_context_id::text, package_revision_id::text,
-		        price_minor, currency, grant_snapshot, expires_at, consumed_at
+		        price_minor, currency, currency_exponent, pms_interface_id::text, settlement_mapping_id::text,
+		        tax_code, tax_rate_bp, tax_amount_minor, grant_snapshot, expires_at, consumed_at
 		   FROM iam_v2.offer_quotes WHERE tenant_id=$1 AND site_id=$2 AND id=$3 FOR UPDATE`,
 		tenantID, siteID, id).Scan(&row.ID, &row.TenantID, &row.SiteID, &row.AuthContextID, &row.PackageRevisionID,
-		&row.PriceMinor, &row.Currency, &snap, &row.ExpiresAt, &consumed)
+		&row.PriceMinor, &row.Currency, &cexp, &row.PMSInterfaceID, &row.SettlementMappingID,
+		&row.TaxCode, &row.TaxRateBP, &row.TaxAmountMinor, &snap, &row.ExpiresAt, &consumed)
 	if err == pgx.ErrNoRows {
 		return OfferQuoteRow{}, &Error{Code: ErrACNotFound, Msg: "quote_not_found"}
 	}
 	if err != nil {
 		return OfferQuoteRow{}, err
 	}
+	if cexp != nil {
+		row.CurrencyExponent = *cexp
+	}
 	row.Consumed = consumed != nil
-	row.GrantSnapshot = map[string]any{}
-	_ = json.Unmarshal(snap, &row.GrantSnapshot)
+	gs, perr := ParseGrantSnapshot(snap)
+	if perr != nil {
+		return OfferQuoteRow{}, perr
+	}
+	row.GrantSnapshot = gs
 	return row, nil
 }
 
@@ -314,20 +343,24 @@ func (t *pgCommerceTx) TerminateLiveEntitlementForSubject(ctx context.Context, t
 
 func (t *pgCommerceTx) InsertEntitlement(ctx context.Context, e EntitlementSpec) (string, error) {
 	v, a, p := subjectCols(e.Subject)
-	snap, _ := json.Marshal(e.PolicySnapshot)
+	snap := e.PolicySnapshot.Canonical()
 	var supersedes *string
 	if e.SupersedesID != "" {
 		supersedes = &e.SupersedesID
+	}
+	endMode := e.EndMode
+	if endMode == "" {
+		endMode = "MANUAL_END"
 	}
 	var id string
 	err := t.tx.QueryRow(ctx,
 		`INSERT INTO iam_v2.entitlements
 		   (tenant_id, site_id, voucher_id, guest_account_id, guest_principal_id, purchase_id,
 		    policy_snapshot, service_plan_revision_id, package_revision_id, time_accounting_mode,
-		    end_mode, status, supersedes_entitlement_id, activated_at)
-		 VALUES ($1,$2,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,'MANUAL_END','ACTIVE',$11::uuid, now())
+		    end_mode, window_ends_at, status, supersedes_entitlement_id, activated_at)
+		 VALUES ($1,$2,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,'ACTIVE',$13::uuid, now())
 		 RETURNING id::text`,
-		e.TenantID, e.SiteID, v, a, p, e.PurchaseID, snap, e.ServicePlanRevID, e.PackageRevID, e.TimeAccountingMode, supersedes).Scan(&id)
+		e.TenantID, e.SiteID, v, a, p, e.PurchaseID, snap, e.ServicePlanRevID, e.PackageRevID, e.TimeAccountingMode, endMode, e.WindowEndsAt, supersedes).Scan(&id)
 	return id, err
 }
 

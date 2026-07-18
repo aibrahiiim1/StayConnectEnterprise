@@ -120,6 +120,7 @@ type PackageRevisionRow struct {
 	IsCurrent          bool // this revision is the package's current_revision
 	TimeAccountingMode string
 	Display            map[string]any
+	DurationPolicy     map[string]any
 }
 
 // PlanRevisionRow carries the grant parameters snapshotted into a quote.
@@ -141,21 +142,29 @@ type OfferQuoteSpec struct {
 	PriceMinor        int64
 	Currency          string
 	CurrencyExponent  int
-	GrantSnapshot     map[string]any
+	GrantSnapshot     GrantSnapshot
 	ExpiresAt         time.Time
 	Now               time.Time
 }
 
+// OfferQuoteRow carries EVERY money/settlement/tax pin so ConfirmFreePurchase can re-validate the quote
+// as a Phase-2 free quote before consuming anything.
 type OfferQuoteRow struct {
-	ID                string
-	TenantID, SiteID  string
-	AuthContextID     string
-	PackageRevisionID string
-	PriceMinor        int64
-	Currency          string
-	GrantSnapshot     map[string]any
-	ExpiresAt         time.Time
-	Consumed          bool
+	ID                  string
+	TenantID, SiteID    string
+	AuthContextID       string
+	PackageRevisionID   string
+	PriceMinor          int64
+	Currency            string
+	CurrencyExponent    int
+	PMSInterfaceID      *string
+	SettlementMappingID *string
+	TaxCode             *string
+	TaxRateBP           *int
+	TaxAmountMinor      *int64
+	GrantSnapshot       GrantSnapshot
+	ExpiresAt           time.Time
+	Consumed            bool
 }
 
 type PurchaseSpec struct {
@@ -175,8 +184,9 @@ type EntitlementSpec struct {
 	Subject            CommerceSubject
 	ServicePlanRevID   string
 	PackageRevID       string
-	PolicySnapshot     map[string]any
+	PolicySnapshot     GrantSnapshot
 	TimeAccountingMode string
+	EndMode            string
 	SupersedesID       string // "" if none
 	WindowEndsAt       *time.Time
 }

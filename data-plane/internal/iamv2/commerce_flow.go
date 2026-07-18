@@ -2,6 +2,7 @@ package iamv2
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 )
 
@@ -113,10 +114,34 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 			return nil
 		}
 
-		snapshot := buildGrantSnapshot(tier, plan, pkg)
+		// typed, validated grant snapshot (no arbitrary jsonb copied into a security-enforced snapshot)
+		snapshot, err := BuildGrantSnapshot(tier, plan, pkg)
+		if err != nil {
+			res = quoteDeny("invalid_grant_config")
+			return nil
+		}
+		// resolve the immutable duration/end policy once, freezing it into the snapshot
+		endMode, window, derr := ResolveEndPolicy(pkg.DurationPolicy, now)
+		if derr != nil {
+			res = quoteDeny("invalid_duration_policy")
+			return nil
+		}
+		snapshot.EndMode = endMode
+		if window != nil {
+			snapshot.WindowEndsAt = window.UTC().Format(time.RFC3339)
+		}
+		if dp, mErr := marshalPolicy(pkg.DurationPolicy); mErr == nil {
+			snapshot.DurationPolicy = dp
+		}
+		// canonical currency for the (zero-price) free quote
+		cur, cerr := ValidateCurrency(pkg.Currency, pkg.CurrencyExponent)
+		if cerr != nil {
+			res = quoteDeny("invalid_currency")
+			return nil
+		}
 		id, err := tx.InsertOfferQuote(ctx, OfferQuoteSpec{
 			TenantID: req.TenantID, SiteID: req.SiteID, AuthContextID: ac.ID, PackageRevisionID: pkg.ID,
-			PriceMinor: 0, Currency: pkg.Currency, CurrencyExponent: pkg.CurrencyExponent,
+			PriceMinor: 0, Currency: cur, CurrencyExponent: pkg.CurrencyExponent,
 			GrantSnapshot: snapshot, ExpiresAt: now.Add(e.ttl), Now: now,
 		})
 		if err != nil {
@@ -154,6 +179,12 @@ func (e *CommerceEngine) ConfirmFreePurchase(ctx context.Context, req ConfirmReq
 		}
 		if q.Consumed || !q.ExpiresAt.After(now) {
 			res = purchaseDeny("quote_unavailable")
+			return nil
+		}
+		// 1a. Re-validate the quote as a Phase-2 FREE quote BEFORE consuming anything (a tampered quote
+		//     row — non-zero price, a settlement mapping, a PMS interface, any tax — must not be granted).
+		if why := revalidateFreeQuote(q); why != "" {
+			res = purchaseDeny(why)
 			return nil
 		}
 		// 2. lock the EXACT pinned auth-context; verify all pins.
@@ -199,7 +230,8 @@ func (e *CommerceEngine) ConfirmFreePurchase(ctx context.Context, req ConfirmReq
 		//    entitlement exists.
 		pid, err := tx.InsertPurchase(ctx, PurchaseSpec{
 			TenantID: req.TenantID, SiteID: req.SiteID, PackageRevisionID: q.PackageRevisionID,
-			OfferQuoteID: q.ID, AuthContextID: ac.ID, Subject: ac.Subject, AmountMinor: 0, Currency: q.Currency,
+			OfferQuoteID: q.ID, AuthContextID: ac.ID, Subject: ac.Subject,
+			AmountMinor: q.PriceMinor, Currency: q.Currency, CurrencyExponent: q.CurrencyExponent, // pinned from the quote, never defaulted
 		})
 		if err != nil {
 			return err
@@ -212,11 +244,19 @@ func (e *CommerceEngine) ConfirmFreePurchase(ctx context.Context, req ConfirmReq
 		if err != nil {
 			return err
 		}
-		planRev, _ := q.GrantSnapshot["service_plan_revision_id"].(string)
+		var window *time.Time
+		if q.GrantSnapshot.WindowEndsAt != "" {
+			if w, perr := time.Parse(time.RFC3339, q.GrantSnapshot.WindowEndsAt); perr == nil {
+				window = &w
+			}
+		}
 		eid, err := tx.InsertEntitlement(ctx, EntitlementSpec{
 			TenantID: req.TenantID, SiteID: req.SiteID, PurchaseID: pid, Subject: ac.Subject,
-			ServicePlanRevID: planRev, PackageRevID: q.PackageRevisionID, PolicySnapshot: q.GrantSnapshot,
-			TimeAccountingMode: snapshotStr(q.GrantSnapshot, "time_accounting_mode", "VALIDITY_WINDOW"),
+			ServicePlanRevID: q.GrantSnapshot.ServicePlanRevisionID, PackageRevID: q.PackageRevisionID,
+			PolicySnapshot:     q.GrantSnapshot,
+			TimeAccountingMode: q.GrantSnapshot.TimeAccountingMode,
+			EndMode:            q.GrantSnapshot.EndMode,
+			WindowEndsAt:       window,
 			SupersedesID:       superseded,
 		})
 		if err != nil {
@@ -254,47 +294,52 @@ func (s CommerceSubject) subjectID() (string, bool) {
 	return "", false
 }
 
-// buildGrantSnapshot freezes the effective grant from the matched tier + pinned plan revision. Tier
-// values (if present) override plan defaults; the plan revision id is always pinned.
-func buildGrantSnapshot(tier GrantTier, plan PlanRevisionRow, pkg PackageRevisionRow) map[string]any {
-	snap := map[string]any{
-		"service_plan_revision_id": plan.ID,
-		"package_revision_id":      pkg.ID,
-		"down_kbps":                plan.DownKbps,
-		"up_kbps":                  plan.UpKbps,
-		"max_concurrent_devices":   plan.MaxConcurrentDevices,
-		"time_quota_seconds":       plan.TimeQuotaSeconds,
-		"data_quota_bytes":         plan.DataQuotaBytes,
-		"time_accounting_mode":     plan.TimeAccountingMode,
+// revalidateFreeQuote re-asserts, at confirm time, that a locked quote is a valid Phase-2 FREE quote:
+// zero price, valid currency+exponent, and NO PMS interface / settlement mapping / tax. A tampered
+// quote row is rejected before any consume. Returns "" when valid, else a deterministic reason.
+func revalidateFreeQuote(q OfferQuoteRow) string {
+	if q.PriceMinor != 0 {
+		return "quote_not_free"
 	}
-	for _, k := range []string{"down_kbps", "up_kbps", "max_concurrent_devices", "time_quota_seconds", "data_quota_bytes"} {
-		if v, ok := tier.Value[k]; ok {
-			snap[k] = v
-		}
+	if _, err := ValidateCurrency(q.Currency, q.CurrencyExponent); err != nil {
+		return "quote_bad_currency"
 	}
-	snap["grant_tier_order"] = tier.Order
-	return snap
+	if q.PMSInterfaceID != nil || q.SettlementMappingID != nil {
+		return "quote_has_pms_settlement"
+	}
+	if q.TaxCode != nil || (q.TaxRateBP != nil && *q.TaxRateBP != 0) || (q.TaxAmountMinor != nil && *q.TaxAmountMinor != 0) {
+		return "quote_has_tax"
+	}
+	if q.GrantSnapshot.Version != GrantSnapshotVersion || q.GrantSnapshot.ServicePlanRevisionID == "" {
+		return "quote_bad_snapshot"
+	}
+	return ""
 }
 
-func snapshotStr(m map[string]any, key, def string) string {
-	if v, ok := m[key].(string); ok && v != "" {
-		return v
+// marshalPolicy returns a compact JSON of the duration policy for the snapshot's audit copy.
+func marshalPolicy(dp map[string]any) (json.RawMessage, error) {
+	if len(dp) == 0 {
+		return nil, nil
 	}
-	return def
+	b, err := json.Marshal(dp)
+	return json.RawMessage(b), err
 }
 
-// guestDisplay returns only guest-appropriate display fields (never internal pins/price internals
-// beyond what the guest should see).
-func guestDisplay(snap map[string]any, pkg PackageRevisionRow) map[string]any {
+// guestDisplay returns only guest-appropriate display fields from the typed snapshot.
+func guestDisplay(snap GrantSnapshot, pkg PackageRevisionRow) map[string]any {
 	d := map[string]any{
-		"down_kbps":              snap["down_kbps"],
-		"up_kbps":                snap["up_kbps"],
-		"max_concurrent_devices": snap["max_concurrent_devices"],
-		"data_quota_bytes":       snap["data_quota_bytes"],
-		"time_quota_seconds":     snap["time_quota_seconds"],
+		"down_kbps":              snap.DownKbps,
+		"up_kbps":                snap.UpKbps,
+		"max_concurrent_devices": snap.MaxConcurrentDevices,
+		"data_quota_bytes":       snap.DataQuotaBytes,
+		"time_quota_seconds":     snap.TimeQuotaSeconds,
+		"end_mode":               snap.EndMode,
 		"price_minor":            0,
 		"currency":               pkg.Currency,
 		"free":                   true,
+	}
+	if snap.WindowEndsAt != "" {
+		d["window_ends_at"] = snap.WindowEndsAt
 	}
 	if pkg.Display != nil {
 		if name, ok := pkg.Display["name"]; ok {
@@ -303,5 +348,3 @@ func guestDisplay(snap map[string]any, pkg PackageRevisionRow) map[string]any {
 	}
 	return d
 }
-
-var _ = time.Now

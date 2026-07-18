@@ -32,6 +32,8 @@ func p2DB(t *testing.T) *pgxpool.Pool {
 		iam_v2.package_grant_tiers, iam_v2.package_eligibility_rules,
 		iam_v2.internet_package_revisions, iam_v2.internet_packages,
 		iam_v2.service_plan_revisions, iam_v2.service_plans,
+		iam_v2.vouchers, iam_v2.voucher_batches, iam_v2.voucher_code_key_generations,
+		iam_v2.guest_principal_identities, iam_v2.guest_principals,
 		iam_v2.devices, iam_v2.guest_access_accounts, public.guest_networks CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate (schema applied?): %v", err)
@@ -54,7 +56,7 @@ type seed struct {
 // `tiers` are optional JSON specs; opts adjust price/settlement/visibility for negative cases.
 func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed {
 	t.Helper()
-	o := seedOpts{price: 0, currency: "USD", exp: 2, settlement: "{NOT_REQUIRED}", tiers: `[{"order":10,"grant":{"down_kbps":5000}}]`}
+	o := seedOpts{price: 0, currency: "USD", exp: 2, settlement: "{NOT_REQUIRED}", tiers: `[{"order":10,"grant":{"down_kbps":5000}}]`, duration: `{"end_mode":"MANUAL_END"}`}
 	if opts != nil {
 		opts(&o)
 	}
@@ -83,9 +85,9 @@ func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed
 	// package + revision (current, free)
 	s.packageID = one(`INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active) VALUES ($1,$2,'PKG1',$3) RETURNING id::text`, p2Tenant, p2Site, o.active())
 	s.pkgRevID = one(`INSERT INTO iam_v2.internet_package_revisions
-		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,visible_from,visible_until,display)
-		VALUES ($1,$2,$3,1,$4,'GENERAL',$5,$6,$7,$8::text[],$9,$10,'{"name":"Free WiFi"}'::jsonb) RETURNING id::text`,
-		p2Tenant, p2Site, s.packageID, s.planRevID, o.price, o.currency, o.exp, o.settlement, o.visFrom, o.visUntil)
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy,visible_from,visible_until,display)
+		VALUES ($1,$2,$3,1,$4,'GENERAL',$5,$6,$7,$8::text[],$9::jsonb,$10,$11,'{"name":"Free WiFi"}'::jsonb) RETURNING id::text`,
+		p2Tenant, p2Site, s.packageID, s.planRevID, o.price, o.currency, o.exp, o.settlement, o.duration, o.visFrom, o.visUntil)
 	ex(`UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2`, s.pkgRevID, s.packageID)
 	if o.rules != "" {
 		ex(`INSERT INTO iam_v2.package_eligibility_rules (tenant_id,site_id,package_revision_id,rule_type,rule_value)
@@ -108,6 +110,7 @@ type seedOpts struct {
 	settlement string
 	rules      string
 	tiers      string
+	duration   string
 	inactive   bool
 	visFrom    *time.Time
 	visUntil   *time.Time

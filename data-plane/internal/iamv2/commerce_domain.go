@@ -88,12 +88,18 @@ func FirstMatchTier(tiers []GrantTier, s EligibilitySubject) (GrantTier, bool) {
 	for _, t := range sorted {
 		mv, has := t.Value["match"]
 		if !has {
-			return t, true // unconditional tier
+			return t, true // ONLY an absent match is unconditional
 		}
-		cond, _ := mv.(map[string]any)
+		// A present match must be a JSON object carrying one recognized typed condition. Malformed,
+		// empty, unknown or PMS-disabled match => the tier does NOT match (never reinterpreted as
+		// unconditional).
+		cond, ok := mv.(map[string]any)
+		if !ok {
+			continue
+		}
 		ctype, _ := cond["type"].(string)
-		if ctype == "" {
-			return t, true // empty condition => unconditional
+		if strings.TrimSpace(ctype) == "" {
+			continue
 		}
 		if ok, _ := evalTypedCondition(ctype, cond, s); ok {
 			return t, true
@@ -111,10 +117,21 @@ func evalTypedCondition(ctype string, v map[string]any, s EligibilitySubject) (b
 	}
 	switch t {
 	case RuleDateWindow:
-		if from, ok := parseTimeField(v, "from"); ok && s.Now.Before(from) {
+		from, fromPresent, fromOK := parseTimeField(v, "from")
+		until, untilPresent, untilOK := parseTimeField(v, "until")
+		if !fromPresent && !untilPresent {
+			return false, "date_window_needs_a_bound" // at least one bound required
+		}
+		if (fromPresent && !fromOK) || (untilPresent && !untilOK) {
+			return false, "malformed_date_window" // present-but-malformed never treated as omitted
+		}
+		if fromPresent && untilPresent && !from.Before(until) {
+			return false, "date_window_from_ge_until"
+		}
+		if fromPresent && s.Now.Before(from) {
 			return false, "before_window"
 		}
-		if until, ok := parseTimeField(v, "until"); ok && !s.Now.Before(until) {
+		if untilPresent && !s.Now.Before(until) {
 			return false, "after_window" // upper bound EXCLUSIVE
 		}
 		return true, ""
@@ -137,10 +154,22 @@ func evalTypedCondition(ctype string, v map[string]any, s EligibilitySubject) (b
 		}
 		return false, "subject_kind_not_allowed"
 	case RulePriorPurchase:
-		if b, ok := v["requires_prior"].(bool); ok && b && !s.HasPriorPurchaseOfPackage {
+		reqRaw, reqHas := v["requires_prior"]
+		forRaw, forHas := v["forbids_prior"]
+		reqB, reqOK := reqRaw.(bool)
+		forB, forOK := forRaw.(bool)
+		if (reqHas && !reqOK) || (forHas && !forOK) {
+			return false, "malformed_prior_purchase" // wrong JSON types
+		}
+		reqOn := reqOK && reqB
+		forOn := forOK && forB
+		if reqOn == forOn { // neither true, or both true -> ambiguous/malformed
+			return false, "prior_purchase_needs_exactly_one"
+		}
+		if reqOn && !s.HasPriorPurchaseOfPackage {
 			return false, "requires_prior_purchase"
 		}
-		if b, ok := v["forbids_prior"].(bool); ok && b && s.HasPriorPurchaseOfPackage {
+		if forOn && s.HasPriorPurchaseOfPackage {
 			return false, "forbids_prior_purchase"
 		}
 		return true, ""
@@ -158,16 +187,23 @@ func evalTypedCondition(ctype string, v map[string]any, s EligibilitySubject) (b
 	}
 }
 
-func parseTimeField(v map[string]any, key string) (time.Time, bool) {
-	sv, ok := v[key].(string)
+// parseTimeField returns (time, present, valid). A field that is absent/empty is (_, false, _). A field
+// that is present but not a valid RFC3339 string is (_, true, false) so the caller can fail closed
+// rather than treat malformed input as an omitted optional bound.
+func parseTimeField(v map[string]any, key string) (time.Time, bool, bool) {
+	raw, has := v[key]
+	if !has {
+		return time.Time{}, false, false
+	}
+	sv, ok := raw.(string)
 	if !ok || strings.TrimSpace(sv) == "" {
-		return time.Time{}, false
+		return time.Time{}, true, false // present but wrong type/empty
 	}
 	t, err := time.Parse(time.RFC3339, strings.TrimSpace(sv))
 	if err != nil {
-		return time.Time{}, false
+		return time.Time{}, true, false
 	}
-	return t, true
+	return t, true, true
 }
 
 // stringSet lowercases-and-uppercases-insensitively builds a membership set from a JSON array of
@@ -197,25 +233,10 @@ type MoneySpec struct {
 	SettlementMethods []string
 }
 
-// iso4217 is a minimal ISO-4217 alpha-3 validity check (letters, length 3). A curated allowlist is not
-// required for correctness here — the constraint is that a zero-price package still carries a
-// syntactically valid, present currency.
-func validISO4217(code string) bool {
-	c := strings.TrimSpace(code)
-	if len(c) != 3 {
-		return false
-	}
-	for _, r := range c {
-		if r < 'A' || r > 'Z' {
-			return false
-		}
-	}
-	return true
-}
-
 // IsFreePackage reports whether a package revision qualifies for the Phase-2 free-only path, with a
 // deterministic reason when not. Requires price_minor == 0, settlement methods EXACTLY {NOT_REQUIRED},
-// and a syntactically valid present currency (zero price is still money-typed).
+// and an AUTHORITATIVE ISO-4217 currency whose supplied exponent matches (zero price is still
+// money-typed).
 func IsFreePackage(m MoneySpec) (bool, string) {
 	if m.PriceMinor != 0 {
 		return false, "not_free"
@@ -223,11 +244,8 @@ func IsFreePackage(m MoneySpec) (bool, string) {
 	if len(m.SettlementMethods) != 1 || strings.ToUpper(strings.TrimSpace(m.SettlementMethods[0])) != "NOT_REQUIRED" {
 		return false, "settlement_not_free"
 	}
-	if !validISO4217(m.Currency) {
+	if _, err := ValidateCurrency(m.Currency, m.CurrencyExponent); err != nil {
 		return false, "invalid_currency"
-	}
-	if m.CurrencyExponent < 0 || m.CurrencyExponent > 4 {
-		return false, "invalid_currency_exponent"
 	}
 	return true, "free"
 }

@@ -40,7 +40,7 @@
     "dark_features_enabled": false,
     "transition_id": "T0012",
     "transition_accepted": false,
-    "stage": "IMPLEMENTATION_IN_PROGRESS (WS-A/B plan+migration + WS-C1 domain done; WS-C2 engine/tests next)"
+    "stage": "IMPLEMENTATION_IN_PROGRESS (WS-A/B plan+migration + WS-C1..C5 domain/engine/hardening done: typed eligibility/grant-snapshot/ISO-4217 currency/duration policy, full money-pin exactness + offer-quote immutability, C2 quote/free-purchase + rollback-at-every-boundary + tamper, C3 subject-uniqueness/supersession/concurrency, C5 non-PMS revision lifecycle; all green on disposable iamv2_p2. WS-D APIs next)"
   },
   "phases": {
     "0":  { "status": "FINAL_CLOSED",       "title": "IAM redesign architecture contract + live PMS validation", "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)." },
@@ -114,7 +114,7 @@
     "Execute the authorized Phase 2 (commercial packages) end-to-end as one Phase, DARK (all Phase-2 flags OFF), on branch phase/2-commercial-packages / PR #4 -- no paid access, no PMS settlement, no iam_v2 cutover, no dark-feature live enablement, no Phase 3"
   ],
   "prohibited_actions": [
-    "Implementing any Phase beyond the authorized Phase 1B dark scope (Phase 2 or any later Phase)",
+    "Implementing any Phase beyond the authorized Phase 2 dark scope (Phase 3 or any later Phase)",
     "Any production iam_v2 write (including inside a later-rolled-back transaction)",
     "Granting any iam_v2 DML privilege to a runtime service role in production",
     "DSN/search_path change that routes any service to iam_v2; any iam_v2 cutover",
@@ -123,8 +123,8 @@
     "HA/topology change; Central changes; legacy IAM removal; guest paid access; Stripe activation"
   ],
   "next_authorized_action": "Complete Phase 2 execution end-to-end (schema, domain, APIs, portal + Hotel Admin UI, tests, live-dark deployment, reboot verification, evidence), then return one final report for a single Product-Owner Phase-2 acceptance decision. No paid access, no PMS settlement, no iam_v2 cutover, no Phase 3.",
-  "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
-  "privilege_matrix": "docs/architecture/Phase1B-Privilege-Matrix.md",
+  "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase2-Plan.md",
+  "privilege_matrix": "docs/architecture/Phase2-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D12",
   "latest_transition_id": "T0012"
 }
