@@ -22,3 +22,12 @@
 | `svc_netd` | `public`-only (network) | **none** | – (zero) |
 
 Rollback for the whole Phase = leave every Phase-2 flag OFF (default). No REVOKE is needed because no GRANT is performed. See `docs/architecture/StayConnect-IAM-Phase2-Plan.md` (sentinel `PHASE_2_PRODUCTION_RUNTIME: DARK`) and the Phase-1B matrix `docs/architecture/Phase1B-Privilege-Matrix.md` for the full production grant rows this Phase inherits unchanged.
+
+## Live-verified (2026-07-18, post live-dark deployment + reboot)
+
+On the appliance `172.21.60.23`, after deploying the Phase-2 binaries/UI and applying migration `0009`, verified via `information_schema.role_table_grants` / `role_routine_grants`:
+- `svc_scd`, `svc_edged`, `svc_acctd`, `svc_netd` each hold **zero** `iam_v2` table grants and **zero** `iam_v2` function EXECUTE grants (`ALL_ZERO`).
+- Migration 0009's trigger functions are owned by `iam_v2_owner` (not a runtime service role); triggers only fire on writes to `iam_v2.purchases` / `iam_v2.offer_quotes`, which no runtime role can perform while dark.
+- Confirmed identically before and after one reboot.
+
+The Phase-2 runtime privilege delta versus Phase 1B is therefore **zero**, as designed.
