@@ -8,6 +8,18 @@ Delivery: branch `phase/2-commercial-packages` / one PR → `master`. Phase 2 de
 `PHASE_2_PRODUCTION_RUNTIME: DARK` (no Phase-2 repository invoked, no Phase-2 runtime SQL, no Quote/
 Purchase/Entitlement row created in production while flags are OFF)
 
+## AS-BUILT FINAL STATUS
+
+**`IMPLEMENTED + LIVE-DARK DEPLOYED + REBOOT VERIFIED; PENDING PRODUCT-OWNER ACCEPTANCE`** (authorized D12/T0012; deployment candidate T0013; `transition_accepted: false`; not merged; no cutover; no Phase 3).
+
+The sections below are the **approved plan** (retained). Where the pre-implementation wording differs from what was actually built, the following as-built corrections govern (and are applied inline in §2/§4/§5/§7):
+
+- **Revision immutability triggers were NOT added by migration 0009.** They were already provided by the accepted Phase-1A canonical schema (MG-9 `imm_plan_rev` / `imm_pkg_rev` append-only triggers) and were **preserved unchanged**. Migration `0009_phase2_commerce` adds only: (1) a null-safe Purchase↔Quote **full** pin/money/tax equality trigger; (2) an Offer-Quote **immutability-except-one-time-consume** trigger; (3) **six lookup indexes**.
+- **There is no separate Phase-2 free-only schema trigger.** Free-only (`price_minor = 0`) and `settlement_methods = {NOT_REQUIRED}` are enforced in **publication + domain + UI validation** (edged writer sets those values; quote/confirm re-validate; grace requires a free CHECKOUT_GRACE revision). This keeps the schema forward-compatible with later paid/PMS phases.
+- **Actual internal-socket portal routes:** `GET /v1/commerce/packages`, `POST /v1/commerce/quote`, `POST /v1/commerce/confirm` (the `/v1/packages/*` names in §4 were a planning placeholder). A trusted **portald server bridge** injects the pins; the browser submits only opaque `package_id` / `quote_id`.
+- **UI surfaces:** the Guest Portal is the Go **`portald` success-page template + client JavaScript** (not a Next app); the Hotel Admin is **Next.js**. Both are deployment-flag gated and **OFF** in the live deployment.
+- **Tests + deployment (as-built):** Go C-series + software gate green on the disposable DB; **45 automated UI tests** (36 Vitest+RTL, 9 Playwright E2E); an authoritative Next production build (all 31 routes); the initial deployment + one UI-only redeploy, with **two** reboot verifications.
+
 ## 0. Scope & non-scope
 
 **In scope (one Phase):** Service Plans + immutable Plan Revisions; Internet Packages + immutable
@@ -42,18 +54,24 @@ one-time consumption columns (`consumed_at`).
 
 ## 2. Additive migrations (Phase 2, iam_v2) — migration `0009_phase2_commerce`
 
-Additive only; apply/twice/rollback/reapply + fingerprint clean. Adds:
-1. **Immutable published revisions** — BEFORE UPDATE triggers on `service_plan_revisions` and
-   `internet_package_revisions` that reject mutation of business columns once created (append-only).
-2. **Free-purchase pin equality** — a null-safe trigger enforcing `purchases.package_revision_id =
-   offer_quotes.package_revision_id` AND `purchases.auth_context_id = offer_quotes.auth_context_id`
-   even when `pms_interface_id`/`settlement_mapping_id` are NULL (the composite FK is MATCH SIMPLE, so
-   it is not enforced when a pinned column is NULL, i.e. the free case).
-3. **Free-only settlement guard** — a trigger rejecting an `offer_quotes`/`purchases` row for a package
-   revision whose `settlement_methods ≠ {NOT_REQUIRED}` or `price_minor ≠ 0` (Phase-2 fail-closed).
-4. **Eligible-package + active-revision indexes** — supporting lookups by (tenant,site,active) and
-   current-revision joins and quote/purchase lookups by auth_context.
-5. **Grant-tier ordering** already UNIQUE; add a validation index; no overlap enforced in domain.
+Additive only; apply/twice/rollback/reapply + fingerprint clean. **As-built, migration 0009 adds ONLY items 2, 4 below** (the null-safe Purchase↔Quote pin/money/tax equality trigger, the offer-quote immutability trigger, and six lookup indexes):
+1. ~~**Immutable published revisions** — BEFORE UPDATE triggers on plan/package revisions.~~ **As-built: NOT added by 0009.** These append-only immutability triggers were already provided by the accepted **Phase-1A MG-9 schema** (`imm_plan_rev` / `imm_pkg_rev`) and were preserved unchanged.
+2. **Free-purchase pin equality** — a null-safe trigger enforcing that a `purchases` row referencing an
+   `offer_quote` pins the SAME tenant/site/package_revision/auth_context/pms_interface/settlement_mapping
+   AND the same amount/currency/exponent/tax_code/tax_rate/tax_amount as that quote (`IS NOT DISTINCT
+   FROM`), even when `pms_interface_id`/`settlement_mapping_id` are NULL (the composite FK is MATCH
+   SIMPLE, so it is not enforced in the free case). **(In 0009.)** Plus an **offer-quote immutability**
+   trigger — a created quote's pins/price/tax/expiry/grant_snapshot are frozen; the only legal mutation
+   is the one-time consume (`consumed_at` NULL → timestamp). **(In 0009.)**
+3. ~~**Free-only settlement guard** — a trigger rejecting non-`NOT_REQUIRED`/priced rows.~~ **As-built:
+   there is NO separate Phase-2 free-only schema trigger.** Free-only (`price_minor = 0`) and
+   `settlement_methods = {NOT_REQUIRED}` are enforced in **publication + domain + UI validation**, so the
+   schema stays forward-compatible with later paid/PMS phases.
+4. **Six lookup indexes** — (tenant,site,active) active-package lookup; current-revision visibility;
+   offer-quote by auth_context; open-quote expiry; purchase by auth_context; eligibility-rules by
+   revision. **(In 0009.)**
+5. **Grant-tier ordering** is already UNIQUE per revision (Phase-1A schema); no overlap is enforced in the
+   schema (domain resolves deterministic first-match by `tier_order`).
 
 No broad runtime grants; Gate-P grants extended only by the exact DARK-build needs (see §7).
 
@@ -85,9 +103,12 @@ Mirror the accepted dark-authenticator pattern (flags OFF ⇒ never touches the 
 
 ## 4. APIs — scd (portal) + edged (Hotel Admin), flag-gated dark
 
-- **Portal (scd, flag `_PORTAL`)**: `GET /v1/packages` (eligible free packages for an auth-context),
-  `POST /v1/packages/quote` (create quote), `POST /v1/packages/purchase` (confirm free purchase →
-  entitlement/session). Generic errors only; no identifier enumeration; no PMS/room/paid flow.
+- **Portal (scd, flag `_PORTAL`)** — **as-built routes** are `GET /v1/commerce/packages` (eligible free
+  packages for an auth-context), `POST /v1/commerce/quote` (create quote), `POST /v1/commerce/confirm`
+  (confirm free purchase → entitlement/session). Internal Unix-socket API only (chmod 0660
+  root:stayconnect), never on a guest TCP listener; a trusted **portald server bridge** derives the
+  auth-context/device/guest-network from its session and forwards them, and the browser submits only the
+  opaque `package_id` / `quote_id`. Generic errors only; no identifier enumeration; no PMS/room/paid flow.
 - **Hotel Admin (edged, flag `_ADMIN`)**: revisioned CRUD for plans/plan-revisions, packages/
   package-revisions, eligibility rules, grant tiers, current-revision publish, activate/deactivate +
   sale windows, free/`NOT_REQUIRED` settlement config, grace config; read-only quote/purchase
@@ -96,10 +117,14 @@ Mirror the accepted dark-authenticator pattern (flags OFF ⇒ never touches the 
 
 ## 5. UI — portal + Hotel Admin (Next), flag-gated (env), default OFF
 
-Portal: list eligible free packages → package/plan revision info (guest-appropriate) → grants
-(speed/data/time/device) → create quote → confirm → entitlement/session state; generic errors. Hotel
-Admin: production-grade management screens for the above with revision history + grace config. No fake
-data in production.
+**As-built:** the **Guest Portal is the Go `portald` success-page template + client JavaScript** (not a
+Next app) — list eligible free packages → guest-appropriate package/plan info → grants
+(speed/data/time/device) → create quote → confirm → entitlement/session state; generic errors;
+double-submit prevented. The **Hotel Admin is Next.js** — production-grade management screens (Packages/
+Service Plans/Grace/Inspection) with a plan-revision selector, typed eligibility/tier editors, sale
+windows, duration policy, revision history and grace config. Both surfaces are **deployment-flag gated and
+OFF** in the live deployment (`NEXT_PUBLIC_PHASE2_ADMIN` for admin; the portal panel renders only when the
+portal flag is on). No fake data in production.
 
 ## 6. Tests — C-series + software gate
 
@@ -112,10 +137,12 @@ Disposable DB; destroy all disposable infra after the gate. Governance CI is NOT
 ## 7. Live-dark deployment (appliance 172.21.60.23)
 
 Reverify host → fresh backup + fingerprints + iam_v2 row counts → apply 0009 via the migration executor
-→ apply exact least-privilege grants for the DARK build → deploy pinned backend+UI → confirm every
-Phase-2 flag OFF + zero Phase-2 SQL + no invented Quote/Purchase/Entitlement/Package data → legacy
-smoke tests → one reboot → repeat dark + operational checks. **Infrastructure only; not guest-enabled;
-no cutover.**
+→ **as-built: zero new runtime iam_v2 privileges were required for the DARK build** (nil repo while
+flags OFF) → deploy pinned backend+UI → confirm every Phase-2 flag OFF + zero Phase-2 SQL + no invented
+Quote/Purchase/Entitlement/Package data → legacy smoke tests → reboot → repeat dark + operational checks.
+**As-built there were TWO reboot verifications** (first at the initial deployment `2026-07-18 08:35:06`;
+second at the final acceptance-gate UI-only redeploy `2026-07-18 11:56:34`). **Infrastructure only; not
+guest-enabled; no cutover.**
 
 ## 8. Governance
 

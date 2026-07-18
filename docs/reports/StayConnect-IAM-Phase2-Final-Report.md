@@ -1,8 +1,10 @@
 # StayConnect IAM — Phase 2 (Commercial Packages) Final Report
 
-**Maturity offered: verified DARK (implementation + live-dark deployment + one reboot + post-reboot re-verification). Pending a single Product-Owner acceptance decision. Not self-accepted; PR #4 unmerged.**
+**Maturity offered: verified DARK (implementation + automated UI tests + live-dark deployment + TWO reboots with post-reboot re-verification each). Pending a single Product-Owner acceptance decision. Not self-accepted; PR #4 unmerged.**
 
 Branch `phase/2-commercial-packages` · PR #4 · **authorized** under **D12** / transition **T0012** · **deployment candidate** transition **T0013** (`transition_accepted: false`) · appliance `radius` / `172.21.60.23`.
+
+**Two HEADs (self-reference avoidance):** `acceptance_candidate_head` = the substantive reconciliation HEAD used to generate the change manifest; the **delivery-wrapper HEAD** (the branch tip / PR HEAD) sits one commit above it and adds only the regenerated manifest, rebuilt export packs and the pointer/provenance — which a generated manifest cannot include about the commit that creates it. Exact SHAs, pack hashes and the Governance CI run are recorded in §13/§16 and the PR body.
 
 ---
 
@@ -27,7 +29,7 @@ This gate added real UI test automation, an authoritative production build, and 
 
 ## 2. Current Phase and authorized scope
 - **Phase 2 — Commercial Packages**, executed as one end-to-end Phase under D12.
-- **Allowed:** plan, additive schema/migration, domain, guest-Portal discovery/selection/quote/free-purchase, Hotel-Admin revisioned CRUD + grace config, tests, live-dark deployment + one reboot + verification, evidence, one final report.
+- **Allowed:** plan, additive schema/migration, domain, guest-Portal discovery/selection/quote/free-purchase, Hotel-Admin revisioned CRUD + grace config, tests, live-dark deployment + reboot verification (the final acceptance gate added a UI-only redeploy + a second reboot), evidence, one final report.
 - **Prohibited (honored):** paid access; PMS settlement/posting/folio/tax; Stripe/payment; IAM-v2 cutover; dual read/write; data migration; dark-feature live enablement; Phase 3; legacy IAM removal; network/HA changes. Free acquisition only (`price_minor=0`, settlement `NOT_REQUIRED`).
 
 ## 3. What was implemented
@@ -42,16 +44,22 @@ Zero observable change today: every surface is inert behind OFF flags. When late
 
 ## 5. Risks and limitations
 - The guest end-to-end flow additionally depends on live IAM-v2 authentication (Phase-1B **dark, not cut over**): with no IAM-v2 auth-context, the portald bridge fail-closes to "unavailable". This is why the flags stay OFF, not a defect.
-- `next build` static prerender OOMs on a memory-pressured workstation; the standalone bundle was built with an 8 GB Node heap and deployed successfully. No JS component/E2E test harness exists in `hotel-admin`; UI verification is tsc + build + the API/bridge Go tests.
+- A deterministic JS UI test harness now exists: **36 Vitest + React Testing Library** component/unit tests and **9 Playwright** E2E tests (3 Hotel Admin + 6 Guest Portal), all green. The authoritative Next production build completes all 31 routes with a 12 GB Node heap (`NODE_OPTIONS=--max-old-space-size=12288 npm run build`, EXIT 0); the earlier prerender OOM was a workstation memory-pressure limit only (a recorded environment observation), not a code defect.
 - Grace config records a selection only; it creates no grace entitlement/checkout behavior (Phase 3).
 
 ## 6. Acceptance tests
 - **Go (`go test ./...`, `PHASE2_TEST_DSN` on disposable `iamv2_p2`): EXIT 0.** Covers config fail-closed; typed eligibility + publication validation; grant-snapshot (floats/negative/unknown/AGGREGATE-disabled); ISO-4217 (exp 0/2/3, ZZZ, USD/0); duration policy; **C2** quote/free-purchase + expiry + 24-way single-winner + rollback-at-every-mutation-boundary + tampered-quote; **C3** subject uniqueness/supersession/cross-subject/concurrency (account/voucher/principal); **C4/C5** immutability + pin trigger + revision lifecycle; **C6** per-pin substitution rejected by PostgreSQL; **C7** offer-quote immutability; **C8** duration-window stamping; guest listing filters + read-only + auth-pin; admin plans/grace-validation/inspection/publish-rejection; portald bridge (dark unmounted, no-session unavailable, browser cannot substitute pins, session-pin forwarding).
-- **UI:** `tsc --noEmit` PASS; `next build` "Compiled successfully" + types valid + all 31 routes generated.
+- **UI component/unit (Vitest + RTL, `npm test`): 36/36 PASS** — nav gating by flag+role; 503 disabled state; plan-revision selector (no raw UUID); revision-history current/immutable; typed eligibility editor (only the five non-PMS rule types; PMS types absent); ordered grant tiers; duration validation (PMS/checkout modes not representable); sale-window; free-only payload (no price/settlement/pms/tax/currency); grace validation; step-up deactivate (aborts on cancel); PII-free inspection; failed-publish-no-false-success.
+- **Guest Portal E2E (Playwright, real portald success-page template): 6/6 PASS** — flag OFF → no panel + no commerce call; flag ON → lists only eligible packages, select→quote→confirm reaches active, browser submits ONLY opaque `package_id`/`quote_id`, double-submit → one confirm, expired/failed quote → generic unavailable.
+- **Hotel Admin E2E (Playwright, real Next app, edged mocked): 3/3 PASS** — nav visible + list; approved disabled behavior on 503 with zero commerce mutations; full flow (create plan → publish free package via selector → step-up deactivate → grace validation → PII-free inspection).
+- **UI type-check + authoritative production build:** `tsc --noEmit` PASS; `NODE_OPTIONS=--max-old-space-size=12288 npm run build` EXIT 0 — `✓ Compiled successfully` + `✓ Generating static pages (31/31)`.
 - Full commands/timestamps/exit codes: `docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md`.
 
 ## 7. Production and guest impact
-- Services restarted then the appliance rebooted once. Existing guest sessions persist across the daemon restarts (nftables/shaping state); the captive portal has a brief restart window. All legacy surfaces returned healthy pre- and post-reboot (scd 200, portald landing 200 + captive redirect 302, hotel-admin 200, edged 200).
+- **Two deployment/reboot events**, both re-verified darkness:
+  1. **Initial Phase-2 deployment** — scd/edged/portald binaries + hotel-admin UI bundle deployed, services restarted, first reboot at **`2026-07-18 08:35:06`**.
+  2. **Final acceptance-gate redeploy (UI only)** — after the typed publish-form refactor, the hotel-admin bundle (`678c793e…`, release `20260718-115608`) was redeployed (Go binaries unchanged); second reboot at **`2026-07-18 11:56:34`**.
+- Existing guest sessions persist across daemon restarts (nftables/shaping state); the captive portal has a brief restart window. All legacy surfaces returned healthy pre- and post-reboot each time (scd 200, portald landing 200 + captive redirect 302, hotel-admin 200, edged 200).
 - No guest-visible feature change (flags OFF).
 
 ## 8. Rollback status
@@ -67,35 +75,38 @@ Zero observable change today: every surface is inert behind OFF flags. When late
 - `public` schema columns SHA-256 unchanged pre→post migration (`833c3d67…`); iam_v2 remains 49 tables / 0 rows.
 
 ## 10. Complete generated changed-file manifest
-`docs/manifests/Phase2-change-manifest.md` — generated by `tools/generate-change-manifest.py` against base `4e3c3ee27a8c` (67 changed files). Do not hand-edit.
+`docs/manifests/Phase2-change-manifest.md` — generated by `tools/generate-change-manifest.py` against base `4e3c3ee27a8c` through the **acceptance-candidate HEAD** (`acceptance_candidate_head` in `project-state.json`): **86 changed files**. The manifest records that acceptance-candidate HEAD; the delivery-wrapper HEAD one commit above it adds only the regenerated manifest, rebuilt packs and pointer/provenance, which the manifest cannot self-include. Do not hand-edit. (The pre-final-gate "67 files" figure is superseded.)
 
 ## 11. All commits created (base `4e3c3ee` → HEAD)
-`c8f7a1c` WS-A/B plan+migration 0009 · `25d6521` WS-C1 config/domain · `740db89` governance D12/T0012 · `09a0abe` packs · `11a3462` WS-C2 engine+tests · `1f4eae6` C1/C2/C3/C5 hardening+governance · `005c0a4` WS-D scd routes · `9c13d11` WS-D edged admin foundation · `1403a33` WS-E admin page foundation · `8df3679` guest listing + PR/state sync · `2ed86c1` full admin API · `a064f6e` portald bridge · `288bff1` scd trust hardening · `ad43140` guest Portal UI · `a0578e4` full admin UI · `b89a744` software-gate evidence · `42f53aa` live-dark evidence + governance closure · `3a4fce8` change manifest · `efcaa26` packs · `1525c0d` validator next-action · `bf7f520` packs. (Plus this report commit.)
+**Core Phase 2:** `c8f7a1c` WS-A/B plan+migration 0009 · `25d6521` WS-C1 config/domain · `740db89` governance D12/T0012 · `09a0abe` packs · `11a3462` WS-C2 engine+tests · `1f4eae6` C1/C2/C3/C5 hardening+governance · `005c0a4` WS-D scd routes · `9c13d11` WS-D edged admin foundation · `1403a33` WS-E admin page foundation · `8df3679` guest listing + PR/state sync · `2ed86c1` full admin API · `a064f6e` portald bridge · `288bff1` scd trust hardening · `ad43140` guest Portal UI · `a0578e4` full admin UI · `b89a744` software-gate evidence · `42f53aa` live-dark evidence + governance closure · `3a4fce8` change manifest · `efcaa26` packs · `1525c0d` validator next-action · `bf7f520` packs · `34233ab` 20-section report + fixtures.
+**Final acceptance gate (UI automation + evidence reconciliation):** `3b7b752` Vitest+RTL harness + typed publish form · `9c78b78` Playwright E2E · `5dd1047` UI-test+build evidence, T0012/T0013 sync, guards · `13bac76` change-manifest regen + pointer · `0d732c1` rebuilt packs.
+**Zero-Stale reconciliation (this delivery):** one substantive commit `S` (docs/governance/exports reconciliation) + one delivery-wrapper commit (manifest + packs + pointer). Their exact SHAs are recorded in §13 and the PR body.
 
 ## 12. Branch and PR information
 - Branch: `phase/2-commercial-packages`; base `master@4e3c3ee`.
 - PR: **#4** (open, do-not-merge before PO acceptance); body updated to actual HEAD/status.
 
-## 13. Remote reachability of HEAD
-HEAD pushed to `origin/phase/2-commercial-packages`; GitHub Actions **Project Governance** green on the pushed HEAD (see §17). (Exact SHA + CI confirmation appended at push time.)
+## 13. Remote reachability of HEAD + Governance CI
+- Prior gate HEAD `0d732c1` — Governance CI run **29644103075** = **SUCCESS**.
+- This Zero-Stale reconciliation pushes the substantive HEAD `S` and the delivery-wrapper HEAD (branch tip / PR HEAD) to `origin/phase/2-commercial-packages`; the exact SHAs and the Governance CI run + conclusion on the **final delivery-wrapper HEAD** are recorded in the PR #4 body and the returned report (a committed file cannot carry the CI run of the commit that is being pushed).
 
 ## 14. Full working-tree status
 Clean at each push (only intended, committed files). No stray tracked modifications; `__pycache__/` git-ignored.
 
 ## 15. Documentation and governance synchronization
-`project-state.json` (activity `PHASE_2_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE`, phase-2 maturity, `migration_0009_applied`, verified_evidence, completed_milestones) + transition `T0013` + rendered generated blocks (Handoff, Phase-0/1A/1B plans, START-HERE, PROJECT-INSTRUCTIONS); Phase-2 plan + Phase-2 privilege matrix (live-verified zero delta); PR #4 body; export packs rebuilt once. `PROJECT_STATE_GOVERNANCE = PASS`; `ZERO_STALE_LEFTOVERS = PASS`; adversarial mutation suite PASS.
+`project-state.json` (activity `PHASE_2_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE`; phase-2 maturity with **two** reboot verifications; `migration_0009_applied`; `authorization_transition_id=T0012`; `transition_id=T0013`; `acceptance_candidate_head`; verified_evidence; completed_milestones; blockers = pending one PO acceptance decision; allowed_actions limited to read-only verification / governance reconciliation / PO acceptance) + transition `T0013` + rendered generated blocks (Handoff, Phase-0/1A/1B plans, START-HERE, PROJECT-INSTRUCTIONS); Phase-2 Plan reconciled to as-built truth; Phase-2 privilege matrix (live-verified zero delta); acceptance candidate; evidence records; PR #4 body. Export packs rebuilt to include the Phase-2 authoritative sources/evidence; Phase-1B Planning Pack marked HISTORICAL. `PROJECT_STATE_GOVERNANCE = PASS`; `ZERO_STALE_LEFTOVERS = PASS` (repository + extracted packs); adversarial mutation suite PASS.
 
-## 16. Project / Evidence Pack paths and checksums (SHA-256, first 16 hex)
-- `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` — `9483fee47618bf5a…`
-- `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` — `716bcab1986b6b83…`
-- `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` — `c0c871ab12b20e1f…`
-- SOURCE_COMMIT recorded in packs: `1525c0d` (rebuilt at `bf7f520`).
+## 16. Project / Evidence Pack paths and checksums (SHA-256)
+The export packs are rebuilt from the substantive reconciliation HEAD `S` in the delivery-wrapper commit; their **full** SHA-256 values are recorded there and in the PR #4 body / returned report (the pack files change in the wrapper, so their final hashes cannot be embedded in a report committed at `S`). Packs:
+- `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` — current Project Pack (now includes the Phase-0/1A/1B/2 plans, Phase-2 privilege matrix, Phase-2 Software-Gate + Live-Dark evidence, Phase-2 acceptance candidate, Phase-2 Final Report, change manifest, Zero-Stale + GitHub delivery rules).
+- `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` — current Phase Evidence Pack (Phase-1A + 1B closed baselines + the full Phase-2 evidence set + change manifest + D12/T0012/T0013 records).
+- `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` — **HISTORICAL** (Phase-1B planning artifact; Phase 1B was ACCEPTED_AND_CLOSED via D11/T0011 and PR #2 merged).
 
 ## 17. `PROJECT_STATE_GOVERNANCE` result
-**PASS** (`python tools/project-state.py validate`). Adversarial mutation suite (`tools/tests/project_state_validator/run_mutations.py`) **PASS** — includes the deterministic Phase-2 scope guard (M36). GitHub Actions Project Governance green on the pushed HEAD.
+**PASS** (`python tools/project-state.py validate`). Adversarial mutation suite (`tools/tests/project_state_validator/run_mutations.py`) **PASS** — includes the deterministic Phase-2 scope guard **M36**, the transition-pointer drift guard **M37**, and the Zero-Stale reconciliation guards added in this delivery (final-report/build/artifact/pack/fingerprint contradiction classes). GitHub Actions Project Governance green on the pushed delivery-wrapper HEAD.
 
 ## 18. `ZERO_STALE_LEFTOVERS` result
-**PASS** (`bash tools/validate-project-state.sh`) — single current maturity, consistent next-action (Phase-2 final report), no stale current-status phrases, packs + links + checksums valid, no secrets/PII.
+**PASS** (`bash tools/validate-project-state.sh`, repository mode + every extracted current pack) — single current maturity, consistent next-action (one Product-Owner Phase-2 acceptance decision), no stale current-status phrases, current packs include the Phase-2 authoritative sources/evidence, links + checksums valid, no secrets/PII. This PASS is asserted only after every correction in the Zero-Stale reconciliation is complete.
 
 ## 19. Remaining blockers
 - None for DARK acceptance. Enabling Phase-2 guest flow in production additionally requires the (separately authorized) IAM-v2 authentication cutover; out of this Phase's DARK scope.

@@ -357,6 +357,72 @@ def cmd_validate(deep=True):
         if "PHASE_2_PRODUCTION_RUNTIME: DARK" not in p2t:
             fail("Phase 2 plan missing sentinel 'PHASE_2_PRODUCTION_RUNTIME: DARK'")
 
+    # ---- Phase-2 Zero-Stale reconciliation guards (narrow, deterministic) ----
+    def _read(rel):
+        p = os.path.join(ROOT, rel)
+        return open(p, encoding="utf-8").read() if os.path.isfile(p) else None
+    rep = _read("docs/reports/StayConnect-IAM-Phase2-Final-Report.md")
+    gate = _read("docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md")
+    live = _read("docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md")
+    man = _read("docs/manifests/Phase2-change-manifest.md")
+    # 1. report cannot claim "no UI test harness" once the software gate records UI tests
+    if rep and gate and re.search(r"Vitest|Playwright|\b36\b\s*(component|Vitest|tests)", gate):
+        if re.search(r"no\s+JS\s+component/?E2E\s+test\s+harness\s+exists|no\s+UI\s+test\s+harness", rep, re.I):
+            fail("Phase-2 report claims no UI test harness while the software gate records UI tests")
+    # 2. report changed-file count must match the manifest and must not present 67 as current
+    if rep and man:
+        mm = re.search(r"Changed files:\*\*\s*(\d+)", man)
+        if mm:
+            cnt = mm.group(1)
+            if cnt not in rep:
+                fail(f"Phase-2 report does not state the manifest changed-file count ({cnt})")
+        # the legitimate superseded mention uses "67 files"; presenting "67 changed files" is the stale claim.
+        if re.search(r"\b67\b\s+changed\s+files?", rep, re.I):
+            fail("Phase-2 report presents 67 changed files as current (must be the acceptance-candidate manifest count)")
+    # 3. live-evidence current artifact table must show the current hotel-admin bundle, not the superseded one
+    if live:
+        cur_ui = "678c793ea46f23241eba05bde66929b19a5473fc8d3752d2a5eb083f4ff0dd95"
+        old_ui = "e25126737341d8f248ae3a4589ba3a72778705a00f25b8caf6312c64a723999d"
+        if cur_ui not in live:
+            fail("Phase-2 live evidence missing the current hotel-admin bundle hash 678c793e")
+        if old_ui in live:
+            idx = live.index(old_ui)
+            preceding = live[:idx]
+            if "HISTORICAL" not in preceding and not re.search(r"supersed", live[max(0, idx-200):idx+200], re.I):
+                fail("Phase-2 live evidence presents the superseded hotel-admin bundle e25126737341 as current (needs a HISTORICAL/superseded marker)")
+    # 4. pending PO acceptance must not coexist with an allowed_action to keep implementing Phase 2
+    if "PENDING_PO_ACCEPTANCE" in str(st.get("current_activity", "")):
+        for a in st.get("allowed_actions", []) or []:
+            if re.search(r"(execute|implement|continue)[^.]{0,60}phase\s*2", str(a), re.I) and re.search(r"end-to-end|implement", str(a), re.I):
+                fail("Phase 2 is pending PO acceptance but an allowed_action still says to continue implementing Phase 2")
+    # 5. the Project Pack SOURCE list must include the current Phase-2 plan/acceptance/evidence (checking the
+    #    build source list, not the extracted dir, so this never deadlocks the pack rebuild).
+    for req in ["StayConnect-IAM-Phase2-Plan.md", "StayConnect-IAM-Phase2-Final-Report.md",
+                "StayConnect-IAM-Phase2-Live-Dark-Acceptance.md", "StayConnect-IAM-Phase2-Software-Gate.md",
+                "StayConnect-IAM-Phase2-Live-Dark-Evidence.md"]:
+        if req not in PACK_DOCS:
+            fail(f"Project Pack source list (PACK_DOCS) omits the current Phase-2 file {req}")
+    # 6. the Phase Evidence Pack SOURCE list must include the Phase-2 evidence set.
+    for req in ["docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md",
+                "docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md"]:
+        if req not in EVIDENCE_PHASE2_DOCS:
+            fail(f"Phase Evidence Pack source list (EVIDENCE_PHASE2_DOCS) omits {req}")
+    # once a Project Pack has been built, it must physically contain the Phase-2 final report (post-build check).
+    built_report = os.path.join(ROOT, "exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Final-Report.md")
+    built_manifest = os.path.join(ROOT, "exports/chatgpt/stayconnectenterprise/MANIFEST.md")
+    if os.path.isfile(built_manifest) and "StayConnect-IAM-Phase2-Final-Report.md" in open(built_manifest, encoding="utf-8").read() and not os.path.isfile(built_report):
+        fail("Project Pack MANIFEST lists the Phase-2 Final Report but the file is not in the pack")
+    # 7. the Phase-1B Planning Pack MANIFEST generator must mark the pack HISTORICAL (checking the generator
+    #    source, not the extracted file, so it holds at the delivery-wrapper HEAD and never deadlocks a rebuild).
+    self_src = _read("tools/project-state.py") or ""
+    if not re.search(r"PLANNING_PACK_STATUS:\s+HISTORICAL", self_src):
+        fail("Phase-1B Planning Pack MANIFEST generator does not mark the pack HISTORICAL (sentinel missing)")
+    # 8. two named public-column fingerprints must carry a reconciliation note (never conflicting unnamed values)
+    dss = st.get("database_schema_state", {}) or {}
+    if dss.get("public_columns_sha256_current") and dss.get("public_columns_phase2_livedark_sha256"):
+        if dss["public_columns_sha256_current"] != dss["public_columns_phase2_livedark_sha256"] and not dss.get("public_columns_fingerprint_reconciliation"):
+            fail("public column fingerprints differ but carry no reconciliation note (must be distinctly named + documented, not comparable)")
+
     # The Phase-1B least-privilege artifacts remain the authoritative BASE for every later DARK phase
     # (D1 rolled-back-write ban, zero production iam_v2 runtime, matrix NONE). Validate them by FIXED path
     # regardless of which phase's plan/matrix is the current pointer, so the base posture cannot be
@@ -435,6 +501,13 @@ PACK_DOCS = {
  "StayConnect-IAM-Phase1A-Plan.md": ("docs/architecture/StayConnect-IAM-Phase1A-Plan.md",None),
  "StayConnect-IAM-Phase1B-Plan.md": ("docs/architecture/StayConnect-IAM-Phase1B-Plan.md",None),
  "Phase1B-Privilege-Matrix.md": ("docs/architecture/Phase1B-Privilege-Matrix.md",None),
+ "StayConnect-IAM-Phase2-Plan.md": ("docs/architecture/StayConnect-IAM-Phase2-Plan.md",None),
+ "Phase2-Privilege-Matrix.md": ("docs/architecture/Phase2-Privilege-Matrix.md",None),
+ "StayConnect-IAM-Phase2-Software-Gate.md": ("docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md",None),
+ "StayConnect-IAM-Phase2-Live-Dark-Evidence.md": ("docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md",None),
+ "StayConnect-IAM-Phase2-Live-Dark-Acceptance.md": ("docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md",None),
+ "StayConnect-IAM-Phase2-Final-Report.md": ("docs/reports/StayConnect-IAM-Phase2-Final-Report.md",None),
+ "Phase2-change-manifest.md": ("docs/manifests/Phase2-change-manifest.md",None),
  "StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md": ("docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md",None),
  "Protel-FIAS-Phase0-Spike.md": ("docs/spikes/Protel-FIAS-Phase0-Spike.md","spike"),
  "ZERO_STALE_LEFTOVERS_RULE.md": ("docs/ZERO_STALE_LEFTOVERS_RULE.md",None),
@@ -447,6 +520,14 @@ PACK_DOCS = {
  "MIGRATION_RUNBOOK.md": ("docs/MIGRATION_RUNBOOK.md",None),
 }
 PACKED_NAMES = set(PACK_DOCS) | {"00-START-HERE.md","PROJECT-INSTRUCTIONS.md","MANIFEST.md"}
+# Phase-2 evidence docs copied into the Phase Evidence Pack (also asserted present by the reconciliation guard).
+EVIDENCE_PHASE2_DOCS = [
+ "docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md",
+ "docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md",
+ "docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md",
+ "docs/reports/StayConnect-IAM-Phase2-Final-Report.md",
+ "docs/manifests/Phase2-change-manifest.md",
+]
 # MANIFEST row order + status label
 MROWS = [
  ("00-START-HERE.md","*(generated)*","Entry point"),
@@ -454,8 +535,15 @@ MROWS = [
  ("StayConnect-IAM-Phase0-Contract.md","`docs/architecture/StayConnect-IAM-Phase0-Contract.md`","**Authoritative** *(sanitized)*"),
  ("StayConnect-IAM-Handoff.md","`docs/context/StayConnect-IAM-Handoff.md`","**Authoritative**"),
  ("StayConnect-IAM-Phase1A-Plan.md","`docs/architecture/StayConnect-IAM-Phase1A-Plan.md`","**Authoritative (closed phase)**"),
- ("StayConnect-IAM-Phase1B-Plan.md","`docs/architecture/StayConnect-IAM-Phase1B-Plan.md`","**Authoritative — implemented (live-dark deployed, T0010)**"),
+ ("StayConnect-IAM-Phase1B-Plan.md","`docs/architecture/StayConnect-IAM-Phase1B-Plan.md`","**Authoritative — ACCEPTED_AND_CLOSED at DARK maturity (D11/T0011); PR #2 merged**"),
  ("Phase1B-Privilege-Matrix.md","`docs/architecture/Phase1B-Privilege-Matrix.md`","**Authoritative — as-built grant matrix (Gate P deployed)**"),
+ ("StayConnect-IAM-Phase2-Plan.md","`docs/architecture/StayConnect-IAM-Phase2-Plan.md`","**Authoritative — Phase 2 implemented + live-dark deployed + reboot-verified; pending PO acceptance (D12/T0012, T0013)**"),
+ ("Phase2-Privilege-Matrix.md","`docs/architecture/Phase2-Privilege-Matrix.md`","**Authoritative — zero new Phase-2 runtime privilege (live-verified)**"),
+ ("StayConnect-IAM-Phase2-Software-Gate.md","`docs/evidence/StayConnect-IAM-Phase2-Software-Gate.md`","**Authoritative — Phase 2 software-gate evidence (Go + 45 UI tests + build)**"),
+ ("StayConnect-IAM-Phase2-Live-Dark-Evidence.md","`docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md`","**Authoritative — Phase 2 live-dark + two-reboot darkness evidence**"),
+ ("StayConnect-IAM-Phase2-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md`","**Acceptance CANDIDATE — pending one PO decision (not accepted)**"),
+ ("StayConnect-IAM-Phase2-Final-Report.md","`docs/reports/StayConnect-IAM-Phase2-Final-Report.md`","**Authoritative — Phase 2 final report**"),
+ ("Phase2-change-manifest.md","`docs/manifests/Phase2-change-manifest.md`","**Generated — Phase 2 changed-file manifest (acceptance-candidate HEAD)**"),
  ("StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`","**Authoritative (acceptance record)**"),
  ("Protel-FIAS-Phase0-Spike.md","`docs/spikes/Protel-FIAS-Phase0-Spike.md`","**Authoritative** *(sanitized)*"),
  ("ZERO_STALE_LEFTOVERS_RULE.md","`docs/ZERO_STALE_LEFTOVERS_RULE.md`","**Permanent rule**"),
@@ -519,7 +607,16 @@ def _build_evidence_pack(src_commit):
     for fn in ["PROD_LIVE_DARK_EVIDENCE_V2.txt","PROD_LIVE_DARK_EVIDENCE.txt"]:
         _cp(os.path.join(ROOT,"iam_v2_scratch/review/prod",fn),os.path.join(EVID,"review/prod",fn))
     _cp(os.path.join(ROOT,"iam_v2_scratch/EVIDENCE.txt"),os.path.join(EVID,"EVIDENCE.txt"))
+    # Phase 1A + 1B acceptance records — retained as CLOSED historical baselines
     _cp(os.path.join(ROOT,"docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"),os.path.join(EVID,"StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"))
+    _cp(os.path.join(ROOT,"docs/acceptance/StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md"),os.path.join(EVID,"StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md"))
+    # Phase 2 authoritative evidence set (current)
+    for rel in EVIDENCE_PHASE2_DOCS:
+        _cp(os.path.join(ROOT,rel),os.path.join(EVID,os.path.basename(rel)))
+    # D12 / T0012 (authorization) + T0013 (live-dark deployment) records
+    _cp(os.path.join(ROOT,"governance/decision-register.json"),os.path.join(EVID,"governance","decision-register.json"))
+    for tid in ["T0012","T0013"]:
+        _cp(os.path.join(ROOT,"governance/transitions",tid+".json"),os.path.join(EVID,"governance","transitions",tid+".json"))
     _cp(os.path.join(ROOT,"tools/validate-project-state.sh"),os.path.join(EVID,"tools/validate-project-state.sh"))
     _cp(os.path.join(ROOT,"tools/project-state.py"),os.path.join(EVID,"tools/project-state.py"))
     migs=[os.path.join("iam_v2_scratch",x) for x in (["mg0.sh"]+["migrations/"+f for f in sorted(os.listdir(os.path.join(ROOT,"iam_v2_scratch/migrations")))])]
@@ -539,7 +636,7 @@ def _build_planning_pack(src_commit):
         _w(os.path.join(PLAN_PACK,dst),t)
     flat_copy("docs/architecture/StayConnect-IAM-Phase1B-Plan.md","StayConnect-IAM-Phase1B-Plan.md")
     flat_copy("docs/architecture/Phase1B-Privilege-Matrix.md","Phase1B-Privilege-Matrix.md")
-    _w(os.path.join(PLAN_PACK,"MANIFEST.md"),f"# Phase 1B Plan Evidence Pack — MANIFEST\n\n- SOURCE_COMMIT: `{src_commit}`\n- Status: Phase 1B implementation is Product-Owner AUTHORIZED and IN_PROGRESS (decision D10). Phase 1A accepted/closed. Legacy production auth authoritative; zero production iam_v2 runtime access; PR #2 not merged; no cutover.\n- Contents: Phase 1B plan (matrices+blueprint), privilege matrix, three code inventories, blueprint extract, README, two checksum lists.\n- Next authorized action: complete Phase 1B execution and live-dark verification, then Product-Owner acceptance or rejection.\n")
+    _w(os.path.join(PLAN_PACK,"MANIFEST.md"),f"# Phase 1B Plan Evidence Pack — MANIFEST  (HISTORICAL)\n\n<!-- PLANNING_PACK_STATUS: HISTORICAL -->\n\n> **HISTORICAL — Phase-1B planning artifact.** Phase 1B was **ACCEPTED_AND_CLOSED at DARK maturity** via decision **D11** / transition **T0011**, and **PR #2 was merged**. This pack is retained for provenance of the Phase-1B planning stage only; it is **not** a current status/evidence pack. For current state see the Project Pack (`00-START-HERE.md`, Phase-2 Plan, Phase-2 Final Report, Phase-2 acceptance candidate) and the Phase Evidence Pack.\n\n- SOURCE_COMMIT: `{src_commit}`\n- HISTORICAL status at the time this planning pack was authored: Phase 1B planning (the earlier D10/IN_PROGRESS wording is superseded — Phase 1B is now accepted/closed via D11/T0011 and PR #2 merged; current phase is Phase 2, live-dark deployed and pending one Product-Owner acceptance decision).\n- Contents: Phase 1B plan (matrices+blueprint), privilege matrix, three code inventories, blueprint extract, README, two checksum lists.\n- Current next authorized action (see project-state): one Product-Owner Phase-2 acceptance decision.\n")
     cited=["docs/architecture/StayConnect-IAM-Phase1B-Plan.md","docs/architecture/Phase1B-Privilege-Matrix.md","data-plane/internal/pmsguard/guard.go",
       "data-plane/cmd/scd/main.go","data-plane/cmd/acctd/main.go","data-plane/cmd/edged/main.go","data-plane/cmd/netd/main.go","data-plane/cmd/portald/main.go",
       "data-plane/internal/session/session.go","data-plane/internal/voucher/voucher.go","data-plane/internal/otp/otp.go",

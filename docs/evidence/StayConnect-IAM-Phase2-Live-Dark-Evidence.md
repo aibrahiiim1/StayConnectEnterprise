@@ -4,16 +4,26 @@
 
 Deployed source: branch `phase/2-commercial-packages`, PR #4. Pinned artifacts built `-trimpath`, `CGO_ENABLED=0 GOOS=linux GOARCH=amd64` from the committed Phase-2 Go source (functionally HEAD `b89a744`).
 
-## Pinned artifacts (SHA-256)
+## Pinned artifacts (SHA-256) — CURRENTLY DEPLOYED
 
-| Component | SHA-256 | Deployed path |
+These are the artifacts on the appliance **now** (after the final acceptance-gate UI redeploy). Go binaries built `-trimpath`, `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`.
+
+| Component | SHA-256 | Deployed path / release |
 |---|---|---|
 | scd | `1e25f9ef44b544d08d112d44f0847a674d51602362b01b9d2cb266ec740e1e86` | `/opt/stayconnect/bin/scd` |
 | edged | `30ed45f15059390e559db4298295bbf5f6b48fb17595ee705eb1be8b44be9c34` | `/opt/stayconnect/bin/edged` |
 | portald | `bf40065409504065bd24d75aaa8c9fa3b58ab47b47b0569755a1bb4ebe2ebd14` | `/opt/stayconnect/bin/portald` |
-| hotel-admin bundle | `e25126737341d8f248ae3a4589ba3a72778705a00f25b8caf6312c64a723999d` (tarball) | release `20260718-083255` (symlinked) |
+| hotel-admin bundle | `678c793ea46f23241eba05bde66929b19a5473fc8d3752d2a5eb083f4ff0dd95` (tarball) | release **`20260718-115608`** (symlinked, current) |
 
 Rollback: prior binaries kept as `/opt/stayconnect/bin/{scd,edged,portald}.bak-phase2pre`; prior UI release retained via `hotel-admin.previous`.
+
+### HISTORICAL — initial Phase-2 deployment artifact, superseded during the final acceptance gate
+
+| Component | SHA-256 | Release |
+|---|---|---|
+| hotel-admin bundle (initial) | `e25126737341d8f248ae3a4589ba3a72778705a00f25b8caf6312c64a723999d` (tarball) | release `20260718-083255` — **superseded** by `678c793e…` / `20260718-115608` during the final acceptance gate |
+
+(The Go binaries `1e25f9ef`/`30ed45f1`/`bf400654` were **not** changed by the final gate; the initial and current deployments share the same Go binaries.)
 
 ## Pre-deployment
 - Host identity: `radius` / `172.21.60.23` reverified.
@@ -31,8 +41,10 @@ Applied under `SET LOCAL ROLE iam_v2_owner` (DDL owned by `iam_v2_owner`, consis
 ## Privileges (step 6)
 Every Phase-2 flag is OFF and no Phase-2 repository is constructed, so **zero** new runtime Phase-2 iam_v2 privileges were granted and no runtime service was routed to iam_v2. Verified: `svc_scd`/`svc_edged`/`svc_acctd`/`svc_netd` hold **zero** iam_v2 table grants and **zero** iam_v2 function EXECUTE grants (Gate-P least-privilege intact).
 
-## Darkness verification — before AND after one reboot
-Boot before: `2026-07-17 21:17:32`. **Final reboot** → boot after: `2026-07-18 08:35:06`. Every check below passed identically pre- and post-reboot:
+## Darkness verification — before AND after the first (initial deployment) reboot
+This section records the **first** reboot, at the initial Phase-2 deployment. A **second** reboot (final acceptance-gate UI redeploy) is recorded in the "Final acceptance gate" section below.
+
+Boot before: `2026-07-17 21:17:32`. **First Phase-2 deployment reboot** → boot after: **`2026-07-18 08:35:06`**. Every check below passed identically pre- and post-reboot:
 
 | Check | Result |
 |---|---|

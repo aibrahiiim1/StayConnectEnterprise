@@ -43,7 +43,7 @@
     "transition_accepted": false,
     "live_dark_deployed": true,
     "reboot_verified": true,
-    "stage": "LIVE_DARK_DEPLOYED + REBOOT_VERIFIED; pending Product-Owner acceptance. COMPLETE: WS-A/B (plan+migration 0009); WS-C1..C5 domain/engine/hardening; WS-D APIs (scd guest quote/confirm + eligible-package listing, edged full Hotel-Admin commerce-admin: packages/plan-revisions/rules-tiers/grace/inspection with RBAC+audit+step-up, portald trusted server bridge, scd internal-socket trust hardening); WS-E UI (guest Portal commerce panel + full Hotel-Admin management UI), all dark/flag-gated. Migration 0009 applied on 172.21.60.23 (2 triggers + 6 indexes, iam_v2_owner-owned); pinned scd/edged/portald binaries + hotel-admin standalone bundle deployed; one reboot; darkness re-verified. All Phase-2 flags OFF; no cutover; no runtime iam_v2 privileges; legacy public-schema auth sole authority."
+    "stage": "LIVE_DARK_DEPLOYED + REBOOT_VERIFIED; pending Product-Owner acceptance. COMPLETE: WS-A/B (plan+migration 0009); WS-C1..C5 domain/engine/hardening; WS-D APIs (scd guest quote/confirm + eligible-package listing, edged full Hotel-Admin commerce-admin: packages/plan-revisions/rules-tiers/grace/inspection with RBAC+audit+step-up, portald trusted server bridge, scd internal-socket trust hardening); WS-E UI (guest Portal commerce panel + full Hotel-Admin management UI), all dark/flag-gated. Migration 0009 applied on 172.21.60.23 (2 triggers + 6 indexes, iam_v2_owner-owned; revision immutability was already provided by Phase-1A MG-9 and preserved; no separate free-only schema trigger); pinned scd/edged/portald binaries + hotel-admin standalone bundle deployed. Final acceptance gate added 45 automated UI tests (36 Vitest+RTL, 9 Playwright E2E) + an authoritative 31/31 Next production build, then a UI-only redeploy (hotel-admin 678c793e, release 20260718-115608; Go binaries unchanged). TWO reboot verifications (2026-07-18 08:35:06 and 11:56:34), darkness re-verified after each. All Phase-2 flags OFF; no cutover; no runtime iam_v2 privileges; legacy public-schema auth sole authority."
   },
   "phases": {
     "0":  { "status": "FINAL_CLOSED",       "title": "IAM redesign architecture contract + live PMS validation", "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)." },
@@ -80,7 +80,16 @@
   "authoritative_source_commits": {
     "phase1a_live_dark_creation": "22a2e15",
     "phase1a_migrations": "b2a715f",
-    "phase1b_live_dark": "b87a59b"
+    "phase1b_live_dark": "b87a59b",
+    "phase2_migration_0009": "c8f7a1c",
+    "phase2_domain_engine": "1f4eae6",
+    "phase2_apis_scd_edged_portald": "2ed86c1",
+    "phase2_ui": "a0578e4",
+    "phase2_live_dark_evidence": "42f53aa",
+    "phase2_ui_test_automation": "9c78b78",
+    "phase2_final_gate_pinned_binaries_source": "b89a744",
+    "phase2_deployed_hotel_admin_bundle_sha256": "678c793ea46f23241eba05bde66929b19a5473fc8d3752d2a5eb083f4ff0dd95",
+    "phase2_deployed_go_binaries_sha256": { "scd": "1e25f9ef44b544d08d112d44f0847a674d51602362b01b9d2cb266ec740e1e86", "edged": "30ed45f15059390e559db4298295bbf5f6b48fb17595ee705eb1be8b44be9c34", "portald": "bf40065409504065bd24d75aaa8c9fa3b58ab47b47b0569755a1bb4ebe2ebd14" }
   },
   "live_scratch_dark_cutover": {
     "live_iam_v2_in_use": false,
@@ -100,7 +109,10 @@
     "public_structural_fingerprint_phase1a_md5_algorithm": "MD5 of sorted public-schema {columns + constraints + indexes} excluding the Phase-1A MG-0 anchor index guest_networks_tsi_anchor (iam_v2_scratch/prod_live_dark.sh). Phase-1A baseline; PRE-Phase-1B / pre-0007-0008.",
     "public_columns_sha256_pre_0007_0008": "8659c08db41624d5cab946027c0d6c2d37251fc1550ec35929241827acf852f9",
     "public_columns_sha256_current": "7241b1cd76201cd48df0eaa0055c336d0951aa218830545d7dbbe92bd61a0fcc",
-    "public_columns_sha256_algorithm": "SHA-256 of information_schema.columns table.column:data_type (Gate-P/Phase-1B). Distinct algorithm from the Phase-1A MD5 above; NOT comparable to it.",
+    "public_columns_sha256_algorithm": "Phase-1B/Gate-P value. SHA-256 over information_schema.columns table.column:data_type, computed by the Gate-P tooling (iam_v2_scratch/prod_live_dark.sh). Distinct algorithm from the Phase-1A MD5 above; NOT comparable to it.",
+    "public_columns_phase2_livedark_sha256": "833c3d6740af4ac79731bb038616559b999109df2f0bef37e95173ffe3a26bfb",
+    "public_columns_phase2_livedark_algorithm": "Phase-2 live-dark value. encode(digest(string_agg(table_name||'.'||column_name||':'||data_type, chr(10) ORDER BY 1),'sha256'),'hex') over information_schema.columns WHERE table_schema='public', computed read-only on 172.21.60.23 during the Phase-2 live-dark deploy.",
+    "public_columns_fingerprint_reconciliation": "public_columns_sha256_current (7241b1cd, Phase-1B/Gate-P) and public_columns_phase2_livedark_sha256 (833c3d67, Phase-2 live-dark) use DIFFERENT serializations (per-object Gate-P method vs aggregate string_agg+newline+digest). They were NOT re-verified against each other on the appliance (this reconciliation does not touch the appliance), so they are recorded as SEPARATE, NOT-directly-comparable fields. The Phase-2 darkness invariant is that the 833c3d67 value is IDENTICAL pre- and post-migration-0009 (public schema unchanged by 0009) -- proven in docs/evidence/StayConnect-IAM-Phase2-Live-Dark-Evidence.md -- not equality between the two named fields.",
     "public_structure_change_note": "The Phase-1A structural baseline was intentionally superseded by the AUTHORIZED additive migrations 0007/0008 (auth_throttle_buckets, otp_hmac_key_generations, auth_otps.otp_key_generation). The pre->post SHA-256 delta (8659c08d -> 7241b1cd) is exactly those additive objects; this is authorized schema evolution, not drift.",
     "iam_v2_dark": true,
     "iam_v2_data_migration": false,
@@ -116,11 +128,12 @@
   "pms_financial_state": "FIAS lookup-only in production; posting engine is a future component (Phase 4). folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
-    "None. Phase 2 (commercial packages) implementation is IN_PROGRESS under Product-Owner authorization D12 as one end-to-end Phase; not a blocker. Phase 1B remains ACCEPTED_AND_CLOSED; Phase 3 remains NOT_STARTED and unauthorized."
+    "No technical Phase-2 blocker: Phase 2 (commercial packages) is implemented, live-dark deployed and reboot-verified (DARK, all flags OFF). Pending exactly ONE Product-Owner acceptance decision. Phase 1B remains ACCEPTED_AND_CLOSED; Phase 3 remains NOT_STARTED and unauthorized."
   ],
   "allowed_actions": [
-    "Read-only inspection, documentation and governance work",
-    "Execute the authorized Phase 2 (commercial packages) end-to-end as one Phase, DARK (all Phase-2 flags OFF), on branch phase/2-commercial-packages / PR #4 -- no paid access, no PMS settlement, no iam_v2 cutover, no dark-feature live enablement, no Phase 3"
+    "Read-only verification and inspection of the delivered, live-dark Phase 2 (commercial packages)",
+    "Governance and documentation reconciliation only (no runtime code change, no migration, no appliance deploy/restart/reboot, no flag enablement)",
+    "Record the Product-Owner acceptance and close the Phase-2 transition ONLY after an explicit Product-Owner acceptance decision"
   ],
   "prohibited_actions": [
     "Implementing any Phase beyond the authorized Phase 2 dark scope (Phase 3 or any later Phase)",
