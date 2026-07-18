@@ -1,0 +1,4 @@
+commit 28858dd54ac39001bfeca7560d9e7dfaffaedb3e
+Date:   Sun Jul 19 02:30:12 2026 +0300
+
+    @ Phase 3 increment 3 (inventory_head): pmsd read-only PMS connector daemon (ADR-0001), DARK
