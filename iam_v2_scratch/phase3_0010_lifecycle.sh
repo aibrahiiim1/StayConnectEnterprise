@@ -73,11 +73,15 @@ BEGIN
   INSERT INTO iam_v2.pms_interface_runtime(tenant_id,site_id,pms_interface_id,pinned_revision_id) VALUES (t,s,i,r);
   INSERT INTO iam_v2.stay_events(id,tenant_id,site_id,pms_interface_id,stay_id,external_event_identity,event_type,pms_timestamp_raw,pms_timestamp_utc,source_timezone,sequence_version,normalization_version,clock_suspect,payload,processing_status) VALUES (gen_random_uuid(),t,s,i,NULL,'E1','GI','x',now(),'Africa/Cairo',1,1,false,'{}','PENDING');
 END\$\$;" >/dev/null
-T="$(Q "SELECT tenant_id FROM iam_v2.pms_interfaces LIMIT 1;")"; S="$(Q "SELECT site_id FROM iam_v2.pms_interfaces LIMIT 1;")"
-I="$(Q "SELECT id FROM iam_v2.pms_interfaces ORDER BY id LIMIT 1;")"; I2="$(Q "SELECT id FROM iam_v2.pms_interfaces ORDER BY id OFFSET 1 LIMIT 1;")"
-R="$(Q "SELECT id FROM iam_v2.pms_interface_revisions WHERE pms_interface_id='$I';")"; R2="$(Q "SELECT id FROM iam_v2.pms_interface_revisions WHERE pms_interface_id='$I2';")"
+# derive everything consistently from seeded stay S1 (runtime row + stays S1/S2 are all on interface I)
 ST="$(Q "SELECT id FROM iam_v2.stays WHERE external_stay_identity='S1';")"
-[ -n "$ST" ] && ok "seed created stay $ST + 2 interfaces" || no "seed failed"
+T="$(Q "SELECT tenant_id FROM iam_v2.stays WHERE external_stay_identity='S1';")"
+S="$(Q "SELECT site_id FROM iam_v2.stays WHERE external_stay_identity='S1';")"
+I="$(Q "SELECT pms_interface_id FROM iam_v2.stays WHERE external_stay_identity='S1';")"
+R="$(Q "SELECT id FROM iam_v2.pms_interface_revisions WHERE pms_interface_id='$I';")"
+I2="$(Q "SELECT id FROM iam_v2.pms_interfaces WHERE id<>'$I' LIMIT 1;")"
+R2="$(Q "SELECT id FROM iam_v2.pms_interface_revisions WHERE pms_interface_id='$I2';")"
+[ -n "$ST" ] && [ -n "$I2" ] && [ -n "$R2" ] && ok "seed created stay $ST + 2 interfaces (I=$I I2=$I2)" || no "seed failed"
 
 echo '== pms_interface_runtime constraints (§8) =='
 expect_err "UPDATE iam_v2.pms_interface_runtime SET runtime_generation=-1 WHERE pms_interface_id='$I';" && ok "runtime_generation >= 0" || no "negative generation allowed"
@@ -108,26 +112,57 @@ Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reser
 PS="$(Q "SELECT id FROM iam_v2.stays WHERE external_stay_identity='SP';")"
 expect_err "UPDATE iam_v2.stays SET status='CHECKED_OUT' WHERE id='$PS';" && ok "POST_STAY_ACTIVE->CHECKED_OUT rejected (Phase 5)" || no "post-stay exit allowed"
 
-echo '== stay_events lineage (§5) =='
+echo '== stay_events composite FK proof (§1 - already in base mg4, not duplicated) =='
+[ "$(Q "SELECT count(*) FROM pg_constraint con JOIN pg_class c ON c.oid=con.conrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam_v2' AND c.relname='stay_events' AND con.contype='f' AND pg_get_constraintdef(con.oid) LIKE '%(tenant_id, site_id, pms_interface_id, stay_id) REFERENCES iam_v2.stays%';")" = 1 ] && ok "base composite FK stay_events(tenant,site,interface,stay)->stays exists (structural cross-interface protection)" || no "composite FK missing"
+
+echo '== stay_events INSERT append-first (§1) =='
+# NEV <stay_id-sql> <ext-identity> <STATUS> <processed_at-sql> <review_code-sql>
+NEV(){ echo "INSERT INTO iam_v2.stay_events(id,tenant_id,site_id,pms_interface_id,stay_id,external_event_identity,event_type,pms_timestamp_raw,pms_timestamp_utc,source_timezone,sequence_version,normalization_version,clock_suspect,payload,processing_status,processed_at,review_code) VALUES (gen_random_uuid(),'$T','$S','$I',$1,'$2','GI','x',now(),'Africa/Cairo',1,1,false,'{}','$3',$4,$5);"; }
+expect_err "$(NEV NULL EA APPLIED NULL NULL)" && ok "INSERT directly as APPLIED rejected" || no "insert APPLIED allowed"
+expect_err "$(NEV NULL EF FAILED NULL NULL)" && ok "INSERT directly as FAILED rejected" || no "insert FAILED allowed"
+expect_err "$(NEV "'$ST'" EP PENDING NULL NULL)" && ok "INSERT PENDING with stay_id rejected" || no "insert pending+stay_id allowed"
+expect_err "$(NEV NULL EP2 PENDING now\(\) NULL)" && ok "INSERT PENDING with processed_at rejected" || no "insert pending+processed_at allowed"
+expect_err "$(NEV NULL EP3 PENDING NULL \'X\')" && ok "INSERT PENDING with review_code rejected" || no "insert pending+review_code allowed"
+expect_ok  "$(NEV NULL EOK PENDING NULL NULL)" && ok "INSERT clean PENDING accepted" || no "clean pending insert blocked"
+
+echo '== stay_events terminal-result invariants (§2/§5) =='
 EV="$(Q "SELECT id FROM iam_v2.stay_events WHERE external_event_identity='E1';")"
 ST2="$(Q "SELECT id FROM iam_v2.stays WHERE external_stay_identity='S2';")"
-XS="$(Q "SELECT id FROM iam_v2.stays WHERE external_stay_identity='SP';")"
+Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$T','$S','$I2','RX','SX','IN_HOUSE',1,0);" >/dev/null
+SX="$(Q "SELECT id FROM iam_v2.stays WHERE external_stay_identity='SX';")"
 expect_err "UPDATE iam_v2.stay_events SET external_event_identity='E1x' WHERE id='$EV';" && ok "event identity immutable" || no "identity mutable"
 expect_err "DELETE FROM iam_v2.stay_events WHERE id='$EV';" && ok "event DELETE rejected" || no "delete allowed"
 expect_err "UPDATE iam_v2.stay_events SET stay_id='$ST' WHERE id='$EV';" && ok "PENDING stay_id set without terminal rejected" || no "pending stay_id set allowed"
-# PENDING event cannot attach to cross-interface stay even when going terminal (I2 has no stay here; use a stay on I2)
-Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$T','$S','$I2','RX','SX','IN_HOUSE',1,0);" >/dev/null
-SX="$(Q "SELECT id FROM iam_v2.stays WHERE external_stay_identity='SX';")"
-expect_err "UPDATE iam_v2.stay_events SET stay_id='$SX', processing_status='APPLIED' WHERE id='$EV';" && ok "PENDING->APPLIED with cross-interface Stay rejected" || no "cross-interface stay accepted"
-expect_ok  "UPDATE iam_v2.stay_events SET stay_id='$ST2', processing_status='APPLIED', processed_at=now() WHERE id='$EV';" && ok "PENDING->APPLIED with same-interface Stay + processed_at allowed" || no "valid application blocked"
-expect_err "UPDATE iam_v2.stay_events SET stay_id='$ST' WHERE id='$EV';" && ok "terminal event stay_id substitution rejected" || no "terminal repoint allowed"
-expect_err "UPDATE iam_v2.stay_events SET stay_id=NULL WHERE id='$EV';" && ok "terminal event stay_id=NULL rejected" || no "terminal clear allowed"
-expect_err "UPDATE iam_v2.stay_events SET processing_status='FAILED' WHERE id='$EV';" && ok "terminal processing_status immutable" || no "terminal status mutated"
+expect_err "UPDATE iam_v2.stay_events SET processing_status='APPLIED' WHERE id='$EV';" && ok "PENDING->APPLIED without stay_id rejected" || no "applied w/o stay_id allowed"
+expect_err "UPDATE iam_v2.stay_events SET processing_status='APPLIED', stay_id='$ST2' WHERE id='$EV';" && ok "PENDING->APPLIED without processed_at rejected" || no "applied w/o processed_at allowed"
+expect_err "UPDATE iam_v2.stay_events SET stay_id='$SX', processing_status='APPLIED', processed_at=now() WHERE id='$EV';" && ok "PENDING->APPLIED cross-interface Stay rejected (FK + trigger)" || no "cross-interface stay accepted"
+expect_err "UPDATE iam_v2.stay_events SET processing_status='MANUAL_REVIEW', processed_at=now() WHERE id='$EV';" && ok "MANUAL_REVIEW without review_code rejected" || no "manual-review w/o code allowed"
+expect_err "UPDATE iam_v2.stay_events SET processing_status='FAILED', processed_at=now(), review_code='room 101 guest smith' WHERE id='$EV';" && ok "free-text/PII-shaped review_code rejected" || no "PII review code allowed"
+expect_err "UPDATE iam_v2.stay_events SET processing_status='APPLIED', stay_id='$ST2', processed_at=now(), review_code='OKCODE' WHERE id='$EV';" && ok "APPLIED must not carry review_code" || no "applied+review_code allowed"
+expect_ok  "UPDATE iam_v2.stay_events SET stay_id='$ST2', processing_status='APPLIED', processed_at=now() WHERE id='$EV';" && ok "valid same-interface PENDING->APPLIED + processed_at accepted" || no "valid application blocked"
+expect_err "UPDATE iam_v2.stay_events SET stay_id='$ST' WHERE id='$EV';" && ok "terminal stay_id substitution rejected" || no "terminal repoint allowed"
+expect_err "UPDATE iam_v2.stay_events SET stay_id=NULL WHERE id='$EV';" && ok "terminal stay_id=NULL rejected" || no "terminal clear allowed"
+expect_err "UPDATE iam_v2.stay_events SET processed_at=now() WHERE id='$EV';" && ok "terminal processed_at change rejected" || no "terminal processed_at mutated"
+expect_err "UPDATE iam_v2.stay_events SET review_code='LATER' WHERE id='$EV';" && ok "terminal review_code change rejected" || no "terminal review_code mutated"
+expect_err "UPDATE iam_v2.stay_events SET processing_status='FAILED' WHERE id='$EV';" && ok "terminal status change rejected" || no "terminal status mutated"
+# MANUAL_REVIEW / FAILED happy paths on fresh events
+E2="$(Q "SELECT id FROM iam_v2.stay_events WHERE external_event_identity='EOK';")"
+expect_ok  "UPDATE iam_v2.stay_events SET processing_status='MANUAL_REVIEW', processed_at=now(), review_code='AMBIGUOUS_LOCAL' WHERE id='$E2';" && ok "MANUAL_REVIEW + bounded review_code accepted" || no "manual-review blocked"
 
-echo '== grace vocabulary + bounds (§9) =='
-expect_err "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,grace_device_limit_policy) VALUES ('$T','$S','ALLOW_UNTIL_LIMIT');" && ok "grace_device_limit_policy rejects non-canonical value" || no "non-canonical policy accepted"
-expect_ok  "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,grace_device_limit_policy,grace_data_quota_bytes) VALUES ('$T','$S','REJECT_NEW_DEVICE',524288000);" && ok "canonical REJECT_NEW_DEVICE + byte quota accepted" || no "canonical policy rejected"
-expect_err "UPDATE iam_v2.site_checkout_grace_config SET eligibility_window_seconds=0 WHERE tenant_id='$T';" && ok "grace eligibility_window must be >0" || no "grace bound not enforced"
+echo '== grace device-policy (§4) + all-or-none (§5) + bounds (§9) =='
+expect_err "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy) VALUES ('$T','$S',3600,5000,2000,524288000,2,'DISCONNECT_OLDEST');" && ok "grace DISCONNECT_OLDEST rejected (§4)" || no "DISCONNECT_OLDEST accepted"
+expect_err "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy) VALUES ('$T','$S',3600,5000,2000,524288000,2,'ADMIN_APPROVAL');" && ok "grace ADMIN_APPROVAL rejected (§4)" || no "ADMIN_APPROVAL accepted"
+expect_err "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,grace_data_quota_bytes,grace_device_limit_policy) VALUES ('$T','$S',524288000,'REJECT_NEW_DEVICE');" && ok "partial grace policy rejected (all-or-none)" || no "partial grace accepted"
+expect_ok  "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy) VALUES ('$T','$S',3600,5000,2000,524288000,2,'REJECT_NEW_DEVICE');" && ok "fully-configured grace (REJECT_NEW_DEVICE, bytes) accepted" || no "full grace rejected"
+expect_ok  "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id) VALUES (gen_random_uuid(),gen_random_uuid());" && ok "unconfigured grace (all policy NULL, default window) accepted" || no "unconfigured grace rejected"
+expect_err "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,config) VALUES (gen_random_uuid(),gen_random_uuid(),'{\"grace_duration_seconds\":3600}'::jsonb);" && ok "config jsonb duplicate authoritative key rejected (§5)" || no "jsonb dup key accepted"
+expect_err "UPDATE iam_v2.site_checkout_grace_config SET eligibility_window_seconds=0 WHERE eligibility_window_seconds=86400;" && ok "grace eligibility_window must be >0" || no "grace bound not enforced"
+
+echo '== runner scope hardening (§6) =='
+o="$(bash "$ROOT/scripts/edge-migrate.sh" 2>&1 || true)"; echo "$o" | grep -q "REFUSED: specify --only" && ok "runner refuses without --only/--all" || no "runner ran with no scope"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 'BAD NAME' 2>&1 || true)"; echo "$o" | grep -q "does not match" && ok "runner rejects invalid version name" || no "runner accepted bad name"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 9999_absent_migration 2>&1 || true)"; echo "$o" | grep -q "resolves to 0 files" && ok "runner rejects absent migration" || no "runner accepted absent migration"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution 2>&1 || true)"; echo "$o" | grep -qE "sha256=[0-9a-f]{64}|skip  0010" && ok "runner prints SHA-256 on apply / skip when already applied" || no "runner did neither"
 
 echo '== rollback == pre and reapply == post =='
 Qf < "$DOWN" >/dev/null && ok "rollback 0010 (down)" || no "rollback failed"

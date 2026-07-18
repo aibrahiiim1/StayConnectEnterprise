@@ -126,15 +126,18 @@ CREATE UNIQUE INDEX auth_resolutions_req_idem
 --      AUTHORITATIVE grace policy; config jsonb must NOT be a second source of truth for these fields.
 -- ============================================================================
 ALTER TABLE iam_v2.site_checkout_grace_config
-  ADD COLUMN eligibility_window_seconds int NOT NULL DEFAULT 86400,   -- 24h default
+  ADD COLUMN eligibility_window_seconds int NOT NULL DEFAULT 86400,   -- 24h default (always present)
   ADD COLUMN grace_duration_seconds int,
   ADD COLUMN grace_down_kbps int,
   ADD COLUMN grace_up_kbps int,
   ADD COLUMN grace_data_quota_bytes bigint,                          -- BYTES are the authoritative unit
   ADD COLUMN grace_device_limit int,
-  ADD COLUMN grace_device_limit_policy text                          -- reuse canonical vocabulary (mg2)
-    CHECK (grace_device_limit_policy IS NULL
-           OR grace_device_limit_policy IN ('REJECT_NEW_DEVICE','DISCONNECT_OLDEST','ADMIN_APPROVAL'));
+  -- Phase-3 Checkout Grace supports ONLY REJECT_NEW_DEVICE from the canonical vocabulary (mg2):
+  -- existing authorized devices persist; devices above the limit are grandfathered; new devices are
+  -- rejected until the active count falls below the limit. DISCONNECT_OLDEST / ADMIN_APPROVAL are NOT
+  -- valid for Grace (the token is reused from the canonical vocab; no second enum is introduced).
+  ADD COLUMN grace_device_limit_policy text
+    CHECK (grace_device_limit_policy IS NULL OR grace_device_limit_policy = 'REJECT_NEW_DEVICE');
 ALTER TABLE iam_v2.site_checkout_grace_config
   ADD CONSTRAINT grace_bounds CHECK (
         eligibility_window_seconds > 0 AND eligibility_window_seconds <= 604800
@@ -142,7 +145,22 @@ ALTER TABLE iam_v2.site_checkout_grace_config
     AND (grace_down_kbps         IS NULL OR (grace_down_kbps         > 0 AND grace_down_kbps         <= 10000000))
     AND (grace_up_kbps           IS NULL OR (grace_up_kbps           > 0 AND grace_up_kbps           <= 10000000))
     AND (grace_data_quota_bytes  IS NULL OR (grace_data_quota_bytes  > 0 AND grace_data_quota_bytes  <= 1099511627776))
-    AND (grace_device_limit      IS NULL OR (grace_device_limit      > 0 AND grace_device_limit      <= 1000)));
+    AND (grace_device_limit      IS NULL OR (grace_device_limit      > 0 AND grace_device_limit      <= 1000))),
+  -- all-or-none typed policy: either fully UNCONFIGURED (all policy fields NULL, eligibility window keeps
+  -- its default) or fully CONFIGURED (every policy field non-NULL + policy = REJECT_NEW_DEVICE).
+  ADD CONSTRAINT grace_all_or_none CHECK (
+    (grace_duration_seconds IS NULL AND grace_down_kbps IS NULL AND grace_up_kbps IS NULL
+       AND grace_data_quota_bytes IS NULL AND grace_device_limit IS NULL AND grace_device_limit_policy IS NULL)
+    OR
+    (grace_duration_seconds IS NOT NULL AND grace_down_kbps IS NOT NULL AND grace_up_kbps IS NOT NULL
+       AND grace_data_quota_bytes IS NOT NULL AND grace_device_limit IS NOT NULL
+       AND grace_device_limit_policy = 'REJECT_NEW_DEVICE')),
+  -- the typed columns are the SOLE source of truth; config jsonb must NOT carry duplicate authoritative keys.
+  ADD CONSTRAINT grace_config_no_dup_policy_keys CHECK (
+    NOT (config ?| ARRAY[
+      'eligibility_window_seconds','grace_duration_seconds','grace_down_kbps','grace_up_kbps',
+      'grace_data_quota_bytes','grace_device_limit','grace_device_limit_policy',
+      'device_limit_policy','data_quota_bytes','duration_seconds','down_kbps','up_kbps']));
 
 -- ============================================================================
 -- (6) stay_events: application-result columns + append-only lineage guard.
@@ -152,6 +170,10 @@ ALTER TABLE iam_v2.stay_events
   ADD COLUMN review_code text
     CHECK (review_code IS NULL OR length(review_code) <= 200);
 
+-- Append-first lifecycle: INSERT must be PENDING with no result/lineage; the ONLY mutation is a single
+-- PENDING->terminal update that sets processed_at (+ stay_id/review_code per result rules); once terminal
+-- the row is immutable. Cross-interface stay_id is already structurally rejected by the base composite
+-- FK (tenant,site,pms_interface_id,stay_id)->stays; the trigger adds a clear error + the lifecycle rules.
 CREATE OR REPLACE FUNCTION iam_v2.p3_stay_event_appendonly() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = iam_v2, pg_temp
@@ -161,7 +183,24 @@ BEGIN
   IF TG_OP = 'DELETE' THEN
     RAISE EXCEPTION 'stay_events is append-only (DELETE rejected)';
   END IF;
-  -- immutable identity / normalization columns
+
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.processing_status <> 'PENDING' THEN
+      RAISE EXCEPTION 'stay_events must be inserted as PENDING (no terminal event inserted directly)';
+    END IF;
+    IF NEW.stay_id IS NOT NULL THEN
+      RAISE EXCEPTION 'stay_events cannot be inserted with a pre-resolved stay_id';
+    END IF;
+    IF NEW.processed_at IS NOT NULL THEN
+      RAISE EXCEPTION 'stay_events.processed_at must be NULL on insert';
+    END IF;
+    IF NEW.review_code IS NOT NULL THEN
+      RAISE EXCEPTION 'stay_events.review_code must be NULL on insert';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- UPDATE: immutable identity / normalization columns
   IF   NEW.tenant_id             IS DISTINCT FROM OLD.tenant_id
     OR NEW.site_id               IS DISTINCT FROM OLD.site_id
     OR NEW.pms_interface_id      IS DISTINCT FROM OLD.pms_interface_id
@@ -179,19 +218,36 @@ BEGIN
     RAISE EXCEPTION 'stay_events identity/normalization columns are immutable (append-only)';
   END IF;
 
-  -- stay_id lineage: only NULL -> a same-interface Stay, and only while the event is being made terminal.
-  IF NEW.stay_id IS DISTINCT FROM OLD.stay_id THEN
-    IF OLD.processing_status <> 'PENDING' THEN
-      RAISE EXCEPTION 'terminal stay_events row cannot be repointed (stay_id immutable after terminal)';
+  -- Once terminal, the only permitted update is a no-op (no result/lineage field may change).
+  IF OLD.processing_status <> 'PENDING' THEN
+    IF NEW.processing_status IS DISTINCT FROM OLD.processing_status
+       OR NEW.stay_id      IS DISTINCT FROM OLD.stay_id
+       OR NEW.processed_at IS DISTINCT FROM OLD.processed_at
+       OR NEW.review_code  IS DISTINCT FROM OLD.review_code THEN
+      RAISE EXCEPTION 'terminal stay_events row is immutable (status/stay_id/processed_at/review_code frozen)';
     END IF;
+    RETURN NEW;
+  END IF;
+
+  -- OLD is PENDING and staying PENDING: no result/lineage field may be set yet.
+  IF NEW.processing_status = 'PENDING' THEN
+    IF NEW.stay_id IS NOT NULL OR NEW.processed_at IS NOT NULL OR NEW.review_code IS NOT NULL THEN
+      RAISE EXCEPTION 'stay_events result fields (stay_id/processed_at/review_code) may only be set on PENDING->terminal';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- PENDING -> terminal (one move)
+  IF NEW.processing_status NOT IN ('APPLIED','SKIPPED_DUPLICATE','MANUAL_REVIEW','FAILED') THEN
+    RAISE EXCEPTION 'invalid stay_events terminal processing_status %', NEW.processing_status;
+  END IF;
+  IF NEW.processed_at IS NULL THEN
+    RAISE EXCEPTION 'stay_events.processed_at is required on PENDING->%', NEW.processing_status;
+  END IF;
+  -- stay_id lineage: NULL -> a same-interface Stay only
+  IF NEW.stay_id IS NOT NULL THEN
     IF OLD.stay_id IS NOT NULL THEN
       RAISE EXCEPTION 'stay_events.stay_id may only go from NULL to a resolved Stay';
-    END IF;
-    IF NEW.stay_id IS NULL THEN
-      RAISE EXCEPTION 'stay_events.stay_id cannot be cleared';
-    END IF;
-    IF NEW.processing_status = 'PENDING' THEN
-      RAISE EXCEPTION 'stay_events.stay_id may only be set in the same update that makes the event terminal';
     END IF;
     SELECT count(*) INTO ok_stay FROM iam_v2.stays s
       WHERE s.id = NEW.stay_id AND s.tenant_id = NEW.tenant_id
@@ -200,20 +256,24 @@ BEGIN
       RAISE EXCEPTION 'stay_events.stay_id must reference a Stay in the same tenant/site/pms_interface';
     END IF;
   END IF;
-
-  -- processing_status: one-way terminal, only from PENDING
-  IF OLD.processing_status <> NEW.processing_status THEN
-    IF OLD.processing_status <> 'PENDING' THEN
-      RAISE EXCEPTION 'stay_events.processing_status is terminal (% cannot change)', OLD.processing_status;
-    END IF;
-    IF NEW.processing_status NOT IN ('APPLIED','SKIPPED_DUPLICATE','MANUAL_REVIEW','FAILED') THEN
-      RAISE EXCEPTION 'invalid stay_events.processing_status transition to %', NEW.processing_status;
-    END IF;
+  -- review_code vocabulary: bounded machine code only (no PII / payload / stack traces)
+  IF NEW.review_code IS NOT NULL AND NEW.review_code !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'stay_events.review_code must match ^[A-Z][A-Z0-9_]{0,63}$ (bounded machine code)';
   END IF;
+  -- result-specific invariants
+  IF NEW.processing_status = 'APPLIED' THEN
+    IF NEW.stay_id IS NULL THEN RAISE EXCEPTION 'APPLIED requires a resolved same-interface stay_id'; END IF;
+    IF NEW.review_code IS NOT NULL THEN RAISE EXCEPTION 'APPLIED must not carry a review_code'; END IF;
+  ELSIF NEW.processing_status = 'MANUAL_REVIEW' THEN
+    IF NEW.review_code IS NULL THEN RAISE EXCEPTION 'MANUAL_REVIEW requires a bounded review_code'; END IF;
+  ELSIF NEW.processing_status = 'FAILED' THEN
+    IF NEW.review_code IS NULL THEN RAISE EXCEPTION 'FAILED requires a bounded review_code'; END IF;
+  END IF;
+  -- SKIPPED_DUPLICATE: processed_at required (checked); stay_id/review_code optional (validated above).
   RETURN NEW;
 END $fn$;
 CREATE TRIGGER p3_stay_event_guard
-  BEFORE UPDATE OR DELETE ON iam_v2.stay_events
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.stay_events
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_stay_event_appendonly();
 
 -- ============================================================================

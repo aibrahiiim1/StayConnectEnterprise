@@ -16,7 +16,9 @@ ALTER TABLE iam_v2.stay_events
   DROP COLUMN IF EXISTS review_code,
   DROP COLUMN IF EXISTS processed_at;
 
--- (4b) grace scalars: constraint then columns
+-- (4b) grace scalars: constraints then columns
+ALTER TABLE iam_v2.site_checkout_grace_config DROP CONSTRAINT IF EXISTS grace_config_no_dup_policy_keys;
+ALTER TABLE iam_v2.site_checkout_grace_config DROP CONSTRAINT IF EXISTS grace_all_or_none;
 ALTER TABLE iam_v2.site_checkout_grace_config DROP CONSTRAINT IF EXISTS grace_bounds;
 ALTER TABLE iam_v2.site_checkout_grace_config
   DROP COLUMN IF EXISTS grace_device_limit_policy,
