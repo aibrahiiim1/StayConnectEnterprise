@@ -32,6 +32,40 @@ type commerceConfirmReq struct {
 	GuestNetworkID string `json:"guest_network_id"`
 }
 
+// commercePackages lists the free packages the authenticated subject is eligible for right now. The
+// trusted identifiers (auth-context / device / guest-network) arrive from portald as query parameters on
+// the internal Unix-socket API; the guest browser never reaches this route. It creates no quote/purchase
+// and never discloses an ineligible package.
+func (s *server) commercePackages(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	res, err := s.commerce.ListEligiblePackages(r.Context(), iamv2.PackageListRequest{
+		TenantID:       s.tenID, // appliance-fixed; never from the request
+		SiteID:         s.siteID,
+		AuthContextID:  q.Get("auth_context_id"),
+		DeviceID:       q.Get("device_id"),
+		GuestNetworkID: q.Get("guest_network_id"),
+	})
+	if err != nil {
+		slog.Error("phase2 list", "err", err)
+		httpErr(w, http.StatusInternalServerError, "unavailable")
+		return
+	}
+	if res.Disabled {
+		httpErr(w, http.StatusServiceUnavailable, "unavailable")
+		return
+	}
+	if res.Reason != "ok" {
+		slog.Info("phase2 list denied", "reason", res.Reason)
+		httpErr(w, http.StatusConflict, "unavailable")
+		return
+	}
+	items := res.Packages
+	if items == nil {
+		items = []iamv2.PackageListItem{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"packages": items})
+}
+
 // commerceQuote resolves a one-time free offer quote for the guest's package selection.
 func (s *server) commerceQuote(w http.ResponseWriter, r *http.Request) {
 	var req commerceQuoteReq

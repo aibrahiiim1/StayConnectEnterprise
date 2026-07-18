@@ -40,7 +40,7 @@
     "dark_features_enabled": false,
     "transition_id": "T0012",
     "transition_accepted": false,
-    "stage": "IMPLEMENTATION_IN_PROGRESS (WS-A/B plan+migration + WS-C1..C5 domain/engine/hardening done: typed eligibility/grant-snapshot/ISO-4217 currency/duration policy, full money-pin exactness + offer-quote immutability, C2 quote/free-purchase + rollback-at-every-boundary + tamper, C3 subject-uniqueness/supersession/concurrency, C5 non-PMS revision lifecycle; all green on disposable iamv2_p2. WS-D APIs next)"
+    "stage": "IMPLEMENTATION_IN_PROGRESS. Done: WS-A/B (plan+migration 0009); WS-C1 (config/domain); WS-C2/C3/C4/C5 hardening (typed eligibility/grant-snapshot/ISO-4217 currency/duration policy, full money-pin exactness + offer-quote immutability, quote/free-purchase + rollback-at-every-boundary + tamper, subject-uniqueness/supersession/concurrency, non-PMS revision lifecycle) — green on disposable iamv2_p2. WS-D PARTIAL: scd quote/confirm routes + edged commerce-admin foundation (3 endpoints) dark/flag-gated. INCOMPLETE: guest package-listing domain/API, portald server bridge, guest Portal UI, full Hotel-Admin API scope (plans/package-revisions/rules-tiers/grace/inspection) + UI, internal-socket trust-boundary hardening. Live-dark deployment NOT started."
   },
   "phases": {
     "0":  { "status": "FINAL_CLOSED",       "title": "IAM redesign architecture contract + live PMS validation", "summary": "Phase-0 contract FINAL; live Protel FIAS Gate 3A PASS (USD 1.00 folio debit verified end-to-end)." },

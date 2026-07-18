@@ -145,6 +145,49 @@ func (t *pgCommerceTx) ResolveActivePackageRevision(ctx context.Context, tenantI
 	return row, nil
 }
 
+// ListActivePackageRevisions returns the current revision of every ACTIVE package for the tenant/site.
+// The guest listing path filters these down to the subject-eligible, free, in-window ones in the domain
+// layer; this query performs no eligibility disclosure of its own.
+func (t *pgCommerceTx) ListActivePackageRevisions(ctx context.Context, tenantID, siteID string) ([]PackageRevisionRow, error) {
+	rows, err := t.tx.Query(ctx,
+		`SELECT r.id::text, r.package_id::text, r.service_plan_revision_id::text, r.package_type,
+		        r.price_minor, r.currency, r.currency_exponent, r.settlement_methods,
+		        r.visible_from, r.visible_until, p.active, (p.current_revision_id = r.id) AS is_current,
+		        r.display, r.duration_policy
+		   FROM iam_v2.internet_packages p
+		   JOIN iam_v2.internet_package_revisions r ON r.id = p.current_revision_id
+		  WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.active
+		  ORDER BY p.code`, tenantID, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PackageRevisionRow
+	for rows.Next() {
+		var row PackageRevisionRow
+		var display, duration []byte
+		var settlement []string
+		var cexp *int
+		if err := rows.Scan(&row.ID, &row.PackageID, &row.PlanRevisionID, &row.PackageType,
+			&row.PriceMinor, &row.Currency, &cexp, &settlement, &row.VisibleFrom, &row.VisibleUntil,
+			&row.PackageActive, &row.IsCurrent, &display, &duration); err != nil {
+			return nil, err
+		}
+		if cexp != nil {
+			row.CurrencyExponent = *cexp
+		}
+		row.SettlementMethods = settlement
+		if len(display) > 0 {
+			_ = json.Unmarshal(display, &row.Display)
+		}
+		if len(duration) > 0 {
+			row.DurationPolicy = unmarshalNumberAware(duration)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 func (t *pgCommerceTx) LoadPlanRevision(ctx context.Context, tenantID, siteID, id string) (PlanRevisionRow, error) {
 	var row PlanRevisionRow
 	var down, up *int

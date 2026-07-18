@@ -62,6 +62,7 @@ type CommerceTx interface {
 	// --- CreateQuote reads (no consumption) ---
 	LoadAuthContext(ctx context.Context, tenantID, siteID, authContextID string) (AuthContextRow, error)
 	ResolveActivePackageRevision(ctx context.Context, tenantID, siteID, packageID string) (PackageRevisionRow, error)
+	ListActivePackageRevisions(ctx context.Context, tenantID, siteID string) ([]PackageRevisionRow, error)
 	LoadPlanRevision(ctx context.Context, tenantID, siteID, planRevisionID string) (PlanRevisionRow, error)
 	LoadEligibilityRules(ctx context.Context, packageRevisionID string) ([]EligibilityRule, error)
 	LoadGrantTiers(ctx context.Context, packageRevisionID string) ([]GrantTier, error)

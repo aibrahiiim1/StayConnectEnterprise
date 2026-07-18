@@ -807,6 +807,7 @@ func main() {
 	// Phase 2 (DARK): guest-portal commerce routes are mounted ONLY when the portal surface is ON. While
 	// dark they are ABSENT (404) and the commerce engine holds a nil repository, so zero Phase-2 SQL runs.
 	if s.commerceCfg.PortalOn() {
+		r.Get("/v1/commerce/packages", s.commercePackages)
 		r.Post("/v1/commerce/quote", s.commerceQuote)
 		r.Post("/v1/commerce/confirm", s.commerceConfirm)
 		slog.Info("phase2 portal commerce routes mounted")
