@@ -1,4 +1,0 @@
-commit 13bac7690104bf388290cadec5ac74dd31a2ac30
-Date:   Sat Jul 18 15:01:42 2026 +0300
-
-    Phase 2 (final gate): regenerate change-manifest to acceptance-candidate HEAD + record pointer

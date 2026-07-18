@@ -1,0 +1,4 @@
+commit 87251f7e6c7499c20d14758ee3d2f405795478fc
+Date:   Sat Jul 18 17:46:54 2026 +0300
+
+    Phase 2 Zero-Stale reconciliation (delivery 1/2): change-manifest + pointer
