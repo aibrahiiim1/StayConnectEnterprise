@@ -1,13 +1,13 @@
 # StayConnect IAM Phase 2 — Live-Dark Acceptance
 
-**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED AT VERIFIED DARK MATURITY (decision D13, transition T0014, 2026-07-18). PR #4 authorized to merge to master with provenance preserved.**
+**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED AT VERIFIED DARK MATURITY (decision D13, transition T0014, 2026-07-18). PR #4 MERGED and CLOSED (merge commit `fe6a0d12a49f74b7b7b84ef0c848a38512273370`); post-merge Governance CI green.**
 
 - Phase: 2 (Commercial Packages) — one end-to-end Phase.
 - **Authorized** under Product-Owner decision **D12**, authorization/start transition **T0012**.
 - **Live-dark deployment** recorded by transition **T0013** (live-dark deploy + reboot).
 - **Product-Owner ACCEPTED and CLOSED** by decision **D13**, closure transition **T0014** (`transition_accepted: true`) at verified DARK maturity.
 - **Accepted baseline:** base `master@4e3c3ee27a8caa2d0656b57b419e8ed5e0d87b68`; substantive reconciliation HEAD `45323ad5cb8f70e64e1dcd727ac92b52cc878c37`; final pre-acceptance PR HEAD `a8c3b3caac6baf8ac41fa581fca5350c97219bb8`; Governance CI `29649900358` SUCCESS.
-- Branch: `phase/2-commercial-packages`; PR #4 (authorized to merge).
+- Branch: `phase/2-commercial-packages` (merged, deleted); PR #4 (merged/closed, merge commit `fe6a0d1`).
 - Maturity offered for acceptance: **verified DARK** (implementation + automated UI tests + live-dark deployment + **two** reboots, each with post-reboot re-verification).
 - Appliance: `radius` / `172.21.60.23`.
 
@@ -34,4 +34,4 @@
 - **Known dependency:** enabled guest Commerce requires a separately authorized IAM-v2 authentication cutover.
 
 ## Product-Owner decision (recorded)
-Phase 2 is **ACCEPTED at verified DARK maturity and CLOSED** by Product-Owner decision **D13** / closure transition **T0014** (2026-07-18). PR #4 is authorized to merge to master with provenance preserved. Acceptance is at DARK maturity only; no enablement, cutover, paid access, PMS settlement, or Phase 3 is authorized. Phase 3 remains NOT_STARTED and unauthorized.
+Phase 2 is **ACCEPTED at verified DARK maturity and CLOSED** by Product-Owner decision **D13** / closure transition **T0014** (2026-07-18), and **MERGED to master** (merge commit `fe6a0d12a49f74b7b7b84ef0c848a38512273370`); post-merge Governance CI green; no open Phase-2 work remains. Acceptance is at DARK maturity only; no enablement, cutover, paid access, PMS settlement, or Phase 3 is authorized. Phase 3 remains NOT_STARTED and unauthorized.

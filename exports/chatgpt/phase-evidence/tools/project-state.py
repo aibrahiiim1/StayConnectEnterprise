@@ -460,6 +460,25 @@ def cmd_validate(deep=True, manifest_equality=True):
             for a in st.get("allowed_actions", []) or []:
                 if re.search(r"(execute|implement)[^.]{0,60}phase\s*2\b", str(a), re.I) and re.search(r"end-to-end|implement|dark", str(a), re.I):
                     fail("Phase 2 is ACCEPTED_AND_CLOSED but an allowed_action still says to execute/implement Phase 2")
+            # 4c. Post-merge coherence: once the Phase-2 PR is recorded merged (merge_commit present), no
+            #     CURRENT-state field may still present the (completed) merge or its post-merge verification as
+            #     a pending/future action. Historical D13/T0014 records legitimately authorized the merge and
+            #     are NOT scanned here (only live current-state fields are).
+            p2x = st.get("phase2_execution", {}) or {}
+            if p2x.get("merged") is True or p2x.get("merge_commit"):
+                cur_blob = " ".join([str(st.get("current_maturity", "")), str(st.get("next_authorized_action", "")),
+                                     str(p2x.get("stage", "")), str(st["phases"].get("2", {}).get("maturity", ""))]
+                                    + [str(x) for x in (st.get("allowed_actions", []) or [])]
+                                    + [str(x) for x in (st.get("blockers", []) or [])])
+                for pat, why in [
+                    (r"merge\s+pr\s*#?\s*4\s+to\s+master", "a current-state field still says to merge PR #4 to master (already merged)"),
+                    (r"pr\s*#?\s*4\s+authorized\s+to\s+merge", "a current-state field still says PR #4 is authorized to merge (already merged)"),
+                    (r"run\s+post-merge\s+governance\s+verification", "a current-state field still lists 'run post-merge governance verification' as a pending action (already done)"),
+                ]:
+                    if re.search(pat, cur_blob, re.I):
+                        fail(f"post-merge stale action: {why}")
+                if re.search(r"merge\s+pr\s*#?\s*4", str(st.get("next_authorized_action", "")), re.I):
+                    fail("next_authorized_action still points to the already-completed PR #4 merge")
         else:
             if p2 not in ("IN_PROGRESS",):
                 fail(f"Phase 2 transition_accepted!=true but phases.2 status {p2} is not IN_PROGRESS (PO acceptance not yet recorded)")
