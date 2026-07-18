@@ -295,20 +295,54 @@ def cmd_validate(deep=True):
         if re.search(r"GIT_OPERATIONS_OWNER:\s*(PRODUCT_OWNER|PO\b|MANUAL|HUMAN)", rd):
             fail("GitHub delivery rule doc must not assign Git operations to the Product Owner (GIT_OPERATIONS_OWNER must be AGENT)")
 
-    # current phase plan matches canonical + exists; privilege matrix agreement
+    # Phase-scope self-consistency (deterministic): once the authorized current phase advances, the
+    # prohibition set must NOT still forbid implementing the current phase itself (a stale prior-phase
+    # prohibition), and it MUST still forbid the next phase. Fails in BOTH directions.
+    cp = str(st.get("current_phase", ""))
+    prohibited = st.get("prohibited_actions", []) or []
+    if cp == "2":
+        for pa in prohibited:
+            s = str(pa)
+            forbids_current = (
+                re.search(r"beyond\s+(the\s+authorized\s+)?phase\s*1b", s, re.I)  # forbids everything after 1B (incl. Phase 2)
+                or re.search(r"implement\w*\s+phase\s*2\b", s, re.I)              # explicitly forbids implementing Phase 2
+                or re.search(r"\(\s*phase\s*2\b", s, re.I)                        # names Phase 2 inside the forbidden set
+            )
+            if forbids_current:
+                fail("Phase-2 scope contradiction: current_phase=2 but a prohibited_action still forbids implementing Phase 2")
+        if not any(re.search(r"beyond\s+the\s+authorized\s+phase\s*2|phase\s*3\b", str(pa), re.I) for pa in prohibited):
+            fail("Phase-2 scope guard: prohibited_actions must still forbid Phase 3+ (beyond the authorized Phase 2)")
+
+    # current phase plan + privilege matrix exist; each asserts the ZERO-production-iam_v2 posture.
     plan = st.get("current_phase_plan")
     if not plan or not os.path.isfile(os.path.join(ROOT, plan)): fail(f"current_phase_plan missing/not found: {plan}")
     mtx = st.get("privilege_matrix")
     if not mtx or not os.path.isfile(os.path.join(ROOT, mtx)): fail(f"privilege_matrix missing/not found: {mtx}")
     else:
         mt = open(os.path.join(ROOT, mtx), encoding="utf-8").read()
-        # machine assertion: production runtime roles hold ZERO iam_v2 DML/EXECUTE
+        # machine assertion: production runtime roles hold ZERO iam_v2 DML/EXECUTE (current-phase matrix)
         if "PRODUCTION_IAM_V2_DML: NONE" not in mt: fail("privilege matrix missing machine assertion PRODUCTION_IAM_V2_DML: NONE")
         if re.search(r"PRODUCTION_IAM_V2_DML:\s*(GRANTED|SOME|ANY)", mt): fail("privilege matrix asserts a production iam_v2 grant (must be NONE)")
-        pt = open(os.path.join(ROOT, plan), encoding="utf-8").read() if plan else ""
+    # current-phase plan self-consistency: the Phase-2 plan must carry its DARK runtime sentinel so the
+    # current pointer can never go stale relative to the phase it names.
+    if cp == "2" and plan and os.path.isfile(os.path.join(ROOT, plan)):
+        p2t = open(os.path.join(ROOT, plan), encoding="utf-8").read()
+        if "PHASE_2_PRODUCTION_RUNTIME: DARK" not in p2t:
+            fail("Phase 2 plan missing sentinel 'PHASE_2_PRODUCTION_RUNTIME: DARK'")
+
+    # The Phase-1B least-privilege artifacts remain the authoritative BASE for every later DARK phase
+    # (D1 rolled-back-write ban, zero production iam_v2 runtime, matrix NONE). Validate them by FIXED path
+    # regardless of which phase's plan/matrix is the current pointer, so the base posture cannot be
+    # silently weakened by repointing the current-phase fields.
+    base_mtx_p = os.path.join(ROOT, "docs/architecture/Phase1B-Privilege-Matrix.md")
+    if os.path.isfile(base_mtx_p):
+        bm = open(base_mtx_p, encoding="utf-8").read()
+        if "PRODUCTION_IAM_V2_DML: NONE" not in bm: fail("Phase 1B base matrix missing PRODUCTION_IAM_V2_DML: NONE")
+        if re.search(r"PRODUCTION_IAM_V2_DML:\s*(GRANTED|SOME|ANY)", bm): fail("Phase 1B base matrix asserts a production iam_v2 grant (must be NONE)")
+    base_plan_p = os.path.join(ROOT, "docs/architecture/StayConnect-IAM-Phase1B-Plan.md")
+    if os.path.isfile(base_plan_p):
+        pt = open(base_plan_p, encoding="utf-8").read()
         if "Phase1B-Privilege-Matrix.md" not in pt: fail("Phase 1B plan does not reference the privilege matrix")
-        for phrase in ["zero production `iam_v2` write", "ZERO `iam_v2` DML"]:
-            pass  # soft
         if "rolled-back" not in pt.lower(): fail("Phase 1B plan must address rolled-back-transaction writes (D1)")
         # Phase 1B plan / canonical-state coherence (no PLANNING-ONLY vs IN_PROGRESS; no production iam_v2
         # runtime grant / shadow / rolled-back contradiction). Sentinel + multiple structural assertions,

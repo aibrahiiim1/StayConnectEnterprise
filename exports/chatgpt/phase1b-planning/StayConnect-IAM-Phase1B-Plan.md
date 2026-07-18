@@ -1,13 +1,13 @@
 # StayConnect IAM — Phase 1B Implementation Plan (Credential/Portal Integration, DARK)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0012 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0013 -->
 **Current phase:** 2 — Packages, revisions, rules, tiers, quotes; free purchases; portal package selection
-**Current activity:** `PHASE_2_IMPLEMENTATION_IN_PROGRESS`
+**Current activity:** `PHASE_2_LIVE_DARK_DEPLOYED_PENDING_PO_ACCEPTANCE`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 IN_PROGRESS · 3 NOT_STARTED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Complete Phase 2 execution end-to-end (schema, domain, APIs, portal + Hotel Admin UI, tests, live-dark deployment, reboot verification, evidence), then return one final report for a single Product-Owner Phase-2 acceptance decision. No paid access, no PMS settlement, no iam_v2 cutover, no Phase 3.
+**Single next authorized action:** Return the single final Phase-2 report for one Product-Owner acceptance decision at verified DARK maturity. No paid access, no PMS settlement, no iam_v2 cutover, no Phase 3.
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D12`.
 <!-- END GENERATED PROJECT STATE -->
 
