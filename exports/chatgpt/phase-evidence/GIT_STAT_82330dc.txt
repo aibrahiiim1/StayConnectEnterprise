@@ -1,4 +1,0 @@
-commit 82330dc85f33f4a8d99bf71300054ec488c2ffc8
-Date:   Sun Jul 19 00:16:10 2026 +0300
-
-    @ Phase 3 increment 2 (inventory_head): migration 0010 + pms_config flags + machine-grounded gap audit
