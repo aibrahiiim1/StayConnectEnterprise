@@ -1,0 +1,4 @@
+commit 1525c0dbaab3e8fbcb3e910268b0ab0aeca24775
+Date:   Sat Jul 18 11:43:22 2026 +0300
+
+    Phase 2 (item 12): allow the Phase-2 final-report next-action in the stale scan

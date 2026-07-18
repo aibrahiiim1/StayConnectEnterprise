@@ -1,4 +1,0 @@
-commit 3a4fce8393da3837148a94436357540128671859
-Date:   Sat Jul 18 11:41:20 2026 +0300
-
-    Phase 2 (item 12): changed-file manifest + ignore __pycache__
