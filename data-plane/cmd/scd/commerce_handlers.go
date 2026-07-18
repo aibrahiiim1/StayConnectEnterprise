@@ -8,16 +8,25 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// Phase-2 DARK guest-portal commerce handlers. These routes are mounted ONLY when the Phase-2 portal
-// surface is ON (see route registration); in the dark deployment they are absent (404) and the engine
-// holds a nil repository, so zero Phase-2 SQL is ever issued.
+// Phase-2 DARK guest-portal commerce handlers.
 //
-// Trust boundary (WS-D): tenant and site are appliance-fixed server-side values (s.tenID / s.siteID) and
-// are NEVER read from the request. The guest browser supplies only OPAQUE ids (package_id for a quote,
-// quote_id for a confirm). portald — scd's trusted server-side caller — resolves the authenticated
-// subject's auth-context, iam_v2 device and guest-network from its own session and forwards them; the
-// browser never supplies them. Deny reasons are logged server-side but returned to the guest only as a
-// single generic "unavailable", so package/eligibility internals never leak.
+// INTERNAL UNIX-SOCKET API. scd listens ONLY on its Unix socket (main.go: net.Listen("unix", ...),
+// chmod 0660, owned root:stayconnect). These commerce handlers are therefore never exposed on any
+// guest-accessible TCP listener — the only TCP listener scd opens is the metrics endpoint, which serves
+// exclusively /metrics + /healthz. The sole intended caller of these routes is portald (a member of the
+// stayconnect group), which owns the browser-facing trust boundary; the guest browser can never reach
+// this socket directly.
+//
+// These routes are mounted ONLY when the Phase-2 portal surface is ON (see route registration); in the
+// dark deployment they are absent and the engine holds a nil repository, so zero Phase-2 SQL is issued.
+//
+// Trust boundary (WS-D/item 7): tenant and site are appliance-fixed server-side values (s.tenID /
+// s.siteID) and are NEVER read from the request. The guest browser supplies only OPAQUE ids (package_id
+// for a quote, quote_id for a confirm). portald resolves the authenticated subject's auth-context,
+// iam_v2 device and guest-network from its own trusted session and forwards them; the browser never
+// supplies them. A call missing any server-derived pin is rejected here before the engine runs. Deny
+// reasons are logged server-side but returned only as a single generic "unavailable", so package /
+// eligibility internals never leak.
 
 type commerceQuoteReq struct {
 	AuthContextID  string `json:"auth_context_id"`  // trusted (portald session), not browser-supplied
@@ -38,6 +47,11 @@ type commerceConfirmReq struct {
 // and never discloses an ineligible package.
 func (s *server) commercePackages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	// reject a call missing any server-derived pin (defense in depth; portald always supplies them)
+	if q.Get("auth_context_id") == "" || q.Get("device_id") == "" || q.Get("guest_network_id") == "" {
+		httpErr(w, http.StatusBadRequest, "unavailable")
+		return
+	}
 	res, err := s.commerce.ListEligiblePackages(r.Context(), iamv2.PackageListRequest{
 		TenantID:       s.tenID, // appliance-fixed; never from the request
 		SiteID:         s.siteID,
@@ -71,6 +85,10 @@ func (s *server) commerceQuote(w http.ResponseWriter, r *http.Request) {
 	var req commerceQuoteReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad body")
+		return
+	}
+	if req.AuthContextID == "" || req.DeviceID == "" || req.GuestNetworkID == "" || req.PackageID == "" {
+		httpErr(w, http.StatusBadRequest, "unavailable")
 		return
 	}
 	res, err := s.commerce.CreateQuote(r.Context(), iamv2.QuoteRequest{
@@ -108,6 +126,10 @@ func (s *server) commerceConfirm(w http.ResponseWriter, r *http.Request) {
 	var req commerceConfirmReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpErr(w, http.StatusBadRequest, "bad body")
+		return
+	}
+	if req.QuoteID == "" || req.DeviceID == "" || req.GuestNetworkID == "" {
+		httpErr(w, http.StatusBadRequest, "unavailable")
 		return
 	}
 	res, err := s.commerce.ConfirmFreePurchase(r.Context(), iamv2.ConfirmRequest{
