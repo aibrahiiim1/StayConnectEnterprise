@@ -135,5 +135,7 @@
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase2-Plan.md",
   "privilege_matrix": "docs/architecture/Phase2-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D12",
-  "latest_transition_id": "T0013"
+  "latest_transition_id": "T0013",
+  "acceptance_candidate_head": "5dd104703591113da59aa92d1824f2cc486ae29c",
+  "acceptance_candidate_head_note": "Substantive Phase-2 deliverables HEAD (code, UI tests, evidence, report, governance). docs/manifests/Phase2-change-manifest.md is generated against this HEAD; the delivery commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above it."
 }
