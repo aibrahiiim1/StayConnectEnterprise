@@ -204,6 +204,96 @@ func TestIntegration_IndependentAxisPreservation(t *testing.T) {
 	}
 }
 
+// TestIntegration_AtomicGapAndResync proves §4 against real PostgreSQL: the two-axis gap/resync transition is
+// atomic (both axes or neither), a forced failure rolls back both, a stale owner changes neither, a heartbeat
+// cannot clear the barrier, and ordinary transport writes preserve the gap/resync state.
+func TestIntegration_AtomicGapAndResync(t *testing.T) {
+	pool := integPool(t)
+	defer pool.Close()
+	s := seedScope(t, pool)
+	repo := NewPgRepoFromPool(pool)
+	req := GenerationRequest{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, PinnedRevisionID: s.rev, PinnedSecretGenerationID: s.sg}
+	gen, err := repo.AllocateRuntimeGeneration(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := axisBase{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, ExpectedGeneration: gen}
+	now := time.Now()
+	// establish a healthy baseline: CONNECTED + CONTINUOUS + IN_SYNC
+	if err := repo.UpdateTransport(context.Background(), TransportUpdate{axisBase: base, Status: TransportConnected, LastConnectedAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateContinuity(context.Background(), ContinuityUpdate{axisBase: base, Status: ContinuityContinuous, LastValidEventAt: &now, LastEventCursor: "cur-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpdateSync(context.Background(), SyncUpdate{axisBase: base, Status: SyncInSync, LastCompleteSyncAt: &now, SyncCursor: "sync-1"}); err != nil {
+		t.Fatal(err)
+	}
+	read := func() (cont, syn, code string, startedNull bool) {
+		var c, y, cd string
+		var startedAt *time.Time
+		if err := pool.QueryRow(context.Background(), `SELECT continuity_status, sync_status,
+			COALESCE(last_sync_failure_code,''), resync_started_at
+			FROM iam_v2.pms_interface_runtime WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3`,
+			s.tenant, s.site, s.iface).Scan(&c, &y, &cd, &startedAt); err != nil {
+			t.Fatal(err)
+		}
+		return c, y, cd, startedAt == nil
+	}
+
+	// 1) FORCED FAILURE rolls back both: an already-cancelled context aborts the transaction; neither axis moves.
+	cctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	greq := GapResyncRequest{axisBase: base, Reason: CodeEventInvalid}
+	if err := repo.MarkGapAndRequireResync(cctx, greq); err == nil {
+		t.Fatal("cancelled-context gap/resync must fail")
+	}
+	if cont, syn, _, _ := read(); cont != "CONTINUOUS" || syn != "IN_SYNC" {
+		t.Fatalf("forced failure must roll back BOTH axes, got continuity=%s sync=%s", cont, syn)
+	}
+
+	// 2) STALE owner changes NEITHER: wrong generation → ErrStaleGeneration, still CONTINUOUS/IN_SYNC.
+	stale := GapResyncRequest{axisBase: axisBase{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, ExpectedGeneration: gen + 1}, Reason: CodeEventInvalid}
+	if err := repo.MarkGapAndRequireResync(context.Background(), stale); err != ErrStaleGeneration {
+		t.Fatalf("stale owner must get ErrStaleGeneration, got %v", err)
+	}
+	if cont, syn, _, _ := read(); cont != "CONTINUOUS" || syn != "IN_SYNC" {
+		t.Fatalf("stale owner must change NEITHER axis, got continuity=%s sync=%s", cont, syn)
+	}
+
+	// 3) BOTH axes change together, reason persisted, resync_started_at reset to NULL (coherent).
+	if err := repo.MarkGapAndRequireResync(context.Background(), greq); err != nil {
+		t.Fatal(err)
+	}
+	cont, syn, code, startedNull := read()
+	if cont != "GAP_DETECTED" || syn != "RESYNC_REQUIRED" {
+		t.Fatalf("both axes must move together, got continuity=%s sync=%s", cont, syn)
+	}
+	if code != CodeEventInvalid.String() {
+		t.Fatalf("bounded typed reason must persist, got %q want %q", code, CodeEventInvalid.String())
+	}
+	if !startedNull {
+		t.Fatal("resync_started_at must be reset to NULL on a fresh RESYNC_REQUIRED")
+	}
+
+	// 4) A HEARTBEAT (transport axis) must NOT clear the gap/resync barrier. Reuse the early `now` so the
+	// heartbeat timestamp is safely <= the DB's updated_at regardless of Go/container clock skew.
+	if err := repo.UpdateTransport(context.Background(), TransportUpdate{axisBase: base, Status: TransportConnected, LastHeartbeatAt: &now}); err != nil {
+		t.Fatal(err)
+	}
+	if cont, syn, _, _ := read(); cont != "GAP_DETECTED" || syn != "RESYNC_REQUIRED" {
+		t.Fatalf("heartbeat must not clear the barrier, got continuity=%s sync=%s", cont, syn)
+	}
+
+	// 5) An ordinary transport write preserves the gap/resync state (independent axes).
+	if err := repo.UpdateTransport(context.Background(), TransportUpdate{axisBase: base, Status: TransportDisconnected, DisconnectedSince: &now, ErrorCode: CodeProtocolLinkEnded}); err != nil {
+		t.Fatal(err)
+	}
+	if cont, syn, _, _ := read(); cont != "GAP_DETECTED" || syn != "RESYNC_REQUIRED" {
+		t.Fatalf("normal transport write must preserve gap/resync, got continuity=%s sync=%s", cont, syn)
+	}
+}
+
 func TestIntegration_RealAdvisoryLockCompetition(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()

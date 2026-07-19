@@ -51,13 +51,15 @@ type Event struct {
 	// feed-continuity evidence
 	Cursor string
 
-	// typed Stay/Guest/Folio attributes (authoritative Protel map: RN=room, G#=reservation, GN/GF=last/first)
+	// typed Stay/Guest/Folio attributes (authoritative Protel map: RN=room, G#=reservation, GN/GF=last/first).
+	// No derived display name is carried here: concatenating two individually-valid names could exceed a
+	// single-field bound and wrongly fail an otherwise-valid record, and a display string is a presentation
+	// concern. Increment 4 / presentation derives display text from the original validated first/last.
 	ReservationRef string
 	RoomNumber     string
 	FolioRef       string
 	GuestLastName  string
 	GuestFirstName string
-	GuestName      string // deterministic display name derived from last/first
 
 	// keyed-HMAC provenance digest of the source evidence (never the raw frame); key is never stored here
 	SourceEvidenceHash string

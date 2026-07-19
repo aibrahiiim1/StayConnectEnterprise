@@ -105,17 +105,25 @@ func testAdapter() *fiasAdapter {
 		identKey: k.IdentityKey, identKeyN: k.IdentityKeyVersion, profile: "protel-fias/v1", now: time.Now}
 }
 
+// mustEvent parses a record that is expected to be strictly well-formed, failing the test on a parse error.
+// (Validation of the typed Event contract is asserted separately by callers.)
+func mustEvent(t *testing.T, a *fiasAdapter, rec string) Event {
+	t.Helper()
+	ev, err := a.toEvent(rec)
+	if err != nil {
+		t.Fatalf("toEvent(%q) unexpected strict-parse error: %v", rec, err)
+	}
+	return ev
+}
+
 // TestFIASFieldMap_Authoritative pins the binding Protel FIAS field map + timestamp semantics without any
 // network: RN=room, G#=reservation, GN/GF=last/first, GA/GD=arrival/departure.
 func TestFIASFieldMap_Authoritative(t *testing.T) {
 	a := testAdapter()
-	gi := a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
+	gi := mustEvent(t, a, "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
 	if gi.RoomNumber != "1408" || gi.ReservationRef != "12345" || gi.GuestLastName != "Smith" ||
 		gi.GuestFirstName != "John" || gi.ArrivalRaw != "260101" || gi.DepartureRaw != "260105" {
 		t.Fatalf("authoritative map wrong: %+v", gi)
-	}
-	if gi.GuestName != "Smith, John" {
-		t.Errorf("display name = %q", gi.GuestName)
 	}
 	if err := gi.Validate(); err != nil {
 		t.Fatalf("valid GI must validate: %v", err)
@@ -137,7 +145,7 @@ func TestFIASFieldMap_Authoritative(t *testing.T) {
 func TestSourceFingerprint_DuplicateAndDistinct(t *testing.T) {
 	a := testAdapter()
 	base := "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|"
-	fp := func(rec string) string { return a.toEvent(rec).SourceEventFingerprint }
+	fp := func(rec string) string { return mustEvent(t, a, rec).SourceEventFingerprint }
 	baseFP := fp(base)
 	if !isHex64(baseFP) {
 		t.Fatalf("fingerprint must be 64-hex, got %q", baseFP)
@@ -147,7 +155,7 @@ func TestSourceFingerprint_DuplicateAndDistinct(t *testing.T) {
 		t.Error("exact retransmission must produce the same fingerprint")
 	}
 	// reservation alone is not the identity
-	if baseFP == a.toEvent(base).ReservationRef {
+	if baseFP == mustEvent(t, a, base).ReservationRef {
 		t.Error("reservation number alone must not be the fingerprint")
 	}
 	distinct := map[string]string{
@@ -167,18 +175,18 @@ func TestSourceFingerprint_DuplicateAndDistinct(t *testing.T) {
 	// interface change -> different
 	a2 := testAdapter()
 	a2.iface = iface("i2")
-	if a2.toEvent(base).SourceEventFingerprint == baseFP {
+	if mustEvent(t, a2, base).SourceEventFingerprint == baseFP {
 		t.Error("interface change must produce a different fingerprint")
 	}
 	// normalization-version change -> different
 	a3 := testAdapter()
 	a3.rev.NormalizationVersion = 2
-	if a3.toEvent(base).SourceEventFingerprint == baseFP {
+	if mustEvent(t, a3, base).SourceEventFingerprint == baseFP {
 		t.Error("normalization-version change must produce a different fingerprint")
 	}
 	// present-but-empty vs absent must not collide (field-boundary ambiguity)
-	emptyGN := a.toEvent("GI|RN1408|G#12345|GN|GFJohn|GA260101|GD260105|")
-	absentGN := a.toEvent("GI|RN1408|G#12345|GFJohn|GA260101|GD260105|")
+	emptyGN := mustEvent(t, a, "GI|RN1408|G#12345|GN|GFJohn|GA260101|GD260105|")
+	absentGN := mustEvent(t, a, "GI|RN1408|G#12345|GFJohn|GA260101|GD260105|")
 	if emptyGN.SourceEventFingerprint == absentGN.SourceEventFingerprint {
 		t.Error("present-but-empty field must not collide with an absent field")
 	}
@@ -196,7 +204,7 @@ func TestSourceFingerprint_EmptyKeyFailsClosed(t *testing.T) {
 	// an event built with no identity key is rejected by Validate (domain event needs a 64-hex fingerprint)
 	a := testAdapter()
 	a.identKey = nil
-	if a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|").Validate() == nil {
+	if mustEvent(t, a, "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|").Validate() == nil {
 		t.Error("domain event without a fingerprint must be rejected")
 	}
 }
@@ -206,9 +214,9 @@ func TestSourceFingerprint_EmptyKeyFailsClosed(t *testing.T) {
 // by Validate — the authoritative Stay/lifecycle resolution is Increment 4's job.
 func TestStayResolutionCandidate_NonAuthoritative(t *testing.T) {
 	a := testAdapter()
-	in := a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
-	move := a.toEvent("GC|RN1500|G#12345|GNSmith|GFJohn|GA260101|GD260105|")   // same reservation, new room
-	arrFix := a.toEvent("GC|RN1408|G#12345|GNSmith|GFJohn|GA260102|GD260105|") // same reservation, corrected arrival
+	in := mustEvent(t, a, "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
+	move := mustEvent(t, a, "GC|RN1500|G#12345|GNSmith|GFJohn|GA260101|GD260105|")   // same reservation, new room
+	arrFix := mustEvent(t, a, "GC|RN1408|G#12345|GNSmith|GFJohn|GA260102|GD260105|") // same reservation, corrected arrival
 	if in.StayResolutionCandidate != move.StayResolutionCandidate {
 		t.Error("a Room Move (room excluded) must keep the same candidate")
 	}
@@ -222,7 +230,7 @@ func TestStayResolutionCandidate_NonAuthoritative(t *testing.T) {
 		t.Error("the candidate must be distinct from the event fingerprint")
 	}
 	// different reservation -> different candidate
-	other := a.toEvent("GI|RN1408|G#99999|GNSmith|GFJohn|GA260101|GD260105|")
+	other := mustEvent(t, a, "GI|RN1408|G#99999|GNSmith|GFJohn|GA260101|GD260105|")
 	if other.StayResolutionCandidate == in.StayResolutionCandidate {
 		t.Error("a different reservation must be a different candidate")
 	}
@@ -236,12 +244,12 @@ func TestStayResolutionCandidate_NonAuthoritative(t *testing.T) {
 
 func TestFIAS_MalformedAndOverlong(t *testing.T) {
 	a := testAdapter()
-	// missing G# (reservation) -> rejected
-	if a.toEvent("GI|RN1408|GNSmith|GA260101|").Validate() == nil {
+	// missing G# (reservation) -> strict typed projection rejects (no Event produced)
+	if _, err := a.toEvent("GI|RN1408|GNSmith|GA260101|"); err == nil {
 		t.Error("GI without reservation (G#) must be rejected")
 	}
 	// missing RN (room) -> rejected
-	if a.toEvent("GI|G#12345|GNSmith|GA260101|").Validate() == nil {
+	if _, err := a.toEvent("GI|G#12345|GNSmith|GA260101|"); err == nil {
 		t.Error("GI without room (RN) must be rejected")
 	}
 }
@@ -261,7 +269,7 @@ func TestFIAS_OverlongFieldsRejectedNoTruncation(t *testing.T) {
 		return "GI|RN" + f["RN"] + "|G#" + f["G#"] + "|GN" + f["GN"] + "|GF" + f["GF"] + "|FO" + f["FO"] + "|GA" + f["GA"] + "|GD" + f["GD"] + "|"
 	}
 	// sanity: the base record is a VALID event (so each failure below is attributable to the one overlong field)
-	if err := a.toEvent(build(base())).Validate(); err != nil {
+	if err := mustEvent(t, a, build(base())).Validate(); err != nil {
 		t.Fatalf("base record must be valid, got %v", err)
 	}
 
@@ -282,7 +290,7 @@ func TestFIAS_OverlongFieldsRejectedNoTruncation(t *testing.T) {
 		f := base()
 		overlong := strings.Repeat("9", tc.limit+7)
 		f[tc.field] = overlong
-		ev := a.toEvent(build(f))
+		ev := mustEvent(t, a, build(f))
 
 		// 1) the adapter carried the FULL value untruncated (no silent clip inside toEvent)
 		if got := tc.get(ev); got != overlong {
@@ -424,14 +432,11 @@ func TestAdapter_StartupDomainAndResync(t *testing.T) {
 		e.GuestLastName != "Smith" || e.GuestFirstName != "John" || e.ArrivalRaw != "260101" || e.DepartureRaw != "260105" {
 		t.Errorf("typed event fields wrong (authoritative RN/G# map): %+v", e)
 	}
-	if e.GuestName != "Smith, John" {
-		t.Errorf("display name = %q, want 'Smith, John'", e.GuestName)
-	}
 	if !isHex64(e.ExternalEventIdentity) {
 		t.Errorf("external identity must be a 64-hex content hash, got %q", e.ExternalEventIdentity)
 	}
 	// the typed event must carry NO raw STX/ETX/control bytes
-	for _, f := range []string{e.ReservationRef, e.RoomNumber, e.GuestName, e.ExternalEventIdentity} {
+	for _, f := range []string{e.ReservationRef, e.RoomNumber, e.GuestLastName, e.GuestFirstName, e.ExternalEventIdentity} {
 		if strings.ContainsAny(f, "\x02\x03") {
 			t.Errorf("typed field carried raw frame bytes: %q", f)
 		}

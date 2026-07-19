@@ -3,7 +3,6 @@ package pms
 import (
 	"bufio"
 	"io"
-	"strings"
 )
 
 // Exported FIAS wire primitives so the Phase-3 read-only connector runtime (internal/pmsd) can REUSE the
@@ -30,24 +29,10 @@ func WriteFramedRecord(w io.Writer, body string) error {
 // ReadFramedRecord reads one STX..ETX-bracketed record body (ETX stripped) from br.
 func ReadFramedRecord(br *bufio.Reader) (string, error) { return readFramedRecord(br) }
 
-// ParseFields walks a "|FFvalue|FFvalue|" record tail into a map of 2-char field id → value.
-func ParseFields(tail string) map[string]string { return parseFields(tail) }
-
-// ParseFieldPairs walks a record body into an ORDERED list of (2-char code, value) pairs, preserving
-// DUPLICATE occurrences and present-but-empty values ("GN" → {"GN",""}). An empty segment (from "||") is
-// skipped (an absent field emits no pair). Unlike ParseFields (a map), this keeps the complete record
-// content in order so a fingerprint over it can distinguish reordered/duplicate fields. Reuses the same
-// pipe-splitting + 2-char-code convention as the accepted parser.
-func ParseFieldPairs(body string) [][2]string {
-	var out [][2]string
-	for _, seg := range strings.Split(body, "|") {
-		if len(seg) < 2 {
-			continue
-		}
-		out = append(out, [2]string{seg[:2], seg[2:]})
-	}
-	return out
-}
+// NOTE: pmsd Event ingestion no longer uses a permissive field parser. The connector parses GI/GC/GO under a
+// STRICT grammar (internal/pmsd/strict_parse.go) that rejects malformed/empty/duplicate-ambiguous tokens
+// instead of silently skipping them. The pms-internal parseFields (used by the legacy connectors in this
+// package) is unchanged.
 
 // RecordID returns the leading 2-char record id of a record body (e.g. "GI"), or "" if too short.
 func RecordID(body string) string {

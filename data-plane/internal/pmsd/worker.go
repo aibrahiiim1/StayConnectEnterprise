@@ -222,9 +222,9 @@ func (s *workerSink) OnDisconnected(at time.Time, code Code) error {
 func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 	if err := s.q.Enqueue(ctx, ev); err != nil {
 		if Classify(err) == CodeQueueOverflow {
-			// Persist the gap/resync transition — a DB/generation failure here must NOT be swallowed: it is
-			// returned so the transport closes rather than leaving a silent, unrecorded gap.
-			if perr := s.markGapResync(); perr != nil {
+			// Persist the gap/resync transition ATOMICALLY — a DB/generation failure here must NOT be
+			// swallowed: it is returned so the transport closes rather than leaving a silent, unrecorded gap.
+			if perr := s.markGapResync(CodeQueueOverflow); perr != nil {
 				return perr
 			}
 		}
@@ -234,19 +234,17 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 }
 
 // OnContinuityFault durably drives continuity→GAP_DETECTED and sync→RESYNC_REQUIRED for a record the adapter
-// could not admit (malformed/overlong/failed normalization). Both writes are persisted under the pinned
-// generation; the first failure is returned so the adapter closes the transport instead of continuing over an
-// unrecorded gap.
+// could not admit (malformed/overlong/duplicate/failed normalization). Both axes move in ONE transaction under
+// the pinned generation; a failure is returned so the adapter closes the transport instead of continuing over
+// an unrecorded gap.
 func (s *workerSink) OnContinuityFault(ctx context.Context, code Code) error {
-	return s.markGapResync()
+	return s.markGapResync(code)
 }
 
-// markGapResync persists the two-axis continuity-gap + resync-required transition, returning the first error.
-func (s *workerSink) markGapResync() error {
-	if err := s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityGapDetected, DiscontinuityAt: ptr(s.w.deps.now())}); err != nil {
-		return err
-	}
-	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncRequired, ResyncRequestedAt: ptr(s.w.deps.now())})
+// markGapResync performs the ATOMIC two-axis continuity-gap + resync-required transition, tagging it with a
+// bounded typed reason code. It returns ErrStaleGeneration if ownership changed and any DB error otherwise.
+func (s *workerSink) markGapResync(reason Code) error {
+	return s.w.repo.MarkGapAndRequireResync(s.ctx, GapResyncRequest{axisBase: s.ax(), Reason: reason})
 }
 
 // QueueForTest exposes the per-ownership queue for integration tests only.

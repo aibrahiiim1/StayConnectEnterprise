@@ -96,10 +96,18 @@ func (a *fiasAdapter) Close() error {
 // LS/LA/heartbeat into axis updates, GI/GC/GO into typed domain events, and DS..DE into resync state. On
 // context cancel it sends LE (controlled shutdown). It NEVER emits PS/PA (guarded at writeFrame).
 func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
+	// The SINGLE serialized writer owns EVERY outbound frame (startup, LA acks, idle keepalive, DR, LE). The
+	// read loop below NEVER touches the socket writer directly — it only submits requests. wctx cancellation
+	// makes the writer emit a controlled LE and stop; the deferred drain guarantees no goroutine leak.
+	wctx, wcancel := context.WithCancel(ctx)
+	w := newSerialWriter(a.g, a.rev.HeartbeatInterval)
+	go w.run(wctx)
+	defer func() { wcancel(); <-w.done }()
+
 	t := a.now()
 	da, ti := t.Format("060102"), t.Format("150405")
 	for _, body := range append([]string{pms.BuildLS(da, ti), pms.BuildLD(da, ti, "pmsd", "1")}, pms.BuildLRs()...) {
-		if err := a.g.writeFrame(body); err != nil {
+		if err := w.submitSync(body); err != nil { // startup handshake through the single writer
 			return err
 		}
 	}
@@ -111,28 +119,34 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	readDeadline := a.rev.HeartbeatTimeout
 	for {
 		if ctx.Err() != nil {
-			_ = a.g.writeFrame(pms.BuildLE()) // controlled shutdown (best effort)
-			return ctx.Err()
+			return ctx.Err() // the writer emits LE on wctx cancel (deferred)
 		}
 		if readDeadline > 0 {
 			_ = a.g.c.SetReadDeadline(time.Now().Add(readDeadline))
 		}
 		body, err := pms.ReadFramedRecord(a.br)
 		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				return coded(CodeProtocolLinkEnded, err)
+			// a writer failure closes the transport to unblock this read; surface the writer's cause if any
+			select {
+			case <-w.done:
+				return w.stoppedErr()
+			default:
 			}
 			return coded(CodeProtocolLinkEnded, err)
 		}
+		w.activity() // a valid read resets the idle keepalive timer
 		switch pms.RecordID(body) {
 		case "LS":
-			if err := a.g.writeFrame(pms.BuildLA()); err != nil { // ack incoming link start
+			if err := w.submit(pms.BuildLA()); err != nil { // ack incoming link start
 				return err
 			}
 			if err := sink.OnHeartbeat(a.now()); err != nil {
 				return err
 			}
 		case "LA", "HB":
+			if err := w.submit(pms.BuildLA()); err != nil { // incoming LA → bare LA
+				return err
+			}
 			if err := sink.OnHeartbeat(a.now()); err != nil {
 				return err
 			}
@@ -149,17 +163,21 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				return err
 			}
 		case "GI", "GC", "GO":
-			ev := a.toEvent(body)
-			if err := ev.Validate(); err != nil {
-				// A malformed / overlong / identity-truncating record is a feed-continuity fault, NOT a
-				// silently-droppable event. Drive continuity→GAP_DETECTED + sync→RESYNC_REQUIRED durably
-				// (a persist/generation failure closes the transport), then request a verified full resync.
-				// No shortened or partial value from this record is exposed to the queue/inbox.
+			ev, perr := a.toEvent(body)
+			if perr == nil {
+				perr = ev.Validate()
+			}
+			if perr != nil {
+				// A malformed record (strict-grammar violation, ambiguous duplicate field, overlong or
+				// identity-truncating value) is a feed-continuity fault, NOT a silently-droppable event. Drive
+				// continuity→GAP_DETECTED + sync→RESYNC_REQUIRED durably (a persist/generation failure closes
+				// the transport), then request a verified full resync. No shortened or partial value from this
+				// record is exposed to the queue/inbox — toEvent returned no Event.
 				if ferr := sink.OnContinuityFault(ctx, CodeEventInvalid); ferr != nil {
 					return ferr
 				}
 				if !resyncing {
-					if werr := a.g.writeFrame(pms.BuildDR()); werr != nil {
+					if werr := w.submit(pms.BuildDR()); werr != nil {
 						return werr
 					}
 					resyncing = true
@@ -169,7 +187,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			if derr := sink.OnDomainEvent(ctx, ev); derr != nil {
 				if Classify(derr) == CodeQueueOverflow && !resyncing {
 					// stop normal application; request a verified full resync
-					if err := a.g.writeFrame(pms.BuildDR()); err != nil {
+					if err := w.submit(pms.BuildDR()); err != nil {
 						return err
 					}
 					resyncing = true
@@ -187,63 +205,61 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	}
 }
 
-// toEvent parses a GI/GC/GO record into a typed, provenance-stamped domain Event using the AUTHORITATIVE
-// Protel FIAS field map (Phase-0 live evidence):
+// toEvent STRICTLY parses a GI/GC/GO record into a typed, provenance-stamped domain Event using the
+// AUTHORITATIVE Protel FIAS field map (Phase-0 live evidence):
 //
 //	RN = room number     G# = reservation number
 //	GN = last name       GF = first name
 //	GA = arrival date    GD = departure date
 //
-// Room number is NOT globally unique (it repeats across reservations/stays), so it is never an identity.
-// The external Event identity is a deterministic content hash over the record type + reservation + room +
-// arrival + departure (interface-scoped), so GI/GC/GO, repeated updates, Room Moves, and the same
-// reservation across different lifecycle episodes never collide, and reservation number alone is not the
-// idempotency key. Raw frame bytes stay here; only bounded typed fields leave.
-func (a *fiasAdapter) toEvent(body string) Event {
-	rt := RecordType(pms.RecordID(body))
-	// The fingerprint is computed over the COMPLETE parsed record (every code+value in order, duplicates and
-	// present-but-empty preserved, incl. unknown codes) — not just the typed fields — so any source-token
-	// change alters it and an exact retransmission reproduces it.
-	rawPairs := pms.ParseFieldPairs(body)
-	pairs := make([]FieldPair, len(rawPairs))
-	for i, p := range rawPairs {
-		pairs[i] = FieldPair{Code: p[0], Value: p[1]}
+// It fails closed (returns ErrRecordMalformed) on any strict-grammar violation OR ambiguous duplicate typed
+// field, so a malformed record produces NO Event and the caller drives a continuity gap/resync. Room number
+// is NOT globally unique, so it is never an identity. The external Event identity is a keyed HMAC over the
+// STRICT COMPLETE parsed source record (every code+value in source order, duplicates and present-but-empty
+// preserved, incl. unknown well-formed codes) — never a reservation/room/date-only hash — so GI/GC/GO,
+// repeated updates, Room Moves, and the same reservation across lifecycle episodes never collide, and
+// reservation number alone is not the idempotency key. Raw frame bytes stay here; only bounded typed fields
+// leave, and none is ever truncated (an overlong value is rejected upstream by Validate, not shortened).
+func (a *fiasAdapter) toEvent(body string) (Event, error) {
+	pr, err := parseStrictRecord(body)
+	if err != nil {
+		return Event{}, err
 	}
-	se := newSourceEvent(a.iface.ID, rt, a.rev.NormalizationVersion, a.profile, "", pairs)
+	// The fingerprint is computed over the COMPLETE strict parsed record (order, duplicates, present-but-empty
+	// and unknown well-formed codes preserved) — not just the typed fields — so any source-token change alters
+	// it and an exact retransmission reproduces it.
+	se := newSourceEvent(a.iface.ID, pr.RecordType, a.rev.NormalizationVersion, a.profile, "", pr.pairs())
 	fp, fpVer := ComputeSourceFingerprint(a.identKey, a.identKeyN, se)
 	evHash, evVer := ComputeEvidenceHMAC(a.evKey, a.evKeyNo, body)
 
-	// Typed fields are extracted (first occurrence per code) but NEVER truncated: an overlong PMS value is
-	// left intact so Validate rejects it (→ the caller triggers a continuity gap/resync), rather than
-	// silently changing it into a different valid-looking value. Display name is derived from the (validated)
-	// typed components. Runtime/Resync generation are stamped later by the owning worker at admission.
-	f := pms.ParseFields(body)
-	reservation := f["G#"]
-	room := f["RN"]
-	last := f["GN"]
-	first := f["GF"]
+	// Typed projection fails closed on ambiguous duplicate identity/evidence fields (RN/G# exactly once;
+	// GN/GF/FO/GA/GD at most once). Values are NEVER truncated. Runtime/Resync generation are stamped later
+	// by the owning worker at admission.
+	tf, err := extractTypedDomainFields(pr)
+	if err != nil {
+		return Event{}, err
+	}
 
 	now := a.now()
 	return Event{
 		InterfaceID: a.iface.ID, RevisionID: a.rev.ID, SecretGenerationID: a.rev.ActiveSecretGenerationID,
 		NormalizationVer:       a.rev.NormalizationVersion,
-		RecordType:             rt,
+		RecordType:             pr.RecordType,
 		SourceEventFingerprint: fp, FingerprintKeyVersion: fpVer, ExternalEventIdentity: fp,
-		StayResolutionCandidate: DeriveStayResolutionCandidate(a.iface.TenantID, a.iface.SiteID, a.iface.ID, reservation),
-		ReservationRef:          reservation,
-		RoomNumber:              room,
-		FolioRef:                f["FO"],
-		GuestLastName:           last,
-		GuestFirstName:          first,
-		GuestName:               deriveDisplayName(last, first),
-		ArrivalRaw:              f["GA"],
-		DepartureRaw:            f["GD"],
+		StayResolutionCandidate: DeriveStayResolutionCandidate(a.iface.TenantID, a.iface.SiteID, a.iface.ID, tf.Reservation),
+		ReservationRef:          tf.Reservation,
+		RoomNumber:              tf.Room,
+		FolioRef:                tf.Folio,
+		GuestLastName:           tf.LastName,
+		GuestFirstName:          tf.FirstName,
+		ArrivalRaw:              tf.Arrival,
+		DepartureRaw:            tf.Departure,
 		// GI/GC/GO carry no verified FIAS event timestamp -> PMSEvent* left unavailable (never substitute GA).
 		PMSEventTimestampRaw: "",
 		PMSEventAt:           nil,
 		NormalizedAt:         now,
-		Cursor:               reservation + ":" + room,
+		Cursor:               tf.Reservation + ":" + tf.Room,
 		SourceEvidenceHash:   evHash, EvidenceKeyVersion: evVer,
 		ReceivedAt: now,
-	}
+	}, nil
 }

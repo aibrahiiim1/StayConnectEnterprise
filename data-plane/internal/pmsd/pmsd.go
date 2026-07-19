@@ -194,6 +194,15 @@ type SyncUpdate struct {
 	FailureCode        Code
 }
 
+// GapResyncRequest drives the ATOMIC two-axis "feed gap detected → full resync required" transition. Both
+// the continuity axis (→ GAP_DETECTED) and the sync axis (→ RESYNC_REQUIRED) move together, in ONE
+// transaction, guarded by the exact runtime_generation. Reason is a bounded typed code persisted where the
+// schema supports it (never raw text/PII).
+type GapResyncRequest struct {
+	axisBase
+	Reason Code
+}
+
 // Repo is the typed, assignment-scoped PMS repository. Every method takes/embeds Tenant+Site; nothing is
 // constructed while the connector is dark. Each Update uses an EXACT compare-and-set on runtime_generation.
 type Repo interface {
@@ -205,6 +214,10 @@ type Repo interface {
 	UpdateTransport(ctx context.Context, u TransportUpdate) error
 	UpdateContinuity(ctx context.Context, u ContinuityUpdate) error
 	UpdateSync(ctx context.Context, u SyncUpdate) error
+	// MarkGapAndRequireResync atomically transitions continuity→GAP_DETECTED AND sync→RESYNC_REQUIRED in ONE
+	// transaction under the exact generation guard (both axes change or neither). It preserves unrelated
+	// transport evidence, returns ErrStaleGeneration when ownership changed, and returns every database error.
+	MarkGapAndRequireResync(ctx context.Context, req GapResyncRequest) error
 	Close() error
 }
 

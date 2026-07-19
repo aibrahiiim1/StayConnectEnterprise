@@ -65,13 +65,15 @@ type fakeRepo struct {
 	transport  map[string]TransportStatus
 	continuity map[string]ContinuityStatus
 	syncS      map[string]SyncStatus
+	gapReason  map[string]Code
+	markGapErr error
 	updates    int64
 	closed     atomic.Bool
 	lastScope  [2]string
 }
 
 func newFakeRepo(ifaces ...Interface) *fakeRepo {
-	return &fakeRepo{ifaces: ifaces, gen: map[string]int64{}, transport: map[string]TransportStatus{}, continuity: map[string]ContinuityStatus{}, syncS: map[string]SyncStatus{}}
+	return &fakeRepo{ifaces: ifaces, gen: map[string]int64{}, transport: map[string]TransportStatus{}, continuity: map[string]ContinuityStatus{}, syncS: map[string]SyncStatus{}, gapReason: map[string]Code{}}
 }
 
 func (r *fakeRepo) ListActiveInterfaces(ctx context.Context, t, s string) ([]Interface, error) {
@@ -141,6 +143,23 @@ func (r *fakeRepo) UpdateSync(ctx context.Context, u SyncUpdate) error {
 	}
 	r.mu.Lock()
 	r.syncS[u.PMSInterfaceID] = u.Status
+	r.mu.Unlock()
+	return nil
+}
+
+// MarkGapAndRequireResync moves BOTH axes atomically under a single CAS (both or neither): a stale generation
+// changes nothing, mirroring the real single-row transactional UPDATE.
+func (r *fakeRepo) MarkGapAndRequireResync(ctx context.Context, req GapResyncRequest) error {
+	if r.markGapErr != nil {
+		return r.markGapErr
+	}
+	if err := r.cas(req.PMSInterfaceID, req.ExpectedGeneration); err != nil {
+		return err // neither axis changes
+	}
+	r.mu.Lock()
+	r.continuity[req.PMSInterfaceID] = ContinuityGapDetected
+	r.syncS[req.PMSInterfaceID] = SyncResyncRequired
+	r.gapReason[req.PMSInterfaceID] = req.Reason
 	r.mu.Unlock()
 	return nil
 }

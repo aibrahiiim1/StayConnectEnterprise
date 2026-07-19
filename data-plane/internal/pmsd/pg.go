@@ -179,6 +179,33 @@ func (r *pgRepo) UpdateSync(ctx context.Context, u SyncUpdate) error {
 		string(u.Status), u.ResyncRequestedAt, u.ResyncStartedAt, u.LastCompleteSyncAt, u.SyncCursor, u.FailureCode.String())
 }
 
+// MarkGapAndRequireResync atomically moves BOTH the continuity axis (→GAP_DETECTED) and the sync axis
+// (→RESYNC_REQUIRED) in ONE transaction, guarded by the exact runtime_generation. It is a single-row UPDATE
+// (inherently all-or-none) wrapped in an explicit transaction. resync_started_at is reset to NULL because a
+// fresh RESYNC_REQUIRED abandons any in-progress resync — and leaving a past resync_started_at alongside a
+// new resync_requested_at would violate the pir_resync_coherent CHECK. Transport columns are untouched.
+// Zero rows affected ⇒ a newer owner exists ⇒ ErrStaleGeneration. Every DB error is returned.
+func (r *pgRepo) MarkGapAndRequireResync(ctx context.Context, req GapResyncRequest) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // no-op after a successful Commit
+	tag, err := tx.Exec(ctx, `UPDATE iam_v2.pms_interface_runtime SET
+		continuity_status='GAP_DETECTED', discontinuity_detected_at=$5,
+		sync_status='RESYNC_REQUIRED', resync_requested_at=$5, resync_started_at=NULL,
+		last_sync_failure_code=NULLIF($6,''), updated_at=now()
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4`,
+		req.TenantID, req.SiteID, req.PMSInterfaceID, req.ExpectedGeneration, req.At, req.Reason.String())
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrStaleGeneration
+	}
+	return tx.Commit(ctx)
+}
+
 // pgLocker is a session-level single-owner advisory lock on a DEDICATED connection acquired from the shared
 // repository pool (no pool-per-lock). Close releases the lock + the connection deterministically.
 type pgLocker struct {

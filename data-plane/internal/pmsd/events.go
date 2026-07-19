@@ -91,7 +91,7 @@ func (e Event) Validate() error {
 	}{
 		{e.PMSEventTimestampRaw, maxRawTimestampLen}, {e.ArrivalRaw, maxRawTimestampLen}, {e.DepartureRaw, maxRawTimestampLen},
 		{e.ReservationRef, maxReservationLen}, {e.RoomNumber, maxRoomLen}, {e.FolioRef, maxFolioLen},
-		{e.GuestLastName, maxGuestLen}, {e.GuestFirstName, maxGuestLen}, {e.GuestName, maxGuestLen},
+		{e.GuestLastName, maxGuestLen}, {e.GuestFirstName, maxGuestLen},
 		{e.Cursor, maxCursorLen},
 	} {
 		if len(f.v) > f.n || hasControlBytes(f.v) {
@@ -121,7 +121,7 @@ func (e Event) Validate() error {
 		}
 	} else {
 		// control observations must NOT carry guest fields (they are not guest events)
-		if e.ReservationRef != "" || e.RoomNumber != "" || e.FolioRef != "" || e.GuestName != "" {
+		if e.ReservationRef != "" || e.RoomNumber != "" || e.FolioRef != "" || e.GuestLastName != "" || e.GuestFirstName != "" {
 			return ErrEventInvalid
 		}
 	}
@@ -229,22 +229,6 @@ func DeriveStayResolutionCandidate(tenantID, siteID, interfaceID, reservation st
 		_, _ = h.Write([]byte{0x1f})
 	}
 	return hex.EncodeToString(h.Sum(nil))
-}
-
-// deriveDisplayName builds a deterministic "Last, First" display name from typed components.
-func deriveDisplayName(last, first string) string {
-	last = strings.TrimSpace(last)
-	first = strings.TrimSpace(first)
-	switch {
-	case last == "" && first == "":
-		return ""
-	case first == "":
-		return last
-	case last == "":
-		return first
-	default:
-		return last + ", " + first
-	}
 }
 
 // nonZeroTime is a small helper for adapters that need a non-zero normalized timestamp.
