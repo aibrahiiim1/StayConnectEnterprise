@@ -13,7 +13,6 @@ package pmsd
 import (
 	"context"
 	"errors"
-	"hash/fnv"
 	"log/slog"
 	"time"
 
@@ -187,19 +186,6 @@ func (d *Deps) withDefaults() {
 	if d.StopGrace <= 0 {
 		d.StopGrace = 10 * time.Second
 	}
-}
-
-// LockKey derives the deterministic single-owner advisory-lock key for a PMS Interface.
-// Canonical representation: FNV-1a/64 of the UTF-8 bytes "tenant|site|interface", reinterpreted as a
-// signed int64 (pg advisory locks take bigint). Documented + covered by TestLockKey_Deterministic.
-func LockKey(tenantID, siteID, interfaceID string) int64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(tenantID))
-	_, _ = h.Write([]byte("|"))
-	_, _ = h.Write([]byte(siteID))
-	_, _ = h.Write([]byte("|"))
-	_, _ = h.Write([]byte(interfaceID))
-	return int64(h.Sum64())
 }
 
 // Run is the daemon entry point. It is fail-closed and DARK-gated: with the connector flag OFF it

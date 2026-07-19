@@ -64,7 +64,11 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 	}
 	defer func() { _ = locker.Close() }()
 
-	got, err := locker.TryLock(ctx, LockKey(w.iface.TenantID, w.iface.SiteID, w.iface.ID))
+	lockKey, err := LockKey(w.iface.TenantID, w.iface.SiteID, w.iface.ID)
+	if err != nil {
+		return 0, err
+	}
+	got, err := locker.TryLock(ctx, lockKey)
 	if err != nil {
 		return 0, err
 	}

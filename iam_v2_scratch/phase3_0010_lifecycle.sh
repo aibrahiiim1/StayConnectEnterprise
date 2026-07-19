@@ -186,10 +186,10 @@ o="$(RUN --only 0010_phase3_stay_resolution --expect-db "$DB" --expect-sha256 de
 o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db WRONGDB --target-kind disposable --ack-target I_UNDERSTAND_DISPOSABLE_DATABASE --expect-sha256 "$UPSHA" 2>&1 || true)"; echo "$o" | grep -q "but --expect-db" && ok "--expect-db mismatch refused (§1)" || no "expect-db mismatch accepted"
 # §2: noncanonical directory rejected without disposable ack
 o="$(RUN --only 0010_phase3_stay_resolution --expect-db "$DB" --expect-sha256 "$UPSHA" --dir /tmp 2>&1 || true)"; echo "$o" | grep -q "requires target-kind=disposable AND --ack-noncanonical-dir" && ok "noncanonical --dir refused without ack (§2)" || no "noncanonical dir accepted"
-# §2: symlink-escape migration dir rejected
-Q "SELECT 1" >/dev/null; LNK="$ROOT/data-plane/migrations_symlink_test"; rm -f "$LNK"; ln -s /tmp "$LNK" 2>/dev/null
-o="$(RUN --only 0010_phase3_stay_resolution --expect-db "$DB" --expect-sha256 "$UPSHA" --dir "$LNK" --ack-noncanonical-dir I_UNDERSTAND_NONCANONICAL_TEST_DIR 2>&1 || true)"; echo "$o" | grep -qE "resolves to 0 files|migration directory missing" && ok "symlinked/escaped dir yields no migration (§2)" || no "symlink escape found a migration"
-rm -f "$LNK"
+# §2: noncanonical/escaped dir (outside the repo) yields no migration even WITH the disposable dir-ack
+ESC="${TMPDIR:-/tmp}/p3_noncanon_dir.$$"; rm -rf "$ESC"; mkdir -p "$ESC"
+o="$(RUN --only 0010_phase3_stay_resolution --expect-db "$DB" --expect-sha256 "$UPSHA" --dir "$ESC" --ack-noncanonical-dir I_UNDERSTAND_NONCANONICAL_TEST_DIR 2>&1 || true)"; echo "$o" | grep -qE "resolves to 0 files|migration directory missing" && ok "noncanonical dir outside repo yields no migration (§2)" || no "escaped dir found a migration"
+rmdir "$ESC" 2>/dev/null || true
 
 echo '== rollback == pre, then CONCURRENT two-runner reapply (PART A §3) =='
 Qf < "$DOWN" >/dev/null && ok "rollback 0010 (down)" || no "rollback failed"

@@ -109,8 +109,28 @@ func fastDeps(sp *spies, repo Repo, mkLocker func() Locker, mkConn func() *fakeC
 	}
 }
 
+// fixed valid UUIDs so the UUID-strict LockKey accepts the fakes (values are arbitrary but canonical).
+const (
+	tTenantUUID = "11111111-1111-1111-1111-111111111111"
+	tSiteUUID   = "22222222-2222-2222-2222-222222222222"
+)
+
+// ifaceUUID maps a short test label to a fixed canonical interface UUID.
+func ifaceUUID(short string) string {
+	switch short {
+	case "i1":
+		return "aaaaaaaa-0000-4000-8000-000000000001"
+	case "i2":
+		return "aaaaaaaa-0000-4000-8000-000000000002"
+	case "i3":
+		return "aaaaaaaa-0000-4000-8000-000000000003"
+	default:
+		return "aaaaaaaa-0000-4000-8000-0000000000ff"
+	}
+}
+
 func iface(id string) Interface {
-	return Interface{TenantID: "t", SiteID: "s", ID: id, LifecycleState: "ACTIVE", CurrentRevisionID: "rev1"}
+	return Interface{TenantID: tTenantUUID, SiteID: tSiteUUID, ID: ifaceUUID(id), LifecycleState: "ACTIVE", CurrentRevisionID: "rev1"}
 }
 func connectorOn() iamv2.PMSConfig {
 	return iamv2.PMSConfig{MasterEnabled: true, PMSConnectorEnabled: true}
@@ -394,18 +414,4 @@ func TestOneFailureDoesNotStopAnother(t *testing.T) {
 	waitFor(t, 2*time.Second, func() bool { return goodServed.Load() })
 	cancel()
 	<-done
-}
-
-// ---- lock-key determinism -------------------------------------------------
-
-func TestLockKey_Deterministic(t *testing.T) {
-	a := LockKey("t", "s", "i")
-	b := LockKey("t", "s", "i")
-	c := LockKey("t", "s", "i2")
-	if a != b {
-		t.Fatal("lock key must be deterministic")
-	}
-	if a == c {
-		t.Fatal("distinct interfaces must not collide trivially")
-	}
 }
