@@ -1,0 +1,4 @@
+commit 62ec099da445999244edef6d9d8d3dd565ace439
+Date:   Sun Jul 19 13:53:39 2026 +0300
+
+    @ Phase 3 increment 3 CI-stability hardening (inventory_head): robust gate readiness + retry-once on flaky in-job postgres container steps
