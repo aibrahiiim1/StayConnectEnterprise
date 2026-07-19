@@ -294,6 +294,155 @@ func TestIntegration_AtomicGapAndResync(t *testing.T) {
 	}
 }
 
+// inbox builds a minimal InboxRow for a seeded scope at the given runtime generation.
+func inbox(s seeded, gen int64, identity, eventType string) InboxRow {
+	return InboxRow{
+		axisBase:              axisBase{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, ExpectedGeneration: gen, At: time.Now()},
+		ExternalEventIdentity: identity, EventType: eventType,
+		ReceivedAt: time.Now(), NormalizationVersion: 1, FingerprintKeyVersion: 1,
+		Payload: []byte(`{"rn":"1408","g#":"12345"}`),
+	}
+}
+
+func publishedGen(t *testing.T, pool *pgxpool.Pool, s seeded) int64 {
+	var g int64
+	if err := pool.QueryRow(context.Background(),
+		`SELECT published_resync_generation FROM iam_v2.pms_interface_runtime WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3`,
+		s.tenant, s.site, s.iface).Scan(&g); err != nil {
+		t.Fatal(err)
+	}
+	return g
+}
+
+// consumableCount mirrors the Increment-4 consumer visibility rule: a row is consumable iff it is LIVE, or a
+// RESYNC row whose resync_generation has been published.
+func consumableCount(t *testing.T, pool *pgxpool.Pool, s seeded, identity string) int {
+	return scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events se
+		JOIN iam_v2.pms_interface_runtime r USING (tenant_id, site_id, pms_interface_id)
+		WHERE se.tenant_id=$1 AND se.site_id=$2 AND se.pms_interface_id=$3 AND se.external_event_identity=$4
+		  AND (se.admission_kind='LIVE' OR se.resync_generation <= r.published_resync_generation)`,
+		s.tenant, s.site, s.iface, identity)
+}
+
+// TestIntegration_ResyncGenerationAndPublication proves §G: monotonic resync-generation allocation under the
+// runtime-generation CAS; staged RESYNC rows are invisible until the atomic publication boundary reaches
+// their generation; and a stale owner cannot allocate, stage, admit or publish.
+func TestIntegration_ResyncGenerationAndPublication(t *testing.T) {
+	pool := integPool(t)
+	defer pool.Close()
+	s := seedScope(t, pool)
+	repo := NewPgRepoFromPool(pool)
+	gen, err := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, PinnedRevisionID: s.rev, PinnedSecretGenerationID: s.sg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := ResyncScope{axisBase{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, ExpectedGeneration: gen, At: time.Now()}}
+
+	// monotonic allocation
+	g1, err := repo.AllocateResyncGeneration(context.Background(), scope)
+	if err != nil || g1 != 1 {
+		t.Fatalf("first resync generation = %d err=%v, want 1", g1, err)
+	}
+	g2, _ := repo.AllocateResyncGeneration(context.Background(), scope)
+	if g2 != 2 {
+		t.Fatalf("second resync generation = %d, want 2", g2)
+	}
+
+	// stale owner cannot allocate/stage/admit/publish
+	stale := ResyncScope{axisBase{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, ExpectedGeneration: gen + 5, At: time.Now()}}
+	if _, err := repo.AllocateResyncGeneration(context.Background(), stale); err != ErrStaleGeneration {
+		t.Fatalf("stale allocate = %v, want ErrStaleGeneration", err)
+	}
+	staleRow := inbox(s, gen+5, "id-stale", "GI")
+	if _, err := repo.AdmitLiveEvent(context.Background(), staleRow); err != ErrStaleGeneration {
+		t.Fatalf("stale admit = %v, want ErrStaleGeneration", err)
+	}
+	if err := repo.PublishResyncGeneration(context.Background(), stale, 1); err != ErrStaleGeneration {
+		t.Fatalf("stale publish = %v, want ErrStaleGeneration", err)
+	}
+
+	// stage a RESYNC row under generation g2; it must NOT be consumable before publication
+	row := inbox(s, gen, "id-roster-1", "GI")
+	row.ResyncGeneration = g2
+	if _, err := repo.StageResyncEvent(context.Background(), row); err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	if publishedGen(t, pool, s) != 0 {
+		t.Fatal("nothing published yet")
+	}
+	if n := consumableCount(t, pool, s, "id-roster-1"); n != 0 {
+		t.Fatalf("staged RESYNC row must be invisible before publication, consumable=%d", n)
+	}
+
+	// publish generation g2 — one atomic row update; now the staged row is consumable
+	if err := repo.PublishResyncGeneration(context.Background(), scope, g2); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if publishedGen(t, pool, s) != g2 {
+		t.Fatalf("published boundary = %d, want %d", publishedGen(t, pool, s), g2)
+	}
+	if n := consumableCount(t, pool, s, "id-roster-1"); n != 1 {
+		t.Fatalf("published RESYNC row must be consumable, consumable=%d", n)
+	}
+	// publishing beyond the allocated seq is rejected
+	if err := repo.PublishResyncGeneration(context.Background(), scope, g2+10); err != ErrStaleGeneration {
+		t.Fatalf("over-publish = %v, want ErrStaleGeneration", err)
+	}
+}
+
+// TestIntegration_LiveVsResyncIdempotency proves the admission-aware partial unique indexes: LIVE dedups per
+// interface; RESYNC dedups per resync generation; the same identity may exist as both LIVE and RESYNC and
+// across different resync generations.
+func TestIntegration_LiveVsResyncIdempotency(t *testing.T) {
+	pool := integPool(t)
+	defer pool.Close()
+	s := seedScope(t, pool)
+	repo := NewPgRepoFromPool(pool)
+	gen, _ := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, PinnedRevisionID: s.rev, PinnedSecretGenerationID: s.sg})
+
+	// LIVE idempotency: same identity twice → second rejected
+	if _, err := repo.AdmitLiveEvent(context.Background(), inbox(s, gen, "id-A", "GI")); err != nil {
+		t.Fatalf("first live admit: %v", err)
+	}
+	if _, err := repo.AdmitLiveEvent(context.Background(), inbox(s, gen, "id-A", "GI")); err == nil {
+		t.Fatal("duplicate LIVE identity must be rejected")
+	}
+	// same identity as RESYNC (generation 1) is allowed (separate namespace)
+	r1 := inbox(s, gen, "id-A", "GI")
+	r1.ResyncGeneration = 1
+	if _, err := repo.StageResyncEvent(context.Background(), r1); err != nil {
+		t.Fatalf("RESYNC with same identity as LIVE must be allowed: %v", err)
+	}
+	// duplicate within the same resync generation → rejected
+	if _, err := repo.StageResyncEvent(context.Background(), r1); err == nil {
+		t.Fatal("duplicate identity within one resync generation must be rejected")
+	}
+	// same identity in a different resync generation → allowed
+	r2 := inbox(s, gen, "id-A", "GI")
+	r2.ResyncGeneration = 2
+	if _, err := repo.StageResyncEvent(context.Background(), r2); err != nil {
+		t.Fatalf("same identity in a new resync generation must be allowed: %v", err)
+	}
+}
+
+// TestIntegration_InboxImmutability proves the admission columns are immutable append-first (the trigger
+// rejects mutating admission_kind/resync_generation).
+func TestIntegration_InboxImmutability(t *testing.T) {
+	pool := integPool(t)
+	defer pool.Close()
+	s := seedScope(t, pool)
+	repo := NewPgRepoFromPool(pool)
+	gen, _ := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, PinnedRevisionID: s.rev, PinnedSecretGenerationID: s.sg})
+	id, err := repo.AdmitLiveEvent(context.Background(), inbox(s, gen, "id-imm", "GI"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE iam_v2.stay_events SET admission_kind='RESYNC', resync_generation=9 WHERE id=$1`, id); err == nil {
+		t.Fatal("mutating admission columns must be rejected (append-first immutable)")
+	}
+}
+
 func TestIntegration_RealAdvisoryLockCompetition(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()

@@ -60,6 +60,14 @@ CREATE TABLE iam_v2.pms_interface_runtime (
   last_complete_sync_at timestamptz,
   sync_cursor text,
   last_sync_failure_code text,
+  -- §G typed resync generation: a monotonic allocator + the ATOMIC generation-level PUBLICATION boundary.
+  -- resync_generation_seq is bumped once per DS (a new typed resync generation under the current runtime
+  -- generation). published_resync_generation is advanced ONLY by a valid DE, in ONE row update — never by
+  -- mass-updating Event rows. RESYNC stay_events rows are immutable; they become consumable only once this
+  -- boundary reaches their resync_generation. A partial/failed generation (no DE) leaves it unchanged, so
+  -- its staged rows are never published and remain isolated for deterministic cleanup.
+  resync_generation_seq bigint NOT NULL DEFAULT 0,
+  published_resync_generation bigint NOT NULL DEFAULT 0,
 
   PRIMARY KEY (tenant_id, site_id, pms_interface_id),
   FOREIGN KEY (tenant_id, site_id, pms_interface_id)
@@ -80,6 +88,9 @@ CREATE TABLE iam_v2.pms_interface_runtime (
   CONSTRAINT pir_resync_coherent CHECK (
         (resync_started_at IS NULL OR resync_requested_at IS NOT NULL)
     AND (resync_started_at IS NULL OR resync_requested_at IS NULL OR resync_started_at >= resync_requested_at)),
+  CONSTRAINT pir_resync_generation_coherent CHECK (
+        resync_generation_seq >= 0 AND published_resync_generation >= 0
+    AND published_resync_generation <= resync_generation_seq),
   CONSTRAINT pir_bounded_lengths CHECK (
         (transport_error_code   IS NULL OR length(transport_error_code)   <= 200)
     AND (last_sync_failure_code IS NULL OR length(last_sync_failure_code) <= 200)
@@ -174,7 +185,50 @@ ALTER TABLE iam_v2.site_checkout_grace_config
 ALTER TABLE iam_v2.stay_events
   ADD COLUMN processed_at timestamptz,
   ADD COLUMN review_code text
-    CHECK (review_code IS NULL OR length(review_code) <= 200);
+    CHECK (review_code IS NULL OR length(review_code) <= 200),
+  -- §G durable append-first inbox: admission classification + isolated resync staging. LIVE rows are
+  -- immediately consumable; RESYNC rows are staged under a typed resync generation and become consumable
+  -- ONLY when a valid DE atomically activates the complete generation. Defaults keep every existing/base
+  -- insert a consumable LIVE row (backward compatible).
+  ADD COLUMN admission_kind text NOT NULL DEFAULT 'LIVE'
+    CHECK (admission_kind IN ('LIVE','RESYNC')),
+  ADD COLUMN admission_runtime_generation bigint NOT NULL DEFAULT 0
+    CHECK (admission_runtime_generation >= 0),
+  ADD COLUMN resync_generation bigint NOT NULL DEFAULT 0
+    CHECK (resync_generation >= 0),
+  ADD COLUMN fingerprint_key_version int NOT NULL DEFAULT 0
+    CHECK (fingerprint_key_version >= 0);
+
+-- admission coherence: a LIVE row has no resync generation (immediately consumable); a RESYNC row carries a
+-- positive resync generation and is consumable only once the interface's published_resync_generation reaches
+-- it. RESYNC Event rows are IMMUTABLE append-first evidence — publication is the single runtime-row boundary,
+-- never a mass row update.
+ALTER TABLE iam_v2.stay_events
+  ADD CONSTRAINT se_admission_coherent CHECK (
+       (admission_kind = 'LIVE'   AND resync_generation = 0)
+    OR (admission_kind = 'RESYNC' AND resync_generation > 0));
+
+-- Admission-aware idempotency. The baseline UNIQUE(tenant,site,pms_interface_id,external_event_identity)
+-- deduplicates the whole table; that is wrong for resync (a fresh full roster must be able to restage a
+-- record whose content matches an existing LIVE row). Replace it with two PARTIAL unique indexes: LIVE rows
+-- dedup within the interface; RESYNC rows dedup within their resync generation.
+DO $$
+DECLARE cn text;
+BEGIN
+  SELECT conname INTO cn FROM pg_constraint
+   WHERE conrelid = 'iam_v2.stay_events'::regclass AND contype = 'u'
+     AND pg_get_constraintdef(oid) LIKE '%external_event_identity%'
+     AND pg_get_constraintdef(oid) NOT LIKE '%resync_generation%';
+  IF cn IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE iam_v2.stay_events DROP CONSTRAINT %I', cn);
+  END IF;
+END$$;
+CREATE UNIQUE INDEX IF NOT EXISTS se_live_identity
+  ON iam_v2.stay_events (tenant_id, site_id, pms_interface_id, external_event_identity)
+  WHERE admission_kind = 'LIVE';
+CREATE UNIQUE INDEX IF NOT EXISTS se_resync_identity
+  ON iam_v2.stay_events (tenant_id, site_id, pms_interface_id, resync_generation, external_event_identity)
+  WHERE admission_kind = 'RESYNC';
 
 -- Append-first lifecycle: INSERT must be PENDING with no result/lineage; the ONLY mutation is a single
 -- PENDING->terminal update that sets processed_at (+ stay_id/review_code per result rules); once terminal
@@ -206,7 +260,7 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- UPDATE: immutable identity / normalization columns
+  -- UPDATE: immutable identity / normalization / admission columns
   IF   NEW.id                    IS DISTINCT FROM OLD.id
     OR NEW.tenant_id             IS DISTINCT FROM OLD.tenant_id
     OR NEW.site_id               IS DISTINCT FROM OLD.site_id
@@ -221,8 +275,12 @@ BEGIN
     OR NEW.normalization_version IS DISTINCT FROM OLD.normalization_version
     OR NEW.clock_suspect         IS DISTINCT FROM OLD.clock_suspect
     OR NEW.payload               IS DISTINCT FROM OLD.payload
+    OR NEW.admission_kind              IS DISTINCT FROM OLD.admission_kind
+    OR NEW.admission_runtime_generation IS DISTINCT FROM OLD.admission_runtime_generation
+    OR NEW.resync_generation           IS DISTINCT FROM OLD.resync_generation
+    OR NEW.fingerprint_key_version     IS DISTINCT FROM OLD.fingerprint_key_version
   THEN
-    RAISE EXCEPTION 'stay_events identity/normalization columns are immutable (append-only)';
+    RAISE EXCEPTION 'stay_events identity/normalization/admission columns are immutable (append-only)';
   END IF;
 
   -- Once terminal, the only permitted update is a no-op (no result/lineage field may change).
@@ -244,7 +302,8 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- PENDING -> terminal (one move)
+  -- PENDING -> terminal (one move). A RESYNC row's PUBLICATION is enforced by the consumer against the
+  -- interface's published_resync_generation boundary; the row itself stays immutable append-first evidence.
   IF NEW.processing_status NOT IN ('APPLIED','SKIPPED_DUPLICATE','MANUAL_REVIEW','FAILED') THEN
     RAISE EXCEPTION 'invalid stay_events terminal processing_status %', NEW.processing_status;
   END IF;

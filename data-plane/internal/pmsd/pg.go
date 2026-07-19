@@ -2,9 +2,11 @@ package pmsd
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -204,6 +206,97 @@ func (r *pgRepo) MarkGapAndRequireResync(ctx context.Context, req GapResyncReque
 		return ErrStaleGeneration
 	}
 	return tx.Commit(ctx)
+}
+
+// AllocateResyncGeneration bumps resync_generation_seq by 1 under the exact runtime-generation CAS.
+func (r *pgRepo) AllocateResyncGeneration(ctx context.Context, req ResyncScope) (int64, error) {
+	var g int64
+	err := r.pool.QueryRow(ctx, `UPDATE iam_v2.pms_interface_runtime
+		SET resync_generation_seq = resync_generation_seq + 1, updated_at = now()
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4
+		RETURNING resync_generation_seq`,
+		req.TenantID, req.SiteID, req.PMSInterfaceID, req.ExpectedGeneration).Scan(&g)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, ErrStaleGeneration // a newer owner exists
+		}
+		return 0, err
+	}
+	return g, nil
+}
+
+// insertInboxRow appends one stay_events inbox row inside a transaction that FIRST proves the caller still
+// owns the exact runtime generation (SELECT ... FOR ... the runtime row), then inserts. Returns the row id.
+func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// synchronous ownership proof under the exact runtime generation
+	var owned int
+	err = tx.QueryRow(ctx, `SELECT 1 FROM iam_v2.pms_interface_runtime
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4 FOR UPDATE`,
+		row.TenantID, row.SiteID, row.PMSInterfaceID, row.ExpectedGeneration).Scan(&owned)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrStaleGeneration
+		}
+		return "", err
+	}
+	payload := row.Payload
+	if len(payload) == 0 {
+		payload = []byte("{}")
+	}
+	var id string
+	err = tx.QueryRow(ctx, `INSERT INTO iam_v2.stay_events
+		(tenant_id, site_id, pms_interface_id, external_event_identity, event_type,
+		 pms_timestamp_raw, pms_timestamp_utc, source_timezone, received_at,
+		 sequence_version, normalization_version, clock_suspect, payload,
+		 admission_kind, admission_runtime_generation, resync_generation, fingerprint_key_version)
+		VALUES ($1,$2,$3,$4,$5, NULLIF($6,''),$7, NULLIF($8,''), $9, $10,$11,$12,$13::jsonb, $14,$15,$16,$17)
+		RETURNING id::text`,
+		row.TenantID, row.SiteID, row.PMSInterfaceID, row.ExternalEventIdentity, row.EventType,
+		row.PMSTimestampRaw, row.PMSTimestampUTC, row.SourceTimezone, row.ReceivedAt,
+		row.SequenceVersion, row.NormalizationVersion, row.ClockSuspect, string(payload),
+		row.AdmissionKind, row.ExpectedGeneration, row.ResyncGeneration, row.FingerprintKeyVersion).Scan(&id)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (r *pgRepo) AdmitLiveEvent(ctx context.Context, row InboxRow) (string, error) {
+	row.AdmissionKind = "LIVE"
+	row.ResyncGeneration = 0
+	return r.insertInboxRow(ctx, row)
+}
+
+func (r *pgRepo) StageResyncEvent(ctx context.Context, row InboxRow) (string, error) {
+	row.AdmissionKind = "RESYNC"
+	return r.insertInboxRow(ctx, row)
+}
+
+// PublishResyncGeneration advances the publication boundary in ONE atomic row update and marks the interface
+// IN_SYNC + CONTINUOUS. The generation must not exceed the allocated seq (guarded here + by the CHECK).
+func (r *pgRepo) PublishResyncGeneration(ctx context.Context, req ResyncScope, g int64) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE iam_v2.pms_interface_runtime SET
+		published_resync_generation=$5,
+		sync_status='IN_SYNC', last_complete_sync_at=$6, resync_started_at=NULL,
+		continuity_status='CONTINUOUS', last_resync_marker_at=$6, updated_at=now()
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4
+		  AND resync_generation_seq >= $5`,
+		req.TenantID, req.SiteID, req.PMSInterfaceID, req.ExpectedGeneration, g, req.At)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrStaleGeneration
+	}
+	return nil
 }
 
 // pgLocker is a session-level single-owner advisory lock on a DEDICATED connection acquired from the shared

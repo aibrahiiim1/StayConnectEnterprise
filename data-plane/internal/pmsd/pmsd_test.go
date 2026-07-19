@@ -70,10 +70,15 @@ type fakeRepo struct {
 	updates    int64
 	closed     atomic.Bool
 	lastScope  [2]string
+
+	resyncSeq    map[string]int64
+	publishedGen map[string]int64
+	liveRows     []string
+	stagedRows   []string
 }
 
 func newFakeRepo(ifaces ...Interface) *fakeRepo {
-	return &fakeRepo{ifaces: ifaces, gen: map[string]int64{}, transport: map[string]TransportStatus{}, continuity: map[string]ContinuityStatus{}, syncS: map[string]SyncStatus{}, gapReason: map[string]Code{}}
+	return &fakeRepo{ifaces: ifaces, gen: map[string]int64{}, transport: map[string]TransportStatus{}, continuity: map[string]ContinuityStatus{}, syncS: map[string]SyncStatus{}, gapReason: map[string]Code{}, resyncSeq: map[string]int64{}, publishedGen: map[string]int64{}}
 }
 
 func (r *fakeRepo) ListActiveInterfaces(ctx context.Context, t, s string) ([]Interface, error) {
@@ -161,6 +166,42 @@ func (r *fakeRepo) MarkGapAndRequireResync(ctx context.Context, req GapResyncReq
 	r.syncS[req.PMSInterfaceID] = SyncResyncRequired
 	r.gapReason[req.PMSInterfaceID] = req.Reason
 	r.mu.Unlock()
+	return nil
+}
+func (r *fakeRepo) AllocateResyncGeneration(ctx context.Context, req ResyncScope) (int64, error) {
+	if err := r.cas(req.PMSInterfaceID, req.ExpectedGeneration); err != nil {
+		return 0, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.resyncSeq[req.PMSInterfaceID]++
+	return r.resyncSeq[req.PMSInterfaceID], nil
+}
+func (r *fakeRepo) AdmitLiveEvent(ctx context.Context, row InboxRow) (string, error) {
+	if err := r.cas(row.PMSInterfaceID, row.ExpectedGeneration); err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.liveRows = append(r.liveRows, row.ExternalEventIdentity)
+	return "live-" + row.ExternalEventIdentity, nil
+}
+func (r *fakeRepo) StageResyncEvent(ctx context.Context, row InboxRow) (string, error) {
+	if err := r.cas(row.PMSInterfaceID, row.ExpectedGeneration); err != nil {
+		return "", err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stagedRows = append(r.stagedRows, row.ExternalEventIdentity)
+	return "resync-" + row.ExternalEventIdentity, nil
+}
+func (r *fakeRepo) PublishResyncGeneration(ctx context.Context, req ResyncScope, g int64) error {
+	if err := r.cas(req.PMSInterfaceID, req.ExpectedGeneration); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.publishedGen[req.PMSInterfaceID] = g
 	return nil
 }
 func (r *fakeRepo) Close() error { r.closed.Store(true); return nil }

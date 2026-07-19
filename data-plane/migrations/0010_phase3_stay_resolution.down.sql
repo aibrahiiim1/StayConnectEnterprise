@@ -11,6 +11,27 @@ DROP FUNCTION IF EXISTS iam_v2.p3_stay_lifecycle_guard();
 DROP TRIGGER IF EXISTS p3_stay_event_guard ON iam_v2.stay_events;
 DROP FUNCTION IF EXISTS iam_v2.p3_stay_event_appendonly();
 
+-- (6b) §G durable resync inbox: partial indexes + admission columns, then restore the baseline unique.
+DROP INDEX IF EXISTS iam_v2.se_resync_identity;
+DROP INDEX IF EXISTS iam_v2.se_live_identity;
+ALTER TABLE iam_v2.stay_events DROP CONSTRAINT IF EXISTS se_admission_coherent;
+ALTER TABLE iam_v2.stay_events
+  DROP COLUMN IF EXISTS fingerprint_key_version,
+  DROP COLUMN IF EXISTS resync_generation,
+  DROP COLUMN IF EXISTS admission_runtime_generation,
+  DROP COLUMN IF EXISTS admission_kind;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'iam_v2.stay_events'::regclass AND contype = 'u'
+                   AND pg_get_constraintdef(oid) LIKE '%external_event_identity%') THEN
+    -- restore the EXACT baseline auto-generated constraint name so the rolled-back catalog matches pre-0010
+    ALTER TABLE iam_v2.stay_events
+      ADD CONSTRAINT stay_events_tenant_id_site_id_pms_interface_id_external_eve_key
+      UNIQUE (tenant_id, site_id, pms_interface_id, external_event_identity);
+  END IF;
+END$$;
+
 -- (6) stay_events application-result columns
 ALTER TABLE iam_v2.stay_events
   DROP COLUMN IF EXISTS review_code,

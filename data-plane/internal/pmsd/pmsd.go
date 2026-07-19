@@ -194,6 +194,27 @@ type SyncUpdate struct {
 	FailureCode        Code
 }
 
+// InboxRow is the typed, provenance-bound evidence appended to the durable inbox (iam_v2.stay_events) for a
+// single admitted/staged domain Event. It NEVER carries the raw STX/ETX frame — only the bounded typed
+// fields Increment 4 consumes. AdmissionKind is "LIVE" (immediately consumable) or "RESYNC" (staged under a
+// typed ResyncGeneration, consumable only once the interface's published boundary reaches it).
+type InboxRow struct {
+	axisBase              // tenant/site/interface + ExpectedGeneration (the pinned runtime generation) + At
+	AdmissionKind         string
+	ResyncGeneration      int64 // 0 for LIVE; >0 for RESYNC
+	ExternalEventIdentity string
+	FingerprintKeyVersion int
+	EventType             string // GI | GC | GO
+	PMSTimestampRaw       string
+	PMSTimestampUTC       *time.Time
+	SourceTimezone        string
+	ReceivedAt            time.Time
+	SequenceVersion       int64
+	NormalizationVersion  int
+	ClockSuspect          bool
+	Payload               []byte // typed JSON payload (bounded; no raw frame / no secret)
+}
+
 // GapResyncRequest drives the ATOMIC two-axis "feed gap detected → full resync required" transition. Both
 // the continuity axis (→ GAP_DETECTED) and the sync axis (→ RESYNC_REQUIRED) move together, in ONE
 // transaction, guarded by the exact runtime_generation. Reason is a bounded typed code persisted where the
@@ -218,7 +239,29 @@ type Repo interface {
 	// transaction under the exact generation guard (both axes change or neither). It preserves unrelated
 	// transport evidence, returns ErrStaleGeneration when ownership changed, and returns every database error.
 	MarkGapAndRequireResync(ctx context.Context, req GapResyncRequest) error
+
+	// ---- §G durable inbox + typed resync generation (all guarded by the exact runtime generation) ----
+
+	// AllocateResyncGeneration bumps the interface's monotonic resync_generation_seq by 1 (a NEW typed resync
+	// generation) under the exact runtime-generation CAS and returns it. ErrStaleGeneration if ownership moved.
+	AllocateResyncGeneration(ctx context.Context, req ResyncScope) (int64, error)
+	// AdmitLiveEvent APPENDS a durable LIVE inbox row inside ONE transaction that first proves the caller still
+	// owns the exact runtime generation, then inserts. It returns the durable row id (the ONLY thing exposed to
+	// the Stay engine). A stale owner inserts nothing and gets ErrStaleGeneration.
+	AdmitLiveEvent(ctx context.Context, row InboxRow) (string, error)
+	// StageResyncEvent APPENDS a durable RESYNC inbox row (immutable, STAGED) under the same ownership proof +
+	// runtime-generation CAS. Staged rows are invisible to the Stay engine until publication.
+	StageResyncEvent(ctx context.Context, row InboxRow) (string, error)
+	// PublishResyncGeneration advances published_resync_generation to g in ONE atomic row update (never a mass
+	// Event-row update) under the exact runtime-generation CAS, and marks the interface IN_SYNC + CONTINUOUS.
+	// g must not exceed the allocated seq. ErrStaleGeneration if ownership moved.
+	PublishResyncGeneration(ctx context.Context, req ResyncScope, g int64) error
 	Close() error
+}
+
+// ResyncScope identifies an interface + the pinned runtime generation for a resync-lifecycle operation.
+type ResyncScope struct {
+	axisBase
 }
 
 // Locker is a session-level single-owner advisory lock bound to a dedicated DB connection.
