@@ -28,18 +28,24 @@ docker rm -f "$C" >/dev/null 2>&1 || true
 docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" -p 127.0.0.1:$PORT:5432 postgres:16-alpine >/dev/null
 for i in $(seq 1 30); do docker exec "$C" pg_isready -U postgres -d "$DB" >/dev/null 2>&1 && break; sleep 1; done
 SCRATCH_ACK=I_UNDERSTAND_DISPOSABLE bash "$ROOT/iam_v2_scratch/run.sh" fresh >/dev/null 2>&1
-Q "CREATE TABLE IF NOT EXISTS public.schema_migrations(version text PRIMARY KEY, applied_at timestamptz DEFAULT now());" >/dev/null
+Q "CREATE TABLE IF NOT EXISTS public.schema_migrations(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-plane/migrations/0009_phase2_commerce.up.sql" >/dev/null 2>&1
+Q "INSERT INTO public.schema_migrations(version) VALUES ('0009_phase2_commerce') ON CONFLICT DO NOTHING;" >/dev/null
 [ "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")" = 49 ] && ok "accepted iam_v2 schema built (49 tables)" || no "schema build failed"
+
+# --- Part-A runner: mandatory positive-identity flags + helper ---
+UPSHA="$(sha256sum "$UP" | awk '{print $1}')"
+RUN(){ bash "$ROOT/scripts/edge-migrate.sh" --target-kind disposable --ack-target I_UNDERSTAND_DISPOSABLE_DATABASE "$@"; }
+APPLY_ARGS=(--only 0010_phase3_stay_resolution --expect-db "$DB" --expect-sha256 "$UPSHA")
 
 PRE="$(Q "$FP")"; echo "  pre-0010 catalog md5 = $PRE"
 
 echo '== runner idempotency (scripts/edge-migrate.sh --only 0010, twice) =='
 export EDGE_PSQL="docker exec -i $C psql -U postgres -d $DB -v ON_ERROR_STOP=1"
-R1="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" 2>&1)"; echo "$R1" | grep -q "apply 0010" && echo "$R1" | grep -q "EDGE_MIGRATE_OK applied=1" && ok "runner run#1 applied 0010" || no "runner run#1 did not apply"
+R1="$(RUN "${APPLY_ARGS[@]}" 2>&1)"; echo "$R1" | grep -q "apply 0010" && echo "$R1" | grep -q "EDGE_MIGRATE_OK applied=1" && ok "runner run#1 applied 0010 (positive-identity + pinned sha)" || { no "runner run#1 did not apply"; echo "$R1" | tail -3; }
 POST="$(Q "$FP")"; echo "  post-0010 catalog md5 = $POST"
 [ "$PRE" != "$POST" ] && ok "0010 changed the catalog" || no "0010 changed nothing"
-R2="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" 2>&1)"; echo "$R2" | grep -q "skip-after-lock 0010" && echo "$R2" | grep -q "applied=0" && ok "runner run#2 skipped 0010 (idempotent no-op)" || no "runner run#2 not a no-op"
+R2="$(RUN "${APPLY_ARGS[@]}" 2>&1)"; echo "$R2" | grep -q "skip-after-lock 0010" && echo "$R2" | grep -q "applied=0" && ok "runner run#2 skipped 0010 (idempotent no-op)" || no "runner run#2 not a no-op"
 [ "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase3_stay_resolution';")" = 1 ] && ok "ledger has exactly one 0010 record" || no "ledger record count wrong"
 [ "$POST" = "$(Q "$FP")" ] && ok "catalog unchanged between runner invocations" || no "catalog changed between runner runs"
 
@@ -166,11 +172,24 @@ expect_ok  "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id) VAL
 expect_err "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,config) VALUES (gen_random_uuid(),gen_random_uuid(),'{\"grace_duration_seconds\":3600}'::jsonb);" && ok "config jsonb duplicate authoritative key rejected (§5)" || no "jsonb dup key accepted"
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET eligibility_window_seconds=0 WHERE eligibility_window_seconds=86400;" && ok "grace eligibility_window must be >0" || no "grace bound not enforced"
 
-echo '== runner scope hardening (§6) =='
-o="$(bash "$ROOT/scripts/edge-migrate.sh" 2>&1 || true)"; echo "$o" | grep -q "REFUSED: specify --only" && ok "runner refuses without --only/--all" || no "runner ran with no scope"
-o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 'BAD NAME' 2>&1 || true)"; echo "$o" | grep -q "does not match" && ok "runner rejects invalid version name" || no "runner accepted bad name"
-o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 9999_absent_migration 2>&1 || true)"; echo "$o" | grep -q "resolves to 0 files" && ok "runner rejects absent migration" || no "runner accepted absent migration"
-o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution 2>&1 || true)"; echo "$o" | grep -qE "sha256=[0-9a-f]{64}|skip  0010" && ok "runner prints SHA-256 on apply / skip when already applied" || no "runner did neither"
+echo '== runner scope + mandatory positive-identity (PART A §1/§2/§4/§8) =='
+o="$(bash "$ROOT/scripts/edge-migrate.sh" 2>&1 || true)"; echo "$o" | grep -q "REFUSED: EDGE_PSQL" || echo "$o" | grep -q "REFUSED: specify --only" && ok "runner refuses without scope" || no "runner ran with no scope"
+o="$(RUN --only 'BAD NAME' --expect-db "$DB" --expect-sha256 "$UPSHA" 2>&1 || true)"; echo "$o" | grep -q "does not match" && ok "runner rejects invalid version name" || no "runner accepted bad name"
+o="$(RUN --only 9999_absent_migration --expect-db "$DB" --expect-sha256 "$UPSHA" 2>&1 || true)"; echo "$o" | grep -q "resolves to 0 files" && ok "runner rejects absent migration" || no "runner accepted absent migration"
+# §1/§8: mandatory identity params
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --target-kind disposable --ack-target I_UNDERSTAND_DISPOSABLE_DATABASE --expect-sha256 "$UPSHA" 2>&1 || true)"; echo "$o" | grep -q "REFUSED: --expect-db is mandatory" && ok "missing --expect-db refused (§1)" || no "missing --expect-db accepted"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" --expect-sha256 "$UPSHA" 2>&1 || true)"; echo "$o" | grep -q "target-kind" && ok "missing --target-kind refused (§1)" || no "missing target-kind accepted"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" --target-kind disposable --expect-sha256 "$UPSHA" 2>&1 || true)"; echo "$o" | grep -q "REFUSED: --ack-target is mandatory" && ok "missing --ack-target refused (§1)" || no "missing ack accepted"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" --target-kind disposable --ack-target WRONG_ACK --expect-sha256 "$UPSHA" 2>&1 || true)"; echo "$o" | grep -q "does not match target-kind" && ok "wrong --ack-target refused (§1)" || no "wrong ack accepted"
+o="$(RUN --only 0010_phase3_stay_resolution --expect-db "$DB" 2>&1 || true)"; echo "$o" | grep -q "expect-sha256 is mandatory" && ok "missing --expect-sha256 refused (§4)" || no "missing sha accepted"
+o="$(RUN --only 0010_phase3_stay_resolution --expect-db "$DB" --expect-sha256 deadbeef 2>&1 || true)"; echo "$o" | grep -q "checksum mismatch" && echo "$o" | grep -q "expected(--expect-sha256): deadbeef" && ok "checksum mismatch refused + prints expected/actual (§4)" || no "checksum mismatch accepted"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db WRONGDB --target-kind disposable --ack-target I_UNDERSTAND_DISPOSABLE_DATABASE --expect-sha256 "$UPSHA" 2>&1 || true)"; echo "$o" | grep -q "but --expect-db" && ok "--expect-db mismatch refused (§1)" || no "expect-db mismatch accepted"
+# §2: noncanonical directory rejected without disposable ack
+o="$(RUN --only 0010_phase3_stay_resolution --expect-db "$DB" --expect-sha256 "$UPSHA" --dir /tmp 2>&1 || true)"; echo "$o" | grep -q "requires target-kind=disposable AND --ack-noncanonical-dir" && ok "noncanonical --dir refused without ack (§2)" || no "noncanonical dir accepted"
+# §2: symlink-escape migration dir rejected
+Q "SELECT 1" >/dev/null; LNK="$ROOT/data-plane/migrations_symlink_test"; rm -f "$LNK"; ln -s /tmp "$LNK" 2>/dev/null
+o="$(RUN --only 0010_phase3_stay_resolution --expect-db "$DB" --expect-sha256 "$UPSHA" --dir "$LNK" --ack-noncanonical-dir I_UNDERSTAND_NONCANONICAL_TEST_DIR 2>&1 || true)"; echo "$o" | grep -qE "resolves to 0 files|migration directory missing" && ok "symlinked/escaped dir yields no migration (§2)" || no "symlink escape found a migration"
+rm -f "$LNK"
 
 echo '== rollback == pre, then CONCURRENT two-runner reapply (PART A §3) =='
 Qf < "$DOWN" >/dev/null && ok "rollback 0010 (down)" || no "rollback failed"
@@ -179,8 +198,8 @@ Qf < "$DOWN" >/dev/null && ok "rollback 0010 (down)" || no "rollback failed"
 # two real runner processes race the same fresh (post-rollback) state; the atomic lock-then-ledger
 # design must serialize them: exactly one APPLIES, the other reports SKIP_AFTER_LOCK, one ledger row.
 TMP="${TMPDIR:-/tmp}"; O1="$TMP/p3run1.$$"; O2="$TMP/p3run2.$$"
-bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" >"$O1" 2>&1 & P1=$!
-bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" >"$O2" 2>&1 & P2=$!
+RUN "${APPLY_ARGS[@]}" >"$O1" 2>&1 & P1=$!
+RUN "${APPLY_ARGS[@]}" >"$O2" 2>&1 & P2=$!
 wait $P1; E1=$?; wait $P2; E2=$?
 [ "$E1" = 0 ] && [ "$E2" = 0 ] && ok "both concurrent runners exit 0" || no "a concurrent runner failed (e1=$E1 e2=$E2)"
 [ "$(cat "$O1" "$O2" | grep -c 'apply 0010_phase3_stay_resolution (under lock)')" = 1 ] && ok "exactly one runner applied under lock" || no "apply count != 1"
@@ -190,11 +209,26 @@ wait $P1; E1=$?; wait $P2; E2=$?
 [ "$(Q "$FP")" = "$POST" ] && ok "catalog after concurrent reapply == first post-0010 (no partial DDL)" || no "concurrent reapply catalog != post"
 rm -f "$O1" "$O2"
 
-echo '== runner target-identity fail-closed (PART A §4) =='
-o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db wrong_db 2>&1 || true)"; echo "$o" | grep -q "REFUSED: connected to database" && ok "runner refuses on --expect-db mismatch" || no "runner ran against wrong db"
+echo '== ledger structural verification + separated bootstrap (PART A §3/§5/§8) =='
+# unexpected ledger column type: version made nullable -> refused
+Q "CREATE TABLE public.sm_bad(version text, applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
+Q "ALTER TABLE public.schema_migrations RENAME TO schema_migrations_ok; ALTER TABLE public.sm_bad RENAME TO schema_migrations;" >/dev/null
+o="$(RUN "${APPLY_ARGS[@]}" 2>&1 || true)"; echo "$o" | grep -qE "version' must be text NOT NULL|is not the PRIMARY KEY" && ok "unexpected ledger structure refused (§3)" || no "bad ledger structure accepted"
+Q "DROP TABLE public.schema_migrations; ALTER TABLE public.schema_migrations_ok RENAME TO schema_migrations;" >/dev/null
+# unexpected ledger owner -> refused
+Q "DROP ROLE IF EXISTS rogue_owner; CREATE ROLE rogue_owner NOLOGIN; ALTER TABLE public.schema_migrations OWNER TO rogue_owner;" >/dev/null
+o="$(RUN "${APPLY_ARGS[@]}" 2>&1 || true)"; echo "$o" | grep -q "ledger owner 'rogue_owner' not in allowlist" && ok "unexpected ledger owner refused (§3)" || no "bad ledger owner accepted"
+Q "ALTER TABLE public.schema_migrations OWNER TO postgres;" >/dev/null
+# missing 0009 baseline before 0010 -> refused
+Q "DELETE FROM public.schema_migrations WHERE version='0009_phase2_commerce';" >/dev/null
+o="$(RUN "${APPLY_ARGS[@]}" 2>&1 || true)"; echo "$o" | grep -q "baseline 0009_phase2_commerce must be applied before" && ok "missing 0009 baseline refused (§3)" || no "0010 allowed without 0009 baseline"
+Q "INSERT INTO public.schema_migrations(version) VALUES ('0009_phase2_commerce') ON CONFLICT DO NOTHING;" >/dev/null
+# ledger absent -> refused (no silent create); bootstrap standalone; bootstrap cannot combine with --only
 Q "ALTER TABLE public.schema_migrations RENAME TO schema_migrations_bak;" >/dev/null
-o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" 2>&1 || true)"; echo "$o" | grep -q "ledger absent" && ok "runner refuses when ledger absent (no silent create, §4)" || no "runner silently proceeded without ledger"
-o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" --bootstrap-ledger 2>&1 || true)"; echo "$o" | grep -q "ledger bootstrapped" && ok "explicit --bootstrap-ledger creates the ledger (separate acknowledged mode, §4)" || no "bootstrap mode failed"
+o="$(RUN "${APPLY_ARGS[@]}" 2>&1 || true)"; echo "$o" | grep -q "ledger absent" && ok "ledger absent refused in normal mode (no silent create, §5)" || no "normal mode silently proceeded"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --bootstrap-ledger --only 0010_phase3_stay_resolution --expect-db "$DB" --target-kind disposable --ack-target I_UNDERSTAND_LEDGER_BOOTSTRAP --bootstrap-owner postgres 2>&1 || true)"; echo "$o" | grep -q "cannot be combined with --only" && ok "bootstrap combined with --only refused (§5)" || no "bootstrap+only accepted"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --bootstrap-ledger --expect-db "$DB" --target-kind disposable --ack-target I_UNDERSTAND_LEDGER_BOOTSTRAP --bootstrap-owner postgres 2>&1 || true)"; echo "$o" | grep -q "EDGE_LEDGER_BOOTSTRAP_OK" && echo "$o" | grep -q "no migration applied" && ok "standalone bootstrap creates ledger + applies NO migration (§5)" || no "bootstrap mode failed"
+[ "$(Q "SELECT count(*) FROM public.schema_migrations;")" = 0 ] && ok "bootstrapped ledger is empty (bootstrap applied no migration, §5)" || no "bootstrap wrote migration rows"
 Q "DROP TABLE public.schema_migrations; ALTER TABLE public.schema_migrations_bak RENAME TO schema_migrations;" >/dev/null
 [ "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase3_stay_resolution';")" = 1 ] && ok "original ledger restored (one 0010 row)" || no "ledger restore failed"
 
@@ -208,16 +242,29 @@ Q "DO \$ro\$ DECLARE r record; BEGIN
      FOR r IN SELECT format('ALTER VIEW iam_v2.%I OWNER TO iam_v2_owner', viewname) c FROM pg_views WHERE schemaname='iam_v2' LOOP EXECUTE r.c; END LOOP;
    END \$ro\$;" >/dev/null
 Q "GRANT USAGE ON SCHEMA public TO iam_v2_owner; GRANT INSERT, SELECT, DELETE ON public.schema_migrations TO iam_v2_owner; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO iam_v2_owner;" >/dev/null
+# deployment-parity service roles (mirror the accepted live least-privilege model) — created with ZERO iam_v2 access
+Q "DO \$sr\$ DECLARE r text; BEGIN FOREACH r IN ARRAY ARRAY['svc_scd','svc_edged','svc_portald','svc_acctd','svc_pmsd'] LOOP EXECUTE format('DROP ROLE IF EXISTS %I',r); EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE',r,'x'); EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I',current_database(),r); END LOOP; END \$sr\$;" >/dev/null
 Qf < "$DOWN" >/dev/null
 [ "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase3_stay_resolution';")" = 0 ] && ok "0010 rolled back before ownership re-apply" || no "pre-ownership rollback failed"
 export EDGE_PSQL_OWNER="docker exec -i $C psql -U iam_v2_owner -d $DB -v ON_ERROR_STOP=1"
-oo="$(EDGE_PSQL="$EDGE_PSQL_OWNER" bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" 2>&1)"; echo "$oo" | grep -q "apply 0010" && ok "0010 applies as NON-superuser iam_v2_owner (no superuser needed, §5)" || { no "0010 failed under iam_v2_owner"; echo "$oo" | tail -3; }
+oo="$(EDGE_PSQL="$EDGE_PSQL_OWNER" RUN --only 0010_phase3_stay_resolution --expect-db "$DB" --expect-sha256 "$UPSHA" 2>&1)"; echo "$oo" | grep -q "apply 0010" && ok "0010 applies with the smallest approved role (NON-superuser iam_v2_owner; no superuser needed, §5/§6)" || { no "0010 failed under iam_v2_owner"; echo "$oo" | tail -3; }
 OWN_BAD="$(Q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_roles r ON r.oid=c.relowner WHERE n.nspname='iam_v2' AND c.relkind IN ('r','i','v') AND r.rolname<>'iam_v2_owner';")"
 [ "$OWN_BAD" = 0 ] && ok "every iam_v2 relation (incl. new 0010 objects) owned by iam_v2_owner (§5)" || no "$OWN_BAD iam_v2 relations not owned by iam_v2_owner"
 FUN_BAD="$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace LEFT JOIN pg_roles r ON r.oid=p.proowner WHERE n.nspname='iam_v2' AND r.rolname<>'iam_v2_owner';")"
 [ "$FUN_BAD" = 0 ] && ok "every iam_v2 function (incl. p3_* triggers) owned by iam_v2_owner (§5)" || no "$FUN_BAD iam_v2 functions not owned by iam_v2_owner"
 PUBG="$(Q "SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema='iam_v2' AND grantee='PUBLIC' AND table_name IN ('pms_interface_runtime','site_checkout_grace_config','auth_resolutions');")"
 [ "$PUBG" = 0 ] && ok "no unexpected PUBLIC grants on new/altered 0010 tables (§5)" || no "unexpected PUBLIC grants ($PUBG)"
+# §6: every runtime service role has ZERO iam_v2 privileges while DARK
+SVCG="$(Q "SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema='iam_v2' AND grantee IN ('svc_scd','svc_edged','svc_portald','svc_acctd','svc_pmsd');")"
+[ "$SVCG" = 0 ] && ok "runtime service roles (scd/edged/portald/acctd/pmsd) have ZERO iam_v2 table privileges while DARK (§6)" || no "service roles hold $SVCG iam_v2 grants"
+SVCF="$(Q "SELECT count(*) FROM information_schema.role_routine_grants WHERE routine_schema='iam_v2' AND grantee IN ('svc_scd','svc_edged','svc_portald','svc_acctd','svc_pmsd');")"
+[ "$SVCF" = 0 ] && ok "runtime service roles have ZERO iam_v2 function EXECUTE while DARK (§6)" || no "service roles hold $SVCF iam_v2 EXECUTE grants"
+# §6: migration role (iam_v2_owner) holds no broad public-schema DDL (no public CREATE beyond ledger writes)
+MDDL="$(Q "SELECT has_schema_privilege('iam_v2_owner','public','CREATE');")"
+[ "$MDDL" = f ] && ok "migration role has no broad public-schema CREATE/DDL privilege (§6)" || no "migration role holds public CREATE"
+# §6: default privileges do not grant future objects to PUBLIC/service roles
+DEFP="$(Q "SELECT count(*) FROM pg_default_acl d JOIN pg_namespace n ON n.oid=d.defaclnamespace WHERE n.nspname='iam_v2' AND array_to_string(d.defaclacl,',') ~ '(=|svc_)';")"
+[ "$DEFP" = 0 ] && ok "no default privileges grant future iam_v2 objects to PUBLIC/service roles (§6)" || no "default ACLs leak future objects"
 [ "$(Q "$FP")" = "$POST" ] && ok "catalog after owner-parity re-apply == post-0010" || no "owner re-apply catalog != post"
 
 echo '== teardown =='
