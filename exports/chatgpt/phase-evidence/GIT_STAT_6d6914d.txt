@@ -1,0 +1,4 @@
+commit 6d6914d2778e91ab2935e2004d92802ec419cb9e
+Date:   Sun Jul 19 20:43:06 2026 +0300
+
+    @ Phase 3 increment 3 hardening items 1-6 (inventory_head): strict FIAS parser, duplicate-field fail-closed, GuestName removed, atomic gap/resync txn, one serialized protocol writer; race + PG16 green

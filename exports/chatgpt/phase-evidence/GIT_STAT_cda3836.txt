@@ -1,4 +1,0 @@
-commit cda3836992e2f941d786539e67649963ca3ec2be
-Date:   Sun Jul 19 19:53:25 2026 +0300
-
-    @ Phase 3 increment 3 hardening Â§A-Â§D CI-stability (inventory_head): fix benign measurement race in linearizable-close test
