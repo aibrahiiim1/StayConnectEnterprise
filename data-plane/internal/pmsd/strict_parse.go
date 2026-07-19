@@ -81,6 +81,17 @@ func parseStrictRecord(body string) (ParsedRecord, error) {
 	return ParsedRecord{RecordType: rt, Fields: fields}, nil
 }
 
+// intendedDomain reports whether a frame that FAILED strict parsing was an intended DOMAIN record (GI/GC/GO),
+// used ONLY to pick the failure policy for an already-rejected frame — never to dispatch a valid action. A
+// malformed domain record is a recoverable feed-quality fault (gap/resync, keep the link); anything else (a
+// malformed control record or an unrecognized record id) is a protocol-level fault that ends ownership.
+func intendedDomain(body string) bool {
+	if len(body) < 2 {
+		return false
+	}
+	return RecordType(body[:2]).IsDomain()
+}
+
 // validFieldCode reports whether a 2-char field code is well-formed: both bytes must be graphic ASCII
 // (0x21..0x7e), which admits letters, digits and FIAS punctuation like '#' (G#, V#) while rejecting spaces
 // and control bytes.

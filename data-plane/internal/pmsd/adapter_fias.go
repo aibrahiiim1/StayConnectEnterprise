@@ -107,7 +107,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	t := a.now()
 	da, ti := t.Format("060102"), t.Format("150405")
 	for _, body := range append([]string{pms.BuildLS(da, ti), pms.BuildLD(da, ti, "pmsd", "1")}, pms.BuildLRs()...) {
-		if err := w.submitSync(body); err != nil { // startup handshake through the single writer
+		if err := w.SubmitSync(ctx, body); err != nil { // startup handshake through the single writer
 			return err
 		}
 	}
@@ -119,13 +119,16 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	readDeadline := a.rev.HeartbeatTimeout
 	for {
 		if ctx.Err() != nil {
-			return ctx.Err() // the writer emits LE on wctx cancel (deferred)
+			return ctx.Err() // the writer emits LE + closes the socket on wctx cancel (deferred)
 		}
 		if readDeadline > 0 {
 			_ = a.g.c.SetReadDeadline(time.Now().Add(readDeadline))
 		}
 		body, err := pms.ReadFramedRecord(a.br)
 		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err() // cancellation closed the socket to release this read promptly
+			}
 			// a writer failure closes the transport to unblock this read; surface the writer's cause if any
 			select {
 			case <-w.done:
@@ -134,50 +137,69 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			}
 			return coded(CodeProtocolLinkEnded, err)
 		}
-		w.activity() // a valid read resets the idle keepalive timer
-		switch pms.RecordID(body) {
-		case "LS":
-			if err := w.submit(pms.BuildLA()); err != nil { // ack incoming link start
-				return err
+
+		// STRICT-PARSE EVERY inbound frame BEFORE any action (idle reset, heartbeat, ack, resync, dispatch).
+		pr, perr := parseStrictRecord(body)
+		if perr != nil {
+			if intendedDomain(body) {
+				// malformed DOMAIN record: recoverable feed fault → atomic gap/resync, zero admission, DR while
+				// owned, barrier stays active. No idle reset, no heartbeat, no ack for an invalid record.
+				if ferr := sink.OnContinuityFault(ctx, CodeEventInvalid); ferr != nil {
+					return ferr
+				}
+				if !resyncing {
+					if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
+						return werr
+					}
+					resyncing = true
+				}
+				continue
 			}
+			// malformed / unsupported CONTROL record (or unknown record id): a protocol-level fault. Do NOT
+			// reset the idle timer, record a heartbeat, or acknowledge it — terminate the ownership cycle with
+			// a bounded typed code. No raw payload is logged.
+			return coded(CodeProtocolFraming, nil)
+		}
+
+		w.activity() // a VALID (strictly-parsed) frame resets the idle keepalive timer
+		switch pr.RecordType {
+		case RecLS, RecLA:
+			// Record the heartbeat evidence we OBSERVED first (receiving a valid LS/LA is the evidence), then
+			// synchronously acknowledge with a bare LA. Recording must not depend on our ack succeeding.
 			if err := sink.OnHeartbeat(a.now()); err != nil {
 				return err
 			}
-		case "LA", "HB":
-			if err := w.submit(pms.BuildLA()); err != nil { // incoming LA → bare LA
+			if err := w.SubmitSync(ctx, pms.BuildLA()); err != nil { // incoming LS/LA → bare LA
 				return err
 			}
-			if err := sink.OnHeartbeat(a.now()); err != nil {
-				return err
-			}
-		case "LE":
+		case RecLE:
 			return coded(CodeProtocolLinkEnded, nil)
-		case "DS":
+		case RecDS:
 			resyncing = true
 			if err := sink.OnResyncStart(a.now()); err != nil {
 				return err
 			}
-		case "DE":
+		case RecDE:
 			resyncing = false
-			if err := sink.OnResyncComplete(a.now(), pms.RecordID(body)); err != nil {
+			if err := sink.OnResyncComplete(a.now(), ""); err != nil { // never use the record id "DE" as a cursor
 				return err
 			}
-		case "GI", "GC", "GO":
+		case RecGI, RecGC, RecGO:
 			ev, perr := a.toEvent(body)
 			if perr == nil {
 				perr = ev.Validate()
 			}
 			if perr != nil {
-				// A malformed record (strict-grammar violation, ambiguous duplicate field, overlong or
-				// identity-truncating value) is a feed-continuity fault, NOT a silently-droppable event. Drive
-				// continuity→GAP_DETECTED + sync→RESYNC_REQUIRED durably (a persist/generation failure closes
-				// the transport), then request a verified full resync. No shortened or partial value from this
-				// record is exposed to the queue/inbox — toEvent returned no Event.
+				// A malformed domain record (ambiguous duplicate field, overlong or identity-truncating value)
+				// is a feed-continuity fault, NOT a silently-droppable event. Drive continuity→GAP_DETECTED +
+				// sync→RESYNC_REQUIRED durably (a persist/generation failure closes the transport), then request
+				// a verified full resync. No shortened or partial value reaches the queue/inbox — toEvent
+				// returned no Event.
 				if ferr := sink.OnContinuityFault(ctx, CodeEventInvalid); ferr != nil {
 					return ferr
 				}
 				if !resyncing {
-					if werr := w.submit(pms.BuildDR()); werr != nil {
+					if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
 						return werr
 					}
 					resyncing = true
@@ -187,7 +209,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			if derr := sink.OnDomainEvent(ctx, ev); derr != nil {
 				if Classify(derr) == CodeQueueOverflow && !resyncing {
 					// stop normal application; request a verified full resync
-					if err := w.submit(pms.BuildDR()); err != nil {
+					if err := w.SubmitSync(ctx, pms.BuildDR()); err != nil {
 						return err
 					}
 					resyncing = true
@@ -199,8 +221,6 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				// other persist errors close the transport
 				return derr
 			}
-		default:
-			// ignore unknown/no-op records (handshake noise)
 		}
 	}
 }

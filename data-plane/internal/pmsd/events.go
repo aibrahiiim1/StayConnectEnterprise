@@ -21,17 +21,19 @@ const (
 	RecGC RecordType = "GC" // guest change
 	RecGO RecordType = "GO" // guest out
 
-	// control observations (connector axes / resync only)
-	RecLS RecordType = "LS" // link start ack
+	// control observations (connector axes / resync only). ONLY Phase-0-verified FIAS wire records appear
+	// here — there is deliberately no "HB" or other speculative record; an unrecognized record id fails the
+	// strict parser and terminates the ownership cycle rather than being treated as a verified heartbeat.
+	RecLS RecordType = "LS" // link start
 	RecLA RecordType = "LA" // link alive (heartbeat)
+	RecLE RecordType = "LE" // link end
 	RecDR RecordType = "DR" // resync request
 	RecDS RecordType = "DS" // database resync start
 	RecDE RecordType = "DE" // database resync end
-	RecHB RecordType = "HB" // heartbeat/link tick
 )
 
 var domainRecords = map[RecordType]struct{}{RecGI: {}, RecGC: {}, RecGO: {}}
-var controlRecords = map[RecordType]struct{}{RecLS: {}, RecLA: {}, RecDR: {}, RecDS: {}, RecDE: {}, RecHB: {}}
+var controlRecords = map[RecordType]struct{}{RecLS: {}, RecLA: {}, RecLE: {}, RecDR: {}, RecDS: {}, RecDE: {}}
 
 func (r RecordType) IsDomain() bool  { _, ok := domainRecords[r]; return ok }
 func (r RecordType) IsControl() bool { _, ok := controlRecords[r]; return ok }

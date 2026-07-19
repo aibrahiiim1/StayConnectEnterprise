@@ -230,9 +230,9 @@ func TestWriter_ConcurrentRequestsSerialized(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			if i%2 == 0 {
-				_ = w.submit(pms.BuildDR())
+				_ = w.Submit(context.Background(), pms.BuildDR())
 			} else {
-				_ = w.submit(pms.BuildLA())
+				_ = w.Submit(context.Background(), pms.BuildLA())
 			}
 		}(i)
 	}
