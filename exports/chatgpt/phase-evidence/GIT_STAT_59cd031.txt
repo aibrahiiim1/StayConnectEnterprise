@@ -1,0 +1,4 @@
+commit 59cd031089ffad09776cfadf79c44fc6f6d87518
+Date:   Sun Jul 19 19:45:44 2026 +0300
+
+    @ Phase 3 increment 3 hardening Â§A-Â§D (inventory_head): finalize Event semantics â€” remove connector-owned Stay identity, complete-record fingerprint, no silent truncation; race-green
