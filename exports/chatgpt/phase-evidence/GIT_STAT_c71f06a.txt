@@ -1,0 +1,4 @@
+commit c71f06a4003570f57a9a4d3cb1613526376371b7
+Date:   Sun Jul 19 17:17:11 2026 +0300
+
+    @ Phase 3 increment 3 hardening Â§1-Â§4 (inventory_head): Event-identity split (SourceEventFingerprint vs LogicalStayKey) + dedicated keyed HMAC + corrected timestamp semantics; race-green
