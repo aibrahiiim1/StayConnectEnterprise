@@ -13,11 +13,19 @@ trap cleanup EXIT
 cleanup
 echo "== disposable PG16 for pmsd integration (container=$C port=$PORT) =="
 docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" -p 127.0.0.1:$PORT:5432 postgres:16-alpine >/dev/null
-for i in $(seq 1 30); do docker exec "$C" pg_isready -U postgres -d "$DB" >/dev/null 2>&1 && break; sleep 1; done
+# robust readiness: a real query must succeed (pg_isready can pass during initdb's transient server, which
+# then restarts -- running psql in that window fails with a socket error).
+ready=0
+for i in $(seq 1 60); do
+  if docker exec "$C" psql -U postgres -d "$DB" -tAqc 'select 1' >/dev/null 2>&1; then ready=1; break; fi
+  sleep 1
+done
+[ "$ready" = 1 ] || { echo "postgres did not become ready"; docker logs "$C" 2>&1 | tail -20; exit 1; }
+sleep 1
 
 # accepted schema exactly as the migration gate builds it (fixture + mg0 + mg1..mg9)
-SCRATCH_CONTAINER="$C" SCRATCH_DB="$DB" SCRATCH_PORT_ALLOW="$PORT" SCRATCH_ACK=I_UNDERSTAND_DISPOSABLE \
-  bash "$ROOT/iam_v2_scratch/run.sh" fresh >/dev/null 2>&1
+runout="$(SCRATCH_CONTAINER="$C" SCRATCH_DB="$DB" SCRATCH_PORT_ALLOW="$PORT" SCRATCH_ACK=I_UNDERSTAND_DISPOSABLE \
+  bash "$ROOT/iam_v2_scratch/run.sh" fresh 2>&1)" || { echo "run.sh fresh FAILED:"; echo "$runout" | tail -20; exit 1; }
 # ledger + 0009 baseline + 0010 via the authoritative runner
 docker exec "$C" psql -U postgres -d "$DB" -tAqc "CREATE TABLE IF NOT EXISTS public.schema_migrations(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-plane/migrations/0009_phase2_commerce.up.sql" >/dev/null 2>&1
