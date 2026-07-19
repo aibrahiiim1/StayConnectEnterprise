@@ -22,19 +22,23 @@ type Event struct {
 	RecordType            RecordType // closed enum (domain vs control)
 	ExternalEventIdentity string     // verified per-interface event identity (required for domain records)
 
-	// timestamps (raw kept as a bounded parsed field; normalized derived by the adapter)
+	// timestamps (raw kept as bounded parsed fields; normalized derived by the adapter under the pinned tz)
 	PMSTimestampRaw string
+	ArrivalRaw      string
+	DepartureRaw    string
 	NormalizedAt    time.Time
 	ClockSuspect    bool
 
 	// feed-continuity evidence
 	Cursor string
 
-	// typed Stay/Guest/Folio attributes (opaque to the queue; ingestion validates them)
+	// typed Stay/Guest/Folio attributes (authoritative Protel map: RN=room, G#=reservation, GN/GF=last/first)
 	ReservationRef string
 	RoomNumber     string
 	FolioRef       string
-	GuestName      string
+	GuestLastName  string
+	GuestFirstName string
+	GuestName      string // deterministic display name derived from last/first
 
 	// keyed-HMAC provenance digest of the source evidence (never the raw frame); key is never stored here
 	SourceEvidenceHash string

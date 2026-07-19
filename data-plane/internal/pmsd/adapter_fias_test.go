@@ -85,6 +85,44 @@ func newAdapterOverPipe(t *testing.T) (*fiasAdapter, net.Conn) {
 	return conn.(*fiasAdapter), server
 }
 
+// TestFIASFieldMap_Authoritative pins the binding Protel FIAS field map and identity determinism without
+// any network: RN=room, G#=reservation, GN/GF=last/first, GA/GD=arrival/departure.
+func TestFIASFieldMap_Authoritative(t *testing.T) {
+	a := &fiasAdapter{iface: iface("i1"), rev: validRevision(), evKey: []byte("0123456789abcdef0123456789abcdef"), evKeyNo: 1, now: time.Now}
+	gi := a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
+	if gi.RoomNumber != "1408" || gi.ReservationRef != "12345" || gi.GuestLastName != "Smith" ||
+		gi.GuestFirstName != "John" || gi.ArrivalRaw != "260101" || gi.DepartureRaw != "260105" {
+		t.Fatalf("authoritative map wrong: %+v", gi)
+	}
+	if err := gi.Validate(); err != nil {
+		t.Fatalf("valid GI must validate: %v", err)
+	}
+	// identity is deterministic + interface-scoped, and DOES NOT equal the reservation number
+	gi2 := a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
+	if gi.ExternalEventIdentity != gi2.ExternalEventIdentity {
+		t.Error("identity must be deterministic for identical records")
+	}
+	if gi.ExternalEventIdentity == gi.ReservationRef {
+		t.Error("reservation number alone must not be the identity")
+	}
+	// GI vs GC vs GO, Room Move (room change), and different episode (arrival change) must NOT collide
+	gc := a.toEvent("GC|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
+	move := a.toEvent("GC|RN1500|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
+	nextEpisode := a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260601|GD260605|")
+	ids := map[string]bool{}
+	for _, e := range []Event{gi, gc, move, nextEpisode} {
+		if ids[e.ExternalEventIdentity] {
+			t.Errorf("identity collision across record-type/room/episode: %s", e.ExternalEventIdentity)
+		}
+		ids[e.ExternalEventIdentity] = true
+	}
+	// a GI missing the reservation (G#) is rejected (must not silently become a valid event)
+	bad := a.toEvent("GI|RN1408|GNSmith|GA260101|")
+	if bad.Validate() == nil {
+		t.Error("GI without a reservation (G#) must be rejected")
+	}
+}
+
 // TestWriteChokepoint_BlocksForbiddenAllowsReadOnly proves the guarded writer rejects PS/PA (and unknown
 // records) BEFORE any byte is written, and passes the verified read-only records.
 func TestWriteChokepoint_BlocksForbiddenAllowsReadOnly(t *testing.T) {
@@ -159,9 +197,10 @@ func TestAdapter_StartupDomainAndResync(t *testing.T) {
 			wrote = append(wrote, pms.RecordID(body))
 			mu.Unlock()
 		}
-		// send a guest-in, a resync window, and a heartbeat
+		// send a guest-in (AUTHORITATIVE map: RN=room, G#=reservation, GN/GF=last/first, GA/GD dates),
+		// a resync window, and a heartbeat
 		for _, rec := range []string{
-			"GI|RN12345|FL1408|GNSmith|GA260101|",
+			"GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|",
 			"DS|",
 			"DE|",
 			"LA|",
@@ -200,8 +239,16 @@ func TestAdapter_StartupDomainAndResync(t *testing.T) {
 		t.Fatalf("expected 1 domain event, got %d", len(sink.events))
 	}
 	e := sink.events[0]
-	if e.RecordType != RecGI || e.ReservationRef != "12345" || e.RoomNumber != "1408" || e.GuestName != "Smith" {
-		t.Errorf("typed event fields wrong: %+v", e)
+	// AUTHORITATIVE Protel map: RN=room(1408), G#=reservation(12345), GN/GF=last/first, GA/GD dates
+	if e.RecordType != RecGI || e.RoomNumber != "1408" || e.ReservationRef != "12345" ||
+		e.GuestLastName != "Smith" || e.GuestFirstName != "John" || e.ArrivalRaw != "260101" || e.DepartureRaw != "260105" {
+		t.Errorf("typed event fields wrong (authoritative RN/G# map): %+v", e)
+	}
+	if e.GuestName != "Smith, John" {
+		t.Errorf("display name = %q, want 'Smith, John'", e.GuestName)
+	}
+	if !isHex64(e.ExternalEventIdentity) {
+		t.Errorf("external identity must be a 64-hex content hash, got %q", e.ExternalEventIdentity)
 	}
 	// the typed event must carry NO raw STX/ETX/control bytes
 	for _, f := range []string{e.ReservationRef, e.RoomNumber, e.GuestName, e.ExternalEventIdentity} {
@@ -231,7 +278,7 @@ func TestAdapter_QueueOverflowRequestsResync(t *testing.T) {
 		// send just enough guest-in records to overflow the cap-1 queue (no consumer draining it); more than
 		// that would deadlock net.Pipe since the adapter blocks writing DR while we block writing GI.
 		for i := 0; i < 2; i++ {
-			if err := pms.WriteFramedRecord(server, "GI|RN"+string(rune('A'+i))+"1|FL10|GNX|GA260101|"); err != nil {
+			if err := pms.WriteFramedRecord(server, "GI|RN10|G#RES"+string(rune('A'+i))+"|GNX|GFY|GA260101|GD260105|"); err != nil {
 				return
 			}
 		}

@@ -82,23 +82,18 @@ func (e Event) Validate() error {
 	if e.NormalizationVer <= 0 {
 		return ErrEventInvalid
 	}
+	// identity-critical + bounded fields — an overlong identity value is REJECTED (never truncated into a
+	// possibly-colliding value); the caller treats a rejection as a continuity fault → resync.
 	for _, f := range []struct {
 		v string
 		n int
 	}{
-		{e.PMSTimestampRaw, maxRawTimestampLen}, {e.ReservationRef, maxReservationLen},
-		{e.RoomNumber, maxRoomLen}, {e.FolioRef, maxFolioLen}, {e.GuestName, maxGuestLen},
-		{e.Cursor, maxCursorLen}, {e.ExternalEventIdentity, maxExtIdentityLen},
+		{e.PMSTimestampRaw, maxRawTimestampLen}, {e.ArrivalRaw, maxRawTimestampLen}, {e.DepartureRaw, maxRawTimestampLen},
+		{e.ReservationRef, maxReservationLen}, {e.RoomNumber, maxRoomLen}, {e.FolioRef, maxFolioLen},
+		{e.GuestLastName, maxGuestLen}, {e.GuestFirstName, maxGuestLen}, {e.GuestName, maxGuestLen},
+		{e.Cursor, maxCursorLen},
 	} {
 		if len(f.v) > f.n || hasControlBytes(f.v) {
-			return ErrEventInvalid
-		}
-	}
-	if len(e.SourceEvidenceHash) > maxEvidenceHexLen {
-		return ErrEventInvalid
-	}
-	if e.SourceEvidenceHash != "" {
-		if _, err := hex.DecodeString(e.SourceEvidenceHash); err != nil || e.EvidenceKeyVersion <= 0 {
 			return ErrEventInvalid
 		}
 	}
@@ -106,8 +101,15 @@ func (e Event) Validate() error {
 		return ErrEventInvalid
 	}
 	if e.RecordType.IsDomain() {
-		// a guest Stay mutation must carry a verified external identity
-		if strings.TrimSpace(e.ExternalEventIdentity) == "" {
+		// a guest Stay mutation must carry: a deterministic 64-hex external identity + a 64-hex keyed-HMAC
+		// evidence with a positive key version + non-empty room/reservation.
+		if !isHex64(e.ExternalEventIdentity) {
+			return ErrEventInvalid
+		}
+		if !isHex64(e.SourceEvidenceHash) || e.EvidenceKeyVersion <= 0 {
+			return ErrEventInvalid
+		}
+		if strings.TrimSpace(e.RoomNumber) == "" || strings.TrimSpace(e.ReservationRef) == "" {
 			return ErrEventInvalid
 		}
 	} else {
@@ -119,6 +121,15 @@ func (e Event) Validate() error {
 	return nil
 }
 
+// isHex64 reports whether s is exactly 64 lowercase/uppercase hex chars (a SHA-256 digest).
+func isHex64(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	b, err := hex.DecodeString(s)
+	return err == nil && len(b) == 32
+}
+
 // ComputeEvidenceHMAC derives the source-evidence digest with a KEYED HMAC-SHA256 (not a plain,
 // dictionary-testable SHA), binding it to a key generation/version. The key is caller-owned and never
 // stored, logged, or embedded in the Event — only the resulting hex digest + key version are.
@@ -126,6 +137,36 @@ func ComputeEvidenceHMAC(key []byte, keyVersion int, data string) (hexDigest str
 	m := hmac.New(sha256.New, key)
 	_, _ = m.Write([]byte(data))
 	return hex.EncodeToString(m.Sum(nil)), keyVersion
+}
+
+// DeriveEventIdentity is the deterministic, interface-scoped external Event identity. It is a content hash
+// over record type + reservation + room + arrival + departure so that GI/GC/GO, repeated updates, Room
+// Moves (room changes), and the same reservation across different lifecycle episodes (arrival/departure
+// change) never collide — and reservation number ALONE is never the idempotency key. Room number, which is
+// not globally unique, only contributes to the hash, it is never the identity by itself.
+func DeriveEventIdentity(interfaceID string, rt RecordType, reservation, room, arrival, departure string) string {
+	h := sha256.New()
+	for _, part := range []string{"pms-event:v1", interfaceID, string(rt), reservation, room, arrival, departure} {
+		_, _ = h.Write([]byte(part))
+		_, _ = h.Write([]byte{0x1f}) // unit separator so field boundaries can't be shifted
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// deriveDisplayName builds a deterministic "Last, First" display name from typed components.
+func deriveDisplayName(last, first string) string {
+	last = strings.TrimSpace(last)
+	first = strings.TrimSpace(first)
+	switch {
+	case last == "" && first == "":
+		return ""
+	case first == "":
+		return last
+	case last == "":
+		return first
+	default:
+		return last + ", " + first
+	}
 }
 
 // nonZeroTime is a small helper for adapters that need a non-zero normalized timestamp.

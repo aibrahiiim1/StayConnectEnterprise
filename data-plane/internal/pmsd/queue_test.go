@@ -12,10 +12,14 @@ import (
 )
 
 func ev(id string) Event {
+	iface := "aaaaaaaa-0000-4000-8000-000000000001"
+	h, ver := ComputeEvidenceHMAC([]byte("test-evidence-key"), 1, id)
 	return Event{
-		InterfaceID: "aaaaaaaa-0000-4000-8000-000000000001", RevisionID: "33333333-0000-4000-8000-000000000001",
+		InterfaceID: iface, RevisionID: "33333333-0000-4000-8000-000000000001",
 		SecretGenerationID: "44444444-0000-4000-8000-000000000001", NormalizationVer: 1,
-		RecordType: RecGI, ExternalEventIdentity: id, NormalizedAt: time.Now(),
+		RecordType: RecGI, ReservationRef: id, RoomNumber: "101",
+		ExternalEventIdentity: DeriveEventIdentity(iface, RecGI, id, "101", "260101", "260105"),
+		SourceEvidenceHash:    h, EvidenceKeyVersion: ver, NormalizedAt: time.Now(),
 	}
 }
 
@@ -32,8 +36,8 @@ func TestQueue_EnqueueDequeueFIFO(t *testing.T) {
 		if err != nil {
 			t.Fatalf("dequeue %d: %v", i, err)
 		}
-		if e.ExternalEventIdentity != fmt.Sprintf("E%d", i) {
-			t.Errorf("FIFO violated: got %q want E%d", e.ExternalEventIdentity, i)
+		if e.ReservationRef != fmt.Sprintf("E%d", i) {
+			t.Errorf("FIFO violated: got %q want E%d", e.ReservationRef, i)
 		}
 	}
 }
@@ -92,11 +96,11 @@ func TestQueue_CloseDrainsThenErrors(t *testing.T) {
 	if err := q.Enqueue(ctx, ev("z")); !errors.Is(err, ErrQueueClosed) {
 		t.Errorf("enqueue after close = %v, want ErrQueueClosed", err)
 	}
-	if e, err := q.Dequeue(ctx); err != nil || e.ExternalEventIdentity != "x" {
-		t.Errorf("drain1 = %v/%v", e.ExternalEventIdentity, err)
+	if e, err := q.Dequeue(ctx); err != nil || e.ReservationRef != "x" {
+		t.Errorf("drain1 = %v/%v", e.ReservationRef, err)
 	}
-	if e, err := q.Dequeue(ctx); err != nil || e.ExternalEventIdentity != "y" {
-		t.Errorf("drain2 = %v/%v", e.ExternalEventIdentity, err)
+	if e, err := q.Dequeue(ctx); err != nil || e.ReservationRef != "y" {
+		t.Errorf("drain2 = %v/%v", e.ReservationRef, err)
 	}
 	if _, err := q.Dequeue(ctx); !errors.Is(err, ErrQueueClosed) {
 		t.Errorf("post-drain dequeue = %v, want ErrQueueClosed", err)

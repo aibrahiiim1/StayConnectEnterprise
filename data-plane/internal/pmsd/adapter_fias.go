@@ -154,22 +154,45 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	}
 }
 
-// toEvent parses a GI/GC/GO record into a typed, provenance-stamped domain Event. Raw frame bytes stay
-// here; only bounded typed fields leave.
+// toEvent parses a GI/GC/GO record into a typed, provenance-stamped domain Event using the AUTHORITATIVE
+// Protel FIAS field map (Phase-0 live evidence):
+//
+//	RN = room number     G# = reservation number
+//	GN = last name       GF = first name
+//	GA = arrival date    GD = departure date
+//
+// Room number is NOT globally unique (it repeats across reservations/stays), so it is never an identity.
+// The external Event identity is a deterministic content hash over the record type + reservation + room +
+// arrival + departure (interface-scoped), so GI/GC/GO, repeated updates, Room Moves, and the same
+// reservation across different lifecycle episodes never collide, and reservation number alone is not the
+// idempotency key. Raw frame bytes stay here; only bounded typed fields leave.
 func (a *fiasAdapter) toEvent(body string) Event {
 	f := pms.ParseFields(body)
+	rt := RecordType(pms.RecordID(body))
+	// identity-critical fields are NOT truncated (a truncated identity could collide) — Validate rejects an
+	// overlong value and the caller triggers gap/resync. Guest names are display-only and may be clipped.
+	room := f["RN"]
+	reservation := f["G#"]
+	arrival := f["GA"]
+	departure := f["GD"]
+	last := clip(f["GN"], maxGuestLen)
+	first := clip(f["GF"], maxGuestLen)
 	hash, ver := ComputeEvidenceHMAC(a.evKey, a.evKeyNo, body)
 	return Event{
 		InterfaceID: a.iface.ID, RevisionID: a.rev.ID, SecretGenerationID: a.rev.ActiveSecretGenerationID,
 		NormalizationVer:      a.rev.NormalizationVersion,
-		RecordType:            RecordType(pms.RecordID(body)),
-		ExternalEventIdentity: clip(f["RN"], maxExtIdentityLen), // reservation number = external identity
-		ReservationRef:        clip(f["RN"], maxReservationLen),
-		RoomNumber:            clip(f["FL"], maxRoomLen),
-		GuestName:             clip(f["GN"], maxGuestLen),
-		PMSTimestampRaw:       clip(f["GA"], maxRawTimestampLen),
+		RecordType:            rt,
+		ExternalEventIdentity: DeriveEventIdentity(a.iface.ID, rt, reservation, room, arrival, departure),
+		ReservationRef:        reservation,
+		RoomNumber:            room,
+		GuestLastName:         last,
+		GuestFirstName:        first,
+		GuestName:             deriveDisplayName(last, first),
+		ArrivalRaw:            arrival,
+		DepartureRaw:          departure,
+		PMSTimestampRaw:       arrival,
 		NormalizedAt:          a.now(),
-		Cursor:                clip(f["RN"], maxCursorLen),
+		Cursor:                clip(reservation+":"+room, maxCursorLen),
 		SourceEvidenceHash:    hash, EvidenceKeyVersion: ver,
 		ReceivedAt: a.now(),
 	}
