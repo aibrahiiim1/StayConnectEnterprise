@@ -1,20 +1,28 @@
 package pmsd
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 )
 
-// canaries are values that MUST NEVER appear in a persisted/exported error code or structured log field.
+// canaries are values that MUST NEVER appear in a persisted/exported error code or structured log line.
 var canaries = []string{
-	"hunter2password", "Sm1thR00mKey", // credential / endpoint password
+	"hunter2password",               // secret / password
+	"svcuser",                       // endpoint username
+	"Sm1thR00mKey",                  // endpoint password
 	"room-1408",                     // room number
 	"John Q. Guest",                 // guest name
 	"RES-88213371",                  // reservation number
 	"FOLIO-55510",                   // folio number
+	"\x02GI|GN12345|room-1408\x03",  // raw GI frame bytes
+	"AAAABBBBCCCCDDDDciphertext==",  // ciphertext blob
+	"nonce-9f8e7d6c",                // nonce
+	"kms-key-7b3a1f",                // key ID
 	"pms.internal.example.com:5010", // endpoint host:port
 }
 
@@ -50,15 +58,23 @@ func TestTypedErr_HidesRawDetail(t *testing.T) {
 	}
 }
 
-func TestDebugRedact_ScrubsSecretsAndEndpoints(t *testing.T) {
-	cases := []string{
-		"password=hunter2password", "secret_token=abcdefghijABCDEFGHIJ0123456789",
-		"pms.internal.example.com:5010", "192.168.10.20:5010",
-	}
-	for _, c := range cases {
-		got := debugRedact(errors.New(c))
-		if !strings.Contains(got, "[REDACTED]") {
-			t.Errorf("debugRedact(%q) did not redact: %q", c, got)
+// TestLogCoded_NoCanaryInCapturedOutput inspects the ACTUAL bytes logCoded emits (not just Code.String())
+// and proves that even when a canary-laden raw error drives the control flow, nothing sensitive reaches the
+// log line — because logCoded never receives the raw error, only the bounded Code + typed SafeFields.
+func TestLogCoded_NoCanaryInCapturedOutput(t *testing.T) {
+	for _, cn := range canaries {
+		var buf bytes.Buffer
+		log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		// a raw error stuffed with the canary drives classification, but must not reach the log
+		raw := fmt.Errorf("dial %q endpoint failed frame=%q", cn, cn)
+		logCoded(log, "connector error", Classify(coded(CodeDialFailed, raw)),
+			SafeFields{InterfaceID: "aaaaaaaa-0000-4000-8000-000000000001", Generation: 7, Stage: StageDial, Attempt: 2})
+		if strings.Contains(buf.String(), cn) {
+			t.Errorf("logCoded leaked canary %q into output: %s", cn, buf.String())
+		}
+		// the code itself is present and in-vocabulary
+		if !strings.Contains(buf.String(), "DIAL_FAILED") {
+			t.Errorf("expected code DIAL_FAILED in log, got: %s", buf.String())
 		}
 	}
 }

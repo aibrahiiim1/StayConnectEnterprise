@@ -227,6 +227,7 @@ Q "INSERT INTO public.schema_migrations(version) VALUES ('0009_phase2_commerce')
 Q "ALTER TABLE public.schema_migrations RENAME TO schema_migrations_bak;" >/dev/null
 o="$(RUN "${APPLY_ARGS[@]}" 2>&1 || true)"; echo "$o" | grep -q "ledger absent" && ok "ledger absent refused in normal mode (no silent create, §5)" || no "normal mode silently proceeded"
 o="$(bash "$ROOT/scripts/edge-migrate.sh" --bootstrap-ledger --only 0010_phase3_stay_resolution --expect-db "$DB" --target-kind disposable --ack-target I_UNDERSTAND_LEDGER_BOOTSTRAP --bootstrap-owner postgres 2>&1 || true)"; echo "$o" | grep -q "cannot be combined with --only" && ok "bootstrap combined with --only refused (§5)" || no "bootstrap+only accepted"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --bootstrap-ledger --expect-db "$DB" --target-kind bogus_kind --ack-target I_UNDERSTAND_LEDGER_BOOTSTRAP --bootstrap-owner postgres 2>&1 || true)"; echo "$o" | grep -q "target-kind must be 'disposable' or 'live-site'" && ok "bootstrap arbitrary --target-kind refused (§5)" || no "bootstrap accepted arbitrary target-kind"
 o="$(bash "$ROOT/scripts/edge-migrate.sh" --bootstrap-ledger --expect-db "$DB" --target-kind disposable --ack-target I_UNDERSTAND_LEDGER_BOOTSTRAP --bootstrap-owner postgres 2>&1 || true)"; echo "$o" | grep -q "EDGE_LEDGER_BOOTSTRAP_OK" && echo "$o" | grep -q "no migration applied" && ok "standalone bootstrap creates ledger + applies NO migration (§5)" || no "bootstrap mode failed"
 [ "$(Q "SELECT count(*) FROM public.schema_migrations;")" = 0 ] && ok "bootstrapped ledger is empty (bootstrap applied no migration, §5)" || no "bootstrap wrote migration rows"
 Q "DROP TABLE public.schema_migrations; ALTER TABLE public.schema_migrations_bak RENAME TO schema_migrations;" >/dev/null
@@ -241,7 +242,8 @@ Q "DO \$ro\$ DECLARE r record; BEGIN
      FOR r IN SELECT format('ALTER FUNCTION iam_v2.%I(%s) OWNER TO iam_v2_owner', p.proname, pg_get_function_identity_arguments(p.oid)) c FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' LOOP EXECUTE r.c; END LOOP;
      FOR r IN SELECT format('ALTER VIEW iam_v2.%I OWNER TO iam_v2_owner', viewname) c FROM pg_views WHERE schemaname='iam_v2' LOOP EXECUTE r.c; END LOOP;
    END \$ro\$;" >/dev/null
-Q "GRANT USAGE ON SCHEMA public TO iam_v2_owner; GRANT INSERT, SELECT, DELETE ON public.schema_migrations TO iam_v2_owner; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO iam_v2_owner;" >/dev/null
+# APPLY role gets ONLY SELECT+INSERT on the ledger (no DELETE) -- rollback/admin is a separate operation (§4)
+Q "GRANT USAGE ON SCHEMA public TO iam_v2_owner; GRANT INSERT, SELECT ON public.schema_migrations TO iam_v2_owner; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO iam_v2_owner;" >/dev/null
 # deployment-parity service roles (mirror the accepted live least-privilege model) — created with ZERO iam_v2 access
 Q "DO \$sr\$ DECLARE r text; BEGIN FOREACH r IN ARRAY ARRAY['svc_scd','svc_edged','svc_portald','svc_acctd','svc_pmsd'] LOOP EXECUTE format('DROP ROLE IF EXISTS %I',r); EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE',r,'x'); EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I',current_database(),r); END LOOP; END \$sr\$;" >/dev/null
 Qf < "$DOWN" >/dev/null
@@ -259,6 +261,13 @@ SVCG="$(Q "SELECT count(*) FROM information_schema.role_table_grants WHERE table
 [ "$SVCG" = 0 ] && ok "runtime service roles (scd/edged/portald/acctd/pmsd) have ZERO iam_v2 table privileges while DARK (§6)" || no "service roles hold $SVCG iam_v2 grants"
 SVCF="$(Q "SELECT count(*) FROM information_schema.role_routine_grants WHERE routine_schema='iam_v2' AND grantee IN ('svc_scd','svc_edged','svc_portald','svc_acctd','svc_pmsd');")"
 [ "$SVCF" = 0 ] && ok "runtime service roles have ZERO iam_v2 function EXECUTE while DARK (§6)" || no "service roles hold $SVCF iam_v2 EXECUTE grants"
+# §4: APPLY role holds ONLY SELECT+INSERT on the ledger -- never destructive rights (rollback/admin only)
+AOK=1
+for p in SELECT INSERT; do [ "$(Q "SELECT has_table_privilege('iam_v2_owner','public.schema_migrations','$p');")" = t ] || AOK=0; done
+[ "$AOK" = 1 ] && ok "apply role holds required SELECT+INSERT on ledger (§4)" || no "apply role missing SELECT/INSERT"
+ABAD=0
+for p in UPDATE DELETE TRUNCATE REFERENCES TRIGGER; do [ "$(Q "SELECT has_table_privilege('iam_v2_owner','public.schema_migrations','$p');")" = t ] && ABAD=1; done
+[ "$ABAD" = 0 ] && ok "apply role holds NO destructive ledger rights (no UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER) (§4)" || no "apply role holds a destructive ledger privilege"
 # §6: migration role (iam_v2_owner) holds no broad public-schema DDL (no public CREATE beyond ledger writes)
 MDDL="$(Q "SELECT has_schema_privilege('iam_v2_owner','public','CREATE');")"
 [ "$MDDL" = f ] && ok "migration role has no broad public-schema CREATE/DDL privilege (§6)" || no "migration role holds public CREATE"

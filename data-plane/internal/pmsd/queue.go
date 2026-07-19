@@ -7,28 +7,65 @@ import (
 	"time"
 )
 
-// Event is one normalized protocol observation handed from the read-only adapter to the (future, Increment-4)
-// Stay ingestion engine. The queue only buffers events in memory; it never logs their contents.
+// Event is one NORMALIZED, typed protocol observation handed from the read-only adapter to the (future,
+// Increment-4) Stay ingestion engine. It deliberately carries ONLY the typed fields ingestion needs —
+// never the raw STX/ETX frame bytes, which stay inside the protocol adapter boundary and are never logged,
+// queued, persisted unredacted, returned through errors, or exported.
 type Event struct {
-	Record     string // raw FIAS record text (opaque to the queue; never logged by pmsd)
+	// provenance (identity only — never secret material)
+	InterfaceID        string
+	RevisionID         string
+	SecretGenerationID string
+	NormalizationVer   int
+
+	// record classification + verified identity
+	RecordType            string // GI | GC | GO | DR | DS | DE | ...
+	ExternalEventIdentity string // verified per-interface event identity
+
+	// timestamps (raw kept as a bounded parsed field; normalized derived by the adapter)
+	PMSTimestampRaw string
+	NormalizedAt    time.Time
+	ClockSuspect    bool
+
+	// feed-continuity evidence
+	Cursor string
+
+	// typed Stay/Guest/Folio attributes (opaque to the queue; ingestion validates them)
+	ReservationRef string
+	RoomNumber     string
+	FolioRef       string
+	GuestName      string
+
+	// sanitized provenance digest of the source evidence (never the raw frame)
+	SourceEvidenceHash string
+
 	ReceivedAt time.Time
 }
 
-// ErrQueueClosed is returned by Dequeue once the queue is closed and fully drained.
+// ErrQueueClosed is returned by Enqueue after Close, and by Dequeue once closed AND drained.
 var ErrQueueClosed = errors.New("pmsd: event queue closed")
 
-// BoundedQueue is a fixed-capacity, back-pressured event queue between the protocol adapter and the
-// ingestion engine. It creates ZERO goroutines of its own (a passive channel), so it can never leak one.
-// On sustained overflow it does NOT silently drop events: Enqueue returns a QUEUE_OVERFLOW-coded error and
-// latches an "overflow → resync required" flag so the worker can drive the sync axis to RESYNC_REQUIRED and
-// request a full resynchronization rather than proceed with a gap.
+// BoundedQueue is a fixed-capacity, back-pressured, LINEARIZABLE event queue between the protocol adapter
+// and the ingestion engine. It creates ZERO goroutines of its own (a passive channel), so it can never
+// leak one.
+//
+// Close/Enqueue linearizability: Enqueue holds a read-lock for the whole send, and Close takes the write
+// lock; therefore `closed` cannot flip while any Enqueue is mid-send. Once Close() RETURNS, every later
+// Enqueue observes closed and returns ErrQueueClosed — no Event is ever accepted after the close boundary,
+// and there is no send-on-closed-channel panic (only `done` is closed, never `ch`).
+//
+// On sustained overflow it does NOT silently drop: Enqueue returns a QUEUE_OVERFLOW-coded error and latches
+// an "overflow → resync required" flag so the worker can drive continuity→GAP_DETECTED and sync→
+// RESYNC_REQUIRED instead of proceeding with a gap.
 type BoundedQueue struct {
 	ch             chan Event
 	done           chan struct{}
 	enqueueTimeout time.Duration
 
-	mu             sync.Mutex
-	closed         bool
+	mu     sync.RWMutex // RLock during a send; Lock (exclusive) during Close — makes close/enqueue linearizable
+	closed bool
+
+	ovMu           sync.Mutex
 	overflowResync bool
 }
 
@@ -48,33 +85,31 @@ func NewBoundedQueue(capacity int, enqueueTimeout time.Duration) *BoundedQueue {
 	}
 }
 
-// Cap reports the configured capacity.
 func (q *BoundedQueue) Cap() int { return cap(q.ch) }
-
-// Len reports the current number of buffered events.
 func (q *BoundedQueue) Len() int { return len(q.ch) }
 
-// Enqueue adds an event, applying bounded back-pressure. Ordering of outcomes:
-//   - closed queue                      -> ErrQueueClosed
-//   - space available (now or within timeout) -> nil
-//   - ctx cancelled while waiting        -> CONTEXT_CANCELED-coded error
-//   - queue closed while waiting         -> ErrQueueClosed
-//   - still full after the timeout       -> QUEUE_OVERFLOW-coded error + latch overflowResync (no drop)
+// Enqueue adds an event with bounded back-pressure. Outcome ordering:
+//   - closed queue                              -> ErrQueueClosed
+//   - space available (now or within timeout)   -> nil (Event accepted)
+//   - ctx cancelled while waiting               -> CONTEXT_CANCELED-coded error
+//   - still full after the timeout              -> QUEUE_OVERFLOW-coded error + latch overflowResync (no drop)
+//
+// The read-lock is held for the whole call so Close (write-lock) cannot interleave: an in-flight Enqueue
+// either commits before Close proceeds, or — if it is waiting on back-pressure — is bounded by the timeout,
+// after which Close proceeds and subsequent Enqueues see closed.
 func (q *BoundedQueue) Enqueue(ctx context.Context, ev Event) error {
-	q.mu.Lock()
+	q.mu.RLock()
+	defer q.mu.RUnlock()
 	if q.closed {
-		q.mu.Unlock()
 		return ErrQueueClosed
 	}
-	q.mu.Unlock()
-
 	// fast path
 	select {
 	case q.ch <- ev:
 		return nil
 	default:
 	}
-	// back-pressure path
+	// back-pressure path (bounded; closed cannot flip while we hold RLock)
 	t := time.NewTimer(q.enqueueTimeout)
 	defer t.Stop()
 	select {
@@ -82,18 +117,16 @@ func (q *BoundedQueue) Enqueue(ctx context.Context, ev Event) error {
 		return nil
 	case <-ctx.Done():
 		return coded(CodeContextCanceled, ctx.Err())
-	case <-q.done:
-		return ErrQueueClosed
 	case <-t.C:
-		q.mu.Lock()
+		q.ovMu.Lock()
 		q.overflowResync = true
-		q.mu.Unlock()
+		q.ovMu.Unlock()
 		return coded(CodeQueueOverflow, nil)
 	}
 }
 
-// Dequeue returns the next event, blocking until one is available, the ctx is cancelled, or the queue is
-// closed AND drained. A closed-but-non-empty queue keeps returning buffered events until empty.
+// Dequeue returns the next event, blocking until one is available, ctx is cancelled, or the queue is closed
+// AND drained. A closed-but-non-empty queue keeps returning buffered events until empty.
 func (q *BoundedQueue) Dequeue(ctx context.Context) (Event, error) {
 	select {
 	case ev := <-q.ch:
@@ -106,7 +139,6 @@ func (q *BoundedQueue) Dequeue(ctx context.Context) (Event, error) {
 	case <-ctx.Done():
 		return Event{}, coded(CodeContextCanceled, ctx.Err())
 	case <-q.done:
-		// drain any remaining buffered events before reporting closed
 		select {
 		case ev := <-q.ch:
 			return ev, nil
@@ -116,21 +148,21 @@ func (q *BoundedQueue) Dequeue(ctx context.Context) (Event, error) {
 	}
 }
 
-// OverflowResyncRequested reports whether a sustained overflow has latched a resync requirement.
 func (q *BoundedQueue) OverflowResyncRequested() bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+	q.ovMu.Lock()
+	defer q.ovMu.Unlock()
 	return q.overflowResync
 }
 
-// ClearOverflowResync resets the latch after the worker has driven a resync.
 func (q *BoundedQueue) ClearOverflowResync() {
-	q.mu.Lock()
+	q.ovMu.Lock()
 	q.overflowResync = false
-	q.mu.Unlock()
+	q.ovMu.Unlock()
 }
 
-// Close idempotently closes the queue. Buffered events remain drainable via Dequeue until empty.
+// Close idempotently closes the queue. It takes the exclusive lock, so it waits for every in-flight Enqueue
+// to finish and guarantees no Enqueue can accept an Event afterward. Buffered events remain drainable via
+// Dequeue until empty.
 func (q *BoundedQueue) Close() {
 	q.mu.Lock()
 	defer q.mu.Unlock()

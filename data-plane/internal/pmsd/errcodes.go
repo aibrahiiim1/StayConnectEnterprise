@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"regexp"
 )
 
 // Code is the CLOSED, bounded vocabulary of machine error codes that pmsd may persist to
@@ -98,25 +97,45 @@ func Classify(err error) Code {
 	}
 }
 
-// redactPattern removes anything that looks like a credential/secret token, host:port, or long hex/base64
-// blob from a string BEFORE it is handed to a local debug sink. Durable state and telemetry never receive
-// raw text at all (they get Classify()); this is only a belt-and-braces guard for local-only debug logs.
-var redactPattern = regexp.MustCompile(`(?i)(pass(word)?|secret|token|key|nonce|cipher)\S*|[A-Za-z0-9+/=]{24,}|\b[A-Za-z0-9._-]+:\d{2,5}\b`)
+// Stage is a bounded lifecycle-stage label (closed set) safe for logs/metrics. It describes WHERE in the
+// ownership cycle an event happened, never WHAT data was involved.
+type Stage string
 
-// debugRedact returns a redacted one-line form of err for LOCAL diagnostics only. Callers must never
-// persist or export the result.
-func debugRedact(err error) string {
-	if err == nil {
-		return ""
-	}
-	return redactPattern.ReplaceAllString(err.Error(), "[REDACTED]")
+const (
+	StageDiscover  Stage = "DISCOVER"
+	StageLock      Stage = "LOCK"
+	StageReRead    Stage = "REREAD"
+	StageAllocate  Stage = "ALLOCATE_GENERATION"
+	StageSecret    Stage = "SECRET"
+	StageDial      Stage = "DIAL"
+	StageServe     Stage = "SERVE"
+	StagePersist   Stage = "PERSIST"
+	StageReconnect Stage = "RECONNECT"
+	StageShutdown  Stage = "SHUTDOWN"
+)
+
+// SafeFields are the ONLY values allowed into a pmsd structured log line. Every field is a bounded machine
+// value — a UUID, a monotonic counter, a closed-set stage label — NEVER PMS/guest/secret-derived text. The
+// raw error is deliberately absent: it stays in memory for control flow (Classify inspects its type only)
+// and is never rendered, redacted, or serialized. There is intentionally no regex "redaction" acting as a
+// security boundary; safety comes from the fact that no unsafe field can enter here at all.
+type SafeFields struct {
+	InterfaceID string // canonical UUID only
+	Generation  int64
+	Stage       Stage
+	Attempt     int
 }
 
-// logCoded emits the bounded Code to structured logs and, at debug level only, a redacted local detail.
-func logCoded(log *slog.Logger, msg string, code Code, err error, kv ...any) {
-	args := append([]any{"code", code.String()}, kv...)
-	log.Error(msg, args...)
-	if err != nil {
-		log.Debug(msg+".detail", "code", code.String(), "redacted", debugRedact(err))
+// logCoded emits the bounded Code plus SafeFields. It NEVER receives or logs a raw error, redacted or not.
+func logCoded(log *slog.Logger, msg string, code Code, sf SafeFields) {
+	if log == nil {
+		return
 	}
+	log.Error(msg,
+		"code", code.String(),
+		"interface", sf.InterfaceID,
+		"generation", sf.Generation,
+		"stage", string(sf.Stage),
+		"attempt", sf.Attempt,
+	)
 }

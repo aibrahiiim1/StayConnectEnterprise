@@ -122,14 +122,20 @@ verify_ledger_structural(){ # read-only, BEFORE lock; fail closed
   # owner allowlist
   local owner; owner="$(q "SELECT tableowner FROM pg_tables WHERE schemaname='public' AND tablename='schema_migrations'")"
   case " $LEDGER_OWNER_ALLOWLIST " in *" $owner "*) : ;; *) echo "REFUSED: ledger owner '$owner' not in allowlist ($LEDGER_OWNER_ALLOWLIST)" >&2; exit 3;; esac
-  # execution role holds exactly the required privileges (INSERT+SELECT+DELETE), and nothing broader like schema-wide CREATE in live
-  for p in SELECT INSERT DELETE; do
+  # APPLY needs exactly SELECT (read the ledger) + INSERT (record the applied version). It must NOT need or
+  # hold DELETE/UPDATE/TRUNCATE — those belong to the separate rollback/admin operation, not a forward apply.
+  for p in SELECT INSERT; do
     [ "$(q "SELECT has_table_privilege(current_user,'public.schema_migrations','$p')")" = t ] \
-      || { echo "REFUSED: execution role lacks required $p on schema_migrations" >&2; exit 3; }
+      || { echo "REFUSED: apply role lacks required $p on schema_migrations" >&2; exit 3; }
   done
   if [ "$TARGET_KIND" = "live-site" ]; then
+    # live-site apply role must be minimal: no destructive ledger rights, no public DDL.
+    for p in UPDATE DELETE TRUNCATE REFERENCES TRIGGER; do
+      [ "$(q "SELECT has_table_privilege(current_user,'public.schema_migrations','$p')")" = f ] \
+        || { echo "REFUSED: live-site apply role must NOT hold $p on schema_migrations (rollback/admin only)" >&2; exit 3; }
+    done
     [ "$(q "SELECT has_schema_privilege(current_user,'public','CREATE')")" = f ] \
-      || { echo "REFUSED: live-site execution role must NOT hold public CREATE (least privilege)" >&2; exit 3; }
+      || { echo "REFUSED: live-site apply role must NOT hold public CREATE (least privilege)" >&2; exit 3; }
   fi
 }
 
@@ -179,9 +185,16 @@ apply_one(){ # $1=file  atomic lock-then-ledger
 if [ "$BOOTSTRAP" -eq 1 ]; then
   { [ -z "$ONLY" ] && [ "$ALL" -ne 1 ]; } || { echo "REFUSED: --bootstrap-ledger cannot be combined with --only/--all" >&2; exit 2; }
   [ -n "$EXPECT_DB" ] || { echo "REFUSED: bootstrap requires --expect-db" >&2; exit 3; }
-  [ -n "$TARGET_KIND" ] || { echo "REFUSED: bootstrap requires --target-kind" >&2; exit 3; }
+  case "$TARGET_KIND" in
+    disposable|live-site) : ;;
+    "") echo "REFUSED: bootstrap requires --target-kind" >&2; exit 3;;
+    *) echo "REFUSED: bootstrap --target-kind must be 'disposable' or 'live-site' (got '$TARGET_KIND')" >&2; exit 3;;
+  esac
   [ "$ACK" = "I_UNDERSTAND_LEDGER_BOOTSTRAP" ] || { echo "REFUSED: bootstrap requires --ack-target I_UNDERSTAND_LEDGER_BOOTSTRAP" >&2; exit 3; }
   [ -n "$BOOTSTRAP_OWNER" ] || { echo "REFUSED: bootstrap requires --bootstrap-owner <role>" >&2; exit 3; }
+  if [ "$TARGET_KIND" = "live-site" ] && [ "$EXPECT_DB" != "stayconnect_site" ]; then
+    echo "REFUSED: live-site bootstrap requires --expect-db stayconnect_site" >&2; exit 3
+  fi
   curdb="$(q 'SELECT current_database()')"
   [ "$curdb" = "$EXPECT_DB" ] || { echo "REFUSED: connected to '$curdb' but --expect-db '$EXPECT_DB'" >&2; exit 3; }
   case " $LEDGER_OWNER_ALLOWLIST " in *" $BOOTSTRAP_OWNER "*) : ;; *) echo "REFUSED: bootstrap owner '$BOOTSTRAP_OWNER' not in allowlist" >&2; exit 3;; esac
