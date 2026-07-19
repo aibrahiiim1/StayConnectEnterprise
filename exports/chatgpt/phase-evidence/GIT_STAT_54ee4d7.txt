@@ -1,4 +1,0 @@
-commit 54ee4d7f5f86e5acbf07b47d918b18d10c7ca4de
-Date:   Sun Jul 19 13:34:04 2026 +0300
-
-    @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green
