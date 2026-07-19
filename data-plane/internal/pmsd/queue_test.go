@@ -167,10 +167,16 @@ func TestQueue_LinearizableClose_NoAcceptAfterClose(t *testing.T) {
 			go func(p int) {
 				defer prodWG.Done()
 				for i := 0; i < 20; i++ {
+					// Observe the close boundary BEFORE the call: the guarantee is that an Enqueue which
+					// STARTS after Close() has returned is never accepted. Reading closeReturned AFTER the
+					// call would falsely flag an Enqueue that legitimately committed while Close() was still
+					// blocked on the write lock and was only observed afterward (a measurement race, not a
+					// linearizability violation).
+					startedAfterClose := atomic.LoadInt32(&closeReturned) == 1
 					err := q.Enqueue(ctx, ev(fmt.Sprintf("p%d-%d", p, i)))
 					if err == nil {
 						atomic.AddInt64(&accepted, 1)
-						if atomic.LoadInt32(&closeReturned) == 1 {
+						if startedAfterClose {
 							atomic.AddInt64(&acceptedAfterClose, 1)
 						}
 					}
