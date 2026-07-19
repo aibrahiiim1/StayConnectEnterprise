@@ -1,0 +1,4 @@
+commit 2e4c86418230082eb0018de260327fbc26a4b1ac
+Date:   Mon Jul 20 01:26:45 2026 +0300
+
+    @ Phase 3 increment 3 Â§G data model + persistence (inventory_head): durable resync inbox (reuse stay_events), typed resync generation, immutable-rows + atomic publication boundary, ownership-safe append-first admission; lifecycle-gate 121/121 + PG16-green + race-green

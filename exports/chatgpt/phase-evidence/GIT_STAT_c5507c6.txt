@@ -1,4 +1,0 @@
-commit c5507c64288783cc4fb63f6d4a64e99c6b929692
-Date:   Mon Jul 20 00:14:01 2026 +0300
-
-    @ Phase 3 increment 3 Â§F-integration hardening items 1-4 (inventory_head): strict-parse every inbound frame, prompt bounded shutdown, context-aware serialized writer, per-frame write-failure coverage; race-green
