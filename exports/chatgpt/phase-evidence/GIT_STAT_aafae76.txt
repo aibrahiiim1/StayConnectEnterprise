@@ -1,0 +1,4 @@
+commit aafae76f222124610a9f95c9bc1cd61a7392f7a0
+Date:   Sun Jul 19 13:45:12 2026 +0300
+
+    @ Phase 3 increment 3 integration-readiness fix (inventory_head): robust postgres readiness in pmsd-pg-integration.sh
