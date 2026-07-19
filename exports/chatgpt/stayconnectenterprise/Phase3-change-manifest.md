@@ -46,7 +46,7 @@
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_c770325.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/GIT_STAT_d015f7d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
@@ -112,13 +112,13 @@
  .../adr/ADR-0001-pmsd-connector-ownership.md       |  53 +++
  docs/context/StayConnect-IAM-Handoff.md            |  16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     | 102 +++++
- docs/manifests/Phase3-change-manifest.md           | 182 +++++++++
+ docs/manifests/Phase3-change-manifest.md           | 180 +++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |   4 +-
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 250675 -> 270659 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 101471 -> 103280 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 41921 -> 42002 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 250675 -> 271173 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 101471 -> 103246 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 41921 -> 42001 bytes
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_c770325.txt    |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_d015f7d.txt    |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  16 +-
  .../phase-evidence/Phase2-change-manifest.md       |  13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -136,7 +136,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |  12 +-
  .../Phase2-change-manifest.md                      |  13 +-
  .../Phase3-Privilege-Matrix.md                     |  34 ++
- .../Phase3-change-manifest.md                      | 164 ++++++++
+ .../Phase3-change-manifest.md                      | 180 +++++++++
  .../StayConnect-IAM-Handoff.md                     |  16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |  12 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |  12 +-
@@ -153,11 +153,25 @@
  tools/project-state.py                             |  49 ++-
  .../tests/project_state_validator/run_mutations.py |  69 ++--
  tools/validate-project-state.sh                    |   2 +-
- 69 files changed, 4372 insertions(+), 209 deletions(-)
+ 69 files changed, 4386 insertions(+), 209 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
+M  docs/manifests/Phase3-change-manifest.md
+M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
+D  exports/chatgpt/phase-evidence/GIT_STAT_c770325.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_d015f7d.txt
+M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/MANIFEST.md
+M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
+M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md
 M  governance/project-state.json
 ```
 

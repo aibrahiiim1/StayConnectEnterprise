@@ -1,0 +1,4 @@
+commit f2b11f91e815a2cf2ea2946e78661bc185c11160
+Date:   Sun Jul 19 12:27:38 2026 +0300
+
+    @ Phase 3 increment 3 continuation Â§1-Â§5 (inventory_head): linearizable queue + typed Events + logging-PII fix + apply/rollback role split + bootstrap target-kind; gate 117/117, pmsd race-green

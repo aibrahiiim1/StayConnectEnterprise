@@ -1,4 +1,0 @@
-commit d015f7d4842ca0de09065df9330f44c1f3699b78
-Date:   Sun Jul 19 12:00:04 2026 +0300
-
-    @ Phase 3 increment 3 Part-B Â§10/Â§14/Â§17 (inventory_head): crypto lock key + typed error vocabulary + bounded event queue; pmsd race-green
