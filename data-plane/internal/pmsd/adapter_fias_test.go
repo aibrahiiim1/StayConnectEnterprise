@@ -21,6 +21,7 @@ type recordingSink struct {
 	resyncComplete int
 	events         []Event
 	overflow       bool
+	continuityFlt  int
 	q              *BoundedQueue
 }
 
@@ -62,6 +63,12 @@ func (s *recordingSink) OnDomainEvent(ctx context.Context, ev Event) error {
 	}
 	s.mu.Lock()
 	s.events = append(s.events, ev)
+	s.mu.Unlock()
+	return nil
+}
+func (s *recordingSink) OnContinuityFault(ctx context.Context, code Code) error {
+	s.mu.Lock()
+	s.continuityFlt++
 	s.mu.Unlock()
 	return nil
 }
@@ -178,11 +185,11 @@ func TestSourceFingerprint_DuplicateAndDistinct(t *testing.T) {
 }
 
 func TestSourceFingerprint_EmptyKeyFailsClosed(t *testing.T) {
-	fp, ver := ComputeSourceFingerprint(nil, 1, newSourceEvent("i", RecGI, 1, "p", ""))
+	fp, ver := ComputeSourceFingerprint(nil, 1, newSourceEvent("i", RecGI, 1, "p", "", nil))
 	if fp != "" || ver != 0 {
 		t.Error("empty identity key must fail closed (empty fingerprint)")
 	}
-	fp, ver = ComputeSourceFingerprint([]byte("k"), 0, newSourceEvent("i", RecGI, 1, "p", ""))
+	fp, ver = ComputeSourceFingerprint([]byte("k"), 0, newSourceEvent("i", RecGI, 1, "p", "", nil))
 	if fp != "" || ver != 0 {
 		t.Error("zero key version must fail closed")
 	}
@@ -194,25 +201,36 @@ func TestSourceFingerprint_EmptyKeyFailsClosed(t *testing.T) {
 	}
 }
 
-// TestLogicalStayKey_SeparateFromEvent proves Stay identity is scoped by reservation + lifecycle (not the
-// event fingerprint) and that a Room Move keeps the SAME logical stay while producing a DIFFERENT event.
-func TestLogicalStayKey_SeparateFromEvent(t *testing.T) {
+// TestStayResolutionCandidate_NonAuthoritative proves the connector's stay-resolution HINT is scoped by
+// reservation ONLY (room and arrival excluded), is distinct from the event fingerprint, and is NOT required
+// by Validate — the authoritative Stay/lifecycle resolution is Increment 4's job.
+func TestStayResolutionCandidate_NonAuthoritative(t *testing.T) {
 	a := testAdapter()
 	in := a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
-	move := a.toEvent("GC|RN1500|G#12345|GNSmith|GFJohn|GA260101|GD260105|") // same reservation+arrival, new room
-	if in.LogicalStayKey != move.LogicalStayKey {
-		t.Error("a Room Move within one Stay must keep the same LogicalStayKey (room is evidence only)")
+	move := a.toEvent("GC|RN1500|G#12345|GNSmith|GFJohn|GA260101|GD260105|")   // same reservation, new room
+	arrFix := a.toEvent("GC|RN1408|G#12345|GNSmith|GFJohn|GA260102|GD260105|") // same reservation, corrected arrival
+	if in.StayResolutionCandidate != move.StayResolutionCandidate {
+		t.Error("a Room Move (room excluded) must keep the same candidate")
+	}
+	if in.StayResolutionCandidate != arrFix.StayResolutionCandidate {
+		t.Error("an arrival correction (arrival excluded) must keep the same candidate")
 	}
 	if in.SourceEventFingerprint == move.SourceEventFingerprint {
-		t.Error("a Room Move must still be a distinct Event")
+		t.Error("a Room Move must still be a DISTINCT event fingerprint")
 	}
-	if in.LogicalStayKey == in.SourceEventFingerprint {
-		t.Error("logical-stay identity must be distinct from the event fingerprint")
+	if in.StayResolutionCandidate == in.SourceEventFingerprint {
+		t.Error("the candidate must be distinct from the event fingerprint")
 	}
-	// different reservation -> different stay
+	// different reservation -> different candidate
 	other := a.toEvent("GI|RN1408|G#99999|GNSmith|GFJohn|GA260101|GD260105|")
-	if other.LogicalStayKey == in.LogicalStayKey {
-		t.Error("different reservation must be a different logical stay")
+	if other.StayResolutionCandidate == in.StayResolutionCandidate {
+		t.Error("a different reservation must be a different candidate")
+	}
+	// the candidate is NOT a mandatory identity: an otherwise-valid event with no candidate still validates
+	ev := in
+	ev.StayResolutionCandidate = ""
+	if err := ev.Validate(); err != nil {
+		t.Errorf("StayResolutionCandidate must not be a mandatory identity: %v", err)
 	}
 }
 
@@ -226,10 +244,62 @@ func TestFIAS_MalformedAndOverlong(t *testing.T) {
 	if a.toEvent("GI|G#12345|GNSmith|GA260101|").Validate() == nil {
 		t.Error("GI without room (RN) must be rejected")
 	}
-	// overlong reservation -> rejected (not truncated into a possibly-colliding value)
-	long := "GI|RN1408|G#" + strings.Repeat("9", maxReservationLen+5) + "|GNSmith|GFJohn|GA260101|GD260105|"
-	if a.toEvent(long).Validate() == nil {
-		t.Error("overlong reservation must be rejected, not truncated")
+}
+
+// TestFIAS_OverlongFieldsRejectedNoTruncation proves §B: EVERY identity/evidence-bearing FIAS field, when
+// overlong, causes the record to be REJECTED (never silently truncated into a possibly-colliding value), and
+// that the full untruncated value the adapter carried is what the validator sees — so no shortened value can
+// slip through. It also drives the rejected event through the real BoundedQueue to prove no truncated (or
+// any) value reaches the queue/inbox: Enqueue returns EVENT_INVALID and capacity is untouched.
+func TestFIAS_OverlongFieldsRejectedNoTruncation(t *testing.T) {
+	a := testAdapter()
+	// base valid record (all required fields present, within bounds)
+	base := func() map[string]string {
+		return map[string]string{"RN": "1408", "G#": "12345", "GN": "Smith", "GF": "John", "FO": "F900", "GA": "260101", "GD": "260105"}
+	}
+	build := func(f map[string]string) string {
+		return "GI|RN" + f["RN"] + "|G#" + f["G#"] + "|GN" + f["GN"] + "|GF" + f["GF"] + "|FO" + f["FO"] + "|GA" + f["GA"] + "|GD" + f["GD"] + "|"
+	}
+	// sanity: the base record is a VALID event (so each failure below is attributable to the one overlong field)
+	if err := a.toEvent(build(base())).Validate(); err != nil {
+		t.Fatalf("base record must be valid, got %v", err)
+	}
+
+	cases := []struct {
+		field string
+		limit int
+		get   func(Event) string
+	}{
+		{"RN", maxRoomLen, func(e Event) string { return e.RoomNumber }},
+		{"G#", maxReservationLen, func(e Event) string { return e.ReservationRef }},
+		{"GN", maxGuestLen, func(e Event) string { return e.GuestLastName }},
+		{"GF", maxGuestLen, func(e Event) string { return e.GuestFirstName }},
+		{"FO", maxFolioLen, func(e Event) string { return e.FolioRef }},
+		{"GA", maxRawTimestampLen, func(e Event) string { return e.ArrivalRaw }},
+		{"GD", maxRawTimestampLen, func(e Event) string { return e.DepartureRaw }},
+	}
+	for _, tc := range cases {
+		f := base()
+		overlong := strings.Repeat("9", tc.limit+7)
+		f[tc.field] = overlong
+		ev := a.toEvent(build(f))
+
+		// 1) the adapter carried the FULL value untruncated (no silent clip inside toEvent)
+		if got := tc.get(ev); got != overlong {
+			t.Errorf("%s: adapter truncated the value (len %d != %d) — silent truncation", tc.field, len(got), len(overlong))
+		}
+		// 2) validation REJECTS it
+		if ev.Validate() == nil {
+			t.Errorf("%s: overlong value must be rejected, not accepted", tc.field)
+		}
+		// 3) it cannot reach the queue/inbox: Enqueue returns EVENT_INVALID and consumes zero capacity
+		q := NewBoundedQueue(4, time.Second)
+		if err := q.Enqueue(context.Background(), ev); Classify(err) != CodeEventInvalid {
+			t.Errorf("%s: enqueue of overlong record = %q, want EVENT_INVALID", tc.field, Classify(err))
+		}
+		if q.Len() != 0 {
+			t.Errorf("%s: a truncated/overlong record reached the queue (len=%d)", tc.field, q.Len())
+		}
 	}
 }
 
@@ -423,5 +493,63 @@ func TestAdapter_QueueOverflowRequestsResync(t *testing.T) {
 	sink.mu.Unlock()
 	if !ov {
 		t.Error("overflow was not observed by the sink")
+	}
+}
+
+// TestAdapter_MalformedRecordFaultsNotSilentDrop proves §B at the Serve boundary: a GI record with an
+// identity-truncating overlong reservation is NOT silently skipped. The adapter drives a continuity fault
+// through the sink (OnContinuityFault) AND requests a verified resync (DR) — and admits ZERO events, so no
+// truncated value can reach the queue/inbox.
+func TestAdapter_MalformedRecordFaultsNotSilentDrop(t *testing.T) {
+	adapter, server := newAdapterOverPipe(t)
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+
+	sawDR := make(chan struct{}, 1)
+	go func() {
+		br := bufio.NewReader(server)
+		for i := 0; i < 5; i++ {
+			if _, err := pms.ReadFramedRecord(br); err != nil {
+				return
+			}
+		}
+		// a GI whose reservation (G#) is grossly overlong — must be rejected, never truncated
+		overlong := "GI|RN10|G#" + strings.Repeat("9", maxReservationLen+16) + "|GNX|GFY|GA260101|GD260105|"
+		if err := pms.WriteFramedRecord(server, overlong); err != nil {
+			return
+		}
+		for {
+			body, err := pms.ReadFramedRecord(br)
+			if err != nil {
+				return
+			}
+			if pms.RecordID(body) == "DR" {
+				select {
+				case sawDR <- struct{}{}:
+				default:
+				}
+				return
+			}
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	go func() { _ = adapter.Serve(ctx, sink) }()
+
+	select {
+	case <-sawDR:
+		// adapter requested a verified resync on the malformed record (no silent skip)
+	case <-time.After(2 * time.Second):
+		t.Fatal("adapter did not request a resync (DR) on a malformed/overlong record")
+	}
+	// give the fault write a beat to land, then assert: fault recorded, zero events admitted
+	time.Sleep(20 * time.Millisecond)
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if sink.continuityFlt < 1 {
+		t.Errorf("malformed record must drive a continuity fault, got %d", sink.continuityFlt)
+	}
+	if len(sink.events) != 0 {
+		t.Errorf("malformed record admitted %d events (must be zero — no truncated value reaches the inbox)", len(sink.events))
 	}
 }

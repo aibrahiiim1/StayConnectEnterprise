@@ -222,12 +222,31 @@ func (s *workerSink) OnDisconnected(at time.Time, code Code) error {
 func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 	if err := s.q.Enqueue(ctx, ev); err != nil {
 		if Classify(err) == CodeQueueOverflow {
-			_ = s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityGapDetected, DiscontinuityAt: ptr(s.w.deps.now())})
-			_ = s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncRequired, ResyncRequestedAt: ptr(s.w.deps.now())})
+			// Persist the gap/resync transition — a DB/generation failure here must NOT be swallowed: it is
+			// returned so the transport closes rather than leaving a silent, unrecorded gap.
+			if perr := s.markGapResync(); perr != nil {
+				return perr
+			}
 		}
 		return err
 	}
 	return s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastValidEventAt: ptr(ev.NormalizedAt), LastEventCursor: clip(ev.Cursor, maxCursorLen)})
+}
+
+// OnContinuityFault durably drives continuity→GAP_DETECTED and sync→RESYNC_REQUIRED for a record the adapter
+// could not admit (malformed/overlong/failed normalization). Both writes are persisted under the pinned
+// generation; the first failure is returned so the adapter closes the transport instead of continuing over an
+// unrecorded gap.
+func (s *workerSink) OnContinuityFault(ctx context.Context, code Code) error {
+	return s.markGapResync()
+}
+
+// markGapResync persists the two-axis continuity-gap + resync-required transition, returning the first error.
+func (s *workerSink) markGapResync() error {
+	if err := s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityGapDetected, DiscontinuityAt: ptr(s.w.deps.now())}); err != nil {
+		return err
+	}
+	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncRequired, ResyncRequestedAt: ptr(s.w.deps.now())})
 }
 
 // QueueForTest exposes the per-ownership queue for integration tests only.

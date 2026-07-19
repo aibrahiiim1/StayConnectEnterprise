@@ -151,7 +151,19 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 		case "GI", "GC", "GO":
 			ev := a.toEvent(body)
 			if err := ev.Validate(); err != nil {
-				// a malformed record is a framing/normalization fault, not a guest event
+				// A malformed / overlong / identity-truncating record is a feed-continuity fault, NOT a
+				// silently-droppable event. Drive continuity→GAP_DETECTED + sync→RESYNC_REQUIRED durably
+				// (a persist/generation failure closes the transport), then request a verified full resync.
+				// No shortened or partial value from this record is exposed to the queue/inbox.
+				if ferr := sink.OnContinuityFault(ctx, CodeEventInvalid); ferr != nil {
+					return ferr
+				}
+				if !resyncing {
+					if werr := a.g.writeFrame(pms.BuildDR()); werr != nil {
+						return werr
+					}
+					resyncing = true
+				}
 				continue
 			}
 			if derr := sink.OnDomainEvent(ctx, ev); derr != nil {
@@ -188,32 +200,28 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 // reservation across different lifecycle episodes never collide, and reservation number alone is not the
 // idempotency key. Raw frame bytes stay here; only bounded typed fields leave.
 func (a *fiasAdapter) toEvent(body string) Event {
-	f := pms.ParseFields(body)
 	rt := RecordType(pms.RecordID(body))
-	// identity-critical fields are NOT truncated (a truncated identity could collide) — Validate rejects an
-	// overlong value and the caller triggers gap/resync. Guest names are display-only and may be clipped.
-	room, roomP := f["RN"]
-	reservation, resP := f["G#"]
-	arrival, arrP := f["GA"]
-	departure, depP := f["GD"]
-	lastV, lastP := f["GN"]
-	firstV, firstP := f["GF"]
-	folioV, folioP := f["FO"]
-	last := clip(lastV, maxGuestLen)
-	first := clip(firstV, maxGuestLen)
-
-	// canonical source event over EVERY normalized field (+ presence/absence + normalization + profile) so
-	// an exact retransmission is idempotent and any meaningful change is distinct.
-	se := newSourceEvent(a.iface.ID, rt, a.rev.NormalizationVersion, a.profile, "")
-	se.set("room", room, roomP)
-	se.set("reservation", reservation, resP)
-	se.set("last", lastV, lastP)
-	se.set("first", firstV, firstP)
-	se.set("arrival", arrival, arrP)
-	se.set("departure", departure, depP)
-	se.set("folio", folioV, folioP)
+	// The fingerprint is computed over the COMPLETE parsed record (every code+value in order, duplicates and
+	// present-but-empty preserved, incl. unknown codes) — not just the typed fields — so any source-token
+	// change alters it and an exact retransmission reproduces it.
+	rawPairs := pms.ParseFieldPairs(body)
+	pairs := make([]FieldPair, len(rawPairs))
+	for i, p := range rawPairs {
+		pairs[i] = FieldPair{Code: p[0], Value: p[1]}
+	}
+	se := newSourceEvent(a.iface.ID, rt, a.rev.NormalizationVersion, a.profile, "", pairs)
 	fp, fpVer := ComputeSourceFingerprint(a.identKey, a.identKeyN, se)
 	evHash, evVer := ComputeEvidenceHMAC(a.evKey, a.evKeyNo, body)
+
+	// Typed fields are extracted (first occurrence per code) but NEVER truncated: an overlong PMS value is
+	// left intact so Validate rejects it (→ the caller triggers a continuity gap/resync), rather than
+	// silently changing it into a different valid-looking value. Display name is derived from the (validated)
+	// typed components. Runtime/Resync generation are stamped later by the owning worker at admission.
+	f := pms.ParseFields(body)
+	reservation := f["G#"]
+	room := f["RN"]
+	last := f["GN"]
+	first := f["GF"]
 
 	now := a.now()
 	return Event{
@@ -221,20 +229,20 @@ func (a *fiasAdapter) toEvent(body string) Event {
 		NormalizationVer:       a.rev.NormalizationVersion,
 		RecordType:             rt,
 		SourceEventFingerprint: fp, FingerprintKeyVersion: fpVer, ExternalEventIdentity: fp,
-		LogicalStayKey: DeriveLogicalStayKey(a.iface.TenantID, a.iface.SiteID, a.iface.ID, reservation, arrival),
-		ReservationRef: reservation,
-		RoomNumber:     room,
-		FolioRef:       clip(folioV, maxFolioLen),
-		GuestLastName:  last,
-		GuestFirstName: first,
-		GuestName:      deriveDisplayName(last, first),
-		ArrivalRaw:     arrival,
-		DepartureRaw:   departure,
+		StayResolutionCandidate: DeriveStayResolutionCandidate(a.iface.TenantID, a.iface.SiteID, a.iface.ID, reservation),
+		ReservationRef:          reservation,
+		RoomNumber:              room,
+		FolioRef:                f["FO"],
+		GuestLastName:           last,
+		GuestFirstName:          first,
+		GuestName:               deriveDisplayName(last, first),
+		ArrivalRaw:              f["GA"],
+		DepartureRaw:            f["GD"],
 		// GI/GC/GO carry no verified FIAS event timestamp -> PMSEvent* left unavailable (never substitute GA).
 		PMSEventTimestampRaw: "",
 		PMSEventAt:           nil,
 		NormalizedAt:         now,
-		Cursor:               clip(reservation+":"+room, maxCursorLen),
+		Cursor:               reservation + ":" + room,
 		SourceEvidenceHash:   evHash, EvidenceKeyVersion: evVer,
 		ReceivedAt: now,
 	}

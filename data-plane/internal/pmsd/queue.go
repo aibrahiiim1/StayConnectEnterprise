@@ -12,22 +12,32 @@ import (
 // never the raw STX/ETX frame bytes, which stay inside the protocol adapter boundary and are never logged,
 // queued, persisted unredacted, returned through errors, or exported.
 type Event struct {
-	// provenance (identity only — never secret material)
+	// provenance (identity only — never secret material). RuntimeGeneration/ResyncGeneration are stamped by
+	// the owning worker at admission time (the adapter does not know them); they bind the durable inbox row
+	// to the exact ownership + resync cycle that produced it.
 	InterfaceID        string
 	RevisionID         string
 	SecretGenerationID string
 	NormalizationVer   int
+	RuntimeGeneration  int64
+	ResyncGeneration   int64
 
 	// record classification
 	RecordType RecordType // closed enum (domain vs control)
 
-	// idempotency: keyed-HMAC fingerprint over the CANONICAL full source event (purpose PMS_EVENT_IDENTITY).
-	// ExternalEventIdentity carries the same value (the durable stay_events identity). LogicalStayKey is the
-	// SEPARATE Stay-resolution identity (never the idempotency key).
-	SourceEventFingerprint string
-	FingerprintKeyVersion  int
-	ExternalEventIdentity  string
-	LogicalStayKey         string
+	// idempotency: keyed-HMAC fingerprint over the CANONICAL complete source record (purpose
+	// PMS_EVENT_IDENTITY). ExternalEventIdentity carries the same value (the durable stay_events identity).
+	//
+	// StayResolutionCandidate is a NON-AUTHORITATIVE hint only: it is NOT unique, NEVER a database identity,
+	// NEVER a lifecycle/episode decision, and NEVER sufficient to apply a Stay mutation. The authoritative
+	// Stay / lifecycle_version / Room / Folio resolution is done TRANSACTIONALLY by the Increment-4 Stay
+	// engine (existing Stay vs Room Move vs new lifecycle vs Reinstatement vs Manual Review). The connector
+	// must not decide Stay identity — arrival evidence can be corrected within the same Stay, and the
+	// connector has no authoritative lifecycle_version.
+	SourceEventFingerprint  string
+	FingerprintKeyVersion   int
+	ExternalEventIdentity   string
+	StayResolutionCandidate string
 
 	// timestamps: Arrival/Departure are Stay dates (NOT event time); ReceivedAt is the local receipt clock;
 	// PMSEvent* is populated ONLY from a verified FIAS event-timestamp field parsed under the pinned tz.

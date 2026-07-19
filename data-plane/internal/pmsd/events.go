@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -105,7 +104,9 @@ func (e Event) Validate() error {
 	if e.RecordType.IsDomain() {
 		// a guest Stay mutation must carry: a 64-hex keyed-HMAC source-event fingerprint (== external
 		// identity) with a positive fingerprint-key version, a 64-hex keyed-HMAC source evidence with a
-		// positive key version, a logical-stay key, and non-empty room/reservation.
+		// positive key version, and non-empty room/reservation. The connector NEVER carries an authoritative
+		// Stay identity — StayResolutionCandidate is an optional non-authoritative hint (Increment 4 resolves
+		// the Stay/lifecycle transactionally), so it is not validated as a mandatory identity here.
 		if !isHex64(e.SourceEventFingerprint) || e.FingerprintKeyVersion <= 0 {
 			return ErrEventInvalid
 		}
@@ -113,9 +114,6 @@ func (e Event) Validate() error {
 			return ErrEventInvalid
 		}
 		if !isHex64(e.SourceEvidenceHash) || e.EvidenceKeyVersion <= 0 {
-			return ErrEventInvalid
-		}
-		if !isHex64(e.LogicalStayKey) {
 			return ErrEventInvalid
 		}
 		if strings.TrimSpace(e.RoomNumber) == "" || strings.TrimSpace(e.ReservationRef) == "" {
@@ -148,65 +146,56 @@ func ComputeEvidenceHMAC(key []byte, keyVersion int, data string) (hexDigest str
 	return hex.EncodeToString(m.Sum(nil)), keyVersion
 }
 
-// fieldVal captures a normalized field's value AND whether it was present in the source record — an empty
-// present field is semantically distinct from an absent one.
-type fieldVal struct {
-	value   string
-	present bool
+// FieldPair is one (code, value) occurrence exactly as parsed from a FIAS record — a 2-char field code and
+// its (possibly empty) value. The list is ORDERED and keeps DUPLICATE occurrences so the fingerprint
+// distinguishes "GNa|GNb" from "GNb|GNa" and from a single "GNa".
+type FieldPair struct {
+	Code  string
+	Value string
 }
 
-// SourceEvent is the canonical, versioned representation of a single PMS source event used to derive the
-// idempotency fingerprint. It contains EVERY verified normalized field the record represents (not just
-// reservation/room/dates) plus presence/absence, the normalization version, the source-protocol profile,
-// and any authoritative sequence/cursor when actually available.
+// SourceEvent is the canonical representation of the COMPLETE parsed FIAS record used to derive the
+// idempotency fingerprint. It carries every field code+value the source sent (in order, with duplicates and
+// present-but-empty preserved), the record type, interface, normalization version, protocol profile, and a
+// verified source sequence/timestamp when available. Unknown field codes are NOT surfaced to the typed
+// domain Event, but they DO influence this fingerprint (so a change to any source token changes the HMAC).
+// Only the STX/ETX framing bytes are excluded.
 type SourceEvent struct {
 	InterfaceID          string
 	RecordType           RecordType
 	NormalizationVersion int
 	ProtocolProfile      string // e.g. "protel-fias/v1"
-	Sequence             string // verified source sequence/cursor when available, else ""
-	fields               map[string]fieldVal
+	Sequence             string // verified source sequence/cursor/timestamp when available, else ""
+	Pairs                []FieldPair
 }
 
-func newSourceEvent(interfaceID string, rt RecordType, normVer int, profile, sequence string) SourceEvent {
+func newSourceEvent(interfaceID string, rt RecordType, normVer int, profile, sequence string, pairs []FieldPair) SourceEvent {
 	return SourceEvent{InterfaceID: interfaceID, RecordType: rt, NormalizationVersion: normVer,
-		ProtocolProfile: profile, Sequence: sequence, fields: map[string]fieldVal{}}
+		ProtocolProfile: profile, Sequence: sequence, Pairs: pairs}
 }
 
-// set records a normalized field: (value, present). present=false means the source omitted the field.
-func (se SourceEvent) set(name, value string, present bool) {
-	se.fields[name] = fieldVal{value, present}
-}
-
-// canonical produces a deterministic, boundary-safe encoding. Fields are sorted; present-but-empty is
-// distinguished from absent; unit separators prevent field-boundary shifting.
+// canonical produces a deterministic, boundary-safe encoding. Every token is length-prefixed so no value
+// can impersonate a boundary; field pairs are encoded IN THE SOURCE ORDER (never sorted) so duplicate and
+// reordered occurrences are distinguishable, and a present-but-empty value ("GN") is distinct from an
+// absent field (no pair emitted for it).
 func (se SourceEvent) canonical() string {
 	var b strings.Builder
 	enc := func(s string) {
-		// length-prefix each token so no value can impersonate a boundary
 		b.WriteString(strconv.Itoa(len(s)))
 		b.WriteByte(':')
 		b.WriteString(s)
 		b.WriteByte(0x1f)
 	}
-	enc("source-event:v1")
+	enc("source-event:v2")
 	enc(se.ProtocolProfile)
 	enc(se.InterfaceID)
 	enc(string(se.RecordType))
 	enc("nv" + strconv.Itoa(se.NormalizationVersion))
 	enc("seq" + se.Sequence)
-	names := make([]string, 0, len(se.fields))
-	for n := range se.fields {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	for _, n := range names {
-		fv := se.fields[n]
-		if fv.present {
-			enc("F+" + n + "=" + fv.value)
-		} else {
-			enc("F-" + n) // absent marker (distinct from present-but-empty "F+name=")
-		}
+	enc("n=" + strconv.Itoa(len(se.Pairs))) // pair count binds the boundary between header and body
+	for _, p := range se.Pairs {
+		enc("c=" + p.Code)
+		enc("v=" + p.Value)
 	}
 	return b.String()
 }
@@ -224,12 +213,16 @@ func ComputeSourceFingerprint(identityKey []byte, keyVersion int, se SourceEvent
 	return hex.EncodeToString(m.Sum(nil)), keyVersion
 }
 
-// DeriveLogicalStayKey is the SEPARATE Stay-resolution identity (never the Event idempotency key). It is
-// scoped by tenant/site/interface + reservation (G#) + lifecycle evidence; room (RN) is evidence only and
-// never part of the identity (it is not globally unique and changes on a Room Move within one Stay).
-func DeriveLogicalStayKey(tenantID, siteID, interfaceID, reservation, lifecycleEvidence string) string {
+// DeriveStayResolutionCandidate is a NON-AUTHORITATIVE grouping hint only — never a Stay primary identity, a
+// unique constraint, a lifecycle/episode decision, Folio/Room ownership, or sufficient to apply a Stay
+// mutation. It is scoped by tenant/site/interface + reservation (G#) ONLY. Room (RN) is excluded (not
+// globally unique; changes on a Room Move within one Stay), and arrival (GA) is excluded (it can be
+// corrected within the same Stay). The Increment-4 Stay engine performs the authoritative, transactional
+// resolution (existing Stay / Room Move / new lifecycle / Reinstatement / Manual Review); this value is
+// only a starting point it may consult.
+func DeriveStayResolutionCandidate(tenantID, siteID, interfaceID, reservation string) string {
 	h := sha256.New()
-	for _, part := range []string{"logical-stay:v1", tenantID, siteID, interfaceID, reservation, lifecycleEvidence} {
+	for _, part := range []string{"stay-resolution-candidate:v1", tenantID, siteID, interfaceID, reservation} {
 		_, _ = h.Write([]byte(strconv.Itoa(len(part))))
 		_, _ = h.Write([]byte{':'})
 		_, _ = h.Write([]byte(part))

@@ -244,6 +244,12 @@ type AxisSink interface {
 	// continuity→GAP_DETECTED and sync→RESYNC_REQUIRED and returns a QUEUE_OVERFLOW error so the adapter
 	// stops normal application until a verified resync.
 	OnDomainEvent(ctx context.Context, ev Event) error
+	// OnContinuityFault records a feed-continuity fault for a record the adapter could NOT admit as a valid
+	// typed event (malformed framing, overlong/identity-truncating field, failed normalization). It DRIVES
+	// continuity→GAP_DETECTED and sync→RESYNC_REQUIRED and PERSISTS both under the pinned generation; the
+	// adapter must never silently drop such a record. A persist failure is returned so the transport closes
+	// (a fault we cannot durably record must not be swallowed).
+	OnContinuityFault(ctx context.Context, code Code) error
 }
 
 // Deps injects every external effect so flags-OFF and failure paths are provable with spies.

@@ -13,9 +13,7 @@ import (
 
 func ev(id string) Event {
 	iface := "aaaaaaaa-0000-4000-8000-000000000001"
-	se := newSourceEvent(iface, RecGI, 1, "protel-fias/v1", "")
-	se.set("reservation", id, true)
-	se.set("room", "101", true)
+	se := newSourceEvent(iface, RecGI, 1, "protel-fias/v1", "", []FieldPair{{Code: "G#", Value: id}, {Code: "RN", Value: "101"}})
 	fp, fpv := ComputeSourceFingerprint([]byte("test-identity-key"), 1, se)
 	h, ver := ComputeEvidenceHMAC([]byte("test-evidence-key"), 1, id)
 	return Event{
@@ -23,8 +21,8 @@ func ev(id string) Event {
 		SecretGenerationID: "44444444-0000-4000-8000-000000000001", NormalizationVer: 1,
 		RecordType: RecGI, ReservationRef: id, RoomNumber: "101",
 		SourceEventFingerprint: fp, FingerprintKeyVersion: fpv, ExternalEventIdentity: fp,
-		LogicalStayKey:     DeriveLogicalStayKey(tTenantUUID, tSiteUUID, iface, id, "260101"),
-		SourceEvidenceHash: h, EvidenceKeyVersion: ver, NormalizedAt: time.Now(),
+		StayResolutionCandidate: DeriveStayResolutionCandidate(tTenantUUID, tSiteUUID, iface, id),
+		SourceEvidenceHash:      h, EvidenceKeyVersion: ver, NormalizedAt: time.Now(),
 	}
 }
 
