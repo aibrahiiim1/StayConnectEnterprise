@@ -1,4 +1,4 @@
-commit 46b95c3105aa5c025c3948d848742f93dd2a4cc3
-Date:   Sun Jul 19 03:09:10 2026 +0300
+commit c77032578712d575f996bba2139d2ddc73b2f701
+Date:   Sun Jul 19 03:14:08 2026 +0300
 
     @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98

@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `28858dd54ac39001bfeca7560d9e7dfaffaedb3e`
-- **Provenance (generation HEAD = inventory_head):** `28858dd54ac39001bfeca7560d9e7dfaffaedb3e`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `c77032578712d575f996bba2139d2ddc73b2f701`
+- **Provenance (generation HEAD = inventory_head):** `c77032578712d575f996bba2139d2ddc73b2f701`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 63
@@ -22,7 +22,7 @@
 | `data-plane/internal/pmsd/supervisor.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 (inventory_head): pmsd read-only PMS connector daemon (ADR-0001), DARK |
 | `data-plane/internal/pmsd/worker.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 (inventory_head): pmsd read-only PMS connector daemon (ADR-0001), DARK |
 | `data-plane/migrations/0010_phase3_stay_resolution.down.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | @ Phase 3 increment 2 final invariants (inventory_head): event append-first/terminal rules, grace all-or-none, runner scope hardening |
-| `data-plane/migrations/0010_phase3_stay_resolution.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | @ Phase 3 increment 2 final invariants (inventory_head): event append-first/terminal rules, grace all-or-none, runner scope hardening |
+| `data-plane/migrations/0010_phase3_stay_resolution.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `deploy/systemd/stayconnect-pmsd.service` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | @ Phase 3 increment 3 (inventory_head): pmsd read-only PMS connector daemon (ADR-0001), DARK |
 | `docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/Phase3-Privilege-Matrix.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
@@ -30,48 +30,48 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/StayConnect-IAM-Phase2-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/architecture/StayConnect-IAM-Phase3-Plan.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 2 hardening (inventory_head): migration 0010 corrections + authoritative runner + 55/55 gate |
+| `docs/architecture/StayConnect-IAM-Phase3-Plan.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `docs/architecture/adr/ADR-0001-pmsd-connector-ownership.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 2 final invariants (inventory_head): event append-first/terminal rules, grace all-or-none, runner scope hardening |
-| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
+| `docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 (delivery_head): complete manifest + rebuilt packs + pointer |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_28858dd.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/GIT_STAT_c770325.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `exports/chatgpt/stayconnectenterprise/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
+| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 increment 2 hardening (delivery_head): complete manifest + rebuilt packs + pointer |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | @ Phase 3 increment 3 (inventory_head): pmsd read-only PMS connector daemon (ADR-0001), DARK |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `iam_v2_scratch/phase3_0010_lifecycle.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | @ Phase 3 increment 2 final invariants (inventory_head): event append-first/terminal rules, grace all-or-none, runner scope hardening |
-| `scripts/edge-migrate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | @ Phase 3 increment 2 final invariants (inventory_head): event append-first/terminal rules, grace all-or-none, runner scope hardening |
+| `iam_v2_scratch/phase3_0010_lifecycle.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
+| `scripts/edge-migrate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98 |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
@@ -88,7 +88,7 @@
  data-plane/internal/pmsd/supervisor.go             | 126 +++++++
  data-plane/internal/pmsd/worker.go                 | 230 ++++++++++++
  .../0010_phase3_stay_resolution.down.sql           |  54 +++
- .../migrations/0010_phase3_stay_resolution.up.sql  | 333 +++++++++++++++++
+ .../migrations/0010_phase3_stay_resolution.up.sql  | 340 +++++++++++++++++
  deploy/systemd/stayconnect-pmsd.service            |  41 ++
  .../StayConnect-IAM-Phase2-Live-Dark-Acceptance.md |   2 +-
  docs/architecture/Phase3-Privilege-Matrix.md       |  34 ++
@@ -99,14 +99,14 @@
  docs/architecture/StayConnect-IAM-Phase3-Plan.md   | 161 ++++++++
  .../adr/ADR-0001-pmsd-connector-ownership.md       |  53 +++
  docs/context/StayConnect-IAM-Handoff.md            |  16 +-
- .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  71 ++++
- docs/manifests/Phase3-change-manifest.md           | 163 ++++++++
+ .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  94 +++++
+ docs/manifests/Phase3-change-manifest.md           | 164 ++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |   4 +-
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 250675 -> 270535 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 101471 -> 103205 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 41921 -> 42000 bytes
- .../chatgpt/phase-evidence/GIT_STAT_28858dd.txt    |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 250675 -> 270659 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 101471 -> 103280 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 41921 -> 42002 bytes
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |   4 -
+ .../chatgpt/phase-evidence/GIT_STAT_c770325.txt    |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  16 +-
  .../phase-evidence/Phase2-change-manifest.md       |  13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -124,7 +124,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |  12 +-
  .../Phase2-change-manifest.md                      |  13 +-
  .../Phase3-Privilege-Matrix.md                     |  34 ++
- .../Phase3-change-manifest.md                      | 163 ++++++++
+ .../Phase3-change-manifest.md                      | 164 ++++++++
  .../StayConnect-IAM-Handoff.md                     |  16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |  12 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |  12 +-
@@ -134,14 +134,14 @@
  .../StayConnect-IAM-Phase2-Plan.md                 |   2 +-
  .../StayConnect-IAM-Phase3-Plan.md                 | 161 ++++++++
  governance/decision-register.json                  |   1 +
- governance/project-state.json                      |  72 ++--
+ governance/project-state.json                      |  73 ++--
  governance/transitions/T0015.json                  |  18 +
- iam_v2_scratch/phase3_0010_lifecycle.sh            | 179 +++++++++
- scripts/edge-migrate.sh                            |  77 ++++
+ iam_v2_scratch/phase3_0010_lifecycle.sh            | 228 ++++++++++++
+ scripts/edge-migrate.sh                            |  98 +++++
  tools/project-state.py                             |  49 ++-
  .../tests/project_state_validator/run_mutations.py |  69 ++--
  tools/validate-project-state.sh                    |   2 +-
- 63 files changed, 3444 insertions(+), 209 deletions(-)
+ 63 files changed, 3547 insertions(+), 209 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -150,20 +150,26 @@ M  docs/manifests/Phase3-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_28858dd.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_2dbe4cd.txt
+R  exports/chatgpt/phase-evidence/GIT_STAT_46b95c3.txt -> exports/chatgpt/phase-evidence/GIT_STAT_c770325.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+c770325 @ Phase 3 increment 3 hardening PART A (inventory_head): 0010 secret-generation pin + event-id immutability + atomic lock-then-ledger runner + target-identity fail-closed + deployment-parity ownership; gate 98/98
+323697c @ Phase 3 increment 3 (delivery_head): complete manifest + rebuilt packs + pointer
 28858dd @ Phase 3 increment 3 (inventory_head): pmsd read-only PMS connector daemon (ADR-0001), DARK
 7f16628 @ Phase 3 increment 2 final invariants (delivery_head): complete manifest + rebuilt packs + pointer
 2dbe4cd @ Phase 3 increment 2 final invariants (inventory_head): event append-first/terminal rules, grace all-or-none, runner scope hardening
