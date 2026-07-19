@@ -11,7 +11,13 @@ import (
 	"time"
 )
 
-func ev(id string) Event { return Event{RecordType: "GI", ExternalEventIdentity: id} }
+func ev(id string) Event {
+	return Event{
+		InterfaceID: "aaaaaaaa-0000-4000-8000-000000000001", RevisionID: "33333333-0000-4000-8000-000000000001",
+		SecretGenerationID: "44444444-0000-4000-8000-000000000001", NormalizationVer: 1,
+		RecordType: RecGI, ExternalEventIdentity: id, NormalizedAt: time.Now(),
+	}
+}
 
 func TestQueue_EnqueueDequeueFIFO(t *testing.T) {
 	q := NewBoundedQueue(4, time.Second)
@@ -179,6 +185,52 @@ func TestQueue_LinearizableClose_NoAcceptAfterClose(t *testing.T) {
 		if atomic.LoadInt64(&accepted) != atomic.LoadInt64(&drained) {
 			t.Fatalf("iter %d: accounting mismatch accepted=%d drained=%d", iter, accepted, drained)
 		}
+	}
+}
+
+func TestQueue_InvalidEventRejectedBeforeCapacity(t *testing.T) {
+	q := NewBoundedQueue(4, time.Second)
+	bad := Event{RecordType: "GI"} // missing UUIDs / normalization / timestamp
+	if err := q.Enqueue(context.Background(), bad); Classify(err) != CodeEventInvalid {
+		t.Fatalf("invalid event must be EVENT_INVALID, got %v", Classify(err))
+	}
+	if q.Len() != 0 {
+		t.Fatalf("invalid event must not consume capacity, len=%d", q.Len())
+	}
+}
+
+// TestQueue_CloseLatencyBounded proves Close returns within ~enqueueTimeout even with a producer blocked on
+// a full queue (it cannot exceed the worker shutdown deadline).
+func TestQueue_CloseLatencyBounded(t *testing.T) {
+	timeout := 60 * time.Millisecond
+	q := NewBoundedQueue(1, timeout)
+	_ = q.Enqueue(context.Background(), ev("fill"))
+	go func() { _ = q.Enqueue(context.Background(), ev("blocked")) }() // will back-pressure up to timeout
+	time.Sleep(5 * time.Millisecond)                                   // let the producer enter back-pressure
+	start := time.Now()
+	q.Close()
+	if d := time.Since(start); d > timeout+40*time.Millisecond {
+		t.Fatalf("Close latency %s exceeded bound ~%s", d, timeout)
+	}
+}
+
+// TestQueue_OverflowLatchPersists proves the resync latch is NOT cleared by ordinary activity — only an
+// explicit ClearOverflowResync (which the worker calls after a verified resync) clears it.
+func TestQueue_OverflowLatchPersists(t *testing.T) {
+	q := NewBoundedQueue(1, 20*time.Millisecond)
+	_ = q.Enqueue(context.Background(), ev("1"))
+	_ = q.Enqueue(context.Background(), ev("2")) // overflow -> latch
+	if !q.OverflowResyncRequested() {
+		t.Fatal("overflow must latch resync")
+	}
+	// draining a buffered event (ordinary activity) must NOT clear the latch
+	_, _ = q.Dequeue(context.Background())
+	if !q.OverflowResyncRequested() {
+		t.Fatal("draining must not clear the overflow latch")
+	}
+	q.ClearOverflowResync()
+	if q.OverflowResyncRequested() {
+		t.Fatal("explicit clear should reset the latch")
 	}
 }
 

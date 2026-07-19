@@ -19,8 +19,8 @@ type Event struct {
 	NormalizationVer   int
 
 	// record classification + verified identity
-	RecordType            string // GI | GC | GO | DR | DS | DE | ...
-	ExternalEventIdentity string // verified per-interface event identity
+	RecordType            RecordType // closed enum (domain vs control)
+	ExternalEventIdentity string     // verified per-interface event identity (required for domain records)
 
 	// timestamps (raw kept as a bounded parsed field; normalized derived by the adapter)
 	PMSTimestampRaw string
@@ -36,8 +36,9 @@ type Event struct {
 	FolioRef       string
 	GuestName      string
 
-	// sanitized provenance digest of the source evidence (never the raw frame)
+	// keyed-HMAC provenance digest of the source evidence (never the raw frame); key is never stored here
 	SourceEvidenceHash string
+	EvidenceKeyVersion int
 
 	ReceivedAt time.Time
 }
@@ -98,6 +99,10 @@ func (q *BoundedQueue) Len() int { return len(q.ch) }
 // either commits before Close proceeds, or — if it is waiting on back-pressure — is bounded by the timeout,
 // after which Close proceeds and subsequent Enqueues see closed.
 func (q *BoundedQueue) Enqueue(ctx context.Context, ev Event) error {
+	// reject an invalid typed Event BEFORE it can consume queue capacity
+	if err := ev.Validate(); err != nil {
+		return coded(CodeEventInvalid, err)
+	}
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 	if q.closed {

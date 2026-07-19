@@ -46,7 +46,13 @@
 - **No unvalidated JSON blob** for runtime state — all axes are typed columns with CHECK-constrained enums.
 - **Ownership / privileges:** 0010 objects inherit `iam_v2_owner` (as with 0009); no `SECURITY DEFINER`; zero runtime grants while dark.
 
-## Verification (`iam_v2_scratch/phase3_0010_lifecycle.sh`) — 114/114 PASS
+## Verification (`iam_v2_scratch/phase3_0010_lifecycle.sh`) — 121/121 PASS
+
+Additional Part-A runner corrections since the 114/114 pass: migration **apply** role needs only `SELECT`+`INSERT` (no `DELETE`; rollback/admin is a separate operation; live-site apply role proven free of `UPDATE`/`DELETE`/`TRUNCATE`/`REFERENCES`/`TRIGGER` + public `CREATE`); standalone `--bootstrap-ledger` rejects an arbitrary `--target-kind`, an SQL-shaped or nonexistent owner, and an env-expanded live owner allowlist (live owner comes from a fixed approved set); disposable mode requires a **harness-generated marker** (`public._scratch_marker`), not merely a caller assertion.
+
+### pmsd read-only connector runtime (Increment 3, Part B/C) — verified separately
+`data-plane/internal/pmsd` unit + race tests (Docker golang:1.25) and `scripts/pmsd-pg-integration.sh` (disposable PG16, 6/6) prove: assignment-scoped discovery + cross-scope rejection; SHA-256 advisory lock key with fixed vectors; secret load+decrypt only after ownership; **atomic** runtime-generation allocation + exact-CAS independent-axis persistence (heartbeat preserves continuity/sync; stale owner rejected); real injectable FIAS adapter reusing `internal/pms` framing (no `errLiveDialDeferred`); the read-only allowlist at the socket-write chokepoint (PS/PA write zero bytes); bounded typed-Event delivery (overflow → GAP_DETECTED + RESYNC_REQUIRED + DR). Mandatory Software CI (`.github/workflows/phase3-software.yml`) runs all of this on every PR HEAD.
+
 
 Part-A final runner corrections (this pass):
 - **Mandatory positive target identity (§1):** normal apply requires `--only`, `--expect-db`, `--target-kind {disposable|live-site}`, `--ack-target`, `--expect-sha256` — none optional. A target is permitted only because its complete expected identity is positively verified (no database-name blacklist). Verified: missing `--expect-db`/`--target-kind`/`--ack-target`, wrong ack, `--expect-db` mismatch all refused. `live-site` requires `expect-db=stayconnect_site` + `I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION` + a NON-superuser role (that mode is not executed now).

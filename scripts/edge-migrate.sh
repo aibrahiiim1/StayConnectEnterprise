@@ -66,6 +66,12 @@ verify_target_identity(){ # $1=mode-label
   # positive baseline: the iam_v2 schema must be present (baseline built)
   [ "$(q "SELECT count(*) FROM information_schema.schemata WHERE schema_name='iam_v2'")" = 1 ] \
     || { echo "REFUSED: iam_v2 schema not present in '$curdb' (baseline not built)" >&2; exit 3; }
+  # disposable mode must carry a HARNESS-generated marker, not merely a caller assertion. Use pg_class
+  # (not privilege-filtered information_schema) so the check is independent of the execution role's grants.
+  if [ "$TARGET_KIND" = "disposable" ]; then
+    [ "$(q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='_scratch_marker'")" = 1 ] \
+      || { echo "REFUSED: disposable target requires a harness-generated marker (public._scratch_marker)" >&2; exit 3; }
+  fi
   if [ "$TARGET_KIND" = "live-site" ]; then
     [ "$(q "SELECT rolsuper FROM pg_roles WHERE rolname=current_user")" = f ] \
       || { echo "REFUSED: live-site execution role must be a least-privilege NON-superuser" >&2; exit 3; }
@@ -192,12 +198,21 @@ if [ "$BOOTSTRAP" -eq 1 ]; then
   esac
   [ "$ACK" = "I_UNDERSTAND_LEDGER_BOOTSTRAP" ] || { echo "REFUSED: bootstrap requires --ack-target I_UNDERSTAND_LEDGER_BOOTSTRAP" >&2; exit 3; }
   [ -n "$BOOTSTRAP_OWNER" ] || { echo "REFUSED: bootstrap requires --bootstrap-owner <role>" >&2; exit 3; }
-  if [ "$TARGET_KIND" = "live-site" ] && [ "$EXPECT_DB" != "stayconnect_site" ]; then
-    echo "REFUSED: live-site bootstrap requires --expect-db stayconnect_site" >&2; exit 3
+  # strict PostgreSQL role-name policy: reject anything but a plain identifier (no whitespace/quotes/;/SQL)
+  echo "$BOOTSTRAP_OWNER" | grep -Eq '^[a-z_][a-z0-9_]{0,62}$' \
+    || { echo "REFUSED: bootstrap owner '$BOOTSTRAP_OWNER' is not a valid role identifier" >&2; exit 3; }
+  if [ "$TARGET_KIND" = "live-site" ]; then
+    [ "$EXPECT_DB" = "stayconnect_site" ] || { echo "REFUSED: live-site bootstrap requires --expect-db stayconnect_site" >&2; exit 3; }
+    # live owner comes from a FIXED approved set baked into the runner, never an env-expandable allowlist
+    case "$BOOTSTRAP_OWNER" in iam_v2_owner) : ;; *) echo "REFUSED: live-site bootstrap owner must be a fixed approved role (iam_v2_owner)" >&2; exit 3;; esac
+  else
+    case " $LEDGER_OWNER_ALLOWLIST " in *" $BOOTSTRAP_OWNER "*) : ;; *) echo "REFUSED: bootstrap owner '$BOOTSTRAP_OWNER' not in allowlist" >&2; exit 3;; esac
   fi
   curdb="$(q 'SELECT current_database()')"
   [ "$curdb" = "$EXPECT_DB" ] || { echo "REFUSED: connected to '$curdb' but --expect-db '$EXPECT_DB'" >&2; exit 3; }
-  case " $LEDGER_OWNER_ALLOWLIST " in *" $BOOTSTRAP_OWNER "*) : ;; *) echo "REFUSED: bootstrap owner '$BOOTSTRAP_OWNER' not in allowlist" >&2; exit 3;; esac
+  # the role must actually exist (validated identifier → safe to interpolate)
+  [ "$(q "SELECT count(*) FROM pg_roles WHERE rolname='$BOOTSTRAP_OWNER'")" = 1 ] \
+    || { echo "REFUSED: bootstrap owner role '$BOOTSTRAP_OWNER' does not exist" >&2; exit 3; }
   if [ "$(q "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='schema_migrations'")" = 1 ]; then
     echo "REFUSED: ledger already exists; bootstrap is not needed and will not run" >&2; exit 3
   fi

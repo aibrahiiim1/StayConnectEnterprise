@@ -3,24 +3,20 @@ package pmsd
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 )
 
-var (
-	errCompetingOwner = errors.New("pmsd: competing owner holds the interface lock")
-	errNotDialable    = errors.New("pmsd: interface not ACTIVE / not read-only-capable")
-)
-
-// worker owns exactly one PMS Interface. Its runtime-generation is monotonic per successful ownership and
-// is written with optimistic checks so a previous owner cannot overwrite the current owner's state.
+// worker owns exactly one PMS Interface. Its runtime generation is allocated ATOMICALLY in PostgreSQL per
+// successful ownership; every axis write uses an exact compare-and-set on that generation so a previous
+// owner cannot overwrite the current owner's state.
 type worker struct {
-	iface  Interface
-	repo   Repo
-	deps   *Deps
-	cancel context.CancelFunc
-	done   chan struct{}
-	gen    int64
+	iface   Interface
+	repo    Repo
+	deps    *Deps
+	cancel  context.CancelFunc
+	done    chan struct{}
+	gen     int64
+	attempt int
 }
 
 func (w *worker) stop(grace time.Duration) {
@@ -37,73 +33,112 @@ func (w *worker) run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		w.attempt++
 		stable, err := w.ownAndServe(ctx)
 		if ctx.Err() != nil {
 			return
 		}
-		// reset backoff only after a meaningfully stable connection interval
 		if err == nil || stable >= w.deps.StableResetAfter {
 			bo.reset()
 		}
-		d := bo.next()
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(d):
+		case <-time.After(bo.next()):
 		}
 	}
 }
 
-// ownAndServe performs the ordered ownership protocol and returns how long a connection stayed up.
-// Ordering is strict: lock -> re-read -> startup-persist(UNKNOWN) -> dial -> serve. If the lock is not
-// acquired, NO socket is opened. On lock loss the connection is closed and serving stops.
+// ownAndServe performs the strict ordered ownership protocol:
+//
+//	lock -> re-read Interface/Revision/SecretGeneration -> validate -> allocate generation (atomic, pins
+//	revision+secret) -> decrypt secret -> dial -> serve (per-axis CAS) -> disconnect-persist.
+//
+// A lock loser opens NO socket and NEVER loads ciphertext / decrypts / dials. On lock loss the transport is
+// closed and serving stops.
 func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
+	sf := func(st Stage) SafeFields {
+		return SafeFields{InterfaceID: NewUUIDValue(w.iface.ID), Generation: w.gen, Stage: st, Attempt: w.attempt}
+	}
+
 	locker, err := w.deps.NewLocker(ctx)
 	if err != nil {
+		logEvent(w.deps.log(), EventWorkerLockFailed, Classify(err), sf(StageLock))
 		return 0, err
 	}
 	defer func() { _ = locker.Close() }()
 
 	lockKey, err := LockKey(w.iface.TenantID, w.iface.SiteID, w.iface.ID)
 	if err != nil {
+		logEvent(w.deps.log(), EventWorkerLockFailed, Classify(err), sf(StageLock))
 		return 0, err
 	}
 	got, err := locker.TryLock(ctx, lockKey)
 	if err != nil {
+		logEvent(w.deps.log(), EventWorkerLockFailed, Classify(err), sf(StageLock))
 		return 0, err
 	}
 	if !got {
-		// competing owner: do NOT open a PMS socket.
-		return 0, errCompetingOwner
+		return 0, coded(CodeLockNotAcquired, nil) // competing owner: NO socket, NO secret
 	}
 
-	// re-read AFTER acquiring ownership (lifecycle/revision/read-only capability may have changed)
-	iface, rev, err := w.repo.LoadInterface(ctx, w.iface.TenantID, w.iface.SiteID, w.iface.ID)
+	// re-read AFTER ownership (lifecycle/revision/secret may have changed between discovery and lock)
+	iface, rev, sg, err := w.repo.LoadInterface(ctx, w.iface.TenantID, w.iface.SiteID, w.iface.ID)
 	if err != nil {
+		logEvent(w.deps.log(), EventWorkerNotDialable, Classify(err), sf(StageReRead))
 		return 0, err
 	}
-	if iface.LifecycleState != "ACTIVE" || !rev.ReadOnly {
-		return 0, errNotDialable
+	if iface.LifecycleState != "ACTIVE" {
+		logEvent(w.deps.log(), EventWorkerNotDialable, CodeInterfaceDisabled, sf(StageReRead))
+		return 0, coded(CodeInterfaceDisabled, nil)
+	}
+	if err := rev.Validate(); err != nil {
+		logEvent(w.deps.log(), EventWorkerRevisionInvalid, Classify(err), sf(StageReRead))
+		return 0, err
+	}
+	if sg.ID == "" || sg.Superseded || sg.ID != rev.ActiveSecretGenerationID {
+		logEvent(w.deps.log(), EventWorkerSecretMissing, CodeSecretMissing, sf(StageSecret))
+		return 0, coded(CodeSecretMissing, nil)
 	}
 	w.iface = iface
 
-	// persist startup axes: UNKNOWN. Never fabricate a heartbeat / complete-sync / HEALTHY on startup.
-	w.gen++
-	startup := RuntimeState{
+	// atomic generation allocation (pins revision + secret); a stale owner is rejected here
+	gen, err := w.repo.AllocateRuntimeGeneration(ctx, GenerationRequest{
 		TenantID: iface.TenantID, SiteID: iface.SiteID, PMSInterfaceID: iface.ID,
-		PinnedRevisionID: rev.ID, Generation: w.gen, UpdatedAt: w.deps.now(),
-		Transport: TransportConnecting, Continuity: ContinuityUnknown, Sync: SyncUnknown,
-		LastConnectAttemptAt: ptr(w.deps.now()),
+		PinnedRevisionID: rev.ID, PinnedSecretGenerationID: sg.ID,
+	})
+	if err != nil {
+		code := Classify(err)
+		if errors.Is(err, ErrStaleGeneration) {
+			code = CodeRuntimeGenStale
+		}
+		logEvent(w.deps.log(), EventWorkerGenerationStale, code, sf(StageAllocate))
+		return 0, err
 	}
-	if err := w.repo.UpsertRuntime(ctx, startup); err != nil {
-		return 0, err // includes ErrStaleGeneration (a newer owner exists)
+	w.gen = gen
+
+	// startup transport axis: CONNECTING (never fabricate heartbeat/complete-sync/HEALTHY)
+	if err := w.repo.UpdateTransport(ctx, TransportUpdate{
+		axisBase: w.ax(gen), Status: TransportConnecting, LastConnectAttemptAt: ptr(w.deps.now()),
+	}); err != nil {
+		logEvent(w.deps.log(), EventWorkerPersistFailed, Classify(err), sf(StagePersist))
+		return 0, err
 	}
 
-	// dial only AFTER lock + re-read + startup-persist succeed
-	conn, err := w.deps.Dial(ctx, iface, rev)
+	// decrypt the selected secret ONLY after ownership + generation; zero it right after dial
+	secret, err := w.deps.DecryptSecret(ctx, iface, rev, sg)
 	if err != nil {
-		_ = w.repo.UpsertRuntime(ctx, w.disconnected(rev, sanitize(err)))
+		logEvent(w.deps.log(), EventWorkerSecretDecrypt, Classify(err), sf(StageSecret))
+		_ = w.repo.UpdateTransport(ctx, w.disc(gen, CodeSecretDecryptFailed))
 		return 0, err
+	}
+
+	conn, dialErr := w.deps.Dial(ctx, DialParams{Iface: iface, Rev: rev, Secret: secret})
+	secret.Zero() // never retained beyond dial
+	if dialErr != nil {
+		logEvent(w.deps.log(), EventWorkerDialFailed, Classify(dialErr), sf(StageDial))
+		_ = w.repo.UpdateTransport(ctx, w.disc(gen, CodeDialFailed))
+		return 0, dialErr
 	}
 	defer func() { _ = conn.Close() }()
 
@@ -113,82 +148,91 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 	go func() {
 		select {
 		case <-locker.Lost():
+			logEvent(w.deps.log(), EventWorkerLockLost, CodeLockSessionLost, sf(StageServe))
 			scancel()
 			_ = conn.Close()
 		case <-sctx.Done():
 		}
 	}()
 
+	// per-ownership bounded typed queue (owned + closed here)
+	q := NewBoundedQueue(w.deps.QueueCapacity, w.deps.QueueEnqueueTimeout)
+	defer q.Close()
+	sink := &workerSink{w: w, ctx: sctx, gen: gen, q: q}
+
 	start := w.deps.now()
-	serr := conn.Serve(sctx, &axisSink{w: w, rev: rev})
-	// record the disconnect (sanitized)
-	code := ""
+	serr := conn.Serve(sctx, sink)
+	code := CodeProtocolLinkEnded
 	if serr != nil {
-		code = sanitize(serr)
+		code = Classify(serr)
 	}
-	_ = w.repo.UpsertRuntime(ctx, w.disconnected(rev, code))
+	logEvent(w.deps.log(), EventWorkerProtocolEnded, code, sf(StageServe))
+	_ = w.repo.UpdateTransport(ctx, w.disc(gen, code))
 	return w.deps.now().Sub(start), serr
 }
 
-func (w *worker) disconnected(rev Revision, code string) RuntimeState {
+func (w *worker) ax(gen int64) axisBase {
+	return axisBase{TenantID: w.iface.TenantID, SiteID: w.iface.SiteID, PMSInterfaceID: w.iface.ID, ExpectedGeneration: gen, At: w.deps.now()}
+}
+func (w *worker) disc(gen int64, code Code) TransportUpdate {
 	now := w.deps.now()
-	return RuntimeState{
-		TenantID: w.iface.TenantID, SiteID: w.iface.SiteID, PMSInterfaceID: w.iface.ID,
-		PinnedRevisionID: rev.ID, Generation: w.gen, UpdatedAt: now,
-		Transport: TransportDisconnected, DisconnectedSince: ptr(now), TransportErrorCode: code,
-		Continuity: ContinuityUnknown, Sync: SyncUnknown,
-	}
-}
-
-// axisSink turns real protocol evidence into optimistic RuntimeState upserts. It NEVER writes a healthy
-// state that is not backed by an observed axis event.
-type axisSink struct {
-	w   *worker
-	rev Revision
-}
-
-func (a *axisSink) base(t TransportStatus, c ContinuityStatus, s SyncStatus) RuntimeState {
-	return RuntimeState{
-		TenantID: a.w.iface.TenantID, SiteID: a.w.iface.SiteID, PMSInterfaceID: a.w.iface.ID,
-		PinnedRevisionID: a.rev.ID, Generation: a.w.gen, UpdatedAt: a.w.deps.now(),
-		Transport: t, Continuity: c, Sync: s,
-	}
-}
-func (a *axisSink) OnConnected(at time.Time) {
-	st := a.base(TransportConnected, ContinuityUnknown, SyncUnknown)
-	st.LastConnectedAt = ptr(at)
-	_ = a.w.repo.UpsertRuntime(context.Background(), st)
-}
-func (a *axisSink) OnHeartbeat(at time.Time) {
-	st := a.base(TransportConnected, ContinuityUnknown, SyncUnknown)
-	st.LastHeartbeatAt = ptr(at)
-	_ = a.w.repo.UpsertRuntime(context.Background(), st)
-}
-func (a *axisSink) OnValidEvent(at time.Time, cursor string) {
-	st := a.base(TransportConnected, ContinuityContinuous, SyncUnknown)
-	st.LastValidEventAt = ptr(at)
-	st.LastEventCursor = clip(cursor, 4096)
-	_ = a.w.repo.UpsertRuntime(context.Background(), st)
-}
-func (a *axisSink) OnResyncMarker(at time.Time) {
-	st := a.base(TransportConnected, ContinuityContinuous, SyncResyncInProgress)
-	st.LastResyncMarkerAt = ptr(at)
-	_ = a.w.repo.UpsertRuntime(context.Background(), st)
-}
-func (a *axisSink) OnCompleteSync(at time.Time, cursor string) {
-	st := a.base(TransportConnected, ContinuityContinuous, SyncInSync)
-	st.LastCompleteSyncAt = ptr(at)
-	st.SyncCursor = clip(cursor, 4096)
-	_ = a.w.repo.UpsertRuntime(context.Background(), st)
-}
-func (a *axisSink) OnDisconnected(at time.Time, sanitizedCode string) {
-	st := a.base(TransportDisconnected, ContinuityUnknown, SyncUnknown)
-	st.DisconnectedSince = ptr(at)
-	st.TransportErrorCode = clip(sanitizedCode, 200)
-	_ = a.w.repo.UpsertRuntime(context.Background(), st)
+	return TransportUpdate{axisBase: w.ax(gen), Status: TransportDisconnected, DisconnectedSince: &now, ErrorCode: code}
 }
 
 func ptr(t time.Time) *time.Time { return &t }
+
+// workerSink translates protocol evidence into INDEPENDENT-axis CAS updates and typed queue events. It uses
+// the worker (serve) context — never context.Background() — and the pinned generation. Any persist error
+// (including stale generation) is returned so the adapter stops serving and the transport closes.
+type workerSink struct {
+	w   *worker
+	ctx context.Context
+	gen int64
+	q   *BoundedQueue
+}
+
+func (s *workerSink) ax() axisBase {
+	return axisBase{TenantID: s.w.iface.TenantID, SiteID: s.w.iface.SiteID, PMSInterfaceID: s.w.iface.ID, ExpectedGeneration: s.gen, At: s.w.deps.now()}
+}
+
+func (s *workerSink) OnConnected(at time.Time) error {
+	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportConnected, LastConnectedAt: &at})
+}
+func (s *workerSink) OnHeartbeat(at time.Time) error {
+	// transport axis ONLY — must not erase continuity/sync evidence
+	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportConnected, LastHeartbeatAt: &at})
+}
+func (s *workerSink) OnResyncStart(at time.Time) error {
+	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncInProgress, ResyncStartedAt: &at})
+}
+func (s *workerSink) OnResyncComplete(at time.Time, cursor string) error {
+	if err := s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncInSync, LastCompleteSyncAt: &at, SyncCursor: clip(cursor, maxCursorLen)}); err != nil {
+		return err
+	}
+	// a verified complete resync restores feed continuity
+	return s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastResyncMarkerAt: &at})
+}
+func (s *workerSink) OnDisconnected(at time.Time, code Code) error {
+	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportDisconnected, DisconnectedSince: &at, ErrorCode: code})
+}
+
+// OnDomainEvent records feed continuity for a valid event, then enqueues the typed event. On queue overflow
+// it drives continuity→GAP_DETECTED and sync→RESYNC_REQUIRED and returns QUEUE_OVERFLOW so the adapter
+// stops normal application until a verified full resync.
+func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
+	if err := s.q.Enqueue(ctx, ev); err != nil {
+		if Classify(err) == CodeQueueOverflow {
+			_ = s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityGapDetected, DiscontinuityAt: ptr(s.w.deps.now())})
+			_ = s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncRequired, ResyncRequestedAt: ptr(s.w.deps.now())})
+		}
+		return err
+	}
+	return s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastValidEventAt: ptr(ev.NormalizedAt), LastEventCursor: clip(ev.Cursor, maxCursorLen)})
+}
+
+// QueueForTest exposes the per-ownership queue for integration tests only.
+func (s *workerSink) queue() *BoundedQueue { return s.q }
+
 func clip(s string, n int) string {
 	if len(s) > n {
 		return s[:n]
@@ -196,37 +240,7 @@ func clip(s string, n int) string {
 	return s
 }
 
-// sanitize reduces an error to a bounded machine-safe code (never a raw PMS payload / guest data /
-// credential). It keeps only an uppercased, underscore-joined, length-bounded token.
-func sanitize(err error) string {
-	if err == nil {
-		return ""
-	}
-	s := err.Error()
-	// keep only the first token-ish segment, uppercased, bounded
-	if i := strings.IndexAny(s, ":\n"); i >= 0 {
-		s = s[:i]
-	}
-	s = strings.ToUpper(strings.TrimSpace(s))
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
-			b.WriteRune(r)
-		} else if r == ' ' || r == '-' {
-			b.WriteRune('_')
-		}
-		if b.Len() >= 64 {
-			break
-		}
-	}
-	out := b.String()
-	if out == "" {
-		return "ERROR"
-	}
-	return out
-}
-
-func (d *Deps) rnd(n int64) int64 { // default jitter source (deterministic-friendly override in tests)
+func (d *Deps) rnd(n int64) int64 {
 	if d.jitter != nil {
 		return d.jitter(n)
 	}

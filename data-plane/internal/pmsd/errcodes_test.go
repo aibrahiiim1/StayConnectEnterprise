@@ -58,25 +58,54 @@ func TestTypedErr_HidesRawDetail(t *testing.T) {
 	}
 }
 
-// TestLogCoded_NoCanaryInCapturedOutput inspects the ACTUAL bytes logCoded emits (not just Code.String())
-// and proves that even when a canary-laden raw error drives the control flow, nothing sensitive reaches the
-// log line — because logCoded never receives the raw error, only the bounded Code + typed SafeFields.
-func TestLogCoded_NoCanaryInCapturedOutput(t *testing.T) {
+// TestLogEvent_NoCanaryInCapturedOutput inspects the ACTUAL bytes logEvent emits and proves that even when
+// a canary drives control flow OR is smuggled into an Interface identity / Stage / LogEvent, nothing
+// sensitive reaches the log line — invalid inputs render as fixed placeholders, and the raw error never
+// reaches logEvent at all.
+func TestLogEvent_NoCanaryInCapturedOutput(t *testing.T) {
 	for _, cn := range canaries {
 		var buf bytes.Buffer
 		log := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-		// a raw error stuffed with the canary drives classification, but must not reach the log
 		raw := fmt.Errorf("dial %q endpoint failed frame=%q", cn, cn)
-		logCoded(log, "connector error", Classify(coded(CodeDialFailed, raw)),
-			SafeFields{InterfaceID: "aaaaaaaa-0000-4000-8000-000000000001", Generation: 7, Stage: StageDial, Attempt: 2})
-		if strings.Contains(buf.String(), cn) {
-			t.Errorf("logCoded leaked canary %q into output: %s", cn, buf.String())
+		// canary smuggled into every free-ish field: raw error (control flow only), interface string,
+		// invalid Stage, invalid LogEvent.
+		logEvent(log, LogEvent(cn), Classify(coded(CodeDialFailed, raw)),
+			SafeFields{InterfaceID: NewUUIDValue(cn), Generation: 7, Stage: Stage(cn), Attempt: 2})
+		out := buf.String()
+		if strings.Contains(out, cn) {
+			t.Errorf("logEvent leaked canary %q into output: %s", cn, out)
 		}
-		// the code itself is present and in-vocabulary
-		if !strings.Contains(buf.String(), "DIAL_FAILED") {
-			t.Errorf("expected code DIAL_FAILED in log, got: %s", buf.String())
+		if !strings.Contains(out, "DIAL_FAILED") {
+			t.Errorf("expected code DIAL_FAILED in log, got: %s", out)
+		}
+		if !strings.Contains(out, "INVALID_UUID") || !strings.Contains(out, "INVALID_STAGE") || !strings.Contains(out, "INVALID_LOG_EVENT") {
+			t.Errorf("invalid fields must render as placeholders, got: %s", out)
 		}
 	}
+}
+
+func TestLogEvent_PanicValueNeverRendered(t *testing.T) {
+	for _, cn := range canaries {
+		var buf bytes.Buffer
+		log := slog.New(slog.NewJSONHandler(&buf, nil))
+		// simulate the supervisor panic-recovery log: only the closed event + safe fields, never the value
+		_ = recoverToLog(log, cn)
+		if strings.Contains(buf.String(), cn) {
+			t.Errorf("panic value canary %q leaked: %s", cn, buf.String())
+		}
+		if !strings.Contains(buf.String(), "WORKER_PANIC_RECOVERED") {
+			t.Errorf("expected WORKER_PANIC_RECOVERED, got: %s", buf.String())
+		}
+	}
+}
+
+// recoverToLog models the supervisor's panic path: the recovered value is discarded, only the closed event
+// + safe fields are logged.
+func recoverToLog(log *slog.Logger, panicValue string) (rec any) {
+	rec = panicValue // stand-in for recover()
+	logEvent(log, EventWorkerPanicRecovered, CodePanicRecovered,
+		SafeFields{InterfaceID: NewUUIDValue("aaaaaaaa-0000-4000-8000-000000000001"), Generation: 3, Stage: StageServe, Attempt: 1})
+	return rec
 }
 
 func TestClassify_StructuralCodes(t *testing.T) {

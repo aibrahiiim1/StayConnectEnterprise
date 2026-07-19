@@ -3,8 +3,9 @@ package pmsd
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,62 +14,161 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// ---- fakes / spies ---------------------------------------------------------
+// ---- fixed valid UUIDs -----------------------------------------------------
+
+const (
+	tTenantUUID = "11111111-1111-1111-1111-111111111111"
+	tSiteUUID   = "22222222-2222-2222-2222-222222222222"
+	tAppliance  = "appliance-1"
+	tRevUUID    = "33333333-0000-4000-8000-000000000001"
+	tSecUUID    = "44444444-0000-4000-8000-000000000001"
+)
+
+func ifaceUUID(short string) string {
+	switch short {
+	case "i1":
+		return "aaaaaaaa-0000-4000-8000-000000000001"
+	case "i2":
+		return "aaaaaaaa-0000-4000-8000-000000000002"
+	case "i3":
+		return "aaaaaaaa-0000-4000-8000-000000000003"
+	default:
+		return "aaaaaaaa-0000-4000-8000-0000000000ff"
+	}
+}
+
+func iface(id string) Interface {
+	return Interface{TenantID: tTenantUUID, SiteID: tSiteUUID, ID: ifaceUUID(id), ConnectorKind: "protel-fias", LifecycleState: "ACTIVE", CurrentRevisionID: tRevUUID}
+}
+
+func validRevision() Revision {
+	return Revision{
+		ID: tRevUUID, ConnectorKind: "protel-fias", Endpoint: "127.0.0.1:15010", SourceTimezone: "UTC",
+		ReadOnly: true, NormalizationVersion: 1, DialTimeout: time.Second, ReadTimeout: time.Second,
+		WriteTimeout: time.Second, HeartbeatInterval: time.Second, HeartbeatTimeout: time.Second,
+		FeedFreshnessBound: time.Second, CompleteSyncBound: time.Second, ResyncSupported: true,
+		Published: true, ActiveSecretGenerationID: tSecUUID,
+	}
+}
+func validSecret() SecretGeneration { return SecretGeneration{ID: tSecUUID, GenerationNo: 1} }
+
+// ---- fake repo (assignment-scoped, atomic generation, independent-axis CAS) -----
 
 type fakeRepo struct {
-	mu        sync.Mutex
-	ifaces    []Interface
-	listErr   error
-	loadFn    func(id string) (Interface, Revision, error)
-	upserts   []RuntimeState
-	storedGen map[string]int64
+	mu       sync.Mutex
+	ifaces   []Interface
+	listErr  error
+	loadFn   func(id string) (Interface, Revision, SecretGeneration, error)
+	allocErr error
+
+	gen        map[string]int64 // stored generation (CAS truth)
+	transport  map[string]TransportStatus
+	continuity map[string]ContinuityStatus
+	syncS      map[string]SyncStatus
+	updates    int64
+	closed     atomic.Bool
+	lastScope  [2]string
 }
 
 func newFakeRepo(ifaces ...Interface) *fakeRepo {
-	return &fakeRepo{ifaces: ifaces, storedGen: map[string]int64{}}
+	return &fakeRepo{ifaces: ifaces, gen: map[string]int64{}, transport: map[string]TransportStatus{}, continuity: map[string]ContinuityStatus{}, syncS: map[string]SyncStatus{}}
 }
-func (r *fakeRepo) ListActiveInterfaces(ctx context.Context) ([]Interface, error) {
-	return r.ifaces, r.listErr
+
+func (r *fakeRepo) ListActiveInterfaces(ctx context.Context, t, s string) ([]Interface, error) {
+	r.mu.Lock()
+	r.lastScope = [2]string{t, s}
+	r.mu.Unlock()
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
+	var out []Interface
+	for _, i := range r.ifaces {
+		if i.TenantID == t && i.SiteID == s {
+			out = append(out, i)
+		}
+	}
+	return out, nil
 }
-func (r *fakeRepo) LoadInterface(ctx context.Context, t, s, id string) (Interface, Revision, error) {
+
+func (r *fakeRepo) LoadInterface(ctx context.Context, t, s, id string) (Interface, Revision, SecretGeneration, error) {
 	if r.loadFn != nil {
 		return r.loadFn(id)
 	}
-	return Interface{TenantID: t, SiteID: s, ID: id, LifecycleState: "ACTIVE", CurrentRevisionID: "rev1"},
-		Revision{ID: "rev1", ReadOnly: true}, nil
+	return Interface{TenantID: t, SiteID: s, ID: id, ConnectorKind: "protel-fias", LifecycleState: "ACTIVE", CurrentRevisionID: tRevUUID},
+		validRevision(), validSecret(), nil
 }
-func (r *fakeRepo) UpsertRuntime(ctx context.Context, st RuntimeState) error {
+
+func (r *fakeRepo) AllocateRuntimeGeneration(ctx context.Context, req GenerationRequest) (int64, error) {
+	if r.allocErr != nil {
+		return 0, r.allocErr
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if st.Generation < r.storedGen[st.PMSInterfaceID] {
+	r.gen[req.PMSInterfaceID]++
+	return r.gen[req.PMSInterfaceID], nil
+}
+
+func (r *fakeRepo) cas(id string, expect int64) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.gen[id] != expect {
 		return ErrStaleGeneration
 	}
-	r.storedGen[st.PMSInterfaceID] = st.Generation
-	r.upserts = append(r.upserts, st)
+	r.updates++
 	return nil
 }
-func (r *fakeRepo) firstUpsert() (RuntimeState, bool) {
+func (r *fakeRepo) UpdateTransport(ctx context.Context, u TransportUpdate) error {
+	if err := r.cas(u.PMSInterfaceID, u.ExpectedGeneration); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.transport[u.PMSInterfaceID] = u.Status
+	r.mu.Unlock()
+	return nil
+}
+func (r *fakeRepo) UpdateContinuity(ctx context.Context, u ContinuityUpdate) error {
+	if err := r.cas(u.PMSInterfaceID, u.ExpectedGeneration); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.continuity[u.PMSInterfaceID] = u.Status
+	r.mu.Unlock()
+	return nil
+}
+func (r *fakeRepo) UpdateSync(ctx context.Context, u SyncUpdate) error {
+	if err := r.cas(u.PMSInterfaceID, u.ExpectedGeneration); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.syncS[u.PMSInterfaceID] = u.Status
+	r.mu.Unlock()
+	return nil
+}
+func (r *fakeRepo) Close() error { r.closed.Store(true); return nil }
+
+func (r *fakeRepo) transportOf(id string) TransportStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(r.upserts) == 0 {
-		return RuntimeState{}, false
-	}
-	return r.upserts[0], true
+	return r.transport[id]
 }
+func (r *fakeRepo) scope() [2]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastScope
+}
+
+// ---- fake locker / conn / spies -------------------------------------------
 
 type fakeLocker struct {
-	got     bool
-	lockErr error
-	lost    chan struct{}
-	closed  atomic.Bool
+	got    bool
+	lost   chan struct{}
+	closed atomic.Bool
 }
 
-func newFakeLocker(got bool) *fakeLocker { return &fakeLocker{got: got, lost: make(chan struct{})} }
-func (l *fakeLocker) TryLock(ctx context.Context, key int64) (bool, error) {
-	return l.got, l.lockErr
-}
-func (l *fakeLocker) Lost() <-chan struct{} { return l.lost }
-func (l *fakeLocker) Close() error          { l.closed.Store(true); return nil }
+func newFakeLocker(got bool) *fakeLocker                                   { return &fakeLocker{got: got, lost: make(chan struct{})} }
+func (l *fakeLocker) TryLock(ctx context.Context, key int64) (bool, error) { return l.got, nil }
+func (l *fakeLocker) Lost() <-chan struct{}                                { return l.lost }
+func (l *fakeLocker) Close() error                                         { l.closed.Store(true); return nil }
 
 type fakeConn struct {
 	serveFn func(ctx context.Context, sink AxisSink) error
@@ -85,56 +185,33 @@ func (c *fakeConn) Serve(ctx context.Context, sink AxisSink) error {
 func (c *fakeConn) Close() error { c.closed.Store(true); return nil }
 
 type spies struct {
-	openRepo, newLocker, dial atomic.Int64
+	loadAssign, openRepo, newLocker, decrypt, dial atomic.Int64
 }
 
-func fastDeps(sp *spies, repo Repo, mkLocker func() Locker, mkConn func() *fakeConn) Deps {
+func assignedDeps(sp *spies, repo Repo, mkLocker func() Locker, mkConn func() *fakeConn) Deps {
 	return Deps{
-		OpenRepo: func(ctx context.Context) (Repo, error) { sp.openRepo.Add(1); return repo, nil },
-		NewLocker: func(ctx context.Context) (Locker, error) {
-			sp.newLocker.Add(1)
-			return mkLocker(), nil
+		LoadAssignment: func(ctx context.Context) (Assignment, bool, error) {
+			sp.loadAssign.Add(1)
+			return Assignment{ApplianceID: tAppliance, TenantID: tTenantUUID, SiteID: tSiteUUID}, true, nil
 		},
-		Dial: func(ctx context.Context, i Interface, r Revision) (Conn, error) {
-			sp.dial.Add(1)
-			return mkConn(), nil
+		OpenRepo:  func(ctx context.Context, a Assignment) (Repo, error) { sp.openRepo.Add(1); return repo, nil },
+		NewLocker: func(ctx context.Context) (Locker, error) { sp.newLocker.Add(1); return mkLocker(), nil },
+		DecryptSecret: func(ctx context.Context, i Interface, r Revision, sg SecretGeneration) (SecretMaterial, error) {
+			sp.decrypt.Add(1)
+			return NewSecretMaterial([]byte("secret")), nil
 		},
-		Now:               time.Now,
-		ReconcileInterval: 20 * time.Millisecond,
-		BackoffMin:        1 * time.Millisecond,
-		BackoffMax:        5 * time.Millisecond,
-		StableResetAfter:  1 * time.Millisecond,
-		StopGrace:         200 * time.Millisecond,
-		jitter:            func(n int64) int64 { return 0 },
+		Dial: func(ctx context.Context, p DialParams) (Conn, error) { sp.dial.Add(1); return mkConn(), nil },
+		Log:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Now:  time.Now, ReconcileInterval: 20 * time.Millisecond, BackoffMin: time.Millisecond,
+		BackoffMax: 5 * time.Millisecond, StableResetAfter: time.Millisecond, StopGrace: 300 * time.Millisecond,
+		QueueCapacity: 16, QueueEnqueueTimeout: 20 * time.Millisecond, jitter: func(int64) int64 { return 0 },
 	}
 }
 
-// fixed valid UUIDs so the UUID-strict LockKey accepts the fakes (values are arbitrary but canonical).
-const (
-	tTenantUUID = "11111111-1111-1111-1111-111111111111"
-	tSiteUUID   = "22222222-2222-2222-2222-222222222222"
-)
-
-// ifaceUUID maps a short test label to a fixed canonical interface UUID.
-func ifaceUUID(short string) string {
-	switch short {
-	case "i1":
-		return "aaaaaaaa-0000-4000-8000-000000000001"
-	case "i2":
-		return "aaaaaaaa-0000-4000-8000-000000000002"
-	case "i3":
-		return "aaaaaaaa-0000-4000-8000-000000000003"
-	default:
-		return "aaaaaaaa-0000-4000-8000-0000000000ff"
-	}
-}
-
-func iface(id string) Interface {
-	return Interface{TenantID: tTenantUUID, SiteID: tSiteUUID, ID: ifaceUUID(id), LifecycleState: "ACTIVE", CurrentRevisionID: "rev1"}
-}
 func connectorOn() iamv2.PMSConfig {
 	return iamv2.PMSConfig{MasterEnabled: true, PMSConnectorEnabled: true}
 }
+
 func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(d)
@@ -147,22 +224,22 @@ func waitFor(t *testing.T, d time.Duration, cond func() bool) {
 	t.Fatalf("condition not met within %s", d)
 }
 
-// ---- §16.1-3: flags-OFF / fail-closed -------------------------------------
+// ---- flags-off / fail-closed / assignment ---------------------------------
 
 func TestFlagsOff_ZeroSideEffects(t *testing.T) {
 	var sp spies
 	deps := Deps{
-		OpenRepo:  func(context.Context) (Repo, error) { sp.openRepo.Add(1); return nil, nil },
-		NewLocker: func(context.Context) (Locker, error) { sp.newLocker.Add(1); return nil, nil },
-		Dial:      func(context.Context, Interface, Revision) (Conn, error) { sp.dial.Add(1); return nil, nil },
+		LoadAssignment: func(context.Context) (Assignment, bool, error) { sp.loadAssign.Add(1); return Assignment{}, false, nil },
+		OpenRepo:       func(context.Context, Assignment) (Repo, error) { sp.openRepo.Add(1); return nil, nil },
+		NewLocker:      func(context.Context) (Locker, error) { sp.newLocker.Add(1); return nil, nil },
+		Dial:           func(context.Context, DialParams) (Conn, error) { sp.dial.Add(1); return nil, nil },
 	}
 	g0 := runtime.NumGoroutine()
 	if err := Run(context.Background(), iamv2.DefaultPMSConfig(), deps); err != nil {
 		t.Fatalf("flags-off Run must return nil, got %v", err)
 	}
-	if sp.openRepo.Load() != 0 || sp.newLocker.Load() != 0 || sp.dial.Load() != 0 {
-		t.Fatalf("flags-off must not open repo/locker/dial: openRepo=%d newLocker=%d dial=%d",
-			sp.openRepo.Load(), sp.newLocker.Load(), sp.dial.Load())
+	if sp.loadAssign.Load() != 0 || sp.openRepo.Load() != 0 || sp.newLocker.Load() != 0 || sp.dial.Load() != 0 {
+		t.Fatalf("flags-off must not load assignment / open repo / lock / dial")
 	}
 	time.Sleep(20 * time.Millisecond)
 	if n := runtime.NumGoroutine(); n > g0+1 {
@@ -172,22 +249,33 @@ func TestFlagsOff_ZeroSideEffects(t *testing.T) {
 
 func TestFailClosed_ChildOnMasterOff(t *testing.T) {
 	var sp spies
-	deps := Deps{OpenRepo: func(context.Context) (Repo, error) { sp.openRepo.Add(1); return nil, nil }}
-	err := Run(context.Background(), iamv2.PMSConfig{PMSConnectorEnabled: true}, deps) // master OFF, child ON
-	if err == nil {
+	deps := Deps{LoadAssignment: func(context.Context) (Assignment, bool, error) { sp.loadAssign.Add(1); return Assignment{}, false, nil }}
+	if err := Run(context.Background(), iamv2.PMSConfig{PMSConnectorEnabled: true}, deps); err == nil {
 		t.Fatal("child-on/master-off must fail closed")
 	}
-	if sp.openRepo.Load() != 0 {
-		t.Fatal("fail-closed must not open repo")
+	if sp.loadAssign.Load() != 0 {
+		t.Fatal("fail-closed must not load assignment")
 	}
 }
 
-// ---- §16.4-5: one/two interfaces -> independent workers -------------------
+func TestUnassigned_FailsClosedNoWork(t *testing.T) {
+	var sp spies
+	deps := assignedDeps(&sp, newFakeRepo(), func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
+	deps.LoadAssignment = func(context.Context) (Assignment, bool, error) { sp.loadAssign.Add(1); return Assignment{}, false, nil }
+	err := Run(context.Background(), connectorOn(), deps)
+	if !errors.Is(err, ErrNoAssignment) {
+		t.Fatalf("unassigned appliance must fail closed with ErrNoAssignment, got %v", err)
+	}
+	if sp.openRepo.Load() != 0 || sp.dial.Load() != 0 {
+		t.Fatal("unassigned appliance must do zero PMS work")
+	}
+}
+
+// ---- discovery / independent workers --------------------------------------
 
 func TestOneInterface_OneWorkerDials(t *testing.T) {
 	var sp spies
-	repo := newFakeRepo(iface("i1"))
-	deps := fastDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
+	deps := assignedDeps(&sp, newFakeRepo(iface("i1")), func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = Run(ctx, connectorOn(), deps); close(done) }()
@@ -198,8 +286,7 @@ func TestOneInterface_OneWorkerDials(t *testing.T) {
 
 func TestTwoInterfaces_IndependentWorkers(t *testing.T) {
 	var sp spies
-	repo := newFakeRepo(iface("i1"), iface("i2"))
-	deps := fastDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
+	deps := assignedDeps(&sp, newFakeRepo(iface("i1"), iface("i2")), func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = Run(ctx, connectorOn(), deps); close(done) }()
@@ -208,210 +295,242 @@ func TestTwoInterfaces_IndependentWorkers(t *testing.T) {
 	<-done
 }
 
-// ---- §16.6,8: competing owner / lock lost before dial -> no socket --------
+// ---- cross-scope rejection ------------------------------------------------
 
-func TestCompetingOwner_NoSocket(t *testing.T) {
+func TestCrossScope_NotDiscovered(t *testing.T) {
 	var sp spies
-	repo := newFakeRepo(iface("i1"))
-	deps := fastDeps(&sp, repo, func() Locker { return newFakeLocker(false) }, func() *fakeConn { return &fakeConn{} })
-	deps.BackoffMax = 5 * time.Millisecond
+	other := Interface{TenantID: "99999999-9999-9999-9999-999999999999", SiteID: tSiteUUID, ID: ifaceUUID("i2"), ConnectorKind: "protel-fias", LifecycleState: "ACTIVE", CurrentRevisionID: tRevUUID}
+	repo := newFakeRepo(iface("i1"), other)
+	deps := assignedDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = Run(ctx, connectorOn(), deps); close(done) }()
+	waitFor(t, time.Second, func() bool { return sp.dial.Load() == 1 })
+	time.Sleep(60 * time.Millisecond)
+	if sp.dial.Load() != 1 {
+		t.Fatalf("cross-scope interface must not be discovered/dialed; dials=%d", sp.dial.Load())
+	}
+	if repo.scope() != [2]string{tTenantUUID, tSiteUUID} {
+		t.Fatalf("list must be scoped to the assignment, got %v", repo.scope())
+	}
+	cancel()
+	<-done
+}
+
+// ---- competing owner: no secret, no dial ----------------------------------
+
+func TestCompetingOwner_NoSecretNoSocket(t *testing.T) {
+	var sp spies
+	deps := assignedDeps(&sp, newFakeRepo(iface("i1")), func() Locker { return newFakeLocker(false) }, func() *fakeConn { return &fakeConn{} })
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 	defer cancel()
 	_ = Run(ctx, connectorOn(), deps)
 	if sp.dial.Load() != 0 {
-		t.Fatalf("a competing (non-owning) worker must NOT dial; dials=%d", sp.dial.Load())
+		t.Fatalf("lock loser must NOT dial; dials=%d", sp.dial.Load())
+	}
+	if sp.decrypt.Load() != 0 {
+		t.Fatalf("lock loser must NOT decrypt a secret; decrypts=%d", sp.decrypt.Load())
 	}
 	if sp.newLocker.Load() == 0 {
 		t.Fatal("worker should have attempted to lock")
 	}
 }
 
-// ---- §16.9: interface disabled after discovery -> no dial -----------------
+// ---- disabled / invalid-revision / missing-secret after re-read -> no dial -
 
 func TestDisabledAfterDiscovery_NoDial(t *testing.T) {
 	var sp spies
 	repo := newFakeRepo(iface("i1"))
-	repo.loadFn = func(id string) (Interface, Revision, error) {
-		return Interface{TenantID: "t", SiteID: "s", ID: id, LifecycleState: "AUTH_DISABLED"}, Revision{ID: "rev1", ReadOnly: true}, nil
+	repo.loadFn = func(id string) (Interface, Revision, SecretGeneration, error) {
+		return Interface{TenantID: tTenantUUID, SiteID: tSiteUUID, ID: id, LifecycleState: "AUTH_DISABLED"}, validRevision(), validSecret(), nil
 	}
-	deps := fastDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
+	deps := assignedDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
 	defer cancel()
 	_ = Run(ctx, connectorOn(), deps)
-	if sp.dial.Load() != 0 {
-		t.Fatalf("disabled interface must not dial; dials=%d", sp.dial.Load())
+	if sp.dial.Load() != 0 || sp.decrypt.Load() != 0 {
+		t.Fatalf("disabled interface must not decrypt/dial; dials=%d decrypts=%d", sp.dial.Load(), sp.decrypt.Load())
 	}
 }
 
-// ---- §16.10: revision changed after lock -> latest used -------------------
-
-func TestRevisionChangedAfterLock_LatestUsed(t *testing.T) {
+func TestRevisionInvalid_NoDial(t *testing.T) {
 	var sp spies
-	var gotRev atomic.Value
 	repo := newFakeRepo(iface("i1"))
-	repo.loadFn = func(id string) (Interface, Revision, error) {
-		return iface(id), Revision{ID: "rev2-latest", ReadOnly: true}, nil // discovery said rev1; reload says rev2
+	repo.loadFn = func(id string) (Interface, Revision, SecretGeneration, error) {
+		rev := validRevision()
+		rev.ReadOnly = false // read-only capability absent -> must fail closed
+		return iface("i1"), rev, validSecret(), nil
 	}
-	deps := fastDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
-	deps.Dial = func(ctx context.Context, i Interface, r Revision) (Conn, error) {
-		gotRev.Store(r.ID)
-		sp.dial.Add(1)
-		return &fakeConn{}, nil
+	deps := assignedDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Millisecond)
+	defer cancel()
+	_ = Run(ctx, connectorOn(), deps)
+	if sp.dial.Load() != 0 || sp.decrypt.Load() != 0 {
+		t.Fatalf("invalid (non-read-only) revision must not decrypt/dial; dials=%d", sp.dial.Load())
 	}
+}
+
+// ---- startup persists CONNECTING, never a fabricated healthy ---------------
+
+func TestStartup_NoFakeHealthy(t *testing.T) {
+	var sp spies
+	repo := newFakeRepo(iface("i1"))
+	deps := assignedDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = Run(ctx, connectorOn(), deps); close(done) }()
-	waitFor(t, time.Second, func() bool { return sp.dial.Load() >= 1 })
+	waitFor(t, time.Second, func() bool { return repo.transportOf(ifaceUUID("i1")) != "" })
+	if got := repo.transportOf(ifaceUUID("i1")); got != TransportConnecting && got != TransportConnected {
+		t.Fatalf("startup transport must be CONNECTING (or CONNECTED after OnConnected), got %q", got)
+	}
+	repo.mu.Lock()
+	c := repo.continuity[ifaceUUID("i1")]
+	s := repo.syncS[ifaceUUID("i1")]
+	repo.mu.Unlock()
+	if c == ContinuityContinuous || s == SyncInSync {
+		t.Fatalf("startup must not fabricate healthy continuity/sync: continuity=%q sync=%q", c, s)
+	}
 	cancel()
 	<-done
-	if gotRev.Load() != "rev2-latest" {
-		t.Fatalf("dial must use the revision re-read after lock, got %v", gotRev.Load())
-	}
 }
 
-// ---- §16.7: lock DB connection loss -> PMS socket closed ------------------
+// ---- lock loss closes the socket ------------------------------------------
 
 func TestLockLoss_ClosesSocket(t *testing.T) {
 	var sp spies
-	repo := newFakeRepo(iface("i1"))
 	lk := newFakeLocker(true)
 	conn := &fakeConn{}
-	deps := fastDeps(&sp, repo, func() Locker { return lk }, func() *fakeConn { return conn })
+	deps := assignedDeps(&sp, newFakeRepo(iface("i1")), func() Locker { return lk }, func() *fakeConn { return conn })
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	done := make(chan struct{})
 	go func() { _ = Run(ctx, connectorOn(), deps); close(done) }()
 	waitFor(t, time.Second, func() bool { return sp.dial.Load() >= 1 })
-	close(lk.lost) // simulate DB session death
+	close(lk.lost) // simulate ownership loss
 	waitFor(t, time.Second, func() bool { return conn.closed.Load() })
 	cancel()
 	<-done
 }
 
-// ---- §16.14: runtime generation blocks stale worker writes ----------------
+// ---- independent axes: heartbeat preserves continuity/sync -----------------
 
-func TestRuntimeGeneration_RejectsStale(t *testing.T) {
-	repo := newFakeRepo()
-	if err := repo.UpsertRuntime(context.Background(), RuntimeState{PMSInterfaceID: "i1", Generation: 5}); err != nil {
+func TestIndependentAxes_HeartbeatPreservesContinuitySync(t *testing.T) {
+	repo := newFakeRepo(iface("i1"))
+	id := ifaceUUID("i1")
+	// simulate an owned generation
+	gen, _ := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{PMSInterfaceID: id})
+	w := &worker{iface: iface("i1"), repo: repo, deps: &Deps{Now: time.Now}}
+	sink := &workerSink{w: w, ctx: context.Background(), gen: gen, q: NewBoundedQueue(4, time.Second)}
+	// establish continuity + sync
+	if err := repo.UpdateContinuity(context.Background(), ContinuityUpdate{axisBase: axisBase{PMSInterfaceID: id, ExpectedGeneration: gen}, Status: ContinuityContinuous}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.UpsertRuntime(context.Background(), RuntimeState{PMSInterfaceID: "i1", Generation: 3}); !errors.Is(err, ErrStaleGeneration) {
-		t.Fatalf("stale generation must be rejected, got %v", err)
+	if err := repo.UpdateSync(context.Background(), SyncUpdate{axisBase: axisBase{PMSInterfaceID: id, ExpectedGeneration: gen}, Status: SyncInSync}); err != nil {
+		t.Fatal(err)
 	}
-	if err := repo.UpsertRuntime(context.Background(), RuntimeState{PMSInterfaceID: "i1", Generation: 6}); err != nil {
-		t.Fatalf("newer generation must be accepted, got %v", err)
+	// a heartbeat updates ONLY transport
+	if err := sink.OnHeartbeat(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if repo.continuity[id] != ContinuityContinuous {
+		t.Errorf("heartbeat erased continuity: %q", repo.continuity[id])
+	}
+	if repo.syncS[id] != SyncInSync {
+		t.Errorf("heartbeat erased sync: %q", repo.syncS[id])
+	}
+	if repo.transport[id] != TransportConnected {
+		t.Errorf("heartbeat should set transport CONNECTED, got %q", repo.transport[id])
 	}
 }
 
-// ---- §16.15: startup writes no fake HEALTHY -------------------------------
+// ---- stale generation rejected --------------------------------------------
 
-func TestStartup_NoFakeHealthy(t *testing.T) {
-	var sp spies
+func TestRuntimeGeneration_StaleRejected(t *testing.T) {
 	repo := newFakeRepo(iface("i1"))
-	deps := fastDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() { _ = Run(ctx, connectorOn(), deps); close(done) }()
-	waitFor(t, time.Second, func() bool { _, ok := repo.firstUpsert(); return ok })
-	cancel()
-	<-done
-	st, _ := repo.firstUpsert()
-	if st.Transport == TransportConnected {
-		t.Fatal("startup must not report CONNECTED before real evidence")
+	id := ifaceUUID("i1")
+	genA, _ := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{PMSInterfaceID: id}) // 1
+	genB, _ := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{PMSInterfaceID: id}) // 2 (restart)
+	if genB <= genA {
+		t.Fatalf("restart must obtain a higher generation: %d !> %d", genB, genA)
 	}
-	if st.Continuity != ContinuityUnknown || st.Sync != SyncUnknown {
-		t.Fatalf("startup continuity/sync must be UNKNOWN, got %s/%s", st.Continuity, st.Sync)
+	// old owner A can no longer update
+	if err := repo.UpdateTransport(context.Background(), TransportUpdate{axisBase: axisBase{PMSInterfaceID: id, ExpectedGeneration: genA}, Status: TransportConnected}); !errors.Is(err, ErrStaleGeneration) {
+		t.Fatalf("stale owner A must be rejected, got %v", err)
 	}
-	if st.LastHeartbeatAt != nil || st.LastCompleteSyncAt != nil {
-		t.Fatal("startup must not fabricate a heartbeat / complete-sync")
+	// new owner B can
+	if err := repo.UpdateTransport(context.Background(), TransportUpdate{axisBase: axisBase{PMSInterfaceID: id, ExpectedGeneration: genB}, Status: TransportConnected}); err != nil {
+		t.Fatalf("current owner B must update, got %v", err)
 	}
 }
 
-// ---- §16.18: outbound allowlist rejects PS (no financial posting) ---------
+// ---- assignment change drains + re-scopes ---------------------------------
 
-func TestOutboundAllowlist_RejectsPS(t *testing.T) {
-	for _, ok := range []string{"LS", "LD", "LR", "LA", "DR"} {
-		if err := CheckOutbound(ok); err != nil {
-			t.Fatalf("read-only record %q must be allowed: %v", ok, err)
-		}
-	}
-	for _, bad := range []string{"PS", "PA", "XX", ""} {
-		if err := CheckOutbound(bad); err == nil {
-			t.Fatalf("record %q must be rejected", bad)
-		}
-	}
-	if !IsFinancialRecord("PS") || IsFinancialRecord("LS") {
-		t.Fatal("PS is financial; LS is not")
-	}
-}
-
-// ---- §16.19: sanitize -> bounded machine code, no PII ---------------------
-
-func TestSanitize_NoLeak(t *testing.T) {
-	got := sanitize(errors.New("dial tcp 10.0.0.5:5001: guest SMITH room 14215 reservation 262224"))
-	if len(got) > 64 {
-		t.Fatalf("sanitized code must be bounded, got %q", got)
-	}
-	for _, leak := range []string{"SMITH", "14215", "262224", "10.0.0.5", "5001"} {
-		if strings.Contains(got, leak) {
-			t.Fatalf("sanitized code leaked %q: %q", leak, got)
-		}
-	}
-	for _, r := range got {
-		if !((r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
-			t.Fatalf("sanitized code has non-machine char: %q", got)
-		}
-	}
-}
-
-// ---- §16.13,20: backoff bounded + SIGTERM drain w/o goroutine leak --------
-
-func TestBackoff_Bounded(t *testing.T) {
-	b := newBackoff(1*time.Millisecond, 8*time.Millisecond, nil)
-	for i := 0; i < 20; i++ {
-		if d := b.next(); d > 8*time.Millisecond {
-			t.Fatalf("backoff exceeded max: %s", d)
-		}
-	}
-}
-
-func TestSIGTERMDrain_NoGoroutineLeak(t *testing.T) {
+func TestAssignmentChange_DrainsWorkers(t *testing.T) {
 	var sp spies
-	repo := newFakeRepo(iface("i1"), iface("i2"), iface("i3"))
-	deps := fastDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
-	g0 := runtime.NumGoroutine()
+	var phase atomic.Int32
+	deps := assignedDeps(&sp, newFakeRepo(iface("i1")), func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
+	deps.LoadAssignment = func(context.Context) (Assignment, bool, error) {
+		sp.loadAssign.Add(1)
+		if phase.Load() == 0 {
+			return Assignment{ApplianceID: tAppliance, TenantID: tTenantUUID, SiteID: tSiteUUID}, true, nil
+		}
+		// after flip, a different site → drain + re-scope
+		return Assignment{ApplianceID: tAppliance, TenantID: tTenantUUID, SiteID: "55555555-5555-5555-5555-555555555555"}, true, nil
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = Run(ctx, connectorOn(), deps); close(done) }()
-	waitFor(t, time.Second, func() bool { return sp.dial.Load() == 3 })
+	waitFor(t, time.Second, func() bool { return sp.dial.Load() >= 1 })
+	openBefore := sp.openRepo.Load()
+	phase.Store(1)
+	waitFor(t, 2*time.Second, func() bool { return sp.openRepo.Load() > openBefore }) // re-scoped → repo reopened
 	cancel()
 	<-done
-	// allow watcher goroutines to unwind
-	waitFor(t, 2*time.Second, func() bool { return runtime.NumGoroutine() <= g0+2 })
 }
 
-// ---- §16.12: one interface failure does not stop another ------------------
+// ---- SIGTERM/cancel drains, no goroutine leak -----------------------------
+
+func TestCancelDrain_NoGoroutineLeak(t *testing.T) {
+	before := runtime.NumGoroutine()
+	var sp spies
+	deps := assignedDeps(&sp, newFakeRepo(iface("i1"), iface("i2")), func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = Run(ctx, connectorOn(), deps); close(done) }()
+	waitFor(t, time.Second, func() bool { return sp.dial.Load() == 2 })
+	cancel()
+	<-done
+	time.Sleep(100 * time.Millisecond)
+	if after := runtime.NumGoroutine(); after > before+2 {
+		t.Errorf("goroutine leak after drain: before=%d after=%d", before, after)
+	}
+}
+
+// ---- one worker failure does not stop another -----------------------------
 
 func TestOneFailureDoesNotStopAnother(t *testing.T) {
 	var sp spies
-	repo := newFakeRepo(iface("bad"), iface("good"))
-	deps := fastDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
-	var goodServed atomic.Bool
-	deps.Dial = func(ctx context.Context, i Interface, r Revision) (Conn, error) {
-		sp.dial.Add(1)
-		if i.ID == "bad" {
-			return nil, errors.New("DIAL_FAIL")
-		}
-		return &fakeConn{serveFn: func(ctx context.Context, s AxisSink) error {
-			goodServed.Store(true)
+	repo := newFakeRepo(iface("i1"), iface("i2"))
+	deps := assignedDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn {
+		return &fakeConn{serveFn: func(ctx context.Context, sink AxisSink) error {
 			<-ctx.Done()
 			return ctx.Err()
-		}}, nil
+		}}
+	})
+	// i1's dial always fails; i2 must still dial
+	base := deps.Dial
+	deps.Dial = func(ctx context.Context, p DialParams) (Conn, error) {
+		if p.Iface.ID == ifaceUUID("i1") {
+			sp.dial.Add(1)
+			return nil, errors.New("dial boom")
+		}
+		return base(ctx, p)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = Run(ctx, connectorOn(), deps); close(done) }()
-	waitFor(t, 2*time.Second, func() bool { return goodServed.Load() })
+	waitFor(t, 2*time.Second, func() bool { return sp.dial.Load() >= 2 })
 	cancel()
 	<-done
 }

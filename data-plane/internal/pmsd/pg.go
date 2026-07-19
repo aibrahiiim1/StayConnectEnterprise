@@ -2,31 +2,48 @@ package pmsd
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 )
 
-// pgRepo is the PostgreSQL-backed typed PMS repository (iam_v2). Constructed only when the connector is ON.
-type pgRepo struct{ pool *pgxpool.Pool }
+// pgRepo is the PostgreSQL-backed, assignment-scoped typed PMS repository (iam_v2). It uses ONE pool for its
+// whole lifetime (no pool-per-operation). Constructed only when the connector is ON.
+type pgRepo struct {
+	pool *pgxpool.Pool
+	owns bool // true if Close should close the pool (false when the daemon shares one pool across scopes)
+}
 
-// NewPgRepo opens the pool and returns the typed repository.
-func NewPgRepo(ctx context.Context, dsn string) (Repo, error) {
+// NewPgRepo opens a single OWNED pool and returns the typed repository (Close closes the pool). Used by
+// integration tests and single-scope callers.
+func NewPgRepo(ctx context.Context, dsn string) (*pgRepo, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		return nil, err
 	}
-	return &pgRepo{pool: pool}, nil
+	return &pgRepo{pool: pool, owns: true}, nil
 }
 
-func (r *pgRepo) ListActiveInterfaces(ctx context.Context) ([]Interface, error) {
+// NewPgRepoFromPool wraps a SHARED pool (Close is a no-op). The daemon owns the pool once and shares it
+// across assignment scopes + the dedicated-connection lockers, so re-scoping never churns the pool.
+func NewPgRepoFromPool(pool *pgxpool.Pool) *pgRepo { return &pgRepo{pool: pool, owns: false} }
+
+// Pool exposes the pool so the daemon can build a dedicated-connection locker from it (no second pool).
+func (r *pgRepo) Pool() *pgxpool.Pool { return r.pool }
+
+func (r *pgRepo) Close() error {
+	if r.owns && r.pool != nil {
+		r.pool.Close()
+	}
+	r.pool = nil
+	return nil
+}
+
+func (r *pgRepo) ListActiveInterfaces(ctx context.Context, tenantID, siteID string) ([]Interface, error) {
 	rows, err := r.pool.Query(ctx, `SELECT tenant_id::text, site_id::text, id::text, connector_kind,
 		lifecycle_state, COALESCE(current_revision_id::text,'') FROM iam_v2.pms_interfaces
-		WHERE lifecycle_state='ACTIVE'`)
+		WHERE tenant_id=$1 AND site_id=$2 AND lifecycle_state='ACTIVE'`, tenantID, siteID)
 	if err != nil {
 		return nil, err
 	}
@@ -42,53 +59,86 @@ func (r *pgRepo) ListActiveInterfaces(ctx context.Context) ([]Interface, error) 
 	return out, rows.Err()
 }
 
-func (r *pgRepo) LoadInterface(ctx context.Context, tenantID, siteID, interfaceID string) (Interface, Revision, error) {
+func (r *pgRepo) LoadInterface(ctx context.Context, tenantID, siteID, interfaceID string) (Interface, Revision, SecretGeneration, error) {
 	var i Interface
 	var rev Revision
-	// read-only capability derives from the pinned revision config (auth.read_only defaults true for a
-	// read-only Phase-3 connector); endpoint/timezone come from the current revision.
+	var readOnly *bool
+	var normVer *int
+	var dialMs, readMs, writeMs, hbIntMs, hbToMs, freshMs, syncMs *int64
+	var resync *bool
 	err := r.pool.QueryRow(ctx, `SELECT pi.tenant_id::text, pi.site_id::text, pi.id::text, pi.connector_kind,
 		pi.lifecycle_state, COALESCE(pi.current_revision_id::text,''),
-		COALESCE(pr.id::text,''), COALESCE(pr.source_timezone,''),
-		COALESCE(pr.config->>'endpoint',''), COALESCE((pr.config->'auth'->>'read_only')::boolean, true)
+		COALESCE(pr.id::text,''), COALESCE(pr.source_timezone,''), COALESCE(pr.config->>'endpoint',''),
+		(pr.config->'auth'->>'read_only')::boolean,
+		pr.normalization_version,
+		(pr.config->>'dial_timeout_ms')::bigint, (pr.config->>'read_timeout_ms')::bigint,
+		(pr.config->>'write_timeout_ms')::bigint, (pr.config->>'heartbeat_interval_ms')::bigint,
+		(pr.config->>'heartbeat_timeout_ms')::bigint, (pr.config->>'feed_freshness_ms')::bigint,
+		(pr.config->>'complete_sync_ms')::bigint, (pr.config->>'resync_supported')::boolean
 		FROM iam_v2.pms_interfaces pi
 		LEFT JOIN iam_v2.pms_interface_revisions pr
 		  ON pr.tenant_id=pi.tenant_id AND pr.site_id=pi.site_id AND pr.pms_interface_id=pi.id AND pr.id=pi.current_revision_id
 		WHERE pi.tenant_id=$1 AND pi.site_id=$2 AND pi.id=$3`, tenantID, siteID, interfaceID).
 		Scan(&i.TenantID, &i.SiteID, &i.ID, &i.ConnectorKind, &i.LifecycleState, &i.CurrentRevisionID,
-			&rev.ID, &rev.SourceTimezone, &rev.Endpoint, &rev.ReadOnly)
+			&rev.ID, &rev.SourceTimezone, &rev.Endpoint, &readOnly, &normVer,
+			&dialMs, &readMs, &writeMs, &hbIntMs, &hbToMs, &freshMs, &syncMs, &resync)
 	if err != nil {
-		return Interface{}, Revision{}, err
+		return Interface{}, Revision{}, SecretGeneration{}, err
 	}
-	return i, rev, nil
+	rev.ConnectorKind = i.ConnectorKind
+	rev.Published = rev.ID != "" // the current revision IS the published one
+	rev.ReadOnly = readOnly != nil && *readOnly
+	rev.ResyncSupported = resync != nil && *resync
+	if normVer != nil {
+		rev.NormalizationVersion = *normVer
+	}
+	rev.DialTimeout = msDur(dialMs)
+	rev.ReadTimeout = msDur(readMs)
+	rev.WriteTimeout = msDur(writeMs)
+	rev.HeartbeatInterval = msDur(hbIntMs)
+	rev.HeartbeatTimeout = msDur(hbToMs)
+	rev.FeedFreshnessBound = msDur(freshMs)
+	rev.CompleteSyncBound = msDur(syncMs)
+
+	// active, non-superseded secret generation for this interface (identity only)
+	var sg SecretGeneration
+	sgErr := r.pool.QueryRow(ctx, `SELECT id::text, generation_no FROM iam_v2.pms_interface_secret_generations
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND superseded_at IS NULL
+		ORDER BY generation_no DESC LIMIT 1`, tenantID, siteID, interfaceID).Scan(&sg.ID, &sg.GenerationNo)
+	if sgErr == nil {
+		rev.ActiveSecretGenerationID = sg.ID
+	}
+	return i, rev, sg, nil
 }
 
-func (r *pgRepo) UpsertRuntime(ctx context.Context, st RuntimeState) error {
-	// optimistic generation: only apply when the incoming generation is >= the stored one; a stale worker
-	// (older generation) is rejected so a previous owner cannot overwrite the current owner's state.
-	tag, err := r.pool.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
-		(tenant_id,site_id,pms_interface_id,pinned_revision_id,runtime_generation,updated_at,
-		 transport_status,last_connect_attempt_at,last_connected_at,last_heartbeat_at,disconnected_since,transport_error_code,
-		 continuity_status,last_valid_event_at,last_event_cursor,discontinuity_detected_at,last_resync_marker_at,
-		 sync_status,resync_requested_at,resync_started_at,last_complete_sync_at,sync_cursor,last_sync_failure_code)
-		VALUES ($1,$2,$3,NULLIF($4,'')::uuid,$5,$6,$7,$8,$9,$10,$11,NULLIF($12,''),
-		        $13,$14,NULLIF($15,''),$16,$17,$18,$19,$20,$21,NULLIF($22,''),NULLIF($23,''))
+func msDur(ms *int64) time.Duration {
+	if ms == nil || *ms <= 0 {
+		return 0
+	}
+	return time.Duration(*ms) * time.Millisecond
+}
+
+// AllocateRuntimeGeneration atomically sets runtime_generation = stored+1 and pins the revision + secret
+// generation, returning the new generation. First allocation for a fresh row is 1.
+func (r *pgRepo) AllocateRuntimeGeneration(ctx context.Context, req GenerationRequest) (int64, error) {
+	var gen int64
+	err := r.pool.QueryRow(ctx, `INSERT INTO iam_v2.pms_interface_runtime
+		(tenant_id, site_id, pms_interface_id, pinned_revision_id, pinned_secret_generation_id, runtime_generation, updated_at)
+		VALUES ($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,1,now())
 		ON CONFLICT (tenant_id,site_id,pms_interface_id) DO UPDATE SET
-		  pinned_revision_id=EXCLUDED.pinned_revision_id, runtime_generation=EXCLUDED.runtime_generation,
-		  updated_at=EXCLUDED.updated_at, transport_status=EXCLUDED.transport_status,
-		  last_connect_attempt_at=EXCLUDED.last_connect_attempt_at, last_connected_at=EXCLUDED.last_connected_at,
-		  last_heartbeat_at=EXCLUDED.last_heartbeat_at, disconnected_since=EXCLUDED.disconnected_since,
-		  transport_error_code=EXCLUDED.transport_error_code, continuity_status=EXCLUDED.continuity_status,
-		  last_valid_event_at=EXCLUDED.last_valid_event_at, last_event_cursor=EXCLUDED.last_event_cursor,
-		  discontinuity_detected_at=EXCLUDED.discontinuity_detected_at, last_resync_marker_at=EXCLUDED.last_resync_marker_at,
-		  sync_status=EXCLUDED.sync_status, resync_requested_at=EXCLUDED.resync_requested_at,
-		  resync_started_at=EXCLUDED.resync_started_at, last_complete_sync_at=EXCLUDED.last_complete_sync_at,
-		  sync_cursor=EXCLUDED.sync_cursor, last_sync_failure_code=EXCLUDED.last_sync_failure_code
-		WHERE EXCLUDED.runtime_generation >= iam_v2.pms_interface_runtime.runtime_generation`,
-		st.TenantID, st.SiteID, st.PMSInterfaceID, st.PinnedRevisionID, st.Generation, st.UpdatedAt,
-		string(st.Transport), st.LastConnectAttemptAt, st.LastConnectedAt, st.LastHeartbeatAt, st.DisconnectedSince, st.TransportErrorCode,
-		string(st.Continuity), st.LastValidEventAt, st.LastEventCursor, st.DiscontinuityAt, st.LastResyncMarkerAt,
-		string(st.Sync), st.ResyncRequestedAt, st.ResyncStartedAt, st.LastCompleteSyncAt, st.SyncCursor, st.LastSyncFailureCode)
+		  runtime_generation = iam_v2.pms_interface_runtime.runtime_generation + 1,
+		  pinned_revision_id = EXCLUDED.pinned_revision_id,
+		  pinned_secret_generation_id = EXCLUDED.pinned_secret_generation_id,
+		  updated_at = now()
+		RETURNING runtime_generation`,
+		req.TenantID, req.SiteID, req.PMSInterfaceID, req.PinnedRevisionID, req.PinnedSecretGenerationID).Scan(&gen)
+	return gen, err
+}
+
+// cas runs an axis UPDATE guarded by the EXACT expected generation. Zero rows affected => a newer owner
+// exists => ErrStaleGeneration.
+func (r *pgRepo) cas(ctx context.Context, sql string, args ...any) error {
+	tag, err := r.pool.Exec(ctx, sql, args...)
 	if err != nil {
 		return err
 	}
@@ -98,27 +148,55 @@ func (r *pgRepo) UpsertRuntime(ctx context.Context, st RuntimeState) error {
 	return nil
 }
 
-// pgLocker is a session-level single-owner advisory lock on a dedicated connection.
+func (r *pgRepo) UpdateTransport(ctx context.Context, u TransportUpdate) error {
+	return r.cas(ctx, `UPDATE iam_v2.pms_interface_runtime SET
+		transport_status=$5, last_connect_attempt_at=COALESCE($6,last_connect_attempt_at),
+		last_connected_at=COALESCE($7,last_connected_at), last_heartbeat_at=COALESCE($8,last_heartbeat_at),
+		disconnected_since=$9, transport_error_code=NULLIF($10,''), updated_at=now()
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4`,
+		u.TenantID, u.SiteID, u.PMSInterfaceID, u.ExpectedGeneration,
+		string(u.Status), u.LastConnectAttemptAt, u.LastConnectedAt, u.LastHeartbeatAt, u.DisconnectedSince, u.ErrorCode.String())
+}
+
+func (r *pgRepo) UpdateContinuity(ctx context.Context, u ContinuityUpdate) error {
+	return r.cas(ctx, `UPDATE iam_v2.pms_interface_runtime SET
+		continuity_status=$5, last_valid_event_at=COALESCE($6,last_valid_event_at),
+		discontinuity_detected_at=COALESCE($7,discontinuity_detected_at),
+		last_resync_marker_at=COALESCE($8,last_resync_marker_at),
+		last_event_cursor=COALESCE(NULLIF($9,''),last_event_cursor), updated_at=now()
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4`,
+		u.TenantID, u.SiteID, u.PMSInterfaceID, u.ExpectedGeneration,
+		string(u.Status), u.LastValidEventAt, u.DiscontinuityAt, u.LastResyncMarkerAt, u.LastEventCursor)
+}
+
+func (r *pgRepo) UpdateSync(ctx context.Context, u SyncUpdate) error {
+	return r.cas(ctx, `UPDATE iam_v2.pms_interface_runtime SET
+		sync_status=$5, resync_requested_at=COALESCE($6,resync_requested_at),
+		resync_started_at=COALESCE($7,resync_started_at), last_complete_sync_at=COALESCE($8,last_complete_sync_at),
+		sync_cursor=COALESCE(NULLIF($9,''),sync_cursor), last_sync_failure_code=NULLIF($10,''), updated_at=now()
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4`,
+		u.TenantID, u.SiteID, u.PMSInterfaceID, u.ExpectedGeneration,
+		string(u.Status), u.ResyncRequestedAt, u.ResyncStartedAt, u.LastCompleteSyncAt, u.SyncCursor, u.FailureCode.String())
+}
+
+// pgLocker is a session-level single-owner advisory lock on a DEDICATED connection acquired from the shared
+// repository pool (no pool-per-lock). Close releases the lock + the connection deterministically.
 type pgLocker struct {
 	conn *pgxpool.Conn
 	lost chan struct{}
 	once sync.Once
 	key  int64
 	held bool
+	stop chan struct{}
 }
 
-// NewPgLocker acquires a dedicated connection for a single-owner advisory lock.
-func NewPgLocker(ctx context.Context, dsn string) (Locker, error) {
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		return nil, err
-	}
+// NewPgLocker acquires ONE dedicated connection from the shared pool for a single-owner advisory lock.
+func NewPgLocker(ctx context.Context, pool *pgxpool.Pool) (*pgLocker, error) {
 	c, err := pool.Acquire(ctx)
 	if err != nil {
-		pool.Close()
 		return nil, err
 	}
-	return &pgLocker{conn: c, lost: make(chan struct{})}, nil
+	return &pgLocker{conn: c, lost: make(chan struct{}), stop: make(chan struct{})}, nil
 }
 
 func (l *pgLocker) TryLock(ctx context.Context, key int64) (bool, error) {
@@ -134,14 +212,18 @@ func (l *pgLocker) TryLock(ctx context.Context, key int64) (bool, error) {
 	return got, nil
 }
 
-// watch closes lost() when the dedicated session dies (ownership gone).
 func (l *pgLocker) watch() {
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
-	for range t.C {
-		if err := l.conn.Ping(context.Background()); err != nil {
-			l.once.Do(func() { close(l.lost) })
+	for {
+		select {
+		case <-l.stop:
 			return
+		case <-t.C:
+			if err := l.conn.Ping(context.Background()); err != nil {
+				l.once.Do(func() { close(l.lost) })
+				return
+			}
 		}
 	}
 }
@@ -152,6 +234,7 @@ func (l *pgLocker) Close() error {
 	if l.conn == nil {
 		return nil
 	}
+	close(l.stop)
 	if l.held {
 		_, _ = l.conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, l.key)
 		l.held = false
@@ -161,34 +244,3 @@ func (l *pgLocker) Close() error {
 	l.conn = nil
 	return nil
 }
-
-var errLiveDialDeferred = errors.New("pmsd: live read-only PMS dial is enabled at live verification (increment 9); connector remains dark")
-
-// DialFIAS is the production dial. It REUSES the accepted FIAS protocol implementation
-// (internal/pms.ProtelFIAS) — pmsd builds no second parser/stack — and enforces the outbound allowlist.
-// Phase-3 Increment 3 opens no live socket: Serve returns errLiveDialDeferred (dark). Live serving is
-// wired to the reused provider at Increment 9.
-func DialFIAS(ctx context.Context, iface Interface, rev Revision) (Conn, error) {
-	// reuse-proof: construct the accepted provider (no second FIAS stack in pmsd).
-	provider := pms.NewProtelFIAS("pmsd-" + iface.ID)
-	return &fiasConn{provider: provider, iface: iface, rev: rev}, nil
-}
-
-type fiasConn struct {
-	provider *pms.ProtelFIAS
-	iface    Interface
-	rev      Revision
-}
-
-func (c *fiasConn) Serve(ctx context.Context, sink AxisSink) error {
-	// Outbound is restricted to the read-only allowlist; a financial (PS) frame can never be emitted.
-	for _, rec := range []string{"LS", "LD", "LR"} {
-		if err := CheckOutbound(rec); err != nil {
-			return err
-		}
-	}
-	// Increment 3 is DARK: do not open a live socket. (Live serving via c.provider is enabled at inc 9.)
-	return errLiveDialDeferred
-}
-
-func (c *fiasConn) Close() error { return nil }

@@ -1,13 +1,15 @@
 // Package pmsd is the dedicated read-only PMS connector runtime (Phase 3, ADR-0001). It owns each PMS
 // Interface connection under a DB advisory single-owner lock, runs one independent supervised worker per
-// Interface, and persists the three interface-level freshness axes (transport / feed-continuity /
-// complete-sync) to iam_v2.pms_interface_runtime. Occupancy freshness is Stay-specific and is NOT written
-// here. It reuses the accepted FIAS protocol layer (data-plane/internal/pms) and enforces a hard outbound
-// allowlist: no financial Posting record (PS), no Posting engine, no P# allocation.
+// Interface, and persists the interface-level freshness axes (transport / feed-continuity / complete-sync)
+// to iam_v2.pms_interface_runtime via INDEPENDENT compare-and-set updates. It reuses the accepted FIAS
+// protocol layer (data-plane/internal/pms) and enforces a hard outbound allowlist at the socket write
+// chokepoint: no financial Posting record (PS/PA), no Posting engine, no P# allocation.
 //
-// EVERYTHING is DARK-gated: when the connector flag is OFF the daemon constructs no DB connection, no
-// repository, no worker, and no PMS socket. All external effects are injected via Deps so the contract can
-// be proven with spies (no live PostgreSQL or PMS required for the unit/race gates).
+// Identity is assignment-scoped: Tenant/Site derive ONLY from the verified signed appliance assignment.
+// EVERYTHING is DARK-gated: with the connector flag OFF the daemon loads no assignment, constructs no DB
+// connection, reads no secret, starts no worker and opens no PMS socket. All external effects are injected
+// via Deps so the contract is provable with spies (no live PostgreSQL or PMS required for the unit/race
+// gates).
 package pmsd
 
 import (
@@ -43,7 +45,15 @@ const (
 	SyncFailed           SyncStatus = "SYNC_FAILED"
 )
 
-// Interface is a PMS Interface as re-read after ownership is acquired.
+// Assignment is the verified signed appliance assignment scope. It is the ONLY source of Tenant/Site
+// identity — never environment or client input.
+type Assignment struct {
+	ApplianceID string
+	TenantID    string
+	SiteID      string
+}
+
+// Interface is a PMS Interface as discovered/re-read within the assigned scope.
 type Interface struct {
 	TenantID          string
 	SiteID            string
@@ -53,109 +63,222 @@ type Interface struct {
 	CurrentRevisionID string
 }
 
-// Revision carries the pinned connector configuration (timezone, endpoint, freshness thresholds).
+// Revision carries the fully-typed pinned connector configuration. Nothing here defaults implicitly;
+// Validate() fails closed on any missing/incoherent field.
 type Revision struct {
-	ID             string
-	SourceTimezone string
-	Endpoint       string
-	ReadOnly       bool
+	ID                       string
+	ConnectorKind            string
+	Endpoint                 string
+	SourceTimezone           string
+	ReadOnly                 bool // must be EXPLICITLY true; never defaulted
+	NormalizationVersion     int
+	DialTimeout              time.Duration
+	ReadTimeout              time.Duration
+	WriteTimeout             time.Duration
+	HeartbeatInterval        time.Duration
+	HeartbeatTimeout         time.Duration
+	FeedFreshnessBound       time.Duration
+	CompleteSyncBound        time.Duration
+	ResyncSupported          bool
+	Published                bool
+	ActiveSecretGenerationID string
 }
 
-// RuntimeState is one durable snapshot of the three interface-level axes for an optimistic upsert.
-type RuntimeState struct {
-	TenantID         string
-	SiteID           string
-	PMSInterfaceID   string
-	PinnedRevisionID string
-	Generation       int64
-	UpdatedAt        time.Time
+var supportedConnectorKinds = map[string]struct{}{"protel-fias": {}}
 
-	Transport            TransportStatus
+// Validate enforces the typed connector configuration. Missing read-only capability FAILS — it is never
+// treated as true. Every timeout/threshold must be a positive duration.
+func (r Revision) Validate() error {
+	switch {
+	case !r.Published:
+		return coded(CodeRevisionInvalid, errors.New("revision not published"))
+	case r.ID == "":
+		return coded(CodeRevisionInvalid, errors.New("missing revision id"))
+	case r.ConnectorKind == "":
+		return coded(CodeRevisionInvalid, errors.New("missing connector kind"))
+	case !r.ReadOnly:
+		return coded(CodeRevisionInvalid, errors.New("read-only capability absent or false"))
+	case r.Endpoint == "":
+		return coded(CodeRevisionInvalid, errors.New("missing endpoint"))
+	case r.SourceTimezone == "":
+		return coded(CodeRevisionInvalid, errors.New("missing source timezone"))
+	case r.NormalizationVersion <= 0:
+		return coded(CodeRevisionInvalid, errors.New("normalization version must be > 0"))
+	case r.ActiveSecretGenerationID == "":
+		return coded(CodeSecretMissing, errors.New("no active secret generation pinned on revision"))
+	}
+	if _, ok := supportedConnectorKinds[r.ConnectorKind]; !ok {
+		return coded(CodeRevisionInvalid, errors.New("unsupported connector kind"))
+	}
+	for _, d := range []time.Duration{
+		r.DialTimeout, r.ReadTimeout, r.WriteTimeout, r.HeartbeatInterval, r.HeartbeatTimeout,
+		r.FeedFreshnessBound, r.CompleteSyncBound,
+	} {
+		if d <= 0 {
+			return coded(CodeConfigInvalid, errors.New("timeout/threshold must be a positive duration"))
+		}
+	}
+	if _, err := loadLocation(r.SourceTimezone); err != nil {
+		return coded(CodeConfigInvalid, errors.New("invalid source timezone"))
+	}
+	return nil
+}
+
+// SecretGeneration is the identity + metadata of the active secret generation (never key material).
+type SecretGeneration struct {
+	ID           string
+	GenerationNo int
+	Superseded   bool
+}
+
+// SecretMaterial is transient decrypted secret bytes. It is zeroed after dial and never logged.
+type SecretMaterial struct{ b []byte }
+
+func NewSecretMaterial(b []byte) SecretMaterial { return SecretMaterial{b: b} }
+func (s *SecretMaterial) Bytes() []byte         { return s.b }
+func (s *SecretMaterial) Zero() {
+	for i := range s.b {
+		s.b[i] = 0
+	}
+	s.b = nil
+}
+
+// GenerationRequest atomically allocates the next runtime generation and pins the selected revision +
+// secret generation.
+type GenerationRequest struct {
+	TenantID                 string
+	SiteID                   string
+	PMSInterfaceID           string
+	PinnedRevisionID         string
+	PinnedSecretGenerationID string
+}
+
+// axisBase is the common identity + CAS guard for every independent-axis update.
+type axisBase struct {
+	TenantID           string
+	SiteID             string
+	PMSInterfaceID     string
+	ExpectedGeneration int64
+	At                 time.Time
+}
+
+// TransportUpdate mutates ONLY the transport axis (never continuity/sync columns).
+type TransportUpdate struct {
+	axisBase
+	Status               TransportStatus
 	LastConnectAttemptAt *time.Time
 	LastConnectedAt      *time.Time
 	LastHeartbeatAt      *time.Time
 	DisconnectedSince    *time.Time
-	TransportErrorCode   string
-
-	Continuity         ContinuityStatus
-	LastValidEventAt   *time.Time
-	LastEventCursor    string
-	DiscontinuityAt    *time.Time
-	LastResyncMarkerAt *time.Time
-
-	Sync                SyncStatus
-	ResyncRequestedAt   *time.Time
-	ResyncStartedAt     *time.Time
-	LastCompleteSyncAt  *time.Time
-	SyncCursor          string
-	LastSyncFailureCode string
+	ErrorCode            Code
 }
 
-// Repo is the typed PMS repository. Nothing here is constructed while the connector is dark.
+// ContinuityUpdate mutates ONLY the feed-continuity axis.
+type ContinuityUpdate struct {
+	axisBase
+	Status             ContinuityStatus
+	LastValidEventAt   *time.Time
+	DiscontinuityAt    *time.Time
+	LastResyncMarkerAt *time.Time
+	LastEventCursor    string
+}
+
+// SyncUpdate mutates ONLY the complete-sync axis.
+type SyncUpdate struct {
+	axisBase
+	Status             SyncStatus
+	ResyncRequestedAt  *time.Time
+	ResyncStartedAt    *time.Time
+	LastCompleteSyncAt *time.Time
+	SyncCursor         string
+	FailureCode        Code
+}
+
+// Repo is the typed, assignment-scoped PMS repository. Every method takes/embeds Tenant+Site; nothing is
+// constructed while the connector is dark. Each Update uses an EXACT compare-and-set on runtime_generation.
 type Repo interface {
-	ListActiveInterfaces(ctx context.Context) ([]Interface, error)
-	// LoadInterface re-reads the Interface, its current Revision and read-only capability AFTER ownership
-	// is acquired (guards against a lifecycle/revision change between discovery and dial).
-	LoadInterface(ctx context.Context, tenantID, siteID, interfaceID string) (Interface, Revision, error)
-	// UpsertRuntime persists a runtime snapshot with an optimistic generation check: a write whose
-	// Generation is older than the currently stored generation MUST be rejected (ErrStaleGeneration).
-	UpsertRuntime(ctx context.Context, st RuntimeState) error
+	ListActiveInterfaces(ctx context.Context, tenantID, siteID string) ([]Interface, error)
+	LoadInterface(ctx context.Context, tenantID, siteID, interfaceID string) (Interface, Revision, SecretGeneration, error)
+	// AllocateRuntimeGeneration atomically sets runtime_generation = stored+1, pins the revision + secret
+	// generation, and returns the new generation.
+	AllocateRuntimeGeneration(ctx context.Context, req GenerationRequest) (int64, error)
+	UpdateTransport(ctx context.Context, u TransportUpdate) error
+	UpdateContinuity(ctx context.Context, u ContinuityUpdate) error
+	UpdateSync(ctx context.Context, u SyncUpdate) error
+	Close() error
 }
 
 // Locker is a session-level single-owner advisory lock bound to a dedicated DB connection.
 type Locker interface {
-	// TryLock is NON-blocking (pg_try_advisory_lock). Returns false if a competing owner holds the key.
 	TryLock(ctx context.Context, key int64) (bool, error)
-	// Lost fires when the underlying dedicated DB session dies (ownership is gone).
 	Lost() <-chan struct{}
-	// Close releases the lock and the dedicated connection.
 	Close() error
 }
 
-// Conn is an owned PMS protocol connection (read-only). Events drive freshness-axis updates.
+// DialParams carries everything the adapter needs to open a read-only connection. Secret is zeroed by the
+// worker after Dial returns.
+type DialParams struct {
+	Iface  Interface
+	Rev    Revision
+	Secret SecretMaterial
+}
+
+// Conn is an owned read-only PMS protocol connection.
 type Conn interface {
-	// Serve runs the read-only protocol loop until ctx is cancelled or the link fails, invoking the axis
-	// callbacks as real protocol evidence is observed. It NEVER sends a financial (PS) record.
+	// Serve runs the read-only protocol loop until ctx is cancelled or the link fails, invoking sink as
+	// real protocol evidence is observed. It NEVER sends a financial (PS/PA) record.
 	Serve(ctx context.Context, sink AxisSink) error
 	Close() error
 }
 
-// AxisSink receives real protocol evidence; the worker translates it into RuntimeState upserts.
+// AxisSink receives real protocol evidence. The worker implements it, translating control observations into
+// independent-axis CAS updates and domain records into typed queue events. All methods use the worker
+// context and the pinned generation.
 type AxisSink interface {
-	OnConnected(at time.Time)
-	OnHeartbeat(at time.Time)
-	OnValidEvent(at time.Time, cursor string)
-	OnResyncMarker(at time.Time)
-	OnCompleteSync(at time.Time, cursor string)
-	OnDisconnected(at time.Time, sanitizedCode string)
+	OnConnected(at time.Time) error
+	OnHeartbeat(at time.Time) error
+	OnResyncStart(at time.Time) error
+	OnResyncComplete(at time.Time, cursor string) error
+	OnDisconnected(at time.Time, code Code) error
+	// OnDomainEvent validates + enqueues a typed guest Stay mutation. On queue overflow it drives
+	// continuity→GAP_DETECTED and sync→RESYNC_REQUIRED and returns a QUEUE_OVERFLOW error so the adapter
+	// stops normal application until a verified resync.
+	OnDomainEvent(ctx context.Context, ev Event) error
 }
 
 // Deps injects every external effect so flags-OFF and failure paths are provable with spies.
 type Deps struct {
-	// OpenRepo constructs the DB-backed repository. NOT called while the connector is dark.
-	OpenRepo func(ctx context.Context) (Repo, error)
-	// NewLocker creates a dedicated single-owner lock session. NOT called while dark / before dial.
+	// LoadAssignment loads + cryptographically verifies the signed appliance assignment. NOT called while
+	// dark. Returns assigned=false for a factory-clean/unassigned appliance.
+	LoadAssignment func(ctx context.Context) (Assignment, bool, error)
+	// OpenRepo constructs the DB-backed repository scoped to the assignment. NOT called while dark.
+	OpenRepo func(ctx context.Context, a Assignment) (Repo, error)
+	// NewLocker creates a dedicated single-owner lock session. NOT called while dark / before ownership.
 	NewLocker func(ctx context.Context) (Locker, error)
-	// Dial opens the owned read-only PMS connection AFTER the lock + re-read succeed. NOT called while dark.
-	Dial func(ctx context.Context, iface Interface, rev Revision) (Conn, error)
+	// DecryptSecret decrypts the selected secret generation AFTER ownership. Lock losers never call it.
+	DecryptSecret func(ctx context.Context, iface Interface, rev Revision, sg SecretGeneration) (SecretMaterial, error)
+	// Dial opens the owned read-only PMS connection AFTER lock + re-read + allocate + decrypt. Not while dark.
+	Dial func(ctx context.Context, p DialParams) (Conn, error)
 
 	Now func() time.Time
 	Log *slog.Logger
 
 	// tuning (all bounded; zero -> sane defaults)
-	ReconcileInterval time.Duration
-	BackoffMin        time.Duration
-	BackoffMax        time.Duration
-	StableResetAfter  time.Duration // a connection must stay up this long before backoff resets
-	StopGrace         time.Duration
+	ReconcileInterval   time.Duration
+	BackoffMin          time.Duration
+	BackoffMax          time.Duration
+	StableResetAfter    time.Duration
+	StopGrace           time.Duration
+	QueueCapacity       int
+	QueueEnqueueTimeout time.Duration
 
-	// jitter is an injectable randomness source for deterministic backoff tests (nil -> time-based).
 	jitter func(int64) int64
 }
 
 var (
 	ErrStaleGeneration = errors.New("pmsd: stale runtime generation (a newer owner exists)")
 	ErrConnectorDark   = errors.New("pmsd: connector flag OFF")
+	ErrNoAssignment    = errors.New("pmsd: no verified signed appliance assignment (factory-clean)")
 )
 
 func (d *Deps) now() time.Time {
@@ -186,25 +309,53 @@ func (d *Deps) withDefaults() {
 	if d.StopGrace <= 0 {
 		d.StopGrace = 10 * time.Second
 	}
+	if d.QueueCapacity <= 0 {
+		d.QueueCapacity = 256
+	}
+	if d.QueueEnqueueTimeout <= 0 {
+		d.QueueEnqueueTimeout = 2 * time.Second
+	}
 }
 
-// Run is the daemon entry point. It is fail-closed and DARK-gated: with the connector flag OFF it
-// constructs NO repository, NO lock, NO worker and NO PMS socket, and returns nil (clean exit). With the
-// flag ON it builds the supervisor and serves until ctx is cancelled.
+// Run is the daemon entry point. Fail-closed and DARK-gated: with the connector flag OFF it loads NO
+// assignment, constructs NO repository/lock/worker/socket and reads NO secret, returning nil. With the flag
+// ON it verifies the signed assignment (fail-closed if unassigned), opens the scoped repository, and serves
+// until ctx is cancelled.
 func Run(ctx context.Context, cfg iamv2.PMSConfig, deps Deps) error {
-	if err := cfg.Validate(); err != nil { // malformed/incoherent flag set -> fail closed
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	if !cfg.ConnectorOn() {
-		deps.log().Info("pmsd: connector flag OFF; no DB, repository, worker or PMS socket constructed",
+		deps.log().Info("pmsd: connector flag OFF; no assignment, DB, secret, worker or PMS socket",
 			"flags", cfg.SafeFlagSummary())
 		return nil
 	}
 	deps.withDefaults()
-	repo, err := deps.OpenRepo(ctx)
-	if err != nil {
-		return err
+	// Loop so an assignment rotation drains the old scope and re-scopes to the new one. ctx cancellation
+	// or an unassigned state ends the loop.
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		assignment, assigned, err := deps.LoadAssignment(ctx)
+		if err != nil {
+			return err
+		}
+		if !assigned {
+			logEvent(deps.log(), EventSupervisorNoAssignment, CodeAssignmentMissing, SafeFields{Stage: StageDiscover})
+			return ErrNoAssignment // fail closed: a factory-clean appliance does no PMS work
+		}
+		repo, err := deps.OpenRepo(ctx, assignment)
+		if err != nil {
+			return err
+		}
+		sup := newSupervisor(cfg, assignment, repo, &deps)
+		serr := sup.run(ctx) // drains all workers before returning
+		_ = repo.Close()     // §9 explicit repository ownership + close (per scope)
+		if errors.Is(serr, errAssignmentChanged) {
+			logEvent(deps.log(), EventSupervisorAssignChange, CodeAssignmentChanged, SafeFields{Stage: StageShutdown})
+			continue // re-scope to the new assignment
+		}
+		return serr
 	}
-	sup := newSupervisor(cfg, repo, &deps)
-	return sup.run(ctx)
 }

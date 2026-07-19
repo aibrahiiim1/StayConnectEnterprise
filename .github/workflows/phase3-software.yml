@@ -1,0 +1,60 @@
+name: Phase 3 Software CI
+
+# Mandatory SOFTWARE gate for the Phase-3 read-only PMS connector runtime (pmsd). Distinct from the
+# Governance CI (which only validates project-state/docs). This compiles + tests the actual Go, runs the
+# race detector, the migration-0010 disposable-PG lifecycle gate, the pmsd PG16 integration tests, and the
+# protocol fake-server tests. Setup failures FAIL the job (they do not skip).
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master, "phase/3-stay-resolution-grace" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  software:
+    name: pmsd-software
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: data-plane
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: gofmt (must be clean)
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needs to be run on:"; echo "$unformatted"; exit 1
+          fi
+          echo "gofmt clean"
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (all packages)
+        run: go test ./... -count=1
+
+      - name: go test -race (pmsd + pms)
+        run: go test -race ./internal/pmsd/... ./internal/pms/... -count=1
+
+      - name: Migration 0010 lifecycle + concurrency gate (disposable PG16)
+        working-directory: .
+        run: bash iam_v2_scratch/phase3_0010_lifecycle.sh
+
+      - name: pmsd PG16 connector integration (disposable PG16)
+        working-directory: .
+        run: bash scripts/pmsd-pg-integration.sh

@@ -32,6 +32,8 @@ const (
 	CodeProtocolLinkEnded   Code = "PROTOCOL_LINK_ENDED"
 	CodeRuntimeGenStale     Code = "RUNTIME_GENERATION_STALE"
 	CodeQueueOverflow       Code = "QUEUE_OVERFLOW"
+	CodeEventInvalid        Code = "EVENT_INVALID"
+	CodeAssignmentMissing   Code = "ASSIGNMENT_MISSING"
 	CodeContextCanceled     Code = "CONTEXT_CANCELED"
 	CodePanicRecovered      Code = "PANIC_RECOVERED"
 	CodeOutboundBlocked     Code = "OUTBOUND_FRAME_BLOCKED"
@@ -44,8 +46,8 @@ var codeSet = map[Code]struct{}{
 	CodeInterfaceDisabled: {}, CodeAssignmentChanged: {}, CodeRevisionInvalid: {}, CodeRevisionChanged: {},
 	CodeConfigInvalid: {}, CodeSecretMissing: {}, CodeSecretRotated: {}, CodeSecretDecryptFailed: {},
 	CodeDialTimeout: {}, CodeDialFailed: {}, CodeProtocolFraming: {}, CodeProtocolLinkEnded: {},
-	CodeRuntimeGenStale: {}, CodeQueueOverflow: {}, CodeContextCanceled: {}, CodePanicRecovered: {},
-	CodeOutboundBlocked: {}, CodeUnclassified: {},
+	CodeRuntimeGenStale: {}, CodeQueueOverflow: {}, CodeEventInvalid: {}, CodeAssignmentMissing: {},
+	CodeContextCanceled: {}, CodePanicRecovered: {}, CodeOutboundBlocked: {}, CodeUnclassified: {},
 }
 
 func (c Code) Valid() bool { _, ok := codeSet[c]; return ok }
@@ -114,28 +116,100 @@ const (
 	StageShutdown  Stage = "SHUTDOWN"
 )
 
+var stageSet = map[Stage]struct{}{
+	StageDiscover: {}, StageLock: {}, StageReRead: {}, StageAllocate: {}, StageSecret: {},
+	StageDial: {}, StageServe: {}, StagePersist: {}, StageReconnect: {}, StageShutdown: {},
+}
+
+func (s Stage) Valid() bool { _, ok := stageSet[s]; return ok }
+func (s Stage) safe() string {
+	if !s.Valid() {
+		return "INVALID_STAGE"
+	}
+	return string(s)
+}
+
+// LogEvent is the CLOSED vocabulary of structured log-line names pmsd may emit. A caller-provided free-text
+// message never reaches the logs — only a LogEvent from this set.
+type LogEvent string
+
+const (
+	EventWorkerLockFailed       LogEvent = "WORKER_LOCK_FAILED"
+	EventWorkerNotDialable      LogEvent = "WORKER_NOT_DIALABLE"
+	EventWorkerRevisionInvalid  LogEvent = "WORKER_REVISION_INVALID"
+	EventWorkerSecretMissing    LogEvent = "WORKER_SECRET_MISSING"
+	EventWorkerSecretDecrypt    LogEvent = "WORKER_SECRET_DECRYPT_FAILED"
+	EventWorkerDialFailed       LogEvent = "WORKER_DIAL_FAILED"
+	EventWorkerLockLost         LogEvent = "WORKER_LOCK_LOST"
+	EventWorkerGenerationStale  LogEvent = "WORKER_GENERATION_STALE"
+	EventWorkerProtocolEnded    LogEvent = "WORKER_PROTOCOL_ENDED"
+	EventWorkerQueueOverflow    LogEvent = "WORKER_QUEUE_OVERFLOW"
+	EventWorkerPersistFailed    LogEvent = "WORKER_PERSIST_FAILED"
+	EventWorkerPanicRecovered   LogEvent = "WORKER_PANIC_RECOVERED"
+	EventWorkerReconnect        LogEvent = "WORKER_RECONNECT"
+	EventSupervisorReconcileErr LogEvent = "SUPERVISOR_RECONCILE_FAILED"
+	EventSupervisorAssignChange LogEvent = "SUPERVISOR_ASSIGNMENT_CHANGED"
+	EventSupervisorNoAssignment LogEvent = "SUPERVISOR_NO_ASSIGNMENT"
+)
+
+var logEventSet = map[LogEvent]struct{}{
+	EventWorkerLockFailed: {}, EventWorkerNotDialable: {}, EventWorkerRevisionInvalid: {},
+	EventWorkerSecretMissing: {}, EventWorkerSecretDecrypt: {}, EventWorkerDialFailed: {},
+	EventWorkerLockLost: {}, EventWorkerGenerationStale: {}, EventWorkerProtocolEnded: {},
+	EventWorkerQueueOverflow: {}, EventWorkerPersistFailed: {}, EventWorkerPanicRecovered: {},
+	EventWorkerReconnect: {}, EventSupervisorReconcileErr: {}, EventSupervisorAssignChange: {},
+	EventSupervisorNoAssignment: {},
+}
+
+func (e LogEvent) Valid() bool { _, ok := logEventSet[e]; return ok }
+func (e LogEvent) safe() string {
+	if !e.Valid() {
+		return "INVALID_LOG_EVENT"
+	}
+	return string(e)
+}
+
+// UUIDValue is a parsed-and-validated identity for logging. An unparseable identity renders as a fixed
+// placeholder — an arbitrary string can never reach a log line through it.
+type UUIDValue struct {
+	s     string
+	valid bool
+}
+
+// NewUUIDValue validates s as a canonical UUID; invalid input yields a placeholder value object.
+func NewUUIDValue(s string) UUIDValue {
+	_, err := parseUUID16(s)
+	return UUIDValue{s: s, valid: err == nil}
+}
+func (u UUIDValue) String() string {
+	if !u.valid {
+		return "INVALID_UUID"
+	}
+	return u.s
+}
+
 // SafeFields are the ONLY values allowed into a pmsd structured log line. Every field is a bounded machine
-// value — a UUID, a monotonic counter, a closed-set stage label — NEVER PMS/guest/secret-derived text. The
-// raw error is deliberately absent: it stays in memory for control flow (Classify inspects its type only)
-// and is never rendered, redacted, or serialized. There is intentionally no regex "redaction" acting as a
-// security boundary; safety comes from the fact that no unsafe field can enter here at all.
+// value — a validated UUID value object, a monotonic counter, a closed-set stage label — NEVER
+// PMS/guest/secret-derived text. The raw error is deliberately absent: it stays in memory for control flow
+// (Classify inspects its type only) and is never rendered, redacted, or serialized.
 type SafeFields struct {
-	InterfaceID string // canonical UUID only
+	InterfaceID UUIDValue
 	Generation  int64
 	Stage       Stage
 	Attempt     int
 }
 
-// logCoded emits the bounded Code plus SafeFields. It NEVER receives or logs a raw error, redacted or not.
-func logCoded(log *slog.Logger, msg string, code Code, sf SafeFields) {
+// logEvent emits a CLOSED LogEvent + Code + SafeFields. It receives no free-text message and no raw error;
+// every field is validated/bounded, so no canary can pass through. Nil logger is a no-op.
+func logEvent(log *slog.Logger, event LogEvent, code Code, sf SafeFields) {
 	if log == nil {
 		return
 	}
-	log.Error(msg,
+	log.Error(event.safe(),
 		"code", code.String(),
-		"interface", sf.InterfaceID,
+		"interface", sf.InterfaceID.String(),
 		"generation", sf.Generation,
-		"stage", string(sf.Stage),
+		"stage", sf.Stage.safe(),
 		"attempt", sf.Attempt,
 	)
 }
