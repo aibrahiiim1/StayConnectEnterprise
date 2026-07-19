@@ -36,10 +36,10 @@ PRE="$(Q "$FP")"; echo "  pre-0010 catalog md5 = $PRE"
 
 echo '== runner idempotency (scripts/edge-migrate.sh --only 0010, twice) =='
 export EDGE_PSQL="docker exec -i $C psql -U postgres -d $DB -v ON_ERROR_STOP=1"
-R1="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution 2>&1)"; echo "$R1" | grep -q "apply 0010" && echo "$R1" | grep -q "EDGE_MIGRATE_OK applied=1" && ok "runner run#1 applied 0010" || no "runner run#1 did not apply"
+R1="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" 2>&1)"; echo "$R1" | grep -q "apply 0010" && echo "$R1" | grep -q "EDGE_MIGRATE_OK applied=1" && ok "runner run#1 applied 0010" || no "runner run#1 did not apply"
 POST="$(Q "$FP")"; echo "  post-0010 catalog md5 = $POST"
 [ "$PRE" != "$POST" ] && ok "0010 changed the catalog" || no "0010 changed nothing"
-R2="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution 2>&1)"; echo "$R2" | grep -q "skip  0010" && echo "$R2" | grep -q "applied=0" && ok "runner run#2 skipped 0010 (idempotent no-op)" || no "runner run#2 not a no-op"
+R2="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" 2>&1)"; echo "$R2" | grep -q "skip-after-lock 0010" && echo "$R2" | grep -q "applied=0" && ok "runner run#2 skipped 0010 (idempotent no-op)" || no "runner run#2 not a no-op"
 [ "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase3_stay_resolution';")" = 1 ] && ok "ledger has exactly one 0010 record" || no "ledger record count wrong"
 [ "$POST" = "$(Q "$FP")" ] && ok "catalog unchanged between runner invocations" || no "catalog changed between runner runs"
 
@@ -69,6 +69,7 @@ BEGIN
   INSERT INTO public.sites(id,tenant_id) VALUES (s,t) ON CONFLICT DO NOTHING;
   INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind) VALUES (i,t,s,'protel-fias'),(i2,t,s,'protel-fias');
   INSERT INTO iam_v2.pms_interface_revisions(id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,config) VALUES (r,t,s,i,1,'Africa/Cairo','{}'),(r2,t,s,i2,1,'Africa/Cairo','{}');
+  INSERT INTO iam_v2.pms_interface_secret_generations(id,tenant_id,site_id,pms_interface_id,generation_no,ciphertext,nonce,encryption_key_id,cipher_version) VALUES (gen_random_uuid(),t,s,i,1,'\x00'::bytea,'\x00'::bytea,gen_random_uuid(),1),(gen_random_uuid(),t,s,i2,1,'\x00'::bytea,'\x00'::bytea,gen_random_uuid(),1);
   INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (st,t,s,i,'R1','S1','RESERVED',1,0),(st2,t,s,i,'R2','S2','RESERVED',1,0);
   INSERT INTO iam_v2.pms_interface_runtime(tenant_id,site_id,pms_interface_id,pinned_revision_id) VALUES (t,s,i,r);
   INSERT INTO iam_v2.stay_events(id,tenant_id,site_id,pms_interface_id,stay_id,external_event_identity,event_type,pms_timestamp_raw,pms_timestamp_utc,source_timezone,sequence_version,normalization_version,clock_suspect,payload,processing_status) VALUES (gen_random_uuid(),t,s,i,NULL,'E1','GI','x',now(),'Africa/Cairo',1,1,false,'{}','PENDING');
@@ -81,11 +82,17 @@ I="$(Q "SELECT pms_interface_id FROM iam_v2.stays WHERE external_stay_identity='
 R="$(Q "SELECT id FROM iam_v2.pms_interface_revisions WHERE pms_interface_id='$I';")"
 I2="$(Q "SELECT id FROM iam_v2.pms_interfaces WHERE id<>'$I' LIMIT 1;")"
 R2="$(Q "SELECT id FROM iam_v2.pms_interface_revisions WHERE pms_interface_id='$I2';")"
-[ -n "$ST" ] && [ -n "$I2" ] && [ -n "$R2" ] && ok "seed created stay $ST + 2 interfaces (I=$I I2=$I2)" || no "seed failed"
+SG="$(Q "SELECT id FROM iam_v2.pms_interface_secret_generations WHERE pms_interface_id='$I';")"
+SG2="$(Q "SELECT id FROM iam_v2.pms_interface_secret_generations WHERE pms_interface_id='$I2';")"
+[ -n "$ST" ] && [ -n "$I2" ] && [ -n "$R2" ] && [ -n "$SG" ] && ok "seed created stay $ST + 2 interfaces (I=$I I2=$I2) + secret gens" || no "seed failed"
 
-echo '== pms_interface_runtime constraints (§8) =='
+echo '== pms_interface_runtime constraints (§8) + Secret-Generation pin (PART A §1) =='
 expect_err "UPDATE iam_v2.pms_interface_runtime SET runtime_generation=-1 WHERE pms_interface_id='$I';" && ok "runtime_generation >= 0" || no "negative generation allowed"
 expect_err "UPDATE iam_v2.pms_interface_runtime SET transport_status='CONNECTED', pinned_revision_id=NULL WHERE pms_interface_id='$I';" && ok "CONNECTED requires pinned revision" || no "CONNECTED without revision allowed"
+expect_err "UPDATE iam_v2.pms_interface_runtime SET transport_status='CONNECTED', pinned_secret_generation_id=NULL, last_connected_at=now() WHERE pms_interface_id='$I';" && ok "CONNECTED requires pinned Secret Generation (§1)" || no "CONNECTED without secret gen allowed"
+expect_err "UPDATE iam_v2.pms_interface_runtime SET pinned_secret_generation_id='$SG2' WHERE pms_interface_id='$I';" && ok "cross-interface Secret Generation pin rejected (composite FK, §1)" || no "cross-interface secret gen accepted"
+expect_ok  "UPDATE iam_v2.pms_interface_runtime SET transport_status='CONNECTED', pinned_secret_generation_id='$SG', last_connected_at=now(), updated_at=now() WHERE pms_interface_id='$I';" && ok "CONNECTED with both pins (revision + same-scope secret gen) allowed (§1)" || no "valid CONNECTED blocked"
+expect_ok  "UPDATE iam_v2.pms_interface_runtime SET transport_status='DISCONNECTED', updated_at=now() WHERE pms_interface_id='$I';" && ok "historical row may retain a (now-superseded) secret-gen pin after disconnect (§1)" || no "post-connect state blocked"
 expect_err "UPDATE iam_v2.pms_interface_runtime SET last_heartbeat_at=now()+interval '1 day' WHERE pms_interface_id='$I';" && ok "heartbeat cannot be after updated_at" || no "future heartbeat allowed"
 expect_err "UPDATE iam_v2.pms_interface_runtime SET resync_started_at=now() WHERE pms_interface_id='$I';" && ok "resync_started requires resync_requested" || no "incoherent resync allowed"
 expect_err "UPDATE iam_v2.pms_interface_runtime SET transport_error_code=repeat('x',201) WHERE pms_interface_id='$I';" && ok "error-code length bounded" || no "unbounded error code"
@@ -130,6 +137,7 @@ EV="$(Q "SELECT id FROM iam_v2.stay_events WHERE external_event_identity='E1';")
 ST2="$(Q "SELECT id FROM iam_v2.stays WHERE external_stay_identity='S2';")"
 Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$T','$S','$I2','RX','SX','IN_HOUSE',1,0);" >/dev/null
 SX="$(Q "SELECT id FROM iam_v2.stays WHERE external_stay_identity='SX';")"
+expect_err "UPDATE iam_v2.stay_events SET id=gen_random_uuid() WHERE id='$EV';" && ok "event row id (primary identity) immutable (PART A §2)" || no "event id mutable"
 expect_err "UPDATE iam_v2.stay_events SET external_event_identity='E1x' WHERE id='$EV';" && ok "event identity immutable" || no "identity mutable"
 expect_err "DELETE FROM iam_v2.stay_events WHERE id='$EV';" && ok "event DELETE rejected" || no "delete allowed"
 expect_err "UPDATE iam_v2.stay_events SET stay_id='$ST' WHERE id='$EV';" && ok "PENDING stay_id set without terminal rejected" || no "pending stay_id set allowed"
@@ -164,12 +172,53 @@ o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 'BAD NAME' 2>&1 || true)"; echo
 o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 9999_absent_migration 2>&1 || true)"; echo "$o" | grep -q "resolves to 0 files" && ok "runner rejects absent migration" || no "runner accepted absent migration"
 o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution 2>&1 || true)"; echo "$o" | grep -qE "sha256=[0-9a-f]{64}|skip  0010" && ok "runner prints SHA-256 on apply / skip when already applied" || no "runner did neither"
 
-echo '== rollback == pre and reapply == post =='
+echo '== rollback == pre, then CONCURRENT two-runner reapply (PART A §3) =='
 Qf < "$DOWN" >/dev/null && ok "rollback 0010 (down)" || no "rollback failed"
 [ "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase3_stay_resolution';")" = 0 ] && ok "ledger 0010 removed on down" || no "ledger not cleared"
 [ "$(Q "$FP")" = "$PRE" ] && ok "catalog after rollback == pre-0010" || no "rollback catalog != pre"
-bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution >/dev/null 2>&1
-[ "$(Q "$FP")" = "$POST" ] && ok "catalog after reapply == first post-0010" || no "reapply catalog != post"
+# two real runner processes race the same fresh (post-rollback) state; the atomic lock-then-ledger
+# design must serialize them: exactly one APPLIES, the other reports SKIP_AFTER_LOCK, one ledger row.
+TMP="${TMPDIR:-/tmp}"; O1="$TMP/p3run1.$$"; O2="$TMP/p3run2.$$"
+bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" >"$O1" 2>&1 & P1=$!
+bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" >"$O2" 2>&1 & P2=$!
+wait $P1; E1=$?; wait $P2; E2=$?
+[ "$E1" = 0 ] && [ "$E2" = 0 ] && ok "both concurrent runners exit 0" || no "a concurrent runner failed (e1=$E1 e2=$E2)"
+[ "$(cat "$O1" "$O2" | grep -c 'apply 0010_phase3_stay_resolution (under lock)')" = 1 ] && ok "exactly one runner applied under lock" || no "apply count != 1"
+[ "$(cat "$O1" "$O2" | grep -c 'skip-after-lock 0010')" = 1 ] && ok "exactly one runner reported skip-after-lock" || no "skip-after-lock count != 1"
+[ "$(cat "$O1" "$O2" | grep -ci 'already exists')" = 0 ] && ok "no 'already exists' (no partial DDL / no pre-lock race)" || no "'already exists' seen (racy DDL)"
+[ "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase3_stay_resolution';")" = 1 ] && ok "exactly one ledger row after concurrent apply" || no "ledger row count != 1"
+[ "$(Q "$FP")" = "$POST" ] && ok "catalog after concurrent reapply == first post-0010 (no partial DDL)" || no "concurrent reapply catalog != post"
+rm -f "$O1" "$O2"
+
+echo '== runner target-identity fail-closed (PART A §4) =='
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db wrong_db 2>&1 || true)"; echo "$o" | grep -q "REFUSED: connected to database" && ok "runner refuses on --expect-db mismatch" || no "runner ran against wrong db"
+Q "ALTER TABLE public.schema_migrations RENAME TO schema_migrations_bak;" >/dev/null
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" 2>&1 || true)"; echo "$o" | grep -q "ledger absent" && ok "runner refuses when ledger absent (no silent create, §4)" || no "runner silently proceeded without ledger"
+o="$(bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" --bootstrap-ledger 2>&1 || true)"; echo "$o" | grep -q "ledger bootstrapped" && ok "explicit --bootstrap-ledger creates the ledger (separate acknowledged mode, §4)" || no "bootstrap mode failed"
+Q "DROP TABLE public.schema_migrations; ALTER TABLE public.schema_migrations_bak RENAME TO schema_migrations;" >/dev/null
+[ "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase3_stay_resolution';")" = 1 ] && ok "original ledger restored (one 0010 row)" || no "ledger restore failed"
+
+echo '== deployment-parity ownership: apply 0010 as non-superuser iam_v2_owner (PART A §5) =='
+# reassign the whole iam_v2 schema to a NOSUPERUSER owner, roll 0010 back, then re-apply AS that owner.
+Q "DROP ROLE IF EXISTS iam_v2_owner; CREATE ROLE iam_v2_owner LOGIN PASSWORD 'ownerpw' NOSUPERUSER NOCREATEDB NOCREATEROLE;" >/dev/null
+Q "DO \$ro\$ DECLARE r record; BEGIN
+     EXECUTE 'ALTER SCHEMA iam_v2 OWNER TO iam_v2_owner';
+     FOR r IN SELECT format('ALTER TABLE iam_v2.%I OWNER TO iam_v2_owner', tablename) c FROM pg_tables WHERE schemaname='iam_v2' LOOP EXECUTE r.c; END LOOP;
+     FOR r IN SELECT format('ALTER FUNCTION iam_v2.%I(%s) OWNER TO iam_v2_owner', p.proname, pg_get_function_identity_arguments(p.oid)) c FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' LOOP EXECUTE r.c; END LOOP;
+     FOR r IN SELECT format('ALTER VIEW iam_v2.%I OWNER TO iam_v2_owner', viewname) c FROM pg_views WHERE schemaname='iam_v2' LOOP EXECUTE r.c; END LOOP;
+   END \$ro\$;" >/dev/null
+Q "GRANT USAGE ON SCHEMA public TO iam_v2_owner; GRANT INSERT, SELECT, DELETE ON public.schema_migrations TO iam_v2_owner; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO iam_v2_owner;" >/dev/null
+Qf < "$DOWN" >/dev/null
+[ "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase3_stay_resolution';")" = 0 ] && ok "0010 rolled back before ownership re-apply" || no "pre-ownership rollback failed"
+export EDGE_PSQL_OWNER="docker exec -i $C psql -U iam_v2_owner -d $DB -v ON_ERROR_STOP=1"
+oo="$(EDGE_PSQL="$EDGE_PSQL_OWNER" bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" 2>&1)"; echo "$oo" | grep -q "apply 0010" && ok "0010 applies as NON-superuser iam_v2_owner (no superuser needed, §5)" || { no "0010 failed under iam_v2_owner"; echo "$oo" | tail -3; }
+OWN_BAD="$(Q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_roles r ON r.oid=c.relowner WHERE n.nspname='iam_v2' AND c.relkind IN ('r','i','v') AND r.rolname<>'iam_v2_owner';")"
+[ "$OWN_BAD" = 0 ] && ok "every iam_v2 relation (incl. new 0010 objects) owned by iam_v2_owner (§5)" || no "$OWN_BAD iam_v2 relations not owned by iam_v2_owner"
+FUN_BAD="$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace LEFT JOIN pg_roles r ON r.oid=p.proowner WHERE n.nspname='iam_v2' AND r.rolname<>'iam_v2_owner';")"
+[ "$FUN_BAD" = 0 ] && ok "every iam_v2 function (incl. p3_* triggers) owned by iam_v2_owner (§5)" || no "$FUN_BAD iam_v2 functions not owned by iam_v2_owner"
+PUBG="$(Q "SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema='iam_v2' AND grantee='PUBLIC' AND table_name IN ('pms_interface_runtime','site_checkout_grace_config','auth_resolutions');")"
+[ "$PUBG" = 0 ] && ok "no unexpected PUBLIC grants on new/altered 0010 tables (§5)" || no "unexpected PUBLIC grants ($PUBG)"
+[ "$(Q "$FP")" = "$POST" ] && ok "catalog after owner-parity re-apply == post-0010" || no "owner re-apply catalog != post"
 
 echo '== teardown =='
 docker rm -f "$C" >/dev/null 2>&1 && ok "disposable DB destroyed" || no "teardown failed"

@@ -31,6 +31,7 @@ CREATE TABLE iam_v2.pms_interface_runtime (
   site_id uuid NOT NULL,
   pms_interface_id uuid NOT NULL,
   pinned_revision_id uuid,
+  pinned_secret_generation_id uuid,                       -- identity only; never ciphertext/nonce/key
   runtime_generation bigint NOT NULL DEFAULT 0,
   updated_at timestamptz NOT NULL DEFAULT now(),
 
@@ -65,11 +66,16 @@ CREATE TABLE iam_v2.pms_interface_runtime (
     REFERENCES iam_v2.pms_interfaces (tenant_id, site_id, id) ON DELETE CASCADE,
   FOREIGN KEY (tenant_id, site_id, pms_interface_id, pinned_revision_id)
     REFERENCES iam_v2.pms_interface_revisions (tenant_id, site_id, pms_interface_id, id),
+  -- the pinned Secret Generation must belong to the SAME tenant/site/interface (historical rows may
+  -- reference a superseded generation; only the identity is stored, never key material).
+  FOREIGN KEY (tenant_id, site_id, pms_interface_id, pinned_secret_generation_id)
+    REFERENCES iam_v2.pms_interface_secret_generations (tenant_id, site_id, pms_interface_id, id),
 
   -- structural coherence (no now()-dependent logic; time-threshold decisions live in the domain)
   CONSTRAINT pir_generation_nonneg CHECK (runtime_generation >= 0),
   CONSTRAINT pir_connected_pins CHECK (
-    transport_status <> 'CONNECTED' OR (pinned_revision_id IS NOT NULL AND last_connected_at IS NOT NULL)),
+    transport_status <> 'CONNECTED'
+    OR (pinned_revision_id IS NOT NULL AND pinned_secret_generation_id IS NOT NULL AND last_connected_at IS NOT NULL)),
   CONSTRAINT pir_heartbeat_not_future CHECK (last_heartbeat_at IS NULL OR last_heartbeat_at <= updated_at),
   CONSTRAINT pir_resync_coherent CHECK (
         (resync_started_at IS NULL OR resync_requested_at IS NOT NULL)
@@ -201,7 +207,8 @@ BEGIN
   END IF;
 
   -- UPDATE: immutable identity / normalization columns
-  IF   NEW.tenant_id             IS DISTINCT FROM OLD.tenant_id
+  IF   NEW.id                    IS DISTINCT FROM OLD.id
+    OR NEW.tenant_id             IS DISTINCT FROM OLD.tenant_id
     OR NEW.site_id               IS DISTINCT FROM OLD.site_id
     OR NEW.pms_interface_id      IS DISTINCT FROM OLD.pms_interface_id
     OR NEW.external_event_identity IS DISTINCT FROM OLD.external_event_identity
