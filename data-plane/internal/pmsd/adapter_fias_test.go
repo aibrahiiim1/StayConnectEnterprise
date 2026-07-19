@@ -73,11 +73,18 @@ func testRev() Revision {
 	return r
 }
 
+func testKeys() AdapterKeys {
+	return AdapterKeys{
+		IdentityKey: []byte("identity-key-0123456789abcdef01"), IdentityKeyVersion: 3,
+		EvidenceKey: []byte("evidence-key-0123456789abcdef01"), EvidenceKeyVersion: 2,
+	}
+}
+
 func newAdapterOverPipe(t *testing.T) (*fiasAdapter, net.Conn) {
 	t.Helper()
 	client, server := net.Pipe()
 	dialer := func(ctx context.Context, network, address string) (net.Conn, error) { return client, nil }
-	dial := NewFIASDial(dialer, []byte("0123456789abcdef0123456789abcdef"), 1, time.Now)
+	dial := NewFIASDial(dialer, testKeys(), time.Now)
 	conn, err := dial(context.Background(), DialParams{Iface: iface("i1"), Rev: testRev()})
 	if err != nil {
 		t.Fatalf("dial: %v", err)
@@ -85,41 +92,144 @@ func newAdapterOverPipe(t *testing.T) (*fiasAdapter, net.Conn) {
 	return conn.(*fiasAdapter), server
 }
 
-// TestFIASFieldMap_Authoritative pins the binding Protel FIAS field map and identity determinism without
-// any network: RN=room, G#=reservation, GN/GF=last/first, GA/GD=arrival/departure.
+func testAdapter() *fiasAdapter {
+	k := testKeys()
+	return &fiasAdapter{iface: iface("i1"), rev: validRevision(), evKey: k.EvidenceKey, evKeyNo: k.EvidenceKeyVersion,
+		identKey: k.IdentityKey, identKeyN: k.IdentityKeyVersion, profile: "protel-fias/v1", now: time.Now}
+}
+
+// TestFIASFieldMap_Authoritative pins the binding Protel FIAS field map + timestamp semantics without any
+// network: RN=room, G#=reservation, GN/GF=last/first, GA/GD=arrival/departure.
 func TestFIASFieldMap_Authoritative(t *testing.T) {
-	a := &fiasAdapter{iface: iface("i1"), rev: validRevision(), evKey: []byte("0123456789abcdef0123456789abcdef"), evKeyNo: 1, now: time.Now}
+	a := testAdapter()
 	gi := a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
 	if gi.RoomNumber != "1408" || gi.ReservationRef != "12345" || gi.GuestLastName != "Smith" ||
 		gi.GuestFirstName != "John" || gi.ArrivalRaw != "260101" || gi.DepartureRaw != "260105" {
 		t.Fatalf("authoritative map wrong: %+v", gi)
 	}
+	if gi.GuestName != "Smith, John" {
+		t.Errorf("display name = %q", gi.GuestName)
+	}
 	if err := gi.Validate(); err != nil {
 		t.Fatalf("valid GI must validate: %v", err)
 	}
-	// identity is deterministic + interface-scoped, and DOES NOT equal the reservation number
-	gi2 := a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
-	if gi.ExternalEventIdentity != gi2.ExternalEventIdentity {
-		t.Error("identity must be deterministic for identical records")
+	// §3 timestamp semantics: Arrival Date must NEVER be reported as PMS event time; ReceivedAt is separate.
+	if gi.PMSEventTimestampRaw != "" || gi.PMSEventAt != nil {
+		t.Errorf("GI has no verified event timestamp; PMSEvent* must be unavailable, got %q/%v", gi.PMSEventTimestampRaw, gi.PMSEventAt)
 	}
-	if gi.ExternalEventIdentity == gi.ReservationRef {
-		t.Error("reservation number alone must not be the identity")
+	if gi.ArrivalRaw == gi.PMSEventTimestampRaw && gi.ArrivalRaw != "" {
+		t.Error("arrival date must not be substituted as PMS event time")
 	}
-	// GI vs GC vs GO, Room Move (room change), and different episode (arrival change) must NOT collide
-	gc := a.toEvent("GC|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
-	move := a.toEvent("GC|RN1500|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
-	nextEpisode := a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260601|GD260605|")
-	ids := map[string]bool{}
-	for _, e := range []Event{gi, gc, move, nextEpisode} {
-		if ids[e.ExternalEventIdentity] {
-			t.Errorf("identity collision across record-type/room/episode: %s", e.ExternalEventIdentity)
+	if gi.ReceivedAt.IsZero() {
+		t.Error("ReceivedAt (local receipt clock) must be set")
+	}
+}
+
+// TestSourceFingerprint_DuplicateAndDistinct proves exact retransmission is idempotent and any meaningful
+// change is distinct (§1/§2).
+func TestSourceFingerprint_DuplicateAndDistinct(t *testing.T) {
+	a := testAdapter()
+	base := "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|"
+	fp := func(rec string) string { return a.toEvent(rec).SourceEventFingerprint }
+	baseFP := fp(base)
+	if !isHex64(baseFP) {
+		t.Fatalf("fingerprint must be 64-hex, got %q", baseFP)
+	}
+	// exact retransmission -> SAME (idempotent)
+	if fp(base) != baseFP {
+		t.Error("exact retransmission must produce the same fingerprint")
+	}
+	// reservation alone is not the identity
+	if baseFP == a.toEvent(base).ReservationRef {
+		t.Error("reservation number alone must not be the fingerprint")
+	}
+	distinct := map[string]string{
+		"GI->GC (record type)":         "GC|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|",
+		"guest last-name-only change":  "GI|RN1408|G#12345|GNSmithe|GFJohn|GA260101|GD260105|",
+		"guest first-name-only change": "GI|RN1408|G#12345|GNSmith|GFJon|GA260101|GD260105|",
+		"folio-only change":            "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|FO9001|",
+		"room move (RN change)":        "GI|RN1500|G#12345|GNSmith|GFJohn|GA260101|GD260105|",
+		"arrival change (episode)":     "GI|RN1408|G#12345|GNSmith|GFJohn|GA260601|GD260605|",
+		"departure change":             "GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260106|",
+	}
+	for label, rec := range distinct {
+		if fp(rec) == baseFP {
+			t.Errorf("%s must produce a DIFFERENT fingerprint", label)
 		}
-		ids[e.ExternalEventIdentity] = true
 	}
-	// a GI missing the reservation (G#) is rejected (must not silently become a valid event)
-	bad := a.toEvent("GI|RN1408|GNSmith|GA260101|")
-	if bad.Validate() == nil {
-		t.Error("GI without a reservation (G#) must be rejected")
+	// interface change -> different
+	a2 := testAdapter()
+	a2.iface = iface("i2")
+	if a2.toEvent(base).SourceEventFingerprint == baseFP {
+		t.Error("interface change must produce a different fingerprint")
+	}
+	// normalization-version change -> different
+	a3 := testAdapter()
+	a3.rev.NormalizationVersion = 2
+	if a3.toEvent(base).SourceEventFingerprint == baseFP {
+		t.Error("normalization-version change must produce a different fingerprint")
+	}
+	// present-but-empty vs absent must not collide (field-boundary ambiguity)
+	emptyGN := a.toEvent("GI|RN1408|G#12345|GN|GFJohn|GA260101|GD260105|")
+	absentGN := a.toEvent("GI|RN1408|G#12345|GFJohn|GA260101|GD260105|")
+	if emptyGN.SourceEventFingerprint == absentGN.SourceEventFingerprint {
+		t.Error("present-but-empty field must not collide with an absent field")
+	}
+}
+
+func TestSourceFingerprint_EmptyKeyFailsClosed(t *testing.T) {
+	fp, ver := ComputeSourceFingerprint(nil, 1, newSourceEvent("i", RecGI, 1, "p", ""))
+	if fp != "" || ver != 0 {
+		t.Error("empty identity key must fail closed (empty fingerprint)")
+	}
+	fp, ver = ComputeSourceFingerprint([]byte("k"), 0, newSourceEvent("i", RecGI, 1, "p", ""))
+	if fp != "" || ver != 0 {
+		t.Error("zero key version must fail closed")
+	}
+	// an event built with no identity key is rejected by Validate (domain event needs a 64-hex fingerprint)
+	a := testAdapter()
+	a.identKey = nil
+	if a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|").Validate() == nil {
+		t.Error("domain event without a fingerprint must be rejected")
+	}
+}
+
+// TestLogicalStayKey_SeparateFromEvent proves Stay identity is scoped by reservation + lifecycle (not the
+// event fingerprint) and that a Room Move keeps the SAME logical stay while producing a DIFFERENT event.
+func TestLogicalStayKey_SeparateFromEvent(t *testing.T) {
+	a := testAdapter()
+	in := a.toEvent("GI|RN1408|G#12345|GNSmith|GFJohn|GA260101|GD260105|")
+	move := a.toEvent("GC|RN1500|G#12345|GNSmith|GFJohn|GA260101|GD260105|") // same reservation+arrival, new room
+	if in.LogicalStayKey != move.LogicalStayKey {
+		t.Error("a Room Move within one Stay must keep the same LogicalStayKey (room is evidence only)")
+	}
+	if in.SourceEventFingerprint == move.SourceEventFingerprint {
+		t.Error("a Room Move must still be a distinct Event")
+	}
+	if in.LogicalStayKey == in.SourceEventFingerprint {
+		t.Error("logical-stay identity must be distinct from the event fingerprint")
+	}
+	// different reservation -> different stay
+	other := a.toEvent("GI|RN1408|G#99999|GNSmith|GFJohn|GA260101|GD260105|")
+	if other.LogicalStayKey == in.LogicalStayKey {
+		t.Error("different reservation must be a different logical stay")
+	}
+}
+
+func TestFIAS_MalformedAndOverlong(t *testing.T) {
+	a := testAdapter()
+	// missing G# (reservation) -> rejected
+	if a.toEvent("GI|RN1408|GNSmith|GA260101|").Validate() == nil {
+		t.Error("GI without reservation (G#) must be rejected")
+	}
+	// missing RN (room) -> rejected
+	if a.toEvent("GI|G#12345|GNSmith|GA260101|").Validate() == nil {
+		t.Error("GI without room (RN) must be rejected")
+	}
+	// overlong reservation -> rejected (not truncated into a possibly-colliding value)
+	long := "GI|RN1408|G#" + strings.Repeat("9", maxReservationLen+5) + "|GNSmith|GFJohn|GA260101|GD260105|"
+	if a.toEvent(long).Validate() == nil {
+		t.Error("overlong reservation must be rejected, not truncated")
 	}
 }
 
@@ -256,8 +366,8 @@ func TestAdapter_StartupDomainAndResync(t *testing.T) {
 			t.Errorf("typed field carried raw frame bytes: %q", f)
 		}
 	}
-	if e.SourceEvidenceHash == "" || e.EvidenceKeyVersion != 1 {
-		t.Errorf("event missing keyed evidence: hash=%q ver=%d", e.SourceEvidenceHash, e.EvidenceKeyVersion)
+	if !isHex64(e.SourceEvidenceHash) || e.EvidenceKeyVersion <= 0 || !isHex64(e.SourceEventFingerprint) || e.FingerprintKeyVersion <= 0 {
+		t.Errorf("event missing keyed evidence/fingerprint: evHash=%q evVer=%d fp=%q fpVer=%d", e.SourceEvidenceHash, e.EvidenceKeyVersion, e.SourceEventFingerprint, e.FingerprintKeyVersion)
 	}
 }
 

@@ -35,22 +35,41 @@ func (g *guardedConn) writeFrame(body string) error {
 // fiasAdapter is the production-capable read-only FIAS connection. It reuses internal/pms framing + parsing
 // (no second parser) and drives the interface-level axes + typed domain-event queue via the AxisSink.
 type fiasAdapter struct {
-	g       *guardedConn
-	br      *bufio.Reader
-	iface   Interface
-	rev     Revision
-	evKey   []byte
-	evKeyNo int
-	now     func() time.Time
+	g         *guardedConn
+	br        *bufio.Reader
+	iface     Interface
+	rev       Revision
+	evKey     []byte
+	evKeyNo   int
+	identKey  []byte // dedicated PMS_EVENT_IDENTITY key (distinct purpose from evidence/encryption keys)
+	identKeyN int
+	profile   string
+	now       func() time.Time
 }
 
-// NewFIASDial builds a Deps.Dial using an injected Dialer. evidenceKey/version drive the keyed-HMAC source
-// evidence digest; the key is never stored on the Event or logged.
-func NewFIASDial(dialer Dialer, evidenceKey []byte, evidenceKeyVersion int, now func() time.Time) func(context.Context, DialParams) (Conn, error) {
+// AdapterKeys carries the two DISTINCT keyed-HMAC keys the adapter needs, each with its own purpose and
+// generation/version. IdentityKey (PMS_EVENT_IDENTITY) derives the idempotency fingerprint; EvidenceKey
+// derives the source-evidence provenance digest. Neither is an encryption key; neither is ever logged.
+type AdapterKeys struct {
+	IdentityKey        []byte
+	IdentityKeyVersion int
+	EvidenceKey        []byte
+	EvidenceKeyVersion int
+}
+
+// NewFIASDial builds a Deps.Dial using an injected Dialer. It fails closed if the dedicated identity key is
+// absent (an empty/invalid identity key must never silently produce un-fingerprinted events).
+func NewFIASDial(dialer Dialer, keys AdapterKeys, now func() time.Time) func(context.Context, DialParams) (Conn, error) {
 	if now == nil {
 		now = time.Now
 	}
 	return func(ctx context.Context, p DialParams) (Conn, error) {
+		if len(keys.IdentityKey) == 0 || keys.IdentityKeyVersion <= 0 {
+			return nil, coded(CodeConfigInvalid, errors.New("missing PMS_EVENT_IDENTITY key"))
+		}
+		if len(keys.EvidenceKey) == 0 || keys.EvidenceKeyVersion <= 0 {
+			return nil, coded(CodeConfigInvalid, errors.New("missing evidence key"))
+		}
 		conn, err := dialer(ctx, "tcp", p.Rev.Endpoint)
 		if err != nil {
 			return nil, coded(CodeDialFailed, err)
@@ -59,7 +78,9 @@ func NewFIASDial(dialer Dialer, evidenceKey []byte, evidenceKeyVersion int, now 
 			g:     &guardedConn{c: conn, writeTimeout: p.Rev.WriteTimeout},
 			br:    bufio.NewReader(conn),
 			iface: p.Iface, rev: p.Rev,
-			evKey: evidenceKey, evKeyNo: evidenceKeyVersion, now: now,
+			evKey: keys.EvidenceKey, evKeyNo: keys.EvidenceKeyVersion,
+			identKey: keys.IdentityKey, identKeyN: keys.IdentityKeyVersion,
+			profile: "protel-fias/v1", now: now,
 		}, nil
 	}
 }
@@ -171,29 +192,50 @@ func (a *fiasAdapter) toEvent(body string) Event {
 	rt := RecordType(pms.RecordID(body))
 	// identity-critical fields are NOT truncated (a truncated identity could collide) — Validate rejects an
 	// overlong value and the caller triggers gap/resync. Guest names are display-only and may be clipped.
-	room := f["RN"]
-	reservation := f["G#"]
-	arrival := f["GA"]
-	departure := f["GD"]
-	last := clip(f["GN"], maxGuestLen)
-	first := clip(f["GF"], maxGuestLen)
-	hash, ver := ComputeEvidenceHMAC(a.evKey, a.evKeyNo, body)
+	room, roomP := f["RN"]
+	reservation, resP := f["G#"]
+	arrival, arrP := f["GA"]
+	departure, depP := f["GD"]
+	lastV, lastP := f["GN"]
+	firstV, firstP := f["GF"]
+	folioV, folioP := f["FO"]
+	last := clip(lastV, maxGuestLen)
+	first := clip(firstV, maxGuestLen)
+
+	// canonical source event over EVERY normalized field (+ presence/absence + normalization + profile) so
+	// an exact retransmission is idempotent and any meaningful change is distinct.
+	se := newSourceEvent(a.iface.ID, rt, a.rev.NormalizationVersion, a.profile, "")
+	se.set("room", room, roomP)
+	se.set("reservation", reservation, resP)
+	se.set("last", lastV, lastP)
+	se.set("first", firstV, firstP)
+	se.set("arrival", arrival, arrP)
+	se.set("departure", departure, depP)
+	se.set("folio", folioV, folioP)
+	fp, fpVer := ComputeSourceFingerprint(a.identKey, a.identKeyN, se)
+	evHash, evVer := ComputeEvidenceHMAC(a.evKey, a.evKeyNo, body)
+
+	now := a.now()
 	return Event{
 		InterfaceID: a.iface.ID, RevisionID: a.rev.ID, SecretGenerationID: a.rev.ActiveSecretGenerationID,
-		NormalizationVer:      a.rev.NormalizationVersion,
-		RecordType:            rt,
-		ExternalEventIdentity: DeriveEventIdentity(a.iface.ID, rt, reservation, room, arrival, departure),
-		ReservationRef:        reservation,
-		RoomNumber:            room,
-		GuestLastName:         last,
-		GuestFirstName:        first,
-		GuestName:             deriveDisplayName(last, first),
-		ArrivalRaw:            arrival,
-		DepartureRaw:          departure,
-		PMSTimestampRaw:       arrival,
-		NormalizedAt:          a.now(),
-		Cursor:                clip(reservation+":"+room, maxCursorLen),
-		SourceEvidenceHash:    hash, EvidenceKeyVersion: ver,
-		ReceivedAt: a.now(),
+		NormalizationVer:       a.rev.NormalizationVersion,
+		RecordType:             rt,
+		SourceEventFingerprint: fp, FingerprintKeyVersion: fpVer, ExternalEventIdentity: fp,
+		LogicalStayKey: DeriveLogicalStayKey(a.iface.TenantID, a.iface.SiteID, a.iface.ID, reservation, arrival),
+		ReservationRef: reservation,
+		RoomNumber:     room,
+		FolioRef:       clip(folioV, maxFolioLen),
+		GuestLastName:  last,
+		GuestFirstName: first,
+		GuestName:      deriveDisplayName(last, first),
+		ArrivalRaw:     arrival,
+		DepartureRaw:   departure,
+		// GI/GC/GO carry no verified FIAS event timestamp -> PMSEvent* left unavailable (never substitute GA).
+		PMSEventTimestampRaw: "",
+		PMSEventAt:           nil,
+		NormalizedAt:         now,
+		Cursor:               clip(reservation+":"+room, maxCursorLen),
+		SourceEvidenceHash:   evHash, EvidenceKeyVersion: evVer,
+		ReceivedAt: now,
 	}
 }

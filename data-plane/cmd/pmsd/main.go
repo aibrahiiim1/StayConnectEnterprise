@@ -19,6 +19,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -68,6 +69,9 @@ func main() {
 		}
 	}
 	evKey, _ := hex.DecodeString(os.Getenv("PMSD_EVIDENCE_KEY_HEX"))
+	identKey, _ := hex.DecodeString(os.Getenv("PMSD_EVENT_IDENTITY_KEY_HEX"))
+	evKeyVer := envInt("PMSD_EVIDENCE_KEY_VERSION")
+	identKeyVer := envInt("PMSD_EVENT_IDENTITY_KEY_VERSION")
 	netDialer := func(ctx context.Context, network, address string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, address)
 	}
@@ -95,8 +99,11 @@ func main() {
 			}
 			return pmsd.NewPgSecretDecryptor(p, keyring)(ctx, iface, rev, sg)
 		},
-		Dial: pmsd.NewFIASDial(netDialer, evKey, 1, time.Now),
-		Log:  log,
+		Dial: pmsd.NewFIASDial(netDialer, pmsd.AdapterKeys{
+			IdentityKey: identKey, IdentityKeyVersion: identKeyVer,
+			EvidenceKey: evKey, EvidenceKeyVersion: evKeyVer,
+		}, time.Now),
+		Log: log,
 	}
 
 	if err := pmsd.Run(ctx, cfg, deps); err != nil {
@@ -104,4 +111,10 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("pmsd: stopped cleanly")
+}
+
+// envInt parses an integer env var (0 when unset/invalid; startup validation rejects a zero where required).
+func envInt(name string) int {
+	n, _ := strconv.Atoi(os.Getenv(name))
+	return n
 }

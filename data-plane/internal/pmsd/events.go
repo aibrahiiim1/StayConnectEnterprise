@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -88,7 +90,7 @@ func (e Event) Validate() error {
 		v string
 		n int
 	}{
-		{e.PMSTimestampRaw, maxRawTimestampLen}, {e.ArrivalRaw, maxRawTimestampLen}, {e.DepartureRaw, maxRawTimestampLen},
+		{e.PMSEventTimestampRaw, maxRawTimestampLen}, {e.ArrivalRaw, maxRawTimestampLen}, {e.DepartureRaw, maxRawTimestampLen},
 		{e.ReservationRef, maxReservationLen}, {e.RoomNumber, maxRoomLen}, {e.FolioRef, maxFolioLen},
 		{e.GuestLastName, maxGuestLen}, {e.GuestFirstName, maxGuestLen}, {e.GuestName, maxGuestLen},
 		{e.Cursor, maxCursorLen},
@@ -101,12 +103,19 @@ func (e Event) Validate() error {
 		return ErrEventInvalid
 	}
 	if e.RecordType.IsDomain() {
-		// a guest Stay mutation must carry: a deterministic 64-hex external identity + a 64-hex keyed-HMAC
-		// evidence with a positive key version + non-empty room/reservation.
-		if !isHex64(e.ExternalEventIdentity) {
+		// a guest Stay mutation must carry: a 64-hex keyed-HMAC source-event fingerprint (== external
+		// identity) with a positive fingerprint-key version, a 64-hex keyed-HMAC source evidence with a
+		// positive key version, a logical-stay key, and non-empty room/reservation.
+		if !isHex64(e.SourceEventFingerprint) || e.FingerprintKeyVersion <= 0 {
+			return ErrEventInvalid
+		}
+		if e.ExternalEventIdentity != e.SourceEventFingerprint {
 			return ErrEventInvalid
 		}
 		if !isHex64(e.SourceEvidenceHash) || e.EvidenceKeyVersion <= 0 {
+			return ErrEventInvalid
+		}
+		if !isHex64(e.LogicalStayKey) {
 			return ErrEventInvalid
 		}
 		if strings.TrimSpace(e.RoomNumber) == "" || strings.TrimSpace(e.ReservationRef) == "" {
@@ -139,16 +148,92 @@ func ComputeEvidenceHMAC(key []byte, keyVersion int, data string) (hexDigest str
 	return hex.EncodeToString(m.Sum(nil)), keyVersion
 }
 
-// DeriveEventIdentity is the deterministic, interface-scoped external Event identity. It is a content hash
-// over record type + reservation + room + arrival + departure so that GI/GC/GO, repeated updates, Room
-// Moves (room changes), and the same reservation across different lifecycle episodes (arrival/departure
-// change) never collide — and reservation number ALONE is never the idempotency key. Room number, which is
-// not globally unique, only contributes to the hash, it is never the identity by itself.
-func DeriveEventIdentity(interfaceID string, rt RecordType, reservation, room, arrival, departure string) string {
+// fieldVal captures a normalized field's value AND whether it was present in the source record — an empty
+// present field is semantically distinct from an absent one.
+type fieldVal struct {
+	value   string
+	present bool
+}
+
+// SourceEvent is the canonical, versioned representation of a single PMS source event used to derive the
+// idempotency fingerprint. It contains EVERY verified normalized field the record represents (not just
+// reservation/room/dates) plus presence/absence, the normalization version, the source-protocol profile,
+// and any authoritative sequence/cursor when actually available.
+type SourceEvent struct {
+	InterfaceID          string
+	RecordType           RecordType
+	NormalizationVersion int
+	ProtocolProfile      string // e.g. "protel-fias/v1"
+	Sequence             string // verified source sequence/cursor when available, else ""
+	fields               map[string]fieldVal
+}
+
+func newSourceEvent(interfaceID string, rt RecordType, normVer int, profile, sequence string) SourceEvent {
+	return SourceEvent{InterfaceID: interfaceID, RecordType: rt, NormalizationVersion: normVer,
+		ProtocolProfile: profile, Sequence: sequence, fields: map[string]fieldVal{}}
+}
+
+// set records a normalized field: (value, present). present=false means the source omitted the field.
+func (se SourceEvent) set(name, value string, present bool) {
+	se.fields[name] = fieldVal{value, present}
+}
+
+// canonical produces a deterministic, boundary-safe encoding. Fields are sorted; present-but-empty is
+// distinguished from absent; unit separators prevent field-boundary shifting.
+func (se SourceEvent) canonical() string {
+	var b strings.Builder
+	enc := func(s string) {
+		// length-prefix each token so no value can impersonate a boundary
+		b.WriteString(strconv.Itoa(len(s)))
+		b.WriteByte(':')
+		b.WriteString(s)
+		b.WriteByte(0x1f)
+	}
+	enc("source-event:v1")
+	enc(se.ProtocolProfile)
+	enc(se.InterfaceID)
+	enc(string(se.RecordType))
+	enc("nv" + strconv.Itoa(se.NormalizationVersion))
+	enc("seq" + se.Sequence)
+	names := make([]string, 0, len(se.fields))
+	for n := range se.fields {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		fv := se.fields[n]
+		if fv.present {
+			enc("F+" + n + "=" + fv.value)
+		} else {
+			enc("F-" + n) // absent marker (distinct from present-but-empty "F+name=")
+		}
+	}
+	return b.String()
+}
+
+// ComputeSourceFingerprint derives the idempotency fingerprint with a DEDICATED keyed HMAC (purpose
+// PMS_EVENT_IDENTITY). An exact retransmission yields the same fingerprint (idempotent); any meaningful
+// normalized payload change yields a different one. An empty key fails closed (returns "", 0).
+func ComputeSourceFingerprint(identityKey []byte, keyVersion int, se SourceEvent) (fingerprint string, version int) {
+	if len(identityKey) == 0 || keyVersion <= 0 {
+		return "", 0
+	}
+	m := hmac.New(sha256.New, identityKey)
+	_, _ = m.Write([]byte("PMS_EVENT_IDENTITY\x00"))
+	_, _ = m.Write([]byte(se.canonical()))
+	return hex.EncodeToString(m.Sum(nil)), keyVersion
+}
+
+// DeriveLogicalStayKey is the SEPARATE Stay-resolution identity (never the Event idempotency key). It is
+// scoped by tenant/site/interface + reservation (G#) + lifecycle evidence; room (RN) is evidence only and
+// never part of the identity (it is not globally unique and changes on a Room Move within one Stay).
+func DeriveLogicalStayKey(tenantID, siteID, interfaceID, reservation, lifecycleEvidence string) string {
 	h := sha256.New()
-	for _, part := range []string{"pms-event:v1", interfaceID, string(rt), reservation, room, arrival, departure} {
+	for _, part := range []string{"logical-stay:v1", tenantID, siteID, interfaceID, reservation, lifecycleEvidence} {
+		_, _ = h.Write([]byte(strconv.Itoa(len(part))))
+		_, _ = h.Write([]byte{':'})
 		_, _ = h.Write([]byte(part))
-		_, _ = h.Write([]byte{0x1f}) // unit separator so field boundaries can't be shifted
+		_, _ = h.Write([]byte{0x1f})
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

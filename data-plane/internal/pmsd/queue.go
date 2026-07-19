@@ -18,16 +18,25 @@ type Event struct {
 	SecretGenerationID string
 	NormalizationVer   int
 
-	// record classification + verified identity
-	RecordType            RecordType // closed enum (domain vs control)
-	ExternalEventIdentity string     // verified per-interface event identity (required for domain records)
+	// record classification
+	RecordType RecordType // closed enum (domain vs control)
 
-	// timestamps (raw kept as bounded parsed fields; normalized derived by the adapter under the pinned tz)
-	PMSTimestampRaw string
-	ArrivalRaw      string
-	DepartureRaw    string
-	NormalizedAt    time.Time
-	ClockSuspect    bool
+	// idempotency: keyed-HMAC fingerprint over the CANONICAL full source event (purpose PMS_EVENT_IDENTITY).
+	// ExternalEventIdentity carries the same value (the durable stay_events identity). LogicalStayKey is the
+	// SEPARATE Stay-resolution identity (never the idempotency key).
+	SourceEventFingerprint string
+	FingerprintKeyVersion  int
+	ExternalEventIdentity  string
+	LogicalStayKey         string
+
+	// timestamps: Arrival/Departure are Stay dates (NOT event time); ReceivedAt is the local receipt clock;
+	// PMSEvent* is populated ONLY from a verified FIAS event-timestamp field parsed under the pinned tz.
+	ArrivalRaw           string
+	DepartureRaw         string
+	PMSEventTimestampRaw string
+	PMSEventAt           *time.Time
+	NormalizedAt         time.Time
+	ClockSuspect         bool
 
 	// feed-continuity evidence
 	Cursor string
