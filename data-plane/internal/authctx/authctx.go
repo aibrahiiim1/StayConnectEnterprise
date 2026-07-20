@@ -30,7 +30,7 @@ func (g PMSGrant) valid() bool {
 			return false
 		}
 	}
-	return g.OccupancyEvidenceVersion > 0 && g.TTLSeconds > 0 && g.TTLSeconds <= maxTTLSeconds
+	return g.TTLSeconds > 0 && g.TTLSeconds <= maxTTLSeconds
 }
 
 // Store is the DB-backed Auth Context issuer/consumer.
@@ -41,13 +41,14 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // PMSGrant is the SERVER-DERIVED pin set for a PMS Auth Context. Interface/Revision/Stay come from the
 // verified resolution; Device/GuestNetwork from the trusted request context. TTLSeconds bounds its lifetime.
 type PMSGrant struct {
-	Tenant, Site             string
-	Interface, Revision      string
-	Stay                     string
-	Device                   string
-	GuestNetwork             string
-	OccupancyEvidenceVersion int // the exact occupancy-evidence version the successful resolution used
-	TTLSeconds               int
+	Tenant, Site        string
+	Interface, Revision string
+	Stay                string
+	Device              string
+	GuestNetwork        string
+	TTLSeconds          int
+	// lifecycle_version + occupancy_evidence_version are NOT supplied by the caller — they are read
+	// authoritatively from the resolved Stay row inside IssuePMSTx (the caller cannot invent them).
 }
 
 // Consumed is what a successful one-time consumption yields — the server-pinned subject the caller may then
@@ -76,16 +77,57 @@ var ErrContextInvalid = errors.New("authctx: context invalid, expired, consumed,
 // expires_at is computed SERVER-SIDE (now() + TTL) so no client clock influences the lifetime. A
 // non-positive TTL yields an already-expired context (fail-closed).
 func (s *Store) IssuePMS(ctx context.Context, g PMSGrant) (string, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	id, err := s.IssuePMSTx(ctx, tx, g)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// IssuePMSTx issues the PMS Auth Context INSIDE the caller's transaction (ideally the successful
+// STRICT-resolution transaction). It locks the resolved Stay, verifies scope + IN_HOUSE + valid occupancy
+// evidence produced by the pinned Revision, and reads the AUTHORITATIVE lifecycle_version + monotonic
+// occupancy_evidence_version from that row — the caller supplies only the verified resolution identity, never
+// the current counters. Fails closed (ErrGrantIncomplete) on any missing/invalid pin, without inserting.
+func (s *Store) IssuePMSTx(ctx context.Context, tx pgx.Tx, g PMSGrant) (string, error) {
 	if !g.valid() {
-		return "", ErrGrantIncomplete // fail BEFORE any INSERT — never persist an unusable context
+		return "", ErrGrantIncomplete
+	}
+	var lifecycleVer int
+	var evVer int64
+	// authoritative snapshot from the resolved Stay: locked, IN_HOUSE, occupancy evidence present + produced
+	// by the SAME Revision the resolution authenticated against, not clock-suspect.
+	err := tx.QueryRow(ctx, `SELECT st.lifecycle_version, st.occupancy_evidence_version
+		FROM iam_v2.stays st
+		JOIN iam_v2.pms_interfaces pi
+		  ON pi.tenant_id=st.tenant_id AND pi.site_id=st.site_id AND pi.id=st.pms_interface_id
+		WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.pms_interface_id=$3 AND st.id=$4
+		  AND st.status='IN_HOUSE' AND pi.lifecycle_state='ACTIVE'
+		  AND st.occupancy_evidence_at IS NOT NULL AND st.occupancy_clock_suspect IS NOT TRUE
+		  AND st.occupancy_revision_id=$5
+		FOR UPDATE OF st`,
+		g.Tenant, g.Site, g.Interface, g.Stay, g.Revision).Scan(&lifecycleVer, &evVer)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrGrantIncomplete // stay not resolvable/eligible for a PMS context — never persist one
+		}
+		return "", err
 	}
 	var id string
-	err := s.pool.QueryRow(ctx, `INSERT INTO iam_v2.auth_contexts
+	err = tx.QueryRow(ctx, `INSERT INTO iam_v2.auth_contexts
 		(tenant_id, site_id, method, stay_id, pms_interface_id, authentication_interface_revision_id,
-		 device_id, guest_network_id, pinned_occupancy_evidence_version, expires_at)
-		VALUES ($1,$2,'PMS',$3,$4,$5,$6,$7,$8, now() + make_interval(secs => $9))
+		 device_id, guest_network_id, pinned_lifecycle_version, pinned_occupancy_evidence_version, expires_at)
+		VALUES ($1,$2,'PMS',$3,$4,$5,$6,$7,$8,$9, now() + make_interval(secs => $10))
 		RETURNING id::text`,
-		g.Tenant, g.Site, g.Stay, g.Interface, g.Revision, g.Device, g.GuestNetwork, g.OccupancyEvidenceVersion, g.TTLSeconds).Scan(&id)
+		g.Tenant, g.Site, g.Stay, g.Interface, g.Revision, g.Device, g.GuestNetwork, lifecycleVer, evVer, g.TTLSeconds).Scan(&id)
 	return id, err
 }
 
@@ -139,20 +181,25 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 		          AND st.pms_interface_id=ac.pms_interface_id
 		          AND st.status='IN_HOUSE'
 		          AND pi.lifecycle_state='ACTIVE'
-		          -- PROVENANCE: the Stay's occupancy evidence must have been produced by the SAME immutable
-		          -- Revision the context authenticated against (single-Revision model). A matching evidence
-		          -- version integer under a DIFFERENT Revision is NOT accepted.
+		          -- SNAPSHOT: the pinned Stay EPISODE and MONOTONIC occupancy-evidence version must be
+		          -- unchanged — a Checkout→Reinstatement (lifecycle_version bump) or an authoritative evidence
+		          -- replacement (evidence_version bump) invalidates the context even within TTL.
+		          AND st.lifecycle_version IS NOT DISTINCT FROM ac.pinned_lifecycle_version
+		          AND st.occupancy_evidence_version IS NOT DISTINCT FROM ac.pinned_occupancy_evidence_version
+		          -- PROVENANCE: occupancy evidence produced by the SAME immutable Revision the context
+		          -- authenticated against (single-Revision model). A matching version under a DIFFERENT
+		          -- Revision is NOT accepted.
 		          AND st.occupancy_revision_id = ac.authentication_interface_revision_id
 		          AND st.occupancy_evidence_at IS NOT NULL
 		          AND st.occupancy_clock_suspect IS NOT TRUE
-		          AND st.occupancy_normalization_version IS NOT DISTINCT FROM ac.pinned_occupancy_evidence_version
-		          -- freshness: bounded, fail-closed parse of the pinned Revision's max_auth_cache_age. Only a
-		          -- positive integer (regex-guarded, capped at 7 days) is honored; anything malformed / absent
-		          -- / zero / negative falls back to a strict 300s default (never an SQL cast error or an
-		          -- unbounded window).
+		          -- freshness: CAST-SAFE, fail-closed. The regex bounds the value to 1..6 digits (max 999999,
+		          -- so the ::int cast can never overflow); a NESTED CASE only casts after that guard; anything
+		          -- malformed / absent / zero / negative / > 604800 (incl. overflow-sized) → strict 300s
+		          -- default. An invalid value is NEVER widened to a large window.
 		          AND st.occupancy_evidence_at > now() - make_interval(secs =>
-		                CASE WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]*$'
-		                     THEN LEAST((pr.config->>'max_auth_cache_age_seconds')::int, 604800)
+		                CASE WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
+		                     THEN CASE WHEN (pr.config->>'max_auth_cache_age_seconds')::int <= 604800
+		                               THEN (pr.config->>'max_auth_cache_age_seconds')::int ELSE 300 END
 		                     ELSE 300 END)))
 		RETURNING method, COALESCE(stay_id::text,''), COALESCE(pms_interface_id::text,''),
 		          COALESCE(authentication_interface_revision_id::text,'')`,

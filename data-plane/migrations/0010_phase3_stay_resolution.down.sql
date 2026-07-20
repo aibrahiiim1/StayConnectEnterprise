@@ -50,8 +50,10 @@ ALTER TABLE iam_v2.site_checkout_grace_config
   DROP COLUMN IF EXISTS grace_duration_seconds,
   DROP COLUMN IF EXISTS eligibility_window_seconds;
 
--- (5b) auth_contexts occupancy-evidence pin
-ALTER TABLE iam_v2.auth_contexts DROP COLUMN IF EXISTS pinned_occupancy_evidence_version;
+-- (5b) auth_contexts occupancy-evidence + episode pins
+ALTER TABLE iam_v2.auth_contexts
+  DROP COLUMN IF EXISTS pinned_occupancy_evidence_version,
+  DROP COLUMN IF EXISTS pinned_lifecycle_version;
 
 -- (5) auth_resolutions idempotency key: index then column
 DROP INDEX IF EXISTS iam_v2.auth_resolutions_req_idem;
@@ -65,6 +67,7 @@ ALTER TABLE iam_v2.stays
   DROP CONSTRAINT IF EXISTS stays_occupancy_all_or_none,
   DROP CONSTRAINT IF EXISTS stays_effco_only_after_checkout;
 ALTER TABLE iam_v2.stays
+  DROP COLUMN IF EXISTS occupancy_evidence_version,
   DROP COLUMN IF EXISTS occupancy_clock_suspect,
   DROP COLUMN IF EXISTS occupancy_normalization_version,
   DROP COLUMN IF EXISTS occupancy_revision_id,

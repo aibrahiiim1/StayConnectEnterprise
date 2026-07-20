@@ -115,7 +115,13 @@ ALTER TABLE iam_v2.stays
   ADD COLUMN occupancy_ingested_at timestamptz,
   ADD COLUMN occupancy_revision_id uuid,
   ADD COLUMN occupancy_normalization_version int,
-  ADD COLUMN occupancy_clock_suspect boolean;
+  ADD COLUMN occupancy_clock_suspect boolean,
+  -- MONOTONIC occupancy-evidence snapshot version (distinct from the parser/normalization version); bumped
+  -- ONLY when authoritative occupancy evidence for the Stay changes. Pinned by a PMS Auth Context so a later
+  -- evidence replacement invalidates the context. Not part of the all-or-none occupancy group (always
+  -- present, 0 = no authoritative evidence yet).
+  ADD COLUMN occupancy_evidence_version bigint NOT NULL DEFAULT 0
+    CHECK (occupancy_evidence_version >= 0);
 ALTER TABLE iam_v2.stays
   ADD CONSTRAINT stays_effco_only_after_checkout
     CHECK (effective_checkout_at IS NULL OR status IN ('CHECKED_OUT','POST_STAY_ACTIVE')),
@@ -150,9 +156,15 @@ CREATE UNIQUE INDEX auth_resolutions_req_idem
 --      consumption can reject a context whose pinned Stay occupancy evidence has since changed version.
 --      Nullable (backward compatible); Phase-3 PMS issuance sets it.
 -- ============================================================================
+-- Pin the authoritative Stay EPISODE (lifecycle_version) and a MONOTONIC occupancy-evidence snapshot version
+-- (NOT the parser/normalization version). Consumption rejects a context whose Stay episode or evidence
+-- snapshot has changed, so a Checkout→Reinstatement or an authoritative evidence replacement invalidates an
+-- old context even within its TTL and even under the same Revision + normalization version.
 ALTER TABLE iam_v2.auth_contexts
-  ADD COLUMN pinned_occupancy_evidence_version int
-    CHECK (pinned_occupancy_evidence_version IS NULL OR pinned_occupancy_evidence_version > 0);
+  ADD COLUMN pinned_lifecycle_version int
+    CHECK (pinned_lifecycle_version IS NULL OR pinned_lifecycle_version > 0),
+  ADD COLUMN pinned_occupancy_evidence_version bigint
+    CHECK (pinned_occupancy_evidence_version IS NULL OR pinned_occupancy_evidence_version >= 0);
 
 -- ============================================================================
 -- (4b) site_checkout_grace_config: typed grace scalars; quota in BYTES; canonical device-limit-policy

@@ -54,9 +54,9 @@ func seedCacheAge(t *testing.T, p *pgxpool.Pool, cacheAgeJSON string) fixture {
 	  pr AS (INSERT INTO iam_v2.pms_interface_revisions(id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,config)
 	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 1, 'UTC', $1::jsonb FROM pi RETURNING id, pms_interface_id),
 	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,
-	           occupancy_evidence_at,occupancy_ingested_at,occupancy_revision_id,occupancy_normalization_version,occupancy_clock_suspect)
+	           occupancy_evidence_at,occupancy_ingested_at,occupancy_revision_id,occupancy_normalization_version,occupancy_clock_suspect,occupancy_evidence_version)
 	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 'R1','R1','IN_HOUSE',1,
-	           now(), now(), pr.id, 1, false FROM pi, pr RETURNING id),
+	           now(), now(), pr.id, 1, false, 1 FROM pi, pr RETURNING id),
 	  dv AS (INSERT INTO iam_v2.devices(id,tenant_id,site_id,appliance_id,mac)
 	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, gen_random_uuid(), '02:00:00:00:00:01'::macaddr FROM pi RETURNING id)
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
@@ -74,7 +74,7 @@ func seedCacheAge(t *testing.T, p *pgxpool.Pool, cacheAgeJSON string) fixture {
 
 func grant(f fixture, ttl int) PMSGrant {
 	return PMSGrant{Tenant: f.tenant, Site: f.site, Interface: f.iface, Revision: f.rev, Stay: f.stay,
-		Device: f.device, GuestNetwork: f.network, OccupancyEvidenceVersion: 1, TTLSeconds: ttl}
+		Device: f.device, GuestNetwork: f.network, TTLSeconds: ttl}
 }
 
 func pres(f fixture) Presenter {
@@ -192,10 +192,10 @@ func TestIntegration_EvidenceAndInterfacePins(t *testing.T) {
 		t.Fatalf("clock-suspect = %v, want ErrContextInvalid", err)
 	}
 
-	// occupancy evidence version changed (no longer matches the pinned version)
+	// monotonic occupancy-evidence version changed (no longer matches the pinned snapshot)
 	f = seed(t, p)
 	id, _ = s.IssuePMS(ctx, grant(f, 600))
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_normalization_version=2 WHERE id=$1`, f.stay); err != nil {
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_version=99 WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
@@ -295,15 +295,19 @@ func TestIntegration_OccupancyRevisionProvenance(t *testing.T) {
 	s := NewStore(p)
 	ctx := context.Background()
 
-	// exact Revision + version, and a newer Revision merely existing does NOT invalidate the pinned one
+	// exact Revision + snapshot, and PUBLISHING a newer Revision (current_revision_id → rev2) does NOT
+	// invalidate the immutable pinned Revision-1 context while the Stay evidence snapshot is unchanged.
 	f := seed(t, p)
 	id, err := s.IssuePMS(ctx, grant(f, 600))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = secondRevision(t, p, f)
+	rev2pub := secondRevision(t, p, f)
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`, f.iface, rev2pub); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.Consume(ctx, id, pres(f)); err != nil {
-		t.Fatalf("exact revision+version (newer rev published) must consume: %v", err)
+		t.Fatalf("published newer revision must not invalidate the pinned rev-1 context: %v", err)
 	}
 
 	// same evidence version but DIFFERENT occupancy Revision → rejected
@@ -329,12 +333,6 @@ func TestIntegration_IssueRejectsIncomplete(t *testing.T) {
 
 	g0 := grant(f, 600)
 	bad := []PMSGrant{}
-	z := g0
-	z.OccupancyEvidenceVersion = 0
-	bad = append(bad, z)
-	n := g0
-	n.OccupancyEvidenceVersion = -1
-	bad = append(bad, n)
 	zt := g0
 	zt.TTLSeconds = 0
 	bad = append(bad, zt)
@@ -376,24 +374,95 @@ func TestIntegration_FreshnessConfigFailClosed(t *testing.T) {
 	s := NewStore(p)
 	ctx := context.Background()
 
-	for _, cfg := range []string{`"abc"`, `"-5"`, `"0"`, `null`} {
-		// fresh evidence (well within the 300s default) still consumes — no cast error, no unbounded window
+	// INVALID / out-of-range / overflow-sized values → strict 300s default (never a cast error, never widened).
+	for _, cfg := range []string{`"abc"`, `"-5"`, `"0"`, `null`, `604801`, `2147483648`, `99999999999999999999`} {
 		f := seedCacheAge(t, p, cfg)
 		id, err := s.IssuePMS(ctx, grant(f, 600))
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("cfg=%s issue: %v", cfg, err)
 		}
+		// fresh evidence (within the 300s default) still consumes — proves no SQL cast error
 		if _, err := s.Consume(ctx, id, pres(f)); err != nil {
 			t.Fatalf("cfg=%s fresh consume: %v", cfg, err)
 		}
-		// evidence older than the 300s fail-closed default → rejected
+		// evidence older than the 300s default → rejected — proves the invalid value was NOT widened
 		f2 := seedCacheAge(t, p, cfg)
 		id2, _ := s.IssuePMS(ctx, grant(f2, 600))
 		if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_at = now() - interval '10 minutes' WHERE id=$1`, f2.stay); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.Consume(ctx, id2, pres(f2)); err != ErrContextInvalid {
-			t.Fatalf("cfg=%s stale-beyond-default = %v, want ErrContextInvalid", cfg, err)
+			t.Fatalf("cfg=%s stale-beyond-default = %v, want ErrContextInvalid (invalid value must not widen)", cfg, err)
 		}
+	}
+
+	// VALID values are honored exactly (not defaulted, not truncated).
+	// 300: evidence at now()-5min is stale (>300s) → rejected.
+	f := seedCacheAge(t, p, "300")
+	id, _ := s.IssuePMS(ctx, grant(f, 600))
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_at = now() - interval '5 minutes' WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
+		t.Fatalf("cfg=300 evidence 5min old must be stale, got %v", err)
+	}
+	// 604800: evidence at now()-2h is fresh (within 7 days) → consumes.
+	f = seedCacheAge(t, p, "604800")
+	id, _ = s.IssuePMS(ctx, grant(f, 600))
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_at = now() - interval '2 hours' WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(ctx, id, pres(f)); err != nil {
+		t.Fatalf("cfg=604800 evidence 2h old must be fresh: %v", err)
+	}
+}
+
+// TestIntegration_EpisodeAndEvidenceSnapshot proves the context pins the exact Stay EPISODE + evidence
+// snapshot: a Checkout→Reinstatement (new lifecycle_version) invalidates the old context even within TTL, a
+// new context for the reinstated episode succeeds, and an authoritative evidence-version bump invalidates an
+// old context under the same Revision + normalization version + IN_HOUSE.
+func TestIntegration_EpisodeAndEvidenceSnapshot(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := NewStore(p)
+	ctx := context.Background()
+
+	// Checkout → Reinstatement within the original TTL → old context rejected (lifecycle_version changed).
+	f := seed(t, p)
+	oldID, err := s.IssuePMS(ctx, grant(f, 600))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// checkout then reinstate on the same Stay row (the migration trigger enforces the +1 on CHECKED_OUT→IN_HOUSE)
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT' WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1 WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(ctx, oldID, pres(f)); err != ErrContextInvalid {
+		t.Fatalf("post-reinstatement old context must be rejected, got %v", err)
+	}
+	// a NEW context for the reinstated episode succeeds (issuance reads the new lifecycle_version)
+	newID, err := s.IssuePMS(ctx, grant(f, 600))
+	if err != nil {
+		t.Fatalf("issue for reinstated episode: %v", err)
+	}
+	if _, err := s.Consume(ctx, newID, pres(f)); err != nil {
+		t.Fatalf("reinstated-episode context must consume: %v", err)
+	}
+
+	// authoritative evidence replacement (evidence_version bump) invalidates an old context, unchanged succeeds.
+	f = seed(t, p)
+	unchanged, _ := s.IssuePMS(ctx, grant(f, 600))
+	if _, err := s.Consume(ctx, unchanged, pres(f)); err != nil {
+		t.Fatalf("unchanged snapshot must consume: %v", err)
+	}
+	stale, _ := s.IssuePMS(ctx, grant(f, 600))
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_version=occupancy_evidence_version+1, occupancy_ingested_at=now() WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(ctx, stale, pres(f)); err != ErrContextInvalid {
+		t.Fatalf("evidence-replaced old context must be rejected, got %v", err)
 	}
 }
