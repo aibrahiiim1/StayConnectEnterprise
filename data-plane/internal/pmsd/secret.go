@@ -41,18 +41,47 @@ func NewPgSecretDecryptor(pool *pgxpool.Pool, kr Keyring) func(context.Context, 
 		if !ok || len(key) != 32 {
 			return SecretMaterial{}, coded(CodeSecretDecryptFailed, ErrSecretDecrypt)
 		}
-		block, err := aes.NewCipher(key)
-		if err != nil {
-			return SecretMaterial{}, coded(CodeSecretDecryptFailed, err)
-		}
-		gcm, err := cipher.NewGCM(block)
-		if err != nil || len(nonce) != gcm.NonceSize() {
-			return SecretMaterial{}, coded(CodeSecretDecryptFailed, ErrSecretDecrypt)
-		}
-		plain, err := gcm.Open(nil, nonce, ciphertext, nil)
+		plain, err := aeadOpen(key, nonce, ciphertext, ownerAAD(iface, sg))
 		if err != nil {
 			return SecretMaterial{}, coded(CodeSecretDecryptFailed, ErrSecretDecrypt)
 		}
 		return NewSecretMaterial(plain), nil
 	}
+}
+
+// ownerAAD binds a secret ciphertext to its EXACT owner (tenant / site / interface / secret-generation) via
+// AES-GCM additional authenticated data, so a ciphertext provisioned for one interface or generation cannot
+// be decrypted in a different context (a swapped/replayed ciphertext row fails authentication). The
+// provisioning (encrypt) side MUST use the identical AAD. Deterministic + length-prefixed so no field
+// boundary is ambiguous.
+func ownerAAD(iface Interface, sg SecretGeneration) []byte {
+	var b []byte
+	add := func(s string) {
+		b = append(b, byte(len(s)>>8), byte(len(s)))
+		b = append(b, s...)
+		b = append(b, 0x1f)
+	}
+	add("pms-secret-aead:v1")
+	add(iface.TenantID)
+	add(iface.SiteID)
+	add(iface.ID)
+	add(sg.ID)
+	return b
+}
+
+// aeadOpen AES-256-GCM-opens ciphertext with the given nonce + owner-bound AAD. Isolated + pure so the
+// owner-binding is unit-testable without a database.
+func aeadOpen(key, nonce, ciphertext, aad []byte) ([]byte, error) {
+	if len(key) != 32 {
+		return nil, ErrSecretDecrypt
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil || len(nonce) != gcm.NonceSize() {
+		return nil, ErrSecretDecrypt
+	}
+	return gcm.Open(nil, nonce, ciphertext, aad)
 }
