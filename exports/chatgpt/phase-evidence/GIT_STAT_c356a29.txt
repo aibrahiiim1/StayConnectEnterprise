@@ -1,0 +1,4 @@
+commit c356a29607c11ff4b6f2f00bc280e1bd3f1aead9
+Date:   Mon Jul 20 10:00:29 2026 +0300
+
+    @ Phase 3 Increment 4 foundation (inventory_head): deterministic Stay-resolution decision core (internal/stayengine)
