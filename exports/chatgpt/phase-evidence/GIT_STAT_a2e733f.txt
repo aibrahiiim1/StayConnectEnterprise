@@ -1,4 +1,0 @@
-commit a2e733f9cf46af0d0ea3a946d3e731a9bc708bd2
-Date:   Mon Jul 20 09:48:19 2026 +0300
-
-    @ Phase 3 increment 3 Â§9 credential_mode NONE + Migration-0010 credential-aware pin coherence (inventory_head): truthful no-auth Protel FIAS; race-green + lifecycle-gate 121/121 + PG16-green
