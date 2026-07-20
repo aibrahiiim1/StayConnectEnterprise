@@ -5,6 +5,7 @@ package authctx
 import (
 	"context"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,10 +34,15 @@ func pool(t *testing.T) *pgxpool.Pool {
 type fixture struct{ tenant, site, iface, rev, stay, device, network string }
 
 // seed builds tenant/site/interface/revision + an IN_HOUSE stay + a guest network, returning the pins a PMS
-// Auth Context needs.
-func seed(t *testing.T, p *pgxpool.Pool) fixture {
+// Auth Context needs. The revision's max_auth_cache_age_seconds is 3600.
+func seed(t *testing.T, p *pgxpool.Pool) fixture { return seedCacheAge(t, p, "3600") }
+
+// seedCacheAge is seed with an explicit max_auth_cache_age_seconds JSON value (e.g. "3600", "\"abc\"",
+// "null"), so the immutable revision carries the (possibly malformed) config from creation.
+func seedCacheAge(t *testing.T, p *pgxpool.Pool, cacheAgeJSON string) fixture {
 	t.Helper()
 	ctx := context.Background()
+	cfg := `{"endpoint":"x","max_auth_cache_age_seconds":` + cacheAgeJSON + `}`
 	var f fixture
 	err := p.QueryRow(ctx, `WITH
 	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
@@ -46,7 +52,7 @@ func seed(t *testing.T, p *pgxpool.Pool) fixture {
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state,current_revision_id)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id, 'protel-fias','ACTIVE',NULL FROM si RETURNING id,tenant_id,site_id),
 	  pr AS (INSERT INTO iam_v2.pms_interface_revisions(id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,config)
-	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 1, 'UTC', '{"endpoint":"x","max_auth_cache_age_seconds":3600}'::jsonb FROM pi RETURNING id, pms_interface_id),
+	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 1, 'UTC', $1::jsonb FROM pi RETURNING id, pms_interface_id),
 	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,
 	           occupancy_evidence_at,occupancy_ingested_at,occupancy_revision_id,occupancy_normalization_version,occupancy_clock_suspect)
 	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 'R1','R1','IN_HOUSE',1,
@@ -54,7 +60,7 @@ func seed(t *testing.T, p *pgxpool.Pool) fixture {
 	  dv AS (INSERT INTO iam_v2.devices(id,tenant_id,site_id,appliance_id,mac)
 	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, gen_random_uuid(), '02:00:00:00:00:01'::macaddr FROM pi RETURNING id)
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
-	       (SELECT id FROM pr)::text, (SELECT id FROM st)::text, (SELECT id FROM dv)::text, (SELECT id FROM gn)::text`).
+	       (SELECT id FROM pr)::text, (SELECT id FROM st)::text, (SELECT id FROM dv)::text, (SELECT id FROM gn)::text`, cfg).
 		Scan(&f.tenant, &f.site, &f.iface, &f.rev, &f.stay, &f.device, &f.network)
 	if err != nil {
 		t.Fatalf("seed: %v", err)
@@ -99,10 +105,13 @@ func TestIntegration_OneTimeConsumeAndReplay(t *testing.T) {
 		t.Fatalf("replay = %v, want ErrContextInvalid", err)
 	}
 
-	// expired context (TTL 0 → expires_at = now, so expires_at > now() is false) → rejected
-	expID, err := s.IssuePMS(context.Background(), grant(f, 0))
+	// expired context: issue with a valid TTL, then move expires_at into the past → consume rejected.
+	expID, err := s.IssuePMS(context.Background(), grant(f, 600))
 	if err != nil {
-		t.Fatalf("issue expired: %v", err)
+		t.Fatalf("issue: %v", err)
+	}
+	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.auth_contexts SET expires_at = now() - interval '1 minute' WHERE id=$1`, expID); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := s.Consume(context.Background(), expID, pres(f)); err != ErrContextInvalid {
 		t.Fatalf("expired consume = %v, want ErrContextInvalid", err)
@@ -248,5 +257,143 @@ func TestIntegration_ConcurrentConsumeSingleWinner(t *testing.T) {
 	wg.Wait()
 	if wins != 1 {
 		t.Fatalf("concurrent consume winners = %d, want exactly 1", wins)
+	}
+}
+
+func scalar(t *testing.T, p *pgxpool.Pool, sql string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := p.QueryRow(context.Background(), sql, args...).Scan(&n); err != nil {
+		t.Fatalf("scalar %q: %v", sql, err)
+	}
+	return n
+}
+
+// secondRevision inserts another immutable Revision for the same interface and returns its id.
+func secondRevision(t *testing.T, p *pgxpool.Pool, f fixture) string {
+	t.Helper()
+	var id string
+	if err := p.QueryRow(context.Background(), `INSERT INTO iam_v2.pms_interface_revisions
+		(id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,config)
+		VALUES (gen_random_uuid(),$1,$2,$3,2,'UTC','{"endpoint":"x","max_auth_cache_age_seconds":3600}'::jsonb)
+		RETURNING id::text`, f.tenant, f.site, f.iface).Scan(&id); err != nil {
+		t.Fatalf("second revision: %v", err)
+	}
+	return id
+}
+
+func authCtxCount(t *testing.T, p *pgxpool.Pool, f fixture) int {
+	return scalar(t, p, `SELECT count(*) FROM iam_v2.auth_contexts WHERE pms_interface_id=$1`, f.iface)
+}
+
+// TestIntegration_OccupancyRevisionProvenance proves the context binds to the EXACT Revision that produced the
+// Stay's occupancy evidence: a matching evidence-version integer under a DIFFERENT occupancy Revision is
+// rejected; a newer published Revision does not by itself invalidate the immutable pinned Revision.
+func TestIntegration_OccupancyRevisionProvenance(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := NewStore(p)
+	ctx := context.Background()
+
+	// exact Revision + version, and a newer Revision merely existing does NOT invalidate the pinned one
+	f := seed(t, p)
+	id, err := s.IssuePMS(ctx, grant(f, 600))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = secondRevision(t, p, f)
+	if _, err := s.Consume(ctx, id, pres(f)); err != nil {
+		t.Fatalf("exact revision+version (newer rev published) must consume: %v", err)
+	}
+
+	// same evidence version but DIFFERENT occupancy Revision → rejected
+	f = seed(t, p)
+	rev2 := secondRevision(t, p, f)
+	id, _ = s.IssuePMS(ctx, grant(f, 600))
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_revision_id=$2 WHERE id=$1`, f.stay, rev2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
+		t.Fatalf("different occupancy revision (same version) must be rejected, got %v", err)
+	}
+}
+
+// TestIntegration_IssueRejectsIncomplete proves PMS issuance fails BEFORE any INSERT when a required pin is
+// missing/invalid — no unusable/already-expired context reaches the table — with a sanitized error.
+func TestIntegration_IssueRejectsIncomplete(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := NewStore(p)
+	f := seed(t, p)
+	before := authCtxCount(t, p, f)
+
+	g0 := grant(f, 600)
+	bad := []PMSGrant{}
+	z := g0
+	z.OccupancyEvidenceVersion = 0
+	bad = append(bad, z)
+	n := g0
+	n.OccupancyEvidenceVersion = -1
+	bad = append(bad, n)
+	zt := g0
+	zt.TTLSeconds = 0
+	bad = append(bad, zt)
+	nt := g0
+	nt.TTLSeconds = -5
+	bad = append(bad, nt)
+	for _, mut := range []func(*PMSGrant){
+		func(g *PMSGrant) { g.Tenant = "" }, func(g *PMSGrant) { g.Site = "" },
+		func(g *PMSGrant) { g.Interface = "" }, func(g *PMSGrant) { g.Revision = "" },
+		func(g *PMSGrant) { g.Stay = "" }, func(g *PMSGrant) { g.Device = "" },
+		func(g *PMSGrant) { g.GuestNetwork = "" },
+	} {
+		m := g0
+		mut(&m)
+		bad = append(bad, m)
+	}
+	for i, g := range bad {
+		_, err := s.IssuePMS(context.Background(), g)
+		if err != ErrGrantIncomplete {
+			t.Fatalf("bad grant %d = %v, want ErrGrantIncomplete", i, err)
+		}
+		if err != nil && strings.Contains(err.Error(), f.stay) {
+			t.Fatalf("error text leaked an identifier: %v", err)
+		}
+	}
+	if after := authCtxCount(t, p, f); after != before {
+		t.Fatalf("incomplete issuance inserted rows: before=%d after=%d", before, after)
+	}
+	if _, err := s.IssuePMS(context.Background(), g0); err != nil {
+		t.Fatalf("valid issue must succeed: %v", err)
+	}
+}
+
+// TestIntegration_FreshnessConfigFailClosed proves a malformed / out-of-range max_auth_cache_age config never
+// causes a cast error or an unbounded window: it falls back to the strict 300s default.
+func TestIntegration_FreshnessConfigFailClosed(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := NewStore(p)
+	ctx := context.Background()
+
+	for _, cfg := range []string{`"abc"`, `"-5"`, `"0"`, `null`} {
+		// fresh evidence (well within the 300s default) still consumes — no cast error, no unbounded window
+		f := seedCacheAge(t, p, cfg)
+		id, err := s.IssuePMS(ctx, grant(f, 600))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Consume(ctx, id, pres(f)); err != nil {
+			t.Fatalf("cfg=%s fresh consume: %v", cfg, err)
+		}
+		// evidence older than the 300s fail-closed default → rejected
+		f2 := seedCacheAge(t, p, cfg)
+		id2, _ := s.IssuePMS(ctx, grant(f2, 600))
+		if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_at = now() - interval '10 minutes' WHERE id=$1`, f2.stay); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Consume(ctx, id2, pres(f2)); err != ErrContextInvalid {
+			t.Fatalf("cfg=%s stale-beyond-default = %v, want ErrContextInvalid", cfg, err)
+		}
 	}
 }
