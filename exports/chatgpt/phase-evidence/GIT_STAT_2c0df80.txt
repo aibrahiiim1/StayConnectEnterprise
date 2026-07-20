@@ -1,4 +1,0 @@
-commit 2c0df80120144a56f1b338030f58e76dd9f45ff6
-Date:   Mon Jul 20 19:38:43 2026 +0300
-
-    Phase 3 Increment-7 atomic Checkout conversion (inventory_head): Stay-first single-tx checkout+grace, PG16-green
