@@ -1,4 +1,0 @@
-commit c973ab076cd87cd4ad5d7e1a046ef28e93165ef1
-Date:   Mon Jul 20 10:20:06 2026 +0300
-
-    @ Phase 3 Increment 4 transactional processor (inventory_head): consume durable inbox â†’ apply Stay op â†’ terminal event, race-green + PG16-green

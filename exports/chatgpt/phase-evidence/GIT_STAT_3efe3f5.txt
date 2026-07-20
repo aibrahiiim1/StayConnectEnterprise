@@ -1,0 +1,4 @@
+commit 3efe3f5e9897c7101a6e3ae9a7624bc558fa0f59
+Date:   Mon Jul 20 10:25:20 2026 +0300
+
+    @ Phase 3 Increment 5 foundation (inventory_head): STRICT multi-PMS resolver decision core (internal/pmsresolve), D1â€“D11
