@@ -35,11 +35,21 @@ type Consumed struct {
 	Method    string
 	Stay      string
 	Interface string
+	Revision  string
 }
 
-// ErrContextInvalid is returned uniformly for a missing / expired / already-consumed context (no detail
-// distinguishes them to the caller — replay and expiry look identical).
-var ErrContextInvalid = errors.New("authctx: context invalid, expired, or already consumed")
+// Presenter is the request-side identity a consumption is checked against. A context pinned to one
+// device/guest-network/scope is UNUSABLE from another — a mismatch is a uniform ErrContextInvalid.
+type Presenter struct {
+	Tenant       string
+	Site         string
+	Device       string
+	GuestNetwork string
+}
+
+// ErrContextInvalid is returned uniformly for a missing / expired / already-consumed context, OR one presented
+// from a different device / guest-network / scope (no detail distinguishes these to the caller).
+var ErrContextInvalid = errors.New("authctx: context invalid, expired, consumed, or wrong presenter")
 
 // IssuePMS creates a one-time, TTL-bounded PMS Auth Context and returns its opaque id (the single-use token).
 // expires_at is computed SERVER-SIDE (now() + TTL) so no client clock influences the lifetime. A
@@ -55,15 +65,45 @@ func (s *Store) IssuePMS(ctx context.Context, g PMSGrant) (string, error) {
 	return id, err
 }
 
-// Consume atomically consumes the context EXACTLY once — it must be un-consumed AND unexpired — and returns
-// its server pins. The single-row UPDATE ... WHERE consumed_at IS NULL AND expires_at > now() guarantees at
-// most one caller ever wins; a replay or an expired context affects zero rows → ErrContextInvalid.
-func (s *Store) Consume(ctx context.Context, tenant, site, id string) (Consumed, error) {
+// Consume atomically consumes the context EXACTLY once against the FULL server pin set — it must be
+// un-consumed, unexpired, in the presenter's tenant/site, AND presented from the SAME device + guest network.
+// Runs in its own transaction (for a standalone session issuance). For commerce, use ConsumeTx so the
+// consumption commits/rolls back ATOMICALLY with the Quote/Purchase — a failed purchase must not leave a
+// context permanently consumed.
+func (s *Store) Consume(ctx context.Context, id string, p Presenter) (Consumed, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Consumed{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	c, err := s.ConsumeTx(ctx, tx, id, p)
+	if err != nil {
+		return Consumed{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Consumed{}, err
+	}
+	return c, nil
+}
+
+// ConsumeTx performs the one-time consumption inside the CALLER's transaction, so the caller can bind it to a
+// Quote/Purchase and roll the consumption back if that fails. The single-row UPDATE guarded by
+// consumed_at IS NULL AND expires_at > now() AND the full pin set guarantees at most one winner and rejects a
+// replay / expiry / wrong device / wrong network / cross-scope uniformly as ErrContextInvalid. It also
+// re-verifies the pinned Stay is still IN_HOUSE (occupancy evidence still valid for the operation).
+func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter) (Consumed, error) {
 	var c Consumed
-	err := s.pool.QueryRow(ctx, `UPDATE iam_v2.auth_contexts SET consumed_at = now()
-		WHERE id=$1 AND tenant_id=$2 AND site_id=$3 AND consumed_at IS NULL AND expires_at > now()
-		RETURNING method, COALESCE(stay_id::text,''), COALESCE(pms_interface_id::text,'')`,
-		id, tenant, site).Scan(&c.Method, &c.Stay, &c.Interface)
+	err := tx.QueryRow(ctx, `UPDATE iam_v2.auth_contexts ac SET consumed_at = now()
+		WHERE ac.id=$1 AND ac.tenant_id=$2 AND ac.site_id=$3
+		  AND ac.device_id=$4 AND ac.guest_network_id=$5
+		  AND ac.consumed_at IS NULL AND ac.expires_at > now()
+		  AND (ac.method <> 'PMS' OR EXISTS (
+		        SELECT 1 FROM iam_v2.stays st
+		        WHERE st.id = ac.stay_id AND st.tenant_id = ac.tenant_id AND st.site_id = ac.site_id
+		          AND st.pms_interface_id = ac.pms_interface_id AND st.status = 'IN_HOUSE'))
+		RETURNING method, COALESCE(stay_id::text,''), COALESCE(pms_interface_id::text,''),
+		          COALESCE(authentication_interface_revision_id::text,'')`,
+		id, p.Tenant, p.Site, p.Device, p.GuestNetwork).Scan(&c.Method, &c.Stay, &c.Interface, &c.Revision)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Consumed{}, ErrContextInvalid

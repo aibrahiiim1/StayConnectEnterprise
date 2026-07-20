@@ -69,6 +69,10 @@ func grant(f fixture, ttl int) PMSGrant {
 		Device: f.device, GuestNetwork: f.network, TTLSeconds: ttl}
 }
 
+func pres(f fixture) Presenter {
+	return Presenter{Tenant: f.tenant, Site: f.site, Device: f.device, GuestNetwork: f.network}
+}
+
 // TestIntegration_OneTimeConsumeAndReplay proves the core one-time semantics: a fresh context consumes once
 // (returning server pins), a replay is rejected, and an expired context is rejected — uniformly.
 func TestIntegration_OneTimeConsumeAndReplay(t *testing.T) {
@@ -81,15 +85,15 @@ func TestIntegration_OneTimeConsumeAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	got, err := s.Consume(context.Background(), f.tenant, f.site, id)
+	got, err := s.Consume(context.Background(), id, pres(f))
 	if err != nil {
 		t.Fatalf("first consume: %v", err)
 	}
-	if got.Method != "PMS" || got.Stay != f.stay || got.Interface != f.iface {
-		t.Fatalf("consume pins = %+v, want PMS/%s/%s", got, f.stay, f.iface)
+	if got.Method != "PMS" || got.Stay != f.stay || got.Interface != f.iface || got.Revision != f.rev {
+		t.Fatalf("consume pins = %+v, want PMS/%s/%s/%s", got, f.stay, f.iface, f.rev)
 	}
 	// replay → rejected uniformly
-	if _, err := s.Consume(context.Background(), f.tenant, f.site, id); err != ErrContextInvalid {
+	if _, err := s.Consume(context.Background(), id, pres(f)); err != ErrContextInvalid {
 		t.Fatalf("replay = %v, want ErrContextInvalid", err)
 	}
 
@@ -98,8 +102,68 @@ func TestIntegration_OneTimeConsumeAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue expired: %v", err)
 	}
-	if _, err := s.Consume(context.Background(), f.tenant, f.site, expID); err != ErrContextInvalid {
+	if _, err := s.Consume(context.Background(), expID, pres(f)); err != ErrContextInvalid {
 		t.Fatalf("expired consume = %v, want ErrContextInvalid", err)
+	}
+}
+
+// TestIntegration_PinnedPresenterAndOccupancy proves a context is UNUSABLE from a different device or guest
+// network, and that a PMS context whose pinned Stay is no longer IN_HOUSE cannot be consumed.
+func TestIntegration_PinnedPresenterAndOccupancy(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	f := seed(t, p)
+	s := NewStore(p)
+
+	// wrong device → invalid
+	id, _ := s.IssuePMS(context.Background(), grant(f, 600))
+	wrongDev := pres(f)
+	wrongDev.Device = "00000000-0000-0000-0000-000000000000"
+	if _, err := s.Consume(context.Background(), id, wrongDev); err != ErrContextInvalid {
+		t.Fatalf("wrong device = %v, want ErrContextInvalid", err)
+	}
+	// wrong network → invalid (and the earlier failed attempt did not consume it: a correct presenter still works)
+	wrongNet := pres(f)
+	wrongNet.GuestNetwork = "00000000-0000-0000-0000-000000000000"
+	if _, err := s.Consume(context.Background(), id, wrongNet); err != ErrContextInvalid {
+		t.Fatalf("wrong network = %v, want ErrContextInvalid", err)
+	}
+	if _, err := s.Consume(context.Background(), id, pres(f)); err != nil {
+		t.Fatalf("correct presenter after wrong attempts must still consume: %v", err)
+	}
+
+	// pinned Stay no longer IN_HOUSE → invalid
+	id2, _ := s.IssuePMS(context.Background(), grant(f, 600))
+	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.stays SET status='CHECKED_OUT' WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(context.Background(), id2, pres(f)); err != ErrContextInvalid {
+		t.Fatalf("checked-out stay consume = %v, want ErrContextInvalid", err)
+	}
+}
+
+// TestIntegration_ConsumeTxRollback proves the consumption is ATOMIC with the caller's transaction: if the
+// intended commerce transaction fails (rollback), the context is NOT left permanently consumed.
+func TestIntegration_ConsumeTxRollback(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	f := seed(t, p)
+	s := NewStore(p)
+	id, _ := s.IssuePMS(context.Background(), grant(f, 600))
+
+	tx, err := p.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConsumeTx(context.Background(), tx, id, pres(f)); err != nil {
+		t.Fatalf("ConsumeTx: %v", err)
+	}
+	// the "purchase" fails → roll back; the consumption must roll back with it
+	_ = tx.Rollback(context.Background())
+
+	// the context is still usable (not permanently consumed)
+	if _, err := s.Consume(context.Background(), id, pres(f)); err != nil {
+		t.Fatalf("after rollback the context must remain consumable, got %v", err)
 	}
 }
 
@@ -122,7 +186,7 @@ func TestIntegration_ConcurrentConsumeSingleWinner(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := s.Consume(context.Background(), f.tenant, f.site, id); err == nil {
+			if _, err := s.Consume(context.Background(), id, pres(f)); err == nil {
 				mu.Lock()
 				wins++
 				mu.Unlock()
