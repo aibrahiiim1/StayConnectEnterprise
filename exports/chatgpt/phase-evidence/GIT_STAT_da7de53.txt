@@ -1,4 +1,0 @@
-commit da7de5333ce35c8dc3eef4989c4521508ca8b64c
-Date:   Mon Jul 20 11:46:55 2026 +0300
-
-    @ Phase 3 Increment 6 Auth Context consumption extended (inventory_head): full pinned-context verification + atomic ConsumeTx; PG16-green

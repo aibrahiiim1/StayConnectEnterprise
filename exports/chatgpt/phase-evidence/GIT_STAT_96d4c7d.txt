@@ -1,0 +1,4 @@
+commit 96d4c7d3e4f31054e1ef9b75fe30f1f50be7e9f4
+Date:   Mon Jul 20 12:17:09 2026 +0300
+
+    @ Phase 3 corrections: REJECT_NEW_DEVICE (no limit exception) + complete Auth Context pin set (inventory_head); lifecycle-gate 121/121 + PG16-green + race-green
