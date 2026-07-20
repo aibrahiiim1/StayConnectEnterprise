@@ -1,4 +1,0 @@
-commit 49a9cff052634801a70b8584c14428ec32c90ab6
-Date:   Mon Jul 20 16:11:08 2026 +0300
-
-    @ Phase 3 Auth Context episode + evidence-snapshot pin + cast-safe freshness + status sync (inventory_head): PG16-green + lifecycle-gate 121/121
