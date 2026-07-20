@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `b0ddce302c3ed49632eee0ec11d4233399d38878`
-- **Provenance (generation HEAD = inventory_head):** `b0ddce302c3ed49632eee0ec11d4233399d38878`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `a2e733f9cf46af0d0ea3a946d3e731a9bc708bd2`
+- **Provenance (generation HEAD = inventory_head):** `a2e733f9cf46af0d0ea3a946d3e731a9bc708bd2`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 91
@@ -35,21 +35,21 @@
 | `data-plane/internal/pmsd/fias_adapter.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 (inventory_head): pmsd read-only PMS connector daemon (ADR-0001), DARK |
 | `data-plane/internal/pmsd/lockkey.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Part-B Â§10/Â§14/Â§17 (inventory_head): crypto lock key + typed error vocabulary + bounded event queue; pmsd race-green |
 | `data-plane/internal/pmsd/lockkey_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Part-B Â§10/Â§14/Â§17 (inventory_head): crypto lock key + typed error vocabulary + bounded event queue; pmsd race-green |
-| `data-plane/internal/pmsd/pg.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§G data model + persistence (inventory_head): durable resync inbox (reuse stay_events), typed resync generation, immutable-rows + atomic publication boundary, ownership-safe append-first admission; lifecycle-gate 121/121 + PG16-green + race-green |
-| `data-plane/internal/pmsd/pg_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§G state machine + Â§H barrier + durable LIVE admission (inventory_head): DSâ†’DE resync lifecycle, application barrier, ownership-safe append-first admission; race-green + PG16-green |
-| `data-plane/internal/pmsd/pmsd.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§G state machine + Â§H barrier + durable LIVE admission (inventory_head): DSâ†’DE resync lifecycle, application barrier, ownership-safe append-first admission; race-green + PG16-green |
-| `data-plane/internal/pmsd/pmsd_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§G data model + persistence (inventory_head): durable resync inbox (reuse stay_events), typed resync generation, immutable-rows + atomic publication boundary, ownership-safe append-first admission; lifecycle-gate 121/121 + PG16-green + race-green |
+| `data-plane/internal/pmsd/pg.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§9 credential_mode NONE + Migration-0010 credential-aware pin coherence (inventory_head): truthful no-auth Protel FIAS; race-green + lifecycle-gate 121/121 + PG16-green |
+| `data-plane/internal/pmsd/pg_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§9 credential_mode NONE + Migration-0010 credential-aware pin coherence (inventory_head): truthful no-auth Protel FIAS; race-green + lifecycle-gate 121/121 + PG16-green |
+| `data-plane/internal/pmsd/pmsd.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§9 credential_mode NONE + Migration-0010 credential-aware pin coherence (inventory_head): truthful no-auth Protel FIAS; race-green + lifecycle-gate 121/121 + PG16-green |
+| `data-plane/internal/pmsd/pmsd_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§9 credential_mode NONE + Migration-0010 credential-aware pin coherence (inventory_head): truthful no-auth Protel FIAS; race-green + lifecycle-gate 121/121 + PG16-green |
 | `data-plane/internal/pmsd/queue.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 hardening items 1-6 (inventory_head): strict FIAS parser, duplicate-field fail-closed, GuestName removed, atomic gap/resync txn, one serialized protocol writer; race + PG16 green |
 | `data-plane/internal/pmsd/queue_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 hardening Â§A-Â§D CI-stability (inventory_head): fix benign measurement race in linearizable-close test |
 | `data-plane/internal/pmsd/secret.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
 | `data-plane/internal/pmsd/strict_parse.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§F-integration hardening items 1-4 (inventory_head): strict-parse every inbound frame, prompt bounded shutdown, context-aware serialized writer, per-frame write-failure coverage; race-green |
 | `data-plane/internal/pmsd/strict_parse_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 hardening items 1-6 (inventory_head): strict FIAS parser, duplicate-field fail-closed, GuestName removed, atomic gap/resync txn, one serialized protocol writer; race + PG16 green |
 | `data-plane/internal/pmsd/supervisor.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
-| `data-plane/internal/pmsd/worker.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§G state machine + Â§H barrier + durable LIVE admission (inventory_head): DSâ†’DE resync lifecycle, application barrier, ownership-safe append-first admission; race-green + PG16-green |
+| `data-plane/internal/pmsd/worker.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§9 credential_mode NONE + Migration-0010 credential-aware pin coherence (inventory_head): truthful no-auth Protel FIAS; race-green + lifecycle-gate 121/121 + PG16-green |
 | `data-plane/internal/pmsd/writer.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§F-integration hardening items 1-4 (inventory_head): strict-parse every inbound frame, prompt bounded shutdown, context-aware serialized writer, per-frame write-failure coverage; race-green |
 | `data-plane/internal/pmsd/writer_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | @ Phase 3 increment 3 Â§F-integration hardening items 1-4 (inventory_head): strict-parse every inbound frame, prompt bounded shutdown, context-aware serialized writer, per-frame write-failure coverage; race-green |
 | `data-plane/migrations/0010_phase3_stay_resolution.down.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | @ Phase 3 increment 3 Â§G data model + persistence (inventory_head): durable resync inbox (reuse stay_events), typed resync generation, immutable-rows + atomic publication boundary, ownership-safe append-first admission; lifecycle-gate 121/121 + PG16-green + race-green |
-| `data-plane/migrations/0010_phase3_stay_resolution.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | @ Phase 3 increment 3 Â§G data model + persistence (inventory_head): durable resync inbox (reuse stay_events), typed resync generation, immutable-rows + atomic publication boundary, ownership-safe append-first admission; lifecycle-gate 121/121 + PG16-green + race-green |
+| `data-plane/migrations/0010_phase3_stay_resolution.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | @ Phase 3 increment 3 Â§9 credential_mode NONE + Migration-0010 credential-aware pin coherence (inventory_head): truthful no-auth Protel FIAS; race-green + lifecycle-gate 121/121 + PG16-green |
 | `deploy/systemd/stayconnect-pmsd.service` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | @ Phase 3 increment 3 (inventory_head): pmsd read-only PMS connector daemon (ADR-0001), DARK |
 | `docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/Phase3-Privilege-Matrix.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
@@ -67,7 +67,7 @@
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 CI-stability (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 CI-stability (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_b0ddce3.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_a2e733f.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 CI-stability (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 CI-stability (delivery_head): complete staged manifest + rebuilt packs + pointer |
@@ -95,7 +95,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 increment 3 Part-B Â§10/Â§14/Â§17 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | @ Phase 3 CI-stability (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | @ Phase 3 increment 3 Â§9 credential_mode NONE + Migration-0010 credential-aware pin coherence (inventory_head): truthful no-auth Protel FIAS; race-green + lifecycle-gate 121/121 + PG16-green |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `iam_v2_scratch/phase3_0010_lifecycle.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | @ Phase 3 increment 3 CI-stability hardening (inventory_head): robust gate readiness + retry-once on flaky in-job postgres container steps |
 | `scripts/edge-migrate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
@@ -106,10 +106,10 @@
 
 ## Total diff statistics (`git diff --stat`)
 ```text
- .github/workflows/phase3-software.yml              |  64 +++
- data-plane/cmd/pmsd/main.go                        | 120 +++++
- data-plane/internal/iamv2/pms_config.go            | 120 +++++
- data-plane/internal/iamv2/pms_config_test.go       | 157 ++++++
+ .github/workflows/phase3-software.yml              |  64 ++
+ data-plane/cmd/pmsd/main.go                        | 120 ++++
+ data-plane/internal/iamv2/pms_config.go            | 120 ++++
+ data-plane/internal/iamv2/pms_config_test.go       | 157 +++++
  data-plane/internal/localkeys/localkeys.go         |  25 +-
  data-plane/internal/pms/apaleo_test.go             |  25 +-
  data-plane/internal/pms/fias_wire.go               |  73 +++
@@ -118,32 +118,32 @@
  data-plane/internal/pms/pms.go                     |  49 +-
  data-plane/internal/pms/protel_fias.go             |  12 +-
  data-plane/internal/pms/stub.go                    |   8 +-
- data-plane/internal/pmsd/adapter_fias.go           | 286 ++++++++++
- data-plane/internal/pmsd/adapter_fias_test.go      | 542 +++++++++++++++++++
- data-plane/internal/pmsd/adapter_frames_test.go    | 257 +++++++++
+ data-plane/internal/pmsd/adapter_fias.go           | 286 +++++++++
+ data-plane/internal/pmsd/adapter_fias_test.go      | 542 +++++++++++++++++
+ data-plane/internal/pmsd/adapter_frames_test.go    | 257 ++++++++
  data-plane/internal/pmsd/assignment.go             | 103 ++++
- data-plane/internal/pmsd/barrier_test.go           | 150 ++++++
- data-plane/internal/pmsd/errcodes.go               | 215 ++++++++
+ data-plane/internal/pmsd/barrier_test.go           | 150 +++++
+ data-plane/internal/pmsd/errcodes.go               | 215 +++++++
  data-plane/internal/pmsd/errcodes_test.go          | 136 +++++
- data-plane/internal/pmsd/events.go                 | 273 ++++++++++
+ data-plane/internal/pmsd/events.go                 | 273 +++++++++
  data-plane/internal/pmsd/fias_adapter.go           |  58 ++
  data-plane/internal/pmsd/lockkey.go                |  86 +++
  data-plane/internal/pmsd/lockkey_test.go           |  74 +++
- data-plane/internal/pmsd/pg.go                     | 366 +++++++++++++
- data-plane/internal/pmsd/pg_integration_test.go    | 570 ++++++++++++++++++++
- data-plane/internal/pmsd/pmsd.go                   | 426 +++++++++++++++
- data-plane/internal/pmsd/pmsd_test.go              | 596 +++++++++++++++++++++
+ data-plane/internal/pmsd/pg.go                     | 379 ++++++++++++
+ data-plane/internal/pmsd/pg_integration_test.go    | 613 +++++++++++++++++++
+ data-plane/internal/pmsd/pmsd.go                   | 448 ++++++++++++++
+ data-plane/internal/pmsd/pmsd_test.go              | 660 +++++++++++++++++++++
  data-plane/internal/pmsd/queue.go                  | 204 +++++++
  data-plane/internal/pmsd/queue_test.go             | 266 +++++++++
  data-plane/internal/pmsd/secret.go                 |  58 ++
  data-plane/internal/pmsd/strict_parse.go           | 177 ++++++
- data-plane/internal/pmsd/strict_parse_test.go      | 150 ++++++
- data-plane/internal/pmsd/supervisor.go             | 156 ++++++
- data-plane/internal/pmsd/worker.go                 | 335 ++++++++++++
- data-plane/internal/pmsd/writer.go                 | 154 ++++++
- data-plane/internal/pmsd/writer_test.go            | 256 +++++++++
+ data-plane/internal/pmsd/strict_parse_test.go      | 150 +++++
+ data-plane/internal/pmsd/supervisor.go             | 156 +++++
+ data-plane/internal/pmsd/worker.go                 | 342 +++++++++++
+ data-plane/internal/pmsd/writer.go                 | 154 +++++
+ data-plane/internal/pmsd/writer_test.go            | 256 ++++++++
  .../0010_phase3_stay_resolution.down.sql           |  75 +++
- .../migrations/0010_phase3_stay_resolution.up.sql  | 399 ++++++++++++++
+ .../migrations/0010_phase3_stay_resolution.up.sql  | 407 +++++++++++++
  deploy/systemd/stayconnect-pmsd.service            |  41 ++
  .../StayConnect-IAM-Phase2-Live-Dark-Acceptance.md |   2 +-
  docs/architecture/Phase3-Privilege-Matrix.md       |  34 ++
@@ -151,17 +151,17 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |  12 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |  12 +-
  docs/architecture/StayConnect-IAM-Phase2-Plan.md   |   2 +-
- docs/architecture/StayConnect-IAM-Phase3-Plan.md   | 161 ++++++
+ docs/architecture/StayConnect-IAM-Phase3-Plan.md   | 161 +++++
  .../adr/ADR-0001-pmsd-connector-ownership.md       |  53 ++
  docs/context/StayConnect-IAM-Handoff.md            |  16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     | 109 ++++
- docs/manifests/Phase3-change-manifest.md           | 268 +++++++++
+ docs/manifests/Phase3-change-manifest.md           | 270 +++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |   4 +-
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 250675 -> 273225 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 101471 -> 103229 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 41921 -> 42000 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 250675 -> 273296 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 101471 -> 103274 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 41921 -> 42003 bytes
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_b0ddce3.txt    |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_a2e733f.txt    |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  16 +-
  .../phase-evidence/Phase2-change-manifest.md       |  13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -175,11 +175,11 @@
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |  12 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |  12 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  67 +--
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  67 ++-
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |  12 +-
  .../Phase2-change-manifest.md                      |  13 +-
  .../Phase3-Privilege-Matrix.md                     |  34 ++
- .../Phase3-change-manifest.md                      | 268 +++++++++
+ .../Phase3-change-manifest.md                      | 270 +++++++++
  .../StayConnect-IAM-Handoff.md                     |  16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |  12 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |  12 +-
@@ -187,17 +187,17 @@
  .../StayConnect-IAM-Phase2-Final-Report.md         |   4 +-
  .../StayConnect-IAM-Phase2-Live-Dark-Acceptance.md |   2 +-
  .../StayConnect-IAM-Phase2-Plan.md                 |   2 +-
- .../StayConnect-IAM-Phase3-Plan.md                 | 161 ++++++
+ .../StayConnect-IAM-Phase3-Plan.md                 | 161 +++++
  governance/decision-register.json                  |   1 +
  governance/project-state.json                      |  73 ++-
  governance/transitions/T0015.json                  |  18 +
- iam_v2_scratch/phase3_0010_lifecycle.sh            | 295 ++++++++++
- scripts/edge-migrate.sh                            | 251 +++++++++
+ iam_v2_scratch/phase3_0010_lifecycle.sh            | 295 +++++++++
+ scripts/edge-migrate.sh                            | 251 ++++++++
  scripts/pmsd-pg-integration.sh                     |  48 ++
  tools/project-state.py                             |  49 +-
  .../tests/project_state_validator/run_mutations.py |  69 +--
  tools/validate-project-state.sh                    |   2 +-
- 91 files changed, 9062 insertions(+), 272 deletions(-)
+ 91 files changed, 9223 insertions(+), 272 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -206,8 +206,8 @@ M  docs/manifests/Phase3-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_4bc1872.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_b0ddce3.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_a2e733f.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_b0ddce3.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -220,6 +220,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+a2e733f @ Phase 3 increment 3 Â§9 credential_mode NONE + Migration-0010 credential-aware pin coherence (inventory_head): truthful no-auth Protel FIAS; race-green + lifecycle-gate 121/121 + PG16-green
+e0d126f @ Phase 3 CI-stability (delivery_head): complete staged manifest + rebuilt packs + pointer
 b0ddce3 @ Phase 3 CI-stability (inventory_head): align Â§F write-failure + malformed-domain tests with the Â§G initial-DR flow
 6916513 @ Phase 3 CI-stability (delivery_head): complete staged manifest + rebuilt packs + pointer
 4bc1872 @ Phase 3 CI-stability (inventory_head): fix concurrency bug in localkeys.CreateKeyIfAbsent (mid-write empty O_EXCL file)
