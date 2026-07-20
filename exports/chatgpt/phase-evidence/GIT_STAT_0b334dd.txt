@@ -1,0 +1,4 @@
+commit 0b334dd79edcd2035deaf3a78718df9b59cab2ab
+Date:   Tue Jul 21 00:52:54 2026 +0300
+
+    Phase 3 CI-stability: fix internal/localkeys.EnsureGeneration concurrent mid-write flake (inventory_head)
