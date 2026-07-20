@@ -1,0 +1,4 @@
+commit 83253ea4288966d5a03867163b61348d693c6e2d
+Date:   Mon Jul 20 11:08:55 2026 +0300
+
+    @ Phase 3 Increment 7 foundation (inventory_head): Checkout Grace + Emergency Grace decision core (internal/grace), F4â€“F6
