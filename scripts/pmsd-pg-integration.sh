@@ -41,8 +41,8 @@ if [ "${runtime_cols:-0}" != "1" ]; then echo "0010 NOT APPLIED (pinned_secret_g
 echo "  iam_v2 tables=$built + 0010 applied"
 
 export PHASE3_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB"
-echo "== go test -tags integration ./internal/pmsd (Integration) =="
-( cd "$ROOT/data-plane" && go test -tags integration -run Integration ./internal/pmsd/ -count=1 )
+echo "== go test -tags integration ./internal/pmsd ./internal/stayengine (Integration) =="
+( cd "$ROOT/data-plane" && go test -tags integration -run Integration ./internal/pmsd/ ./internal/stayengine/ -count=1 )
 rc=$?
 echo "PMSD_PG_INTEGRATION rc=$rc"
 exit $rc

@@ -34,23 +34,23 @@ jobs:
 
       - name: gofmt (Phase-3 pmsd surface must be clean)
         run: |
-          unformatted="$(gofmt -l internal/pmsd internal/pms cmd/pmsd)"
+          unformatted="$(gofmt -l internal/pmsd internal/pms internal/stayengine cmd/pmsd)"
           if [ -n "$unformatted" ]; then
             echo "gofmt needs to be run on:"; echo "$unformatted"; exit 1
           fi
-          echo "gofmt clean (internal/pmsd, internal/pms, cmd/pmsd)"
+          echo "gofmt clean (internal/pmsd, internal/pms, internal/stayengine, cmd/pmsd)"
 
       - name: go build
         run: go build ./...
 
-      - name: go vet (Phase-3 pmsd surface)
-        run: go vet ./internal/pmsd/... ./internal/pms/... ./cmd/pmsd/...
+      - name: go vet (Phase-3 surface)
+        run: go vet ./internal/pmsd/... ./internal/pms/... ./internal/stayengine/... ./cmd/pmsd/...
 
       - name: go test (all packages)
         run: go test ./... -count=1
 
-      - name: go test -race (pmsd + pms)
-        run: go test -race ./internal/pmsd/... ./internal/pms/... -count=1
+      - name: go test -race (pmsd + pms + stayengine)
+        run: go test -race ./internal/pmsd/... ./internal/pms/... ./internal/stayengine/... -count=1
 
       - name: Migration 0010 lifecycle + concurrency gate (disposable PG16)
         working-directory: .
