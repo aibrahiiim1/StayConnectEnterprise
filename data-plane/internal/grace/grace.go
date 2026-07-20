@@ -1,92 +1,146 @@
-// Package grace is the Increment-7 Checkout Grace + Emergency Grace decision core. After a Stay checks out,
-// EXISTING entitled devices may retain bounded access for a configured grace window (grandfathering); NEW
-// devices are rejected (REJECT_NEW_DEVICE). During a cloud outage the appliance serves EXISTING entitled
-// devices locally under a bounded EMERGENCY grace so guests are not cut off. All decisions are deterministic
-// and fail closed; this package grants no session and moves no money.
+// Package grace is the Increment-7 Checkout Grace + Emergency Grace decision core, per the authoritative
+// Product-Owner semantics:
+//
+//   - ELIGIBILITY: every checked-out Stay that has an ACTIVE VALID Entitlement at the effective-checkout
+//     boundary receives exactly ONE Checkout Grace conversion for the current lifecycle episode — regardless
+//     of whether the prior package was FREE, PAID, Stay-based or any other approved source. No active
+//     Entitlement at checkout ⇒ no Grace. Origin/price NEVER affects eligibility.
+//   - grace_duration_seconds is the LIFETIME of the resulting Grace Entitlement (from effective_checkout_at),
+//     NOT the eligibility test. Device activity is NOT the eligibility test.
+//   - EMERGENCY GRACE is the fallback used when the Hotel-Admin-configured Checkout Grace policy is invalid or
+//     unavailable AT the atomic conversion — a versioned built-in policy — NOT a generic cloud-outage
+//     reauthorization. Local-first cloud-outage operation merely keeps enforcing already-authoritative local
+//     state; it never mints a new Entitlement for a Guest whose access already expired.
+//
+// This package grants no session and moves no money.
 package grace
 
-// Config is the site's checkout-grace configuration (from iam_v2.site_checkout_grace_config). A nil/zero
-// GraceDurationSeconds means checkout grace is DISABLED (checkout ends access immediately for that Stay).
-type Config struct {
-	EligibilityWindowSeconds int    // broad window in which Stay-based eligibility still applies (always > 0)
-	GraceDurationSeconds     int    // post-checkout grace window; 0 = disabled
-	GraceDeviceLimit         int    // optional cap on devices during grace (0 = inherit plan)
-	Policy                   string // "REJECT_NEW_DEVICE" or "" (only REJECT_NEW_DEVICE is defined)
-	GraceDownKbps            int
-	GraceUpKbps              int
-	GraceDataQuotaBytes      int64
+// Policy is the Grace policy applied to a conversion — either the Hotel-Admin-configured Checkout Grace policy
+// or the built-in Emergency fallback. It is PINNED at conversion time so later Admin edits never rewrite an
+// existing Guest's Grace terms.
+type Policy struct {
+	DurationSeconds   int
+	DownKbps          int
+	UpKbps            int
+	DataQuotaBytes    int64
+	DeviceLimit       int
+	DeviceLimitPolicy string // only "REJECT_NEW_DEVICE" is currently approved
+	IsEmergency       bool
 }
 
-// Request is the runtime state a grace decision needs. Ages are (now − event), seconds; the caller computes
-// them from authoritative timestamps (never client input).
-type Request struct {
-	CheckedOut         bool // the Stay has checked out
-	CheckoutAgeSeconds int  // seconds since effective_checkout_at (only meaningful when CheckedOut)
-	DeviceIsExisting   bool // this device already held a live entitlement before the boundary
-	CloudOutage        bool // the control plane is unreachable → local-first emergency mode
-	OutageAgeSeconds   int  // seconds the outage has lasted (only meaningful when CloudOutage)
+// DeviceLimitRejectNew is the only currently-approved device-limit policy.
+const DeviceLimitRejectNew = "REJECT_NEW_DEVICE"
+
+// BuiltinEmergencyPolicy is the VERSIONED Emergency Grace fallback used when the configured Checkout Grace
+// policy is invalid/unavailable at the atomic conversion: 60 min, 5 Mbps down, 2 Mbps up, 500 MB,
+// REJECT_NEW_DEVICE.
+func BuiltinEmergencyPolicy() Policy {
+	return Policy{
+		DurationSeconds: 3600, DownKbps: 5000, UpKbps: 2000, DataQuotaBytes: 500 << 20,
+		DeviceLimit: 0, DeviceLimitPolicy: DeviceLimitRejectNew, IsEmergency: true,
+	}
 }
 
-// Mode is the access mode a decision resolves to.
-type Mode string
+// ValidatePolicy checks a configured Checkout Grace policy SERVER-SIDE (the UI is never the boundary). A
+// disabled or malformed policy is INVALID → the caller uses the Emergency fallback. hasPinnedRevision asserts
+// a valid hidden/system Checkout Grace package/policy revision is selected.
+func ValidatePolicy(p Policy, enabled, hasPinnedRevision bool) bool {
+	if !enabled || !hasPinnedRevision {
+		return false
+	}
+	if p.DurationSeconds <= 0 || p.DurationSeconds > 604800 {
+		return false
+	}
+	if p.DownKbps <= 0 || p.UpKbps <= 0 || p.DataQuotaBytes < 0 {
+		return false
+	}
+	if p.DeviceLimitPolicy != DeviceLimitRejectNew {
+		return false
+	}
+	return true
+}
+
+// Trigger identifies which grace path a conversion took.
+type Trigger string
 
 const (
-	ModeNormal    Mode = "NORMAL"    // in-house / within entitlement — full plan access
-	ModeGrace     Mode = "GRACE"     // post-checkout grace — existing device, grace shaping
-	ModeEmergency Mode = "EMERGENCY" // cloud-outage local fallback — existing device, bounded
-	ModeDenied    Mode = "DENIED"    // no access
+	TriggerCheckoutGrace Trigger = "CHECKOUT_GRACE"
+	TriggerEmergency     Trigger = "EMERGENCY_GRACE"
 )
 
-// Decision is the resolved access outcome. When Allow is true and Mode is GRACE, the shaping overrides apply.
-type Decision struct {
+// ConversionRequest is evaluated at the effective-checkout boundary. HasActiveEntitlementAtCheckout is TRUE if
+// the Stay held ANY active valid Entitlement (FREE/PAID/Stay-based/…) at the boundary — origin irrelevant.
+type ConversionRequest struct {
+	HasActiveEntitlementAtCheckout bool
+	AlreadyConvertedThisEpisode    bool // a Grace conversion already exists for this lifecycle episode
+	Configured                     Policy
+	ConfiguredValid                bool // the Admin policy is enabled + server-valid + a pinned package revision exists
+}
+
+// Conversion is the resolved conversion decision at checkout. Policy is the PINNED policy for this conversion.
+type Conversion struct {
+	Create             bool
+	Trigger            Trigger
+	Policy             Policy
+	Reason             string
+	IsEmergency        bool
+	ConfigInvalidAlert bool // raise CHECKOUT_GRACE_CONFIG_INVALID
+}
+
+// DecideConversion applies the Product-Owner Checkout Grace rule at the effective-checkout boundary. EVERY
+// checked-out Stay with an active valid Entitlement gets exactly ONE Grace conversion per lifecycle episode,
+// regardless of the prior package's origin or price. If the configured policy is invalid/unavailable, the
+// Emergency fallback policy is used (an otherwise-eligible Guest is still converted, never skipped).
+func DecideConversion(r ConversionRequest) Conversion {
+	if r.AlreadyConvertedThisEpisode {
+		return Conversion{Create: false, Reason: "ALREADY_CONVERTED_THIS_EPISODE"} // idempotent
+	}
+	if !r.HasActiveEntitlementAtCheckout {
+		// a Guest who never obtained an Entitlement before checkout gets no new Grace Entitlement.
+		return Conversion{Create: false, Reason: "NO_ACTIVE_ENTITLEMENT_AT_CHECKOUT"}
+	}
+	if r.ConfiguredValid {
+		return Conversion{Create: true, Trigger: TriggerCheckoutGrace, Policy: r.Configured, Reason: "ELIGIBLE"}
+	}
+	// configured policy invalid/unavailable → Emergency fallback (still convert the eligible Guest).
+	return Conversion{Create: true, Trigger: TriggerEmergency, Policy: BuiltinEmergencyPolicy(),
+		Reason: "CONFIG_INVALID_EMERGENCY_FALLBACK", IsEmergency: true, ConfigInvalidAlert: true}
+}
+
+// AccessRequest is evaluated for a device DURING the active Grace window. GraceAgeSeconds is measured from
+// effective_checkout_at (the Grace time/quota counters begin at that boundary).
+type AccessRequest struct {
+	Policy            Policy
+	GraceAgeSeconds   int
+	DeviceIsExisting  bool // authorized before the boundary → grandfathered
+	ActiveDeviceCount int  // current devices under the Grace entitlement
+}
+
+// Access is the per-device access outcome during the Grace window; shaping applies when allowed.
+type Access struct {
 	Allow          bool
-	Mode           Mode
 	Reason         string
 	DownKbps       int
 	UpKbps         int
 	DataQuotaBytes int64
 }
 
-// Decide resolves access under the grace/emergency rules. emergencyGraceSeconds bounds the cloud-outage
-// fallback (0 disables emergency grace). Precedence:
-//  1. Cloud outage + EXISTING device within the emergency bound → EMERGENCY allow (local-first, don't cut off
-//     an already-connected guest during an outage). A NEW device during an outage is still rejected.
-//  2. Not checked out → NORMAL allow (grace is irrelevant while in-house).
-//  3. Checked out + grace enabled + within the window + EXISTING device → GRACE allow (grandfathered), with
-//     grace shaping. A NEW device during grace is rejected (REJECT_NEW_DEVICE).
-//  4. Otherwise → DENIED (grace disabled, window elapsed, or a new device).
-func Decide(cfg Config, r Request, emergencyGraceSeconds int) Decision {
-	// (1) emergency local-first fallback
-	if r.CloudOutage {
-		if r.DeviceIsExisting && emergencyGraceSeconds > 0 && r.OutageAgeSeconds <= emergencyGraceSeconds {
-			return Decision{Allow: true, Mode: ModeEmergency, Reason: "EMERGENCY_GRACE_EXISTING_DEVICE"}
+// DecideAccess governs a device during the Grace window. An existing authorized device is GRANDFATHERED (even
+// above the Grace device limit) until the window elapses; a NEW device is rejected under REJECT_NEW_DEVICE
+// unless the active device count is below the Grace device limit. Grace shaping applies to allowed access.
+func DecideAccess(r AccessRequest) Access {
+	if r.GraceAgeSeconds < 0 || r.GraceAgeSeconds > r.Policy.DurationSeconds {
+		return Access{Allow: false, Reason: "GRACE_WINDOW_ELAPSED"}
+	}
+	if !r.DeviceIsExisting {
+		if r.Policy.DeviceLimit > 0 && r.ActiveDeviceCount < r.Policy.DeviceLimit {
+			return allow("GRACE_NEW_DEVICE_UNDER_LIMIT", r.Policy)
 		}
-		if !r.DeviceIsExisting {
-			return Decision{Allow: false, Mode: ModeDenied, Reason: "EMERGENCY_NEW_DEVICE_REJECTED"}
-		}
-		return Decision{Allow: false, Mode: ModeDenied, Reason: "EMERGENCY_GRACE_EXPIRED"}
+		return Access{Allow: false, Reason: "GRACE_NEW_DEVICE_REJECTED"}
 	}
+	return allow("GRACE_EXISTING_DEVICE_GRANDFATHERED", r.Policy)
+}
 
-	// (2) still in-house
-	if !r.CheckedOut {
-		return Decision{Allow: true, Mode: ModeNormal, Reason: "IN_HOUSE"}
-	}
-
-	// (3) post-checkout grace
-	graceEnabled := cfg.GraceDurationSeconds > 0
-	withinWindow := r.CheckoutAgeSeconds >= 0 && r.CheckoutAgeSeconds <= cfg.GraceDurationSeconds
-	if graceEnabled && withinWindow {
-		if !r.DeviceIsExisting {
-			// REJECT_NEW_DEVICE: grace grandfathers existing devices only.
-			return Decision{Allow: false, Mode: ModeDenied, Reason: "GRACE_NEW_DEVICE_REJECTED"}
-		}
-		return Decision{Allow: true, Mode: ModeGrace, Reason: "CHECKOUT_GRACE_EXISTING_DEVICE",
-			DownKbps: cfg.GraceDownKbps, UpKbps: cfg.GraceUpKbps, DataQuotaBytes: cfg.GraceDataQuotaBytes}
-	}
-
-	// (4) no grace
-	if !graceEnabled {
-		return Decision{Allow: false, Mode: ModeDenied, Reason: "GRACE_DISABLED"}
-	}
-	return Decision{Allow: false, Mode: ModeDenied, Reason: "GRACE_WINDOW_ELAPSED"}
+func allow(reason string, p Policy) Access {
+	return Access{Allow: true, Reason: reason, DownKbps: p.DownKbps, UpKbps: p.UpKbps, DataQuotaBytes: p.DataQuotaBytes}
 }
