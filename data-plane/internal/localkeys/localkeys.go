@@ -202,20 +202,19 @@ func EnsureGeneration(dir, prefix string, gen int) ([]byte, error) {
 	}
 	path := filepath.Join(dir, fmt.Sprintf("%s_%d.key", prefix, gen))
 	b, err := os.ReadFile(path)
-	if err == nil {
+	if err == nil && len(b) >= MinKeyLen {
 		if perr := checkFile(path); perr != nil {
 			return nil, perr
 		}
-		if len(b) < MinKeyLen {
-			return nil, fmt.Errorf("localkeys: %s too short (%d < %d)", path, len(b), MinKeyLen)
-		}
 		return b, nil
 	}
-	if !os.IsNotExist(err) {
+	if err != nil && !os.IsNotExist(err) {
 		return nil, err // surface every read error other than not-exist
 	}
-	// Race-safe, no-overwrite creation: if a concurrent caller wins, reload and return the winner so
-	// no two callers ever retain different keys for the same generation.
+	// The file is absent OR present-but-short (a concurrent bootstrapper won the O_EXCL create and is still
+	// mid-write — treating that 0-byte snapshot as "too short" here was the concurrency bug). Fall through to
+	// the race-safe, no-overwrite create, which O_EXCL-fails on an existing file and retry-reads the winner's
+	// completed key, so no two callers ever retain different keys for the same generation.
 	_, key, cerr := createExclKey(path)
 	return key, cerr
 }
