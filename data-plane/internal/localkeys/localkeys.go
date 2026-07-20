@@ -69,9 +69,11 @@ func createExclKey(path string) (bool, []byte, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
-			// Another caller won the O_EXCL create. It may still be mid-write, so retry-read until the
-			// file is complete (>= MinKeyLen) rather than returning a partial/empty key.
-			for i := 0; i < 100; i++ {
+			// Another caller won the O_EXCL create. It may still be mid-write (the winner created the file
+			// but has not written the key yet), so retry-read until the file is complete (>= MinKeyLen)
+			// rather than returning a partial/empty key. The budget is generous (~5s) because under heavy
+			// concurrency/CI load the winner goroutine can be scheduling-starved between create and write.
+			for i := 0; i < 1000; i++ {
 				b, rerr := os.ReadFile(path)
 				if rerr == nil && len(b) >= MinKeyLen {
 					if perr := checkFile(path); perr != nil {
@@ -82,7 +84,7 @@ func createExclKey(path string) (bool, []byte, error) {
 				if rerr != nil && !os.IsNotExist(rerr) {
 					return false, nil, rerr
 				}
-				time.Sleep(2 * time.Millisecond)
+				time.Sleep(5 * time.Millisecond)
 			}
 			// If it exists but is genuinely short (not a mid-write), surface that.
 			if b, rerr := os.ReadFile(path); rerr == nil && len(b) < MinKeyLen {
@@ -131,13 +133,16 @@ func LoadExistingKey(path string) ([]byte, error) {
 // helper — never on the normal service-start path.
 func CreateKeyIfAbsent(path string) ([]byte, error) {
 	if b, err := os.ReadFile(path); err == nil {
-		if perr := checkFile(path); perr != nil {
-			return nil, perr
+		if len(b) >= MinKeyLen {
+			if perr := checkFile(path); perr != nil {
+				return nil, perr
+			}
+			return b, nil
 		}
-		if len(b) < MinKeyLen {
-			return nil, fmt.Errorf("localkeys: %s too short (%d < %d)", path, len(b), MinKeyLen)
-		}
-		return b, nil
+		// The file EXISTS but is short/empty: a concurrent bootstrap won the O_EXCL create and has not
+		// finished writing the key yet. This is NOT a corrupt key — fall through to the race-safe create,
+		// whose EEXIST path retry-reads the complete single winner. (Treating an empty mid-write file as
+		// "too short" here was a concurrency bug that could fail a losing bootstrapper.)
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
