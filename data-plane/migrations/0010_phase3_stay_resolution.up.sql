@@ -32,6 +32,11 @@ CREATE TABLE iam_v2.pms_interface_runtime (
   pms_interface_id uuid NOT NULL,
   pinned_revision_id uuid,
   pinned_secret_generation_id uuid,                       -- identity only; never ciphertext/nonce/key
+  -- credential mode of the pinned connector: NONE (no-auth transport, e.g. Protel FIAS — NO Secret
+  -- Generation is required or pinned) or AUTH_KEY (a Secret Generation MUST be pinned). Denormalized from
+  -- the revision at generation allocation so the pin-coherence CHECK can enforce it without a join.
+  credential_mode text NOT NULL DEFAULT 'AUTH_KEY'
+    CHECK (credential_mode IN ('NONE','AUTH_KEY')),
   runtime_generation bigint NOT NULL DEFAULT 0,
   updated_at timestamptz NOT NULL DEFAULT now(),
 
@@ -81,9 +86,12 @@ CREATE TABLE iam_v2.pms_interface_runtime (
 
   -- structural coherence (no now()-dependent logic; time-threshold decisions live in the domain)
   CONSTRAINT pir_generation_nonneg CHECK (runtime_generation >= 0),
+  -- CONNECTED requires a pinned revision + connect time, and a pinned Secret Generation ONLY when the
+  -- credential mode is AUTH_KEY (a NONE/no-auth connector legitimately has no Secret Generation).
   CONSTRAINT pir_connected_pins CHECK (
     transport_status <> 'CONNECTED'
-    OR (pinned_revision_id IS NOT NULL AND pinned_secret_generation_id IS NOT NULL AND last_connected_at IS NOT NULL)),
+    OR (pinned_revision_id IS NOT NULL AND last_connected_at IS NOT NULL
+        AND (credential_mode = 'NONE' OR pinned_secret_generation_id IS NOT NULL))),
   CONSTRAINT pir_heartbeat_not_future CHECK (last_heartbeat_at IS NULL OR last_heartbeat_at <= updated_at),
   CONSTRAINT pir_resync_coherent CHECK (
         (resync_started_at IS NULL OR resync_requested_at IS NOT NULL)

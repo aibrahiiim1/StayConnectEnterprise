@@ -96,16 +96,19 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 		logEvent(w.deps.log(), EventWorkerRevisionInvalid, Classify(err), sf(StageReRead))
 		return 0, err
 	}
-	if sg.ID == "" || sg.Superseded || sg.ID != rev.ActiveSecretGenerationID {
+	// A Secret Generation is required + validated ONLY for AUTH_KEY. A NONE (no-auth, e.g. Protel FIAS)
+	// connector must have NO Secret Generation (rev.Validate already rejects a NONE carrying one).
+	if rev.RequiresSecret() && (sg.ID == "" || sg.Superseded || sg.ID != rev.ActiveSecretGenerationID) {
 		logEvent(w.deps.log(), EventWorkerSecretMissing, CodeSecretMissing, sf(StageSecret))
 		return 0, coded(CodeSecretMissing, nil)
 	}
 	w.iface = iface
 
-	// atomic generation allocation (pins revision + secret); a stale owner is rejected here
+	// atomic generation allocation (pins revision + credential mode + secret when AUTH_KEY); a stale owner is
+	// rejected here
 	gen, err := w.repo.AllocateRuntimeGeneration(ctx, GenerationRequest{
 		TenantID: iface.TenantID, SiteID: iface.SiteID, PMSInterfaceID: iface.ID,
-		PinnedRevisionID: rev.ID, PinnedSecretGenerationID: sg.ID,
+		PinnedRevisionID: rev.ID, PinnedSecretGenerationID: sg.ID, CredentialMode: rev.CredentialMode,
 	})
 	if err != nil {
 		code := Classify(err)
@@ -125,16 +128,20 @@ func (w *worker) ownAndServe(ctx context.Context) (time.Duration, error) {
 		return 0, err
 	}
 
-	// decrypt the selected secret ONLY after ownership + generation; zero it right after dial
-	secret, err := w.deps.DecryptSecret(ctx, iface, rev, sg)
-	if err != nil {
-		logEvent(w.deps.log(), EventWorkerSecretDecrypt, Classify(err), sf(StageSecret))
-		_ = w.repo.UpdateTransport(ctx, w.disc(gen, CodeSecretDecryptFailed))
-		return 0, err
+	// decrypt the selected secret ONLY after ownership + generation, and ONLY for AUTH_KEY; zero it right
+	// after dial. A NONE connector decrypts nothing and dials with no secret material.
+	var secret SecretMaterial
+	if rev.RequiresSecret() {
+		secret, err = w.deps.DecryptSecret(ctx, iface, rev, sg)
+		if err != nil {
+			logEvent(w.deps.log(), EventWorkerSecretDecrypt, Classify(err), sf(StageSecret))
+			_ = w.repo.UpdateTransport(ctx, w.disc(gen, CodeSecretDecryptFailed))
+			return 0, err
+		}
 	}
 
 	conn, dialErr := w.deps.Dial(ctx, DialParams{Iface: iface, Rev: rev, Secret: secret})
-	secret.Zero() // never retained beyond dial
+	secret.Zero() // never retained beyond dial (safe no-op for a NONE connector's empty secret)
 	if dialErr != nil {
 		logEvent(w.deps.log(), EventWorkerDialFailed, Classify(dialErr), sf(StageDial))
 		_ = w.repo.UpdateTransport(ctx, w.disc(gen, CodeDialFailed))

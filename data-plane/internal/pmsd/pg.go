@@ -68,6 +68,7 @@ func (r *pgRepo) LoadInterface(ctx context.Context, tenantID, siteID, interfaceI
 	var normVer *int
 	var dialMs, readMs, writeMs, hbIntMs, hbToMs, freshMs, syncMs *int64
 	var resync *bool
+	var credMode string
 	err := r.pool.QueryRow(ctx, `SELECT pi.tenant_id::text, pi.site_id::text, pi.id::text, pi.connector_kind,
 		pi.lifecycle_state, COALESCE(pi.current_revision_id::text,''),
 		COALESCE(pr.id::text,''), COALESCE(pr.source_timezone,''), COALESCE(pr.config->>'endpoint',''),
@@ -76,14 +77,15 @@ func (r *pgRepo) LoadInterface(ctx context.Context, tenantID, siteID, interfaceI
 		(pr.config->>'dial_timeout_ms')::bigint, (pr.config->>'read_timeout_ms')::bigint,
 		(pr.config->>'write_timeout_ms')::bigint, (pr.config->>'heartbeat_interval_ms')::bigint,
 		(pr.config->>'heartbeat_timeout_ms')::bigint, (pr.config->>'feed_freshness_ms')::bigint,
-		(pr.config->>'complete_sync_ms')::bigint, (pr.config->>'resync_supported')::boolean
+		(pr.config->>'complete_sync_ms')::bigint, (pr.config->>'resync_supported')::boolean,
+		COALESCE(pr.config->'auth'->>'credential_mode','')
 		FROM iam_v2.pms_interfaces pi
 		LEFT JOIN iam_v2.pms_interface_revisions pr
 		  ON pr.tenant_id=pi.tenant_id AND pr.site_id=pi.site_id AND pr.pms_interface_id=pi.id AND pr.id=pi.current_revision_id
 		WHERE pi.tenant_id=$1 AND pi.site_id=$2 AND pi.id=$3`, tenantID, siteID, interfaceID).
 		Scan(&i.TenantID, &i.SiteID, &i.ID, &i.ConnectorKind, &i.LifecycleState, &i.CurrentRevisionID,
 			&rev.ID, &rev.SourceTimezone, &rev.Endpoint, &readOnly, &normVer,
-			&dialMs, &readMs, &writeMs, &hbIntMs, &hbToMs, &freshMs, &syncMs, &resync)
+			&dialMs, &readMs, &writeMs, &hbIntMs, &hbToMs, &freshMs, &syncMs, &resync, &credMode)
 	if err != nil {
 		return Interface{}, Revision{}, SecretGeneration{}, err
 	}
@@ -101,14 +103,20 @@ func (r *pgRepo) LoadInterface(ctx context.Context, tenantID, siteID, interfaceI
 	rev.HeartbeatTimeout = msDur(hbToMs)
 	rev.FeedFreshnessBound = msDur(freshMs)
 	rev.CompleteSyncBound = msDur(syncMs)
+	rev.CredentialMode = credMode
+	if rev.CredentialMode == "" {
+		rev.CredentialMode = CredentialAuthKey // fail-closed: an explicit NONE is required to skip the secret
+	}
 
-	// active, non-superseded secret generation for this interface (identity only)
+	// A Secret Generation is loaded/pinned ONLY for AUTH_KEY. A NONE (no-auth) connector fabricates none.
 	var sg SecretGeneration
-	sgErr := r.pool.QueryRow(ctx, `SELECT id::text, generation_no FROM iam_v2.pms_interface_secret_generations
-		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND superseded_at IS NULL
-		ORDER BY generation_no DESC LIMIT 1`, tenantID, siteID, interfaceID).Scan(&sg.ID, &sg.GenerationNo)
-	if sgErr == nil {
-		rev.ActiveSecretGenerationID = sg.ID
+	if rev.RequiresSecret() {
+		sgErr := r.pool.QueryRow(ctx, `SELECT id::text, generation_no FROM iam_v2.pms_interface_secret_generations
+			WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND superseded_at IS NULL
+			ORDER BY generation_no DESC LIMIT 1`, tenantID, siteID, interfaceID).Scan(&sg.ID, &sg.GenerationNo)
+		if sgErr == nil {
+			rev.ActiveSecretGenerationID = sg.ID
+		}
 	}
 	return i, rev, sg, nil
 }
@@ -124,16 +132,21 @@ func msDur(ms *int64) time.Duration {
 // generation, returning the new generation. First allocation for a fresh row is 1.
 func (r *pgRepo) AllocateRuntimeGeneration(ctx context.Context, req GenerationRequest) (int64, error) {
 	var gen int64
+	credMode := req.CredentialMode
+	if credMode == "" {
+		credMode = "AUTH_KEY" // fail-closed: never silently allow a no-secret connection without an explicit NONE
+	}
 	err := r.pool.QueryRow(ctx, `INSERT INTO iam_v2.pms_interface_runtime
-		(tenant_id, site_id, pms_interface_id, pinned_revision_id, pinned_secret_generation_id, runtime_generation, updated_at)
-		VALUES ($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,1,now())
+		(tenant_id, site_id, pms_interface_id, pinned_revision_id, pinned_secret_generation_id, credential_mode, runtime_generation, updated_at)
+		VALUES ($1,$2,$3,NULLIF($4,'')::uuid,NULLIF($5,'')::uuid,$6,1,now())
 		ON CONFLICT (tenant_id,site_id,pms_interface_id) DO UPDATE SET
 		  runtime_generation = iam_v2.pms_interface_runtime.runtime_generation + 1,
 		  pinned_revision_id = EXCLUDED.pinned_revision_id,
 		  pinned_secret_generation_id = EXCLUDED.pinned_secret_generation_id,
+		  credential_mode = EXCLUDED.credential_mode,
 		  updated_at = now()
 		RETURNING runtime_generation`,
-		req.TenantID, req.SiteID, req.PMSInterfaceID, req.PinnedRevisionID, req.PinnedSecretGenerationID).Scan(&gen)
+		req.TenantID, req.SiteID, req.PMSInterfaceID, req.PinnedRevisionID, req.PinnedSecretGenerationID, credMode).Scan(&gen)
 	return gen, err
 }
 

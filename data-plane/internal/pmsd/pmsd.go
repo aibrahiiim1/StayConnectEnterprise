@@ -81,10 +81,22 @@ type Revision struct {
 	CompleteSyncBound        time.Duration
 	ResyncSupported          bool
 	Published                bool
+	CredentialMode           string // "NONE" (no-auth transport, e.g. Protel FIAS) | "AUTH_KEY"
 	ActiveSecretGenerationID string
 }
 
+// Credential modes. Protel FIAS is a no-auth transport → NONE (no Secret Generation is fabricated,
+// required, decrypted or pinned). AUTH_KEY connectors MUST carry a Secret Generation.
+const (
+	CredentialNone    = "NONE"
+	CredentialAuthKey = "AUTH_KEY"
+)
+
 var supportedConnectorKinds = map[string]struct{}{"protel-fias": {}}
+var supportedCredentialModes = map[string]struct{}{CredentialNone: {}, CredentialAuthKey: {}}
+
+// RequiresSecret reports whether this revision's credential mode needs a Secret Generation.
+func (r Revision) RequiresSecret() bool { return r.CredentialMode == CredentialAuthKey }
 
 // Validate enforces the typed connector configuration. Missing read-only capability FAILS — it is never
 // treated as true. Every timeout/threshold must be a positive duration.
@@ -104,8 +116,17 @@ func (r Revision) Validate() error {
 		return coded(CodeRevisionInvalid, errors.New("missing source timezone"))
 	case r.NormalizationVersion <= 0:
 		return coded(CodeRevisionInvalid, errors.New("normalization version must be > 0"))
-	case r.ActiveSecretGenerationID == "":
-		return coded(CodeSecretMissing, errors.New("no active secret generation pinned on revision"))
+	}
+	if _, ok := supportedCredentialModes[r.CredentialMode]; !ok {
+		return coded(CodeRevisionInvalid, errors.New("credential mode must be explicit (NONE or AUTH_KEY)"))
+	}
+	// a Secret Generation is REQUIRED only for AUTH_KEY; a NONE connector must NOT carry one (no fabricated
+	// secret for a no-auth transport).
+	if r.RequiresSecret() && r.ActiveSecretGenerationID == "" {
+		return coded(CodeSecretMissing, errors.New("AUTH_KEY connector requires an active secret generation"))
+	}
+	if !r.RequiresSecret() && r.ActiveSecretGenerationID != "" {
+		return coded(CodeRevisionInvalid, errors.New("NONE connector must not carry a secret generation"))
 	}
 	if _, ok := supportedConnectorKinds[r.ConnectorKind]; !ok {
 		return coded(CodeRevisionInvalid, errors.New("unsupported connector kind"))
@@ -150,7 +171,8 @@ type GenerationRequest struct {
 	SiteID                   string
 	PMSInterfaceID           string
 	PinnedRevisionID         string
-	PinnedSecretGenerationID string
+	PinnedSecretGenerationID string // empty for a NONE credential mode
+	CredentialMode           string // "NONE" | "AUTH_KEY"
 }
 
 // axisBase is the common identity + CAS guard for every independent-axis update.

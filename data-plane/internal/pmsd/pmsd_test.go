@@ -47,8 +47,16 @@ func validRevision() Revision {
 		ReadOnly: true, NormalizationVersion: 1, DialTimeout: time.Second, ReadTimeout: time.Second,
 		WriteTimeout: time.Second, HeartbeatInterval: time.Second, HeartbeatTimeout: time.Second,
 		FeedFreshnessBound: time.Second, CompleteSyncBound: time.Second, ResyncSupported: true,
-		Published: true, ActiveSecretGenerationID: tSecUUID,
+		Published: true, CredentialMode: CredentialAuthKey, ActiveSecretGenerationID: tSecUUID,
 	}
+}
+
+// noneRevision is a truthful Protel FIAS (no-auth) revision: credential mode NONE, NO secret generation.
+func noneRevision() Revision {
+	r := validRevision()
+	r.CredentialMode = CredentialNone
+	r.ActiveSecretGenerationID = ""
+	return r
 }
 func validSecret() SecretGeneration { return SecretGeneration{ID: tSecUUID, GenerationNo: 1} }
 
@@ -427,6 +435,62 @@ func TestRevisionInvalid_NoDial(t *testing.T) {
 	_ = Run(ctx, connectorOn(), deps)
 	if sp.dial.Load() != 0 || sp.decrypt.Load() != 0 {
 		t.Fatalf("invalid (non-read-only) revision must not decrypt/dial; dials=%d", sp.dial.Load())
+	}
+}
+
+// ---- credential mode: truthful NONE (no-auth Protel FIAS) ------------------
+
+func TestRevision_CredentialCoherence(t *testing.T) {
+	// unknown credential mode → invalid (must be explicit)
+	r := validRevision()
+	r.CredentialMode = "WEIRD"
+	if r.Validate() == nil {
+		t.Error("unknown credential mode must be rejected")
+	}
+	// AUTH_KEY without a secret → invalid
+	r = validRevision()
+	r.ActiveSecretGenerationID = ""
+	if r.Validate() == nil {
+		t.Error("AUTH_KEY without a secret generation must be rejected")
+	}
+	// NONE carrying a secret → invalid (no fabricated secret for a no-auth transport)
+	r = noneRevision()
+	r.ActiveSecretGenerationID = tSecUUID
+	if r.Validate() == nil {
+		t.Error("NONE connector carrying a secret generation must be rejected")
+	}
+	// valid NONE + valid AUTH_KEY
+	if err := noneRevision().Validate(); err != nil {
+		t.Errorf("valid NONE revision must validate: %v", err)
+	}
+	if err := validRevision().Validate(); err != nil {
+		t.Errorf("valid AUTH_KEY revision must validate: %v", err)
+	}
+	if noneRevision().RequiresSecret() {
+		t.Error("NONE must not require a secret")
+	}
+	if !validRevision().RequiresSecret() {
+		t.Error("AUTH_KEY must require a secret")
+	}
+}
+
+// TestCredentialModeNone_DialsWithoutDecrypt proves a NONE connector dials the no-auth transport WITHOUT
+// loading or decrypting any Secret Generation.
+func TestCredentialModeNone_DialsWithoutDecrypt(t *testing.T) {
+	var sp spies
+	repo := newFakeRepo(iface("i1"))
+	repo.loadFn = func(id string) (Interface, Revision, SecretGeneration, error) {
+		return iface("i1"), noneRevision(), SecretGeneration{}, nil // NONE → no secret generation
+	}
+	deps := assignedDeps(&sp, repo, func() Locker { return newFakeLocker(true) }, func() *fakeConn { return &fakeConn{} })
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	_ = Run(ctx, connectorOn(), deps)
+	if sp.decrypt.Load() != 0 {
+		t.Fatalf("NONE connector must NOT decrypt any secret; decrypts=%d", sp.decrypt.Load())
+	}
+	if sp.dial.Load() == 0 {
+		t.Fatal("NONE connector must still dial the no-auth transport")
 	}
 }
 

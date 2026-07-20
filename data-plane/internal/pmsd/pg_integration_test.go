@@ -520,6 +520,49 @@ func TestIntegration_SinkResyncLifecycle(t *testing.T) {
 	}
 }
 
+// TestIntegration_CredentialAwarePinCoherence proves the amended pir_connected_pins CHECK: a NONE connector
+// may be CONNECTED with NO pinned Secret Generation, while an AUTH_KEY connector CONNECTED without a pinned
+// secret is rejected by the constraint.
+func TestIntegration_CredentialAwarePinCoherence(t *testing.T) {
+	pool := integPool(t)
+	defer pool.Close()
+	s := seedScope(t, pool)
+	repo := NewPgRepoFromPool(pool)
+	now := time.Now()
+
+	// NONE: allocate with no secret pin, then CONNECTED must be ALLOWED
+	genNone, err := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{
+		TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, PinnedRevisionID: s.rev, CredentialMode: "NONE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseNone := axisBase{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, ExpectedGeneration: genNone}
+	if err := repo.UpdateTransport(context.Background(), TransportUpdate{axisBase: baseNone, Status: TransportConnected, LastConnectedAt: &now}); err != nil {
+		t.Fatalf("NONE connector must be allowed CONNECTED without a secret pin: %v", err)
+	}
+	var cm string
+	if err := pool.QueryRow(context.Background(), `SELECT credential_mode FROM iam_v2.pms_interface_runtime WHERE pms_interface_id=$1`, s.iface).Scan(&cm); err != nil || cm != "NONE" {
+		t.Fatalf("credential_mode = %q err=%v, want NONE", cm, err)
+	}
+
+	// reset transport to DISCONNECTED before switching credential mode (a CONNECTED row cannot legally drop
+	// to AUTH_KEY-without-secret — that is the very coherence this CHECK enforces)
+	if err := repo.UpdateTransport(context.Background(), TransportUpdate{axisBase: baseNone, Status: TransportDisconnected, DisconnectedSince: &now}); err != nil {
+		t.Fatal(err)
+	}
+
+	// AUTH_KEY with NO secret pin: re-allocate (bumps generation) then CONNECTED must be REJECTED by the CHECK
+	genAuth, err := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{
+		TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, PinnedRevisionID: s.rev, CredentialMode: "AUTH_KEY"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseAuth := axisBase{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, ExpectedGeneration: genAuth}
+	if err := repo.UpdateTransport(context.Background(), TransportUpdate{axisBase: baseAuth, Status: TransportConnected, LastConnectedAt: &now}); err == nil {
+		t.Fatal("AUTH_KEY CONNECTED without a pinned secret must be rejected by pir_connected_pins")
+	}
+}
+
 func TestIntegration_RealAdvisoryLockCompetition(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
