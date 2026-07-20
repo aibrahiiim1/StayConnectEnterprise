@@ -1,0 +1,4 @@
+commit 11fc3ffd761b26f2351cc6f1b602ab314b0fb46e
+Date:   Mon Jul 20 09:15:13 2026 +0300
+
+    @ Phase 3 increment 3 Â§G state machine + Â§H barrier + durable LIVE admission (inventory_head): DSâ†’DE resync lifecycle, application barrier, ownership-safe append-first admission; race-green + PG16-green
