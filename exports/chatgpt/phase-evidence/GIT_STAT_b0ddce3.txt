@@ -1,0 +1,4 @@
+commit b0ddce302c3ed49632eee0ec11d4233399d38878
+Date:   Mon Jul 20 09:30:13 2026 +0300
+
+    @ Phase 3 CI-stability (inventory_head): align Â§F write-failure + malformed-domain tests with the Â§G initial-DR flow

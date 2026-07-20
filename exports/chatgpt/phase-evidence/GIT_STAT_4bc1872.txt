@@ -1,4 +1,0 @@
-commit 4bc1872d3a0b88093162a224f9c50cb94338f384
-Date:   Mon Jul 20 09:23:16 2026 +0300
-
-    @ Phase 3 CI-stability (inventory_head): fix concurrency bug in localkeys.CreateKeyIfAbsent (mid-write empty O_EXCL file)
