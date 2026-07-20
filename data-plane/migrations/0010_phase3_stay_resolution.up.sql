@@ -146,6 +146,15 @@ CREATE UNIQUE INDEX auth_resolutions_req_idem
   WHERE resolution_request_id IS NOT NULL;
 
 -- ============================================================================
+-- (5b) auth_contexts: pin the EXACT occupancy-evidence version the successful STRICT resolution used, so
+--      consumption can reject a context whose pinned Stay occupancy evidence has since changed version.
+--      Nullable (backward compatible); Phase-3 PMS issuance sets it.
+-- ============================================================================
+ALTER TABLE iam_v2.auth_contexts
+  ADD COLUMN pinned_occupancy_evidence_version int
+    CHECK (pinned_occupancy_evidence_version IS NULL OR pinned_occupancy_evidence_version > 0);
+
+-- ============================================================================
 -- (4b) site_checkout_grace_config: typed grace scalars; quota in BYTES; canonical device-limit-policy
 --      vocabulary reused (service_plan_revisions.device_limit_policy). The typed columns are the
 --      AUTHORITATIVE grace policy; config jsonb must NOT be a second source of truth for these fields.
@@ -157,10 +166,12 @@ ALTER TABLE iam_v2.site_checkout_grace_config
   ADD COLUMN grace_up_kbps int,
   ADD COLUMN grace_data_quota_bytes bigint,                          -- BYTES are the authoritative unit
   ADD COLUMN grace_device_limit int,
-  -- Phase-3 Checkout Grace supports ONLY REJECT_NEW_DEVICE from the canonical vocabulary (mg2):
-  -- existing authorized devices persist; devices above the limit are grandfathered; new devices are
-  -- rejected until the active count falls below the limit. DISCONNECT_OLDEST / ADMIN_APPROVAL are NOT
-  -- valid for Grace (the token is reused from the canonical vocab; no second enum is introduced).
+  -- Phase-3 Checkout Grace supports ONLY REJECT_NEW_DEVICE from the canonical vocabulary (mg2): every device
+  -- authorized AT effective_checkout_at is grandfathered (kept, even above the configured limit — a lower
+  -- limit never disconnects an existing device); EVERY device NOT authorized at the boundary is a new device
+  -- and is rejected for the whole Grace lifetime (being below the limit does NOT admit a new post-checkout
+  -- device). DISCONNECT_OLDEST / ADMIN_APPROVAL are NOT valid for Grace (the token is reused from the
+  -- canonical vocab; no second enum is introduced).
   ADD COLUMN grace_device_limit_policy text
     CHECK (grace_device_limit_policy IS NULL OR grace_device_limit_policy = 'REJECT_NEW_DEVICE');
 ALTER TABLE iam_v2.site_checkout_grace_config

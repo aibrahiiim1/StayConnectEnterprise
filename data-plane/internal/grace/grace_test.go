@@ -82,25 +82,39 @@ func TestValidatePolicy(t *testing.T) {
 	}
 }
 
-// Grace access during the window: existing device grandfathered; window elapsed → denied; new device rejected
-// at/above the limit, admitted below it (REJECT_NEW_DEVICE); shaping applies.
+// Grace access under REJECT_NEW_DEVICE: EVERY new post-checkout device is rejected (below/at/above the limit);
+// existing devices are grandfathered even above the configured limit and are never disconnected; the window
+// still bounds access.
 func TestGraceAccess(t *testing.T) {
-	p := adminPolicy()
-	// existing device, within window → allowed + grace shaping
-	if a := DecideAccess(AccessRequest{Policy: p, GraceAgeSeconds: 600, DeviceIsExisting: true, ActiveDeviceCount: 5}); !a.Allow || a.DownKbps != 3000 {
+	p := adminPolicy() // DeviceLimit = 3
+	// existing device, within window → allowed + grace shaping (even with many existing devices)
+	if a := DecideAccess(AccessRequest{Policy: p, GraceAgeSeconds: 600, DeviceIsExisting: true}); !a.Allow || a.DownKbps != 3000 {
 		t.Fatalf("existing device in window: %+v", a)
 	}
-	// window elapsed → denied even for existing device
+	// window elapsed → denied even for an existing device
 	if a := DecideAccess(AccessRequest{Policy: p, GraceAgeSeconds: 3601, DeviceIsExisting: true}); a.Allow || a.Reason != "GRACE_WINDOW_ELAPSED" {
 		t.Fatalf("elapsed: %+v", a)
 	}
-	// new device at/above limit → rejected
-	if a := DecideAccess(AccessRequest{Policy: p, GraceAgeSeconds: 100, DeviceIsExisting: false, ActiveDeviceCount: 3}); a.Allow {
-		t.Fatalf("new device at limit must be rejected: %+v", a)
+	// NEW device is ALWAYS rejected during Grace — below, at, and above the limit
+	for _, lbl := range []string{"below", "at", "above"} {
+		if a := DecideAccess(AccessRequest{Policy: p, GraceAgeSeconds: 100, DeviceIsExisting: false}); a.Allow || a.Reason != "GRACE_NEW_DEVICE_REJECTED" {
+			t.Fatalf("new device (%s limit) must be rejected: %+v", lbl, a)
+		}
 	}
-	// new device below limit → admitted under REJECT_NEW_DEVICE
-	if a := DecideAccess(AccessRequest{Policy: p, GraceAgeSeconds: 100, DeviceIsExisting: false, ActiveDeviceCount: 1}); !a.Allow {
-		t.Fatalf("new device below limit may be admitted: %+v", a)
+}
+
+// Over-limit existing devices are grandfathered (not disconnected); the count is admin visibility only.
+func TestExistingDevicesGrandfatheredAboveLimit(t *testing.T) {
+	p := adminPolicy() // limit 3
+	// 5 existing devices, limit 3 → each existing device still ALLOWED within the window
+	if a := DecideAccess(AccessRequest{Policy: p, GraceAgeSeconds: 100, DeviceIsExisting: true}); !a.Allow {
+		t.Fatal("an existing device must not be disconnected because the Grace limit is lower")
+	}
+	if over := ExistingDevicesOverLimit(p, 5); over != 2 {
+		t.Fatalf("over-limit visibility = %d, want 2", over)
+	}
+	if over := ExistingDevicesOverLimit(p, 2); over != 0 {
+		t.Fatalf("under-limit over-count = %d, want 0", over)
 	}
 }
 

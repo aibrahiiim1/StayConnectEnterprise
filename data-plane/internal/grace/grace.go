@@ -108,12 +108,12 @@ func DecideConversion(r ConversionRequest) Conversion {
 }
 
 // AccessRequest is evaluated for a device DURING the active Grace window. GraceAgeSeconds is measured from
-// effective_checkout_at (the Grace time/quota counters begin at that boundary).
+// effective_checkout_at (the Grace time/quota counters begin at that boundary). DeviceIsExisting is TRUE iff
+// the device was already authorized AT the checkout boundary.
 type AccessRequest struct {
-	Policy            Policy
-	GraceAgeSeconds   int
-	DeviceIsExisting  bool // authorized before the boundary → grandfathered
-	ActiveDeviceCount int  // current devices under the Grace entitlement
+	Policy           Policy
+	GraceAgeSeconds  int
+	DeviceIsExisting bool
 }
 
 // Access is the per-device access outcome during the Grace window; shaping applies when allowed.
@@ -125,20 +125,33 @@ type Access struct {
 	DataQuotaBytes int64
 }
 
-// DecideAccess governs a device during the Grace window. An existing authorized device is GRANDFATHERED (even
-// above the Grace device limit) until the window elapses; a NEW device is rejected under REJECT_NEW_DEVICE
-// unless the active device count is below the Grace device limit. Grace shaping applies to allowed access.
+// DecideAccess governs a device during the Grace window under the approved REJECT_NEW_DEVICE policy:
+//   - existing device (authorized at the boundary) within the window → allowed + shaped, GRANDFATHERED even
+//     above the configured Grace device limit (a lower limit never disconnects an already-authorized device);
+//   - NEW device (not authorized at the boundary) within the window → DENIED, ALWAYS. Being below
+//     grace_device_limit does NOT make a new post-checkout device eligible;
+//   - any device after the window elapses → DENIED.
+//
+// DeviceLimit is used for policy validation, pinning, over-limit visibility and audit — never to authorize a
+// new device.
 func DecideAccess(r AccessRequest) Access {
 	if r.GraceAgeSeconds < 0 || r.GraceAgeSeconds > r.Policy.DurationSeconds {
 		return Access{Allow: false, Reason: "GRACE_WINDOW_ELAPSED"}
 	}
 	if !r.DeviceIsExisting {
-		if r.Policy.DeviceLimit > 0 && r.ActiveDeviceCount < r.Policy.DeviceLimit {
-			return allow("GRACE_NEW_DEVICE_UNDER_LIMIT", r.Policy)
-		}
-		return Access{Allow: false, Reason: "GRACE_NEW_DEVICE_REJECTED"}
+		return Access{Allow: false, Reason: "GRACE_NEW_DEVICE_REJECTED"} // REJECT_NEW_DEVICE — no limit exception
 	}
 	return allow("GRACE_EXISTING_DEVICE_GRANDFATHERED", r.Policy)
+}
+
+// ExistingDevicesOverLimit reports how many already-authorized devices exceed the configured Grace device
+// limit — for Hotel-Admin visibility/audit only. All such devices are grandfathered (none is disconnected);
+// this figure never gates admission. Zero when the limit is unset (<=0) or not exceeded.
+func ExistingDevicesOverLimit(p Policy, existingDeviceCount int) int {
+	if p.DeviceLimit <= 0 || existingDeviceCount <= p.DeviceLimit {
+		return 0
+	}
+	return existingDeviceCount - p.DeviceLimit
 }
 
 func allow(reason string, p Policy) Access {

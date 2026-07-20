@@ -50,6 +50,9 @@ ALTER TABLE iam_v2.site_checkout_grace_config
   DROP COLUMN IF EXISTS grace_duration_seconds,
   DROP COLUMN IF EXISTS eligibility_window_seconds;
 
+-- (5b) auth_contexts occupancy-evidence pin
+ALTER TABLE iam_v2.auth_contexts DROP COLUMN IF EXISTS pinned_occupancy_evidence_version;
+
 -- (5) auth_resolutions idempotency key: index then column
 DROP INDEX IF EXISTS iam_v2.auth_resolutions_req_idem;
 ALTER TABLE iam_v2.auth_resolutions DROP COLUMN IF EXISTS resolution_request_id;

@@ -46,9 +46,11 @@ func seed(t *testing.T, p *pgxpool.Pool) fixture {
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state,current_revision_id)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id, 'protel-fias','ACTIVE',NULL FROM si RETURNING id,tenant_id,site_id),
 	  pr AS (INSERT INTO iam_v2.pms_interface_revisions(id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,config)
-	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 1, 'UTC', '{"endpoint":"x"}'::jsonb FROM pi RETURNING id, pms_interface_id),
-	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version)
-	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 'R1','R1','IN_HOUSE',1 FROM pi RETURNING id),
+	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 1, 'UTC', '{"endpoint":"x","max_auth_cache_age_seconds":3600}'::jsonb FROM pi RETURNING id, pms_interface_id),
+	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,
+	           occupancy_evidence_at,occupancy_ingested_at,occupancy_revision_id,occupancy_normalization_version,occupancy_clock_suspect)
+	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 'R1','R1','IN_HOUSE',1,
+	           now(), now(), pr.id, 1, false FROM pi, pr RETURNING id),
 	  dv AS (INSERT INTO iam_v2.devices(id,tenant_id,site_id,appliance_id,mac)
 	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, gen_random_uuid(), '02:00:00:00:00:01'::macaddr FROM pi RETURNING id)
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
@@ -66,7 +68,7 @@ func seed(t *testing.T, p *pgxpool.Pool) fixture {
 
 func grant(f fixture, ttl int) PMSGrant {
 	return PMSGrant{Tenant: f.tenant, Site: f.site, Interface: f.iface, Revision: f.rev, Stay: f.stay,
-		Device: f.device, GuestNetwork: f.network, TTLSeconds: ttl}
+		Device: f.device, GuestNetwork: f.network, OccupancyEvidenceVersion: 1, TTLSeconds: ttl}
 }
 
 func pres(f fixture) Presenter {
@@ -139,6 +141,56 @@ func TestIntegration_PinnedPresenterAndOccupancy(t *testing.T) {
 	}
 	if _, err := s.Consume(context.Background(), id2, pres(f)); err != ErrContextInvalid {
 		t.Fatalf("checked-out stay consume = %v, want ErrContextInvalid", err)
+	}
+}
+
+// TestIntegration_EvidenceAndInterfacePins proves ConsumeTx rejects a PMS context when the pinned Interface
+// is disabled, the occupancy evidence is stale / clock-suspect / a different version, or occupancy evidence is
+// absent — each a uniform ErrContextInvalid.
+func TestIntegration_EvidenceAndInterfacePins(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := NewStore(p)
+	ctx := context.Background()
+
+	// disabled interface
+	f := seed(t, p)
+	id, _ := s.IssuePMS(ctx, grant(f, 600))
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET lifecycle_state='AUTH_DISABLED' WHERE id=$1`, f.iface); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
+		t.Fatalf("disabled interface = %v, want ErrContextInvalid", err)
+	}
+
+	// stale occupancy evidence (older than max_auth_cache_age=3600s)
+	f = seed(t, p)
+	id, _ = s.IssuePMS(ctx, grant(f, 600))
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_at = now() - interval '2 hours' WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
+		t.Fatalf("stale evidence = %v, want ErrContextInvalid", err)
+	}
+
+	// clock-suspect occupancy evidence
+	f = seed(t, p)
+	id, _ = s.IssuePMS(ctx, grant(f, 600))
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_clock_suspect=true WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
+		t.Fatalf("clock-suspect = %v, want ErrContextInvalid", err)
+	}
+
+	// occupancy evidence version changed (no longer matches the pinned version)
+	f = seed(t, p)
+	id, _ = s.IssuePMS(ctx, grant(f, 600))
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_normalization_version=2 WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
+		t.Fatalf("evidence version mismatch = %v, want ErrContextInvalid", err)
 	}
 }
 
