@@ -34,7 +34,7 @@ jobs:
 
       - name: gofmt (Phase-3 pmsd surface must be clean)
         run: |
-          unformatted="$(gofmt -l internal/pmsd internal/pms internal/stayengine internal/pmsresolve internal/authctx cmd/pmsd)"
+          unformatted="$(gofmt -l internal/pmsd internal/pms internal/stayengine internal/pmsresolve internal/authctx internal/grace cmd/pmsd)"
           if [ -n "$unformatted" ]; then
             echo "gofmt needs to be run on:"; echo "$unformatted"; exit 1
           fi
@@ -44,13 +44,13 @@ jobs:
         run: go build ./...
 
       - name: go vet (Phase-3 surface)
-        run: go vet ./internal/pmsd/... ./internal/pms/... ./internal/stayengine/... ./internal/pmsresolve/... ./internal/authctx/... ./cmd/pmsd/...
+        run: go vet ./internal/pmsd/... ./internal/pms/... ./internal/stayengine/... ./internal/pmsresolve/... ./internal/authctx/... ./internal/grace/... ./cmd/pmsd/...
 
       - name: go test (all packages)
         run: go test ./... -count=1
 
       - name: go test -race (pmsd + pms + stayengine)
-        run: go test -race ./internal/pmsd/... ./internal/pms/... ./internal/stayengine/... ./internal/pmsresolve/... -count=1
+        run: go test -race ./internal/pmsd/... ./internal/pms/... ./internal/stayengine/... ./internal/pmsresolve/... ./internal/grace/... -count=1
 
       - name: Migration 0010 lifecycle + concurrency gate (disposable PG16)
         working-directory: .
