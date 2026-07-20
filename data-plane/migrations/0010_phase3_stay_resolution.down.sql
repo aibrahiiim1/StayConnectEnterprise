@@ -11,6 +11,11 @@ DROP FUNCTION IF EXISTS iam_v2.p3_stay_lifecycle_guard();
 DROP TRIGGER IF EXISTS p3_stay_event_guard ON iam_v2.stay_events;
 DROP FUNCTION IF EXISTS iam_v2.p3_stay_event_appendonly();
 
+-- (4c) checkout_grace_audit append-only guard + table
+DROP TRIGGER IF EXISTS p3_checkout_grace_audit_guard ON iam_v2.checkout_grace_audit;
+DROP FUNCTION IF EXISTS iam_v2.p3_checkout_grace_audit_appendonly();
+DROP TABLE IF EXISTS iam_v2.checkout_grace_audit;
+
 -- (6b) §G durable resync inbox: partial indexes + admission columns, then restore the baseline unique.
 DROP INDEX IF EXISTS iam_v2.se_resync_identity;
 DROP INDEX IF EXISTS iam_v2.se_live_identity;

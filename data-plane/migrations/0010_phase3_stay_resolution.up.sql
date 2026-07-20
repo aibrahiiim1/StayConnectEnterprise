@@ -218,6 +218,52 @@ ALTER TABLE iam_v2.site_checkout_grace_config
       'device_limit_policy','data_quota_bytes','duration_seconds','down_kbps','up_kbps']));
 
 -- ============================================================================
+-- (4c) checkout_grace_audit — DURABLE, append-only, ONE-per-episode evidence for every atomic Checkout
+--      conversion outcome (normal grace, Emergency fallback, or fail-closed no-grace). This is the durable
+--      substitute for a transient ConfigInvalidAlert return flag: the critical CHECKOUT_GRACE_CONFIG_INVALID
+--      alert, the pinned Emergency policy version, the trusted-vs-clock-suspect boundary, and a bounded machine
+--      reason code are committed IN THE SAME transaction as the conversion. The UNIQUE(stay, lifecycle_version)
+--      makes a duplicate/concurrent Checkout unable to create a second alert/audit for the same episode. NO
+--      room / guest-name / reservation / folio / credential payload is stored (machine codes + ids + times).
+-- ============================================================================
+CREATE TABLE iam_v2.checkout_grace_audit (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL, pms_interface_id uuid NOT NULL,
+  stay_id uuid NOT NULL, lifecycle_version int NOT NULL CHECK (lifecycle_version > 0),
+  trigger text NOT NULL CHECK (trigger IN ('CHECKOUT_GRACE','EMERGENCY_GRACE','NO_GRACE')),
+  is_emergency boolean NOT NULL DEFAULT false,
+  policy_version text NOT NULL CHECK (policy_version ~ '^[A-Z][A-Z0-9_]{0,63}$'),
+  alert_code text CHECK (alert_code IS NULL OR alert_code = 'CHECKOUT_GRACE_CONFIG_INVALID'),
+  reason_code text NOT NULL CHECK (reason_code ~ '^[A-Z][A-Z0-9_]{0,63}$'),
+  grace_entitlement_id uuid,
+  boundary_at timestamptz NOT NULL,
+  boundary_clock_suspect boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  -- exactly one audit/alert per Stay lifecycle episode (idempotent + concurrent single-winner)
+  UNIQUE (tenant_id, site_id, stay_id, lifecycle_version),
+  -- an emergency conversion MUST raise the config-invalid alert; a normal grace MUST NOT. IS NOT DISTINCT FROM
+  -- (not =) so a NULL alert_code on the emergency branch evaluates to FALSE, not NULL (a NULL CHECK is treated
+  -- as satisfied — that would let emergency+no-alert slip through).
+  CONSTRAINT cga_emergency_alerts CHECK (
+    (is_emergency = false AND alert_code IS NULL)
+    OR (is_emergency = true AND alert_code IS NOT DISTINCT FROM 'CHECKOUT_GRACE_CONFIG_INVALID')),
+  FOREIGN KEY (tenant_id, site_id, pms_interface_id, stay_id)
+    REFERENCES iam_v2.stays (tenant_id, site_id, pms_interface_id, id) ON DELETE CASCADE);
+
+-- append-only: no UPDATE, no DELETE (immutable sanitized evidence).
+CREATE OR REPLACE FUNCTION iam_v2.p3_checkout_grace_audit_appendonly() RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = iam_v2, pg_temp
+  AS $fn$
+BEGIN
+  RAISE EXCEPTION 'iam_v2.checkout_grace_audit is append-only (% rejected)', TG_OP;
+END $fn$;
+CREATE TRIGGER p3_checkout_grace_audit_guard
+  BEFORE UPDATE OR DELETE ON iam_v2.checkout_grace_audit
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_checkout_grace_audit_appendonly();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_checkout_grace_audit_appendonly() FROM PUBLIC;
+
+-- ============================================================================
 -- (6) stay_events: application-result columns + append-only lineage guard.
 -- ============================================================================
 ALTER TABLE iam_v2.stay_events

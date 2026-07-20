@@ -199,6 +199,20 @@ expect_ok  "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id) VAL
 expect_err "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,config) VALUES (gen_random_uuid(),gen_random_uuid(),'{\"grace_duration_seconds\":3600}'::jsonb);" && ok "config jsonb duplicate authoritative key rejected (§5)" || no "jsonb dup key accepted"
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET eligibility_window_seconds=0 WHERE eligibility_window_seconds=86400;" && ok "grace eligibility_window must be >0" || no "grace bound not enforced"
 
+echo '== checkout_grace_audit append-only + one-per-episode + emergency-alert coherence (§4c) =='
+CGA(){ echo "INSERT INTO iam_v2.checkout_grace_audit(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,alert_code,reason_code,boundary_at) VALUES ('$T','$S','$I','$ST',$1,'$2',$3,'$4',$5,'$6',now());"; }
+expect_err "$(CGA 5 EMERGENCY_GRACE true EMERGENCY_GRACE_V1 NULL ELIGIBLE)" && ok "emergency without alert_code rejected (cga_emergency_alerts)" || no "emergency w/o alert accepted"
+expect_err "$(CGA 5 CHECKOUT_GRACE false CHECKOUT_GRACE_V1 \'CHECKOUT_GRACE_CONFIG_INVALID\' ELIGIBLE)" && ok "non-emergency with alert_code rejected" || no "normal+alert accepted"
+expect_err "$(CGA 5 CHECKOUT_GRACE false checkout_grace_v1 NULL ELIGIBLE)" && ok "lowercase policy_version rejected (bounded machine code)" || no "unbounded policy_version accepted"
+expect_err "$(CGA 5 CHECKOUT_GRACE false CHECKOUT_GRACE_V1 NULL 'room 101')" && ok "free-text reason_code rejected (no PII shape)" || no "PII reason accepted"
+expect_err "$(CGA 0 NO_GRACE false NONE NULL NO_ACTIVE_ENTITLEMENT)" && ok "lifecycle_version>0 enforced" || no "zero episode accepted"
+expect_ok  "$(CGA 5 CHECKOUT_GRACE false CHECKOUT_GRACE_V1 NULL ELIGIBLE)" && ok "valid normal audit row accepted" || no "valid audit rejected"
+expect_err "$(CGA 5 EMERGENCY_GRACE true EMERGENCY_GRACE_V1 \'CHECKOUT_GRACE_CONFIG_INVALID\' CONFIG_INVALID_EMERGENCY_FALLBACK)" && ok "second audit for same (stay,episode) rejected (one-per-episode)" || no "duplicate episode audit accepted"
+CGAID="$(Q "SELECT id FROM iam_v2.checkout_grace_audit WHERE stay_id='$ST' AND lifecycle_version=5;")"
+expect_err "UPDATE iam_v2.checkout_grace_audit SET reason_code='TAMPERED' WHERE id='$CGAID';" && ok "audit UPDATE rejected (append-only)" || no "audit mutable"
+expect_err "DELETE FROM iam_v2.checkout_grace_audit WHERE id='$CGAID';" && ok "audit DELETE rejected (append-only)" || no "audit deletable"
+expect_ok  "$(CGA 6 EMERGENCY_GRACE true EMERGENCY_GRACE_V1 \'CHECKOUT_GRACE_CONFIG_INVALID\' CONFIG_INVALID_EMERGENCY_FALLBACK)" && ok "valid emergency audit (alert + version) accepted" || no "valid emergency audit rejected"
+
 echo '== runner scope + mandatory positive-identity (PART A §1/§2/§4/§8) =='
 o="$(bash "$ROOT/scripts/edge-migrate.sh" 2>&1 || true)"; echo "$o" | grep -q "REFUSED: EDGE_PSQL" || echo "$o" | grep -q "REFUSED: specify --only" && ok "runner refuses without scope" || no "runner ran with no scope"
 o="$(RUN --only 'BAD NAME' --expect-db "$DB" --expect-sha256 "$UPSHA" 2>&1 || true)"; echo "$o" | grep -q "does not match" && ok "runner rejects invalid version name" || no "runner accepted bad name"
