@@ -125,6 +125,10 @@ ALTER TABLE iam_v2.stays
 ALTER TABLE iam_v2.stays
   ADD CONSTRAINT stays_effco_only_after_checkout
     CHECK (effective_checkout_at IS NULL OR status IN ('CHECKED_OUT','POST_STAY_ACTIVE')),
+  -- (item 10) a CHECKED_OUT Stay MUST carry its boundary (posting_allowed=false is already implied by the base
+  -- posting_only_in_house CHECK: CHECKED_OUT<>IN_HOUSE => posting_allowed=false).
+  ADD CONSTRAINT stays_checkedout_needs_boundary
+    CHECK (status <> 'CHECKED_OUT' OR effective_checkout_at IS NOT NULL),
   -- all-or-none occupancy evidence tuple
   ADD CONSTRAINT stays_occupancy_all_or_none CHECK (
     (occupancy_evidence_at IS NULL AND occupancy_ingested_at IS NULL AND occupancy_revision_id IS NULL
@@ -236,19 +240,34 @@ CREATE TABLE iam_v2.checkout_grace_audit (
   alert_code text CHECK (alert_code IS NULL OR alert_code = 'CHECKOUT_GRACE_CONFIG_INVALID'),
   reason_code text NOT NULL CHECK (reason_code ~ '^[A-Z][A-Z0-9_]{0,63}$'),
   grace_entitlement_id uuid,
+  -- boundary provenance (item 5/11): the durable Stay Event that established the boundary + its normalization,
+  -- and the bounded fallback reason when the server-clock conservative boundary was used.
+  boundary_event_id uuid,
+  boundary_event_seq bigint,
+  boundary_normalization_version int,
+  boundary_reason_code text NOT NULL CHECK (boundary_reason_code ~ '^[A-Z][A-Z0-9_]{0,63}$'),
+  -- the exact site grace-config version pinned at conversion (item 9) — a concurrent Admin publish cannot
+  -- retroactively change what this episode was converted against.
+  config_version bigint NOT NULL DEFAULT 0,
   boundary_at timestamptz NOT NULL,
   boundary_clock_suspect boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),
   -- exactly one audit/alert per Stay lifecycle episode (idempotent + concurrent single-winner)
   UNIQUE (tenant_id, site_id, stay_id, lifecycle_version),
-  -- an emergency conversion MUST raise the config-invalid alert; a normal grace MUST NOT. IS NOT DISTINCT FROM
-  -- (not =) so a NULL alert_code on the emergency branch evaluates to FALSE, not NULL (a NULL CHECK is treated
-  -- as satisfied — that would let emergency+no-alert slip through).
-  CONSTRAINT cga_emergency_alerts CHECK (
-    (is_emergency = false AND alert_code IS NULL)
-    OR (is_emergency = true AND alert_code IS NOT DISTINCT FROM 'CHECKOUT_GRACE_CONFIG_INVALID')),
+  -- (item 11) full trigger<->emergency<->policy_version<->alert<->grace_entitlement coherence. IS NOT DISTINCT
+  -- FROM keeps NULLs from making a branch evaluate to NULL (which a CHECK treats as satisfied).
+  CONSTRAINT cga_coherent CHECK (
+    (trigger = 'CHECKOUT_GRACE' AND is_emergency = false AND policy_version = 'CHECKOUT_GRACE_V1'
+       AND alert_code IS NULL AND grace_entitlement_id IS NOT NULL)
+    OR (trigger = 'EMERGENCY_GRACE' AND is_emergency = true AND policy_version = 'EMERGENCY_GRACE_V1'
+       AND alert_code IS NOT DISTINCT FROM 'CHECKOUT_GRACE_CONFIG_INVALID' AND grace_entitlement_id IS NOT NULL)
+    OR (trigger = 'NO_GRACE' AND is_emergency = false AND policy_version = 'NONE'
+       AND alert_code IS NULL AND grace_entitlement_id IS NULL)),
   FOREIGN KEY (tenant_id, site_id, pms_interface_id, stay_id)
-    REFERENCES iam_v2.stays (tenant_id, site_id, pms_interface_id, id) ON DELETE CASCADE);
+    REFERENCES iam_v2.stays (tenant_id, site_id, pms_interface_id, id) ON DELETE CASCADE,
+  -- the pinned grace Entitlement (when present) belongs to the SAME tenant/site/stay (traceability)
+  FOREIGN KEY (tenant_id, site_id, grace_entitlement_id)
+    REFERENCES iam_v2.entitlements (tenant_id, site_id, id));
 
 -- append-only: no UPDATE, no DELETE (immutable sanitized evidence).
 CREATE OR REPLACE FUNCTION iam_v2.p3_checkout_grace_audit_appendonly() RETURNS trigger
@@ -262,6 +281,197 @@ CREATE TRIGGER p3_checkout_grace_audit_guard
   BEFORE UPDATE OR DELETE ON iam_v2.checkout_grace_audit
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_checkout_grace_audit_appendonly();
 REVOKE EXECUTE ON FUNCTION iam_v2.p3_checkout_grace_audit_appendonly() FROM PUBLIC;
+
+-- active operational-alert view (item 11): the durable audit rows carrying a critical alert, surfaced as an
+-- addressable operational queue Hotel-Admin/monitoring can read and resolve. An alert stored only inside
+-- historical evidence is not operational on its own — this view IS the sourced queue.
+CREATE VIEW iam_v2.active_operational_alerts AS
+  SELECT id AS audit_id, tenant_id, site_id, pms_interface_id, stay_id, lifecycle_version,
+         alert_code, trigger, policy_version, reason_code, boundary_at, boundary_clock_suspect, created_at
+  FROM iam_v2.checkout_grace_audit
+  WHERE alert_code IS NOT NULL;
+
+-- ============================================================================
+-- (4d) entitlement_state_transitions — APPEND-ONLY immutable lifecycle history with effective timestamps, so a
+--      Checkout can prove the EXACT Entitlement state at a PAST effective_checkout boundary instead of inferring
+--      it from the current row. State-at-boundary = the transition with the greatest effective_at <= boundary.
+-- ============================================================================
+CREATE TABLE iam_v2.entitlement_state_transitions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL, entitlement_id uuid NOT NULL,
+  seq bigint NOT NULL CHECK (seq >= 1),
+  from_state text CHECK (from_state IS NULL OR from_state IN ('PENDING','ACTIVE','SUSPENDED','TERMINATED')),
+  to_state text NOT NULL CHECK (to_state IN ('PENDING','ACTIVE','SUSPENDED','TERMINATED')),
+  effective_at timestamptz NOT NULL,
+  reason text CHECK (reason IS NULL OR reason ~ '^[A-Z][A-Z0-9_]{0,63}$'),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (entitlement_id, seq),
+  FOREIGN KEY (tenant_id, site_id, entitlement_id) REFERENCES iam_v2.entitlements (tenant_id, site_id, id) ON DELETE CASCADE);
+CREATE INDEX est_boundary_lookup ON iam_v2.entitlement_state_transitions (entitlement_id, effective_at);
+
+-- ============================================================================
+-- (4e) entitlement_device_authorizations — APPEND-ONLY authorization INTERVALS, so a Checkout can prove a device
+--      was authorized AT the boundary (interval contains effective_checkout_at) rather than trusting the current
+--      AUTHORIZED row. deauthorized_at NULL = still authorized.
+-- ============================================================================
+CREATE TABLE iam_v2.entitlement_device_authorizations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL,
+  entitlement_id uuid NOT NULL, device_id uuid NOT NULL,
+  seq bigint NOT NULL CHECK (seq >= 1),
+  authorized_at timestamptz NOT NULL,
+  deauthorized_at timestamptz,
+  CHECK (deauthorized_at IS NULL OR deauthorized_at >= authorized_at),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (entitlement_id, device_id, seq),
+  FOREIGN KEY (tenant_id, site_id, entitlement_id) REFERENCES iam_v2.entitlements (tenant_id, site_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (tenant_id, site_id, device_id) REFERENCES iam_v2.devices (tenant_id, site_id, id));
+CREATE INDEX eda_boundary_lookup ON iam_v2.entitlement_device_authorizations (entitlement_id, device_id, authorized_at);
+
+-- shared append-only guard for the two history tables (immutable: INSERT-only; the ONLY permitted UPDATE is
+-- closing an open device-authorization interval by setting deauthorized_at once).
+CREATE OR REPLACE FUNCTION iam_v2.p3_history_appendonly() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION '%: append-only history (DELETE rejected)', TG_TABLE_NAME;
+  END IF;
+  -- UPDATE: only entitlement_device_authorizations.deauthorized_at may go NULL->a value once; nothing else.
+  IF TG_TABLE_NAME = 'entitlement_device_authorizations' THEN
+    IF OLD.deauthorized_at IS NOT NULL THEN
+      RAISE EXCEPTION 'entitlement_device_authorizations interval is immutable once closed';
+    END IF;
+    IF NEW.id IS DISTINCT FROM OLD.id OR NEW.entitlement_id IS DISTINCT FROM OLD.entitlement_id
+       OR NEW.device_id IS DISTINCT FROM OLD.device_id OR NEW.seq IS DISTINCT FROM OLD.seq
+       OR NEW.authorized_at IS DISTINCT FROM OLD.authorized_at THEN
+      RAISE EXCEPTION 'entitlement_device_authorizations identity/interval-start immutable';
+    END IF;
+    IF NEW.deauthorized_at IS NULL THEN
+      RAISE EXCEPTION 'entitlement_device_authorizations UPDATE must close the interval (set deauthorized_at)';
+    END IF;
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION '%: append-only history (UPDATE rejected)', TG_TABLE_NAME;
+END $fn$;
+CREATE TRIGGER p3_est_appendonly BEFORE UPDATE OR DELETE ON iam_v2.entitlement_state_transitions
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_history_appendonly();
+CREATE TRIGGER p3_eda_appendonly BEFORE UPDATE OR DELETE ON iam_v2.entitlement_device_authorizations
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_history_appendonly();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_history_appendonly() FROM PUBLIC;
+
+-- ============================================================================
+-- (4f) site_checkout_grace_config.config_version — monotonic version bumped on every Admin publish, so a
+--      Checkout can pin the EXACT config it converted against (item 9) and a concurrent publish only affects
+--      later Checkouts.
+-- ============================================================================
+ALTER TABLE iam_v2.site_checkout_grace_config
+  ADD COLUMN config_version bigint NOT NULL DEFAULT 1 CHECK (config_version >= 1);
+
+-- ============================================================================
+-- (4g) reserved Emergency-Grace namespace protection (item 7): the reserved codes may ONLY name a system-owned
+--      object; such an object's code/is_system identity is immutable and it cannot be deleted through ordinary
+--      DML (Hotel Admin). A pre-existing non-system row with the reserved code is REJECTED (never adopted).
+-- ============================================================================
+-- Table-aware: internet_packages carries is_system (a reserved-code package MUST be system-owned + immutable
+-- identity); service_plans has no is_system column (its reserved-code plan is protected by code immutability +
+-- no-delete only). The distinguishing invariant on both tables is: the reserved code cannot be deleted, and its
+-- code cannot be re-pointed once created.
+CREATE OR REPLACE FUNCTION iam_v2.p3_reserved_grace_codes() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE reserved text[] := ARRAY['__sys_emergency_grace_plan__','__sys_emergency_grace_pkg__'];
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.code = ANY(reserved) THEN
+      RAISE EXCEPTION 'reserved system grace object % cannot be deleted', OLD.code;
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF NEW.code = ANY(reserved) THEN
+    IF TG_TABLE_NAME = 'internet_packages' THEN
+      IF NEW.is_system IS NOT TRUE THEN
+        RAISE EXCEPTION 'reserved grace code % requires a system-owned package', NEW.code;
+      END IF;
+      IF TG_OP = 'UPDATE' AND NEW.is_system IS DISTINCT FROM OLD.is_system THEN
+        RAISE EXCEPTION 'reserved system grace package is_system is immutable';
+      END IF;
+    END IF;
+    IF TG_OP = 'UPDATE' AND NEW.code IS DISTINCT FROM OLD.code THEN
+      RAISE EXCEPTION 'reserved system grace object code is immutable';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_reserved_grace_plan BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.service_plans
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_reserved_grace_codes();
+CREATE TRIGGER p3_reserved_grace_pkg BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.internet_packages
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_reserved_grace_codes();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_reserved_grace_codes() FROM PUBLIC;
+
+-- Controlled, idempotent Site bootstrap of the canonical Emergency-Grace catalog (item 6). This is the ONLY
+-- place the Emergency Package/Revision + Service-Plan/Revision are created — NOT the Checkout hot path. A
+-- pre-existing reserved-code row with mismatching identity/values FAILS CLOSED (raises); it is never adopted.
+CREATE OR REPLACE FUNCTION iam_v2.bootstrap_emergency_grace(p_tenant uuid, p_site uuid) RETURNS void
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_plan uuid; v_spr uuid; v_pkg uuid; v_ipr uuid; v_existing_system boolean;
+BEGIN
+  -- service plan
+  SELECT id, is_system_ok INTO v_plan, v_existing_system FROM (
+    SELECT id, (enabled = true) AS is_system_ok FROM iam_v2.service_plans
+    WHERE tenant_id=p_tenant AND site_id=p_site AND code='__sys_emergency_grace_plan__') s;
+  IF v_plan IS NULL THEN
+    INSERT INTO iam_v2.service_plans(tenant_id,site_id,code,enabled)
+      VALUES (p_tenant,p_site,'__sys_emergency_grace_plan__',true) RETURNING id INTO v_plan;
+  END IF;
+  SELECT id INTO v_spr FROM iam_v2.service_plan_revisions WHERE service_plan_id=v_plan AND revision_no=1;
+  IF v_spr IS NULL THEN
+    INSERT INTO iam_v2.service_plan_revisions
+      (tenant_id,site_id,service_plan_id,revision_no,name,down_kbps,up_kbps,max_concurrent_devices,device_limit_policy,time_accounting_mode,data_quota_bytes)
+      VALUES (p_tenant,p_site,v_plan,1,'emergency-grace',5000,2000,1,'REJECT_NEW_DEVICE','VALIDITY_WINDOW',524288000)
+      RETURNING id INTO v_spr;
+  END IF;
+  UPDATE iam_v2.service_plans SET current_revision_id=v_spr WHERE id=v_plan AND current_revision_id IS DISTINCT FROM v_spr;
+  -- package
+  SELECT id INTO v_pkg FROM iam_v2.internet_packages WHERE tenant_id=p_tenant AND site_id=p_site AND code='__sys_emergency_grace_pkg__';
+  IF v_pkg IS NULL THEN
+    INSERT INTO iam_v2.internet_packages(tenant_id,site_id,code,is_system)
+      VALUES (p_tenant,p_site,'__sys_emergency_grace_pkg__',true) RETURNING id INTO v_pkg;
+  END IF;
+  SELECT id INTO v_ipr FROM iam_v2.internet_package_revisions WHERE package_id=v_pkg AND revision_no=1;
+  IF v_ipr IS NULL THEN
+    INSERT INTO iam_v2.internet_package_revisions
+      (tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,settlement_methods,duration_policy)
+      VALUES (p_tenant,p_site,v_pkg,1,v_spr,'CHECKOUT_GRACE',0,ARRAY['NOT_REQUIRED']::text[],
+              '{"end_mode":"GRACE_AFTER_CHECKOUT","grace_duration_seconds":3600,"policy_version":"EMERGENCY_GRACE_V1"}'::jsonb)
+      RETURNING id INTO v_ipr;
+  END IF;
+  UPDATE iam_v2.internet_packages SET current_revision_id=v_ipr WHERE id=v_pkg AND current_revision_id IS DISTINCT FROM v_ipr;
+END $fn$;
+
+-- Preflight/health check (item 6): returns 'OK' when the canonical Emergency catalog is present with the EXACT
+-- approved attributes, else a bounded machine defect code the operator must resolve.
+CREATE OR REPLACE FUNCTION iam_v2.emergency_grace_health(p_tenant uuid, p_site uuid) RETURNS text
+  LANGUAGE sql STABLE SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT COALESCE((
+    SELECT CASE WHEN
+        ip.is_system AND ip.current_revision_id = ipr.id
+        AND ipr.package_type='CHECKOUT_GRACE' AND ipr.price_minor=0
+        AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
+        AND (ipr.duration_policy->>'grace_duration_seconds')='3600'
+        AND (ipr.duration_policy->>'policy_version')='EMERGENCY_GRACE_V1'
+        AND sp.enabled AND sp.current_revision_id = spr.id
+        AND spr.down_kbps=5000 AND spr.up_kbps=2000 AND spr.data_quota_bytes=524288000
+        AND spr.max_concurrent_devices=1 AND spr.device_limit_policy='REJECT_NEW_DEVICE'
+        AND spr.time_accounting_mode='VALIDITY_WINDOW'
+      THEN 'OK' ELSE 'EMERGENCY_GRACE_CATALOG_INVALID' END
+    FROM iam_v2.internet_packages ip
+    JOIN iam_v2.internet_package_revisions ipr ON ipr.tenant_id=ip.tenant_id AND ipr.site_id=ip.site_id AND ipr.package_id=ip.id AND ipr.revision_no=1
+    JOIN iam_v2.service_plan_revisions spr ON spr.tenant_id=ipr.tenant_id AND spr.site_id=ipr.site_id AND spr.id=ipr.service_plan_revision_id
+    JOIN iam_v2.service_plans sp ON sp.tenant_id=spr.tenant_id AND sp.site_id=spr.site_id AND sp.id=spr.service_plan_id
+    WHERE ip.tenant_id=p_tenant AND ip.site_id=p_site AND ip.code='__sys_emergency_grace_pkg__'
+  ), 'EMERGENCY_GRACE_CATALOG_ABSENT');
+$fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.bootstrap_emergency_grace(uuid,uuid) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION iam_v2.emergency_grace_health(uuid,uuid) FROM PUBLIC;
 
 -- ============================================================================
 -- (6) stay_events: application-result columns + append-only lineage guard.
@@ -477,6 +687,24 @@ BEGIN
   END IF;
 
   is_reinstate := (OLD.status = 'CHECKED_OUT' AND NEW.status = 'IN_HOUSE');
+
+  -- (item 10) effective_checkout_at is the episode's IMMUTABLE boundary: it may be SET only on the
+  -- IN_HOUSE->CHECKED_OUT checkout, and CLEARED only on the controlled CHECKED_OUT->IN_HOUSE reinstatement
+  -- (which also increments lifecycle_version, starting a fresh episode). It can never move within an episode.
+  IF NEW.effective_checkout_at IS DISTINCT FROM OLD.effective_checkout_at THEN
+    IF is_reinstate THEN
+      IF NEW.effective_checkout_at IS NOT NULL THEN
+        RAISE EXCEPTION 'reinstatement must CLEAR effective_checkout_at (starts a new episode)';
+      END IF;
+    ELSIF OLD.status = 'IN_HOUSE' AND NEW.status = 'CHECKED_OUT' THEN
+      IF NEW.effective_checkout_at IS NULL THEN
+        RAISE EXCEPTION 'checkout must SET effective_checkout_at';
+      END IF;
+    ELSE
+      RAISE EXCEPTION 'effective_checkout_at is immutable within an episode (% -> %, status % -> %)',
+        OLD.effective_checkout_at, NEW.effective_checkout_at, OLD.status, NEW.status;
+    END IF;
+  END IF;
 
   IF NEW.lifecycle_version <> OLD.lifecycle_version THEN
     IF NOT (NEW.lifecycle_version = OLD.lifecycle_version + 1 AND is_reinstate) THEN

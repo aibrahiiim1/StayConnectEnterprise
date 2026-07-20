@@ -160,7 +160,7 @@ func TestIntegration_PinnedPresenterAndOccupancy(t *testing.T) {
 
 	// pinned Stay no longer IN_HOUSE → invalid
 	id2, _ := s.IssuePMS(context.Background(), grant(f, 600))
-	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.stays SET status='CHECKED_OUT' WHERE id=$1`, f.stay); err != nil {
+	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Consume(context.Background(), id2, pres(f)); err != ErrContextInvalid {
@@ -493,10 +493,10 @@ func TestIntegration_EpisodeAndEvidenceSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	// checkout then reinstate on the same Stay row (the migration trigger enforces the +1 on CHECKED_OUT→IN_HOUSE)
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT' WHERE id=$1`, f.stay); err != nil {
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1 WHERE id=$1`, f.stay); err != nil {
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1, effective_checkout_at=NULL WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Consume(ctx, oldID, pres(f)); err != ErrContextInvalid {

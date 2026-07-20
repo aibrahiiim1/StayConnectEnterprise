@@ -11,7 +11,22 @@ DROP FUNCTION IF EXISTS iam_v2.p3_stay_lifecycle_guard();
 DROP TRIGGER IF EXISTS p3_stay_event_guard ON iam_v2.stay_events;
 DROP FUNCTION IF EXISTS iam_v2.p3_stay_event_appendonly();
 
--- (4c) checkout_grace_audit append-only guard + table
+-- (4g) reserved-namespace + emergency bootstrap/health
+DROP TRIGGER IF EXISTS p3_reserved_grace_plan ON iam_v2.service_plans;
+DROP TRIGGER IF EXISTS p3_reserved_grace_pkg ON iam_v2.internet_packages;
+DROP FUNCTION IF EXISTS iam_v2.p3_reserved_grace_codes();
+DROP FUNCTION IF EXISTS iam_v2.bootstrap_emergency_grace(uuid,uuid);
+DROP FUNCTION IF EXISTS iam_v2.emergency_grace_health(uuid,uuid);
+
+-- (4d/4e) history tables + shared append-only guard
+DROP TRIGGER IF EXISTS p3_est_appendonly ON iam_v2.entitlement_state_transitions;
+DROP TRIGGER IF EXISTS p3_eda_appendonly ON iam_v2.entitlement_device_authorizations;
+DROP FUNCTION IF EXISTS iam_v2.p3_history_appendonly();
+DROP TABLE IF EXISTS iam_v2.entitlement_device_authorizations;
+DROP TABLE IF EXISTS iam_v2.entitlement_state_transitions;
+
+-- (4c) checkout_grace_audit alert view + append-only guard + table
+DROP VIEW IF EXISTS iam_v2.active_operational_alerts;
 DROP TRIGGER IF EXISTS p3_checkout_grace_audit_guard ON iam_v2.checkout_grace_audit;
 DROP FUNCTION IF EXISTS iam_v2.p3_checkout_grace_audit_appendonly();
 DROP TABLE IF EXISTS iam_v2.checkout_grace_audit;
@@ -42,6 +57,9 @@ ALTER TABLE iam_v2.stay_events
   DROP COLUMN IF EXISTS review_code,
   DROP COLUMN IF EXISTS processed_at;
 
+-- (4f) grace config version
+ALTER TABLE iam_v2.site_checkout_grace_config DROP COLUMN IF EXISTS config_version;
+
 -- (4b) grace scalars: constraints then columns
 ALTER TABLE iam_v2.site_checkout_grace_config DROP CONSTRAINT IF EXISTS grace_config_no_dup_policy_keys;
 ALTER TABLE iam_v2.site_checkout_grace_config DROP CONSTRAINT IF EXISTS grace_all_or_none;
@@ -71,6 +89,7 @@ ALTER TABLE iam_v2.stays
   DROP CONSTRAINT IF EXISTS stays_evidence_version_coherent,
   DROP CONSTRAINT IF EXISTS stays_occupancy_norm_pos,
   DROP CONSTRAINT IF EXISTS stays_occupancy_all_or_none,
+  DROP CONSTRAINT IF EXISTS stays_checkedout_needs_boundary,
   DROP CONSTRAINT IF EXISTS stays_effco_only_after_checkout;
 ALTER TABLE iam_v2.stays
   DROP COLUMN IF EXISTS occupancy_evidence_version,

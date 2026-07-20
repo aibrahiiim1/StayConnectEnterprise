@@ -199,19 +199,51 @@ expect_ok  "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id) VAL
 expect_err "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,config) VALUES (gen_random_uuid(),gen_random_uuid(),'{\"grace_duration_seconds\":3600}'::jsonb);" && ok "config jsonb duplicate authoritative key rejected (§5)" || no "jsonb dup key accepted"
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET eligibility_window_seconds=0 WHERE eligibility_window_seconds=86400;" && ok "grace eligibility_window must be >0" || no "grace bound not enforced"
 
-echo '== checkout_grace_audit append-only + one-per-episode + emergency-alert coherence (§4c) =='
-CGA(){ echo "INSERT INTO iam_v2.checkout_grace_audit(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,alert_code,reason_code,boundary_at) VALUES ('$T','$S','$I','$ST',$1,'$2',$3,'$4',$5,'$6',now());"; }
-expect_err "$(CGA 5 EMERGENCY_GRACE true EMERGENCY_GRACE_V1 NULL ELIGIBLE)" && ok "emergency without alert_code rejected (cga_emergency_alerts)" || no "emergency w/o alert accepted"
-expect_err "$(CGA 5 CHECKOUT_GRACE false CHECKOUT_GRACE_V1 \'CHECKOUT_GRACE_CONFIG_INVALID\' ELIGIBLE)" && ok "non-emergency with alert_code rejected" || no "normal+alert accepted"
-expect_err "$(CGA 5 CHECKOUT_GRACE false checkout_grace_v1 NULL ELIGIBLE)" && ok "lowercase policy_version rejected (bounded machine code)" || no "unbounded policy_version accepted"
-expect_err "$(CGA 5 CHECKOUT_GRACE false CHECKOUT_GRACE_V1 NULL 'room 101')" && ok "free-text reason_code rejected (no PII shape)" || no "PII reason accepted"
-expect_err "$(CGA 0 NO_GRACE false NONE NULL NO_ACTIVE_ENTITLEMENT)" && ok "lifecycle_version>0 enforced" || no "zero episode accepted"
-expect_ok  "$(CGA 5 CHECKOUT_GRACE false CHECKOUT_GRACE_V1 NULL ELIGIBLE)" && ok "valid normal audit row accepted" || no "valid audit rejected"
-expect_err "$(CGA 5 EMERGENCY_GRACE true EMERGENCY_GRACE_V1 \'CHECKOUT_GRACE_CONFIG_INVALID\' CONFIG_INVALID_EMERGENCY_FALLBACK)" && ok "second audit for same (stay,episode) rejected (one-per-episode)" || no "duplicate episode audit accepted"
+echo '== checkout_grace_audit append-only + one-per-episode + coherence + boundary/config provenance (§4c/§11) =='
+# CGA <episode> <trigger> <is_emergency> <policy_version> <alert_code|NULL> <reason_code> <grace_ent|NULL> <boundary_reason>
+CGA(){ echo "INSERT INTO iam_v2.checkout_grace_audit(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,alert_code,reason_code,grace_entitlement_id,boundary_reason_code,config_version,boundary_at) VALUES ('$T','$S','$I','$ST',$1,'$2',$3,'$4',$5,'$6',$7,'$8',1,now());"; }
+# cga_coherent (§11): grace triggers require a grace_entitlement_id + matching policy version; NO_GRACE requires none
+expect_err "$(CGA 5 CHECKOUT_GRACE false CHECKOUT_GRACE_V1 NULL ELIGIBLE NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "CHECKOUT_GRACE without grace_entitlement_id rejected (§11)" || no "grace w/o entitlement accepted"
+expect_err "$(CGA 5 EMERGENCY_GRACE false EMERGENCY_GRACE_V1 \'CHECKOUT_GRACE_CONFIG_INVALID\' ELIGIBLE NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "EMERGENCY_GRACE with is_emergency=false rejected (§11)" || no "emergency non-emergency accepted"
+expect_err "$(CGA 5 NO_GRACE false CHECKOUT_GRACE_V1 NULL X NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "NO_GRACE with non-NONE policy_version rejected (§11)" || no "no-grace wrong policy accepted"
+expect_err "$(CGA 5 NO_GRACE true NONE NULL X NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "NO_GRACE with is_emergency=true rejected (§11)" || no "no-grace emergency accepted"
+expect_err "$(CGA 5 NO_GRACE false NONE \'CHECKOUT_GRACE_CONFIG_INVALID\' X NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "NO_GRACE with alert_code rejected (§11)" || no "no-grace alert accepted"
+# bounded machine codes + episode + boundary provenance
+expect_err "$(CGA 5 NO_GRACE false none NULL X NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "lowercase policy_version rejected (bounded machine code)" || no "unbounded policy_version accepted"
+expect_err "$(CGA 5 NO_GRACE false NONE NULL 'room 101' NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "free-text reason_code rejected (no PII shape)" || no "PII reason accepted"
+expect_err "$(CGA 5 NO_GRACE false NONE NULL X NULL 'server clock')" && ok "free-text boundary_reason_code rejected (bounded)" || no "unbounded boundary reason accepted"
+expect_err "$(CGA 0 NO_GRACE false NONE NULL NO_ACTIVE_ENTITLEMENT NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "lifecycle_version>0 enforced" || no "zero episode accepted"
+# valid NO_GRACE row (grace_entitlement NULL, policy NONE, bounded reason + boundary reason + config_version)
+expect_ok  "$(CGA 5 NO_GRACE false NONE NULL NO_ACTIVE_ENTITLEMENT NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "valid NO_GRACE audit row (provenance + config version) accepted" || no "valid audit rejected"
+expect_err "$(CGA 5 NO_GRACE false NONE NULL NO_ACTIVE_ENTITLEMENT NULL EVENT_CLOCK_SUSPECT)" && ok "second audit for same (stay,episode) rejected (one-per-episode)" || no "duplicate episode audit accepted"
 CGAID="$(Q "SELECT id FROM iam_v2.checkout_grace_audit WHERE stay_id='$ST' AND lifecycle_version=5;")"
 expect_err "UPDATE iam_v2.checkout_grace_audit SET reason_code='TAMPERED' WHERE id='$CGAID';" && ok "audit UPDATE rejected (append-only)" || no "audit mutable"
 expect_err "DELETE FROM iam_v2.checkout_grace_audit WHERE id='$CGAID';" && ok "audit DELETE rejected (append-only)" || no "audit deletable"
-expect_ok  "$(CGA 6 EMERGENCY_GRACE true EMERGENCY_GRACE_V1 \'CHECKOUT_GRACE_CONFIG_INVALID\' CONFIG_INVALID_EMERGENCY_FALLBACK)" && ok "valid emergency audit (alert + version) accepted" || no "valid emergency audit rejected"
+# active_operational_alerts view surfaces only alert-bearing rows (this NO_GRACE row has none)
+[ "$(Q "SELECT count(*) FROM iam_v2.active_operational_alerts WHERE stay_id='$ST';")" = 0 ] && ok "NO_GRACE row not surfaced as an operational alert (§11 view)" || no "no-grace surfaced as alert"
+
+echo '== reserved Emergency-Grace namespace + bootstrap/health (§4g) =='
+RT="$(Q "SELECT tenant_id FROM iam_v2.stays WHERE id='$ST';")"; RS="$(Q "SELECT site_id FROM iam_v2.stays WHERE id='$ST';")"
+expect_err "INSERT INTO iam_v2.internet_packages(tenant_id,site_id,code,is_system) VALUES ('$RT','$RS','__sys_emergency_grace_pkg__',false);" && ok "non-system reserved-code package rejected (§7)" || no "non-system reserved package accepted"
+[ "$(Q "SELECT iam_v2.emergency_grace_health('$RT','$RS');")" = "EMERGENCY_GRACE_CATALOG_ABSENT" ] && ok "health reports ABSENT before bootstrap (§6)" || no "health not absent pre-bootstrap"
+Q "SELECT iam_v2.bootstrap_emergency_grace('$RT','$RS');" >/dev/null
+[ "$(Q "SELECT iam_v2.emergency_grace_health('$RT','$RS');")" = "OK" ] && ok "bootstrap provisions canonical catalog; health OK (§6)" || no "health not OK after bootstrap"
+Q "SELECT iam_v2.bootstrap_emergency_grace('$RT','$RS');" >/dev/null
+[ "$(Q "SELECT iam_v2.emergency_grace_health('$RT','$RS');")" = "OK" ] && ok "bootstrap is idempotent (re-run stays OK)" || no "idempotent bootstrap broke health"
+expect_err "DELETE FROM iam_v2.internet_packages WHERE tenant_id='$RT' AND site_id='$RS' AND code='__sys_emergency_grace_pkg__';" && ok "reserved system package delete rejected (§7)" || no "reserved package deletable"
+expect_err "DELETE FROM iam_v2.service_plans WHERE tenant_id='$RT' AND site_id='$RS' AND code='__sys_emergency_grace_plan__';" && ok "reserved system plan delete rejected (§7)" || no "reserved plan deletable"
+
+echo '== structural checkout boundary invariants (§10) =='
+Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$T','$S','$I','RB','SB','IN_HOUSE',1,0);" >/dev/null
+SB="$(Q "SELECT id FROM iam_v2.stays WHERE external_stay_identity='SB';")"
+expect_err "UPDATE iam_v2.stays SET status='CHECKED_OUT' WHERE id='$SB';" && ok "CHECKED_OUT without effective_checkout_at rejected (§10)" || no "checkout without boundary accepted"
+expect_ok  "UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now(), posting_allowed=false WHERE id='$SB';" && ok "checkout sets boundary + posting off (§10)" || no "valid checkout blocked"
+expect_err "UPDATE iam_v2.stays SET effective_checkout_at=now()+interval '1 hour' WHERE id='$SB';" && ok "effective_checkout_at immutable within episode (§10)" || no "boundary moved within episode"
+expect_err "UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1 WHERE id='$SB';" && ok "reinstatement without clearing boundary rejected (§10)" || no "reinstate kept boundary"
+expect_ok  "UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1, effective_checkout_at=NULL WHERE id='$SB';" && ok "reinstatement clears boundary + bumps episode (§10)" || no "valid reinstate blocked"
+
+echo '== entitlement history append-only (§4d/§4e) =='
+[ "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_name IN ('entitlement_state_transitions','entitlement_device_authorizations');")" = 2 ] && ok "append-only history tables present" || no "history tables missing"
 
 echo '== runner scope + mandatory positive-identity (PART A §1/§2/§4/§8) =='
 o="$(bash "$ROOT/scripts/edge-migrate.sh" 2>&1 || true)"; echo "$o" | grep -q "REFUSED: EDGE_PSQL" || echo "$o" | grep -q "REFUSED: specify --only" && ok "runner refuses without scope" || no "runner ran with no scope"

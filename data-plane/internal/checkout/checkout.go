@@ -1,21 +1,22 @@
-// Package checkout is the Increment-7 ATOMIC Checkout conversion. In ONE transaction it locks the Stay
-// (global L1), establishes the IMMUTABLE effective-checkout boundary from the trusted normalized PMS checkout
-// timestamp (or a conservative clock-suspect fallback), sets the Stay CHECKED_OUT with posting_allowed=false,
-// TERMINATES the Stay's boundary-active Entitlement, and — for an eligible Stay — creates exactly ONE
-// Checkout-Grace (or versioned Emergency-Grace) Entitlement for the current lifecycle episode, grandfathering
-// only the devices/sessions that were authorized AT the boundary and rebinding them WITHOUT a logout. It
-// commits a durable, append-only, one-per-episode audit/alert row in the SAME transaction.
+// Package checkout is the Increment-7 ATOMIC Checkout conversion. In ONE Stay-first transaction it derives the
+// IMMUTABLE effective-checkout boundary from a DURABLE, verified Stay Event, sets the Stay CHECKED_OUT with
+// posting_allowed=false, TERMINATES every non-terminal pre-checkout Entitlement, and — for a Stay that a
+// history-based, quota-proven eligibility check shows held an ACTIVE valid Entitlement AT the boundary — creates
+// exactly ONE Checkout-Grace (or versioned Emergency-Grace) Entitlement for the current lifecycle episode.
+// Only devices whose authorization INTERVAL contains the boundary are grandfathered, and only their
+// boundary-valid sessions are rebound WITHOUT a logout. A durable, append-only, one-per-episode audit/alert row
+// (with the pinned config version + boundary provenance) commits in the SAME transaction.
 //
-// Fail-closed ordering: a COMMITTED checkout NEVER leaves the original pre-checkout Entitlement live — the
-// termination happens before (and in the same tx as) grace creation, so any pre-commit failure rolls back the
-// whole operation. It moves no money (grace amount 0, state GRANTED, settlement NOT_REQUIRED, no PS/PA) and
-// issues no session directly.
+// Fail-closed: a COMMITTED checkout NEVER leaves a pre-checkout Entitlement live; the Emergency catalog is
+// READ-ONLY (pre-provisioned by iam_v2.bootstrap_emergency_grace, not created in this hot path); it moves no
+// money (grace amount 0, GRANTED, settlement NOT_REQUIRED, no PS/PA) and issues no session directly.
 package checkout
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,20 +26,21 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/grace"
 )
 
-// ErrStayNotFound is returned when the pinned Stay does not exist in the given tenant/site/interface scope.
-var ErrStayNotFound = errors.New("checkout: stay not found in scope")
+var (
+	// ErrStayNotFound — the pinned Stay does not exist in the given tenant/site/interface scope.
+	ErrStayNotFound = errors.New("checkout: stay not found in scope")
+	// ErrInvalidBoundaryEvent — the supplied Stay Event is not a valid durable boundary source (wrong scope,
+	// unprocessed/failed/manual, unpublished RESYNC, or a version older than the applied Stay state).
+	ErrInvalidBoundaryEvent = errors.New("checkout: invalid boundary Stay Event")
+	// ErrEmergencyCatalogUnavailable — Emergency Grace is needed but the canonical system catalog is
+	// absent/invalid; a critical operational defect the operator must resolve (fail-closed, whole tx rolls back).
+	ErrEmergencyCatalogUnavailable = errors.New("checkout: emergency-grace catalog unavailable")
+)
 
-// Pinned, explicit policy versions. The Emergency policy is INDEPENDENT of any Hotel-Admin configuration and
-// carries its own version so a conversion's terms are auditable and reproducible.
 const (
 	checkoutGracePolicyVersion  = "CHECKOUT_GRACE_V1"
 	emergencyGracePolicyVersion = "EMERGENCY_GRACE_V1"
-
-	// canonical, system-owned, NON-configurable Emergency-Grace identities (reserved codes, provisioned once
-	// per site). NOT a per-request/fake package — a real immutable Package/Revision that preserves Purchase
-	// traceability without depending on (possibly corrupt) Hotel-Admin config.
-	sysEmergencyPlanCode = "__sys_emergency_grace_plan__"
-	sysEmergencyPkgCode  = "__sys_emergency_grace_pkg__"
+	defaultMaxSkew              = 5 * time.Minute
 )
 
 // Converter runs the atomic Checkout conversion against the site DB.
@@ -46,43 +48,42 @@ type Converter struct{ pool *pgxpool.Pool }
 
 func NewConverter(pool *pgxpool.Pool) *Converter { return &Converter{pool: pool} }
 
-// Boundary carries the trusted normalized PMS checkout timestamp and its provenance, derived by the Stay
-// engine from the durable Stay Event. When Trusted is false (PMS time unavailable / stale / clock-suspect /
-// normalization-invalid) the converter applies the conservative server-clock fallback and records it as
-// clock-suspect with the bounded UntrustedReason. A zero TrustedAt with Trusted=true is treated as untrusted.
-type Boundary struct {
-	TrustedAt       time.Time
-	Trusted         bool
-	UntrustedReason string // bounded machine code (^[A-Z][A-Z0-9_]{0,63}$) when !Trusted
+// BoundarySource binds the conversion to a durable, verifiable server identity — the Stay Event that drives the
+// checkout. The Converter reads and verifies it from PostgreSQL inside the Stay-first transaction; an arbitrary
+// caller CANNOT inject a bare timestamp. MaxSkew bounds an acceptable future normalized timestamp (default 5m).
+type BoundarySource struct {
+	StayEventID string
+	MaxSkew     time.Duration
 }
 
 // Result reports what the atomic conversion did. It carries no guest credential and no PII.
 type Result struct {
-	CheckedOut           bool // this call flipped the Stay IN_HOUSE -> CHECKED_OUT
-	AlreadyProcessed     bool // the episode was already converted/audited (idempotent re-entry)
+	CheckedOut           bool
+	AlreadyProcessed     bool
 	GraceCreated         bool
 	Trigger              grace.Trigger
 	IsEmergency          bool
 	ConfigInvalidAlert   bool
 	BoundaryClockSuspect bool
+	ManualReview         bool
 	NewEntitlementID     string
 	OldEntitlementID     string
 	Reason               string
+	BoundaryReason       string
+	ConfigVersion        int64
 	DevicesGrandfathered int
 	SessionsRebound      int
+	EntitlementsEnded    int
 }
 
-// ConvertAtCheckout performs the whole atomic Checkout conversion for one Stay at the trusted boundary. It is
-// idempotent per lifecycle episode: a duplicate/delayed checkout preserves the established boundary and creates
-// no second grace/audit.
-func (c *Converter) ConvertAtCheckout(ctx context.Context, tenant, site, iface, stayID string, b Boundary) (Result, error) {
+// ConvertAtCheckout performs the whole atomic Checkout conversion for one Stay, bound to the durable Stay Event.
+func (c *Converter) ConvertAtCheckout(ctx context.Context, tenant, site, iface, stayID string, src BoundarySource) (Result, error) {
 	tx, err := c.pool.Begin(ctx)
 	if err != nil {
 		return Result{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-
-	res, err := c.convertTx(ctx, tx, tenant, site, iface, stayID, b)
+	res, err := c.convertTx(ctx, tx, tenant, site, iface, stayID, src)
 	if err != nil {
 		return Result{}, err
 	}
@@ -92,15 +93,19 @@ func (c *Converter) ConvertAtCheckout(ctx context.Context, tenant, site, iface, 
 	return res, nil
 }
 
-func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, b Boundary) (Result, error) {
-	// L1: lock the Stay first. lifecycle_version is the authoritative episode; never supplied by a caller.
+func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, src BoundarySource) (Result, error) {
+	skew := src.MaxSkew
+	if skew <= 0 {
+		skew = defaultMaxSkew
+	}
+	// L1: lock the Stay first.
 	var episode int
 	var status string
 	var effcoSet bool
-	err := tx.QueryRow(ctx, `SELECT lifecycle_version, status, effective_checkout_at IS NOT NULL
-		FROM iam_v2.stays
-		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND id=$4
-		FOR UPDATE`, tenant, site, iface, stayID).Scan(&episode, &status, &effcoSet)
+	var lastApplied int64
+	err := tx.QueryRow(ctx, `SELECT lifecycle_version, status, effective_checkout_at IS NOT NULL, last_applied_event_version
+		FROM iam_v2.stays WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND id=$4
+		FOR UPDATE`, tenant, site, iface, stayID).Scan(&episode, &status, &effcoSet, &lastApplied)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Result{}, ErrStayNotFound
@@ -110,34 +115,37 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 
 	var res Result
 	var boundary time.Time
-	// (item 1/4/8) establish the CHECKED_OUT state + posting_allowed=false + the IMMUTABLE boundary. A trusted
-	// PMS timestamp is used verbatim; otherwise the conservative server-clock fallback is recorded clock-suspect.
-	// An already-established boundary is NEVER overwritten (duplicate/delayed events preserve it).
+	var evSeq *int64
+	var evNorm *int
 	switch status {
 	case "IN_HOUSE":
-		if b.Trusted && !b.TrustedAt.IsZero() {
-			if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays
-				SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=$2
-				WHERE id=$1 AND status='IN_HOUSE' RETURNING effective_checkout_at`, stayID, b.TrustedAt).Scan(&boundary); err != nil {
+		// (item 5) derive + verify the boundary from the durable Stay Event before committing the checkout.
+		b, suspect, reason, seq, norm, evErr := deriveBoundary(ctx, tx, tenant, site, iface, stayID, lastApplied, skew, src.StayEventID)
+		if evErr != nil {
+			return Result{}, evErr
+		}
+		evSeq, evNorm = seq, norm
+		res.BoundaryClockSuspect = suspect
+		res.BoundaryReason = reason
+		if suspect {
+			if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now()
+				WHERE id=$1 AND status='IN_HOUSE' RETURNING effective_checkout_at`, stayID).Scan(&boundary); err != nil {
 				return Result{}, err
 			}
 		} else {
-			res.BoundaryClockSuspect = true
-			if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays
-				SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=now()
-				WHERE id=$1 AND status='IN_HOUSE' RETURNING effective_checkout_at`, stayID).Scan(&boundary); err != nil {
+			if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false, effective_checkout_at=$2
+				WHERE id=$1 AND status='IN_HOUSE' RETURNING effective_checkout_at`, stayID, b).Scan(&boundary); err != nil {
 				return Result{}, err
 			}
 		}
 		res.CheckedOut = true
 	case "CHECKED_OUT":
-		// reuse the ESTABLISHED boundary; never move it. Assert posting_allowed=false defensively.
-		if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays
-			SET posting_allowed=false, effective_checkout_at=COALESCE(effective_checkout_at, now())
+		if err := tx.QueryRow(ctx, `UPDATE iam_v2.stays SET posting_allowed=false, effective_checkout_at=COALESCE(effective_checkout_at, now())
 			WHERE id=$1 RETURNING effective_checkout_at`, stayID).Scan(&boundary); err != nil {
 			return Result{}, err
 		}
-		res.BoundaryClockSuspect = !effcoSet // only the defensive now() path is suspect
+		res.BoundaryClockSuspect = !effcoSet
+		res.BoundaryReason = "REENTRY_ESTABLISHED_BOUNDARY"
 	default:
 		res.Reason = "STAY_NOT_CHECKED_OUT"
 		return res, nil
@@ -156,65 +164,62 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 		return res, nil
 	}
 
-	// (item 3) eligibility AT the boundary: the Stay's Entitlement that was ACTIVE + valid at effective_checkout.
-	// PENDING/SUSPENDED are never silently eligible. An Entitlement that was active at the boundary but expired
-	// AFTER it is still eligible; one created after the boundary or exhausted at/before it is not.
-	var oldEnt string
-	var oldLive bool
-	err = tx.QueryRow(ctx, `SELECT id, (status='ACTIVE')
-		FROM iam_v2.entitlements
-		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND stay_id=$4
-		  AND activated_at IS NOT NULL AND activated_at <= $5
-		  AND (window_ends_at IS NULL OR window_ends_at > $5)
-		  AND ( status='ACTIVE'
-		     OR (status='TERMINATED' AND terminated_at IS NOT NULL AND terminated_at > $5
-		         AND NOT (terminal_reason IN ('DATA','TIME','HARD_EXPIRY') AND terminated_at <= $5)) )
-		ORDER BY activated_at DESC
-		LIMIT 1
-		FOR UPDATE`, tenant, site, iface, stayID, boundary).Scan(&oldEnt, &oldLive)
-	hasActive := err == nil
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	// atomic config pin (item 9): lock the site grace-config row FIRST and read its exact version + typed policy,
+	// so the whole decision (and every audit path) uses one consistent snapshot a concurrent Admin publish
+	// cannot change.
+	pol, gpkg, enabled, configVersion, err := lockGraceConfig(ctx, tx, tenant, site)
+	if err != nil {
 		return Result{}, err
 	}
-	res.OldEntitlementID = oldEnt
+	res.ConfigVersion = configVersion
 
-	// (item 1) terminate the boundary-active original FIRST, at the boundary, so a committed checkout can never
-	// leave it live — regardless of what happens with grace creation below.
-	if hasActive && oldLive {
-		if _, err := tx.Exec(ctx, `UPDATE iam_v2.entitlements
-			SET status='TERMINATED', terminal_reason='CONVERTED', terminated_at=$2
-			WHERE id=$1 AND status IN ('ACTIVE','PENDING','SUSPENDED')`, oldEnt, boundary); err != nil {
-			return Result{}, err
-		}
+	// (item 2/3) eligibility proven from the append-only state history + quota ledger AT the boundary.
+	elig, err := eligibleOriginalAtBoundary(ctx, tx, tenant, site, iface, stayID, boundary)
+	if err != nil {
+		return Result{}, err
+	}
+	res.OldEntitlementID = elig.entitlementID
+
+	// (item 1) lock + terminate EVERY non-terminal pre-checkout (non-grace) Entitlement at the boundary, so no
+	// PENDING/ACTIVE/SUSPENDED state can later become usable. The eligible original is CONVERTED, the rest CHECKOUT.
+	ended, err := terminateNonTerminalPreCheckout(ctx, tx, tenant, site, iface, stayID, boundary, elig.entitlementID)
+	if err != nil {
+		return Result{}, err
+	}
+	res.EntitlementsEnded = ended
+
+	// >1 ACTIVE-at-boundary → deterministic manual review (never ORDER BY LIMIT 1). Originals are already
+	// terminated (fail-closed); no grace is minted, a NO_GRACE audit records the review.
+	if elig.multiActive {
+		res.ManualReview = true
+		res.Reason = "MULTIPLE_ACTIVE_AT_BOUNDARY_MANUAL_REVIEW"
+		return res, writeAudit(ctx, tx, auditRow{tenant, site, iface, stayID, episode, "NO_GRACE", false, "NONE",
+			nil, res.Reason, nil, src.StayEventID, evSeq, evNorm, res.BoundaryReason, configVersion, boundary, res.BoundaryClockSuspect})
 	}
 
-	// grace config (typed authoritative scalars + pinned package) and the decision.
-	pol, gpkg, enabled := loadGraceConfig(ctx, tx, tenant, site)
-	// (item 6) fully revalidate the CONFIGURED grace package server-side; an invalid/unavailable one routes the
-	// otherwise-eligible Guest to the versioned Emergency path.
-	cfgPkgValid := gpkg != "" && validateConfiguredGracePackage(ctx, tx, tenant, site, gpkg)
-	cfgValid := grace.ValidatePolicy(pol, enabled, cfgPkgValid)
+	// (item 6/8) validate the configured package server-side with EXACT policy<->plan equality.
+	cfgValid := gpkg != "" && validateConfiguredGraceExact(ctx, tx, tenant, site, gpkg, pol)
+	cfgOK := grace.ValidatePolicy(pol, enabled, cfgValid)
 
 	d := grace.DecideConversion(grace.ConversionRequest{
-		HasActiveEntitlementAtCheckout: hasActive,
-		AlreadyConvertedThisEpisode:    false, // gated by the audit row above
+		HasActiveEntitlementAtCheckout: elig.eligible,
+		AlreadyConvertedThisEpisode:    false,
 		Configured:                     pol,
-		ConfiguredValid:                cfgValid,
+		ConfiguredValid:                cfgOK,
 	})
 	res.Reason = d.Reason
 	res.IsEmergency = d.IsEmergency
 
 	trigger := grace.Trigger("NO_GRACE")
 	policyVersion := "NONE"
-	var alertCode any // NULL unless emergency
+	var alertCode any
 	var graceEntArg any
 
 	if d.Create {
-		// resolve the package + service-plan the grace Entitlement/Purchase hang off, preserving traceability.
 		var pkgRev, svcRev, tam string
 		if d.IsEmergency {
-			// (item 2) canonical, system-owned Emergency-Grace package/revision (provisioned once per site).
-			pkgRev, svcRev, tam, err = ensureEmergencyGracePackage(ctx, tx, tenant, site)
+			// (item 6/7) READ the pre-provisioned canonical Emergency catalog; fail closed if absent/invalid.
+			pkgRev, svcRev, tam, err = readEmergencyCatalog(ctx, tx, tenant, site)
 			if err != nil {
 				return Result{}, err
 			}
@@ -226,8 +231,7 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 			pkgRev = gpkg
 			if err := tx.QueryRow(ctx, `SELECT ipr.service_plan_revision_id, spr.time_accounting_mode
 				FROM iam_v2.internet_package_revisions ipr
-				JOIN iam_v2.service_plan_revisions spr
-				  ON spr.tenant_id=ipr.tenant_id AND spr.site_id=ipr.site_id AND spr.id=ipr.service_plan_revision_id
+				JOIN iam_v2.service_plan_revisions spr ON spr.tenant_id=ipr.tenant_id AND spr.site_id=ipr.site_id AND spr.id=ipr.service_plan_revision_id
 				WHERE ipr.tenant_id=$1 AND ipr.site_id=$2 AND ipr.id=$3`, tenant, site, pkgRev).Scan(&svcRev, &tam); err != nil {
 				return Result{}, err
 			}
@@ -236,9 +240,9 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 		}
 
 		newEnt, err := c.createGrace(ctx, tx, createGraceArgs{
-			tenant: tenant, site: site, iface: iface, stayID: stayID, episode: episode,
-			pkgRev: pkgRev, svcRev: svcRev, tam: tam, trigger: trigger, policy: d.Policy, policyVersion: policyVersion,
-			isEmergency: d.IsEmergency, boundary: boundary, oldEnt: oldEntOrNil(hasActive, oldEnt),
+			tenant: tenant, site: site, iface: iface, stayID: stayID, episode: episode, pkgRev: pkgRev, svcRev: svcRev,
+			tam: tam, trigger: trigger, policy: d.Policy, policyVersion: policyVersion, isEmergency: d.IsEmergency,
+			boundary: boundary, oldEnt: nilIfEmpty(elig.entitlementID),
 		})
 		if err != nil {
 			return Result{}, err
@@ -248,43 +252,246 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 		res.NewEntitlementID = newEnt
 		graceEntArg = newEnt
 
-		if hasActive {
-			// (item 5) grandfather ONLY the devices authorized at/before the boundary; a device first authorized
-			// AFTER the boundary is a new post-checkout device and is not grandfathered.
-			ct, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_devices
-				(tenant_id, site_id, entitlement_id, device_id, status, grandfathered, first_authorized, last_authorized)
-				SELECT tenant_id, site_id, $2, device_id, 'AUTHORIZED', true, first_authorized, last_authorized
-				FROM iam_v2.entitlement_devices
-				WHERE entitlement_id=$1 AND status='AUTHORIZED' AND first_authorized IS NOT NULL AND first_authorized <= $3`,
-				oldEnt, newEnt, boundary)
+		if elig.entitlementID != "" {
+			// (item 4) grandfather ONLY devices whose authorization INTERVAL contains the boundary.
+			gf, sb, err := grandfatherBoundaryDevices(ctx, tx, tenant, site, elig.entitlementID, newEnt, boundary)
 			if err != nil {
 				return Result{}, err
 			}
-			res.DevicesGrandfathered = int(ct.RowsAffected())
-
-			// rebind ONLY the live sessions that started at/before the boundary on a grandfathered device.
-			ct2, err := tx.Exec(ctx, `UPDATE iam_v2.sessions s SET entitlement_id=$2
-				WHERE s.entitlement_id=$1 AND s.state='active' AND s.started <= $3
-				  AND EXISTS (SELECT 1 FROM iam_v2.entitlement_devices ed
-				              WHERE ed.entitlement_id=$2 AND ed.device_id=s.device_id AND ed.grandfathered)`,
-				oldEnt, newEnt, boundary)
-			if err != nil {
-				return Result{}, err
-			}
-			res.SessionsRebound = int(ct2.RowsAffected())
+			res.DevicesGrandfathered = gf
+			res.SessionsRebound = sb
 		}
 	}
 
-	// (item 7) durable, append-only, one-per-episode audit/alert — SAME transaction as the conversion.
-	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_audit
-		(tenant_id, site_id, pms_interface_id, stay_id, lifecycle_version, trigger, is_emergency, policy_version,
-		 alert_code, reason_code, grace_entitlement_id, boundary_at, boundary_clock_suspect)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-		tenant, site, iface, stayID, episode, string(trigger), d.IsEmergency, policyVersion,
-		alertCode, boundedReason(res.Reason), graceEntArg, boundary, res.BoundaryClockSuspect); err != nil {
-		return Result{}, err
+	return res, writeAudit(ctx, tx, auditRow{tenant, site, iface, stayID, episode, string(trigger), d.IsEmergency,
+		policyVersion, alertCode, boundedReason(res.Reason), graceEntArg, src.StayEventID, evSeq, evNorm,
+		res.BoundaryReason, configVersion, boundary, res.BoundaryClockSuspect})
+}
+
+// deriveBoundary reads + verifies the durable Stay Event and returns (boundary, clockSuspect, reasonCode).
+// Structural failures (wrong scope, unprocessed, unpublished RESYNC, stale version) are ErrInvalidBoundaryEvent.
+// Timestamp problems (clock-suspect, absent, implausibly future) fall back to the server clock, recorded suspect.
+func deriveBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, lastApplied int64, skew time.Duration, eventID string) (time.Time, bool, string, *int64, *int, error) {
+	if eventID == "" {
+		return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent
 	}
-	return res, nil
+	var ts *time.Time
+	var clkSuspect bool
+	var seq int64
+	var norm int
+	var admission string
+	var resyncGen int64
+	err := tx.QueryRow(ctx, `SELECT pms_timestamp_utc, clock_suspect, sequence_version, normalization_version, admission_kind, resync_generation
+		FROM iam_v2.stay_events
+		WHERE id=$1 AND tenant_id=$2 AND site_id=$3 AND pms_interface_id=$4 AND stay_id=$5 AND processing_status='APPLIED'`,
+		eventID, tenant, site, iface, stayID).Scan(&ts, &clkSuspect, &seq, &norm, &admission, &resyncGen)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent // wrong scope / unprocessed / cross-stay / cross-interface
+		}
+		return time.Time{}, false, "", nil, nil, err
+	}
+	// stale RESYNC evidence: a RESYNC event is only usable once its generation is published.
+	if admission == "RESYNC" {
+		var published int64
+		if err := tx.QueryRow(ctx, `SELECT published_resync_generation FROM iam_v2.pms_interface_runtime
+			WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3`, tenant, site, iface).Scan(&published); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent
+			}
+			return time.Time{}, false, "", nil, nil, err
+		}
+		if resyncGen > published {
+			return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent // unpublished resync
+		}
+	}
+	// event older than the already-applied Stay version → stale/superseded boundary source.
+	if seq < lastApplied {
+		return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent
+	}
+	// timestamp trust: clock-suspect / absent / implausibly future → conservative server-clock fallback.
+	if clkSuspect {
+		return time.Time{}, true, "EVENT_CLOCK_SUSPECT", &seq, &norm, nil
+	}
+	if ts == nil {
+		return time.Time{}, true, "PMS_TIME_ABSENT", &seq, &norm, nil
+	}
+	var future bool
+	if err := tx.QueryRow(ctx, `SELECT $1::timestamptz > now() + make_interval(secs => $2)`, *ts, skew.Seconds()).Scan(&future); err != nil {
+		return time.Time{}, false, "", nil, nil, err
+	}
+	if future {
+		return time.Time{}, true, "PMS_TIME_IMPLAUSIBLE_FUTURE", &seq, &norm, nil
+	}
+	return *ts, false, "TRUSTED_PMS_CHECKOUT_TS", &seq, &norm, nil
+}
+
+type eligibility struct {
+	entitlementID string
+	eligible      bool
+	multiActive   bool
+}
+
+// eligibleOriginalAtBoundary proves, from the append-only state history + quota ledger, which single non-grace
+// Entitlement was ACTIVE and valid AT the boundary (items 2/3). >1 ACTIVE → multiActive (manual review).
+func eligibleOriginalAtBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, boundary time.Time) (eligibility, error) {
+	var e eligibility
+	// state-at-boundary per non-grace entitlement = the latest transition with effective_at <= boundary.
+	rows, err := tx.Query(ctx, `WITH latest AS (
+		SELECT DISTINCT ON (t.entitlement_id) t.entitlement_id, t.to_state
+		FROM iam_v2.entitlement_state_transitions t
+		JOIN iam_v2.entitlements e ON e.id=t.entitlement_id
+		WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.pms_interface_id=$3 AND e.stay_id=$4
+		  AND e.end_mode <> 'GRACE_AFTER_CHECKOUT' AND t.effective_at <= $5
+		ORDER BY t.entitlement_id, t.effective_at DESC, t.seq DESC)
+		SELECT entitlement_id::text FROM latest WHERE to_state='ACTIVE'`, tenant, site, iface, stayID, boundary)
+	if err != nil {
+		return e, err
+	}
+	var active []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return e, err
+		}
+		active = append(active, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return e, err
+	}
+	if len(active) > 1 {
+		e.multiActive = true
+		return e, nil
+	}
+	if len(active) == 1 {
+		// prove window + data-quota at the boundary from authoritative counters/ledger.
+		ok, err := validAtBoundary(ctx, tx, active[0], boundary)
+		if err != nil {
+			return e, err
+		}
+		if ok {
+			e.entitlementID = active[0]
+			e.eligible = true
+		}
+	}
+	return e, nil
+}
+
+// validAtBoundary proves the Entitlement's validity window had not elapsed and its data quota was not exhausted
+// at/before the boundary, using the plan quota + the accounting ledger summed up to the boundary.
+func validAtBoundary(ctx context.Context, tx pgx.Tx, entID string, boundary time.Time) (bool, error) {
+	var windowOK bool
+	var quota *int64
+	if err := tx.QueryRow(ctx, `SELECT (e.window_ends_at IS NULL OR e.window_ends_at > $2), spr.data_quota_bytes
+		FROM iam_v2.entitlements e
+		JOIN iam_v2.service_plan_revisions spr ON spr.tenant_id=e.tenant_id AND spr.site_id=e.site_id AND spr.id=e.service_plan_revision_id
+		WHERE e.id=$1`, entID, boundary).Scan(&windowOK, &quota); err != nil {
+		return false, err
+	}
+	if !windowOK {
+		return false, nil
+	}
+	if quota != nil {
+		var used int64
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(ar.bytes_up + ar.bytes_down),0)
+			FROM iam_v2.accounting_records ar JOIN iam_v2.sessions s ON s.id=ar.session_id
+			WHERE s.entitlement_id=$1 AND ar.sampled_at <= $2`, entID, boundary).Scan(&used); err != nil {
+			return false, err
+		}
+		if used >= *quota {
+			return false, nil // data quota exhausted at/before the boundary
+		}
+	}
+	return true, nil
+}
+
+// terminateNonTerminalPreCheckout terminates every non-terminal pre-checkout (non-grace) Entitlement for the
+// Stay at the boundary and appends a TERMINATED state transition to each, returning the count ended.
+func terminateNonTerminalPreCheckout(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, boundary time.Time, eligibleID string) (int, error) {
+	rows, err := tx.Query(ctx, `UPDATE iam_v2.entitlements e
+		SET status='TERMINATED',
+		    terminal_reason=CASE WHEN e.id::text=$6 THEN 'CONVERTED' ELSE 'CHECKOUT' END,
+		    terminated_at=$5
+		WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.pms_interface_id=$3 AND e.stay_id=$4
+		  AND e.end_mode <> 'GRACE_AFTER_CHECKOUT' AND e.status IN ('PENDING','ACTIVE','SUSPENDED')
+		RETURNING e.id::text, COALESCE(e.id::text = $6, false)`, tenant, site, iface, stayID, boundary, nilIfEmpty(eligibleID))
+	if err != nil {
+		return 0, err
+	}
+	type ended struct {
+		id       string
+		eligible bool
+	}
+	var list []ended
+	for rows.Next() {
+		var x ended
+		if err := rows.Scan(&x.id, &x.eligible); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		list = append(list, x)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, x := range list {
+		reason := "CHECKOUT"
+		if x.eligible {
+			reason = "CONVERTED"
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_state_transitions
+			(tenant_id, site_id, entitlement_id, seq, from_state, to_state, effective_at, reason)
+			SELECT e.tenant_id, e.site_id, e.id,
+			       COALESCE((SELECT max(t.seq) FROM iam_v2.entitlement_state_transitions t WHERE t.entitlement_id=e.id),0)+1,
+			       NULL, 'TERMINATED', $2, $3
+			FROM iam_v2.entitlements e WHERE e.id=$1`, x.id, boundary, reason); err != nil {
+			return 0, err
+		}
+	}
+	return len(list), nil
+}
+
+// grandfatherBoundaryDevices copies onto the grace Entitlement only devices whose authorization interval
+// contains the boundary, and rebinds only their boundary-valid live sessions. It also seeds the grace
+// Entitlement's own authorization intervals + an ACTIVE state transition.
+func grandfatherBoundaryDevices(ctx context.Context, tx pgx.Tx, tenant, site, oldEnt, newEnt string, boundary time.Time) (int, int, error) {
+	// grace entitlement starts ACTIVE at the boundary (state history).
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_state_transitions
+		(tenant_id, site_id, entitlement_id, seq, from_state, to_state, effective_at, reason)
+		VALUES ($1,$2,$3,1,NULL,'ACTIVE',$4,'GRACE_CONVERSION')`, tenant, site, newEnt, boundary); err != nil {
+		return 0, 0, err
+	}
+	ct, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_devices
+		(tenant_id, site_id, entitlement_id, device_id, status, grandfathered, first_authorized, last_authorized)
+		SELECT ed.tenant_id, ed.site_id, $2, ed.device_id, 'AUTHORIZED', true, ed.first_authorized, ed.last_authorized
+		FROM iam_v2.entitlement_devices ed
+		WHERE ed.entitlement_id=$1 AND ed.status='AUTHORIZED'
+		  AND EXISTS (SELECT 1 FROM iam_v2.entitlement_device_authorizations a
+		              WHERE a.entitlement_id=$1 AND a.device_id=ed.device_id
+		                AND a.authorized_at <= $3 AND (a.deauthorized_at IS NULL OR a.deauthorized_at > $3))`,
+		oldEnt, newEnt, boundary)
+	if err != nil {
+		return 0, 0, err
+	}
+	gf := int(ct.RowsAffected())
+	// seed grace authorization intervals (opening at the boundary) for the grandfathered devices.
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_device_authorizations
+		(tenant_id, site_id, entitlement_id, device_id, seq, authorized_at)
+		SELECT tenant_id, site_id, entitlement_id, device_id, 1, $2 FROM iam_v2.entitlement_devices WHERE entitlement_id=$1`, newEnt, boundary); err != nil {
+		return 0, 0, err
+	}
+	// rebind only boundary-valid live sessions of grandfathered devices (session interval contains boundary).
+	ct2, err := tx.Exec(ctx, `UPDATE iam_v2.sessions s SET entitlement_id=$2
+		WHERE s.entitlement_id=$1 AND s.state='active' AND s.started <= $3 AND (s.ended IS NULL OR s.ended > $3)
+		  AND EXISTS (SELECT 1 FROM iam_v2.entitlement_devices ed WHERE ed.entitlement_id=$2 AND ed.device_id=s.device_id AND ed.grandfathered)`,
+		oldEnt, newEnt, boundary)
+	if err != nil {
+		return 0, 0, err
+	}
+	return gf, int(ct2.RowsAffected()), nil
 }
 
 type createGraceArgs struct {
@@ -299,7 +506,6 @@ type createGraceArgs struct {
 	oldEnt                      any
 }
 
-// createGrace inserts the one grace Purchase (one_conversion_per_episode backstop) + the grace Entitlement.
 func (c *Converter) createGrace(ctx context.Context, tx pgx.Tx, a createGraceArgs) (string, error) {
 	var purchaseID string
 	err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
@@ -309,12 +515,11 @@ func (c *Converter) createGrace(ctx context.Context, tx pgx.Tx, a createGraceArg
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return "", err // concurrent episode conversion won — roll back; the winner's checkout stands
+			return "", err
 		}
 		return "", err
 	}
-	snap := policySnapshot{Version: a.policyVersion, Policy: a.policy}
-	polJSON, err := json.Marshal(snap)
+	polJSON, err := json.Marshal(policySnapshot{Version: a.policyVersion, Policy: a.policy})
 	if err != nil {
 		return "", err
 	}
@@ -333,20 +538,48 @@ func (c *Converter) createGrace(ctx context.Context, tx pgx.Tx, a createGraceArg
 	return newEnt, nil
 }
 
-// policySnapshot pins the explicit policy version alongside the grace policy in the entitlement snapshot.
 type policySnapshot struct {
 	Version string `json:"policy_version"`
 	grace.Policy
 }
 
-func oldEntOrNil(has bool, id string) any {
-	if has {
-		return id
-	}
-	return nil
+type auditRow struct {
+	tenant, site, iface, stayID string
+	episode                     int
+	trigger                     string
+	isEmergency                 bool
+	policyVersion               string
+	alertCode                   any
+	reasonCode                  string
+	graceEntID                  any
+	boundaryEventID             string
+	boundaryEventSeq            *int64
+	boundaryNormVer             *int
+	boundaryReason              string
+	configVersion               int64
+	boundaryAt                  time.Time
+	boundaryClockSuspect        bool
 }
 
-// boundedReason clamps a reason to the ^[A-Z][A-Z0-9_]{0,63}$ machine-code shape the audit CHECK enforces.
+func writeAudit(ctx context.Context, tx pgx.Tx, a auditRow) error {
+	_, err := tx.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_audit
+		(tenant_id, site_id, pms_interface_id, stay_id, lifecycle_version, trigger, is_emergency, policy_version,
+		 alert_code, reason_code, grace_entitlement_id, boundary_event_id, boundary_event_seq, boundary_normalization_version,
+		 boundary_reason_code, config_version, boundary_at, boundary_clock_suspect)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+		a.tenant, a.site, a.iface, a.stayID, a.episode, a.trigger, a.isEmergency, a.policyVersion,
+		a.alertCode, a.reasonCode, a.graceEntID, nilIfEmpty(a.boundaryEventID), a.boundaryEventSeq, a.boundaryNormVer,
+		boundedReason(a.boundaryReason), a.configVersion, a.boundaryAt, a.boundaryClockSuspect)
+	return err
+}
+
+func nilIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func boundedReason(r string) string {
 	if r == "" {
 		return "UNSPECIFIED"
@@ -357,109 +590,73 @@ func boundedReason(r string) string {
 	return r
 }
 
-// validateConfiguredGracePackage fully revalidates the site's configured grace package revision server-side
-// (item 6): same tenant/site, system-owned, CHECKOUT_GRACE type, the approved CURRENT/pinned revision, a
-// zero price, settlement exactly NOT_REQUIRED, and an ENABLED pinned service plan. Anything else -> invalid.
-func validateConfiguredGracePackage(ctx context.Context, tx pgx.Tx, tenant, site, pkgRev string) bool {
+// readEmergencyCatalog READS (never creates) the canonical, pre-provisioned Emergency-Grace catalog after
+// asserting its health; if absent/invalid it fails closed with ErrEmergencyCatalogUnavailable (a critical
+// operational defect surfaced to the operator; the whole checkout tx rolls back).
+func readEmergencyCatalog(ctx context.Context, tx pgx.Tx, tenant, site string) (string, string, string, error) {
+	var health string
+	if err := tx.QueryRow(ctx, `SELECT iam_v2.emergency_grace_health($1,$2)`, tenant, site).Scan(&health); err != nil {
+		return "", "", "", err
+	}
+	if health != "OK" {
+		return "", "", "", ErrEmergencyCatalogUnavailable
+	}
+	var pkgRev, svcRev, tam string
+	if err := tx.QueryRow(ctx, `SELECT ipr.id::text, spr.id::text, spr.time_accounting_mode
+		FROM iam_v2.internet_packages ip
+		JOIN iam_v2.internet_package_revisions ipr ON ipr.tenant_id=ip.tenant_id AND ipr.site_id=ip.site_id AND ipr.id=ip.current_revision_id
+		JOIN iam_v2.service_plan_revisions spr ON spr.tenant_id=ipr.tenant_id AND spr.site_id=ipr.site_id AND spr.id=ipr.service_plan_revision_id
+		WHERE ip.tenant_id=$1 AND ip.site_id=$2 AND ip.code='__sys_emergency_grace_pkg__'`, tenant, site).Scan(&pkgRev, &svcRev, &tam); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", "", "", ErrEmergencyCatalogUnavailable
+		}
+		return "", "", "", err
+	}
+	return pkgRev, svcRev, tam, nil
+}
+
+// validateConfiguredGraceExact validates the configured grace package server-side (item 6) AND proves EXACT
+// equality between the typed site policy and the selected immutable Service-Plan/Package revision (item 8):
+// same tenant/site, system-owned, CHECKOUT_GRACE, the approved current/pinned revision, price 0, settlement
+// exactly NOT_REQUIRED, enabled plan, and down/up/quota/device-limit/policy + grace duration all matching.
+func validateConfiguredGraceExact(ctx context.Context, tx pgx.Tx, tenant, site, pkgRev string, pol grace.Policy) bool {
 	var ok bool
 	err := tx.QueryRow(ctx, `SELECT
-		ip.is_system = true
-		AND ipr.package_type = 'CHECKOUT_GRACE'
-		AND ip.current_revision_id = ipr.id
-		AND ipr.price_minor = 0
-		AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
-		AND sp.enabled = true
+		ip.is_system AND ipr.package_type='CHECKOUT_GRACE' AND ip.current_revision_id=ipr.id
+		AND ipr.price_minor=0 AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
+		AND sp.enabled
+		AND spr.down_kbps=$4 AND spr.up_kbps=$5 AND spr.data_quota_bytes=$6
+		AND spr.max_concurrent_devices=$7 AND spr.device_limit_policy=$8
+		AND (ipr.duration_policy->>'grace_duration_seconds')=$9
 		FROM iam_v2.internet_package_revisions ipr
-		JOIN iam_v2.internet_packages ip
-		  ON ip.tenant_id=ipr.tenant_id AND ip.site_id=ipr.site_id AND ip.id=ipr.package_id
-		JOIN iam_v2.service_plan_revisions spr
-		  ON spr.tenant_id=ipr.tenant_id AND spr.site_id=ipr.site_id AND spr.id=ipr.service_plan_revision_id
-		JOIN iam_v2.service_plans sp
-		  ON sp.tenant_id=spr.tenant_id AND sp.site_id=spr.site_id AND sp.id=spr.service_plan_id
-		WHERE ipr.tenant_id=$1 AND ipr.site_id=$2 AND ipr.id=$3`, tenant, site, pkgRev).Scan(&ok)
+		JOIN iam_v2.internet_packages ip ON ip.tenant_id=ipr.tenant_id AND ip.site_id=ipr.site_id AND ip.id=ipr.package_id
+		JOIN iam_v2.service_plan_revisions spr ON spr.tenant_id=ipr.tenant_id AND spr.site_id=ipr.site_id AND spr.id=ipr.service_plan_revision_id
+		JOIN iam_v2.service_plans sp ON sp.tenant_id=spr.tenant_id AND sp.site_id=spr.site_id AND sp.id=spr.service_plan_id
+		WHERE ipr.tenant_id=$1 AND ipr.site_id=$2 AND ipr.id=$3`,
+		tenant, site, pkgRev, pol.DownKbps, pol.UpKbps, pol.DataQuotaBytes, pol.DeviceLimit, pol.DeviceLimitPolicy,
+		strconv.Itoa(pol.DurationSeconds)).Scan(&ok)
 	return err == nil && ok
 }
 
-// ensureEmergencyGracePackage idempotently provisions the canonical, system-owned Emergency-Grace package
-// (item 2): a real, immutable Package/Revision + Service-Plan/Revision carrying the versioned Emergency shaping,
-// created once per site and reused thereafter, so Emergency conversions preserve Purchase traceability without
-// depending on Hotel-Admin config and without fabricating per-request rows. Returns (packageRevID, servicePlanRevID, timeAccountingMode).
-func ensureEmergencyGracePackage(ctx context.Context, tx pgx.Tx, tenant, site string) (string, string, string, error) {
-	em := grace.BuiltinEmergencyPolicy()
-	// service plan (system)
-	var planID string
-	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.service_plans (tenant_id, site_id, code, enabled)
-		VALUES ($1,$2,$3,true) ON CONFLICT (tenant_id, site_id, code) DO NOTHING RETURNING id`,
-		tenant, site, sysEmergencyPlanCode).Scan(&planID); errors.Is(err, pgx.ErrNoRows) {
-		if err := tx.QueryRow(ctx, `SELECT id FROM iam_v2.service_plans WHERE tenant_id=$1 AND site_id=$2 AND code=$3`,
-			tenant, site, sysEmergencyPlanCode).Scan(&planID); err != nil {
-			return "", "", "", err
-		}
-	} else if err != nil {
-		return "", "", "", err
-	}
-	// service plan revision 1 (append-only; idempotent by (service_plan_id, revision_no))
-	var svcRev string
-	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.service_plan_revisions
-		(tenant_id, site_id, service_plan_id, revision_no, name, down_kbps, up_kbps, time_accounting_mode, data_quota_bytes)
-		VALUES ($1,$2,$3,1,'emergency-grace',$4,$5,'VALIDITY_WINDOW',$6)
-		ON CONFLICT (service_plan_id, revision_no) DO NOTHING RETURNING id`,
-		tenant, site, planID, em.DownKbps, em.UpKbps, em.DataQuotaBytes).Scan(&svcRev); errors.Is(err, pgx.ErrNoRows) {
-		if err := tx.QueryRow(ctx, `SELECT id FROM iam_v2.service_plan_revisions WHERE service_plan_id=$1 AND revision_no=1`, planID).Scan(&svcRev); err != nil {
-			return "", "", "", err
-		}
-	} else if err != nil {
-		return "", "", "", err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE iam_v2.service_plans SET current_revision_id=$2 WHERE id=$1 AND current_revision_id IS DISTINCT FROM $2`, planID, svcRev); err != nil {
-		return "", "", "", err
-	}
-	// package (system)
-	var pkgID string
-	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.internet_packages (tenant_id, site_id, code, is_system)
-		VALUES ($1,$2,$3,true) ON CONFLICT (tenant_id, site_id, code) DO NOTHING RETURNING id`,
-		tenant, site, sysEmergencyPkgCode).Scan(&pkgID); errors.Is(err, pgx.ErrNoRows) {
-		if err := tx.QueryRow(ctx, `SELECT id FROM iam_v2.internet_packages WHERE tenant_id=$1 AND site_id=$2 AND code=$3`,
-			tenant, site, sysEmergencyPkgCode).Scan(&pkgID); err != nil {
-			return "", "", "", err
-		}
-	} else if err != nil {
-		return "", "", "", err
-	}
-	// package revision 1 (append-only; CHECKOUT_GRACE, price 0, settlement NOT_REQUIRED)
-	var pkgRev string
-	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.internet_package_revisions
-		(tenant_id, site_id, package_id, revision_no, service_plan_revision_id, package_type, price_minor, settlement_methods)
-		VALUES ($1,$2,$3,1,$4,'CHECKOUT_GRACE',0, ARRAY['NOT_REQUIRED']::text[])
-		ON CONFLICT (package_id, revision_no) DO NOTHING RETURNING id`,
-		tenant, site, pkgID, svcRev).Scan(&pkgRev); errors.Is(err, pgx.ErrNoRows) {
-		if err := tx.QueryRow(ctx, `SELECT id FROM iam_v2.internet_package_revisions WHERE package_id=$1 AND revision_no=1`, pkgID).Scan(&pkgRev); err != nil {
-			return "", "", "", err
-		}
-	} else if err != nil {
-		return "", "", "", err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$2 WHERE id=$1 AND current_revision_id IS DISTINCT FROM $2`, pkgID, pkgRev); err != nil {
-		return "", "", "", err
-	}
-	return pkgRev, svcRev, "VALIDITY_WINDOW", nil
-}
-
-// loadGraceConfig reads the site's PINNED grace policy: the authoritative typed scalars (migration 0010) and the
-// pinned grace package revision. enabled is true only when the typed policy is fully populated (all-or-none).
-func loadGraceConfig(ctx context.Context, tx pgx.Tx, tenant, site string) (grace.Policy, string, bool) {
+// lockGraceConfig locks the site grace-config row (item 9) and returns the typed policy + pinned package + the
+// exact config_version, so a concurrent Admin publish cannot produce a mixed snapshot for this episode.
+func lockGraceConfig(ctx context.Context, tx pgx.Tx, tenant, site string) (grace.Policy, string, bool, int64, error) {
 	var (
 		dur, down, up, devLim *int
 		quota                 *int64
 		policyKind            *string
 		gpkg                  *string
+		configVersion         int64
 	)
 	err := tx.QueryRow(ctx, `SELECT grace_duration_seconds, grace_down_kbps, grace_up_kbps, grace_data_quota_bytes,
-		grace_device_limit, grace_device_limit_policy, grace_package_revision_id
-		FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2`, tenant, site).
-		Scan(&dur, &down, &up, &quota, &devLim, &policyKind, &gpkg)
+		grace_device_limit, grace_device_limit_policy, grace_package_revision_id, config_version
+		FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2 FOR UPDATE`, tenant, site).
+		Scan(&dur, &down, &up, &quota, &devLim, &policyKind, &gpkg, &configVersion)
 	if err != nil {
-		return grace.Policy{}, "", false
+		if errors.Is(err, pgx.ErrNoRows) {
+			return grace.Policy{}, "", false, 0, nil // unconfigured → Emergency path
+		}
+		return grace.Policy{}, "", false, 0, err
 	}
 	pkg := ""
 	if gpkg != nil {
@@ -467,14 +664,10 @@ func loadGraceConfig(ctx context.Context, tx pgx.Tx, tenant, site string) (grace
 	}
 	enabled := dur != nil && down != nil && up != nil && quota != nil && devLim != nil && policyKind != nil
 	if !enabled {
-		return grace.Policy{}, pkg, false
+		return grace.Policy{}, pkg, false, configVersion, nil
 	}
 	return grace.Policy{
-		DurationSeconds:   *dur,
-		DownKbps:          *down,
-		UpKbps:            *up,
-		DataQuotaBytes:    *quota,
-		DeviceLimit:       *devLim,
-		DeviceLimitPolicy: *policyKind,
-	}, pkg, true
+		DurationSeconds: *dur, DownKbps: *down, UpKbps: *up, DataQuotaBytes: *quota,
+		DeviceLimit: *devLim, DeviceLimitPolicy: *policyKind,
+	}, pkg, true, configVersion, nil
 }

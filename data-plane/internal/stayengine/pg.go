@@ -142,14 +142,20 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		return cur.ID, "APPLIED", "", nil
 
 	case OpCheckout:
-		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT' WHERE id=$1`, cur.ID); err != nil {
+		// establish the episode's immutable effective-checkout boundary (structural stays_checkedout_needs_boundary
+		// + posting_only_in_house). The commerce-aware checkout.Converter derives the exact boundary from the
+		// durable event; this Stay-domain flip uses the server clock and never overwrites an existing boundary.
+		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false,
+			effective_checkout_at=COALESCE(effective_checkout_at, now()) WHERE id=$1`, cur.ID); err != nil {
 			return "", "", "", err
 		}
 		return cur.ID, "APPLIED", "", nil
 
 	case OpReinstate:
-		// CHECKED_OUT → IN_HOUSE with EXACTLY one lifecycle_version bump (the migration trigger enforces this).
-		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1 WHERE id=$1`, cur.ID); err != nil {
+		// CHECKED_OUT → IN_HOUSE with EXACTLY one lifecycle_version bump (the migration trigger enforces this) and
+		// CLEARING the previous episode's boundary (the guard requires reinstatement to reset effective_checkout_at).
+		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1,
+			effective_checkout_at=NULL WHERE id=$1`, cur.ID); err != nil {
 			return "", "", "", err
 		}
 		return cur.ID, "APPLIED", "", nil
