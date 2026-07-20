@@ -1,4 +1,0 @@
-commit 3dd37136dccb2a58689ab34fbc5500511e9d3487
-Date:   Mon Jul 20 15:37:27 2026 +0300
-
-    @ Phase 3 Auth Context provenance + issuance validation + status sync (inventory_head): PG16-green
