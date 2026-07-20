@@ -134,6 +134,13 @@ ALTER TABLE iam_v2.stays
        AND occupancy_normalization_version IS NOT NULL AND occupancy_clock_suspect IS NOT NULL)),
   ADD CONSTRAINT stays_occupancy_norm_pos
     CHECK (occupancy_normalization_version IS NULL OR occupancy_normalization_version > 0),
+  -- occupancy-evidence version coherence (STRUCTURAL, INSERT + UPDATE): authoritative evidence present
+  -- (evidence_at NOT NULL) REQUIRES a real version > 0; no authoritative evidence (evidence_at NULL) REQUIRES
+  -- version = 0. Combined with the monotonic + exactly-once transition rules in p3_stay_lifecycle_guard, this
+  -- makes "evidence present with version 0" and "version populated without evidence" structurally impossible.
+  ADD CONSTRAINT stays_evidence_version_coherent CHECK (
+    (occupancy_evidence_at IS NULL     AND occupancy_evidence_version = 0)
+    OR (occupancy_evidence_at IS NOT NULL AND occupancy_evidence_version > 0)),
   -- occupancy evidence Revision must belong to the SAME interface (historical revision, not necessarily current)
   ADD CONSTRAINT stays_occupancy_revision_fk
     FOREIGN KEY (tenant_id, site_id, pms_interface_id, occupancy_revision_id)
@@ -383,11 +390,44 @@ CREATE OR REPLACE FUNCTION iam_v2.p3_stay_lifecycle_guard() RETURNS trigger
   LANGUAGE plpgsql
   SET search_path = iam_v2, pg_temp
   AS $fn$
-DECLARE allowed boolean; is_reinstate boolean;
+DECLARE allowed boolean; is_reinstate boolean; evidence_changed boolean;
 BEGIN
   IF NEW.last_applied_event_version < OLD.last_applied_event_version THEN
     RAISE EXCEPTION 'stays.last_applied_event_version cannot decrease (% -> %)',
       OLD.last_applied_event_version, NEW.last_applied_event_version;
+  END IF;
+
+  -- occupancy-evidence version transition guard (MONOTONIC + exactly-once). The "material" evidence is the
+  -- observed content: evidence_at / revision_id / normalization_version / clock_suspect. occupancy_ingested_at
+  -- is processing metadata and is DELIBERATELY excluded, so a duplicate reapplication of identical evidence may
+  -- refresh ingested_at WITHOUT bumping the version (no uncontrolled increment). Deterministic semantics:
+  --   * version never decreases;
+  --   * a material evidence change (incl. a Revision change or occupancy-state change) increments by EXACTLY 1;
+  --   * an unchanged material tuple must leave the version UNCHANGED (an arbitrary jump or a bump-without-change
+  --     is rejected);
+  --   * coherence (present<=>version>0, absent<=>version=0) is the structural stays_evidence_version_coherent
+  --     CHECK, so evidence once observed can never silently revert to "never observed" (that would require a
+  --     decrease and is rejected here).
+  -- No caller can mutate the evidence fields without applying the required version transition.
+  IF NEW.occupancy_evidence_version < OLD.occupancy_evidence_version THEN
+    RAISE EXCEPTION 'stays.occupancy_evidence_version cannot decrease (% -> %)',
+      OLD.occupancy_evidence_version, NEW.occupancy_evidence_version;
+  END IF;
+  evidence_changed := (
+       NEW.occupancy_evidence_at          IS DISTINCT FROM OLD.occupancy_evidence_at
+    OR NEW.occupancy_revision_id          IS DISTINCT FROM OLD.occupancy_revision_id
+    OR NEW.occupancy_normalization_version IS DISTINCT FROM OLD.occupancy_normalization_version
+    OR NEW.occupancy_clock_suspect        IS DISTINCT FROM OLD.occupancy_clock_suspect);
+  IF evidence_changed THEN
+    IF NEW.occupancy_evidence_version <> OLD.occupancy_evidence_version + 1 THEN
+      RAISE EXCEPTION 'a material occupancy-evidence change must increment occupancy_evidence_version by exactly 1 (% -> %)',
+        OLD.occupancy_evidence_version, NEW.occupancy_evidence_version;
+    END IF;
+  ELSE
+    IF NEW.occupancy_evidence_version <> OLD.occupancy_evidence_version THEN
+      RAISE EXCEPTION 'stays.occupancy_evidence_version may not change without a material occupancy-evidence change (% -> %)',
+        OLD.occupancy_evidence_version, NEW.occupancy_evidence_version;
+    END IF;
   END IF;
 
   is_reinstate := (OLD.status = 'CHECKED_OUT' AND NEW.status = 'IN_HOUSE');

@@ -21,16 +21,46 @@ const maxTTLSeconds = 3600
 // pin. It carries no guest credential or raw identifier.
 var ErrGrantIncomplete = errors.New("authctx: incomplete or invalid PMS grant")
 
-// valid reports whether every required server-derived pin is present and in range. A PMS Auth Context is
-// NEVER issued without the full pin set (an unusable context — e.g. a NULL evidence version or an
-// already-expired TTL — must not reach the table).
+const nilUUID = "00000000-0000-0000-0000-000000000000"
+
+// validPinUUID reports whether s is a canonical 8-4-4-4-12 lowercase/uppercase-hex UUID and NOT the nil UUID
+// (a real identity pin is never nil). Validating in Go means a malformed id returns a typed sanitized error
+// BEFORE any SQL, never a raw PostgreSQL cast error.
+func validPinUUID(s string) bool {
+	if len(s) != 36 || s == nilUUID {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+			continue
+		}
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+// valid reports whether every required server-derived pin is a proper UUID and the TTL is positive/bounded. A
+// PMS Auth Context is NEVER issued without the full valid pin set.
 func (g PMSGrant) valid() bool {
 	for _, v := range []string{g.Tenant, g.Site, g.Interface, g.Revision, g.Stay, g.Device, g.GuestNetwork} {
-		if strings.TrimSpace(v) == "" {
+		if !validPinUUID(strings.TrimSpace(v)) {
 			return false
 		}
 	}
 	return g.TTLSeconds > 0 && g.TTLSeconds <= maxTTLSeconds
+}
+
+// valid reports whether the presenter identity is fully-formed (proper UUIDs). A malformed presenter is a
+// uniform ErrContextInvalid, never a raw cast error.
+func (p Presenter) valid() bool {
+	return validPinUUID(strings.TrimSpace(p.Tenant)) && validPinUUID(strings.TrimSpace(p.Site)) &&
+		validPinUUID(strings.TrimSpace(p.Device)) && validPinUUID(strings.TrimSpace(p.GuestNetwork))
 }
 
 // Store is the DB-backed Auth Context issuer/consumer.
@@ -103,16 +133,29 @@ func (s *Store) IssuePMSTx(ctx context.Context, tx pgx.Tx, g PMSGrant) (string, 
 	}
 	var lifecycleVer int
 	var evVer int64
-	// authoritative snapshot from the resolved Stay: locked, IN_HOUSE, occupancy evidence present + produced
-	// by the SAME Revision the resolution authenticated against, not clock-suspect.
+	// authoritative snapshot from the resolved Stay: locked (L1 Stay-first), IN_HOUSE, occupancy evidence
+	// present with a real MONOTONIC version (> 0), produced by the SAME Revision the resolution authenticated
+	// against, not clock-suspect, AND still FRESH under that Revision's pinned max_auth_cache_age. Freshness is
+	// revalidated HERE so a context that is already stale at the moment of issue is NEVER persisted — the
+	// evidence-version guard alone cannot detect wall-clock staleness of unchanged evidence. Same cast-safe,
+	// fail-closed 300s parse as consume (regex-bounded 1..6 digits, nested CASE, <= 604800).
 	err := tx.QueryRow(ctx, `SELECT st.lifecycle_version, st.occupancy_evidence_version
 		FROM iam_v2.stays st
 		JOIN iam_v2.pms_interfaces pi
 		  ON pi.tenant_id=st.tenant_id AND pi.site_id=st.site_id AND pi.id=st.pms_interface_id
+		JOIN iam_v2.pms_interface_revisions pr
+		  ON pr.tenant_id=st.tenant_id AND pr.site_id=st.site_id AND pr.pms_interface_id=st.pms_interface_id
+		     AND pr.id=$5
 		WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.pms_interface_id=$3 AND st.id=$4
 		  AND st.status='IN_HOUSE' AND pi.lifecycle_state='ACTIVE'
 		  AND st.occupancy_evidence_at IS NOT NULL AND st.occupancy_clock_suspect IS NOT TRUE
+		  AND st.occupancy_evidence_version > 0
 		  AND st.occupancy_revision_id=$5
+		  AND st.occupancy_evidence_at > now() - make_interval(secs =>
+		        CASE WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
+		             THEN CASE WHEN (pr.config->>'max_auth_cache_age_seconds')::int <= 604800
+		                       THEN (pr.config->>'max_auth_cache_age_seconds')::int ELSE 300 END
+		             ELSE 300 END)
 		FOR UPDATE OF st`,
 		g.Tenant, g.Site, g.Interface, g.Stay, g.Revision).Scan(&lifecycleVer, &evVer)
 	if err != nil {
@@ -153,54 +196,93 @@ func (s *Store) Consume(ctx context.Context, id string, p Presenter) (Consumed, 
 }
 
 // ConsumeTx performs the one-time consumption inside the CALLER's transaction, so the caller can bind it to a
-// Quote/Purchase and roll the consumption back if that fails. The single-row UPDATE guarded by
-// consumed_at IS NULL AND expires_at > now() AND the full pin set guarantees at most one winner and rejects a
-// replay / expiry / wrong device / wrong network / cross-scope uniformly as ErrContextInvalid. It also
-// re-verifies the pinned Stay is still IN_HOUSE (occupancy evidence still valid for the operation).
+// Quote/Purchase and roll the consumption back if that fails. It obeys the approved GLOBAL lock order
+// L1 Stay → L2 Subject/Credential (the Auth Context row) → L3 Entitlement → L4 Capacity → L5 Config, so it
+// serializes deterministically against Checkout / Reinstatement / occupancy-evidence replacement (which all
+// take the Stay lock first) and never deadlocks against them:
+//
+//	(1) resolve the context's scoped Stay identity (unlocked read, filtered by presenter + unconsumed +
+//	    unexpired) — no context detail is returned to the caller on failure;
+//	(2) lock the pinned Stay row FIRST (SELECT ... FOR UPDATE OF st) while re-verifying the FULL pin set:
+//	    tenant/site/interface, IN_HOUSE, interface ACTIVE, Revision provenance, episode + monotonic evidence
+//	    snapshot, evidence present + not clock-suspect, and freshness under the pinned Revision;
+//	(3) only THEN atomically flip the context unconsumed→consumed (single-row UPDATE guarded by
+//	    consumed_at IS NULL AND expires_at > now()) — exactly one concurrent winner.
+//
+// The caller continues Quote/Purchase/Entitlement in the SAME transaction while still holding the Stay lock,
+// so a Checkout cannot interleave; a failed purchase rolls the consumption back with it. Every failure —
+// invalid/malformed id, stale, consumed, expired, wrong presenter — is the uniform ErrContextInvalid.
 func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter) (Consumed, error) {
+	if !validPinUUID(strings.TrimSpace(id)) || !p.valid() {
+		return Consumed{}, ErrContextInvalid // typed/sanitized BEFORE any SQL — never a raw cast error
+	}
+
+	// (1) Resolve the context's scoped Stay identity WITHOUT locking the context. Presenter scope + one-time +
+	//     unexpired are enforced here (and re-asserted atomically in step 3). We learn only which Stay to lock.
+	var method, stayID string
+	err := tx.QueryRow(ctx, `SELECT ac.method, COALESCE(ac.stay_id::text,'')
+		FROM iam_v2.auth_contexts ac
+		WHERE ac.id=$1 AND ac.tenant_id=$2 AND ac.site_id=$3
+		  AND ac.device_id=$4 AND ac.guest_network_id=$5
+		  AND ac.consumed_at IS NULL AND ac.expires_at > now()`,
+		id, p.Tenant, p.Site, p.Device, p.GuestNetwork).Scan(&method, &stayID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Consumed{}, ErrContextInvalid
+		}
+		return Consumed{}, err
+	}
+
+	// (2) L1: lock the pinned Stay FIRST and re-verify the full server pin set against live authoritative state.
+	//     Holding this lock serializes the whole consumption+commerce transaction against Checkout /
+	//     Reinstatement / evidence replacement, which acquire the same Stay lock before mutating it.
+	if method == "PMS" {
+		var one int
+		err := tx.QueryRow(ctx, `SELECT 1
+			FROM iam_v2.stays st
+			JOIN iam_v2.auth_contexts ac
+			  ON ac.id=$1 AND ac.stay_id=st.id AND ac.tenant_id=st.tenant_id AND ac.site_id=st.site_id
+			     AND ac.pms_interface_id=st.pms_interface_id
+			JOIN iam_v2.pms_interfaces pi
+			  ON pi.tenant_id=st.tenant_id AND pi.site_id=st.site_id AND pi.id=st.pms_interface_id
+			JOIN iam_v2.pms_interface_revisions pr
+			  ON pr.tenant_id=st.tenant_id AND pr.site_id=st.site_id AND pr.pms_interface_id=st.pms_interface_id
+			     AND pr.id=ac.authentication_interface_revision_id
+			WHERE st.status='IN_HOUSE'
+			  AND pi.lifecycle_state='ACTIVE'
+			  -- SNAPSHOT: pinned Stay EPISODE + MONOTONIC occupancy-evidence version unchanged — a
+			  -- Checkout→Reinstatement (lifecycle_version bump) or an authoritative evidence replacement
+			  -- (evidence_version bump) invalidates the context even within TTL.
+			  AND st.lifecycle_version IS NOT DISTINCT FROM ac.pinned_lifecycle_version
+			  AND st.occupancy_evidence_version IS NOT DISTINCT FROM ac.pinned_occupancy_evidence_version
+			  -- PROVENANCE: evidence produced by the SAME immutable Revision the context authenticated against.
+			  AND st.occupancy_revision_id = ac.authentication_interface_revision_id
+			  AND st.occupancy_evidence_at IS NOT NULL
+			  AND st.occupancy_evidence_version > 0
+			  AND st.occupancy_clock_suspect IS NOT TRUE
+			  -- freshness: CAST-SAFE, fail-closed (regex-bounded 1..6 digits → nested CASE cast → <= 604800,
+			  -- else strict 300s). An invalid value is NEVER widened to a large window.
+			  AND st.occupancy_evidence_at > now() - make_interval(secs =>
+			        CASE WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
+			             THEN CASE WHEN (pr.config->>'max_auth_cache_age_seconds')::int <= 604800
+			                       THEN (pr.config->>'max_auth_cache_age_seconds')::int ELSE 300 END
+			             ELSE 300 END)
+			FOR UPDATE OF st`, id).Scan(&one)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return Consumed{}, ErrContextInvalid
+			}
+			return Consumed{}, err
+		}
+	}
+
+	// (3) L2: atomically flip the Auth Context unconsumed→consumed. The consumed_at IS NULL guard yields exactly
+	//     one concurrent winner even after the Stay lock is granted; presenter scope + expiry re-asserted.
 	var c Consumed
-	// For a PMS context the EXISTS clause re-verifies the FULL server pin set at consume time: the pinned
-	// Interface is still ACTIVE (not disabled/auth-ineligible); the pinned Revision still exists (immutable —
-	// only an explicit lifecycle invalidation removes it); the pinned Stay is still IN_HOUSE; the Stay's
-	// occupancy evidence still matches the PINNED evidence version, is present and NOT clock-suspect, and is
-	// fresh under the pinned Revision's max_auth_cache_age (fail-closed default 300s). Any mismatch → zero rows
-	// → ErrContextInvalid (uniform).
-	err := tx.QueryRow(ctx, `UPDATE iam_v2.auth_contexts ac SET consumed_at = now()
+	err = tx.QueryRow(ctx, `UPDATE iam_v2.auth_contexts ac SET consumed_at = now()
 		WHERE ac.id=$1 AND ac.tenant_id=$2 AND ac.site_id=$3
 		  AND ac.device_id=$4 AND ac.guest_network_id=$5
 		  AND ac.consumed_at IS NULL AND ac.expires_at > now()
-		  AND (ac.method <> 'PMS' OR EXISTS (
-		        SELECT 1
-		        FROM iam_v2.stays st
-		        JOIN iam_v2.pms_interfaces pi
-		          ON pi.tenant_id=ac.tenant_id AND pi.site_id=ac.site_id AND pi.id=ac.pms_interface_id
-		        JOIN iam_v2.pms_interface_revisions pr
-		          ON pr.tenant_id=ac.tenant_id AND pr.site_id=ac.site_id AND pr.pms_interface_id=ac.pms_interface_id
-		             AND pr.id=ac.authentication_interface_revision_id
-		        WHERE st.id=ac.stay_id AND st.tenant_id=ac.tenant_id AND st.site_id=ac.site_id
-		          AND st.pms_interface_id=ac.pms_interface_id
-		          AND st.status='IN_HOUSE'
-		          AND pi.lifecycle_state='ACTIVE'
-		          -- SNAPSHOT: the pinned Stay EPISODE and MONOTONIC occupancy-evidence version must be
-		          -- unchanged — a Checkout→Reinstatement (lifecycle_version bump) or an authoritative evidence
-		          -- replacement (evidence_version bump) invalidates the context even within TTL.
-		          AND st.lifecycle_version IS NOT DISTINCT FROM ac.pinned_lifecycle_version
-		          AND st.occupancy_evidence_version IS NOT DISTINCT FROM ac.pinned_occupancy_evidence_version
-		          -- PROVENANCE: occupancy evidence produced by the SAME immutable Revision the context
-		          -- authenticated against (single-Revision model). A matching version under a DIFFERENT
-		          -- Revision is NOT accepted.
-		          AND st.occupancy_revision_id = ac.authentication_interface_revision_id
-		          AND st.occupancy_evidence_at IS NOT NULL
-		          AND st.occupancy_clock_suspect IS NOT TRUE
-		          -- freshness: CAST-SAFE, fail-closed. The regex bounds the value to 1..6 digits (max 999999,
-		          -- so the ::int cast can never overflow); a NESTED CASE only casts after that guard; anything
-		          -- malformed / absent / zero / negative / > 604800 (incl. overflow-sized) → strict 300s
-		          -- default. An invalid value is NEVER widened to a large window.
-		          AND st.occupancy_evidence_at > now() - make_interval(secs =>
-		                CASE WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
-		                     THEN CASE WHEN (pr.config->>'max_auth_cache_age_seconds')::int <= 604800
-		                               THEN (pr.config->>'max_auth_cache_age_seconds')::int ELSE 300 END
-		                     ELSE 300 END)))
 		RETURNING method, COALESCE(stay_id::text,''), COALESCE(pms_interface_id::text,''),
 		          COALESCE(authentication_interface_revision_id::text,'')`,
 		id, p.Tenant, p.Site, p.Device, p.GuestNetwork).Scan(&c.Method, &c.Stay, &c.Interface, &c.Revision)

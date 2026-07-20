@@ -63,6 +63,7 @@ ALTER TABLE iam_v2.auth_resolutions DROP COLUMN IF EXISTS resolution_request_id;
 DROP INDEX IF EXISTS iam_v2.stays_effective_checkout;
 ALTER TABLE iam_v2.stays
   DROP CONSTRAINT IF EXISTS stays_occupancy_revision_fk,
+  DROP CONSTRAINT IF EXISTS stays_evidence_version_coherent,
   DROP CONSTRAINT IF EXISTS stays_occupancy_norm_pos,
   DROP CONSTRAINT IF EXISTS stays_occupancy_all_or_none,
   DROP CONSTRAINT IF EXISTS stays_effco_only_after_checkout;

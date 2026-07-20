@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -34,17 +35,30 @@ func pool(t *testing.T) *pgxpool.Pool {
 type fixture struct{ tenant, site, iface, rev, stay, device, network string }
 
 // seed builds tenant/site/interface/revision + an IN_HOUSE stay + a guest network, returning the pins a PMS
-// Auth Context needs. The revision's max_auth_cache_age_seconds is 3600.
+// Auth Context needs. The revision's max_auth_cache_age_seconds is 3600; occupancy evidence is fresh (now()).
 func seed(t *testing.T, p *pgxpool.Pool) fixture { return seedCacheAge(t, p, "3600") }
 
 // seedCacheAge is seed with an explicit max_auth_cache_age_seconds JSON value (e.g. "3600", "\"abc\"",
 // "null"), so the immutable revision carries the (possibly malformed) config from creation.
 func seedCacheAge(t *testing.T, p *pgxpool.Pool, cacheAgeJSON string) fixture {
+	return seedAged(t, p, cacheAgeJSON, "now()", false)
+}
+
+// seedAged builds the fixture with an explicit occupancy-evidence timestamp EXPRESSION (e.g. "now()" or
+// "now() - interval '2 hours'") and clock-suspect flag, both fixed at seed time. Because the migration's
+// evidence-version guard now rejects mutating occupancy fields without the required version transition, tests
+// that need a stale / clock-suspect Stay must seed it that way (and prove the ISSUANCE-time guard rejects it),
+// rather than mutating a fresh Stay after issue.
+func seedAged(t *testing.T, p *pgxpool.Pool, cacheAgeJSON, evidenceAtExpr string, clockSuspect bool) fixture {
 	t.Helper()
 	ctx := context.Background()
 	cfg := `{"endpoint":"x","max_auth_cache_age_seconds":` + cacheAgeJSON + `}`
-	var f fixture
-	err := p.QueryRow(ctx, `WITH
+	// evidenceAtExpr and clockSuspect are test-controlled literals spliced into the seed DDL (never guest input).
+	suspect := "false"
+	if clockSuspect {
+		suspect = "true"
+	}
+	sql := `WITH
 	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
 	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
 	  gn AS (INSERT INTO public.guest_networks(id,tenant_id,site_id)
@@ -56,13 +70,14 @@ func seedCacheAge(t *testing.T, p *pgxpool.Pool, cacheAgeJSON string) fixture {
 	  st AS (INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,
 	           occupancy_evidence_at,occupancy_ingested_at,occupancy_revision_id,occupancy_normalization_version,occupancy_clock_suspect,occupancy_evidence_version)
 	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, pi.id, 'R1','R1','IN_HOUSE',1,
-	           now(), now(), pr.id, 1, false, 1 FROM pi, pr RETURNING id),
+	           ` + evidenceAtExpr + `, now(), pr.id, 1, ` + suspect + `, 1 FROM pi, pr RETURNING id),
 	  dv AS (INSERT INTO iam_v2.devices(id,tenant_id,site_id,appliance_id,mac)
 	         SELECT gen_random_uuid(), pi.tenant_id, pi.site_id, gen_random_uuid(), '02:00:00:00:00:01'::macaddr FROM pi RETURNING id)
 	SELECT (SELECT tenant_id FROM pi)::text, (SELECT site_id FROM pi)::text, (SELECT id FROM pi)::text,
-	       (SELECT id FROM pr)::text, (SELECT id FROM st)::text, (SELECT id FROM dv)::text, (SELECT id FROM gn)::text`, cfg).
-		Scan(&f.tenant, &f.site, &f.iface, &f.rev, &f.stay, &f.device, &f.network)
-	if err != nil {
+	       (SELECT id FROM pr)::text, (SELECT id FROM st)::text, (SELECT id FROM dv)::text, (SELECT id FROM gn)::text`
+	var f fixture
+	if err := p.QueryRow(ctx, sql, cfg).
+		Scan(&f.tenant, &f.site, &f.iface, &f.rev, &f.stay, &f.device, &f.network); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	// point the interface at its revision (separate statement — a CTE cannot update a row another CTE inserted)
@@ -153,16 +168,19 @@ func TestIntegration_PinnedPresenterAndOccupancy(t *testing.T) {
 	}
 }
 
-// TestIntegration_EvidenceAndInterfacePins proves ConsumeTx rejects a PMS context when the pinned Interface
-// is disabled, the occupancy evidence is stale / clock-suspect / a different version, or occupancy evidence is
-// absent — each a uniform ErrContextInvalid.
+// TestIntegration_EvidenceAndInterfacePins proves the pinned Interface / occupancy-evidence guards:
+//   - a context whose pinned Interface is disabled AFTER issue is rejected at consume;
+//   - a Stay whose occupancy evidence is already STALE or CLOCK-SUSPECT at issue never yields a context
+//     (issuance fails closed — an unusable context is never persisted);
+//   - an authoritative occupancy-evidence replacement (material change + monotonic version bump) invalidates
+//     an already-issued context at consume.
 func TestIntegration_EvidenceAndInterfacePins(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	s := NewStore(p)
 	ctx := context.Background()
 
-	// disabled interface
+	// disabled interface AFTER issue → consume rejected
 	f := seed(t, p)
 	id, _ := s.IssuePMS(ctx, grant(f, 600))
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET lifecycle_state='AUTH_DISABLED' WHERE id=$1`, f.iface); err != nil {
@@ -172,34 +190,32 @@ func TestIntegration_EvidenceAndInterfacePins(t *testing.T) {
 		t.Fatalf("disabled interface = %v, want ErrContextInvalid", err)
 	}
 
-	// stale occupancy evidence (older than max_auth_cache_age=3600s)
-	f = seed(t, p)
-	id, _ = s.IssuePMS(ctx, grant(f, 600))
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_at = now() - interval '2 hours' WHERE id=$1`, f.stay); err != nil {
-		t.Fatal(err)
+	// stale occupancy evidence at issue (2h old, older than max_auth_cache_age=3600s) → issuance fails closed
+	fs := seedAged(t, p, "3600", "now() - interval '2 hours'", false)
+	before := authCtxCount(t, p, fs)
+	if _, err := s.IssuePMS(ctx, grant(fs, 600)); err != ErrGrantIncomplete {
+		t.Fatalf("stale-at-issue = %v, want ErrGrantIncomplete", err)
 	}
-	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
-		t.Fatalf("stale evidence = %v, want ErrContextInvalid", err)
-	}
-
-	// clock-suspect occupancy evidence
-	f = seed(t, p)
-	id, _ = s.IssuePMS(ctx, grant(f, 600))
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_clock_suspect=true WHERE id=$1`, f.stay); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
-		t.Fatalf("clock-suspect = %v, want ErrContextInvalid", err)
+	if after := authCtxCount(t, p, fs); after != before {
+		t.Fatalf("stale-at-issue must not persist a context: before=%d after=%d", before, after)
 	}
 
-	// monotonic occupancy-evidence version changed (no longer matches the pinned snapshot)
+	// clock-suspect occupancy evidence at issue → issuance fails closed
+	fc := seedAged(t, p, "3600", "now()", true)
+	if _, err := s.IssuePMS(ctx, grant(fc, 600)); err != ErrGrantIncomplete {
+		t.Fatalf("clock-suspect-at-issue = %v, want ErrGrantIncomplete", err)
+	}
+
+	// authoritative evidence replacement after issue (material change + exactly-+1 version) → consume rejected
 	f = seed(t, p)
 	id, _ = s.IssuePMS(ctx, grant(f, 600))
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_version=99 WHERE id=$1`, f.stay); err != nil {
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays
+		SET occupancy_evidence_at = now() + interval '1 second', occupancy_evidence_version = occupancy_evidence_version + 1
+		WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
-		t.Fatalf("evidence version mismatch = %v, want ErrContextInvalid", err)
+		t.Fatalf("evidence replacement (version bump) = %v, want ErrContextInvalid", err)
 	}
 }
 
@@ -310,15 +326,29 @@ func TestIntegration_OccupancyRevisionProvenance(t *testing.T) {
 		t.Fatalf("published newer revision must not invalidate the pinned rev-1 context: %v", err)
 	}
 
-	// same evidence version but DIFFERENT occupancy Revision → rejected
+	// same evidence version but DIFFERENT occupancy Revision → rejected by the consume-time PROVENANCE clause.
+	// The evidence-version trigger normally forces ANY material change (incl. a Revision change) to bump the
+	// version, so a same-version/different-Revision state is unreachable via legal mutation. We bypass the
+	// trigger inside a single tx (SET LOCAL session_replication_role = replica) precisely to construct that
+	// illegal state and prove the provenance clause rejects it even though the pinned version still matches.
 	f = seed(t, p)
 	rev2 := secondRevision(t, p, f)
 	id, _ = s.IssuePMS(ctx, grant(f, 600))
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_revision_id=$2 WHERE id=$1`, f.stay, rev2); err != nil {
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_revision_id=$2 WHERE id=$1`, f.stay, rev2); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
-		t.Fatalf("different occupancy revision (same version) must be rejected, got %v", err)
+		t.Fatalf("different occupancy revision (same version) must be rejected by provenance, got %v", err)
 	}
 }
 
@@ -340,10 +370,19 @@ func TestIntegration_IssueRejectsIncomplete(t *testing.T) {
 	nt.TTLSeconds = -5
 	bad = append(bad, nt)
 	for _, mut := range []func(*PMSGrant){
+		// empty
 		func(g *PMSGrant) { g.Tenant = "" }, func(g *PMSGrant) { g.Site = "" },
 		func(g *PMSGrant) { g.Interface = "" }, func(g *PMSGrant) { g.Revision = "" },
 		func(g *PMSGrant) { g.Stay = "" }, func(g *PMSGrant) { g.Device = "" },
 		func(g *PMSGrant) { g.GuestNetwork = "" },
+		// malformed UUID → typed error BEFORE SQL, never a raw cast error
+		func(g *PMSGrant) { g.Stay = "not-a-uuid" },
+		// whitespace-only
+		func(g *PMSGrant) { g.Site = "   " },
+		// overlong
+		func(g *PMSGrant) { g.Interface = g.Interface + "x" },
+		// nil UUID is not a real identity pin
+		func(g *PMSGrant) { g.Device = "00000000-0000-0000-0000-000000000000" },
 	} {
 		m := g0
 		mut(&m)
@@ -354,15 +393,37 @@ func TestIntegration_IssueRejectsIncomplete(t *testing.T) {
 		if err != ErrGrantIncomplete {
 			t.Fatalf("bad grant %d = %v, want ErrGrantIncomplete", i, err)
 		}
-		if err != nil && strings.Contains(err.Error(), f.stay) {
-			t.Fatalf("error text leaked an identifier: %v", err)
+		// no supplied identifier may appear in the error text
+		if err != nil {
+			for _, id := range []string{f.stay, f.iface, f.rev, f.device, f.network, f.tenant, f.site} {
+				if strings.Contains(err.Error(), id) {
+					t.Fatalf("error text leaked an identifier: %v", err)
+				}
+			}
 		}
 	}
 	if after := authCtxCount(t, p, f); after != before {
 		t.Fatalf("incomplete issuance inserted rows: before=%d after=%d", before, after)
 	}
-	if _, err := s.IssuePMS(context.Background(), g0); err != nil {
+
+	// malformed / nil consume id + malformed presenter → uniform ErrContextInvalid before SQL, no row consumed
+	valid, err := s.IssuePMS(context.Background(), g0)
+	if err != nil {
 		t.Fatalf("valid issue must succeed: %v", err)
+	}
+	for _, badID := range []string{"", "   ", "not-a-uuid", "00000000-0000-0000-0000-000000000000", valid + "x"} {
+		if _, err := s.Consume(context.Background(), badID, pres(f)); err != ErrContextInvalid {
+			t.Fatalf("consume(badID=%q) = %v, want ErrContextInvalid", badID, err)
+		}
+	}
+	badPres := pres(f)
+	badPres.Device = "nope"
+	if _, err := s.Consume(context.Background(), valid, badPres); err != ErrContextInvalid {
+		t.Fatalf("consume(malformed presenter) = %v, want ErrContextInvalid", err)
+	}
+	// the real context survived every malformed attempt (none consumed it) → still consumable exactly once
+	if _, err := s.Consume(context.Background(), valid, pres(f)); err != nil {
+		t.Fatalf("valid context must still consume after malformed attempts: %v", err)
 	}
 }
 
@@ -374,45 +435,43 @@ func TestIntegration_FreshnessConfigFailClosed(t *testing.T) {
 	s := NewStore(p)
 	ctx := context.Background()
 
-	// INVALID / out-of-range / overflow-sized values → strict 300s default (never a cast error, never widened).
+	// Freshness is now revalidated at ISSUANCE (an already-stale Stay must never yield a persisted context), so
+	// the fail-closed parse is proven there. INVALID / out-of-range / overflow-sized values → strict 300s
+	// default (never a cast error, never widened to a large window).
 	for _, cfg := range []string{`"abc"`, `"-5"`, `"0"`, `null`, `604801`, `2147483648`, `99999999999999999999`} {
+		// fresh evidence (within the 300s default) → issues AND consumes: proves no SQL cast error, default applied
 		f := seedCacheAge(t, p, cfg)
 		id, err := s.IssuePMS(ctx, grant(f, 600))
 		if err != nil {
-			t.Fatalf("cfg=%s issue: %v", cfg, err)
+			t.Fatalf("cfg=%s fresh issue: %v", cfg, err)
 		}
-		// fresh evidence (within the 300s default) still consumes — proves no SQL cast error
 		if _, err := s.Consume(ctx, id, pres(f)); err != nil {
 			t.Fatalf("cfg=%s fresh consume: %v", cfg, err)
 		}
-		// evidence older than the 300s default → rejected — proves the invalid value was NOT widened
-		f2 := seedCacheAge(t, p, cfg)
-		id2, _ := s.IssuePMS(ctx, grant(f2, 600))
-		if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_at = now() - interval '10 minutes' WHERE id=$1`, f2.stay); err != nil {
-			t.Fatal(err)
+		// evidence 10min old (> 300s default) → issuance fails closed: proves the invalid value was NOT widened
+		f2 := seedAged(t, p, cfg, "now() - interval '10 minutes'", false)
+		before := authCtxCount(t, p, f2)
+		if _, err := s.IssuePMS(ctx, grant(f2, 600)); err != ErrGrantIncomplete {
+			t.Fatalf("cfg=%s stale-beyond-default = %v, want ErrGrantIncomplete (invalid value must not widen)", cfg, err)
 		}
-		if _, err := s.Consume(ctx, id2, pres(f2)); err != ErrContextInvalid {
-			t.Fatalf("cfg=%s stale-beyond-default = %v, want ErrContextInvalid (invalid value must not widen)", cfg, err)
+		if after := authCtxCount(t, p, f2); after != before {
+			t.Fatalf("cfg=%s stale-at-issue must not persist a context: before=%d after=%d", cfg, before, after)
 		}
 	}
 
 	// VALID values are honored exactly (not defaulted, not truncated).
-	// 300: evidence at now()-5min is stale (>300s) → rejected.
-	f := seedCacheAge(t, p, "300")
-	id, _ := s.IssuePMS(ctx, grant(f, 600))
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_at = now() - interval '5 minutes' WHERE id=$1`, f.stay); err != nil {
-		t.Fatal(err)
+	// 300: evidence 5min old is stale (>300s) → issuance rejected.
+	f300 := seedAged(t, p, "300", "now() - interval '5 minutes'", false)
+	if _, err := s.IssuePMS(ctx, grant(f300, 600)); err != ErrGrantIncomplete {
+		t.Fatalf("cfg=300 evidence 5min old must be stale at issue, got %v", err)
 	}
-	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
-		t.Fatalf("cfg=300 evidence 5min old must be stale, got %v", err)
+	// 604800: evidence 2h old is fresh (within 7 days) → issues AND consumes.
+	f7d := seedAged(t, p, "604800", "now() - interval '2 hours'", false)
+	id7, err := s.IssuePMS(ctx, grant(f7d, 600))
+	if err != nil {
+		t.Fatalf("cfg=604800 evidence 2h old must issue: %v", err)
 	}
-	// 604800: evidence at now()-2h is fresh (within 7 days) → consumes.
-	f = seedCacheAge(t, p, "604800")
-	id, _ = s.IssuePMS(ctx, grant(f, 600))
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_at = now() - interval '2 hours' WHERE id=$1`, f.stay); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.Consume(ctx, id, pres(f)); err != nil {
+	if _, err := s.Consume(ctx, id7, pres(f7d)); err != nil {
 		t.Fatalf("cfg=604800 evidence 2h old must be fresh: %v", err)
 	}
 }
@@ -459,10 +518,209 @@ func TestIntegration_EpisodeAndEvidenceSnapshot(t *testing.T) {
 		t.Fatalf("unchanged snapshot must consume: %v", err)
 	}
 	stale, _ := s.IssuePMS(ctx, grant(f, 600))
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET occupancy_evidence_version=occupancy_evidence_version+1, occupancy_ingested_at=now() WHERE id=$1`, f.stay); err != nil {
+	// material evidence change (evidence_at) + exactly-+1 version bump — the trigger-legal replacement path.
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays
+		SET occupancy_evidence_at = now() + interval '1 second', occupancy_evidence_version = occupancy_evidence_version + 1
+		WHERE id=$1`, f.stay); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Consume(ctx, stale, pres(f)); err != ErrContextInvalid {
 		t.Fatalf("evidence-replaced old context must be rejected, got %v", err)
+	}
+}
+
+// lockStayFirst mimics a Checkout/evidence writer that correctly obeys L1: it locks the Stay row FIRST
+// (SELECT ... FOR UPDATE) inside the returned open transaction. The caller then mutates + commits/rolls back.
+func lockStayFirst(t *testing.T, p *pgxpool.Pool, stay string) pgx.Tx {
+	t.Helper()
+	tx, err := p.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(context.Background(), `SELECT 1 FROM iam_v2.stays WHERE id=$1 FOR UPDATE`, stay); err != nil {
+		_ = tx.Rollback(context.Background())
+		t.Fatal(err)
+	}
+	return tx
+}
+
+// TestIntegration_ConsumeStayFirstLockOrder proves ConsumeTx obeys the global L1 Stay-first lock order, so it
+// serializes deterministically against Checkout / evidence replacement and never races them.
+func TestIntegration_ConsumeStayFirstLockOrder(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := NewStore(p)
+	ctx := context.Background()
+
+	// (a) Checkout takes the Stay lock FIRST → a concurrent consume WAITS on it, then REJECTS after commit.
+	f := seed(t, p)
+	id, _ := s.IssuePMS(ctx, grant(f, 600))
+	txCk := lockStayFirst(t, p, f.stay)
+	if _, err := txCk.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	consumeErr := make(chan error, 1)
+	go func() { _, e := s.Consume(context.Background(), id, pres(f)); consumeErr <- e }()
+	select {
+	case e := <-consumeErr:
+		t.Fatalf("consume returned %v before checkout committed (did not wait on the Stay lock)", e)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := txCk.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if e := <-consumeErr; e != ErrContextInvalid {
+		t.Fatalf("post-checkout consume = %v, want ErrContextInvalid", e)
+	}
+
+	// (b) Consume takes the Stay lock FIRST (inside a caller tx that then runs commerce) → a concurrent
+	//     Checkout WAITS until that whole transaction commits/rolls back.
+	f = seed(t, p)
+	id, _ = s.IssuePMS(ctx, grant(f, 600))
+	txC, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConsumeTx(ctx, txC, id, pres(f)); err != nil {
+		t.Fatalf("ConsumeTx (stay-first): %v", err)
+	}
+	ckDone := make(chan error, 1)
+	go func() {
+		tx2, e := p.Begin(context.Background())
+		if e != nil {
+			ckDone <- e
+			return
+		}
+		if _, e = tx2.Exec(context.Background(), `SELECT 1 FROM iam_v2.stays WHERE id=$1 FOR UPDATE`, f.stay); e != nil {
+			_ = tx2.Rollback(context.Background())
+			ckDone <- e
+			return
+		}
+		ckDone <- tx2.Commit(context.Background())
+	}()
+	select {
+	case e := <-ckDone:
+		t.Fatalf("checkout acquired the Stay lock (%v) while consume held it — lock order violated", e)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := txC.Commit(ctx); err != nil { // commerce succeeds
+		t.Fatal(err)
+	}
+	if e := <-ckDone; e != nil {
+		t.Fatalf("checkout after consume commit: %v", e)
+	}
+
+	// (c) Evidence replacement takes the Stay lock FIRST and commits → the old context REJECTS.
+	f = seed(t, p)
+	id, _ = s.IssuePMS(ctx, grant(f, 600))
+	txEv := lockStayFirst(t, p, f.stay)
+	if _, err := txEv.Exec(ctx, `UPDATE iam_v2.stays
+		SET occupancy_evidence_at = now() + interval '1 second', occupancy_evidence_version = occupancy_evidence_version + 1
+		WHERE id=$1`, f.stay); err != nil {
+		t.Fatal(err)
+	}
+	if err := txEv.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Consume(ctx, id, pres(f)); err != ErrContextInvalid {
+		t.Fatalf("post-evidence-replacement consume = %v, want ErrContextInvalid", err)
+	}
+
+	// (d) Failed commerce rolls the consumption back atomically — the context stays consumable.
+	f = seed(t, p)
+	id, _ = s.IssuePMS(ctx, grant(f, 600))
+	txF, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ConsumeTx(ctx, txF, id, pres(f)); err != nil {
+		t.Fatalf("ConsumeTx: %v", err)
+	}
+	_ = txF.Rollback(ctx) // commerce failed
+	if _, err := s.Consume(ctx, id, pres(f)); err != nil {
+		t.Fatalf("after rolled-back commerce the context must remain consumable: %v", err)
+	}
+}
+
+// TestIntegration_MixedCheckoutConsumeNoDeadlock runs ≥24 mixed Checkout-cycle / Consume operations against the
+// SAME Stay concurrently. Because every operation acquires the single Stay row lock FIRST (L1), there is a total
+// lock order and NO deadlock is possible; every operation completes and none returns a deadlock (SQLSTATE
+// 40P01). Consumers may legitimately reject (ErrContextInvalid) when a concurrent reinstatement bumped the
+// episode first — that is correct, not a failure.
+func TestIntegration_MixedCheckoutConsumeNoDeadlock(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := NewStore(p)
+	ctx := context.Background()
+
+	f := seed(t, p)
+	const consumers = 12
+	ids := make([]string, consumers)
+	for i := range ids {
+		id, err := s.IssuePMS(ctx, grant(f, 600))
+		if err != nil {
+			t.Fatalf("issue %d: %v", i, err)
+		}
+		ids[i] = id
+	}
+
+	// a Stay-first checkout→reinstate cycle: keeps the Stay IN_HOUSE but bumps lifecycle_version (invalidating
+	// contexts). Holding the Stay lock across both statements serializes cleanly with everyone else.
+	mutate := func() error {
+		tx, e := p.Begin(context.Background())
+		if e != nil {
+			return e
+		}
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		var st string
+		if e := tx.QueryRow(context.Background(), `SELECT status FROM iam_v2.stays WHERE id=$1 FOR UPDATE`, f.stay).Scan(&st); e != nil {
+			return e
+		}
+		if st == "IN_HOUSE" {
+			if _, e := tx.Exec(context.Background(), `UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`, f.stay); e != nil {
+				return e
+			}
+			if _, e := tx.Exec(context.Background(), `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1, effective_checkout_at=NULL WHERE id=$1`, f.stay); e != nil {
+				return e
+			}
+		}
+		return tx.Commit(context.Background())
+	}
+
+	const mutators = 12
+	errs := make(chan error, consumers+mutators)
+	var wg sync.WaitGroup
+	for i := 0; i < consumers; i++ {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			_, e := s.Consume(context.Background(), id, pres(f))
+			if e != nil && e != ErrContextInvalid { // ErrContextInvalid is a legitimate outcome
+				errs <- e
+			}
+		}(ids[i])
+	}
+	for i := 0; i < mutators; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if e := mutate(); e != nil {
+				errs <- e
+			}
+		}()
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatalf("mixed checkout/consume did not complete in time — possible deadlock/livelock")
+	}
+	close(errs)
+	for e := range errs {
+		if strings.Contains(strings.ToLower(e.Error()), "deadlock") {
+			t.Fatalf("deadlock detected under mixed operations: %v", e)
+		}
+		t.Fatalf("unexpected error under mixed operations: %v", e)
 	}
 }

@@ -111,7 +111,31 @@ echo '== occupancy composite pin + all-or-none (§6) =='
 expect_err "UPDATE iam_v2.stays SET occupancy_evidence_at=now() WHERE id='$ST';" && ok "partial occupancy tuple rejected (all-or-none)" || no "partial occupancy allowed"
 expect_err "UPDATE iam_v2.stays SET occupancy_evidence_at=now(),occupancy_ingested_at=now(),occupancy_revision_id='$R',occupancy_normalization_version=0,occupancy_clock_suspect=false WHERE id='$ST';" && ok "occupancy normalization_version>0" || no "zero normalization allowed"
 expect_err "UPDATE iam_v2.stays SET occupancy_evidence_at=now(),occupancy_ingested_at=now(),occupancy_revision_id='$R2',occupancy_normalization_version=1,occupancy_clock_suspect=false WHERE id='$ST';" && ok "cross-interface occupancy revision rejected (composite FK)" || no "cross-interface revision allowed"
-expect_ok  "UPDATE iam_v2.stays SET occupancy_evidence_at=now(),occupancy_ingested_at=now(),occupancy_revision_id='$R',occupancy_normalization_version=1,occupancy_clock_suspect=false WHERE id='$ST';" && ok "full same-interface occupancy tuple allowed" || no "valid occupancy blocked"
+expect_ok  "UPDATE iam_v2.stays SET occupancy_evidence_at=now(),occupancy_ingested_at=now(),occupancy_revision_id='$R',occupancy_normalization_version=1,occupancy_clock_suspect=false,occupancy_evidence_version=1 WHERE id='$ST';" && ok "full same-interface occupancy tuple (0->1 evidence version) allowed" || no "valid occupancy blocked"
+
+echo '== occupancy-evidence version MONOTONIC + exactly-once (§6b) =='
+# dedicated fresh stay with NO occupancy (default evidence_version=0) so the transitions are unentangled.
+Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$T','$S','$I','REV','SEV','RESERVED',1,0);" >/dev/null
+SEV="$(Q "SELECT id FROM iam_v2.stays WHERE external_stay_identity='SEV';")"
+# no-evidence coherence: version must be 0 while evidence absent
+expect_err "UPDATE iam_v2.stays SET occupancy_evidence_version=1 WHERE id='$SEV';" && ok "no authoritative evidence => version stays 0 (coherence + no-material-change)" || no "version bumped without evidence"
+# evidence present with version 0 rejected (coherence + exactly-once)
+expect_err "UPDATE iam_v2.stays SET occupancy_evidence_at=now(),occupancy_ingested_at=now(),occupancy_revision_id='$R',occupancy_normalization_version=1,occupancy_clock_suspect=false,occupancy_evidence_version=0 WHERE id='$SEV';" && ok "evidence present with version 0 rejected" || no "evidence+version0 accepted"
+# valid initial 0->1
+expect_ok  "UPDATE iam_v2.stays SET occupancy_evidence_at=now(),occupancy_ingested_at=now(),occupancy_revision_id='$R',occupancy_normalization_version=1,occupancy_clock_suspect=false,occupancy_evidence_version=1 WHERE id='$SEV';" && ok "valid initial evidence 0->1" || no "0->1 blocked"
+# arbitrary jump rejected (material change but not +1)
+expect_err "UPDATE iam_v2.stays SET occupancy_evidence_at=now()+interval '1 second',occupancy_evidence_version=99 WHERE id='$SEV';" && ok "arbitrary version jump (1->99) rejected" || no "jump accepted"
+# evidence mutation WITHOUT the version transition rejected
+expect_err "UPDATE iam_v2.stays SET occupancy_evidence_at=now()+interval '1 second' WHERE id='$SEV';" && ok "material evidence mutation without version++ rejected" || no "silent evidence mutation accepted"
+# valid subsequent N->N+1 (material change + exactly +1)
+expect_ok  "UPDATE iam_v2.stays SET occupancy_evidence_at=now()+interval '1 second',occupancy_evidence_version=2 WHERE id='$SEV';" && ok "valid subsequent evidence update 1->2" || no "N->N+1 blocked"
+# duplicate reapplication: identical material, only ingested_at metadata refreshed => NO uncontrolled increment
+expect_ok  "UPDATE iam_v2.stays SET occupancy_ingested_at=now()+interval '5 seconds' WHERE id='$SEV';" && ok "duplicate reapplication (ingested_at refresh only) keeps version (no uncontrolled increment)" || no "metadata refresh blocked"
+[ "$(Q "SELECT occupancy_evidence_version FROM iam_v2.stays WHERE id='$SEV';")" = 2 ] && ok "version unchanged at 2 after duplicate reapplication" || no "duplicate reapplication changed version"
+# bumping version on a duplicate (no material change) rejected
+expect_err "UPDATE iam_v2.stays SET occupancy_evidence_version=3 WHERE id='$SEV';" && ok "version bump without material change rejected" || no "uncontrolled increment accepted"
+# decrease rejected
+expect_err "UPDATE iam_v2.stays SET occupancy_evidence_at=now()+interval '2 seconds',occupancy_evidence_version=1 WHERE id='$SEV';" && ok "version decrease (2->1) rejected" || no "decrease accepted"
 
 echo '== lifecycle_version strict episode (§2) + status matrix (§4) =='
 expect_ok  "UPDATE iam_v2.stays SET status='IN_HOUSE', last_applied_event_version=1 WHERE id='$ST';" && ok "RESERVED->IN_HOUSE allowed" || no "RESERVED->IN_HOUSE blocked"
