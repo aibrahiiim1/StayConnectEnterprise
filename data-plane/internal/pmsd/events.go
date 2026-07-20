@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -231,6 +232,33 @@ func DeriveStayResolutionCandidate(tenantID, siteID, interfaceID, reservation st
 		_, _ = h.Write([]byte{0x1f})
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// eventPayloadJSON builds the BOUNDED typed JSON payload persisted with a durable inbox row. It contains ONLY
+// the typed Stay/Guest/Folio fields the Increment-4 engine consumes — never the raw STX/ETX frame, never a
+// secret. Keys are stable and deterministic. Marshalling cannot fail for these string fields; on the
+// theoretical error it falls back to an empty object rather than leaking anything.
+func eventPayloadJSON(ev Event) []byte {
+	p := struct {
+		Reservation string `json:"reservation"`
+		Room        string `json:"room"`
+		LastName    string `json:"last_name"`
+		FirstName   string `json:"first_name"`
+		Folio       string `json:"folio,omitempty"`
+		ArrivalRaw  string `json:"arrival_raw,omitempty"`
+		Departure   string `json:"departure_raw,omitempty"`
+		Candidate   string `json:"stay_resolution_candidate,omitempty"`
+	}{
+		Reservation: ev.ReservationRef, Room: ev.RoomNumber,
+		LastName: ev.GuestLastName, FirstName: ev.GuestFirstName,
+		Folio: ev.FolioRef, ArrivalRaw: ev.ArrivalRaw, Departure: ev.DepartureRaw,
+		Candidate: ev.StayResolutionCandidate,
+	}
+	b, err := json.Marshal(p)
+	if err != nil {
+		return []byte("{}")
+	}
+	return b
 }
 
 // nonZeroTime is a small helper for adapters that need a non-zero normalized timestamp.

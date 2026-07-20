@@ -181,14 +181,26 @@ func (w *worker) disc(gen int64, code Code) TransportUpdate {
 
 func ptr(t time.Time) *time.Time { return &t }
 
-// workerSink translates protocol evidence into INDEPENDENT-axis CAS updates and typed queue events. It uses
+// workerSink translates protocol evidence into INDEPENDENT-axis CAS updates and DURABLE inbox rows. It uses
 // the worker (serve) context — never context.Background() — and the pinned generation. Any persist error
 // (including stale generation) is returned so the adapter stops serving and the transport closes.
+//
+// Application barrier (§H) + resync state machine (§G) live here. The fields below are touched ONLY by the
+// single Serve goroutine (the adapter calls sink methods serially), so they need no lock:
+//   - synced: a complete DS→DE resync generation has been PUBLISHED; until then LIVE admission is barred.
+//   - resyncing/resyncGen: inside a DS→DE window, domain records are STAGED under the allocated generation.
+//
+// The bounded queue is now a best-effort WAKEUP channel only (durable rows are the authoritative store); a
+// full queue is benign (a poll backstop covers a dropped wakeup) and never forces a gap.
 type workerSink struct {
 	w   *worker
 	ctx context.Context
 	gen int64
 	q   *BoundedQueue
+
+	synced    bool
+	resyncing bool
+	resyncGen int64
 }
 
 func (s *workerSink) ax() axisBase {
@@ -202,36 +214,94 @@ func (s *workerSink) OnHeartbeat(at time.Time) error {
 	// transport axis ONLY — must not erase continuity/sync evidence
 	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportConnected, LastHeartbeatAt: &at})
 }
-func (s *workerSink) OnResyncStart(at time.Time) error {
-	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncInProgress, ResyncStartedAt: &at})
+
+// RequireInitialResync raises the barrier at connect (§H): sync→RESYNC_REQUIRED, no LIVE admission until a
+// complete DS→DE generation is published.
+func (s *workerSink) RequireInitialResync(at time.Time) error {
+	s.synced = false
+	s.resyncing = false
+	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncRequired, ResyncRequestedAt: &at})
 }
-func (s *workerSink) OnResyncComplete(at time.Time, cursor string) error {
-	if err := s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncInSync, LastCompleteSyncAt: &at, SyncCursor: clip(cursor, maxCursorLen)}); err != nil {
+
+// OnResyncStart (DS) allocates a NEW typed resync generation under the exact runtime-generation CAS and opens
+// the staging window (sync→RESYNC_IN_PROGRESS). Domain records until DE are STAGED under this generation.
+func (s *workerSink) OnResyncStart(at time.Time) error {
+	g, err := s.w.repo.AllocateResyncGeneration(s.ctx, ResyncScope{s.ax()})
+	if err != nil {
 		return err
 	}
-	// a verified complete resync restores feed continuity
-	return s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastResyncMarkerAt: &at})
+	s.resyncGen = g
+	s.resyncing = true
+	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncInProgress, ResyncStartedAt: &at})
+}
+
+// OnResyncComplete (DE) ATOMICALLY publishes the complete resync generation (one runtime-row boundary update
+// + IN_SYNC/CONTINUOUS), then lowers the barrier. Nothing is published unless a resync window was open.
+func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
+	if !s.resyncing || s.resyncGen == 0 {
+		// a DE without a preceding DS publishes nothing (partial/spurious) — leave the barrier up.
+		return nil
+	}
+	if err := s.w.repo.PublishResyncGeneration(s.ctx, ResyncScope{s.ax()}, s.resyncGen); err != nil {
+		return err
+	}
+	s.resyncing = false
+	s.synced = true
+	return nil
 }
 func (s *workerSink) OnDisconnected(at time.Time, code Code) error {
 	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportDisconnected, DisconnectedSince: &at, ErrorCode: code})
 }
 
-// OnDomainEvent records feed continuity for a valid event, then enqueues the typed event. On queue overflow
-// it drives continuity→GAP_DETECTED and sync→RESYNC_REQUIRED and returns QUEUE_OVERFLOW so the adapter
-// stops normal application until a verified full resync.
+// OnDomainEvent routes a validated domain Event through the barrier + durable inbox:
+//   - inside a DS→DE window  → StageResyncEvent (immutable, under the resync generation; NOT live).
+//   - barrier up (not synced, no window) → NOT admitted (a poll/resync will re-establish the roster); the
+//     barrier stays up. Zero LIVE admissions occur until a generation is published.
+//   - synced → AdmitLiveEvent (durable append-first, ownership-proof + runtime-generation CAS) then record
+//     feed continuity. The bounded queue receives a best-effort WAKEUP with the durable row id.
+//
+// The durable row is the AUTHORITATIVE store; a full wakeup queue is benign (never a gap). A stale owner
+// admits/stages nothing (ErrStaleGeneration is returned so the transport closes).
 func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
-	if err := s.q.Enqueue(ctx, ev); err != nil {
-		if Classify(err) == CodeQueueOverflow {
-			// Persist the gap/resync transition ATOMICALLY — a DB/generation failure here must NOT be
-			// swallowed: it is returned so the transport closes rather than leaving a silent, unrecorded gap.
-			if perr := s.markGapResync(CodeQueueOverflow); perr != nil {
-				return perr
-			}
+	row := s.inboxRow(ev)
+	switch {
+	case s.resyncing:
+		row.ResyncGeneration = s.resyncGen
+		if _, err := s.w.repo.StageResyncEvent(s.ctx, row); err != nil {
+			return err
 		}
-		return err
+		return nil
+	case !s.synced:
+		// §H barrier: no LIVE admission before the initial sync completes. Hold (do not admit); the
+		// already-requested resync will produce the authoritative roster.
+		return nil
+	default:
+		if _, err := s.w.repo.AdmitLiveEvent(s.ctx, row); err != nil {
+			return err
+		}
+		return s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastValidEventAt: ptr(ev.NormalizedAt), LastEventCursor: clip(ev.Cursor, maxCursorLen)})
 	}
-	return s.w.repo.UpdateContinuity(s.ctx, ContinuityUpdate{axisBase: s.ax(), Status: ContinuityContinuous, LastValidEventAt: ptr(ev.NormalizedAt), LastEventCursor: clip(ev.Cursor, maxCursorLen)})
 }
+
+// inboxRow builds the durable, provenance-bound inbox row from a validated Event. It carries only bounded
+// typed fields (never the raw frame / secret) as a JSON payload for the Increment-4 Stay engine.
+func (s *workerSink) inboxRow(ev Event) InboxRow {
+	return InboxRow{
+		axisBase:              s.ax(),
+		ExternalEventIdentity: ev.ExternalEventIdentity,
+		FingerprintKeyVersion: ev.FingerprintKeyVersion,
+		EventType:             string(ev.RecordType),
+		PMSTimestampRaw:       ev.PMSEventTimestampRaw,
+		PMSTimestampUTC:       ev.PMSEventAt,
+		ReceivedAt:            nonZeroTime(ev.ReceivedAt, s.w.deps.now()),
+		SequenceVersion:       0,
+		NormalizationVersion:  ev.NormalizationVer,
+		ClockSuspect:          ev.ClockSuspect,
+		Payload:               eventPayloadJSON(ev),
+	}
+}
+
+// OnDomainEvent's continuity-gap counterpart for records the adapter could not admit.
 
 // OnContinuityFault durably drives continuity→GAP_DETECTED and sync→RESYNC_REQUIRED for a record the adapter
 // could not admit (malformed/overlong/duplicate/failed normalization). Both axes move in ONE transaction under

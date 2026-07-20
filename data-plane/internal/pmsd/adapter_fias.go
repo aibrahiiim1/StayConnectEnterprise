@@ -114,8 +114,18 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	if err := sink.OnConnected(a.now()); err != nil {
 		return err
 	}
+	// §G/§H: raise the application barrier and request the INITIAL full resync through the single writer. Until
+	// a complete DS→DE generation is published, no LIVE admission occurs. The DR is submitted (bounded, async
+	// through the serialized writer) so the read loop can immediately begin consuming DS…DE; a DR write failure
+	// closes the transport and ends the cycle via the read path.
+	if err := sink.RequireInitialResync(a.now()); err != nil {
+		return err
+	}
+	if err := w.Submit(ctx, pms.BuildDR()); err != nil {
+		return err
+	}
 
-	resyncing := false
+	resyncing := true // a DR is outstanding; we are awaiting DS…DE (gates duplicate DR requests only)
 	readDeadline := a.rev.HeartbeatTimeout
 	for {
 		if ctx.Err() != nil {
@@ -206,20 +216,11 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				}
 				continue
 			}
+			// The sink routes the Event through the §H barrier + durable inbox (stage while resyncing, hold
+			// while the barrier is up, admit durably when synced). The durable row is authoritative — there is
+			// no in-memory-queue-overflow gap here. Any DB/ownership failure closes the transport.
 			if derr := sink.OnDomainEvent(ctx, ev); derr != nil {
-				if Classify(derr) == CodeQueueOverflow && !resyncing {
-					// stop normal application; request a verified full resync
-					if err := w.SubmitSync(ctx, pms.BuildDR()); err != nil {
-						return err
-					}
-					resyncing = true
-					continue
-				}
-				if errors.Is(derr, ErrStaleGeneration) {
-					return derr // a newer owner exists: terminate this ownership cycle
-				}
-				// other persist errors close the transport
-				return derr
+				return derr // ErrStaleGeneration or any persist error terminates the ownership cycle
 			}
 		}
 	}

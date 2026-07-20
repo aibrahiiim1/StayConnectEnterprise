@@ -22,6 +22,7 @@ type recordingSink struct {
 	events         []Event
 	overflow       bool
 	continuityFlt  int
+	initialResync  int
 	q              *BoundedQueue
 }
 
@@ -34,6 +35,12 @@ func (s *recordingSink) OnConnected(time.Time) error {
 func (s *recordingSink) OnHeartbeat(time.Time) error {
 	s.mu.Lock()
 	s.heartbeats++
+	s.mu.Unlock()
+	return nil
+}
+func (s *recordingSink) RequireInitialResync(time.Time) error {
+	s.mu.Lock()
+	s.initialResync++
 	s.mu.Unlock()
 	return nil
 }
@@ -446,58 +453,33 @@ func TestAdapter_StartupDomainAndResync(t *testing.T) {
 	}
 }
 
-// TestAdapter_QueueOverflowRequestsResync floods domain events past a tiny queue and asserts the adapter
-// issues a DR resync request rather than silently dropping.
-func TestAdapter_QueueOverflowRequestsResync(t *testing.T) {
+// TestAdapter_InitialResyncRequestsDR proves §G/§H: after the startup handshake the adapter raises the
+// barrier (RequireInitialResync) and sends the initial DR resync request through the single writer, before
+// any live admission.
+func TestAdapter_InitialResyncRequestsDR(t *testing.T) {
 	adapter, server := newAdapterOverPipe(t)
-	sink := &recordingSink{q: NewBoundedQueue(1, 20*time.Millisecond)} // tiny + no consumer → overflow
-
-	sawDR := make(chan struct{}, 1)
-	go func() {
-		br := bufio.NewReader(server)
-		for i := 0; i < 5; i++ {
-			if _, err := pms.ReadFramedRecord(br); err != nil {
-				return
-			}
-		}
-		// send just enough guest-in records to overflow the cap-1 queue (no consumer draining it); more than
-		// that would deadlock net.Pipe since the adapter blocks writing DR while we block writing GI.
-		for i := 0; i < 2; i++ {
-			if err := pms.WriteFramedRecord(server, "GI|RN10|G#RES"+string(rune('A'+i))+"|GNX|GFY|GA260101|GD260105|"); err != nil {
-				return
-			}
-		}
-		// watch for the DR resync request the adapter must send
-		for {
-			body, err := pms.ReadFramedRecord(br)
-			if err != nil {
-				return
-			}
-			if pms.RecordID(body) == "DR" {
-				select {
-				case sawDR <- struct{}{}:
-				default:
-				}
-				return
-			}
-		}
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	adapter.rev.HeartbeatInterval = time.Hour
+	adapter.rev.HeartbeatTimeout = 5 * time.Second
+	peer := newPipePeer(server)
+	sink := &recordingSink{q: NewBoundedQueue(16, time.Second)}
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = adapter.Serve(ctx, sink) }()
 
-	select {
-	case <-sawDR:
-		// adapter requested a verified resync on overflow (no silent drop)
-	case <-time.After(2 * time.Second):
-		t.Fatal("adapter did not request a resync (DR) on queue overflow")
+	// consume the 5 startup frames, then the initial DR must arrive
+	for i := 0; i < 5; i++ {
+		<-peer.recv
+	}
+	if peer.waitFor("DR", 1, 2*time.Second) < 1 {
+		t.Fatal("adapter must send an initial DR resync request after connect")
 	}
 	sink.mu.Lock()
-	ov := sink.overflow
-	sink.mu.Unlock()
-	if !ov {
-		t.Error("overflow was not observed by the sink")
+	defer sink.mu.Unlock()
+	if sink.initialResync != 1 {
+		t.Errorf("RequireInitialResync calls = %d, want 1", sink.initialResync)
+	}
+	if sink.connected != 1 {
+		t.Errorf("OnConnected = %d, want 1", sink.connected)
 	}
 }
 

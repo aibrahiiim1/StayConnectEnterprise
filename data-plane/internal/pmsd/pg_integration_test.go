@@ -443,6 +443,83 @@ func TestIntegration_InboxImmutability(t *testing.T) {
 	}
 }
 
+// TestIntegration_SinkResyncLifecycle drives the real workerSink against PostgreSQL through a full
+// RequireInitialResync → DS → stage → DE(publish) → live-admit lifecycle and asserts the durable rows and the
+// publication boundary land correctly through the real append-only triggers.
+func TestIntegration_SinkResyncLifecycle(t *testing.T) {
+	pool := integPool(t)
+	defer pool.Close()
+	s := seedScope(t, pool)
+	repo := NewPgRepoFromPool(pool)
+	gen, err := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface, PinnedRevisionID: s.rev, PinnedSecretGenerationID: s.sg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := &worker{iface: Interface{TenantID: s.tenant, SiteID: s.site, ID: s.iface}, repo: repo, deps: &Deps{Now: time.Now}}
+	sink := &workerSink{w: w, ctx: context.Background(), gen: gen}
+
+	mkEvent := func(identity string) Event {
+		return Event{
+			InterfaceID: s.iface, RevisionID: s.rev, SecretGenerationID: s.sg, NormalizationVer: 1,
+			RecordType: RecGI, ReservationRef: "R" + identity, RoomNumber: "1408",
+			SourceEventFingerprint: identity, FingerprintKeyVersion: 1, ExternalEventIdentity: identity,
+			SourceEvidenceHash: identity, EvidenceKeyVersion: 1, NormalizedAt: time.Now(), ReceivedAt: time.Now(),
+		}
+	}
+	hex := func(n byte) string { // 64-hex identity
+		b := make([]byte, 32)
+		for i := range b {
+			b[i] = n
+		}
+		out := make([]byte, 64)
+		const h = "0123456789abcdef"
+		for i, x := range b {
+			out[i*2] = h[x>>4]
+			out[i*2+1] = h[x&0xf]
+		}
+		return string(out)
+	}
+	ctx := context.Background()
+
+	if err := sink.RequireInitialResync(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// live event before publish → held (no durable row)
+	if err := sink.OnDomainEvent(ctx, mkEvent(hex(0x11))); err != nil {
+		t.Fatal(err)
+	}
+	if n := scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events WHERE pms_interface_id=$1`, s.iface); n != 0 {
+		t.Fatalf("no durable row before publish, got %d", n)
+	}
+	// DS → stage a roster row
+	if err := sink.OnResyncStart(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.OnDomainEvent(ctx, mkEvent(hex(0x22))); err != nil {
+		t.Fatal(err)
+	}
+	if n := scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events WHERE pms_interface_id=$1 AND admission_kind='RESYNC'`, s.iface); n != 1 {
+		t.Fatalf("staged RESYNC row count = %d, want 1", n)
+	}
+	if consumableCount(t, pool, s, hex(0x22)) != 0 {
+		t.Fatal("staged row must be invisible before DE")
+	}
+	// DE → publish; the staged row becomes consumable
+	if err := sink.OnResyncComplete(time.Now(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if consumableCount(t, pool, s, hex(0x22)) != 1 {
+		t.Fatal("published staged row must be consumable")
+	}
+	// now a live event is durably admitted
+	if err := sink.OnDomainEvent(ctx, mkEvent(hex(0x33))); err != nil {
+		t.Fatal(err)
+	}
+	if n := scalarInt(t, pool, `SELECT count(*) FROM iam_v2.stay_events WHERE pms_interface_id=$1 AND admission_kind='LIVE'`, s.iface); n != 1 {
+		t.Fatalf("live admitted row count = %d, want 1", n)
+	}
+}
+
 func TestIntegration_RealAdvisoryLockCompetition(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()

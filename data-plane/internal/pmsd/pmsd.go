@@ -293,6 +293,9 @@ type Conn interface {
 type AxisSink interface {
 	OnConnected(at time.Time) error
 	OnHeartbeat(at time.Time) error
+	// RequireInitialResync raises the application barrier at connect: sync→RESYNC_REQUIRED and no LIVE
+	// admission until a complete DS→DE generation is published. The adapter then sends the initial DR.
+	RequireInitialResync(at time.Time) error
 	OnResyncStart(at time.Time) error
 	OnResyncComplete(at time.Time, cursor string) error
 	OnDisconnected(at time.Time, code Code) error
