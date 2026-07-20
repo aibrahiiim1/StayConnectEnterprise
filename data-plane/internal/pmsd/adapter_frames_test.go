@@ -106,11 +106,26 @@ func TestFrames_MalformedDomainGapAndZeroAdmission(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		<-peer.recv
 	}
+	// consume the initial DR (barrier already requested a resync at connect)
+	if peer.waitFor("DR", 1, 2*time.Second) < 1 {
+		t.Fatal("adapter must send an initial DR after connect")
+	}
 	if err := peer.send("GIjunk|"); err != nil { // malformed domain
 		t.Fatal(err)
 	}
-	if peer.waitFor("DR", 1, 2*time.Second) < 1 {
-		t.Fatal("malformed domain record must request a DR resync")
+	// the malformed domain must drive a continuity fault (a resync is already outstanding, so no NEW DR)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		sink.mu.Lock()
+		cf := sink.continuityFlt
+		sink.mu.Unlock()
+		if cf >= 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("malformed domain must drive a continuity fault")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 	select {
 	case <-done:
@@ -119,9 +134,6 @@ func TestFrames_MalformedDomainGapAndZeroAdmission(t *testing.T) {
 	}
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
-	if sink.continuityFlt < 1 {
-		t.Errorf("malformed domain must drive a continuity fault, got %d", sink.continuityFlt)
-	}
 	if len(sink.events) != 0 {
 		t.Errorf("malformed domain admitted %d events (must be zero)", len(sink.events))
 	}
@@ -181,8 +193,10 @@ func TestFrames_PostStartWriteFailures(t *testing.T) {
 			func(p *pipePeer) { _ = p.send(pms.BuildLA()) }},
 		{"idle keepalive LA", func(a *fiasAdapter) { a.rev.HeartbeatInterval = 20 * time.Millisecond },
 			func(p *pipePeer) {}}, // no send: the idle ticker fires the failing write
-		{"DR after malformed domain", func(a *fiasAdapter) { a.rev.HeartbeatInterval = time.Hour },
-			func(p *pipePeer) { _ = p.send("GIjunk|") }},
+		{"DR after malformed domain (post-sync)", func(a *fiasAdapter) { a.rev.HeartbeatInterval = time.Hour },
+			// a fresh DR is only emitted for a malformed domain when NOT already resyncing, i.e. after a
+			// completed DS→DE lowers the barrier; then a malformed domain requests a new (failing) DR.
+			func(p *pipePeer) { _ = p.send("DS|"); _ = p.send("DE|"); _ = p.send("GIjunk|") }},
 	}
 	for _, tc := range cases {
 		before := runtime.NumGoroutine()
@@ -196,6 +210,10 @@ func TestFrames_PostStartWriteFailures(t *testing.T) {
 		}()
 		for i := 0; i < 5; i++ {
 			<-peer.recv // startup succeeds
+		}
+		// let the INITIAL DR (sent after connect) succeed first, so each subcase exercises its OWN frame.
+		if peer.waitFor("DR", 1, 2*time.Second) < 1 {
+			t.Fatalf("%s: initial DR never arrived", tc.name)
 		}
 		gc.fail.Store(true) // arm: all further writes fail
 		tc.trigger(peer)
