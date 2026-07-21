@@ -200,8 +200,13 @@ expect_err "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,conf
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET eligibility_window_seconds=0 WHERE eligibility_window_seconds=86400;" && ok "grace eligibility_window must be >0" || no "grace bound not enforced"
 
 echo '== checkout_grace_audit append-only + one-per-episode + coherence + boundary/config provenance (§4c/§11) =='
+# a Phase-3 audit MUST cite a same-scope APPLIED GO event with matching seq/normalization (item 11). Seed one.
+CGAEV="$(Q "INSERT INTO iam_v2.stay_events(id,tenant_id,site_id,pms_interface_id,stay_id,external_event_identity,event_type,pms_timestamp_raw,pms_timestamp_utc,source_timezone,sequence_version,normalization_version,clock_suspect,payload,processing_status) VALUES (gen_random_uuid(),'$T','$S','$I',NULL,'CGAEV','GO','x',now(),'UTC',7,1,false,'{}','PENDING') RETURNING id;")"
+Q "UPDATE iam_v2.stay_events SET stay_id='$ST', processing_status='APPLIED', processed_at=now() WHERE id='$CGAEV';" >/dev/null
 # CGA <episode> <trigger> <is_emergency> <policy_version> <alert_code|NULL> <reason_code> <grace_ent|NULL> <boundary_reason>
-CGA(){ echo "INSERT INTO iam_v2.checkout_grace_audit(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,alert_code,reason_code,grace_entitlement_id,boundary_reason_code,config_version,boundary_at) VALUES ('$T','$S','$I','$ST',$1,'$2',$3,'$4',$5,'$6',$7,'$8',1,now());"; }
+CGA(){ echo "INSERT INTO iam_v2.checkout_grace_audit(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,alert_code,reason_code,grace_entitlement_id,boundary_event_id,boundary_event_seq,boundary_normalization_version,boundary_reason_code,config_version,boundary_at) VALUES ('$T','$S','$I','$ST',$1,'$2',$3,'$4',$5,'$6',$7,'$CGAEV',7,1,'$8',1,now());"; }
+# item 11: a NULL boundary_event_id is rejected (mandatory provenance)
+expect_err "INSERT INTO iam_v2.checkout_grace_audit(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,reason_code,boundary_reason_code,config_version,boundary_at) VALUES ('$T','$S','$I','$ST',9,'NO_GRACE',false,'NONE','X','TRUSTED_PMS_CHECKOUT_TS',1,now());" && ok "audit without a boundary event rejected (NOT NULL, §11)" || no "null boundary event accepted"
 # cga_coherent (§11): grace triggers require a grace_entitlement_id + matching policy version; NO_GRACE requires none
 expect_err "$(CGA 5 CHECKOUT_GRACE false CHECKOUT_GRACE_V1 NULL ELIGIBLE NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "CHECKOUT_GRACE without grace_entitlement_id rejected (§11)" || no "grace w/o entitlement accepted"
 expect_err "$(CGA 5 EMERGENCY_GRACE false EMERGENCY_GRACE_V1 \'CHECKOUT_GRACE_CONFIG_INVALID\' ELIGIBLE NULL TRUSTED_PMS_CHECKOUT_TS)" && ok "EMERGENCY_GRACE with is_emergency=false rejected (§11)" || no "emergency non-emergency accepted"
@@ -241,13 +246,22 @@ expect_err "UPDATE iam_v2.internet_packages SET current_revision_id=NULL WHERE t
 echo '== controlled entitlement transition state machine (§5) + device intervals (§7) + config publish (§10i) =='
 EPKG="$(Q "SELECT current_revision_id FROM iam_v2.internet_packages WHERE tenant_id='$RT' AND site_id='$RS' AND code='__sys_emergency_grace_pkg__';")"
 ESPR="$(Q "SELECT service_plan_revision_id FROM iam_v2.internet_package_revisions WHERE id='$EPKG';")"
-PUR="$(Q "INSERT INTO iam_v2.purchases(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state) VALUES ('$RT','$RS','$EPKG','$I','$ST','ADMIN_GRANT',0,'GRANTED') RETURNING id;")"
-ENT="$(Q "INSERT INTO iam_v2.entitlements(tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status) VALUES ('$RT','$RS','$ST','$I','$PUR','{}'::jsonb,'$ESPR','$EPKG','VALIDITY_WINDOW','AT_CHECKOUT','PENDING') RETURNING id;")"
-[ -n "$ENT" ] && ok "seeded PENDING entitlement for transition tests" || no "entitlement seed failed"
-expect_err "UPDATE iam_v2.entitlements SET status='ACTIVE' WHERE id='$ENT';" && ok "raw entitlements.status UPDATE rejected (must use apply_entitlement_transition) (§5)" || no "raw status update accepted"
-expect_ok  "SELECT iam_v2.apply_entitlement_transition('$ENT','ACTIVE',now(),'SEED');" && ok "apply_entitlement_transition(ACTIVE) works (§5)" || no "controlled transition failed"
-[ "$(Q "SELECT count(*) FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$ENT';")" = 1 ] && ok "controlled transition recorded exactly one history row (§5)" || no "history not recorded"
-expect_err "INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at) VALUES ('$RT','$RS','$ENT',2,'ACTIVE','SUSPENDED',now());" && ok "direct transition whose to_state != current status rejected (§5)" || no "mismatched transition accepted"
+ENT="$(Q "SELECT gen_random_uuid();")"; PUR="$(Q "SELECT gen_random_uuid();")"
+# entitlement INSERT + its initial transition MUST be one transaction (deferred status<->history coherence, §3/§5)
+Q "DO \$do\$ BEGIN
+  INSERT INTO iam_v2.purchases(id,tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state) VALUES ('$PUR','$RT','$RS','$EPKG','$I','$ST','ADMIN_GRANT',0,'GRANTED');
+  INSERT INTO iam_v2.entitlements(id,tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status) VALUES ('$ENT','$RT','$RS','$ST','$I','$PUR','{}'::jsonb,'$ESPR','$EPKG','VALIDITY_WINDOW','AT_CHECKOUT','PENDING');
+  PERFORM iam_v2.apply_entitlement_transition('$ENT','PENDING',now(),'SEED');
+END \$do\$;" >/dev/null
+[ "$(Q "SELECT count(*) FROM iam_v2.entitlements WHERE id='$ENT';")" = 1 ] && ok "entitlement + initial transition created atomically (§5)" || no "atomic entitlement grant failed"
+# item 3: a bare entitlement INSERT with NO transition fails closed at commit (deferred coherence)
+expect_err "INSERT INTO iam_v2.entitlements(tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status) VALUES ('$RT','$RS','$ST','$I','$PUR','{}'::jsonb,'$ESPR','$EPKG','VALIDITY_WINDOW','AT_CHECKOUT','PENDING');" && ok "entitlement without initial history rejected at commit (§3/§5)" || no "history-less entitlement accepted"
+# item 3: the spoofable GUC bypass no longer works — set the flag AND raw-update; commit still rejects
+expect_err "SET LOCAL iam_v2.entitlement_transition='on'; UPDATE iam_v2.entitlements SET status='ACTIVE' WHERE id='$ENT';" && ok "GUC-flag + raw status UPDATE rejected by deferred coherence (§3)" || no "GUC spoof accepted"
+expect_err "UPDATE iam_v2.entitlements SET status='ACTIVE' WHERE id='$ENT';" && ok "raw entitlements.status UPDATE rejected (deferred coherence) (§5)" || no "raw status update accepted"
+expect_ok  "SELECT iam_v2.apply_entitlement_transition('$ENT','ACTIVE',now(),'SEED');" && ok "apply_entitlement_transition(PENDING->ACTIVE) works (§5)" || no "controlled transition failed"
+[ "$(Q "SELECT count(*) FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$ENT';")" = 2 ] && ok "controlled transitions recorded (seq1 PENDING + seq2 ACTIVE) (§5)" || no "history not recorded"
+expect_err "INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at) VALUES ('$RT','$RS','$ENT',3,'ACTIVE','SUSPENDED',now());" && ok "direct transition whose to_state != current status rejected (§5)" || no "mismatched transition accepted"
 expect_err "SELECT iam_v2.apply_entitlement_transition('$ENT','TERMINATED',now(),'ADMIN'); SELECT iam_v2.apply_entitlement_transition('$ENT','ACTIVE',now(),'SEED');" && ok "no transition out of TERMINATED (terminal) (§5)" || no "resurrected terminated entitlement"
 # device intervals (§7): open one, then a second open is rejected; interval without a binding rejected
 DEV="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:aa:01'::macaddr) RETURNING id;")"
@@ -257,10 +271,22 @@ expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_
 expect_ok  "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',1,now());" && ok "first device authorization interval (seq=1) accepted (§7)" || no "valid interval blocked"
 expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',2,now());" && ok "second OPEN interval for the same device rejected (§7)" || no "two open intervals accepted"
 expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',3,now());" && ok "non-contiguous device authorization seq rejected (§7)" || no "sparse device seq accepted"
-# config publish (§10): increments config_version by exactly 1 each time (row exists from §4 grace tests)
+# config publish (§10): a material change increments config_version by exactly 1; an IDENTICAL re-publish does not
 V1="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE');")"
 V2="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE');")"
-[ "$V2" = "$((V1+1))" ] && ok "publish_checkout_grace_config increments config_version by exactly 1 (§10)" || no "config_version not monotonic (+1)"
+[ "$V2" = "$V1" ] && ok "identical re-publish is idempotent (no config_version bump) (§9/§10)" || no "idempotent publish bumped version"
+V3="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3700,4000,1500,524288000,2,'REJECT_NEW_DEVICE');")"
+[ "$V3" = "$((V2+1))" ] && ok "material change increments config_version by exactly 1 (§10)" || no "config_version not +1 on change"
+# raw policy change without the controlled publish fails closed (config_version guard)
+expect_err "UPDATE iam_v2.site_checkout_grace_config SET grace_duration_seconds=9999 WHERE tenant_id='$T' AND site_id='$S';" && ok "raw policy UPDATE without version bump rejected (§9)" || no "raw policy update accepted"
+expect_err "UPDATE iam_v2.site_checkout_grace_config SET config_version=config_version-1 WHERE tenant_id='$T' AND site_id='$S';" && ok "config_version decrease rejected (§9)" || no "config_version decrease accepted"
+
+# alert-action legal edges (§10): the first action must be OPEN — proven directly against the valid NO_GRACE
+# audit id ($CGAID). (The full OPEN->ACK->RESOLVED lifecycle + active-view semantics are proven in the PG16
+# checkout suite against a real emergency-alert audit.)
+expect_err "INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ('$T','$S','$CGAID',1,'ACKNOWLEDGED');" && ok "first alert action must be OPEN (§10)" || no "non-OPEN first action accepted"
+expect_ok  "INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ('$T','$S','$CGAID',1,'OPEN');" && ok "OPEN first action accepted (§10)" || no "OPEN first action blocked"
+expect_err "INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ('$T','$S','$CGAID',2,'OPEN');" && ok "OPEN->OPEN rejected (§10)" || no "OPEN->OPEN accepted"
 
 echo '== structural checkout boundary invariants (§10) =='
 Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$T','$S','$I','RB','SB','IN_HOUSE',1,0);" >/dev/null

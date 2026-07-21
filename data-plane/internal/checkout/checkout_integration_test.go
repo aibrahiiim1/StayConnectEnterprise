@@ -181,16 +181,22 @@ type txn struct {
 func seedEnt(t *testing.T, p *pgxpool.Pool, f fixture, window *time.Time, txns []txn) string {
 	t.Helper()
 	ctx := context.Background()
+	// The entitlement INSERT and its initial transition MUST be in ONE transaction — the deferred
+	// status<->history coherence constraint (item 3/5) forbids an entitlement committing without its history.
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	var purchaseID string
-	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.purchases
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
 		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state)
 		VALUES ($1,$2,$3,$4,$5,'ADMIN_GRANT',0,'GRANTED') RETURNING id`,
 		f.tenant, f.site, f.gracePkgRev, f.iface, f.stay).Scan(&purchaseID); err != nil {
 		t.Fatalf("seed purchase: %v", err)
 	}
-	// INSERT in the FIRST transition's state; apply() then records seq=1 and drives the rest.
 	var ent string
-	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.entitlements
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlements
 		(tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,
 		 time_accounting_mode,end_mode,status,window_ends_at)
 		VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,$6,$7,'VALIDITY_WINDOW','VALIDITY_WINDOW',$8,$9) RETURNING id`,
@@ -198,9 +204,12 @@ func seedEnt(t *testing.T, p *pgxpool.Pool, f fixture, window *time.Time, txns [
 		t.Fatalf("seed entitlement: %v", err)
 	}
 	for _, tr := range txns {
-		if _, err := p.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1,$2,$3,'SEED')`, ent, tr.state, tr.at); err != nil {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1,$2,$3,'SEED')`, ent, tr.state, tr.at); err != nil {
 			t.Fatalf("seed transition %s: %v", tr.state, err)
 		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed entitlement commit: %v", err)
 	}
 	return ent
 }

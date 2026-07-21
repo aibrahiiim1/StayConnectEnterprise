@@ -35,6 +35,9 @@ var (
 	// ErrEmergencyCatalogUnavailable — Emergency Grace is needed but the canonical system catalog is
 	// absent/invalid; a critical operational defect the operator must resolve (fail-closed, whole tx rolls back).
 	ErrEmergencyCatalogUnavailable = errors.New("checkout: emergency-grace catalog unavailable")
+	// ErrConflictingCheckoutEvent — a duplicate checkout for an already-processed episode cited a DIFFERENT
+	// boundary Event than the one that originally established it.
+	ErrConflictingCheckoutEvent = errors.New("checkout: conflicting checkout event for an already-processed episode")
 )
 
 const (
@@ -151,14 +154,19 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 		return res, nil
 	}
 
-	// idempotency gate: the one-per-episode audit row is the durable "already decided" marker.
-	var audited int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM iam_v2.checkout_grace_audit
+	// idempotency gate: the one-per-episode audit row is the durable "already decided" marker. On a duplicate
+	// (item 11) we RESOLVE the ORIGINAL audit and verify the supplied Event is the exact one that established the
+	// boundary — a different checkout Event for an already-processed episode is a CONFLICT, not a silent no-op.
+	var origEvent *string
+	if err := tx.QueryRow(ctx, `SELECT boundary_event_id::text FROM iam_v2.checkout_grace_audit
 		WHERE tenant_id=$1 AND site_id=$2 AND stay_id=$3 AND lifecycle_version=$4`,
-		tenant, site, stayID, episode).Scan(&audited); err != nil {
+		tenant, site, stayID, episode).Scan(&origEvent); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Result{}, err
 	}
-	if audited > 0 {
+	if origEvent != nil {
+		if *origEvent != src.StayEventID {
+			return Result{}, ErrConflictingCheckoutEvent
+		}
 		res.AlreadyProcessed = true
 		res.Reason = "ALREADY_PROCESSED_THIS_EPISODE"
 		return res, nil

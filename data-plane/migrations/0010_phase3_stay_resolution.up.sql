@@ -250,8 +250,10 @@ CREATE TABLE iam_v2.checkout_grace_audit (
   reason_code text NOT NULL CHECK (reason_code ~ '^[A-Z][A-Z0-9_]{0,63}$'),
   grace_entitlement_id uuid,
   -- boundary provenance (item 5/11): the durable Stay Event that established the boundary + its normalization,
-  -- and the bounded fallback reason when the server-clock conservative boundary was used.
-  boundary_event_id uuid,
+  -- and the bounded fallback reason when the server-clock conservative boundary was used. A Phase-3 Checkout
+  -- audit MUST cite a boundary Event (NOT NULL); the provenance trigger proves it is the typed GO checkout event
+  -- for the exact scope with matching seq/normalization.
+  boundary_event_id uuid NOT NULL,
   boundary_event_seq bigint,
   boundary_normalization_version int,
   boundary_reason_code text NOT NULL CHECK (boundary_reason_code ~ '^[A-Z][A-Z0-9_]{0,63}$'),
@@ -404,20 +406,37 @@ CREATE TRIGGER p3_est_insert BEFORE INSERT ON iam_v2.entitlement_state_transitio
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_est_insert_guard();
 REVOKE EXECUTE ON FUNCTION iam_v2.p3_est_insert_guard() FROM PUBLIC;
 
--- (item 5) entitlements.status may ONLY change through iam_v2.apply_entitlement_transition, which sets a
--- tx-local flag before updating the row. A raw status UPDATE that forgets to append history is rejected.
-CREATE OR REPLACE FUNCTION iam_v2.p3_entitlement_status_guard() RETURNS trigger
+-- (item 3/5) UNSPOOFABLE status<->history coherence. A caller-settable session GUC is NOT an authorization
+-- boundary, so there is no such flag: instead a DEFERRED constraint trigger proves AT COMMIT that every
+-- entitlement's current status equals its LATEST recorded transition. A raw `UPDATE entitlements SET status=...`
+-- that does not also append the matching transition leaves status != latest-transition and rolls the whole
+-- transaction back at commit; likewise an entitlement inserted without its initial transition fails closed
+-- (there is no entitlement without history). The privilege model is the second layer: runtime roles receive NO
+-- direct UPDATE grant on entitlements (dark), so only the owner-run controlled function mutates status. Because
+-- the check is deferred, the controlled function may update the row then append the transition in either order
+-- within its transaction.
+CREATE OR REPLACE FUNCTION iam_v2.p3_entitlement_status_coherent() RETURNS trigger
   LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE latest text; cur text;
 BEGIN
-  IF NEW.status IS DISTINCT FROM OLD.status
-     AND current_setting('iam_v2.entitlement_transition', true) IS DISTINCT FROM 'on' THEN
-    RAISE EXCEPTION 'entitlements.status may change only via iam_v2.apply_entitlement_transition';
+  -- re-read the CURRENT (final, at-commit) row status rather than trusting the deferred trigger's captured NEW:
+  -- a row updated several times in one tx queues several deferred events, each carrying a stale intermediate
+  -- NEW — only the final committed status must agree with the latest transition.
+  SELECT status INTO cur FROM iam_v2.entitlements WHERE id = NEW.id;
+  IF cur IS NULL THEN RETURN NULL; END IF; -- row removed within the tx; nothing to check
+  SELECT to_state INTO latest FROM iam_v2.entitlement_state_transitions
+    WHERE entitlement_id = NEW.id ORDER BY seq DESC LIMIT 1;
+  IF latest IS DISTINCT FROM cur THEN
+    RAISE EXCEPTION 'entitlement % status % is not backed by its latest transition % (use apply_entitlement_transition)',
+      NEW.id, cur, COALESCE(latest, 'NONE');
   END IF;
-  RETURN NEW;
+  RETURN NULL;
 END $fn$;
-CREATE TRIGGER p3_entitlement_status_guard BEFORE UPDATE ON iam_v2.entitlements
-  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_entitlement_status_guard();
-REVOKE EXECUTE ON FUNCTION iam_v2.p3_entitlement_status_guard() FROM PUBLIC;
+CREATE CONSTRAINT TRIGGER p3_entitlement_status_coherent
+  AFTER INSERT OR UPDATE ON iam_v2.entitlements
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_entitlement_status_coherent();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_entitlement_status_coherent() FROM PUBLIC;
 
 -- (item 5) THE controlled transition operation: locks the entitlement, updates status + terminal/activation
 -- fields, and appends the matching history row ATOMICALLY (exactly one concurrent writer wins via the row lock).
@@ -440,7 +459,7 @@ BEGIN
   v_term := CASE WHEN p_to='TERMINATED' THEN
     (CASE WHEN p_reason IN ('TIME','DATA','HARD_EXPIRY','CHECKOUT','ADMIN','REVOKED','SUPERSEDED','CONVERTED','TRANSFERRED','CANCELLED','OTHER')
           THEN p_reason ELSE 'OTHER' END) ELSE NULL END;
-  SET LOCAL iam_v2.entitlement_transition = 'on';
+  -- no session flag: status/history coherence is proven by the DEFERRED p3_entitlement_status_coherent trigger.
   UPDATE iam_v2.entitlements SET
     status = p_to,
     activated_at    = CASE WHEN p_to='ACTIVE' AND activated_at IS NULL THEN v_at ELSE activated_at END,
@@ -579,10 +598,21 @@ BEGIN
       (tenant_id,site_id,service_plan_id,revision_no,name,down_kbps,up_kbps,max_concurrent_devices,device_limit_policy,time_accounting_mode,data_quota_bytes)
       VALUES (p_tenant,p_site,v_plan,1,'emergency-grace',5000,2000,1,'REJECT_NEW_DEVICE','VALIDITY_WINDOW',524288000)
       RETURNING id INTO v_spr;
+  ELSE
+    -- (item 8) verify an EXISTING revision has the EXACT approved attributes BEFORE re-pointing anything; a
+    -- poisoned revision RAISES and (via rollback) leaves every current-revision pointer unchanged.
+    IF NOT EXISTS (SELECT 1 FROM iam_v2.service_plan_revisions WHERE id=v_spr
+        AND down_kbps=5000 AND up_kbps=2000 AND max_concurrent_devices=1
+        AND device_limit_policy='REJECT_NEW_DEVICE' AND time_accounting_mode='VALIDITY_WINDOW' AND data_quota_bytes=524288000) THEN
+      RAISE EXCEPTION 'reserved emergency service-plan revision 1 has mismatching attributes (poisoned; fail closed)';
+    END IF;
   END IF;
   UPDATE iam_v2.service_plans SET current_revision_id=v_spr WHERE id=v_plan AND current_revision_id IS DISTINCT FROM v_spr;
   -- package
   SELECT id INTO v_pkg FROM iam_v2.internet_packages WHERE tenant_id=p_tenant AND site_id=p_site AND code='__sys_emergency_grace_pkg__';
+  IF v_pkg IS NOT NULL AND NOT EXISTS (SELECT 1 FROM iam_v2.internet_packages WHERE id=v_pkg AND is_system AND active) THEN
+    RAISE EXCEPTION 'reserved emergency package exists but is not system/active (poisoned; fail closed)';
+  END IF;
   IF v_pkg IS NULL THEN
     INSERT INTO iam_v2.internet_packages(tenant_id,site_id,code,is_system)
       VALUES (p_tenant,p_site,'__sys_emergency_grace_pkg__',true) RETURNING id INTO v_pkg;
@@ -594,8 +624,22 @@ BEGIN
       VALUES (p_tenant,p_site,v_pkg,1,v_spr,'CHECKOUT_GRACE',0,ARRAY['NOT_REQUIRED']::text[],
               '{"end_mode":"GRACE_AFTER_CHECKOUT","grace_duration_seconds":3600,"policy_version":"EMERGENCY_GRACE_V1"}'::jsonb)
       RETURNING id INTO v_ipr;
+  ELSE
+    -- (item 8) verify the EXISTING package revision exactly (type/price/settlement/duration/end/version + its
+    -- Plan-Revision relationship). Any mismatch is poisoned → RAISE (pointers unchanged).
+    IF NOT EXISTS (SELECT 1 FROM iam_v2.internet_package_revisions WHERE id=v_ipr
+        AND package_type='CHECKOUT_GRACE' AND price_minor=0 AND settlement_methods=ARRAY['NOT_REQUIRED']::text[]
+        AND service_plan_revision_id=v_spr
+        AND (duration_policy->>'grace_duration_seconds')='3600' AND (duration_policy->>'end_mode')='GRACE_AFTER_CHECKOUT'
+        AND (duration_policy->>'policy_version')='EMERGENCY_GRACE_V1') THEN
+      RAISE EXCEPTION 'reserved emergency package revision 1 has mismatching attributes (poisoned; fail closed)';
+    END IF;
   END IF;
   UPDATE iam_v2.internet_packages SET current_revision_id=v_ipr WHERE id=v_pkg AND current_revision_id IS DISTINCT FROM v_ipr;
+  -- final coherence assertion (the whole graph must be exactly OK after bootstrap).
+  IF iam_v2.emergency_grace_health(p_tenant,p_site) <> 'OK' THEN
+    RAISE EXCEPTION 'emergency-grace catalog not OK after bootstrap (fail closed)';
+  END IF;
 END $fn$;
 
 -- Preflight/health check (item 6): returns 'OK' when the canonical Emergency catalog is present with the EXACT
@@ -654,6 +698,17 @@ BEGIN
       VALUES (p_tenant,p_site,p_pkg_rev,p_duration,p_down,p_up,p_quota,p_dev_limit,p_dev_policy,1);
     RETURN 1;
   END IF;
+  -- idempotent re-publication of the IDENTICAL typed policy does NOT bump the version (a material change does).
+  IF EXISTS (SELECT 1 FROM iam_v2.site_checkout_grace_config
+             WHERE tenant_id=p_tenant AND site_id=p_site
+               AND grace_package_revision_id IS NOT DISTINCT FROM p_pkg_rev
+               AND grace_duration_seconds IS NOT DISTINCT FROM p_duration
+               AND grace_down_kbps IS NOT DISTINCT FROM p_down AND grace_up_kbps IS NOT DISTINCT FROM p_up
+               AND grace_data_quota_bytes IS NOT DISTINCT FROM p_quota
+               AND grace_device_limit IS NOT DISTINCT FROM p_dev_limit
+               AND grace_device_limit_policy IS NOT DISTINCT FROM p_dev_policy) THEN
+    RETURN v_ver;
+  END IF;
   UPDATE iam_v2.site_checkout_grace_config SET
     grace_package_revision_id=p_pkg_rev, grace_duration_seconds=p_duration, grace_down_kbps=p_down,
     grace_up_kbps=p_up, grace_data_quota_bytes=p_quota, grace_device_limit=p_dev_limit,
@@ -662,6 +717,35 @@ BEGIN
   RETURN v_ver+1;
 END $fn$;
 REVOKE EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text) FROM PUBLIC;
+
+-- (item 9) config_version integrity: a material policy change REQUIRES config_version = OLD+1; the version can
+-- never decrease or jump; and the version may not be bumped without a change. This makes a raw UPDATE that
+-- changes policy fields while leaving/decreasing/jumping config_version fail closed (the controlled publish
+-- function is the only writer that satisfies it).
+CREATE OR REPLACE FUNCTION iam_v2.p3_grace_config_version_guard() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE policy_changed boolean;
+BEGIN
+  policy_changed := (NEW.grace_package_revision_id IS DISTINCT FROM OLD.grace_package_revision_id
+    OR NEW.grace_duration_seconds IS DISTINCT FROM OLD.grace_duration_seconds
+    OR NEW.grace_down_kbps IS DISTINCT FROM OLD.grace_down_kbps OR NEW.grace_up_kbps IS DISTINCT FROM OLD.grace_up_kbps
+    OR NEW.grace_data_quota_bytes IS DISTINCT FROM OLD.grace_data_quota_bytes
+    OR NEW.grace_device_limit IS DISTINCT FROM OLD.grace_device_limit
+    OR NEW.grace_device_limit_policy IS DISTINCT FROM OLD.grace_device_limit_policy);
+  IF NEW.config_version < OLD.config_version THEN
+    RAISE EXCEPTION 'site grace config_version cannot decrease (% -> %)', OLD.config_version, NEW.config_version;
+  END IF;
+  IF policy_changed AND NEW.config_version <> OLD.config_version + 1 THEN
+    RAISE EXCEPTION 'a grace policy change must increment config_version by exactly 1 (use publish_checkout_grace_config)';
+  END IF;
+  IF NOT policy_changed AND NEW.config_version <> OLD.config_version THEN
+    RAISE EXCEPTION 'config_version may not change without a policy change';
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_grace_config_version_guard BEFORE UPDATE ON iam_v2.site_checkout_grace_config
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_grace_config_version_guard();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_grace_config_version_guard() FROM PUBLIC;
 
 -- ============================================================================
 -- (4j) resolvable operational-alert model (item 12): the immutable audit rows are the EVIDENCE; an alert's
@@ -691,7 +775,12 @@ BEGIN
     IF NEW.seq <> 1 OR NEW.action <> 'OPEN' THEN RAISE EXCEPTION 'first alert action must be seq=1 OPEN'; END IF;
   ELSE
     IF NEW.seq <> prev_seq + 1 THEN RAISE EXCEPTION 'alert action seq must be contiguous'; END IF;
-    IF prev_action = 'RESOLVED' THEN RAISE EXCEPTION 'a RESOLVED alert is terminal'; END IF;
+    -- (item 10) legal edges only: OPEN->ACKNOWLEDGED|RESOLVED, ACKNOWLEDGED->RESOLVED, RESOLVED terminal.
+    -- Rejects OPEN->OPEN, ACKNOWLEDGED->OPEN, repeated ACKNOWLEDGED, and any action after RESOLVED.
+    IF NOT ( (prev_action='OPEN'         AND NEW.action IN ('ACKNOWLEDGED','RESOLVED'))
+          OR (prev_action='ACKNOWLEDGED' AND NEW.action='RESOLVED') ) THEN
+      RAISE EXCEPTION 'illegal alert action edge % -> %', prev_action, NEW.action;
+    END IF;
   END IF;
   IF NEW.action IN ('ACKNOWLEDGED','RESOLVED') AND NEW.actor IS NULL THEN
     RAISE EXCEPTION 'ACKNOWLEDGED/RESOLVED alert action requires an actor';

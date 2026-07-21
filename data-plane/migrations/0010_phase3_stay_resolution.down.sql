@@ -19,6 +19,8 @@ DROP FUNCTION IF EXISTS iam_v2.bootstrap_emergency_grace(uuid,uuid);
 DROP FUNCTION IF EXISTS iam_v2.emergency_grace_health(uuid,uuid);
 
 -- (4i/4j/4k) grace-config publish + alert-action model + audit provenance
+DROP TRIGGER IF EXISTS p3_grace_config_version_guard ON iam_v2.site_checkout_grace_config;
+DROP FUNCTION IF EXISTS iam_v2.p3_grace_config_version_guard();
 DROP FUNCTION IF EXISTS iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text);
 DROP TRIGGER IF EXISTS p3_checkout_audit_provenance ON iam_v2.checkout_grace_audit;
 DROP FUNCTION IF EXISTS iam_v2.p3_checkout_audit_provenance();
@@ -29,8 +31,8 @@ DROP FUNCTION IF EXISTS iam_v2.p3_alert_action_guard();
 DROP TABLE IF EXISTS iam_v2.checkout_grace_alert_actions;
 
 -- (4d/4e) history tables + guards (append-only + insert state machines) + controlled transition
-DROP TRIGGER IF EXISTS p3_entitlement_status_guard ON iam_v2.entitlements;
-DROP FUNCTION IF EXISTS iam_v2.p3_entitlement_status_guard();
+DROP TRIGGER IF EXISTS p3_entitlement_status_coherent ON iam_v2.entitlements;
+DROP FUNCTION IF EXISTS iam_v2.p3_entitlement_status_coherent();
 DROP FUNCTION IF EXISTS iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text);
 DROP TRIGGER IF EXISTS p3_est_appendonly ON iam_v2.entitlement_state_transitions;
 DROP TRIGGER IF EXISTS p3_est_insert ON iam_v2.entitlement_state_transitions;
