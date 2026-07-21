@@ -1,0 +1,4 @@
+commit 324dbebb6568681a573b2ed36bf13c436dd6ad81
+Date:   Tue Jul 21 15:01:49 2026 +0300
+
+    Phase 3 controlled-writer manifest documentation sync (inventory_head): doc-only

@@ -1,4 +1,0 @@
-commit de9c1890105aac0ecc0a7fc8013d216325099eea
-Date:   Tue Jul 21 14:47:39 2026 +0300
-
-    Phase 3 Increment-7 EXECUTE-only caller proof for the controlled-writer model (inventory_head): PG16-green + gate 225/225

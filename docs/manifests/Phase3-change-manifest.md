@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `de9c1890105aac0ecc0a7fc8013d216325099eea`
-- **Provenance (generation HEAD = inventory_head):** `de9c1890105aac0ecc0a7fc8013d216325099eea`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `324dbebb6568681a573b2ed36bf13c436dd6ad81`
+- **Provenance (generation HEAD = inventory_head):** `324dbebb6568681a573b2ed36bf13c436dd6ad81`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 106
@@ -66,7 +66,7 @@
 | `data-plane/migrations/0010_phase3_stay_resolution.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Phase 3 Increment-7 EXECUTE-only caller proof for the controlled-writer model (inventory_head): PG16-green + gate 225/225 |
 | `deploy/systemd/stayconnect-pmsd.service` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | @ Phase 3 increment 3 (inventory_head): pmsd read-only PMS connector daemon (ADR-0001), DARK |
 | `docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/architecture/Phase3-Controlled-Writer-Privilege-Manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 Increment-7 controlled-writer first-insert + full-policy gaps (inventory_head): PG16-green + gate 196/196 |
+| `docs/architecture/Phase3-Controlled-Writer-Privilege-Manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 controlled-writer manifest documentation sync (inventory_head): doc-only |
 | `docs/architecture/Phase3-Privilege-Matrix.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 3 Increment-7 Checkout history-integrity + emergency-catalog + alert + provenance corrections (inventory_head): PG16-green + gate 172/172 |
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
@@ -76,31 +76,31 @@
 | `docs/architecture/adr/ADR-0001-pmsd-connector-ownership.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
-| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/GIT_STAT_324dbeb.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_de9c189.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `exports/chatgpt/stayconnectenterprise/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 Checkout history-integrity corrections (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
@@ -110,7 +110,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 Increment-7 Checkout history-integrity corrections (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 3 Increment-7 EXECUTE-only caller proof for the controlled-writer model (inventory_head): PG16-green + gate 225/225 |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `iam_v2_scratch/phase3_0010_lifecycle.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Increment-7 EXECUTE-only caller proof for the controlled-writer model (inventory_head): PG16-green + gate 225/225 |
 | `scripts/edge-migrate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
@@ -175,7 +175,7 @@
  .../migrations/0010_phase3_stay_resolution.up.sql  | 1230 ++++++++++++++++++++
  deploy/systemd/stayconnect-pmsd.service            |   41 +
  .../StayConnect-IAM-Phase2-Live-Dark-Acceptance.md |    2 +-
- .../Phase3-Controlled-Writer-Privilege-Manifest.md |   67 ++
+ .../Phase3-Controlled-Writer-Privilege-Manifest.md |   92 ++
  docs/architecture/Phase3-Privilege-Matrix.md       |   34 +
  .../StayConnect-IAM-Phase0-Contract.md             |   16 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   12 +-
@@ -185,13 +185,13 @@
  .../adr/ADR-0001-pmsd-connector-ownership.md       |   53 +
  docs/context/StayConnect-IAM-Handoff.md            |   16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 ++
- docs/manifests/Phase3-change-manifest.md           |  350 ++++++
+ docs/manifests/Phase3-change-manifest.md           |  352 ++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 276172 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 103225 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 41998 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 276230 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 103193 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 41999 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_324dbeb.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
- .../chatgpt/phase-evidence/GIT_STAT_de9c189.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -209,7 +209,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   12 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  350 ++++++
+ .../Phase3-change-manifest.md                      |  352 ++++++
  .../StayConnect-IAM-Handoff.md                     |   16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   16 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   12 +-
@@ -227,7 +227,7 @@
  tools/project-state.py                             |   49 +-
  .../tests/project_state_validator/run_mutations.py |   69 +-
  tools/validate-project-state.sh                    |    2 +-
- 106 files changed, 14334 insertions(+), 284 deletions(-)
+ 106 files changed, 14363 insertions(+), 284 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -244,8 +244,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_d5263d7.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_de9c189.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_324dbeb.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_de9c189.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -257,6 +257,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+324dbeb Phase 3 controlled-writer manifest documentation sync (inventory_head): doc-only
+f82cef2 @ Phase 3 Increment-7 EXECUTE-only caller proof (delivery_head): complete staged manifest + rebuilt packs + pointer
 de9c189 Phase 3 Increment-7 EXECUTE-only caller proof for the controlled-writer model (inventory_head): PG16-green + gate 225/225
 7d01e72 @ Phase 3 Increment-7 config-DELETE + per-family writer-owner (delivery_head): complete staged manifest + rebuilt packs + pointer
 d5263d7 Phase 3 Increment-7 config-DELETE + per-family writer-owner gaps (inventory_head): PG16-green + gate 209/209
