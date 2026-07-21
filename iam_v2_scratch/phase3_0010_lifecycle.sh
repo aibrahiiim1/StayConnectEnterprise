@@ -451,6 +451,108 @@ expect_err "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3700,4
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET grace_duration_seconds=9999 WHERE tenant_id='$T' AND site_id='$S';" && ok "raw policy UPDATE without version bump rejected (§9)" || no "raw policy update accepted"
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET config_version=config_version-1 WHERE tenant_id='$T' AND site_id='$S';" && ok "config_version decrease rejected (§9)" || no "config_version decrease accepted"
 
+echo '== CONTROLLED ALERT LIFECYCLE + GOVERNED GRACE PUBLICATION (§9/§10) =='
+# The appliance's own operator table lives in migration 0001; the disposable fixture builds iam_v2 only, so the
+# gate provisions it here — the controlled operations validate a REAL actor against it, which is the contract
+# under test.
+Q "CREATE TABLE IF NOT EXISTS public.operators (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid,
+     email text NOT NULL, display_name text, password_hash text, status text NOT NULL DEFAULT 'active',
+     created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());" >/dev/null
+OP="$(Q "INSERT INTO public.operators(tenant_id,email,status) VALUES ('$T','gate-op@test.local','active') RETURNING id;")"
+OP_OTHER="$(Q "INSERT INTO public.operators(tenant_id,email,status) VALUES (gen_random_uuid(),'other-tenant@test.local','active') RETURNING id;")"
+OP_DISABLED="$(Q "INSERT INTO public.operators(tenant_id,email,status) VALUES ('$T','disabled@test.local','disabled') RETURNING id;")"
+
+# a real alert-bearing audit: emergency grace on a checked-out stay
+AST="$(Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version,effective_checkout_at,posting_allowed) VALUES (gen_random_uuid(),'$T','$S','$I2','RAL','SAL','CHECKED_OUT',1,0,now() - interval '1 hour',false) RETURNING id;")"
+AEV="$(Q "INSERT INTO iam_v2.stay_events(tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,pms_timestamp_utc,admission_kind,admission_runtime_generation,resync_generation,received_at) VALUES ('$T','$S','$I2','AL-GO','GO','{}'::jsonb,now() - interval '1 hour','LIVE',1,0,now()) RETURNING id;")"
+Q "UPDATE iam_v2.stay_events SET processing_status='APPLIED', processed_at=now(), stay_id='$AST' WHERE id='$AEV';" >/dev/null
+Q "SELECT iam_v2.bootstrap_emergency_grace('$T','$S');" >/dev/null
+GPKG="$(Q "SELECT current_revision_id FROM iam_v2.internet_packages WHERE tenant_id='$T' AND site_id='$S' AND code='__sys_emergency_grace_pkg__';")"
+GSPR="$(Q "SELECT service_plan_revision_id FROM iam_v2.internet_package_revisions WHERE id='$GPKG';")"
+GENT="$(Q "SELECT gen_random_uuid();")"; GPUR="$(Q "SELECT gen_random_uuid();")"
+Q "DO \$do\$ BEGIN
+  INSERT INTO iam_v2.purchases(id,tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state,checkout_episode) VALUES ('$GPUR','$T','$S','$GPKG','$I2','$AST','EMERGENCY_GRACE',0,'GRANTED',1);
+  INSERT INTO iam_v2.entitlements(id,tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status,window_ends_at) VALUES ('$GENT','$T','$S','$AST','$I2','$GPUR','{}'::jsonb,'$GSPR','$GPKG','VALIDITY_WINDOW','GRACE_AFTER_CHECKOUT','ACTIVE', now() + interval '1 hour');
+  PERFORM iam_v2.apply_entitlement_transition('$GENT','ACTIVE',now() - interval '1 hour','GRACE_CONVERSION');
+END \$do\$;" >/dev/null
+AUD="$(Q "INSERT INTO iam_v2.checkout_grace_audit(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,alert_code,reason_code,boundary_at,boundary_clock_suspect,grace_entitlement_id,boundary_event_id,boundary_event_seq,boundary_normalization_version,boundary_reason_code,config_version) SELECT '$T','$S','$I2','$AST',1,'EMERGENCY_GRACE',true,'EMERGENCY_GRACE_V1','CHECKOUT_GRACE_CONFIG_INVALID','POLICY_MISMATCH',e.pms_timestamp_utc,false,'$GENT',e.id,e.sequence_version,e.normalization_version,'TRUSTED_PMS_CHECKOUT_TS',1 FROM iam_v2.stay_events e WHERE e.id='$AEV' RETURNING id;")"
+[ -n "$AUD" ] && ok "alert-bearing checkout audit created (§9)" || no "could not create the alert audit"
+# THE property: the alert opened its own lifecycle in the same transaction
+[ "$(Q "SELECT count(*) FROM iam_v2.checkout_grace_alert_actions WHERE audit_id='$AUD' AND seq=1 AND action='OPEN';")" = 1 ] \
+  && ok "an alert-bearing audit OPENS its own lifecycle (no alert without a lifecycle) (§9)" || no "alert has no OPEN action"
+[ "$(Q "SELECT alert_state||'/'||alert_seq FROM iam_v2.active_operational_alerts WHERE audit_id='$AUD';")" = "OPEN/1" ] \
+  && ok "the queue exposes the lifecycle head + sequence for optimistic actions (§9)" || no "queue does not expose the head state"
+# actor rules
+expect_err "SELECT iam_v2.record_alert_action('$T','$S','$AUD','ACKNOWLEDGED',NULL,'X','OPEN');" \
+  && ok "an alert action without an actor is refused (§9)" || no "actorless action accepted"
+expect_err "SELECT iam_v2.record_alert_action('$T','$S','$AUD','ACKNOWLEDGED','$OP_OTHER','X','OPEN');" \
+  && ok "an actor from another tenant is refused (§9)" || no "cross-tenant actor accepted"
+expect_err "SELECT iam_v2.record_alert_action('$T','$S','$AUD','ACKNOWLEDGED','$OP_DISABLED','X','OPEN');" \
+  && ok "a disabled operator cannot act (§9)" || no "disabled actor accepted"
+# scope + action vocabulary
+expect_err "SELECT iam_v2.record_alert_action('$T','$S','$AUD','ACK','$OP','X','OPEN');" \
+  && ok "the legacy 'ACK' action is refused (the DB vocabulary is authoritative) (§9)" || no "ACK accepted"
+expect_err "SELECT iam_v2.record_alert_action('$T','$S','$AUD','OPEN','$OP','X','OPEN');" \
+  && ok "an operator cannot re-OPEN an alert (§9)" || no "operator OPEN accepted"
+FT2="$(Q "INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id;")"
+FS2="$(Q "INSERT INTO public.sites(id,tenant_id) VALUES (gen_random_uuid(),'$FT2') RETURNING id;")"
+expect_err "SELECT iam_v2.record_alert_action('$FT2','$FS2','$AUD','ACKNOWLEDGED','$OP','X','OPEN');" \
+  && ok "an alert from another site is not actionable (§9)" || no "cross-site action accepted"
+# optimistic state
+expect_err "SELECT iam_v2.record_alert_action('$T','$S','$AUD','ACKNOWLEDGED','$OP','X','ACKNOWLEDGED');" \
+  && ok "a stale expected-state is refused (§9)" || no "stale expected state accepted"
+[ "$(Q "SELECT iam_v2.record_alert_action('$T','$S','$AUD','ACKNOWLEDGED','$OP','REVIEWED','OPEN');")" = 2 ] \
+  && ok "ACKNOWLEDGED appended at the next contiguous sequence (§9)" || no "acknowledge failed"
+expect_err "SELECT iam_v2.record_alert_action('$T','$S','$AUD','ACKNOWLEDGED','$OP','REVIEWED','ACKNOWLEDGED');" \
+  && ok "acknowledging twice is refused (§9)" || no "double acknowledge accepted"
+[ "$(Q "SELECT count(*) FROM iam_v2.active_operational_alerts WHERE audit_id='$AUD' AND alert_state='ACKNOWLEDGED';")" = 1 ] \
+  && ok "an ACKNOWLEDGED alert stays in the queue (§9)" || no "acknowledged alert left the queue"
+[ "$(Q "SELECT iam_v2.record_alert_action('$T','$S','$AUD','RESOLVED','$OP','FIXED','ACKNOWLEDGED');")" = 3 ] \
+  && ok "RESOLVED appended (§9)" || no "resolve failed"
+[ "$(Q "SELECT count(*) FROM iam_v2.active_operational_alerts WHERE audit_id='$AUD';")" = 0 ] \
+  && ok "a RESOLVED alert leaves the queue (§9)" || no "resolved alert still queued"
+expect_err "SELECT iam_v2.record_alert_action('$T','$S','$AUD','RESOLVED','$OP','FIXED','ACKNOWLEDGED');" \
+  && ok "no action after RESOLVED (§9)" || no "post-resolution action accepted"
+expect_err "UPDATE iam_v2.checkout_grace_alert_actions SET action='OPEN' WHERE audit_id='$AUD' AND seq=3;" \
+  && ok "the alert history is immutable (§9)" || no "alert history mutated"
+
+echo '== GOVERNED grace-policy publication (§10) =='
+PT="$(Q "INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id;")"
+PS_="$(Q "INSERT INTO public.sites(id,tenant_id) VALUES (gen_random_uuid(),'$PT') RETURNING id;")"
+POP="$(Q "INSERT INTO public.operators(tenant_id,email,status) VALUES ('$PT','pub@test.local','active') RETURNING id;")"
+# wrong expected version (nothing published yet, caller claims 5)
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,5,'$POP','INIT');" \
+  && ok "a stale expected config_version is refused (§10)" || no "stale version accepted"
+# capability-disabled policy
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,3600,4000,1500,524288000,2,'DISCONNECT_OLDEST',86400,0,'$POP','INIT');" \
+  && ok "a capability-disabled device policy is refused, not approximated (§10)" || no "unsupported policy accepted"
+# actor rules
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,NULL,'INIT');" \
+  && ok "publication without an actor is refused (§10)" || no "actorless publication accepted"
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$OP','INIT');" \
+  && ok "an actor from another tenant cannot publish (§10)" || no "cross-tenant publisher accepted"
+# a non-grace package is refused
+Q "INSERT INTO iam_v2.service_plans(id,tenant_id,site_id,code,enabled) VALUES ('11111111-0000-0000-0000-000000000001','$PT','$PS_','p',true);" >/dev/null
+Q "INSERT INTO iam_v2.service_plan_revisions(id,tenant_id,site_id,service_plan_id,revision_no,down_kbps,up_kbps,max_concurrent_devices,device_limit_policy,time_accounting_mode,data_quota_bytes) VALUES ('11111111-0000-0000-0000-000000000002','$PT','$PS_','11111111-0000-0000-0000-000000000001',1,4000,1500,2,'REJECT_NEW_DEVICE','VALIDITY_WINDOW',524288000);" >/dev/null
+Q "INSERT INTO iam_v2.internet_packages(id,tenant_id,site_id,code,is_system) VALUES ('11111111-0000-0000-0000-000000000003','$PT','$PS_','guest',false);" >/dev/null
+Q "INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,settlement_methods,duration_policy) VALUES ('11111111-0000-0000-0000-000000000004','$PT','$PS_','11111111-0000-0000-0000-000000000003',1,'11111111-0000-0000-0000-000000000002','FREE_STAY',0,ARRAY['NOT_REQUIRED']::text[],'{}'::jsonb);" >/dev/null
+Q "UPDATE iam_v2.internet_packages SET current_revision_id='11111111-0000-0000-0000-000000000004' WHERE id='11111111-0000-0000-0000-000000000003';" >/dev/null
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','11111111-0000-0000-0000-000000000004',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','INIT');" \
+  && ok "a non-CHECKOUT_GRACE package cannot back the grace policy (§10)" || no "wrong package type accepted"
+# the happy path, then the audit and the conflict
+[ "$(Q "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','INITIAL_POLICY');")" = 1 ] \
+  && ok "governed publication creates version 1 (§10)" || no "governed publication failed"
+[ "$(Q "SELECT actor='$POP' AND reason_code='INITIAL_POLICY' FROM iam_v2.checkout_grace_policy_publications WHERE tenant_id='$PT' AND site_id='$PS_' AND config_version=1;")" = t ] \
+  && ok "the publication is attributed to its actor with a bounded reason (§10)" || no "publication audit missing"
+expect_err "UPDATE iam_v2.checkout_grace_policy_publications SET reason_code='X' WHERE tenant_id='$PT' AND config_version=1;" \
+  && ok "the publication audit is immutable (§10)" || no "publication audit mutated"
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,1800,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','SECOND');" \
+  && ok "a second publication with the SAME stale version is a conflict, not an overwrite (§10)" || no "stale publish overwrote"
+[ "$(Q "SELECT grace_duration_seconds FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$PT' AND site_id='$PS_';")" = 3600 ] \
+  && ok "the refused publication changed nothing (§10)" || no "refused publication mutated the policy"
+[ "$(Q "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,1800,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,1,'$POP','SECOND');")" = 2 ] \
+  && ok "publishing with the CURRENT version succeeds and bumps once (§10)" || no "correct-version publish failed"
+
 echo '== ACCOUNTING ATTRIBUTION: session binding intervals, watermarks, delayed samples (§8) =='
 # A rebound session must not carry its pre-boundary samples to the next Entitlement, a frozen decision must not
 # be rewritten by a late sample, and no session may exist without attribution history.
@@ -650,7 +752,12 @@ RUN "${APPLY_ARGS[@]}" >"$O1" 2>&1 & P1=$!
 RUN "${APPLY_ARGS[@]}" >"$O2" 2>&1 & P2=$!
 wait $P1; E1=$?; wait $P2; E2=$?
 [ "$E1" = 0 ] && [ "$E2" = 0 ] && ok "both concurrent runners exit 0" || no "a concurrent runner failed (e1=$E1 e2=$E2)"
-[ "$(cat "$O1" "$O2" | grep -c 'apply 0010_phase3_stay_resolution (under lock)')" = 1 ] && ok "exactly one runner applied under lock" || no "apply count != 1"
+if [ "$(cat "$O1" "$O2" | grep -c 'apply 0010_phase3_stay_resolution (under lock)')" = 1 ]; then
+  ok "exactly one runner applied under lock"
+else
+  # a silent count mismatch is unactionable: show what the runners actually said.
+  no "apply count != 1"; echo "    --- runner 1 ---"; sed 's/^/    /' "$O1" | tail -8; echo "    --- runner 2 ---"; sed 's/^/    /' "$O2" | tail -8
+fi
 [ "$(cat "$O1" "$O2" | grep -c 'skip-after-lock 0010')" = 1 ] && ok "exactly one runner reported skip-after-lock" || no "skip-after-lock count != 1"
 [ "$(cat "$O1" "$O2" | grep -ci 'already exists')" = 0 ] && ok "no 'already exists' (no partial DDL / no pre-lock race)" || no "'already exists' seen (racy DDL)"
 [ "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase3_stay_resolution';")" = 1 ] && ok "exactly one ledger row after concurrent apply" || no "ledger row count != 1"

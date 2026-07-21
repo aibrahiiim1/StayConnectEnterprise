@@ -140,8 +140,14 @@ ALTER TABLE iam_v2.stays
     CHECK (effective_checkout_at IS NULL OR status IN ('CHECKED_OUT','POST_STAY_ACTIVE')),
   -- (item 10) a CHECKED_OUT Stay MUST carry its boundary (posting_allowed=false is already implied by the base
   -- posting_only_in_house CHECK: CHECKED_OUT<>IN_HOUSE => posting_allowed=false).
+  --
+  -- NOT VALID, deliberately. effective_checkout_at is introduced BY this migration, so any Stay that departed
+  -- before it ran — or before a rollback dropped the column — has no boundary to show. Validating retroactively
+  -- would make the migration fail on exactly the databases that have been running longest, and would make the
+  -- rollback drill unrepeatable. NOT VALID enforces the rule on every INSERT and UPDATE from now on, which is
+  -- what the invariant is actually about; the historical rows are not rewritten to look like they complied.
   ADD CONSTRAINT stays_checkedout_needs_boundary
-    CHECK (status <> 'CHECKED_OUT' OR effective_checkout_at IS NOT NULL),
+    CHECK (status <> 'CHECKED_OUT' OR effective_checkout_at IS NOT NULL) NOT VALID,
   -- all-or-none occupancy evidence tuple
   ADD CONSTRAINT stays_occupancy_all_or_none CHECK (
     (occupancy_evidence_at IS NULL AND occupancy_ingested_at IS NULL AND occupancy_revision_id IS NULL
@@ -302,11 +308,7 @@ REVOKE EXECUTE ON FUNCTION iam_v2.p3_checkout_grace_audit_appendonly() FROM PUBL
 -- active operational-alert view (item 11): the durable audit rows carrying a critical alert, surfaced as an
 -- addressable operational queue Hotel-Admin/monitoring can read and resolve. An alert stored only inside
 -- historical evidence is not operational on its own — this view IS the sourced queue.
-CREATE VIEW iam_v2.active_operational_alerts AS
-  SELECT id AS audit_id, tenant_id, site_id, pms_interface_id, stay_id, lifecycle_version,
-         alert_code, trigger, policy_version, reason_code, boundary_at, boundary_clock_suspect, created_at
-  FROM iam_v2.checkout_grace_audit
-  WHERE alert_code IS NOT NULL;
+-- (the resolvable-alert VIEW is created further down, once its lifecycle table exists)
 
 -- ============================================================================
 -- (4d) entitlement_state_transitions — APPEND-ONLY immutable lifecycle history with effective timestamps, so a
@@ -1368,17 +1370,203 @@ CREATE TRIGGER p3_alert_action_appendonly BEFORE UPDATE OR DELETE ON iam_v2.chec
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_alert_action_guard();
 REVOKE EXECUTE ON FUNCTION iam_v2.p3_alert_action_guard() FROM PUBLIC;
 
--- redefine the active view: an alert-bearing audit row whose latest action is not RESOLVED (an audit row with
--- no action yet is implicitly OPEN and therefore active).
+-- An alert-bearing audit row OPENS its own lifecycle in the SAME transaction. Leaving the OPEN row to the
+-- application would allow an alert that exists but has no lifecycle — invisible to the queue, impossible to
+-- acknowledge — so the database creates it structurally instead.
+CREATE OR REPLACE FUNCTION iam_v2.p3_alert_open_on_audit() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+BEGIN
+  IF NEW.alert_code IS NOT NULL THEN
+    INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id, site_id, audit_id, seq, action, reason_code)
+      VALUES (NEW.tenant_id, NEW.site_id, NEW.id, 1, 'OPEN', NEW.reason_code);
+  END IF;
+  RETURN NULL;
+END $fn$;
+CREATE TRIGGER p3_alert_open_on_audit AFTER INSERT ON iam_v2.checkout_grace_audit
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_alert_open_on_audit();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_alert_open_on_audit() FROM PUBLIC;
+
+-- THE controlled alert-lifecycle operation. Callers never insert actions directly: they name the audit, the
+-- action they intend, who they are, why, and WHAT STATE THEY BELIEVE THE ALERT IS IN. That last part is what
+-- makes two operators clicking Acknowledge at the same moment resolve to exactly one winner and one clear
+-- conflict, instead of one silently overwriting the other's view of the world.
+--
+-- Returns the new sequence number. Raises with a bounded, machine-greppable prefix so an API layer can map
+-- the failure to the right HTTP status without parsing prose:
+--   ALERT_NOT_FOUND / ALERT_STATE_CONFLICT / ALERT_ACTOR_INVALID / ALERT_ACTION_INVALID
+CREATE OR REPLACE FUNCTION iam_v2.record_alert_action(
+    p_tenant uuid, p_site uuid, p_audit uuid, p_action text,
+    p_actor uuid, p_reason text, p_expected_state text) RETURNS bigint
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_seq bigint; v_head text; v_head_seq bigint; v_audit uuid;
+BEGIN
+  IF p_action NOT IN ('ACKNOWLEDGED','RESOLVED') THEN
+    -- OPEN belongs to the audit that raised the alert; an operator can only move it forward.
+    RAISE EXCEPTION 'ALERT_ACTION_INVALID: % is not an operator action', p_action;
+  END IF;
+  IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'ALERT_ACTION_INVALID: reason must be a bounded machine code';
+  END IF;
+  -- scope: the alert must belong to THIS tenant+site, and the row lock serializes the whole lifecycle
+  SELECT id INTO v_audit FROM iam_v2.checkout_grace_audit
+    WHERE id = p_audit AND tenant_id = p_tenant AND site_id = p_site AND alert_code IS NOT NULL
+    FOR UPDATE;
+  IF v_audit IS NULL THEN
+    RAISE EXCEPTION 'ALERT_NOT_FOUND: no alert % in this scope', p_audit;
+  END IF;
+  -- actor: an existing, active operator of the SAME tenant. An action nobody can be held to is not an audit.
+  IF p_actor IS NULL THEN
+    RAISE EXCEPTION 'ALERT_ACTOR_INVALID: an actor is required';
+  END IF;
+  PERFORM 1 FROM public.operators o
+    WHERE o.id = p_actor AND o.status = 'active'
+      AND (o.tenant_id IS NULL OR o.tenant_id = p_tenant);
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'ALERT_ACTOR_INVALID: actor % is not an active operator of this tenant', p_actor;
+  END IF;
+  SELECT action, seq INTO v_head, v_head_seq FROM iam_v2.checkout_grace_alert_actions
+    WHERE audit_id = p_audit ORDER BY seq DESC LIMIT 1;
+  IF v_head IS NULL THEN
+    RAISE EXCEPTION 'ALERT_NOT_FOUND: alert % has no lifecycle', p_audit;
+  END IF;
+  -- optimistic state match: the caller acted on what it last saw, and nothing has moved since.
+  IF p_expected_state IS NOT NULL AND p_expected_state <> v_head THEN
+    RAISE EXCEPTION 'ALERT_STATE_CONFLICT: alert is % (caller expected %)', v_head, p_expected_state;
+  END IF;
+  IF v_head = 'RESOLVED' THEN
+    RAISE EXCEPTION 'ALERT_STATE_CONFLICT: alert is already RESOLVED';
+  END IF;
+  IF v_head = 'ACKNOWLEDGED' AND p_action = 'ACKNOWLEDGED' THEN
+    RAISE EXCEPTION 'ALERT_STATE_CONFLICT: alert is already ACKNOWLEDGED';
+  END IF;
+  v_seq := v_head_seq + 1;
+  INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id, site_id, audit_id, seq, action, actor, reason_code)
+    VALUES (p_tenant, p_site, p_audit, v_seq, p_action, p_actor, p_reason);
+  RETURN v_seq;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.record_alert_action(uuid,uuid,uuid,text,uuid,text,text) FROM PUBLIC;
+
+-- ============================================================================
+-- (4n) CONTROLLED CHECKOUT-GRACE POLICY PUBLICATION.
+--
+-- publish_checkout_grace_config() is the low-level writer: it locks the row, validates the typed policy and
+-- bumps config_version. What it does NOT know is who published, whether they were looking at the current
+-- version, or whether the Package they pointed at is actually a usable grace Package. Exposing it directly to
+-- an API would let two operators overwrite each other silently and let a policy reference a Package that can
+-- never be granted.
+--
+-- This operation adds the binding preconditions and an IMMUTABLE publication audit. Failures use bounded,
+-- machine-greppable prefixes so an API can map them to the right status without parsing prose:
+--   GRACE_VERSION_CONFLICT / GRACE_ACTOR_INVALID / GRACE_PACKAGE_INVALID / GRACE_POLICY_UNSUPPORTED
+-- ============================================================================
+CREATE TABLE iam_v2.checkout_grace_policy_publications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL,
+  config_version int NOT NULL CHECK (config_version >= 1),
+  actor uuid NOT NULL,
+  reason_code text CHECK (reason_code IS NULL OR reason_code ~ '^[A-Z][A-Z0-9_]{0,63}$'),
+  grace_package_revision_id uuid,
+  policy_snapshot jsonb NOT NULL,
+  published_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (tenant_id, site_id, config_version));
+CREATE TRIGGER p3_grace_publication_appendonly BEFORE UPDATE OR DELETE ON iam_v2.checkout_grace_policy_publications
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_history_appendonly();
+
+CREATE OR REPLACE FUNCTION iam_v2.publish_checkout_grace_policy(
+    p_tenant uuid, p_site uuid, p_pkg_rev uuid,
+    p_duration int, p_down int, p_up int, p_quota bigint, p_dev_limit int, p_dev_policy text,
+    p_eligibility int, p_expected_version int, p_actor uuid, p_reason text) RETURNS int
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_current int; v_new int; v_type text; v_price bigint; v_settle text[]; v_spr uuid; v_sys boolean;
+BEGIN
+  -- ACTOR: an existing, active operator of this tenant. A policy nobody can be held to is not governed.
+  IF p_actor IS NULL THEN RAISE EXCEPTION 'GRACE_ACTOR_INVALID: an actor is required'; END IF;
+  PERFORM 1 FROM public.operators o
+    WHERE o.id = p_actor AND o.status = 'active' AND (o.tenant_id IS NULL OR o.tenant_id = p_tenant);
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'GRACE_ACTOR_INVALID: actor % is not an active operator of this tenant', p_actor;
+  END IF;
+  IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'GRACE_ACTOR_INVALID: reason must be a bounded machine code';
+  END IF;
+
+  -- POLICY: only the capability that actually exists. DISCONNECT_OLDEST and ADMIN_APPROVAL are refused rather
+  -- than accepted-and-approximated, because a policy the enforcement path cannot honour is worse than none.
+  IF p_dev_policy <> 'REJECT_NEW_DEVICE' THEN
+    RAISE EXCEPTION 'GRACE_POLICY_UNSUPPORTED: device limit policy % is not implemented', p_dev_policy;
+  END IF;
+
+  -- PACKAGE GRAPH: the referenced revision must be a real, current, grantable CHECKOUT_GRACE revision at zero
+  -- price with settlement exactly NOT_REQUIRED, and its Service Plan revision must exist. Validating this here
+  -- means an operator cannot publish a policy that would fall back to Emergency Grace on every checkout.
+  IF p_pkg_rev IS NOT NULL THEN
+    SELECT ipr.package_type, ipr.price_minor, ipr.settlement_methods, ipr.service_plan_revision_id, ip.is_system
+      INTO v_type, v_price, v_settle, v_spr, v_sys
+      FROM iam_v2.internet_package_revisions ipr
+      JOIN iam_v2.internet_packages ip
+        ON ip.tenant_id = ipr.tenant_id AND ip.site_id = ipr.site_id AND ip.id = ipr.package_id
+     WHERE ipr.id = p_pkg_rev AND ipr.tenant_id = p_tenant AND ipr.site_id = p_site
+       AND ip.current_revision_id = ipr.id;
+    IF v_type IS NULL THEN
+      RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: % is not the current revision of a package in this site', p_pkg_rev;
+    END IF;
+    IF v_type <> 'CHECKOUT_GRACE' THEN
+      RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: package type % cannot serve checkout grace', v_type;
+    END IF;
+    IF v_price <> 0 THEN
+      RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: a grace package must be free (price %)', v_price;
+    END IF;
+    IF array_length(v_settle,1) <> 1 OR v_settle[1] <> 'NOT_REQUIRED' THEN
+      RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: a grace package must require no settlement';
+    END IF;
+    PERFORM 1 FROM iam_v2.service_plan_revisions WHERE id = v_spr AND tenant_id = p_tenant AND site_id = p_site;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: the package revision has no service plan revision in this site';
+    END IF;
+  END IF;
+
+  -- OPTIMISTIC VERSION: the caller edited what it last read. Two operators publishing at once produce one
+  -- winner and one explicit conflict, never a silent overwrite. 0 means "I believe nothing is published yet".
+  SELECT config_version INTO v_current FROM iam_v2.site_checkout_grace_config
+    WHERE tenant_id = p_tenant AND site_id = p_site FOR UPDATE;
+  IF p_expected_version IS NOT NULL AND COALESCE(v_current,0) <> p_expected_version THEN
+    RAISE EXCEPTION 'GRACE_VERSION_CONFLICT: current version is % (caller expected %)', COALESCE(v_current,0), p_expected_version;
+  END IF;
+
+  v_new := iam_v2.publish_checkout_grace_config(p_tenant, p_site, p_pkg_rev, p_duration, p_down, p_up,
+                                                p_quota, p_dev_limit, p_dev_policy, p_eligibility);
+
+  -- IMMUTABLE publication audit. An identical re-publish is idempotent in the writer (the version does not
+  -- move), so the audit is only appended when a NEW version was actually created — the record then means
+  -- exactly what it says: this actor put this policy in force.
+  INSERT INTO iam_v2.checkout_grace_policy_publications
+    (tenant_id, site_id, config_version, actor, reason_code, grace_package_revision_id, policy_snapshot)
+    SELECT p_tenant, p_site, v_new, p_actor, p_reason, p_pkg_rev,
+           jsonb_build_object('grace_duration_seconds', p_duration, 'grace_down_kbps', p_down,
+                              'grace_up_kbps', p_up, 'grace_data_quota_bytes', p_quota,
+                              'grace_device_limit', p_dev_limit, 'grace_device_limit_policy', p_dev_policy,
+                              'eligibility_window_seconds', p_eligibility)
+    WHERE NOT EXISTS (SELECT 1 FROM iam_v2.checkout_grace_policy_publications
+                      WHERE tenant_id = p_tenant AND site_id = p_site AND config_version = v_new);
+  RETURN v_new;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_policy(uuid,uuid,uuid,int,int,int,bigint,int,text,int,int,uuid,text) FROM PUBLIC;
+
+-- An operator's queue is what still needs attention, so the view exposes only alerts whose lifecycle head is
+-- NOT RESOLVED. It carries that head state AND its sequence, because the next action must be able to say what
+-- state it believed the alert was in — that is what makes two operators clicking at once produce exactly one
+-- winner and one clear conflict instead of one silently overwriting the other.
 CREATE OR REPLACE VIEW iam_v2.active_operational_alerts AS
   SELECT a.id AS audit_id, a.tenant_id, a.site_id, a.pms_interface_id, a.stay_id, a.lifecycle_version,
          a.alert_code, a.trigger, a.policy_version, a.reason_code, a.boundary_at, a.boundary_clock_suspect, a.created_at,
-         COALESCE((SELECT act.action FROM iam_v2.checkout_grace_alert_actions act
-                   WHERE act.audit_id=a.id ORDER BY act.seq DESC LIMIT 1), 'OPEN') AS state
+         COALESCE(h.action, 'OPEN') AS state,
+         COALESCE(h.action, 'OPEN') AS alert_state,
+         COALESCE(h.seq, 1)         AS alert_seq,
+         h.created_at               AS state_changed_at
   FROM iam_v2.checkout_grace_audit a
-  WHERE a.alert_code IS NOT NULL
-    AND COALESCE((SELECT act.action FROM iam_v2.checkout_grace_alert_actions act
-                  WHERE act.audit_id=a.id ORDER BY act.seq DESC LIMIT 1), 'OPEN') <> 'RESOLVED';
+  LEFT JOIN LATERAL (SELECT act.action, act.seq, act.created_at FROM iam_v2.checkout_grace_alert_actions act
+                     WHERE act.audit_id = a.id ORDER BY act.seq DESC LIMIT 1) h ON true
+  WHERE a.alert_code IS NOT NULL AND COALESCE(h.action, 'OPEN') <> 'RESOLVED';
 
 -- ============================================================================
 -- (4k) checkout audit provenance guard (item 11): the DB proves boundary-event + grace-entitlement lineage, not

@@ -14,6 +14,7 @@ package main
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -258,6 +259,21 @@ type checkoutGraceConfig struct {
 	ConfigVersion        int     `json:"config_version"`
 }
 
+// checkoutGracePublishReq is what publishing REQUIRES beyond the policy itself: the version the operator was
+// looking at, a password step-up, and a bounded reason. Publishing changes what every departing guest gets,
+// so it is treated like the other privileged, destructive operations on this appliance.
+type checkoutGracePublishReq struct {
+	checkoutGraceConfig
+	ExpectedConfigVersion *int   `json:"expected_config_version"`
+	Password              string `json:"password"`
+	ReasonCode            string `json:"reason_code"`
+}
+
+// supportedDeviceLimitPolicies lists what the enforcement path can actually honour. DISCONNECT_OLDEST and
+// ADMIN_APPROVAL stay capability-disabled: offering them would let an operator publish a policy that silently
+// degrades to something else at the boundary.
+var supportedDeviceLimitPolicies = []string{"REJECT_NEW_DEVICE"}
+
 func (s *server) checkoutGraceConfigRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.getCheckoutGraceConfig)
@@ -276,46 +292,102 @@ func (s *server) getCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 		Scan(&c.PackageRevisionID, &c.DurationSeconds, &c.DownKbps, &c.UpKbps, &c.DataQuotaBytes,
 			&c.DeviceLimit, &c.DeviceLimitPolicy, &c.EligibilityWindowSec, &c.ConfigVersion)
 	if isNoRows(err) {
-		jsonErr(w, http.StatusNotFound, "not_found", "no checkout-grace configuration published for this site")
+		// A site with nothing published yet is a starting point, not a failure: version 0 says exactly that,
+		// and the operator can send it back as their expected version.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"published":                 false,
+			"config_version":            0,
+			"supported_device_policies": supportedDeviceLimitPolicies,
+		})
 		return
 	}
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, c)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"published":                 true,
+		"config_version":            c.ConfigVersion,
+		"supported_device_policies": supportedDeviceLimitPolicies,
+		"policy":                    c,
+	})
 }
 
 func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) {
-	var in checkoutGraceConfig
+	var in checkoutGracePublishReq
 	if err := decodeJSON(r, &in); err != nil {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
 		return
 	}
-	// Bounds are re-checked by the controlled writer in the database; these checks exist so an operator gets a
-	// clear 400 instead of a database exception, never as the authoritative gate.
+	if in.ExpectedConfigVersion == nil {
+		jsonErr(w, http.StatusBadRequest, "expected_version_required",
+			"expected_config_version is required so a concurrent publication cannot be silently overwritten")
+		return
+	}
+	if strings.TrimSpace(in.ReasonCode) == "" {
+		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason code is required to publish")
+		return
+	}
+	// Step-up: publishing changes what every departing guest receives.
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		return
+	}
+	sess := sessFrom(r.Context())
+	if sess == nil || sess.OperatorID == "" {
+		jsonErr(w, http.StatusUnauthorized, "unauthorized", "an operator identity is required")
+		return
+	}
+	// Shape checks only — the database re-validates everything and owns the authoritative decision.
 	if in.DurationSeconds <= 0 || in.DownKbps <= 0 || in.UpKbps <= 0 || in.DeviceLimit <= 0 || in.EligibilityWindowSec <= 0 {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "duration, rates, device limit and eligibility window must be positive")
 		return
 	}
-	switch in.DeviceLimitPolicy {
-	case "REJECT_NEW_DEVICE", "DISCONNECT_OLDEST", "ADMIN_APPROVAL":
-	default:
-		jsonErr(w, http.StatusBadRequest, "bad_request", "unknown device limit policy")
+	supported := false
+	for _, p := range supportedDeviceLimitPolicies {
+		if in.DeviceLimitPolicy == p {
+			supported = true
+		}
+	}
+	if !supported {
+		jsonErr(w, http.StatusBadRequest, "policy_unsupported",
+			"only REJECT_NEW_DEVICE is implemented; the others are capability-disabled")
 		return
 	}
+
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// publication goes through the ONLY approved writer: it locks the row, verifies the whole typed policy and
-	// bumps config_version by exactly one (an identical re-publish is idempotent).
 	var version int
-	if err := s.db.QueryRow(ctx, `SELECT iam_v2.publish_checkout_grace_config($1,$2,$3::uuid,$4,$5,$6,$7,$8,$9,$10)`,
+	err := s.db.QueryRow(ctx, `SELECT iam_v2.publish_checkout_grace_policy(
+			$1,$2,$3::uuid,$4,$5,$6,$7,$8,$9,$10,$11,$12::uuid,$13)`,
 		s.tenantID, s.siteID, in.PackageRevisionID, in.DurationSeconds, in.DownKbps, in.UpKbps,
-		in.DataQuotaBytes, in.DeviceLimit, in.DeviceLimitPolicy, in.EligibilityWindowSec).Scan(&version); err != nil {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "the checkout-grace policy was refused: "+err.Error())
+		in.DataQuotaBytes, in.DeviceLimit, in.DeviceLimitPolicy, in.EligibilityWindowSec,
+		*in.ExpectedConfigVersion, sess.OperatorID, in.ReasonCode).Scan(&version)
+	if err != nil {
+		status, code := graceFailureStatus(err.Error())
+		jsonErr(w, status, code, "the checkout-grace policy was refused")
 		return
 	}
+	s.audit(r, "checkout_grace.published", "site_checkout_grace_config", s.siteID,
+		map[string]any{"config_version": version, "reason_code": in.ReasonCode})
 	writeJSON(w, http.StatusOK, map[string]any{"config_version": version})
+}
+
+// graceFailureStatus maps the controlled operation's bounded failure prefixes to HTTP. A version conflict is
+// a 409 so the UI can reload and show the operator what actually changed instead of overwriting it.
+func graceFailureStatus(msg string) (int, string) {
+	switch {
+	case strings.Contains(msg, "GRACE_VERSION_CONFLICT"):
+		return http.StatusConflict, "version_conflict"
+	case strings.Contains(msg, "GRACE_ACTOR_INVALID"):
+		return http.StatusForbidden, "actor_invalid"
+	case strings.Contains(msg, "GRACE_PACKAGE_INVALID"):
+		return http.StatusBadRequest, "package_invalid"
+	case strings.Contains(msg, "GRACE_POLICY_UNSUPPORTED"):
+		return http.StatusBadRequest, "policy_unsupported"
+	default:
+		return http.StatusBadRequest, "bad_request"
+	}
 }
 
 // ---------- Operational alerts ----------
@@ -330,12 +402,17 @@ type alertRow struct {
 	BoundaryAt       time.Time `json:"boundary_at"`
 	ClockSuspect     bool      `json:"boundary_clock_suspect"`
 	CreatedAt        time.Time `json:"created_at"`
+	// State + Seq are what an operator must send back on the next action. Without them two operators can
+	// each act on a stale view and one silently overwrites the other.
+	State          string     `json:"state"`
+	Seq            int64      `json:"seq"`
+	StateChangedAt *time.Time `json:"state_changed_at,omitempty"`
 }
 
 func (s *server) operationalAlertsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listAlerts)
-	r.Post("/{auditID}/acknowledge", s.alertAction("ACK"))
+	r.Post("/{auditID}/acknowledge", s.alertAction("ACKNOWLEDGED"))
 	r.Post("/{auditID}/resolve", s.alertAction("RESOLVED"))
 	return r
 }
@@ -343,9 +420,10 @@ func (s *server) operationalAlertsRoutes() http.Handler {
 func (s *server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
-	// the view returns only UNRESOLVED alerts — an operator's queue is what still needs attention.
+	// the view returns only alerts whose lifecycle head is not RESOLVED — an operator's queue is what still
+	// needs attention — and carries that head state so the next action can be optimistic.
 	rows, err := s.db.Query(ctx, `SELECT audit_id::text, stay_id::text, lifecycle_version, alert_code, trigger,
-			reason_code, boundary_at, boundary_clock_suspect, created_at
+			reason_code, boundary_at, boundary_clock_suspect, created_at, alert_state, alert_seq, state_changed_at
 		FROM iam_v2.active_operational_alerts WHERE tenant_id=$1 AND site_id=$2
 		ORDER BY created_at DESC LIMIT 200`, s.tenantID, s.siteID)
 	if err != nil {
@@ -357,7 +435,8 @@ func (s *server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a alertRow
 		if err := rows.Scan(&a.AuditID, &a.StayID, &a.LifecycleVersion, &a.AlertCode, &a.Trigger,
-			&a.ReasonCode, &a.BoundaryAt, &a.ClockSuspect, &a.CreatedAt); err != nil {
+			&a.ReasonCode, &a.BoundaryAt, &a.ClockSuspect, &a.CreatedAt,
+			&a.State, &a.Seq, &a.StateChangedAt); err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
 			return
 		}
@@ -366,37 +445,69 @@ func (s *server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	writeList(w, out)
 }
 
-// alertAction records an ACK or RESOLVED action against the alert. The action model is append-only and
-// enforces the legal OPEN→ACK→RESOLVED edges in the database, so an illegal transition is refused there
-// rather than being talked out of by this handler.
+type alertActionReq struct {
+	// ExpectedState is what the operator was looking at. It is REQUIRED: an action sent without it is an
+	// action taken on an unknown world, and this API refuses to guess on the operator's behalf.
+	ExpectedState string `json:"expected_state"`
+	ReasonCode    string `json:"reason_code"`
+}
+
+// alertAction records an ACKNOWLEDGED or RESOLVED action through the ONE controlled database operation, which
+// owns the lock, the contiguous sequence, the legal edges, the actor check and the optimistic state match.
+// This handler's only jobs are to identify the operator and to map the operation's bounded failure prefixes
+// onto the right HTTP status.
 func (s *server) alertAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auditID := chi.URLParam(r, "auditID")
-		var body struct {
-			Note string `json:"note"`
+		var in alertActionReq
+		if err := decodeJSON(r, &in); err != nil {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+			return
 		}
-		_ = decodeJSON(r, &body) // an absent/empty body is fine: the note is optional
-		actor := ""
-		if sess := sessFrom(r.Context()); sess != nil {
-			actor = sess.OperatorID
+		switch in.ExpectedState {
+		case "OPEN", "ACKNOWLEDGED":
+		default:
+			jsonErr(w, http.StatusBadRequest, "bad_request", "expected_state must be OPEN or ACKNOWLEDGED")
+			return
+		}
+		sess := sessFrom(r.Context())
+		if sess == nil || sess.OperatorID == "" {
+			jsonErr(w, http.StatusUnauthorized, "unauthorized", "an operator identity is required")
+			return
+		}
+		var reasonArg any
+		if in.ReasonCode != "" {
+			reasonArg = in.ReasonCode
 		}
 		ctx, cancel := dbCtx(r)
 		defer cancel()
-		var id string
-		err := s.db.QueryRow(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions
-			(tenant_id, site_id, audit_id, action, actor_operator_id, note)
-			SELECT $1,$2,a.id,$3,NULLIF($4,'')::uuid,NULLIF($5,'')
-			FROM iam_v2.checkout_grace_audit a
-			WHERE a.id=$6 AND a.tenant_id=$1 AND a.site_id=$2
-			RETURNING id::text`, s.tenantID, s.siteID, action, actor, body.Note, auditID).Scan(&id)
-		if isNoRows(err) {
-			jsonErr(w, http.StatusNotFound, "not_found", "alert not found")
-			return
-		}
+		var seq int64
+		err := s.db.QueryRow(ctx, `SELECT iam_v2.record_alert_action($1,$2,$3::uuid,$4,$5::uuid,$6,$7)`,
+			s.tenantID, s.siteID, auditID, action, sess.OperatorID, reasonArg, in.ExpectedState).Scan(&seq)
 		if err != nil {
-			jsonErr(w, http.StatusConflict, "conflict", "the alert action was refused: "+err.Error())
+			status, code := alertFailureStatus(err.Error())
+			jsonErr(w, status, code, "the alert action was refused")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"id": id, "action": action})
+		s.audit(r, "operational_alert."+strings.ToLower(action), "checkout_grace_audit", auditID,
+			map[string]any{"seq": seq, "expected_state": in.ExpectedState})
+		writeJSON(w, http.StatusOK, map[string]any{"audit_id": auditID, "action": action, "seq": seq})
+	}
+}
+
+// alertFailureStatus maps the controlled operation's bounded failure prefixes to HTTP. The database is the
+// authority on WHY something was refused; this only decides how to say it over HTTP.
+func alertFailureStatus(msg string) (int, string) {
+	switch {
+	case strings.Contains(msg, "ALERT_NOT_FOUND"):
+		return http.StatusNotFound, "not_found"
+	case strings.Contains(msg, "ALERT_STATE_CONFLICT"):
+		return http.StatusConflict, "state_conflict"
+	case strings.Contains(msg, "ALERT_ACTOR_INVALID"):
+		return http.StatusForbidden, "actor_invalid"
+	case strings.Contains(msg, "ALERT_ACTION_INVALID"):
+		return http.StatusBadRequest, "bad_request"
+	default:
+		return http.StatusConflict, "conflict"
 	}
 }

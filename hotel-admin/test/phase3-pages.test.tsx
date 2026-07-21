@@ -92,14 +92,19 @@ describe("Operational alerts page", () => {
         audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "EMERGENCY_GRACE_USED",
         trigger: "EMERGENCY_GRACE", reason_code: "POLICY_MISMATCH",
         boundary_at: new Date().toISOString(), boundary_clock_suspect: false, created_at: new Date().toISOString(),
+        state: "OPEN", seq: 1,
       }],
       meta: { has_more: false },
     });
     post.mockResolvedValue({ id: "x", action: "ACK" });
-    const { default: AlertsPage } = await import("@/app/(app)/operational-alerts/page");
+    const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage />);
     await userEvent.click(await screen.findByRole("button", { name: /Acknowledge alert/ }));
-    await waitFor(() => expect(post).toHaveBeenCalledWith("/operational-alerts/a1/acknowledge", {}));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    const [path, body] = post.mock.calls[0];
+    expect(path).toBe("/operational-alerts/a1/acknowledge");
+    // the action carries the state this operator was looking at, so a concurrent change is a clean conflict
+    expect(body.expected_state).toBe("OPEN");
     expect(get).toHaveBeenCalledTimes(2); // the queue is re-read after acting
   });
 
@@ -108,12 +113,12 @@ describe("Operational alerts page", () => {
       data: [{
         audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "EMERGENCY_GRACE_USED",
         trigger: "EMERGENCY_GRACE", boundary_at: new Date().toISOString(),
-        boundary_clock_suspect: false, created_at: new Date().toISOString(),
+        boundary_clock_suspect: false, created_at: new Date().toISOString(), state: "OPEN", seq: 1,
       }],
       meta: { has_more: false },
     });
     post.mockRejectedValue(new Error("illegal transition"));
-    const { default: AlertsPage } = await import("@/app/(app)/operational-alerts/page");
+    const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage />);
     await userEvent.click(await screen.findByRole("button", { name: /Resolve alert/ }));
     expect(await screen.findByRole("alert")).toBeTruthy();
@@ -124,11 +129,11 @@ describe("Operational alerts page", () => {
       data: [{
         audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "EMERGENCY_GRACE_USED",
         trigger: "EMERGENCY_GRACE", boundary_at: new Date().toISOString(),
-        boundary_clock_suspect: false, created_at: new Date().toISOString(),
+        boundary_clock_suspect: false, created_at: new Date().toISOString(), state: "OPEN", seq: 1,
       }],
       meta: { has_more: false },
     });
-    const { default: AlertsPage } = await import("@/app/(app)/operational-alerts/page");
+    const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
     render(<AlertsPage canAct={false} />);
     await screen.findByText(/emergency grace used/);
     expect(screen.queryByRole("button", { name: /Acknowledge alert/ })).toBeNull();
@@ -142,10 +147,10 @@ describe("Checkout grace page", () => {
     grace_device_limit_policy: "REJECT_NEW_DEVICE", eligibility_window_seconds: 86400, config_version: 7,
   };
 
-  it("publishes the COMPLETE policy, not a patch, and reports the new version", async () => {
-    get.mockResolvedValue({ ...cfg });
+  it("publishes the COMPLETE policy with the version it read, a reason and a step-up", async () => {
+    get.mockResolvedValue({ published: true, config_version: 7, supported_device_policies: ["REJECT_NEW_DEVICE"], policy: { ...cfg } });
     put.mockResolvedValue({ config_version: 8 });
-    const { default: GracePage } = await import("@/app/(app)/checkout-grace/page");
+    const { CheckoutGraceForm: GracePage } = await import("@/components/phase3/checkout-grace-form");
     render(<GracePage />);
     const duration = await screen.findByDisplayValue("3600");
     await userEvent.clear(duration);
@@ -158,22 +163,75 @@ describe("Checkout grace page", () => {
     // every field travels together — the database publishes one coherent version
     for (const k of Object.keys(cfg)) expect(body).toHaveProperty(k);
     expect(body.grace_duration_seconds).toBe(1800);
+    // and the publication is governed: the version read, a bounded reason, and a password confirmation
+    expect(body.expected_config_version).toBe(7);
+    expect(body.reason_code).toBeTruthy();
+    expect(body).toHaveProperty("password");
     expect(await screen.findByRole("status")).toBeTruthy();
   });
 
   it("treats a site with no published policy as a starting point, not an error", async () => {
-    get.mockRejectedValue(Object.assign(new Error("not found"), { status: 404 }));
-    const { default: GracePage } = await import("@/app/(app)/checkout-grace/page");
+    get.mockResolvedValue({ published: false, config_version: 0, supported_device_policies: ["REJECT_NEW_DEVICE"] });
+    const { CheckoutGraceForm: GracePage } = await import("@/components/phase3/checkout-grace-form");
     render(<GracePage />);
     expect(await screen.findByDisplayValue("3600")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("disables publishing for a role that may only read the policy", async () => {
-    get.mockResolvedValue({ ...cfg });
-    const { default: GracePage } = await import("@/app/(app)/checkout-grace/page");
+    get.mockResolvedValue({ published: true, config_version: 7, supported_device_policies: ["REJECT_NEW_DEVICE"], policy: { ...cfg } });
+    const { CheckoutGraceForm: GracePage } = await import("@/components/phase3/checkout-grace-form");
     render(<GracePage canWrite={false} />);
     const btn = await screen.findByRole("button", { name: /Publish policy/ });
     expect((btn as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("Concurrency contracts in the UI", () => {
+  it("an alert changed by someone else reloads the queue instead of overwriting it", async () => {
+    get.mockResolvedValue({
+      data: [{
+        audit_id: "a1", stay_id: "s1", lifecycle_version: 1, alert_code: "EMERGENCY_GRACE_USED",
+        trigger: "EMERGENCY_GRACE", boundary_at: new Date().toISOString(),
+        boundary_clock_suspect: false, created_at: new Date().toISOString(), state: "OPEN", seq: 1,
+      }],
+      meta: { has_more: false },
+    });
+    post.mockRejectedValue(Object.assign(new Error("state conflict"), { status: 409 }));
+    const { OperationalAlertsView: AlertsPage } = await import("@/components/phase3/operational-alerts-view");
+    render(<AlertsPage />);
+    await userEvent.click(await screen.findByRole("button", { name: /Acknowledge alert/ }));
+    // the operator is told what happened, and the queue is re-read rather than retried blindly
+    expect(await screen.findByRole("status")).toBeTruthy();
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it("a policy published by someone else reloads instead of overwriting", async () => {
+    get.mockResolvedValue({
+      published: true, config_version: 7, supported_device_policies: ["REJECT_NEW_DEVICE"],
+      policy: {
+        grace_package_revision_id: null, grace_duration_seconds: 3600, grace_down_kbps: 4000,
+        grace_up_kbps: 1500, grace_data_quota_bytes: 524288000, grace_device_limit: 2,
+        grace_device_limit_policy: "REJECT_NEW_DEVICE", eligibility_window_seconds: 86400, config_version: 7,
+      },
+    });
+    put.mockRejectedValue(Object.assign(new Error("version conflict"), { status: 409 }));
+    const { CheckoutGraceForm: GracePage } = await import("@/components/phase3/checkout-grace-form");
+    render(<GracePage />);
+    await screen.findByDisplayValue("3600");
+    await userEvent.click(screen.getByRole("button", { name: /Publish policy/ }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
+  });
+
+  it("only the device-limit policies the backend supports are offered", async () => {
+    get.mockResolvedValue({
+      published: false, config_version: 0,
+      supported_device_policies: ["REJECT_NEW_DEVICE"],
+    });
+    const { CheckoutGraceForm: GracePage } = await import("@/components/phase3/checkout-grace-form");
+    render(<GracePage />);
+    const select = (await screen.findByLabelText("Device limit policy")) as HTMLSelectElement;
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(["REJECT_NEW_DEVICE"]);
   });
 });

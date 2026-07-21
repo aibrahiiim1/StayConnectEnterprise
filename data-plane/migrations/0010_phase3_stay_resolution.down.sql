@@ -29,6 +29,11 @@ DROP VIEW IF EXISTS iam_v2.active_operational_alerts; -- depends on checkout_gra
 DROP TRIGGER IF EXISTS p3_alert_action_insert ON iam_v2.checkout_grace_alert_actions;
 DROP TRIGGER IF EXISTS p3_alert_action_appendonly ON iam_v2.checkout_grace_alert_actions;
 DROP FUNCTION IF EXISTS iam_v2.p3_alert_action_guard();
+DROP TRIGGER IF EXISTS p3_alert_open_on_audit ON iam_v2.checkout_grace_audit;
+DROP FUNCTION IF EXISTS iam_v2.p3_alert_open_on_audit();
+DROP FUNCTION IF EXISTS iam_v2.record_alert_action(uuid,uuid,uuid,text,uuid,text,text);
+DROP FUNCTION IF EXISTS iam_v2.publish_checkout_grace_policy(uuid,uuid,uuid,int,int,int,bigint,int,text,int,int,uuid,text);
+DROP TABLE IF EXISTS iam_v2.checkout_grace_policy_publications;
 DROP TABLE IF EXISTS iam_v2.checkout_grace_alert_actions;
 
 -- (4d/4e) history tables + guards (append-only + insert state machines) + controlled transition

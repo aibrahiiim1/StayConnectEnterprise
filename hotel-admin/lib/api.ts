@@ -184,6 +184,11 @@ export type OperationalAlert = {
   audit_id: string; stay_id: string; lifecycle_version: number;
   alert_code: string; trigger: string; reason_code?: string | null;
   boundary_at: string; boundary_clock_suspect: boolean; created_at: string;
+  // the lifecycle head the operator is looking at. Every action sends it back, so a concurrent change is a
+  // clean 409 rather than a silent overwrite.
+  state: "OPEN" | "ACKNOWLEDGED";
+  seq: number;
+  state_changed_at?: string | null;
 };
 
 export type Operator = {

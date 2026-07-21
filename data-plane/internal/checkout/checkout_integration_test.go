@@ -599,17 +599,22 @@ func TestIntegration_AlertLifecycleAndProvenance(t *testing.T) {
 	if err := p.QueryRow(ctx, `SELECT id::text FROM iam_v2.checkout_grace_audit WHERE stay_id=$1`, f.stay).Scan(&auditID); err != nil {
 		t.Fatal(err)
 	}
-	// alert is active (implicitly OPEN, no action yet)
-	if count(t, p, `SELECT count(*) FROM iam_v2.active_operational_alerts WHERE audit_id=$1`, auditID) != 1 {
-		t.Fatal("emergency alert must be active before resolution")
+	// the alert OPENED ITSELF with the audit row, in the same transaction: an alert that exists but has no
+	// lifecycle would be invisible to the operator queue and impossible to acknowledge.
+	if count(t, p, `SELECT count(*) FROM iam_v2.checkout_grace_alert_actions
+		WHERE audit_id=$1 AND seq=1 AND action='OPEN'`, auditID) != 1 {
+		t.Fatal("an alert-bearing audit must open its own lifecycle")
 	}
-	// RESOLVED requires an actor
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ($1,$2,$3,1,'RESOLVED')`, f.tenant, f.site, auditID); err == nil {
-		t.Fatal("first action must be OPEN / RESOLVED needs actor")
+	if count(t, p, `SELECT count(*) FROM iam_v2.active_operational_alerts WHERE audit_id=$1 AND alert_state='OPEN'`, auditID) != 1 {
+		t.Fatal("emergency alert must be active and OPEN before resolution")
 	}
+	// RESOLVED still requires an actor, and a second OPEN is not a legal edge
 	actor := "11111111-1111-1111-1111-111111111111"
-	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ($1,$2,$3,1,'OPEN')`, f.tenant, f.site, auditID); err != nil {
-		t.Fatal(err)
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ($1,$2,$3,2,'RESOLVED')`, f.tenant, f.site, auditID); err == nil {
+		t.Fatal("RESOLVED needs an actor")
+	}
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ($1,$2,$3,2,'OPEN')`, f.tenant, f.site, auditID); err == nil {
+		t.Fatal("OPEN -> OPEN is not a legal edge")
 	}
 	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action,actor) VALUES ($1,$2,$3,2,'ACKNOWLEDGED',$4)`, f.tenant, f.site, auditID, actor); err != nil {
 		t.Fatal(err)
