@@ -310,8 +310,47 @@ AS_PROBE "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,grace_
 # the SECURITY DEFINER publication function CAN create the first row (version 1)
 FV="$(Q "SELECT iam_v2.publish_checkout_grace_config('$FT','$FS',NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400);")"
 [ "$FV" = 1 ] && ok "controlled publication creates the FIRST config row at version 1 (§1/§2)" || no "controlled first publication failed"
+# (item 1) direct DELETE of the authoritative config row is refused for a non-owner even WITH DELETE privilege
+PREV_VER="$(Q "SELECT config_version FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$T' AND site_id='$S';")"
+PREV_DUR="$(Q "SELECT grace_duration_seconds FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$T' AND site_id='$S';")"
+Q "GRANT DELETE ON iam_v2.site_checkout_grace_config TO p3_writer_probe;" >/dev/null
+AS_PROBE "DELETE FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$T' AND site_id='$S';" && no "non-owner config DELETE accepted" || ok "non-owner direct grace-config DELETE refused (§1)"
+[ "$(Q "SELECT count(*) FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$T' AND site_id='$S';")" = 1 ] && ok "config row still present after refused DELETE (§1)" || no "config row deleted"
+[ "$(Q "SELECT config_version FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$T' AND site_id='$S';")" = "$PREV_VER" ] && ok "config_version unchanged after refused DELETE (§1)" || no "config_version changed by refused delete"
+[ "$(Q "SELECT grace_duration_seconds FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$T' AND site_id='$S';")" = "$PREV_DUR" ] && ok "policy unchanged after refused DELETE (§1)" || no "policy changed by refused delete"
+Q "REVOKE DELETE ON iam_v2.site_checkout_grace_config FROM p3_writer_probe;" >/dev/null
 Q "REVOKE ALL ON iam_v2.entitlements, iam_v2.entitlement_state_transitions, iam_v2.site_checkout_grace_config FROM p3_writer_probe; REVOKE USAGE ON SCHEMA iam_v2 FROM p3_writer_probe; DROP ROLE IF EXISTS p3_writer_probe;" >/dev/null
 ok "probe role cleaned up (no residual runtime grants)"
+
+echo '== Gate-P FEASIBILITY: per-family dedicated NOLOGIN writer owners (disposable only, baseline restored) (§3) =='
+BASE_OWNER="$(Q "SELECT iam_v2.p3_controlled_writer_owner('entitlement');")"
+[ -n "$BASE_OWNER" ] && ok "per-family owner resolves from the exact regprocedure identity (§2): $BASE_OWNER" || no "owner not resolvable"
+# dedicated NOLOGIN owners, each with ONLY its own family's minimum underlying privileges
+Q "DROP ROLE IF EXISTS p3_ent_writer; DROP ROLE IF EXISTS p3_cfg_writer;
+   CREATE ROLE p3_ent_writer NOLOGIN NOSUPERUSER; CREATE ROLE p3_cfg_writer NOLOGIN NOSUPERUSER;
+   GRANT USAGE ON SCHEMA iam_v2 TO p3_ent_writer, p3_cfg_writer;
+   GRANT SELECT, UPDATE ON iam_v2.entitlements TO p3_ent_writer;
+   GRANT SELECT, INSERT ON iam_v2.entitlement_state_transitions TO p3_ent_writer;
+   GRANT SELECT, INSERT, UPDATE ON iam_v2.site_checkout_grace_config TO p3_cfg_writer;" >/dev/null
+# reassign each SECURITY DEFINER function to its own family owner
+Q "ALTER FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text) OWNER TO p3_ent_writer;
+   ALTER FUNCTION iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int) OWNER TO p3_cfg_writer;" >/dev/null
+[ "$(Q "SELECT iam_v2.p3_controlled_writer_owner('entitlement');")" = "p3_ent_writer" ] && ok "entitlement family now follows its dedicated function owner (§2/§3)" || no "entitlement family owner not tracked"
+[ "$(Q "SELECT iam_v2.p3_controlled_writer_owner('grace_config');")" = "p3_cfg_writer" ] && ok "grace-config family now follows its dedicated function owner (§2/§3)" || no "config family owner not tracked"
+# each controlled function still succeeds through its own path under the separated owners
+expect_ok "SELECT iam_v2.apply_entitlement_transition('$ENT','SUSPENDED',now(),'ADMIN');" && ok "entitlement transition still succeeds under a dedicated NOLOGIN owner (§3)" || no "separated-owner transition failed"
+expect_ok "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3800,4000,1500,524288000,2,'REJECT_NEW_DEVICE',43200);" && ok "grace publication still succeeds under a dedicated NOLOGIN owner (§3)" || no "separated-owner publication failed"
+# the OTHER family's owner cannot perform this family's operation (owner separation is real)
+expect_err "SET LOCAL ROLE p3_cfg_writer; UPDATE iam_v2.entitlements SET status='ACTIVE' WHERE id='$ENT';" && ok "grace-config owner CANNOT mutate entitlement status (cross-family refused) (§3)" || no "cross-family write accepted"
+expect_err "SET LOCAL ROLE p3_ent_writer; UPDATE iam_v2.site_checkout_grace_config SET grace_duration_seconds=4242, config_version=config_version+1 WHERE tenant_id='$T' AND site_id='$S';" && ok "entitlement owner CANNOT publish grace config (cross-family refused) (§3)" || no "cross-family config write accepted"
+# restore the DARK ownership baseline and destroy the temporary owners (no persistent grants remain)
+Q "ALTER FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text) OWNER TO $BASE_OWNER;
+   ALTER FUNCTION iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int) OWNER TO $BASE_OWNER;
+   REVOKE ALL ON iam_v2.entitlements, iam_v2.entitlement_state_transitions, iam_v2.site_checkout_grace_config FROM p3_ent_writer, p3_cfg_writer;
+   REVOKE USAGE ON SCHEMA iam_v2 FROM p3_ent_writer, p3_cfg_writer;
+   DROP ROLE IF EXISTS p3_ent_writer; DROP ROLE IF EXISTS p3_cfg_writer;" >/dev/null
+[ "$(Q "SELECT iam_v2.p3_controlled_writer_owner('entitlement');")" = "$BASE_OWNER" ] && ok "DARK ownership baseline restored; temporary writer owners destroyed (§3)" || no "baseline not restored"
+[ "$(Q "SELECT count(*) FROM pg_roles WHERE rolname IN ('p3_ent_writer','p3_cfg_writer','p3_writer_probe');")" = 0 ] && ok "no temporary writer/probe roles persist (zero runtime grants preserved) (§3)" || no "temporary roles persist"
 
 # alert-action legal edges (§10): the first action must be OPEN — proven directly against the valid NO_GRACE
 # audit id ($CGAID). (The full OPEN->ACK->RESOLVED lifecycle + active-view semantics are proven in the PG16

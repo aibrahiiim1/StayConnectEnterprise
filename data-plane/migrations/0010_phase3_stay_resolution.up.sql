@@ -487,11 +487,62 @@ REVOKE EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timesta
 -- These guards therefore reject a NON-OWNER's raw status UPDATE, forged history INSERT, or direct authoritative
 -- grace-policy UPDATE (even one that correctly recomputes config_version+1), while the controlled functions
 -- pass. The deferred status/history coherence trigger stays as defense-in-depth behind this boundary.
+-- (item 2) PER-FAMILY owner resolution. The permitted writer identity is the EXACT owner of that family's
+-- approved controlled function, resolved from the catalog by its unambiguous regprocedure signature (never a
+-- bare name — overloads would be ambiguous — and never a caller-supplied GUC/application_name/role string).
+-- This lets Gate-P reassign each callable function to its own dedicated minimum-privilege NOLOGIN owner without
+-- touching these table guards. Fails CLOSED when the function or its owner cannot be resolved.
+CREATE OR REPLACE FUNCTION iam_v2.p3_controlled_writer_owner(p_family text) RETURNS text
+  LANGUAGE plpgsql STABLE SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_sig text; v_oid oid; v_owner text;
+BEGIN
+  v_sig := CASE p_family
+    WHEN 'entitlement' THEN 'iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)'
+    WHEN 'grace_config' THEN 'iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)'
+    ELSE NULL END;
+  IF v_sig IS NULL THEN
+    RAISE EXCEPTION 'no approved controlled-writer family %', p_family;
+  END IF;
+  v_oid := to_regprocedure(v_sig);            -- NULL (not an error) when unresolvable
+  IF v_oid IS NULL THEN
+    RAISE EXCEPTION 'controlled-writer function % is not resolvable (fail closed)', v_sig;
+  END IF;
+  SELECT pg_get_userbyid(proowner) INTO v_owner FROM pg_proc WHERE oid = v_oid;
+  IF v_owner IS NULL OR v_owner = '' THEN
+    RAISE EXCEPTION 'controlled-writer owner for % is not resolvable (fail closed)', v_sig;
+  END IF;
+  RETURN v_owner;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_controlled_writer_owner(text) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION iam_v2.p3_controlled_writer_only() RETURNS trigger
   LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
-DECLARE owner_role text; changed boolean := true;
+DECLARE owner_role text; changed boolean := true; v_sig text; v_oid oid;
 BEGIN
-  owner_role := pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid = 'iam_v2.entitlements'::regclass));
+  -- resolve the family's approved function owner INLINE (catalog-only). Deliberately NOT a call to the
+  -- introspection helper: this trigger fires as whichever role is writing, and a cross-function EXECUTE
+  -- dependency would break exactly the dedicated-owner separation Gate-P needs.
+  v_sig := CASE WHEN TG_TABLE_NAME = 'site_checkout_grace_config'
+                THEN 'iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)'
+                ELSE 'iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)' END;
+  v_oid := to_regprocedure(v_sig);
+  IF v_oid IS NULL THEN
+    RAISE EXCEPTION 'controlled-writer function % is not resolvable (fail closed)', v_sig;
+  END IF;
+  SELECT pg_get_userbyid(proowner) INTO owner_role FROM pg_proc WHERE oid = v_oid;
+  IF owner_role IS NULL OR owner_role = '' THEN
+    RAISE EXCEPTION 'controlled-writer owner for % is not resolvable (fail closed)', v_sig;
+  END IF;
+  -- (item 1) DELETE of the authoritative site grace config is ALWAYS a controlled-writer-only operation. There
+  -- is no approved ordinary DELETE for this row; a future reset/disable must be its own audited, PO-approved API
+  -- with explicit semantics (this guard deliberately does NOT silently convert DELETE into "disable").
+  IF TG_OP = 'DELETE' THEN
+    IF current_user <> owner_role THEN
+      RAISE EXCEPTION '%: DELETE goes through an approved controlled iam_v2 writer (caller %)',
+        TG_TABLE_NAME, current_user;
+    END IF;
+    RETURN OLD;
+  END IF;
   IF TG_TABLE_NAME = 'entitlements' THEN
     changed := (NEW.status IS DISTINCT FROM OLD.status);   -- only status is controlled-writer-only
   ELSIF TG_TABLE_NAME = 'site_checkout_grace_config' AND TG_OP = 'UPDATE' THEN
@@ -517,7 +568,7 @@ CREATE TRIGGER p3_est_controlled_writer BEFORE INSERT ON iam_v2.entitlement_stat
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
 -- (item 1) INSERT is protected too: seeding the FIRST authoritative grace-config row is itself an authoritative
 -- write, so it must come through publish_checkout_grace_config() and never from a raw non-owner INSERT.
-CREATE TRIGGER p3_grace_config_controlled_writer BEFORE INSERT OR UPDATE ON iam_v2.site_checkout_grace_config
+CREATE TRIGGER p3_grace_config_controlled_writer BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.site_checkout_grace_config
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
 REVOKE EXECUTE ON FUNCTION iam_v2.p3_controlled_writer_only() FROM PUBLIC;
 

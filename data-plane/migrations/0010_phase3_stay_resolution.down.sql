@@ -36,6 +36,7 @@ DROP TRIGGER IF EXISTS p3_entitlement_controlled_writer ON iam_v2.entitlements;
 DROP TRIGGER IF EXISTS p3_est_controlled_writer ON iam_v2.entitlement_state_transitions;
 DROP TRIGGER IF EXISTS p3_grace_config_controlled_writer ON iam_v2.site_checkout_grace_config;
 DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_only();
+DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_owner(text);
 DROP TRIGGER IF EXISTS p3_entitlement_status_coherent ON iam_v2.entitlements;
 DROP FUNCTION IF EXISTS iam_v2.p3_entitlement_status_coherent();
 DROP FUNCTION IF EXISTS iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text);
