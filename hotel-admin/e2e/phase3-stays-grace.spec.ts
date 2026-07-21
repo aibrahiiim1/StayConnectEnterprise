@@ -15,6 +15,7 @@ async function installBackend(
     alerts?: unknown[];
     unpublished?: boolean;
     alertActionStatus?: number;
+    packages?: unknown[];
     grace?: unknown;
     gracePutStatus?: number;
     mutations: Mutations;
@@ -61,6 +62,9 @@ async function installBackend(
       if (st !== 200) return route.fulfill(json(st, { error: "bad_request", message: "the checkout-grace policy was refused" }));
       return route.fulfill(json(200, { config_version: 8 }));
     }
+    if (path === "/checkout-grace/packages") {
+      return route.fulfill(json(200, JSON.stringify({ data: opts.packages ?? [gracePackage], meta: { has_more: false } })));
+    }
     if (path === "/checkout-grace") {
       if (opts.unpublished) {
         return route.fulfill(json(200, { published: false, config_version: 0, supported_device_policies: ["REJECT_NEW_DEVICE"] }));
@@ -85,6 +89,14 @@ const stay = {
   posting_allowed: false,
   occupants: 2,
   effective_checkout_at: "2026-07-21T09:00:00Z",
+};
+
+const gracePackage = {
+  package_revision_id: "rev-1", package_code: "site-grace-pkg", revision_no: 1,
+  service_plan_revision_id: "plan-1", service_plan_code: "site-grace-plan",
+  down_kbps: 4000, up_kbps: 1500, data_quota_bytes: 524288000, device_limit: 2,
+  device_limit_policy: "REJECT_NEW_DEVICE", grace_duration_seconds: 3600,
+  settlement_mode: "NOT_REQUIRED", is_current: true, selected: true,
 };
 
 const graceCfg = {
@@ -174,9 +186,8 @@ test("publishing the checkout-grace policy sends the COMPLETE policy and reports
   const mutations: Mutations = [];
   await installBackend(page, { grace: graceCfg, mutations });
   await page.goto("/checkout-grace");
-  const duration = page.getByLabel("Grace duration (seconds)", { exact: true });
-  await expect(duration).toHaveValue("3600");
-  await duration.fill("1800");
+  // the operator chooses a package; the numbers are the package's own pinned values, shown read-only
+  await expect(page.getByText("4000 kbps")).toBeVisible();
   await page.getByLabel("Confirm your password", { exact: true }).fill("operator-pw");
   await page.getByRole("button", { name: /Publish policy/ }).click();
 
@@ -184,7 +195,9 @@ test("publishing the checkout-grace policy sends the COMPLETE policy and reports
   const req = mutations.find((m) => m.path === "/checkout-grace" && m.method === "PUT")!;
   const sent = req.body as Record<string, unknown>;
   for (const k of Object.keys(graceCfg)) expect(sent).toHaveProperty(k);
-  expect(sent.grace_duration_seconds).toBe(1800);
+  expect(sent.grace_package_revision_id).toBe("rev-1");
+  expect(sent.grace_duration_seconds).toBe(3600);
+  expect(sent.grace_down_kbps).toBe(4000);
   // governed publication: the version the operator read, a bounded reason and a password confirmation
   expect(sent.expected_config_version).toBe(7);
   expect(sent.reason_code).toBeTruthy();
@@ -206,8 +219,8 @@ test("a site with no published policy starts from defaults rather than an error"
   const mutations: Mutations = [];
   await installBackend(page, { unpublished: true, mutations });
   await page.goto("/checkout-grace");
-  await expect(page.getByLabel("Grace duration (seconds)", { exact: true })).toHaveValue("3600");
   // "no policy published yet" is a starting point, not a failure the operator has to interpret
+  await expect(page.getByText(/nothing published yet/)).toBeVisible();
   await expect(page.getByText(/Failed to load the checkout-grace policy/)).toHaveCount(0);
 });
 
@@ -228,13 +241,10 @@ test("phase-3 pages are accessible: named controls, one heading, labelled filter
   await page.goto("/checkout-grace");
   await expect(page.getByRole("heading", { level: 1, name: "Checkout grace" })).toBeVisible();
   for (const label of [
-    "Grace duration (seconds)",
+    "Grace package",
     "Eligibility window (seconds)",
-    "Download (kbps)",
-    "Upload (kbps)",
-    "Data allowance (bytes)",
-    "Device limit",
-    "Device limit policy",
+    "Reason",
+    "Confirm your password",
   ]) {
     await expect(page.getByLabel(label, { exact: true })).toBeVisible();
   }

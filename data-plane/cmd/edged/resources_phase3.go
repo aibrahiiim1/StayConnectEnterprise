@@ -277,8 +277,79 @@ var supportedDeviceLimitPolicies = []string{"REJECT_NEW_DEVICE"}
 func (s *server) checkoutGraceConfigRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.getCheckoutGraceConfig)
+	r.Get("/packages", s.listGracePackages)
 	r.Put("/", s.putCheckoutGraceConfig)
 	return r
+}
+
+// gracePackageOption is one selectable Checkout-Grace Package Revision, described by its own IMMUTABLE
+// attributes. The operator picks a package; they never type a UUID, and they never invent the numbers — the
+// numbers ARE the pinned revision's, which is what makes the published policy and the package agree by
+// construction rather than by careful data entry.
+type gracePackageOption struct {
+	PackageRevisionID string `json:"package_revision_id"`
+	PackageCode       string `json:"package_code"`
+	RevisionNo        int    `json:"revision_no"`
+	PlanRevisionID    string `json:"service_plan_revision_id"`
+	PlanCode          string `json:"service_plan_code"`
+	DownKbps          int    `json:"down_kbps"`
+	UpKbps            int    `json:"up_kbps"`
+	DataQuotaBytes    int64  `json:"data_quota_bytes"`
+	DeviceLimit       int    `json:"device_limit"`
+	DeviceLimitPolicy string `json:"device_limit_policy"`
+	DurationSeconds   int    `json:"grace_duration_seconds"`
+	SettlementMode    string `json:"settlement_mode"`
+	IsCurrent         bool   `json:"is_current"`
+	Selected          bool   `json:"selected"`
+}
+
+// listGracePackages returns ONLY revisions that could actually serve as this site's Checkout-Grace policy:
+// current revision of an active, system-owned CHECKOUT_GRACE package, free, no settlement, with a real plan
+// revision. Anything else would be an option that publication is guaranteed to refuse.
+func (s *server) listGracePackages(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `SELECT ipr.id::text, ip.code, ipr.revision_no, spr.id::text, sp.code,
+			spr.down_kbps, spr.up_kbps, spr.data_quota_bytes, spr.max_concurrent_devices, spr.device_limit_policy,
+			COALESCE((ipr.duration_policy->>'grace_duration_seconds')::int, 0),
+			array_to_string(ipr.settlement_methods, ','),
+			(ip.current_revision_id = ipr.id),
+			(ipr.id = (SELECT grace_package_revision_id FROM iam_v2.site_checkout_grace_config
+			           WHERE tenant_id=$1 AND site_id=$2))
+		FROM iam_v2.internet_package_revisions ipr
+		JOIN iam_v2.internet_packages ip
+		  ON ip.tenant_id=ipr.tenant_id AND ip.site_id=ipr.site_id AND ip.id=ipr.package_id
+		JOIN iam_v2.service_plan_revisions spr
+		  ON spr.tenant_id=ipr.tenant_id AND spr.site_id=ipr.site_id AND spr.id=ipr.service_plan_revision_id
+		JOIN iam_v2.service_plans sp
+		  ON sp.tenant_id=spr.tenant_id AND sp.site_id=spr.site_id AND sp.id=spr.service_plan_id
+		WHERE ipr.tenant_id=$1 AND ipr.site_id=$2
+		  AND ipr.package_type='CHECKOUT_GRACE' AND ip.is_system AND ip.active
+		  -- the reserved Emergency catalog is the fallback of last resort, never an ordinary choice
+		  AND ip.code NOT IN ('__sys_emergency_grace_pkg__','__sys_emergency_grace_plan__')
+		  AND ip.current_revision_id = ipr.id AND ipr.price_minor = 0
+		  AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
+		  AND sp.enabled
+		ORDER BY ip.code, ipr.revision_no DESC`, s.tenantID, s.siteID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	defer rows.Close()
+	out := []gracePackageOption{}
+	for rows.Next() {
+		var o gracePackageOption
+		var selected *bool
+		if err := rows.Scan(&o.PackageRevisionID, &o.PackageCode, &o.RevisionNo, &o.PlanRevisionID, &o.PlanCode,
+			&o.DownKbps, &o.UpKbps, &o.DataQuotaBytes, &o.DeviceLimit, &o.DeviceLimitPolicy,
+			&o.DurationSeconds, &o.SettlementMode, &o.IsCurrent, &selected); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
+			return
+		}
+		o.Selected = selected != nil && *selected
+		out = append(out, o)
+	}
+	writeList(w, out)
 }
 
 func (s *server) getCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) {
@@ -326,6 +397,14 @@ func (s *server) putCheckoutGraceConfig(w http.ResponseWriter, r *http.Request) 
 	}
 	if strings.TrimSpace(in.ReasonCode) == "" {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a bounded reason code is required to publish")
+		return
+	}
+	// A policy with no Package Revision is not an ordinary policy: the Checkout conversion judges it invalid
+	// configuration and falls back to Emergency Grace, so publishing it would show "saved" while guaranteeing
+	// an emergency fallback and an operational alert on the very next departure.
+	if in.PackageRevisionID == nil || strings.TrimSpace(*in.PackageRevisionID) == "" {
+		jsonErr(w, http.StatusBadRequest, "package_required",
+			"select a checkout-grace package revision; a policy with no package would fall back to emergency grace")
 		return
 	}
 	// Step-up: publishing changes what every departing guest receives.

@@ -1404,8 +1404,15 @@ BEGIN
     -- OPEN belongs to the audit that raised the alert; an operator can only move it forward.
     RAISE EXCEPTION 'ALERT_ACTION_INVALID: % is not an operator action', p_action;
   END IF;
-  IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
-    RAISE EXCEPTION 'ALERT_ACTION_INVALID: reason must be a bounded machine code';
+  -- Mandatory, and enforced HERE rather than only at the HTTP layer: an operator action with no reason is an
+  -- unexplained state change in an audit trail whose whole purpose is explaining state changes.
+  IF p_reason IS NULL OR p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'ALERT_ACTION_INVALID: a bounded machine reason code is required';
+  END IF;
+  -- NULL must never mean "act against whatever state you find": that is precisely the race the expected-state
+  -- check exists to prevent.
+  IF p_expected_state IS NULL OR p_expected_state NOT IN ('OPEN','ACKNOWLEDGED') THEN
+    RAISE EXCEPTION 'ALERT_STATE_CONFLICT: an expected state of OPEN or ACKNOWLEDGED is required';
   END IF;
   -- scope: the alert must belong to THIS tenant+site, and the row lock serializes the whole lifecycle
   SELECT id INTO v_audit FROM iam_v2.checkout_grace_audit
@@ -1430,7 +1437,7 @@ BEGIN
     RAISE EXCEPTION 'ALERT_NOT_FOUND: alert % has no lifecycle', p_audit;
   END IF;
   -- optimistic state match: the caller acted on what it last saw, and nothing has moved since.
-  IF p_expected_state IS NOT NULL AND p_expected_state <> v_head THEN
+  IF p_expected_state <> v_head THEN
     RAISE EXCEPTION 'ALERT_STATE_CONFLICT: alert is % (caller expected %)', v_head, p_expected_state;
   END IF;
   IF v_head = 'RESOLVED' THEN
@@ -1445,6 +1452,90 @@ BEGIN
   RETURN v_seq;
 END $fn$;
 REVOKE EXECUTE ON FUNCTION iam_v2.record_alert_action(uuid,uuid,uuid,text,uuid,text,text) FROM PUBLIC;
+
+-- ============================================================================
+-- (4m2) THE ONE authoritative Grace-package validator.
+--
+-- Two places need to know whether a Package Revision can actually serve the published Checkout-Grace policy:
+-- the Hotel-Admin PUBLICATION (refuse it up front) and the CHECKOUT CONVERSION (fall back to Emergency if it
+-- ever stops being true). Implementing that twice guarantees they eventually disagree — and the failure mode
+-- is the worst kind: publication says "saved", every subsequent checkout silently falls back to Emergency
+-- Grace, and the alert queue fills up with something an operator already thought they had configured.
+--
+-- So it lives HERE, once, and both callers use it.
+--
+-- grace_package_mismatch_reason returns NULL when the revision exactly serves the policy, or the FIRST bounded
+-- reason it does not. grace_package_matches_policy is the boolean form for the conversion path.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION iam_v2.grace_package_mismatch_reason(
+    p_tenant uuid, p_site uuid, p_pkg_rev uuid,
+    p_duration int, p_down int, p_up int, p_quota bigint, p_dev_limit int, p_dev_policy text) RETURNS text
+  LANGUAGE plpgsql STABLE SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE r record;
+BEGIN
+  IF p_pkg_rev IS NULL THEN
+    -- A policy with no Package cannot grant anything. The conversion treats it as invalid configuration and
+    -- falls back to Emergency, so it must never be publishable as an ordinary policy.
+    RETURN 'PACKAGE_REQUIRED';
+  END IF;
+  SELECT ipr.id, ipr.package_type, ipr.price_minor, ipr.settlement_methods, ipr.duration_policy,
+         ipr.service_plan_revision_id, ip.is_system, ip.active AS pkg_active, ip.current_revision_id, ip.code AS pkg_code,
+         spr.id AS spr_id, spr.down_kbps, spr.up_kbps, spr.data_quota_bytes,
+         spr.max_concurrent_devices, spr.device_limit_policy, spr.time_accounting_mode, sp.enabled AS plan_enabled
+    INTO r
+    FROM iam_v2.internet_package_revisions ipr
+    JOIN iam_v2.internet_packages ip
+      ON ip.tenant_id = ipr.tenant_id AND ip.site_id = ipr.site_id AND ip.id = ipr.package_id
+    LEFT JOIN iam_v2.service_plan_revisions spr
+      ON spr.tenant_id = ipr.tenant_id AND spr.site_id = ipr.site_id AND spr.id = ipr.service_plan_revision_id
+    LEFT JOIN iam_v2.service_plans sp
+      ON sp.tenant_id = spr.tenant_id AND sp.site_id = spr.site_id AND sp.id = spr.service_plan_id
+   WHERE ipr.id = p_pkg_rev AND ipr.tenant_id = p_tenant AND ipr.site_id = p_site;
+
+  IF r.id IS NULL THEN RETURN 'PACKAGE_NOT_IN_SITE'; END IF;
+  IF r.current_revision_id IS DISTINCT FROM r.id THEN RETURN 'NOT_CURRENT_REVISION'; END IF;
+  IF r.pkg_active IS NOT TRUE THEN RETURN 'PACKAGE_INACTIVE'; END IF;
+  IF r.package_type <> 'CHECKOUT_GRACE' THEN RETURN 'PACKAGE_TYPE'; END IF;
+  IF r.is_system IS NOT TRUE THEN RETURN 'PACKAGE_NOT_SYSTEM_OWNED'; END IF;
+  -- The RESERVED Emergency catalog is the fallback of last resort, not a policy an operator may adopt as the
+  -- ordinary one. Allowing it would make "configured" and "emergency" indistinguishable in the audit trail and
+  -- would silence the very alert that tells an operator their real policy is broken.
+  IF r.pkg_code IN ('__sys_emergency_grace_pkg__','__sys_emergency_grace_plan__') THEN
+    RETURN 'PACKAGE_IS_EMERGENCY_CATALOG';
+  END IF;
+  IF r.price_minor <> 0 THEN RETURN 'PACKAGE_NOT_FREE'; END IF;
+  IF array_length(r.settlement_methods,1) <> 1 OR r.settlement_methods[1] <> 'NOT_REQUIRED' THEN
+    RETURN 'PACKAGE_SETTLEMENT';
+  END IF;
+  IF r.spr_id IS NULL THEN RETURN 'PLAN_REVISION_MISSING'; END IF;
+  IF r.plan_enabled IS NOT TRUE THEN RETURN 'PLAN_DISABLED'; END IF;
+  -- duration policy: the package must END as grace, for exactly the published duration, under the approved
+  -- policy version when it declares one.
+  IF COALESCE(r.duration_policy->>'end_mode','') <> 'GRACE_AFTER_CHECKOUT' THEN RETURN 'DURATION_END_MODE'; END IF;
+  IF COALESCE(r.duration_policy->>'grace_duration_seconds','') <> p_duration::text THEN RETURN 'DURATION_SECONDS'; END IF;
+  IF r.duration_policy ? 'policy_version'
+     AND COALESCE(r.duration_policy->>'policy_version','') <> 'CHECKOUT_GRACE_V1' THEN
+    RETURN 'DURATION_POLICY_VERSION';
+  END IF;
+  -- the pinned plan revision must carry EXACTLY the published scalars: a policy the plan cannot deliver is a
+  -- promise to the guest that the enforcement path would quietly break.
+  IF r.down_kbps <> p_down THEN RETURN 'PLAN_DOWN_KBPS'; END IF;
+  IF r.up_kbps <> p_up THEN RETURN 'PLAN_UP_KBPS'; END IF;
+  IF r.data_quota_bytes IS DISTINCT FROM p_quota THEN RETURN 'PLAN_DATA_QUOTA'; END IF;
+  IF r.max_concurrent_devices <> p_dev_limit THEN RETURN 'PLAN_DEVICE_LIMIT'; END IF;
+  IF r.device_limit_policy <> p_dev_policy THEN RETURN 'PLAN_DEVICE_POLICY'; END IF;
+  IF r.time_accounting_mode <> 'VALIDITY_WINDOW' THEN RETURN 'PLAN_TIME_ACCOUNTING'; END IF;
+  RETURN NULL;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.grace_package_mismatch_reason(uuid,uuid,uuid,int,int,int,bigint,int,text) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION iam_v2.grace_package_matches_policy(
+    p_tenant uuid, p_site uuid, p_pkg_rev uuid,
+    p_duration int, p_down int, p_up int, p_quota bigint, p_dev_limit int, p_dev_policy text) RETURNS boolean
+  LANGUAGE sql STABLE SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT iam_v2.grace_package_mismatch_reason($1,$2,$3,$4,$5,$6,$7,$8,$9) IS NULL;
+$fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.grace_package_matches_policy(uuid,uuid,uuid,int,int,int,bigint,int,text) FROM PUBLIC;
 
 -- ============================================================================
 -- (4n) CONTROLLED CHECKOUT-GRACE POLICY PUBLICATION.
@@ -1477,7 +1568,7 @@ CREATE OR REPLACE FUNCTION iam_v2.publish_checkout_grace_policy(
     p_duration int, p_down int, p_up int, p_quota bigint, p_dev_limit int, p_dev_policy text,
     p_eligibility int, p_expected_version int, p_actor uuid, p_reason text) RETURNS int
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
-DECLARE v_current int; v_new int; v_type text; v_price bigint; v_settle text[]; v_spr uuid; v_sys boolean;
+DECLARE v_current int; v_new int; v_mismatch text;
 BEGIN
   -- ACTOR: an existing, active operator of this tenant. A policy nobody can be held to is not governed.
   IF p_actor IS NULL THEN RAISE EXCEPTION 'GRACE_ACTOR_INVALID: an actor is required'; END IF;
@@ -1486,8 +1577,9 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'GRACE_ACTOR_INVALID: actor % is not an active operator of this tenant', p_actor;
   END IF;
-  IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
-    RAISE EXCEPTION 'GRACE_ACTOR_INVALID: reason must be a bounded machine code';
+  -- A publication with no recorded reason is an unattributable change to what every departing guest receives.
+  IF p_reason IS NULL OR p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'GRACE_ACTOR_INVALID: a bounded machine reason code is required';
   END IF;
 
   -- POLICY: only the capability that actually exists. DISCONNECT_OLDEST and ADMIN_APPROVAL are refused rather
@@ -1496,40 +1588,26 @@ BEGIN
     RAISE EXCEPTION 'GRACE_POLICY_UNSUPPORTED: device limit policy % is not implemented', p_dev_policy;
   END IF;
 
-  -- PACKAGE GRAPH: the referenced revision must be a real, current, grantable CHECKOUT_GRACE revision at zero
-  -- price with settlement exactly NOT_REQUIRED, and its Service Plan revision must exist. Validating this here
-  -- means an operator cannot publish a policy that would fall back to Emergency Grace on every checkout.
-  IF p_pkg_rev IS NOT NULL THEN
-    SELECT ipr.package_type, ipr.price_minor, ipr.settlement_methods, ipr.service_plan_revision_id, ip.is_system
-      INTO v_type, v_price, v_settle, v_spr, v_sys
-      FROM iam_v2.internet_package_revisions ipr
-      JOIN iam_v2.internet_packages ip
-        ON ip.tenant_id = ipr.tenant_id AND ip.site_id = ipr.site_id AND ip.id = ipr.package_id
-     WHERE ipr.id = p_pkg_rev AND ipr.tenant_id = p_tenant AND ipr.site_id = p_site
-       AND ip.current_revision_id = ipr.id;
-    IF v_type IS NULL THEN
-      RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: % is not the current revision of a package in this site', p_pkg_rev;
-    END IF;
-    IF v_type <> 'CHECKOUT_GRACE' THEN
-      RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: package type % cannot serve checkout grace', v_type;
-    END IF;
-    IF v_price <> 0 THEN
-      RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: a grace package must be free (price %)', v_price;
-    END IF;
-    IF array_length(v_settle,1) <> 1 OR v_settle[1] <> 'NOT_REQUIRED' THEN
-      RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: a grace package must require no settlement';
-    END IF;
-    PERFORM 1 FROM iam_v2.service_plan_revisions WHERE id = v_spr AND tenant_id = p_tenant AND site_id = p_site;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: the package revision has no service plan revision in this site';
-    END IF;
+  -- PACKAGE GRAPH: validated by THE SAME function the Checkout conversion uses, so a policy that would later
+  -- be judged invalid (and silently fall back to Emergency Grace on every departure) is refused NOW, while an
+  -- operator is looking at it. A NULL package is refused for exactly that reason: it is not a policy, it is a
+  -- guaranteed Emergency fallback wearing a success message.
+  v_mismatch := iam_v2.grace_package_mismatch_reason(p_tenant, p_site, p_pkg_rev,
+                                                     p_duration, p_down, p_up, p_quota, p_dev_limit, p_dev_policy);
+  IF v_mismatch IS NOT NULL THEN
+    RAISE EXCEPTION 'GRACE_PACKAGE_INVALID: %', v_mismatch;
   END IF;
 
   -- OPTIMISTIC VERSION: the caller edited what it last read. Two operators publishing at once produce one
   -- winner and one explicit conflict, never a silent overwrite. 0 means "I believe nothing is published yet".
+  -- It is MANDATORY here, not just at the HTTP layer: a NULL that meant "skip concurrency control" would make
+  -- the database's own guarantee depend on a caller remembering to ask for it.
+  IF p_expected_version IS NULL OR p_expected_version < 0 THEN
+    RAISE EXCEPTION 'GRACE_VERSION_CONFLICT: an expected config_version (>= 0) is required';
+  END IF;
   SELECT config_version INTO v_current FROM iam_v2.site_checkout_grace_config
     WHERE tenant_id = p_tenant AND site_id = p_site FOR UPDATE;
-  IF p_expected_version IS NOT NULL AND COALESCE(v_current,0) <> p_expected_version THEN
+  IF COALESCE(v_current,0) <> p_expected_version THEN
     RAISE EXCEPTION 'GRACE_VERSION_CONFLICT: current version is % (caller expected %)', COALESCE(v_current,0), p_expected_version;
   END IF;
 

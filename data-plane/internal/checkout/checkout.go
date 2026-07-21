@@ -16,7 +16,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -734,21 +733,13 @@ func readEmergencyCatalog(ctx context.Context, tx pgx.Tx, tenant, site string) (
 // same tenant/site, system-owned, CHECKOUT_GRACE, the approved current/pinned revision, price 0, settlement
 // exactly NOT_REQUIRED, enabled plan, and down/up/quota/device-limit/policy + grace duration all matching.
 func validateConfiguredGraceExact(ctx context.Context, tx pgx.Tx, tenant, site, pkgRev string, pol grace.Policy) bool {
+	// THE SAME function the Hotel-Admin publication uses. Keeping one implementation is the point: if the
+	// conversion judged the configuration by different rules than publication did, an operator could publish a
+	// policy that "saved successfully" and then watch every departure silently fall back to Emergency Grace.
 	var ok bool
-	err := tx.QueryRow(ctx, `SELECT
-		ip.is_system AND ipr.package_type='CHECKOUT_GRACE' AND ip.current_revision_id=ipr.id
-		AND ipr.price_minor=0 AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
-		AND sp.enabled
-		AND spr.down_kbps=$4 AND spr.up_kbps=$5 AND spr.data_quota_bytes=$6
-		AND spr.max_concurrent_devices=$7 AND spr.device_limit_policy=$8
-		AND (ipr.duration_policy->>'grace_duration_seconds')=$9
-		FROM iam_v2.internet_package_revisions ipr
-		JOIN iam_v2.internet_packages ip ON ip.tenant_id=ipr.tenant_id AND ip.site_id=ipr.site_id AND ip.id=ipr.package_id
-		JOIN iam_v2.service_plan_revisions spr ON spr.tenant_id=ipr.tenant_id AND spr.site_id=ipr.site_id AND spr.id=ipr.service_plan_revision_id
-		JOIN iam_v2.service_plans sp ON sp.tenant_id=spr.tenant_id AND sp.site_id=spr.site_id AND sp.id=spr.service_plan_id
-		WHERE ipr.tenant_id=$1 AND ipr.site_id=$2 AND ipr.id=$3`,
-		tenant, site, pkgRev, pol.DownKbps, pol.UpKbps, pol.DataQuotaBytes, pol.DeviceLimit, pol.DeviceLimitPolicy,
-		strconv.Itoa(pol.DurationSeconds)).Scan(&ok)
+	err := tx.QueryRow(ctx, `SELECT iam_v2.grace_package_matches_policy($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		tenant, site, pkgRev, pol.DurationSeconds, pol.DownKbps, pol.UpKbps, pol.DataQuotaBytes,
+		pol.DeviceLimit, pol.DeviceLimitPolicy).Scan(&ok)
 	return err == nil && ok
 }
 

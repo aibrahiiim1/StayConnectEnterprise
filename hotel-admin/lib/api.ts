@@ -180,6 +180,26 @@ export type CheckoutGraceConfig = {
   config_version: number;
 };
 
+// GracePackageOption is one selectable Checkout-Grace package revision, described by its own IMMUTABLE
+// attributes. The operator picks one; the numbers are never typed, so the published policy and the package
+// agree by construction.
+export type GracePackageOption = {
+  package_revision_id: string;
+  package_code: string;
+  revision_no: number;
+  service_plan_revision_id: string;
+  service_plan_code: string;
+  down_kbps: number;
+  up_kbps: number;
+  data_quota_bytes: number;
+  device_limit: number;
+  device_limit_policy: string;
+  grace_duration_seconds: number;
+  settlement_mode: string;
+  is_current: boolean;
+  selected: boolean;
+};
+
 export type OperationalAlert = {
   audit_id: string; stay_id: string; lifecycle_version: number;
   alert_code: string; trigger: string; reason_code?: string | null;

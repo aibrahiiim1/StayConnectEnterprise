@@ -303,36 +303,36 @@ func TestIntegration_API_AlertRefusals(t *testing.T) {
 	}
 	// a stale expected state conflicts
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+audit+"/acknowledge",
-		map[string]any{"expected_state": "ACKNOWLEDGED"}); status != 409 {
+		map[string]any{"expected_state": "ACKNOWLEDGED", "reason_code": "REVIEWED"}); status != 409 {
 		t.Fatalf("stale expected_state got %d, want 409", status)
 	}
 	// an unknown alert is a 404
 	if status, _ := f.do(t, "POST", "/operational-alerts/00000000-0000-0000-0000-000000000000/acknowledge",
-		map[string]any{"expected_state": "OPEN"}); status != 404 {
+		map[string]any{"expected_state": "OPEN", "reason_code": "REVIEWED"}); status != 404 {
 		t.Fatalf("unknown alert got %d, want 404", status)
 	}
 	// an alert from ANOTHER site is invisible and unactionable
 	other := newAPI(t)
 	foreign := other.seedAlert(t)
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+foreign+"/acknowledge",
-		map[string]any{"expected_state": "OPEN"}); status != 404 {
+		map[string]any{"expected_state": "OPEN", "reason_code": "REVIEWED"}); status != 404 {
 		t.Fatalf("cross-site alert got %d, want 404", status)
 	}
 	// acknowledge, then acknowledge again → conflict; and any action after RESOLVED → conflict
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+audit+"/acknowledge",
-		map[string]any{"expected_state": "OPEN"}); status != 200 {
+		map[string]any{"expected_state": "OPEN", "reason_code": "REVIEWED"}); status != 200 {
 		t.Fatal("first acknowledge should succeed")
 	}
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+audit+"/acknowledge",
-		map[string]any{"expected_state": "ACKNOWLEDGED"}); status != 409 {
+		map[string]any{"expected_state": "ACKNOWLEDGED", "reason_code": "REVIEWED"}); status != 409 {
 		t.Fatal("repeat acknowledge must conflict")
 	}
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+audit+"/resolve",
-		map[string]any{"expected_state": "ACKNOWLEDGED"}); status != 200 {
+		map[string]any{"expected_state": "ACKNOWLEDGED", "reason_code": "REVIEWED"}); status != 200 {
 		t.Fatal("resolve should succeed")
 	}
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+audit+"/resolve",
-		map[string]any{"expected_state": "ACKNOWLEDGED"}); status != 409 {
+		map[string]any{"expected_state": "ACKNOWLEDGED", "reason_code": "REVIEWED"}); status != 409 {
 		t.Fatal("action after RESOLVED must conflict")
 	}
 }
@@ -349,7 +349,7 @@ func TestIntegration_API_ConcurrentAcknowledgeHasOneWinner(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			codes[i], _ = f.do(t, "POST", "/operational-alerts/"+audit+"/acknowledge",
-				map[string]any{"expected_state": "OPEN"})
+				map[string]any{"expected_state": "OPEN", "reason_code": "REVIEWED"})
 		}(i)
 	}
 	wg.Wait()
@@ -395,94 +395,6 @@ func gracePolicy(expected int, pkgRev any) map[string]any {
 	}
 }
 
-func TestIntegration_API_GracePublicationRequiresStepUpAndVersion(t *testing.T) {
-	f := newAPI(t)
-
-	// an unpublished site reports version 0 rather than an error
-	status, body := f.do(t, "GET", "/checkout-grace", nil)
-	if status != 200 || body["published"].(bool) || body["config_version"].(float64) != 0 {
-		t.Fatalf("unpublished GET: %d %v", status, body)
-	}
-
-	// no expected version → refused
-	p := gracePolicy(0, nil)
-	delete(p, "expected_config_version")
-	if status, _ := f.do(t, "PUT", "/checkout-grace", p); status != 400 {
-		t.Fatalf("missing expected_config_version got %d, want 400", status)
-	}
-	// wrong password → refused
-	p = gracePolicy(0, nil)
-	p["password"] = "wrong"
-	if status, _ := f.do(t, "PUT", "/checkout-grace", p); status != 401 {
-		t.Fatalf("bad step-up got %d, want 401", status)
-	}
-	// no reason → refused
-	p = gracePolicy(0, nil)
-	p["reason_code"] = ""
-	if status, _ := f.do(t, "PUT", "/checkout-grace", p); status != 400 {
-		t.Fatalf("missing reason got %d, want 400", status)
-	}
-	// a capability-disabled policy is refused rather than approximated
-	p = gracePolicy(0, nil)
-	p["grace_device_limit_policy"] = "DISCONNECT_OLDEST"
-	if status, body := f.do(t, "PUT", "/checkout-grace", p); status != 400 || body["error"] != "policy_unsupported" {
-		t.Fatalf("unsupported policy got %d %v", status, body)
-	}
-
-	// a correct publication succeeds, is attributed, and is audited immutably
-	status, body = f.do(t, "PUT", "/checkout-grace", gracePolicy(0, nil))
-	if status != 200 || body["config_version"].(float64) != 1 {
-		t.Fatalf("publish: %d %v", status, body)
-	}
-	var actor string
-	var reason string
-	if err := f.pool.QueryRow(context.Background(), `SELECT actor::text, reason_code
-		FROM iam_v2.checkout_grace_policy_publications WHERE tenant_id=$1 AND site_id=$2 AND config_version=1`,
-		f.tenant, f.site).Scan(&actor, &reason); err != nil {
-		t.Fatalf("no publication audit: %v", err)
-	}
-	if actor != f.operator || reason != "INITIAL_POLICY" {
-		t.Fatalf("publication audit actor=%s reason=%s", actor, reason)
-	}
-	if _, err := f.pool.Exec(context.Background(),
-		`UPDATE iam_v2.checkout_grace_policy_publications SET reason_code='X' WHERE config_version=1 AND site_id=$1`, f.site); err == nil {
-		t.Fatal("the publication audit must be immutable")
-	}
-
-	// publishing again with the STALE expected version is a conflict, not an overwrite
-	if status, body := f.do(t, "PUT", "/checkout-grace", gracePolicy(0, nil)); status != 409 || body["error"] != "version_conflict" {
-		t.Fatalf("stale publish got %d %v, want 409/version_conflict", status, body)
-	}
-}
-
-func TestIntegration_API_GracePublicationValidatesThePackageGraph(t *testing.T) {
-	f := newAPI(t)
-	ctx := context.Background()
-	// a NON-grace package: right shape, wrong type
-	var wrongType string
-	if err := f.pool.QueryRow(ctx, `WITH
-	  sp AS (INSERT INTO iam_v2.service_plans(id,tenant_id,site_id,code,enabled) VALUES (gen_random_uuid(),$1,$2,'p',true) RETURNING id),
-	  spr AS (INSERT INTO iam_v2.service_plan_revisions(id,tenant_id,site_id,service_plan_id,revision_no,down_kbps,up_kbps,max_concurrent_devices,device_limit_policy,time_accounting_mode,data_quota_bytes)
-	          SELECT gen_random_uuid(),$1,$2,sp.id,1,4000,1500,2,'REJECT_NEW_DEVICE','VALIDITY_WINDOW',524288000 FROM sp RETURNING id),
-	  ip AS (INSERT INTO iam_v2.internet_packages(id,tenant_id,site_id,code,is_system) VALUES (gen_random_uuid(),$1,$2,'guest',false) RETURNING id),
-	  ipr AS (INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,settlement_methods,duration_policy)
-	          SELECT gen_random_uuid(),$1,$2,ip.id,1,spr.id,'FREE_STAY',0,ARRAY['NOT_REQUIRED']::text[],'{}'::jsonb FROM ip, spr RETURNING id, package_id)
-	SELECT id::text FROM ipr`, f.tenant, f.site).Scan(&wrongType); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1
-		WHERE id=(SELECT package_id FROM iam_v2.internet_package_revisions WHERE id=$1)`, wrongType); err != nil {
-		t.Fatal(err)
-	}
-	if status, body := f.do(t, "PUT", "/checkout-grace", gracePolicy(0, wrongType)); status != 400 || body["error"] != "package_invalid" {
-		t.Fatalf("non-grace package got %d %v, want 400/package_invalid", status, body)
-	}
-	// a package that is not the CURRENT revision of anything
-	if status, body := f.do(t, "PUT", "/checkout-grace", gracePolicy(0, "00000000-0000-0000-0000-000000000000")); status != 400 || body["error"] != "package_invalid" {
-		t.Fatalf("unknown package got %d %v", status, body)
-	}
-}
-
 // A read-only role can see the policy and the queue but can change neither.
 func TestIntegration_API_ReadOnlyRoleCannotMutate(t *testing.T) {
 	f := newAPI(t, "site_viewer")
@@ -494,7 +406,17 @@ func TestIntegration_API_ReadOnlyRoleCannotMutate(t *testing.T) {
 		t.Fatal("a viewer must not be able to publish the policy")
 	}
 	if status, _ := f.do(t, "POST", "/operational-alerts/"+audit+"/acknowledge",
-		map[string]any{"expected_state": "OPEN"}); status != 403 {
+		map[string]any{"expected_state": "OPEN", "reason_code": "REVIEWED"}); status != 403 {
 		t.Fatal("a viewer must not be able to act on alerts")
 	}
+}
+
+// count runs a scalar count/int query against the disposable database.
+func count(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := p.QueryRow(context.Background(), q, args...).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

@@ -539,19 +539,55 @@ Q "INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id
 Q "UPDATE iam_v2.internet_packages SET current_revision_id='11111111-0000-0000-0000-000000000004' WHERE id='11111111-0000-0000-0000-000000000003';" >/dev/null
 expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','11111111-0000-0000-0000-000000000004',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','INIT');" \
   && ok "a non-CHECKOUT_GRACE package cannot back the grace policy (§10)" || no "wrong package type accepted"
+# A policy with NO package is refused: it would report success while guaranteeing Emergency fallback on the
+# very next checkout, which is the opposite of what "published" should mean to an operator.
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','INIT');" \
+  && ok "a NULL package revision is not a publishable ordinary policy (§10)" || no "NULL package accepted"
+# NULL preconditions never mean "skip the check" — the DB is the final authority, not the HTTP layer.
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,NULL,'$POP','INIT');" \
+  && ok "a NULL expected version cannot bypass concurrency control (§10)" || no "NULL expected version accepted"
+# an ORDINARY (non-emergency) system-owned grace package for this site
+Q "INSERT INTO iam_v2.service_plans(id,tenant_id,site_id,code,enabled) VALUES ('11111111-0000-0000-0000-000000000011','$PT','$PS_','site-grace-plan',true);" >/dev/null
+Q "INSERT INTO iam_v2.service_plan_revisions(id,tenant_id,site_id,service_plan_id,revision_no,down_kbps,up_kbps,max_concurrent_devices,device_limit_policy,time_accounting_mode,data_quota_bytes) VALUES ('11111111-0000-0000-0000-000000000012','$PT','$PS_','11111111-0000-0000-0000-000000000011',1,4000,1500,2,'REJECT_NEW_DEVICE','VALIDITY_WINDOW',524288000);" >/dev/null
+Q "INSERT INTO iam_v2.internet_packages(id,tenant_id,site_id,code,is_system,active) VALUES ('11111111-0000-0000-0000-000000000013','$PT','$PS_','site-grace-pkg',true,true);" >/dev/null
+Q "INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,settlement_methods,duration_policy) VALUES ('11111111-0000-0000-0000-000000000014','$PT','$PS_','11111111-0000-0000-0000-000000000013',1,'11111111-0000-0000-0000-000000000012','CHECKOUT_GRACE',0,ARRAY['NOT_REQUIRED']::text[],'{\"end_mode\":\"GRACE_AFTER_CHECKOUT\",\"grace_duration_seconds\":3600,\"policy_version\":\"CHECKOUT_GRACE_V1\"}'::jsonb);" >/dev/null
+Q "UPDATE iam_v2.internet_packages SET current_revision_id='11111111-0000-0000-0000-000000000014' WHERE id='11111111-0000-0000-0000-000000000013';" >/dev/null
+GP='11111111-0000-0000-0000-000000000014'
+# EXACT equality: each scalar poisoned independently must be refused, because a policy the pinned plan cannot
+# deliver would be accepted here and then silently degraded to Emergency Grace on first use.
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','$GP',1800,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','INIT');" \
+  && ok "duration mismatch refused at publication (§10)" || no "duration mismatch accepted"
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','$GP',3600,9999,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','INIT');" \
+  && ok "down_kbps mismatch refused at publication (§10)" || no "down mismatch accepted"
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','$GP',3600,4000,9999,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','INIT');" \
+  && ok "up_kbps mismatch refused at publication (§10)" || no "up mismatch accepted"
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','$GP',3600,4000,1500,1,2,'REJECT_NEW_DEVICE',86400,0,'$POP','INIT');" \
+  && ok "data quota mismatch refused at publication (§10)" || no "quota mismatch accepted"
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','$GP',3600,4000,1500,524288000,9,'REJECT_NEW_DEVICE',86400,0,'$POP','INIT');" \
+  && ok "device limit mismatch refused at publication (§10)" || no "device limit mismatch accepted"
+# the RESERVED Emergency catalog is never an ordinary policy
+Q "SELECT iam_v2.bootstrap_emergency_grace('$PT','$PS_');" >/dev/null
+EPK="$(Q "SELECT current_revision_id FROM iam_v2.internet_packages WHERE tenant_id='$PT' AND site_id='$PS_' AND code='__sys_emergency_grace_pkg__';")"
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','$EPK',3600,5000,2000,268435456,1,'REJECT_NEW_DEVICE',86400,0,'$POP','INIT');" \
+  && ok "the reserved Emergency catalog cannot be adopted as the ordinary policy (§10)" || no "emergency catalog published as ordinary"
+[ "$(Q "SELECT count(*) FROM iam_v2.checkout_grace_policy_publications WHERE tenant_id='$PT';")" = 0 ] \
+  && ok "no refused publication left an audit row (§10)" || no "a refused publication was audited"
 # the happy path, then the audit and the conflict
-[ "$(Q "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','INITIAL_POLICY');")" = 1 ] \
-  && ok "governed publication creates version 1 (§10)" || no "governed publication failed"
+[ "$(Q "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','$GP',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','INITIAL_POLICY');")" = 1 ] \
+  && ok "governed publication of a MATCHING package creates version 1 (§10)" || no "governed publication failed"
 [ "$(Q "SELECT actor='$POP' AND reason_code='INITIAL_POLICY' FROM iam_v2.checkout_grace_policy_publications WHERE tenant_id='$PT' AND site_id='$PS_' AND config_version=1;")" = t ] \
   && ok "the publication is attributed to its actor with a bounded reason (§10)" || no "publication audit missing"
 expect_err "UPDATE iam_v2.checkout_grace_policy_publications SET reason_code='X' WHERE tenant_id='$PT' AND config_version=1;" \
   && ok "the publication audit is immutable (§10)" || no "publication audit mutated"
-expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,1800,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,0,'$POP','SECOND');" \
+expect_err "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','$GP',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',43200,0,'$POP','SECOND');" \
   && ok "a second publication with the SAME stale version is a conflict, not an overwrite (§10)" || no "stale publish overwrote"
-[ "$(Q "SELECT grace_duration_seconds FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$PT' AND site_id='$PS_';")" = 3600 ] \
+[ "$(Q "SELECT eligibility_window_seconds FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$PT' AND site_id='$PS_';")" = 86400 ] \
   && ok "the refused publication changed nothing (§10)" || no "refused publication mutated the policy"
-[ "$(Q "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_',NULL,1800,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400,1,'$POP','SECOND');")" = 2 ] \
+[ "$(Q "SELECT iam_v2.publish_checkout_grace_policy('$PT','$PS_','$GP',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',43200,1,'$POP','SECOND');")" = 2 ] \
   && ok "publishing with the CURRENT version succeeds and bumps once (§10)" || no "correct-version publish failed"
+# the SAME validator the Checkout conversion uses agrees with what was just published
+[ "$(Q "SELECT iam_v2.grace_package_matches_policy('$PT','$PS_','$GP',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE');")" = t ] \
+  && ok "the published policy passes the SHARED conversion-time validator (no drift) (§10)" || no "published policy fails the conversion validator"
 
 echo '== ACCOUNTING ATTRIBUTION: session binding intervals, watermarks, delayed samples (§8) =='
 # A rebound session must not carry its pre-boundary samples to the next Entitlement, a frozen decision must not
