@@ -497,3 +497,100 @@ func countRows(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
 	}
 	return n
 }
+
+// F1 — ROOM MOVE PRESERVATION. A room move changes ONLY the lookup room number: the Stay identity, its
+// episode counter, its occupants and its folio link all survive, because the room is evidence, never identity.
+func TestIntegration_F1_RoomMovePreservesTheStay(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	s := seed(t, p)
+	pr := NewProcessor(p)
+	insertLive(t, p, s, "F1-GI", "GI", paySharers("R800", "800", "F800",
+		`{"external_guest_id":"G1","first_name":"Ada","last_name":"Byron","is_primary":true},`+
+			`{"external_guest_id":"G2","first_name":"Chas","last_name":"Babbage"}`))
+	process(t, pr, s)
+	var stayID string
+	var lifecycle int
+	if err := p.QueryRow(ctx, `SELECT id::text, lifecycle_version FROM iam_v2.stays
+		WHERE pms_interface_id=$1 AND external_reservation_id='R800'`, s.iface).Scan(&stayID, &lifecycle); err != nil {
+		t.Fatal(err)
+	}
+	insertLive(t, p, s, "F1-MOVE", "GC", paySharers("R800", "915", "F800", `{"external_guest_id":"G1","first_name":"Ada","last_name":"Byron","is_primary":true}`))
+	process(t, pr, s)
+
+	var movedID, room string
+	var movedLifecycle int
+	if err := p.QueryRow(ctx, `SELECT id::text, COALESCE(normalized_room_number,''), lifecycle_version FROM iam_v2.stays
+		WHERE pms_interface_id=$1 AND external_reservation_id='R800'`, s.iface).Scan(&movedID, &room, &movedLifecycle); err != nil {
+		t.Fatal(err)
+	}
+	if movedID != stayID {
+		t.Fatal("a room move created a new Stay — the room is evidence, not identity")
+	}
+	if room != "915" {
+		t.Fatalf("room = %q, want the moved room 915", room)
+	}
+	if movedLifecycle != lifecycle {
+		t.Fatalf("lifecycle_version moved from %d to %d — a room move is not a new episode", lifecycle, movedLifecycle)
+	}
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1`, stayID); n != 2 {
+		t.Fatalf("occupants after the move = %d, want the original 2 preserved", n)
+	}
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
+		WHERE sf.stay_id=$1 AND f.external_folio_id='F800' AND sf.is_default_posting_target`, stayID); n != 1 {
+		t.Fatal("the folio link was lost in the room move")
+	}
+}
+
+// F2 — STALE / REPLAYED EVENT IS A NO-OP. A replayed LIVE event identity cannot even be admitted to the
+// durable inbox (the identity is unique per interface), and a LATE event arriving against a Stay that has
+// already departed is never applied to it: it is routed to review, leaving the Stay's state and lineage
+// untouched. A stale fact can therefore never corrupt current state.
+func TestIntegration_F2_StaleEventIsANoOp(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	s := seed(t, p)
+	commerce(t, p, s, true)
+	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
+	insertLive(t, p, s, "F2-GI", "GI", pay("R810", "810", "Stale", "Event", "F810", "260101", "260105"))
+	process(t, pr, s)
+
+	// (a) the durable inbox refuses a second LIVE event with the SAME identity — a replay never becomes a fact
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.stay_events
+		(tenant_id, site_id, pms_interface_id, external_event_identity, event_type, payload, pms_timestamp_utc,
+		 admission_kind, admission_runtime_generation, resync_generation, received_at)
+		VALUES ($1,$2,$3,'F2-GI','GI',$4::jsonb,now(),'LIVE',1,0,now())`,
+		s.tenant, s.site, s.iface, pay("R810", "999", "Stale", "Event", "F810", "260101", "260105")); err == nil {
+		t.Fatal("the durable inbox admitted a replayed LIVE event identity")
+	}
+
+	// depart the stay, then deliver a LATE change event for it
+	insertLiveAt(t, p, s, "F2-GO", "GO", pay("R810", "810", "Stale", "Event", "F810", "260101", "260105"), time.Now().Add(-time.Hour))
+	process(t, pr, s)
+	var stayID, room, status, lineage string
+	var version int
+	if err := p.QueryRow(ctx, `SELECT id::text, COALESCE(normalized_room_number,''), status, last_applied_event_version, last_applied_event_id::text
+		FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id='R810'`, s.iface).Scan(&stayID, &room, &status, &version, &lineage); err != nil {
+		t.Fatal(err)
+	}
+	insertLive(t, p, s, "F2-LATE", "GC", pay("R810", "999", "Stale", "Event", "F810", "260101", "260105"))
+	process(t, pr, s)
+
+	// (b) the late fact changed nothing and was recorded for review rather than applied
+	var afterRoom, afterStatus, afterLineage string
+	var afterVersion int
+	if err := p.QueryRow(ctx, `SELECT COALESCE(normalized_room_number,''), status, last_applied_event_version, last_applied_event_id::text
+		FROM iam_v2.stays WHERE id=$1`, stayID).Scan(&afterRoom, &afterStatus, &afterVersion, &afterLineage); err != nil {
+		t.Fatal(err)
+	}
+	if afterRoom != room || afterStatus != status || afterVersion != version || afterLineage != lineage {
+		t.Fatalf("a stale event changed the Stay: room %q->%q status %q->%q version %d->%d lineage %s->%s",
+			room, afterRoom, status, afterStatus, version, afterVersion, lineage, afterLineage)
+	}
+	outcome, code := eventOutcome(t, p, s, "F2-LATE")
+	if outcome != "MANUAL_REVIEW" || code != "GC_ON_TERMINAL_STAY" {
+		t.Fatalf("late event outcome=%s code=%s, want MANUAL_REVIEW/GC_ON_TERMINAL_STAY", outcome, code)
+	}
+}
