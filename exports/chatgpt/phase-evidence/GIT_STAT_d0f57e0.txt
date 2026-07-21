@@ -1,0 +1,4 @@
+commit d0f57e01987cb9fa8fd925cb282464980d80bd25
+Date:   Tue Jul 21 19:42:22 2026 +0300
+
+    Phase 3 F1-F7 named flow suite (inventory_head): room-move preservation, stale-event no-op, origin-agnostic conversion, grandfathering, validity window, emergency fallback, episode idempotency: PG16-green

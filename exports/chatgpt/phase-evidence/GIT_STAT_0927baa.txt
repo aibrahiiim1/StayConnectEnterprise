@@ -1,4 +1,0 @@
-commit 0927baa8b9cb5553402b732d8eaa564794cc682c
-Date:   Tue Jul 21 19:34:10 2026 +0300
-
-    Phase 3 sharers + folios + source conflicts (inventory_head): legal multi-occupancy with one primary, contradictory payloads and folio claims to review: PG16-green
