@@ -1,4 +1,0 @@
-commit f322c840e0ba406d3e528c1abc988df51114c7e2
-Date:   Tue Jul 21 23:27:39 2026 +0300
-
-    Phase 3 corrections round 2 items 1-4 (inventory_head): mandatory grace package, ONE shared exact validator, typed package selector, mandatory DB-level preconditions: gate 320/320

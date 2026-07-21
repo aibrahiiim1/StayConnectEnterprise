@@ -1,0 +1,4 @@
+commit 8ebce2c5cbc0f8e6baaffa05c88a3eb9861f0364
+Date:   Tue Jul 21 23:36:18 2026 +0300
+
+    Phase 3 corrections round 2 items 5-6 (inventory_head): synchronous fail-closed applier construction + supervised interface reconciliation
