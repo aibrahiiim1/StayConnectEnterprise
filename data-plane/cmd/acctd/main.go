@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 	"github.com/stayconnect/enterprise/data-plane/internal/livez"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
@@ -108,8 +109,10 @@ func main() {
 		c.ApplianceID = ident.ApplianceID
 	}
 	asgStore := &assignment.Store{Dir: envOr("ACCTD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
-	if aTen, _, _, _ := asgStore.Resolved(); aTen != "" {
+	assignedSite := ""
+	if aTen, aSite, _, _ := asgStore.Resolved(); aTen != "" {
 		c.TenantID = aTen
+		assignedSite = aSite
 	} else {
 		c.TenantID = "" // unassigned appliance bills nobody
 	}
@@ -140,6 +143,16 @@ func main() {
 		prev:         snapshot{},
 	}
 
+	// Phase 3 (DARK): the enforcement arm is constructed only when the master + checkout-grace flags are on.
+	// While dark p3 is nil, every call on it is a no-op, and acctd issues zero Phase-3 queries.
+	pmsCfg, err := iamv2.LoadPMSConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("acctd: phase3 config fail-closed", "err", err)
+		os.Exit(1)
+	}
+	p3 := newPhase3(pmsCfg, a, c.TenantID, assignedSite)
+	slog.Info("acctd phase3 arm", "flags", pmsCfg.SafeFlagSummary(), "active", p3 != nil)
+
 	tick := time.NewTicker(time.Duration(c.TickSeconds) * time.Second)
 	defer tick.Stop()
 
@@ -152,6 +165,11 @@ func main() {
 			if err := a.loop(rootCtx); err != nil {
 				slog.Error("loop", "err", err)
 			}
+			// Phase-3 runs on the same tick, AFTER legacy accounting, so a sample taken this tick is already
+			// attributed before access that ended is closed out. Enforce first, then reconcile shaping, so the
+			// plan the edge receives already reflects what just ended. Both are no-ops while dark.
+			p3.enforceExpiries(rootCtx)
+			p3.reconcileShaping(rootCtx, a.shp, c.LegacyBridge)
 			// Liveness heartbeat: proves the accounting loop is PROGRESSING (not
 			// just that the process is up) for the edged health supervisor.
 			livez.Touch("acctd")

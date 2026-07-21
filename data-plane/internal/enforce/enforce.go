@@ -28,8 +28,11 @@ type SessionShape struct {
 	DeviceID      string
 	IP            string
 	MAC           string
-	DownKbps      int
-	UpKbps        int
+	// Bridge is where the session's traffic actually appears. Shaping is per-bridge, so a plan without it
+	// could only be applied by guessing — and guessing the wrong bridge silently shapes nobody.
+	Bridge   string
+	DownKbps int
+	UpKbps   int
 }
 
 // Plan is what the edge should be enforcing right now for a site.
@@ -51,7 +54,7 @@ func New(pool *pgxpool.Pool) *Enforcer { return &Enforcer{pool: pool} }
 func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, error) {
 	var p Plan
 	rows, err := e.pool.Query(ctx, `SELECT s.id::text, s.entitlement_id::text, s.device_id::text,
-			COALESCE(host(s.ip),''), COALESCE(s.mac::text,''),
+			COALESCE(host(s.ip),''), COALESCE(s.mac::text,''), COALESCE(s.ingress_interface,''),
 			COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0),
 			(s.state='active' AND s.ended IS NULL AND e.status='ACTIVE'
 			 AND (e.window_ends_at IS NULL OR e.window_ends_at > now())) AS entitled
@@ -67,7 +70,7 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 	for rows.Next() {
 		var sh SessionShape
 		var entitled bool
-		if err := rows.Scan(&sh.SessionID, &sh.EntitlementID, &sh.DeviceID, &sh.IP, &sh.MAC,
+		if err := rows.Scan(&sh.SessionID, &sh.EntitlementID, &sh.DeviceID, &sh.IP, &sh.MAC, &sh.Bridge,
 			&sh.DownKbps, &sh.UpKbps, &entitled); err != nil {
 			return p, err
 		}
