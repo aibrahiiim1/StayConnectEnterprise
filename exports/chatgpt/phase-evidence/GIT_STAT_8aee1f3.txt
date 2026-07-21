@@ -1,4 +1,0 @@
-commit 8aee1f35252f3851657984c5ab5f54281d38d5b7
-Date:   Tue Jul 21 22:09:24 2026 +0300
-
-    Phase 3 corrections round 1 (inventory_head): controlled alert lifecycle + governed grace publication + NOT VALID boundary CHECK; real API+PG contract tests: gate 310/310
