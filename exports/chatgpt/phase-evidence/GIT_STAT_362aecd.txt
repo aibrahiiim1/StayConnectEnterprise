@@ -1,0 +1,4 @@
+commit 362aecdb01aab01879bf52c00f3c580004e9fdac
+Date:   Tue Jul 21 17:43:44 2026 +0300
+
+    Phase 3 Increment-7 Checkout scorecard-gap closure (inventory_head): no old path, fail-closed, mandatory lineage, structural DB lineage, ordering, >=24 integrated concurrency, late-stage rollback: PG16-green + gate 225/225
