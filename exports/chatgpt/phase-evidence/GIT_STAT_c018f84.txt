@@ -1,0 +1,4 @@
+commit c018f84ab1affbbd51f5d99405ccfbe914c9e7a7
+Date:   Tue Jul 21 18:20:33 2026 +0300
+
+    Phase 3 bitemporal entitlement history (inventory_head): true effective_at + recorded_at, explicit supersession, boundary termination without clamping: PG16-green + gate 254/254
