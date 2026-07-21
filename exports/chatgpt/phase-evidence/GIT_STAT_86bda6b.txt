@@ -1,4 +1,0 @@
-commit 86bda6b46c188ed5b2ab12c60b7af3c9a9bf977b
-Date:   Tue Jul 21 22:16:46 2026 +0300
-
-    Phase 3 correction item 1 (inventory_head): pmsd Stay-Event application worker composition root + process-level tests
