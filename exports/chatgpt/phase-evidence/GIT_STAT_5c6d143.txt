@@ -1,4 +1,0 @@
-commit 5c6d143550c752fe5879950cf48bae1b13e7f8c0
-Date:   Tue Jul 21 20:30:18 2026 +0300
-
-    Phase 3 Increment-9 offline tooling + runbook (inventory_head): preflight 11/11, evidence collector, deployment/rollback/reboot runbook
