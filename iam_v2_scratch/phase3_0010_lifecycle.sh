@@ -69,7 +69,15 @@ echo '== privilege hardening (§3) =='
 [ "$(Q "SELECT has_function_privilege('public','iam_v2.p3_stay_lifecycle_guard()','EXECUTE');")" = f ] && ok "PUBLIC has NO EXECUTE on p3_stay_lifecycle_guard" || no "PUBLIC can execute lifecycle guard"
 [ "$(Q "SELECT has_function_privilege('public','iam_v2.p3_stay_event_appendonly()','EXECUTE');")" = f ] && ok "PUBLIC has NO EXECUTE on p3_stay_event_appendonly" || no "PUBLIC can execute event guard"
 [ "$(Q "SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema='iam_v2' AND table_name='pms_interface_runtime' AND grantee <> current_user AND grantee <> 'PUBLIC';")" = 0 ] && ok "no non-owner grants on pms_interface_runtime (dark)" || no "unexpected runtime-table grants"
-[ "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname LIKE 'p3_%' AND p.prosecdef;")" = 0 ] && ok "no SECURITY DEFINER on p3_* functions" || no "unexpected SECURITY DEFINER"
+# SECURITY DEFINER allowlist: every p3_* guard must stay SECURITY INVOKER EXCEPT the deferred coherence checker,
+# which MUST be DEFINER so an EXECUTE-only caller needs no direct table SELECT at COMMIT (PO item 2). Any other
+# p3_* DEFINER function is unexpected.
+[ "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname LIKE 'p3_%' AND p.prosecdef AND p.proname <> 'p3_entitlement_status_coherent';")" = 0 ] && ok "no unapproved SECURITY DEFINER on p3_* functions (allowlist)" || no "unexpected SECURITY DEFINER"
+[ "$(Q "SELECT prosecdef FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p3_entitlement_status_coherent';")" = t ] && ok "deferred coherence checker IS SECURITY DEFINER (EXECUTE-only callers need no table SELECT)" || no "coherence checker not DEFINER"
+[ "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p3_entitlement_status_coherent' AND p.proconfig::text LIKE '%search_path=iam_v2%';")" = 1 ] && ok "coherence checker pins a fixed search_path" || no "coherence checker missing fixed search_path"
+[ "$(Q "SELECT has_function_privilege('public','iam_v2.p3_entitlement_status_coherent()','EXECUTE');")" = f ] && ok "PUBLIC has NO EXECUTE on the coherence checker" || no "PUBLIC can execute coherence checker"
+# every SECURITY DEFINER function in iam_v2 must pin a fixed search_path (no dynamic-search_path definer)
+[ "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND (p.proconfig IS NULL OR p.proconfig::text NOT LIKE '%search_path=%');")" = 0 ] && ok "every SECURITY DEFINER function pins a fixed search_path" || no "definer without fixed search_path"
 
 echo '== seed interface+revision (+2nd interface for cross-interface tests) =='
 Q "DO \$\$DECLARE t uuid:=gen_random_uuid(); s uuid:=gen_random_uuid(); i uuid:=gen_random_uuid(); i2 uuid:=gen_random_uuid(); r uuid:=gen_random_uuid(); r2 uuid:=gen_random_uuid(); st uuid:=gen_random_uuid(); st2 uuid:=gen_random_uuid();
@@ -325,32 +333,68 @@ ok "probe role cleaned up (no residual runtime grants)"
 echo '== Gate-P FEASIBILITY: per-family dedicated NOLOGIN writer owners (disposable only, baseline restored) (§3) =='
 BASE_OWNER="$(Q "SELECT iam_v2.p3_controlled_writer_owner('entitlement');")"
 [ -n "$BASE_OWNER" ] && ok "per-family owner resolves from the exact regprocedure identity (§2): $BASE_OWNER" || no "owner not resolvable"
-# dedicated NOLOGIN owners, each with ONLY its own family's minimum underlying privileges
+# dedicated NOLOGIN owners with the EXACT MINIMUM, COLUMN-LEVEL underlying privileges (§3)
 Q "DROP ROLE IF EXISTS p3_ent_writer; DROP ROLE IF EXISTS p3_cfg_writer;
    CREATE ROLE p3_ent_writer NOLOGIN NOSUPERUSER; CREATE ROLE p3_cfg_writer NOLOGIN NOSUPERUSER;
    GRANT USAGE ON SCHEMA iam_v2 TO p3_ent_writer, p3_cfg_writer;
-   GRANT SELECT, UPDATE ON iam_v2.entitlements TO p3_ent_writer;
+   GRANT SELECT (id,tenant_id,site_id,stay_id,pms_interface_id,status,activated_at,terminal_reason,terminated_at,end_mode,window_ends_at,service_plan_revision_id,purchase_id) ON iam_v2.entitlements TO p3_ent_writer;
+   GRANT UPDATE (status,activated_at,terminal_reason,terminated_at) ON iam_v2.entitlements TO p3_ent_writer;
    GRANT SELECT, INSERT ON iam_v2.entitlement_state_transitions TO p3_ent_writer;
-   GRANT SELECT, INSERT, UPDATE ON iam_v2.site_checkout_grace_config TO p3_cfg_writer;" >/dev/null
-# reassign each SECURITY DEFINER function to its own family owner
-Q "ALTER FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text) OWNER TO p3_ent_writer;
+   GRANT SELECT (tenant_id,site_id,grace_package_revision_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy,eligibility_window_seconds,config_version) ON iam_v2.site_checkout_grace_config TO p3_cfg_writer;
+   GRANT INSERT, UPDATE (grace_package_revision_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy,eligibility_window_seconds,config_version) ON iam_v2.site_checkout_grace_config TO p3_cfg_writer;" >/dev/null
+# the deferred coherence checker must run as a capability that can read, not as the EXECUTE-only caller (§2)
+Q "ALTER FUNCTION iam_v2.p3_entitlement_status_coherent() OWNER TO p3_ent_writer;
+   ALTER FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text) OWNER TO p3_ent_writer;
    ALTER FUNCTION iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int) OWNER TO p3_cfg_writer;" >/dev/null
 [ "$(Q "SELECT iam_v2.p3_controlled_writer_owner('entitlement');")" = "p3_ent_writer" ] && ok "entitlement family now follows its dedicated function owner (§2/§3)" || no "entitlement family owner not tracked"
 [ "$(Q "SELECT iam_v2.p3_controlled_writer_owner('grace_config');")" = "p3_cfg_writer" ] && ok "grace-config family now follows its dedicated function owner (§2/§3)" || no "config family owner not tracked"
-# each controlled function still succeeds through its own path under the separated owners
-expect_ok "SELECT iam_v2.apply_entitlement_transition('$ENT','SUSPENDED',now(),'ADMIN');" && ok "entitlement transition still succeeds under a dedicated NOLOGIN owner (§3)" || no "separated-owner transition failed"
-expect_ok "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3800,4000,1500,524288000,2,'REJECT_NEW_DEVICE',43200);" && ok "grace publication still succeeds under a dedicated NOLOGIN owner (§3)" || no "separated-owner publication failed"
-# the OTHER family's owner cannot perform this family's operation (owner separation is real)
-expect_err "SET LOCAL ROLE p3_cfg_writer; UPDATE iam_v2.entitlements SET status='ACTIVE' WHERE id='$ENT';" && ok "grace-config owner CANNOT mutate entitlement status (cross-family refused) (§3)" || no "cross-family write accepted"
-expect_err "SET LOCAL ROLE p3_ent_writer; UPDATE iam_v2.site_checkout_grace_config SET grace_duration_seconds=4242, config_version=config_version+1 WHERE tenant_id='$T' AND site_id='$S';" && ok "entitlement owner CANNOT publish grace config (cross-family refused) (§3)" || no "cross-family config write accepted"
-# restore the DARK ownership baseline and destroy the temporary owners (no persistent grants remain)
+# (§3) the family owner CANNOT touch immutable/pinned columns — column-level privileges refuse it
+expect_err "SET LOCAL ROLE p3_ent_writer; UPDATE iam_v2.entitlements SET stay_id=gen_random_uuid() WHERE id='$ENT';" && ok "entitlement writer owner CANNOT mutate pinned stay_id (column privileges) (§3)" || no "owner mutated pinned column"
+expect_err "SET LOCAL ROLE p3_ent_writer; UPDATE iam_v2.entitlements SET package_revision_id=gen_random_uuid() WHERE id='$ENT';" && ok "entitlement writer owner CANNOT mutate pinned package_revision_id (§3)" || no "owner mutated package pin"
+
+echo '== EXECUTE-ONLY caller proof (CONNECT + USAGE + EXECUTE only; zero table privileges) (§1/§2) =='
+Q "DROP ROLE IF EXISTS p3_ent_caller; DROP ROLE IF EXISTS p3_cfg_caller;
+   CREATE ROLE p3_ent_caller LOGIN PASSWORD 'x' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+   CREATE ROLE p3_cfg_caller LOGIN PASSWORD 'x' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+   GRANT CONNECT ON DATABASE $DB TO p3_ent_caller, p3_cfg_caller;
+   GRANT USAGE ON SCHEMA iam_v2 TO p3_ent_caller, p3_cfg_caller;
+   GRANT EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text) TO p3_ent_caller;
+   GRANT EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int) TO p3_cfg_caller;" >/dev/null
+AS_CALLER(){ docker exec -e PGPASSWORD=x "$C" psql -h 127.0.0.1 -U "$1" -d "$DB" -v ON_ERROR_STOP=1 -tAqc "$2" >/dev/null 2>&1; }
+# zero direct table privileges for the callers
+[ "$(Q "SELECT count(*) FROM information_schema.role_table_grants WHERE grantee IN ('p3_ent_caller','p3_cfg_caller') AND table_schema='iam_v2';")" = 0 ] && ok "EXECUTE-only callers hold ZERO direct iam_v2 table privileges (§1)" || no "caller holds table privileges"
+AS_CALLER p3_ent_caller "SELECT 1 FROM iam_v2.entitlements LIMIT 1;" && no "caller could read entitlements" || ok "EXECUTE-only caller cannot even SELECT entitlements (§1)"
+# POSITIVE: the EXECUTE-only caller drives the whole controlled transaction incl. COMMIT-time deferred checks
+AS_CALLER p3_ent_caller "SELECT iam_v2.apply_entitlement_transition('$ENT','SUSPENDED',now(),'ADMIN');" && ok "EXECUTE-only caller performed the controlled transition (commit incl. deferred trigger) (§1/§2)" || no "EXECUTE-only transition failed"
+[ "$(Q "SELECT status FROM iam_v2.entitlements WHERE id='$ENT';")" = "SUSPENDED" ] && ok "controlled update applied under the EXECUTE-only caller (§2)" || no "status not updated"
+[ "$(Q "SELECT to_state FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$ENT' ORDER BY seq DESC LIMIT 1;")" = "SUSPENDED" ] && ok "history appended and MATCHES final status at COMMIT (§2)" || no "history/status diverged"
+AS_CALLER p3_cfg_caller "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3800,4000,1500,524288000,2,'REJECT_NEW_DEVICE',43200);" && ok "EXECUTE-only caller performed the controlled grace publication (§1)" || no "EXECUTE-only publication failed"
+# NEGATIVE: an incoherent/forged transaction still fails at COMMIT even for the owner path
+expect_err "UPDATE iam_v2.entitlements SET status='ACTIVE' WHERE id='$ENT';" && ok "incoherent raw status change still fails at COMMIT under least privilege (§2)" || no "incoherent commit accepted"
+# (§4) cross-family: give the WRONG owner the raw table DML it lacks, and prove the guard STILL rejects it
+Q "GRANT SELECT, UPDATE, INSERT ON iam_v2.entitlements, iam_v2.entitlement_state_transitions TO p3_cfg_writer;
+   GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.site_checkout_grace_config TO p3_ent_writer;" >/dev/null
+expect_err "SET LOCAL ROLE p3_cfg_writer; UPDATE iam_v2.entitlements SET status='ACTIVE' WHERE id='$ENT';" && ok "grace-config owner WITH raw entitlement DML still refused by the family guard (§4)" || no "cross-family entitlement write accepted"
+expect_err "SET LOCAL ROLE p3_cfg_writer; INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at) VALUES ('$RT','$RS','$ENT',99,'SUSPENDED','ACTIVE',now());" && ok "grace-config owner WITH raw DML cannot forge history (§4)" || no "cross-family forged history accepted"
+expect_err "SET LOCAL ROLE p3_ent_writer; UPDATE iam_v2.site_checkout_grace_config SET grace_duration_seconds=4242, config_version=config_version+1 WHERE tenant_id='$T' AND site_id='$S';" && ok "entitlement owner WITH raw config DML still refused (§4)" || no "cross-family config update accepted"
+expect_err "SET LOCAL ROLE p3_ent_writer; DELETE FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$T' AND site_id='$S';" && ok "entitlement owner WITH raw config DELETE still refused (§4)" || no "cross-family config delete accepted"
+Q "REVOKE ALL ON iam_v2.entitlements, iam_v2.entitlement_state_transitions FROM p3_cfg_writer;
+   REVOKE ALL ON iam_v2.site_checkout_grace_config FROM p3_ent_writer;" >/dev/null
+ok "temporary cross-family grants revoked immediately (§4)"
+# (§5) restore the DARK ownership baseline and destroy every temporary owner/caller role + grant
 Q "ALTER FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text) OWNER TO $BASE_OWNER;
    ALTER FUNCTION iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int) OWNER TO $BASE_OWNER;
+   ALTER FUNCTION iam_v2.p3_entitlement_status_coherent() OWNER TO $BASE_OWNER;
+   REVOKE EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text) FROM p3_ent_caller;
+   REVOKE EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int) FROM p3_cfg_caller;
    REVOKE ALL ON iam_v2.entitlements, iam_v2.entitlement_state_transitions, iam_v2.site_checkout_grace_config FROM p3_ent_writer, p3_cfg_writer;
-   REVOKE USAGE ON SCHEMA iam_v2 FROM p3_ent_writer, p3_cfg_writer;
-   DROP ROLE IF EXISTS p3_ent_writer; DROP ROLE IF EXISTS p3_cfg_writer;" >/dev/null
+   REVOKE USAGE ON SCHEMA iam_v2 FROM p3_ent_writer, p3_cfg_writer, p3_ent_caller, p3_cfg_caller;
+   REVOKE CONNECT ON DATABASE $DB FROM p3_ent_caller, p3_cfg_caller;
+   DROP ROLE IF EXISTS p3_ent_writer; DROP ROLE IF EXISTS p3_cfg_writer; DROP ROLE IF EXISTS p3_ent_caller; DROP ROLE IF EXISTS p3_cfg_caller;" >/dev/null
 [ "$(Q "SELECT iam_v2.p3_controlled_writer_owner('entitlement');")" = "$BASE_OWNER" ] && ok "DARK ownership baseline restored; temporary writer owners destroyed (§3)" || no "baseline not restored"
-[ "$(Q "SELECT count(*) FROM pg_roles WHERE rolname IN ('p3_ent_writer','p3_cfg_writer','p3_writer_probe');")" = 0 ] && ok "no temporary writer/probe roles persist (zero runtime grants preserved) (§3)" || no "temporary roles persist"
+[ "$(Q "SELECT count(*) FROM pg_roles WHERE rolname IN ('p3_ent_writer','p3_cfg_writer','p3_writer_probe','p3_ent_caller','p3_cfg_caller');")" = 0 ] && ok "no temporary writer/caller/probe roles persist (§5)" || no "temporary roles persist"
+[ "$(Q "SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema='iam_v2' AND grantee IN ('svc_scd','svc_edged','svc_portald','svc_acctd','svc_pmsd');")" = 0 ] && ok "service roles still hold ZERO iam_v2 table privileges after the feasibility proof (§5)" || no "service role gained table privileges"
+[ "$(Q "SELECT count(*) FROM information_schema.role_routine_grants WHERE routine_schema='iam_v2' AND grantee IN ('svc_scd','svc_edged','svc_portald','svc_acctd','svc_pmsd');")" = 0 ] && ok "service roles still hold ZERO iam_v2 function EXECUTE after the feasibility proof (§5)" || no "service role gained EXECUTE"
 
 # alert-action legal edges (§10): the first action must be OPEN — proven directly against the valid NO_GRACE
 # audit id ($CGAID). (The full OPEN->ACK->RESOLVED lifecycle + active-view semantics are proven in the PG16

@@ -419,8 +419,13 @@ REVOKE EXECUTE ON FUNCTION iam_v2.p3_est_insert_guard() FROM PUBLIC;
 -- direct UPDATE grant on entitlements (dark), so only the owner-run controlled function mutates status. Because
 -- the check is deferred, the controlled function may update the row then append the transition in either order
 -- within its transaction.
+-- (item 2) SECURITY DEFINER: this check runs at COMMIT as whichever role committed. An EXECUTE-only caller
+-- (schema USAGE + EXECUTE on its approved function, and NO direct table privileges) must not be forced to hold
+-- table SELECT merely so the deferred consistency checker can read. It is read-only (no mutation), fixed
+-- search_path, no dynamic SQL, PUBLIC EXECUTE revoked; its owner needs only SELECT on entitlements +
+-- entitlement_state_transitions.
 CREATE OR REPLACE FUNCTION iam_v2.p3_entitlement_status_coherent() RETURNS trigger
-  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE latest text; cur text;
 BEGIN
   -- re-read the CURRENT (final, at-commit) row status rather than trusting the deferred trigger's captured NEW:
