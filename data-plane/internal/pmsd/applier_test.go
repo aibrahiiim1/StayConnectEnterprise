@@ -85,7 +85,11 @@ func TestApplierNotConstructedWhileDark(t *testing.T) {
 		{MasterEnabled: true}, // master on, ingest off
 		{MasterEnabled: true, PMSConnectorEnabled: true}, // connector only
 	} {
-		done := startStayApplier(context.Background(), cfg, Assignment{TenantID: "t", SiteID: "s"}, repo, deps)
+		ap, err := buildStayApplier(context.Background(), cfg, Assignment{TenantID: "t", SiteID: "s"}, deps)
+		if err != nil {
+			t.Fatalf("dark build returned an error: %v", err)
+		}
+		done := startStayApplier(context.Background(), cfg, Assignment{TenantID: "t", SiteID: "s"}, repo, ap, deps)
 		select {
 		case <-done:
 		case <-time.After(2 * time.Second):
@@ -119,7 +123,11 @@ func TestApplierRunsOneLoopPerInterface(t *testing.T) {
 	cfg := iamv2.PMSConfig{MasterEnabled: true, PMSIngestEnabled: true}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := startStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, repo, deps)
+	ap2, err := buildStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := startStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, repo, ap2, deps)
 	// wait until both backlogs are drained
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -152,7 +160,11 @@ func TestOneInterfaceFailureDoesNotStallAnother(t *testing.T) {
 	cfg := iamv2.PMSConfig{MasterEnabled: true, PMSIngestEnabled: true}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := startStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, repo, deps)
+	ap2, err := buildStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := startStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, repo, ap2, deps)
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		ap.mu.Lock()
@@ -180,7 +192,11 @@ func TestApplierDrainsOnShutdown(t *testing.T) {
 	deps := &Deps{Log: quietLog(), NewStayApplier: func(ctx context.Context, a Assignment) (StayApplier, error) { return ap, nil }}
 	cfg := iamv2.PMSConfig{MasterEnabled: true, PMSIngestEnabled: true}
 	ctx, cancel := context.WithCancel(context.Background())
-	done := startStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, repo, deps)
+	ap2, err := buildStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := startStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, repo, ap2, deps)
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	select {
@@ -198,7 +214,11 @@ func TestFailedApplicationIsRetriedNotDropped(t *testing.T) {
 	deps := &Deps{Log: quietLog(), NewStayApplier: func(ctx context.Context, a Assignment) (StayApplier, error) { return ap, nil }}
 	cfg := iamv2.PMSConfig{MasterEnabled: true, PMSIngestEnabled: true}
 	ctx, cancel := context.WithCancel(context.Background())
-	done := startStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, repo, deps)
+	ap2, err := buildStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := startStayApplier(ctx, cfg, Assignment{TenantID: "t", SiteID: "s"}, repo, ap2, deps)
 	time.Sleep(200 * time.Millisecond)
 	cancel()
 	<-done

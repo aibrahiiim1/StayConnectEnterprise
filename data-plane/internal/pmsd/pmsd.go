@@ -15,8 +15,9 @@ package pmsd
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
-	"sync"
+	"reflect"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -357,13 +358,16 @@ type Deps struct {
 	Log *slog.Logger
 
 	// tuning (all bounded; zero -> sane defaults)
-	ReconcileInterval   time.Duration
-	BackoffMin          time.Duration
-	BackoffMax          time.Duration
-	StableResetAfter    time.Duration
-	StopGrace           time.Duration
-	QueueCapacity       int
-	QueueEnqueueTimeout time.Duration
+	// ApplierReconcileInterval bounds how quickly the Stay-Event application loops notice an Interface being
+	// activated or withdrawn.
+	ApplierReconcileInterval time.Duration
+	ReconcileInterval        time.Duration
+	BackoffMin               time.Duration
+	BackoffMax               time.Duration
+	StableResetAfter         time.Duration
+	StopGrace                time.Duration
+	QueueCapacity            int
+	QueueEnqueueTimeout      time.Duration
 
 	jitter func(int64) int64
 }
@@ -413,38 +417,55 @@ func (d *Deps) withDefaults() {
 // startStayApplier launches one application loop per assigned PMS Interface and returns a channel closed
 // when they have all drained. With the ingest flag OFF it starts nothing and closes immediately, so a
 // connector-only deployment pays nothing for a surface it does not run.
-func startStayApplier(ctx context.Context, cfg iamv2.PMSConfig, a Assignment, repo Repo, deps *Deps) <-chan struct{} {
-	done := make(chan struct{})
+// buildStayApplier constructs and validates the Stay Applier before anything else starts. It returns a
+// bounded startup error rather than a nil applier, so a caller cannot accidentally proceed with one.
+//
+// It also rejects a TYPED NIL — an interface holding a nil concrete pointer is non-nil to `== nil` but panics
+// (or silently does nothing) on first use, and "the connector ran but no event was ever applied" is precisely
+// the outcome this check exists to make impossible.
+func buildStayApplier(ctx context.Context, cfg iamv2.PMSConfig, a Assignment, deps *Deps) (StayApplier, error) {
 	if !cfg.IngestOn() {
+		return nil, nil // dark: nothing is constructed and nothing will run
+	}
+	if deps.NewStayApplier == nil {
+		return nil, ErrApplierRequired
+	}
+	ap, err := deps.NewStayApplier(ctx, a)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrApplierRequired, err)
+	}
+	if ap == nil || isTypedNil(ap) {
+		return nil, ErrApplierRequired
+	}
+	return ap, nil
+}
+
+// isTypedNil reports whether an interface value holds a nil pointer/map/slice/func/channel. Without this, a
+// factory that returns (*processor)(nil) would pass an `ap == nil` check and fail only at the first event.
+func isTypedNil(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan, reflect.Interface:
+		return rv.IsNil()
+	default:
+		return false
+	}
+}
+
+// startStayApplier launches one application loop per assigned PMS Interface and returns a channel closed when
+// they have all drained. The applier itself was already constructed and validated by buildStayApplier.
+func startStayApplier(ctx context.Context, cfg iamv2.PMSConfig, a Assignment, repo Repo, ap StayApplier, deps *Deps) <-chan struct{} {
+	done := make(chan struct{})
+	if !cfg.IngestOn() || ap == nil {
 		close(done)
 		return done
 	}
 	go func() {
 		defer close(done)
-		ap, err := deps.NewStayApplier(ctx, a)
-		if err != nil || ap == nil {
-			// A missing applier at this point is a real fault, not a reason to apply events unsafely.
-			logEvent(deps.log(), EventSupervisorNoAssignment, CodeConfigInvalid, SafeFields{Stage: StageDiscover})
-			return
-		}
-		// Interfaces come from the same authoritative discovery the connector uses, so the applier covers
-		// exactly the ACTIVE interfaces of the assigned scope and nothing else.
-		ifaces, err := repo.ListActiveInterfaces(ctx, a.TenantID, a.SiteID)
-		if err != nil {
-			logEvent(deps.log(), EventSupervisorNoAssignment, Classify(err), SafeFields{Stage: StageDiscover})
-			return
-		}
-		var wg sync.WaitGroup
-		for _, iface := range ifaces {
-			wg.Add(1)
-			go func(id string) {
-				defer wg.Done()
-				// one loop per Interface: an outage or backlog on one cannot stall another
-				runApplierScope(ctx, ap, applierScope{Tenant: a.TenantID, Site: a.SiteID, Interface: id},
-					applierConfig{}, deps.log())
-			}(iface.ID)
-		}
-		wg.Wait()
+		runApplierSupervisor(ctx, a, repo, ap, deps)
 	}()
 	return done
 }
@@ -490,10 +511,20 @@ func Run(ctx context.Context, cfg iamv2.PMSConfig, deps Deps) error {
 		if err != nil {
 			return err
 		}
-		// The Stay-Event applier is supervised ALONGSIDE the connector workers, not inside one: it owns a
-		// different job (applying the durable inbox) and must keep running while a PMS socket is down.
+		// The Stay Applier is constructed SYNCHRONOUSLY, BEFORE any connector worker starts. Building it in a
+		// goroutine meant a construction failure only logged and exited while the connector kept running and
+		// kept admitting events nothing would ever apply — a silently growing inbox, which is exactly the
+		// failure this daemon exists to prevent. If it cannot be built, nothing else starts: no worker, no PMS
+		// socket, no admitted event, and the repository is released before returning.
+		ap, aerr := buildStayApplier(ctx, cfg, assignment, &deps)
+		if aerr != nil {
+			_ = repo.Close()
+			return aerr
+		}
+		// The applier is supervised ALONGSIDE the connector workers, not inside one: it owns a different job
+		// (applying the durable inbox) and must keep running while a PMS socket is down.
 		appCtx, stopApplier := context.WithCancel(ctx)
-		applierDone := startStayApplier(appCtx, cfg, assignment, repo, &deps)
+		applierDone := startStayApplier(appCtx, cfg, assignment, repo, ap, &deps)
 
 		sup := newSupervisor(cfg, assignment, repo, &deps)
 		serr := sup.run(ctx) // drains all workers before returning
