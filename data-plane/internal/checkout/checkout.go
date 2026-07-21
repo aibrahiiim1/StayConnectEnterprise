@@ -325,12 +325,12 @@ func deriveBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID 
 			return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent // unpublished resync
 		}
 	}
-	// (exact lineage) stays.sequence_version is the PMS protocol version while last_applied_event_version is a
-	// per-application counter — they are DIFFERENT domains and must never be compared. The authoritative check is
-	// event IDENTITY: when the Stay engine has pinned the event whose application advanced this Stay, the
-	// boundary source MUST be exactly that event. (When no application lineage is recorded the structural checks
-	// above — scope, typed GO, APPLIED, published admission — stand alone.)
-	if lastAppliedEvent != nil && *lastAppliedEvent != eventID {
+	// (exact lineage — ALWAYS MANDATORY) stay_events.sequence_version is the PMS protocol version while
+	// last_applied_event_version is a per-application counter — DIFFERENT domains, never compared. The
+	// authoritative check is event IDENTITY, and it is required on EVERY path (integrated or standalone): the
+	// Stay MUST carry an application-lineage pin and the boundary source MUST be exactly that event. An absent
+	// pin means the application lineage was never recorded, so the boundary cannot be verified — fail closed.
+	if lastAppliedEvent == nil || *lastAppliedEvent != eventID {
 		return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent
 	}
 	// timestamp trust: clock-suspect / absent / implausibly future → conservative server-clock fallback.

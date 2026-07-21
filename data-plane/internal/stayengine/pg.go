@@ -37,6 +37,11 @@ type Processor struct {
 	conv CheckoutConverter
 }
 
+// ErrCheckoutConverterRequired — a Checkout (GO) event was claimed but no Checkout Converter is wired. There is
+// no legacy Stay-domain-only checkout path: rather than establish an unverified server-clock boundary, the
+// application fails closed and the whole transaction rolls back (the event stays PENDING for a correct retry).
+var ErrCheckoutConverterRequired = errors.New("stayengine: checkout requires a wired Checkout Converter")
+
 // CheckoutConverter is the transaction-bound Checkout conversion the engine delegates to (implemented by
 // checkout.Converter). It must NOT open its own transaction.
 type CheckoutConverter interface {
@@ -71,6 +76,17 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 		return false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// ORDERED APPLICATION. Events for one PMS Interface form an ordered stream: a Stay's GI must be applied
+	// before its GO, and a room-move before a later correction. With only FOR UPDATE SKIP LOCKED, two processors
+	// could claim GI and GO concurrently and apply the GO against a Stay that does not exist yet (an orphan
+	// MANUAL_REVIEW) — i.e. silent reordering. This transaction-scoped advisory lock serializes application per
+	// (tenant, site, interface), so the ORDER BY received_at, id claim below is a true ordering guarantee.
+	// Different interfaces still process concurrently, and the lock is released at commit/rollback.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2 || ':' || $3 || ':stay-events', 0))`,
+		tenant, site, iface); err != nil {
+		return false, err
+	}
 
 	var eventID, identity, eventType string
 	var raw []byte
@@ -170,16 +186,11 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		return cur.ID, "APPLIED", "", nil
 
 	case OpCheckout:
-		// When the Checkout Converter is wired, it OWNS the boundary: it derives the trusted/conservative
-		// effective_checkout_at from this durable event inside the SAME transaction, so the engine must NOT do a
-		// separate server-clock flip first. Without a converter, keep the Stay-domain-only flip (which still
-		// satisfies stays_checkedout_needs_boundary + posting_only_in_house).
-		if delegateCheckout {
-			return cur.ID, "APPLIED", "", nil
-		}
-		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false,
-			effective_checkout_at=COALESCE(effective_checkout_at, now()) WHERE id=$1`, cur.ID); err != nil {
-			return "", "", "", err
+		// The Checkout Converter OWNS the boundary: it derives the trusted/conservative effective_checkout_at
+		// from this durable event inside the SAME transaction. There is NO legacy server-clock flip — a Checkout
+		// with no Converter wired FAILS CLOSED rather than silently establishing an unverified boundary.
+		if !delegateCheckout {
+			return "", "", "", ErrCheckoutConverterRequired
 		}
 		return cur.ID, "APPLIED", "", nil
 

@@ -778,8 +778,15 @@ REVOKE EXECUTE ON FUNCTION iam_v2.emergency_grace_health(uuid,uuid) FROM PUBLIC;
 --      Stay, so the Checkout boundary verifier can prove exact event lineage (not a "seq >= counter" heuristic).
 --      The Stay engine pins it on every applied event; it FKs the durable event.
 -- ============================================================================
-ALTER TABLE iam_v2.stays ADD COLUMN last_applied_event_id uuid
-  REFERENCES iam_v2.stay_events (id);
+-- STRUCTURAL lineage scope: a plain uuid FK could still point at another Tenant/Site/Interface's event, so the
+-- reference is COMPOSITE-SCOPED. stay_events gets a matching unique key first.
+ALTER TABLE iam_v2.stay_events
+  ADD CONSTRAINT stay_events_scoped_identity UNIQUE (tenant_id, site_id, pms_interface_id, id);
+ALTER TABLE iam_v2.stays ADD COLUMN last_applied_event_id uuid;
+ALTER TABLE iam_v2.stays
+  ADD CONSTRAINT stays_last_applied_event_scoped
+  FOREIGN KEY (tenant_id, site_id, pms_interface_id, last_applied_event_id)
+  REFERENCES iam_v2.stay_events (tenant_id, site_id, pms_interface_id, id);
 
 -- ============================================================================
 -- (4i) publish_checkout_grace_config (item 10): the SOLE controlled Hotel-Admin publication of the typed grace

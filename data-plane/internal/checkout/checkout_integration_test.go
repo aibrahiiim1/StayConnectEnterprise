@@ -156,10 +156,17 @@ func seedEvent(t *testing.T, p *pgxpool.Pool, f fixture, ts *time.Time, suspect 
 	return eid
 }
 
+// applyEvent mirrors what the Stay engine's finishEvent does: it moves the event PENDING->APPLIED with its Stay
+// lineage AND pins stays.last_applied_event_id. Exact lineage is MANDATORY on every path, so a test that applies
+// an event without pinning it would (correctly) be refused as an unverifiable boundary.
 func applyEvent(t *testing.T, p *pgxpool.Pool, eid, stay string) {
 	t.Helper()
-	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.stay_events SET stay_id=$2, processing_status='APPLIED', processed_at=now() WHERE id=$1`, eid, stay); err != nil {
+	ctx := context.Background()
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stay_events SET stay_id=$2, processing_status='APPLIED', processed_at=now() WHERE id=$1`, eid, stay); err != nil {
 		t.Fatalf("apply event: %v", err)
+	}
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET last_applied_event_id=$1::uuid, last_applied_event_version=last_applied_event_version+1 WHERE id=$2`, eid, stay); err != nil {
+		t.Fatalf("pin lineage: %v", err)
 	}
 }
 

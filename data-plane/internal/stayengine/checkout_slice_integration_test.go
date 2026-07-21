@@ -4,6 +4,7 @@ package stayengine
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -214,5 +215,152 @@ func TestIntegration_CheckoutSliceRollsBackTogether(t *testing.T) {
 	_ = p.QueryRow(ctx, `SELECT count(*) FROM iam_v2.checkout_grace_audit WHERE stay_id=$1`, stayID).Scan(&auditN)
 	if graceN != 0 || auditN != 0 {
 		t.Fatalf("grace=%d audit=%d, want 0/0 after rollback", graceN, auditN)
+	}
+}
+
+// TestIntegration_CheckoutWithoutConverterFailsClosed proves there is NO legacy Stay-domain-only checkout path:
+// a GO event claimed by a Processor with no wired Converter fails closed and leaves the event PENDING and the
+// Stay IN_HOUSE (rather than silently establishing an unverified server-clock boundary).
+func TestIntegration_CheckoutWithoutConverterFailsClosed(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	s := seed(t, p)
+	commerce(t, p, s, true)
+	bare := NewProcessor(p) // deliberately NO converter
+
+	insertLive(t, p, s, "E-GI3", "GI", pay("R902", "902", "No", "Conv", "F902", "260101", "260105"))
+	if _, err := bare.ProcessNext(ctx, s.tenant, s.site, s.iface); err != nil {
+		t.Fatalf("GI must still apply without a converter: %v", err)
+	}
+	insertLiveAt(t, p, s, "E-GO3", "GO", pay("R902", "902", "No", "Conv", "F902", "260101", "260105"), time.Now().Add(-time.Hour))
+	if _, err := bare.ProcessNext(ctx, s.tenant, s.site, s.iface); err == nil {
+		t.Fatal("a GO event without a wired Converter must FAIL CLOSED")
+	}
+	var evStatus, status string
+	var effcoSet bool
+	_ = p.QueryRow(ctx, `SELECT processing_status FROM iam_v2.stay_events WHERE pms_interface_id=$1 AND external_event_identity='E-GO3'`, s.iface).Scan(&evStatus)
+	_ = p.QueryRow(ctx, `SELECT status, effective_checkout_at IS NOT NULL FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id='R902'`, s.iface).Scan(&status, &effcoSet)
+	if evStatus != "PENDING" || status != "IN_HOUSE" || effcoSet {
+		t.Fatalf("fail-closed expected PENDING/IN_HOUSE/no-boundary, got %s/%s/%v", evStatus, status, effcoSet)
+	}
+}
+
+// TestIntegration_EventOrderingUnderConcurrency proves per-Interface ordered application: with GI and GO for the
+// SAME Stay queued together and many processors racing, the GO can never be applied before the GI (which would
+// orphan it into MANUAL_REVIEW). Also proves >=24 concurrent integrated processors apply every event exactly
+// once with no deadlock and exactly one Grace.
+func TestIntegration_EventOrderingUnderConcurrency(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	s := seed(t, p)
+	commerce(t, p, s, true)
+	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
+
+	// queue GI and GO for the same reservation BEFORE any processing, so ordering is genuinely contested
+	insertLive(t, p, s, "O-GI", "GI", pay("R910", "910", "Ord", "Er", "F910", "260101", "260105"))
+	insertLiveAt(t, p, s, "O-GO", "GO", pay("R910", "910", "Ord", "Er", "F910", "260101", "260105"), time.Now().Add(-time.Hour))
+
+	const n = 24
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				ok, err := pr.ProcessNext(context.Background(), s.tenant, s.site, s.iface)
+				if err != nil {
+					errs <- err
+					return
+				}
+				if !ok {
+					return
+				}
+			}
+		}()
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("integrated concurrency did not drain — possible deadlock")
+	}
+	close(errs)
+	for e := range errs {
+		t.Fatalf("concurrent integrated processing error: %v", e)
+	}
+
+	// ORDER held: the GO applied against an existing Stay (never an orphan MANUAL_REVIEW)
+	giStatus, _ := eventOutcome(t, p, s, "O-GI")
+	goStatus, goReview := eventOutcome(t, p, s, "O-GO")
+	if giStatus != "APPLIED" || goStatus != "APPLIED" {
+		t.Fatalf("both events must apply exactly once: GI=%s GO=%s (review=%s)", giStatus, goStatus, goReview)
+	}
+	var status string
+	var stayID string
+	if err := p.QueryRow(ctx, `SELECT id::text, status FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id='R910'`, s.iface).Scan(&stayID, &status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "CHECKED_OUT" {
+		t.Fatalf("stay=%s, want CHECKED_OUT (ordered GI then GO)", status)
+	}
+	// exactly one audit for the episode (no double conversion under 24-way concurrency)
+	var auditN int
+	_ = p.QueryRow(ctx, `SELECT count(*) FROM iam_v2.checkout_grace_audit WHERE stay_id=$1`, stayID).Scan(&auditN)
+	if auditN != 1 {
+		t.Fatalf("audit rows = %d, want exactly 1", auditN)
+	}
+}
+
+// TestIntegration_LateStageRollback forces a failure LATE in the conversion — after the boundary is set and the
+// original Entitlement has been terminated, the grace Purchase insert hits one_conversion_per_episode — and
+// proves the whole slice still rolls back: event PENDING, Stay IN_HOUSE with no boundary, Entitlement ACTIVE.
+func TestIntegration_LateStageRollback(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	s := seed(t, p)
+	pkgRev := commerce(t, p, s, true)
+	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
+
+	insertLive(t, p, s, "L-GI", "GI", pay("R920", "920", "Late", "Stage", "F920", "260101", "260105"))
+	process(t, pr, s)
+	var stayID string
+	if err := p.QueryRow(ctx, `SELECT id::text FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id='R920'`, s.iface).Scan(&stayID); err != nil {
+		t.Fatal(err)
+	}
+	boundary := time.Now().Add(-time.Hour).Truncate(time.Microsecond)
+	ent := grantEntitlement(t, p, s, stayID, pkgRev, boundary.Add(-2*time.Hour))
+
+	// Pre-plant a CHECKOUT_GRACE purchase for THIS episode but NO audit row: the conversion passes its audit
+	// idempotency gate, terminates the original Entitlement, and only then collides on
+	// purchases.one_conversion_per_episode — a genuine LATE-stage failure.
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.purchases
+		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state,checkout_episode)
+		VALUES ($1,$2,$3,$4,$5,'CHECKOUT_GRACE',0,'GRANTED',1)`, s.tenant, s.site, pkgRev, s.iface, stayID); err != nil {
+		t.Fatal(err)
+	}
+
+	insertLiveAt(t, p, s, "L-GO", "GO", pay("R920", "920", "Late", "Stage", "F920", "260101", "260105"), boundary)
+	if _, err := pr.ProcessNext(ctx, s.tenant, s.site, s.iface); err == nil {
+		t.Fatal("expected a LATE-stage conversion failure (duplicate episode purchase)")
+	}
+
+	var evStatus, status, entStatus string
+	var effcoSet bool
+	_ = p.QueryRow(ctx, `SELECT processing_status FROM iam_v2.stay_events WHERE pms_interface_id=$1 AND external_event_identity='L-GO'`, s.iface).Scan(&evStatus)
+	_ = p.QueryRow(ctx, `SELECT status, effective_checkout_at IS NOT NULL FROM iam_v2.stays WHERE id=$1`, stayID).Scan(&status, &effcoSet)
+	_ = p.QueryRow(ctx, `SELECT status FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&entStatus)
+	if evStatus != "PENDING" || status != "IN_HOUSE" || effcoSet || entStatus != "ACTIVE" {
+		t.Fatalf("late-stage rollback incomplete: event=%s stay=%s boundary=%v entitlement=%s", evStatus, status, effcoSet, entStatus)
+	}
+	var graceN, auditN int
+	_ = p.QueryRow(ctx, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, stayID).Scan(&graceN)
+	_ = p.QueryRow(ctx, `SELECT count(*) FROM iam_v2.checkout_grace_audit WHERE stay_id=$1`, stayID).Scan(&auditN)
+	if graceN != 0 || auditN != 0 {
+		t.Fatalf("late-stage rollback left grace=%d audit=%d, want 0/0", graceN, auditN)
 	}
 }

@@ -51,7 +51,9 @@ DROP TABLE IF EXISTS iam_v2.entitlement_device_authorizations;
 DROP TABLE IF EXISTS iam_v2.entitlement_state_transitions;
 
 -- (4h) stays lineage pin
+ALTER TABLE iam_v2.stays DROP CONSTRAINT IF EXISTS stays_last_applied_event_scoped;
 ALTER TABLE iam_v2.stays DROP COLUMN IF EXISTS last_applied_event_id;
+ALTER TABLE iam_v2.stay_events DROP CONSTRAINT IF EXISTS stay_events_scoped_identity;
 
 -- (4c) checkout_grace_audit alert view + append-only guard + table
 DROP VIEW IF EXISTS iam_v2.active_operational_alerts;

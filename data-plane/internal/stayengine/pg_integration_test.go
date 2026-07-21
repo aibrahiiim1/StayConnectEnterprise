@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
 )
 
 // These tests require a disposable PostgreSQL 16 with the accepted iam_v2 schema + migration 0010 applied,
@@ -105,7 +107,10 @@ func TestIntegration_StayLifecycle(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	s := seed(t, p)
-	pr := NewProcessor(p)
+	// a GO event has no legacy Stay-domain-only path any more, so the lifecycle test drives the REAL wired
+	// Checkout slice (commerce seeded so the conversion can run).
+	commerce(t, p, s, true)
+	pr := NewProcessorWithCheckout(p, checkout.NewConverter(p))
 	res := "RES-1"
 
 	// GI → create IN_HOUSE stay + primary guest + folio identity
