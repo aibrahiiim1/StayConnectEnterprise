@@ -175,8 +175,10 @@ type txn struct {
 	at    time.Time
 }
 
-// seedEnt inserts a non-grace entitlement with an explicit current status/window + append-only state history.
-func seedEnt(t *testing.T, p *pgxpool.Pool, f fixture, currentStatus string, window *time.Time, terminalReason *string, terminatedAt, activatedAt *time.Time, txns []txn) string {
+// seedEnt inserts a non-grace entitlement whose lifecycle history is built entirely through the CONTROLLED
+// transition operation (apply_entitlement_transition), so the seed produces the same coherent status+history a
+// real Commerce/Stay path would. The entitlement's final status is txns[len-1].state.
+func seedEnt(t *testing.T, p *pgxpool.Pool, f fixture, window *time.Time, txns []txn) string {
 	t.Helper()
 	ctx := context.Background()
 	var purchaseID string
@@ -186,20 +188,18 @@ func seedEnt(t *testing.T, p *pgxpool.Pool, f fixture, currentStatus string, win
 		f.tenant, f.site, f.gracePkgRev, f.iface, f.stay).Scan(&purchaseID); err != nil {
 		t.Fatalf("seed purchase: %v", err)
 	}
+	// INSERT in the FIRST transition's state; apply() then records seq=1 and drives the rest.
 	var ent string
 	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.entitlements
 		(tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,
-		 time_accounting_mode,end_mode,status,activated_at,window_ends_at,terminal_reason,terminated_at)
-		VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,$6,$7,'VALIDITY_WINDOW','VALIDITY_WINDOW',$8,$9,$10,$11,$12) RETURNING id`,
-		f.tenant, f.site, f.stay, f.iface, purchaseID, f.svcRev, f.gracePkgRev,
-		currentStatus, activatedAt, window, terminalReason, terminatedAt).Scan(&ent); err != nil {
+		 time_accounting_mode,end_mode,status,window_ends_at)
+		VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,$6,$7,'VALIDITY_WINDOW','VALIDITY_WINDOW',$8,$9) RETURNING id`,
+		f.tenant, f.site, f.stay, f.iface, purchaseID, f.svcRev, f.gracePkgRev, txns[0].state, window).Scan(&ent); err != nil {
 		t.Fatalf("seed entitlement: %v", err)
 	}
-	for i, tr := range txns {
-		if _, err := p.Exec(ctx, `INSERT INTO iam_v2.entitlement_state_transitions
-			(tenant_id,site_id,entitlement_id,seq,to_state,effective_at,reason) VALUES ($1,$2,$3,$4,$5,$6,'SEED')`,
-			f.tenant, f.site, ent, i+1, tr.state, tr.at); err != nil {
-			t.Fatalf("seed transition: %v", err)
+	for _, tr := range txns {
+		if _, err := p.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1,$2,$3,'SEED')`, ent, tr.state, tr.at); err != nil {
+			t.Fatalf("seed transition %s: %v", tr.state, err)
 		}
 	}
 	return ent
@@ -254,7 +254,7 @@ func ptr(tm time.Time) *time.Time { return &tm }
 func activeEnt(t *testing.T, p *pgxpool.Pool, f fixture) string {
 	act := f.boundary.Add(-30 * time.Minute)
 	win := f.boundary.Add(48 * time.Hour)
-	return seedEnt(t, p, f, "ACTIVE", &win, nil, nil, &act, []txn{{"ACTIVE", act}})
+	return seedEnt(t, p, f, &win, []txn{{"ACTIVE", act}})
 }
 
 // TestIntegration_ConvertCreatesGrace: normal conversion; devices grandfathered strictly by interval-containment.
@@ -312,15 +312,13 @@ func TestIntegration_TerminatesNonTerminal(t *testing.T) {
 		f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 		b := f.boundary
 		win := b.Add(48 * time.Hour)
-		var act *time.Time
 		var txns []txn
 		if st == "PENDING" {
 			txns = []txn{{"PENDING", b.Add(-time.Hour)}}
 		} else {
-			act = ptr(b.Add(-2 * time.Hour))
 			txns = []txn{{"ACTIVE", b.Add(-2 * time.Hour)}, {"SUSPENDED", b.Add(-90 * time.Minute)}}
 		}
-		seedEnt(t, p, f, st, &win, nil, nil, act, txns)
+		seedEnt(t, p, f, &win, txns)
 		res, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f))
 		if err != nil {
 			t.Fatalf("%s convert: %v", st, err)
@@ -359,22 +357,22 @@ func TestIntegration_EligibilityAtBoundary(t *testing.T) {
 	// ACTIVE at boundary, SUSPENDED after -> eligible
 	run("active-then-suspended", func(f fixture) {
 		win := b0.Add(48 * time.Hour)
-		seedEnt(t, p, f, "SUSPENDED", &win, nil, nil, ptr(b0.Add(-time.Hour)), []txn{{"ACTIVE", b0.Add(-time.Hour)}, {"SUSPENDED", b0.Add(time.Hour)}})
+		seedEnt(t, p, f, &win, []txn{{"ACTIVE", b0.Add(-time.Hour)}, {"SUSPENDED", b0.Add(time.Hour)}})
 	}, true, false)
 	// SUSPENDED at boundary, reactivated after -> NOT eligible
 	run("suspended-then-reactivated", func(f fixture) {
 		win := b0.Add(48 * time.Hour)
-		seedEnt(t, p, f, "ACTIVE", &win, nil, nil, ptr(b0.Add(-2*time.Hour)), []txn{{"ACTIVE", b0.Add(-2 * time.Hour)}, {"SUSPENDED", b0.Add(-time.Hour)}, {"ACTIVE", b0.Add(time.Hour)}})
+		seedEnt(t, p, f, &win, []txn{{"ACTIVE", b0.Add(-2 * time.Hour)}, {"SUSPENDED", b0.Add(-time.Hour)}, {"ACTIVE", b0.Add(time.Hour)}})
 	}, false, false)
 	// PENDING at boundary, activated after -> NOT eligible
 	run("pending-then-activated", func(f fixture) {
 		win := b0.Add(48 * time.Hour)
-		seedEnt(t, p, f, "ACTIVE", &win, nil, nil, ptr(b0.Add(time.Hour)), []txn{{"PENDING", b0.Add(-time.Hour)}, {"ACTIVE", b0.Add(time.Hour)}})
+		seedEnt(t, p, f, &win, []txn{{"PENDING", b0.Add(-time.Hour)}, {"ACTIVE", b0.Add(time.Hour)}})
 	}, false, false)
 	// ACTIVE only after boundary -> NOT eligible
 	run("active-only-after", func(f fixture) {
 		win := b0.Add(48 * time.Hour)
-		seedEnt(t, p, f, "ACTIVE", &win, nil, nil, ptr(b0.Add(time.Hour)), []txn{{"ACTIVE", b0.Add(time.Hour)}})
+		seedEnt(t, p, f, &win, []txn{{"ACTIVE", b0.Add(time.Hour)}})
 	}, false, false)
 }
 
@@ -389,10 +387,10 @@ func TestIntegration_OverlappingActiveManualReview(t *testing.T) {
 	b := f.boundary
 	win := b.Add(48 * time.Hour)
 	// the ent_live_stay unique index forbids two CURRENTLY-live rows, so one is currently TERMINATED-after-boundary
-	// while still ACTIVE AT the boundary — both are ACTIVE at the boundary per history.
-	seedEnt(t, p, f, "ACTIVE", &win, nil, nil, ptr(b.Add(-time.Hour)), []txn{{"ACTIVE", b.Add(-time.Hour)}})
-	tr := "HARD_EXPIRY"
-	seedEnt(t, p, f, "TERMINATED", &win, &tr, ptr(b.Add(time.Hour)), ptr(b.Add(-time.Hour)), []txn{{"ACTIVE", b.Add(-time.Hour)}})
+	// while still ACTIVE AT the boundary — both are ACTIVE at the boundary per history. Seed the TERMINATED-ending
+	// one FIRST so it is no longer live when the second (currently-ACTIVE) row is inserted.
+	seedEnt(t, p, f, &win, []txn{{"ACTIVE", b.Add(-time.Hour)}, {"TERMINATED", b.Add(time.Hour)}})
+	seedEnt(t, p, f, &win, []txn{{"ACTIVE", b.Add(-time.Hour)}})
 
 	res, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f))
 	if err != nil {
@@ -420,7 +418,7 @@ func TestIntegration_QuotaWindowAtBoundary(t *testing.T) {
 	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 	b := f.boundary
 	winPast := b.Add(-time.Minute)
-	seedEnt(t, p, f, "ACTIVE", &winPast, nil, nil, ptr(b.Add(-time.Hour)), []txn{{"ACTIVE", b.Add(-time.Hour)}})
+	seedEnt(t, p, f, &winPast, []txn{{"ACTIVE", b.Add(-time.Hour)}})
 	r, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f))
 	if err != nil || r.GraceCreated {
 		t.Fatalf("window-elapsed must be ineligible: %+v err=%v", r, err)
@@ -430,7 +428,7 @@ func TestIntegration_QuotaWindowAtBoundary(t *testing.T) {
 	f = seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 	b = f.boundary
 	win := b.Add(48 * time.Hour)
-	ent := seedEnt(t, p, f, "ACTIVE", &win, nil, nil, ptr(b.Add(-time.Hour)), []txn{{"ACTIVE", b.Add(-time.Hour)}})
+	ent := seedEnt(t, p, f, &win, []txn{{"ACTIVE", b.Add(-time.Hour)}})
 	_, sess := seedDeviceAuth(t, p, f, ent, 1, b.Add(-time.Hour), nil, b.Add(-time.Hour), nil)
 	// one accounting sample before the boundary that meets/exceeds the 500MB plan quota
 	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.accounting_records(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at)
@@ -542,6 +540,71 @@ func TestIntegration_EmergencyReadsCatalog(t *testing.T) {
 	}
 	if _, err := p.Exec(ctx, `DELETE FROM iam_v2.internet_packages WHERE tenant_id=$1 AND site_id=$2 AND code='__sys_emergency_grace_pkg__'`, f.tenant, f.site); err == nil {
 		t.Fatal("reserved-code package delete must be rejected")
+	}
+}
+
+// TestIntegration_AlertLifecycleAndProvenance covers the resolvable alert model (item 12) and the DB-enforced
+// audit provenance (item 11): an Emergency conversion opens an operational alert; OPEN/ACKNOWLEDGED keep it
+// active; RESOLVED removes it from the active view (evidence stays immutable); and a mismatched boundary event
+// is rejected by the provenance guard.
+func TestIntegration_AlertLifecycleAndProvenance(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	c := NewConverter(p)
+	ctx := context.Background()
+	f := seedBase(t, p, seedOpts{configureTypedPolicy: false, pinGracePackage: false, systemGracePackage: true, bootstrapEmergency: true})
+	activeEnt(t, p, f)
+	res, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f))
+	if err != nil || !res.IsEmergency {
+		t.Fatalf("emergency convert: %+v err=%v", res, err)
+	}
+	var auditID string
+	if err := p.QueryRow(ctx, `SELECT id::text FROM iam_v2.checkout_grace_audit WHERE stay_id=$1`, f.stay).Scan(&auditID); err != nil {
+		t.Fatal(err)
+	}
+	// alert is active (implicitly OPEN, no action yet)
+	if count(t, p, `SELECT count(*) FROM iam_v2.active_operational_alerts WHERE audit_id=$1`, auditID) != 1 {
+		t.Fatal("emergency alert must be active before resolution")
+	}
+	// RESOLVED requires an actor
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ($1,$2,$3,1,'RESOLVED')`, f.tenant, f.site, auditID); err == nil {
+		t.Fatal("first action must be OPEN / RESOLVED needs actor")
+	}
+	actor := "11111111-1111-1111-1111-111111111111"
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action) VALUES ($1,$2,$3,1,'OPEN')`, f.tenant, f.site, auditID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action,actor) VALUES ($1,$2,$3,2,'ACKNOWLEDGED',$4)`, f.tenant, f.site, auditID, actor); err != nil {
+		t.Fatal(err)
+	}
+	if count(t, p, `SELECT count(*) FROM iam_v2.active_operational_alerts WHERE audit_id=$1`, auditID) != 1 {
+		t.Fatal("ACKNOWLEDGED alert must stay active")
+	}
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action,actor,reason_code) VALUES ($1,$2,$3,3,'RESOLVED',$4,'CATALOG_FIXED')`, f.tenant, f.site, auditID, actor); err != nil {
+		t.Fatal(err)
+	}
+	if count(t, p, `SELECT count(*) FROM iam_v2.active_operational_alerts WHERE audit_id=$1`, auditID) != 0 {
+		t.Fatal("RESOLVED alert must leave the active view")
+	}
+	// evidence immutable + a resolved alert is terminal
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.checkout_grace_alert_actions SET action='OPEN' WHERE audit_id=$1`, auditID); err == nil {
+		t.Fatal("alert actions are append-only")
+	}
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id,site_id,audit_id,seq,action,actor) VALUES ($1,$2,$3,4,'ACKNOWLEDGED',$4)`, f.tenant, f.site, auditID, actor); err == nil {
+		t.Fatal("a RESOLVED alert is terminal")
+	}
+
+	// provenance: an audit row whose boundary_event_id belongs to a DIFFERENT stay is rejected.
+	f2 := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
+	wrongEv := seedEvent(t, p, f2, &f2.boundary, false, 5, "LIVE", 0, "")
+	applyEvent(t, p, wrongEv, f2.stay)
+	// craft an audit for f2.stay but citing wrongEv with a MISMATCHED seq → provenance guard rejects
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.checkout_grace_audit
+		(tenant_id,site_id,pms_interface_id,stay_id,lifecycle_version,trigger,is_emergency,policy_version,reason_code,
+		 boundary_event_id,boundary_event_seq,boundary_normalization_version,boundary_reason_code,config_version,boundary_at)
+		VALUES ($1,$2,$3,$4,1,'NO_GRACE',false,'NONE','X',$5,999,1,'TRUSTED_PMS_CHECKOUT_TS',1,now())`,
+		f2.tenant, f2.site, f2.iface, f2.stay, wrongEv); err == nil {
+		t.Fatal("audit with a mismatched boundary event seq must be rejected by the provenance guard")
 	}
 }
 

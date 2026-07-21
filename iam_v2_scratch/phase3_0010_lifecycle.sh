@@ -232,6 +232,35 @@ Q "SELECT iam_v2.bootstrap_emergency_grace('$RT','$RS');" >/dev/null
 [ "$(Q "SELECT iam_v2.emergency_grace_health('$RT','$RS');")" = "OK" ] && ok "bootstrap is idempotent (re-run stays OK)" || no "idempotent bootstrap broke health"
 expect_err "DELETE FROM iam_v2.internet_packages WHERE tenant_id='$RT' AND site_id='$RS' AND code='__sys_emergency_grace_pkg__';" && ok "reserved system package delete rejected (§7)" || no "reserved package deletable"
 expect_err "DELETE FROM iam_v2.service_plans WHERE tenant_id='$RT' AND site_id='$RS' AND code='__sys_emergency_grace_plan__';" && ok "reserved system plan delete rejected (§7)" || no "reserved plan deletable"
+# item 9 hardening: rename-away, disable, current-revision re-point all rejected
+expect_err "UPDATE iam_v2.internet_packages SET code='was_reserved' WHERE tenant_id='$RT' AND site_id='$RS' AND code='__sys_emergency_grace_pkg__';" && ok "reserved package cannot be renamed away (§9)" || no "reserved package renamed"
+expect_err "UPDATE iam_v2.internet_packages SET active=false WHERE tenant_id='$RT' AND site_id='$RS' AND code='__sys_emergency_grace_pkg__';" && ok "reserved package cannot be disabled (§9)" || no "reserved package disabled"
+expect_err "UPDATE iam_v2.service_plans SET enabled=false WHERE tenant_id='$RT' AND site_id='$RS' AND code='__sys_emergency_grace_plan__';" && ok "reserved plan cannot be disabled (§9)" || no "reserved plan disabled"
+expect_err "UPDATE iam_v2.internet_packages SET current_revision_id=NULL WHERE tenant_id='$RT' AND site_id='$RS' AND code='__sys_emergency_grace_pkg__';" && ok "reserved package current-revision cannot be re-pointed (§9)" || no "reserved revision re-pointed"
+
+echo '== controlled entitlement transition state machine (§5) + device intervals (§7) + config publish (§10i) =='
+EPKG="$(Q "SELECT current_revision_id FROM iam_v2.internet_packages WHERE tenant_id='$RT' AND site_id='$RS' AND code='__sys_emergency_grace_pkg__';")"
+ESPR="$(Q "SELECT service_plan_revision_id FROM iam_v2.internet_package_revisions WHERE id='$EPKG';")"
+PUR="$(Q "INSERT INTO iam_v2.purchases(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state) VALUES ('$RT','$RS','$EPKG','$I','$ST','ADMIN_GRANT',0,'GRANTED') RETURNING id;")"
+ENT="$(Q "INSERT INTO iam_v2.entitlements(tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status) VALUES ('$RT','$RS','$ST','$I','$PUR','{}'::jsonb,'$ESPR','$EPKG','VALIDITY_WINDOW','AT_CHECKOUT','PENDING') RETURNING id;")"
+[ -n "$ENT" ] && ok "seeded PENDING entitlement for transition tests" || no "entitlement seed failed"
+expect_err "UPDATE iam_v2.entitlements SET status='ACTIVE' WHERE id='$ENT';" && ok "raw entitlements.status UPDATE rejected (must use apply_entitlement_transition) (§5)" || no "raw status update accepted"
+expect_ok  "SELECT iam_v2.apply_entitlement_transition('$ENT','ACTIVE',now(),'SEED');" && ok "apply_entitlement_transition(ACTIVE) works (§5)" || no "controlled transition failed"
+[ "$(Q "SELECT count(*) FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$ENT';")" = 1 ] && ok "controlled transition recorded exactly one history row (§5)" || no "history not recorded"
+expect_err "INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at) VALUES ('$RT','$RS','$ENT',2,'ACTIVE','SUSPENDED',now());" && ok "direct transition whose to_state != current status rejected (§5)" || no "mismatched transition accepted"
+expect_err "SELECT iam_v2.apply_entitlement_transition('$ENT','TERMINATED',now(),'ADMIN'); SELECT iam_v2.apply_entitlement_transition('$ENT','ACTIVE',now(),'SEED');" && ok "no transition out of TERMINATED (terminal) (§5)" || no "resurrected terminated entitlement"
+# device intervals (§7): open one, then a second open is rejected; interval without a binding rejected
+DEV="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:aa:01'::macaddr) RETURNING id;")"
+DEV2="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:aa:02'::macaddr) RETURNING id;")"
+Q "INSERT INTO iam_v2.entitlement_devices(tenant_id,site_id,entitlement_id,device_id,status,first_authorized,last_authorized) VALUES ('$RT','$RS','$ENT','$DEV','AUTHORIZED',now(),now());" >/dev/null
+expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV2',1,now());" && ok "device authorization without an entitlement_devices binding rejected (§7)" || no "unbound interval accepted"
+expect_ok  "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',1,now());" && ok "first device authorization interval (seq=1) accepted (§7)" || no "valid interval blocked"
+expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',2,now());" && ok "second OPEN interval for the same device rejected (§7)" || no "two open intervals accepted"
+expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',3,now());" && ok "non-contiguous device authorization seq rejected (§7)" || no "sparse device seq accepted"
+# config publish (§10): increments config_version by exactly 1 each time (row exists from §4 grace tests)
+V1="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE');")"
+V2="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE');")"
+[ "$V2" = "$((V1+1))" ] && ok "publish_checkout_grace_config increments config_version by exactly 1 (§10)" || no "config_version not monotonic (+1)"
 
 echo '== structural checkout boundary invariants (§10) =='
 Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$T','$S','$I','RB','SB','IN_HOUSE',1,0);" >/dev/null

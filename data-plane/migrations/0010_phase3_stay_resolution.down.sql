@@ -18,12 +18,32 @@ DROP FUNCTION IF EXISTS iam_v2.p3_reserved_grace_codes();
 DROP FUNCTION IF EXISTS iam_v2.bootstrap_emergency_grace(uuid,uuid);
 DROP FUNCTION IF EXISTS iam_v2.emergency_grace_health(uuid,uuid);
 
--- (4d/4e) history tables + shared append-only guard
+-- (4i/4j/4k) grace-config publish + alert-action model + audit provenance
+DROP FUNCTION IF EXISTS iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text);
+DROP TRIGGER IF EXISTS p3_checkout_audit_provenance ON iam_v2.checkout_grace_audit;
+DROP FUNCTION IF EXISTS iam_v2.p3_checkout_audit_provenance();
+DROP VIEW IF EXISTS iam_v2.active_operational_alerts; -- depends on checkout_grace_alert_actions
+DROP TRIGGER IF EXISTS p3_alert_action_insert ON iam_v2.checkout_grace_alert_actions;
+DROP TRIGGER IF EXISTS p3_alert_action_appendonly ON iam_v2.checkout_grace_alert_actions;
+DROP FUNCTION IF EXISTS iam_v2.p3_alert_action_guard();
+DROP TABLE IF EXISTS iam_v2.checkout_grace_alert_actions;
+
+-- (4d/4e) history tables + guards (append-only + insert state machines) + controlled transition
+DROP TRIGGER IF EXISTS p3_entitlement_status_guard ON iam_v2.entitlements;
+DROP FUNCTION IF EXISTS iam_v2.p3_entitlement_status_guard();
+DROP FUNCTION IF EXISTS iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text);
 DROP TRIGGER IF EXISTS p3_est_appendonly ON iam_v2.entitlement_state_transitions;
+DROP TRIGGER IF EXISTS p3_est_insert ON iam_v2.entitlement_state_transitions;
+DROP FUNCTION IF EXISTS iam_v2.p3_est_insert_guard();
 DROP TRIGGER IF EXISTS p3_eda_appendonly ON iam_v2.entitlement_device_authorizations;
+DROP TRIGGER IF EXISTS p3_eda_insert ON iam_v2.entitlement_device_authorizations;
+DROP FUNCTION IF EXISTS iam_v2.p3_eda_insert_guard();
 DROP FUNCTION IF EXISTS iam_v2.p3_history_appendonly();
 DROP TABLE IF EXISTS iam_v2.entitlement_device_authorizations;
 DROP TABLE IF EXISTS iam_v2.entitlement_state_transitions;
+
+-- (4h) stays lineage pin
+ALTER TABLE iam_v2.stays DROP COLUMN IF EXISTS last_applied_event_id;
 
 -- (4c) checkout_grace_audit alert view + append-only guard + table
 DROP VIEW IF EXISTS iam_v2.active_operational_alerts;

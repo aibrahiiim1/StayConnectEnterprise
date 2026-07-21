@@ -20,6 +20,15 @@
 --   (5) auth_resolutions.resolution_request_id — server-side resolution-request idempotency key.
 --   (6) stay_events append-only guard (immutable identity/normalization; one-way terminal processing_status;
 --       stay_id may go NULL->same-interface Stay only in the same tx that makes the event terminal).
+--   (7) PO Checkout-hardening APPEND-ONLY integrity tables + controlled operations (proving the atomic Checkout
+--       conversion AT the effective-checkout boundary from immutable history, not a mutable current row):
+--         - checkout_grace_audit (durable one-per-episode conversion evidence + boundary provenance);
+--         - checkout_grace_alert_actions + active_operational_alerts view (resolvable OPEN/ACK/RESOLVED alerts);
+--         - entitlement_state_transitions + apply_entitlement_transition() (controlled Entitlement state machine);
+--         - entitlement_device_authorizations (append-only device-authorization intervals);
+--         - stays.last_applied_event_id (exact event lineage pin);
+--         - bootstrap_emergency_grace()/emergency_grace_health() (system Emergency catalog, reserved-namespace
+--           protected) and publish_checkout_grace_config() (controlled, version-incrementing config publication).
 -- No public-schema mutation. No SECURITY DEFINER. Zero runtime grants (dark).
 BEGIN;
 
@@ -254,6 +263,8 @@ CREATE TABLE iam_v2.checkout_grace_audit (
   created_at timestamptz NOT NULL DEFAULT now(),
   -- exactly one audit/alert per Stay lifecycle episode (idempotent + concurrent single-winner)
   UNIQUE (tenant_id, site_id, stay_id, lifecycle_version),
+  UNIQUE (tenant_id, site_id, id), -- composite target for the alert-action FK
+
   -- (item 11) full trigger<->emergency<->policy_version<->alert<->grace_entitlement coherence. IS NOT DISTINCT
   -- FROM keeps NULLs from making a branch evaluate to NULL (which a CHECK treats as satisfied).
   CONSTRAINT cga_coherent CHECK (
@@ -359,6 +370,119 @@ CREATE TRIGGER p3_eda_appendonly BEFORE UPDATE OR DELETE ON iam_v2.entitlement_d
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_history_appendonly();
 REVOKE EXECUTE ON FUNCTION iam_v2.p3_history_appendonly() FROM PUBLIC;
 
+-- (item 5) INSERT-time STATE-MACHINE guard: exactly one initial (seq=1, from_state=NULL); every later seq is
+-- previous+1 with from_state=previous.to_state; effective_at never moves backwards; only legal transition edges;
+-- and the new (always-latest) transition's to_state MUST equal the entitlement's current status (so history and
+-- the row can never diverge). Combined with p3_entitlement_status_guard, every status change is history-backed.
+CREATE OR REPLACE FUNCTION iam_v2.p3_est_insert_guard() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE prev_seq bigint; prev_to text; prev_at timestamptz; cur_status text;
+BEGIN
+  SELECT seq, to_state, effective_at INTO prev_seq, prev_to, prev_at
+    FROM iam_v2.entitlement_state_transitions WHERE entitlement_id = NEW.entitlement_id ORDER BY seq DESC LIMIT 1;
+  IF prev_seq IS NULL THEN
+    IF NEW.seq <> 1 THEN RAISE EXCEPTION 'first entitlement transition must have seq=1 (got %)', NEW.seq; END IF;
+    IF NEW.from_state IS NOT NULL THEN RAISE EXCEPTION 'initial transition from_state must be NULL'; END IF;
+  ELSE
+    IF NEW.seq <> prev_seq + 1 THEN RAISE EXCEPTION 'entitlement transition seq must be contiguous (% -> %)', prev_seq, NEW.seq; END IF;
+    IF NEW.from_state IS DISTINCT FROM prev_to THEN RAISE EXCEPTION 'from_state % must equal previous to_state %', NEW.from_state, prev_to; END IF;
+    IF NEW.effective_at < prev_at THEN RAISE EXCEPTION 'transition effective_at cannot move backwards'; END IF;
+  END IF;
+  IF NEW.from_state IS NOT NULL AND NOT (
+       (NEW.from_state='PENDING'   AND NEW.to_state IN ('ACTIVE','SUSPENDED','TERMINATED'))
+    OR (NEW.from_state='ACTIVE'    AND NEW.to_state IN ('SUSPENDED','TERMINATED'))
+    OR (NEW.from_state='SUSPENDED' AND NEW.to_state IN ('ACTIVE','TERMINATED'))) THEN
+    RAISE EXCEPTION 'illegal entitlement transition % -> % (TERMINATED is terminal)', NEW.from_state, NEW.to_state;
+  END IF;
+  SELECT status INTO cur_status FROM iam_v2.entitlements WHERE id = NEW.entitlement_id;
+  IF NEW.to_state IS DISTINCT FROM cur_status THEN
+    RAISE EXCEPTION 'transition to_state % must equal entitlement current status % (use apply_entitlement_transition)', NEW.to_state, cur_status;
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_est_insert BEFORE INSERT ON iam_v2.entitlement_state_transitions
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_est_insert_guard();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_est_insert_guard() FROM PUBLIC;
+
+-- (item 5) entitlements.status may ONLY change through iam_v2.apply_entitlement_transition, which sets a
+-- tx-local flag before updating the row. A raw status UPDATE that forgets to append history is rejected.
+CREATE OR REPLACE FUNCTION iam_v2.p3_entitlement_status_guard() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+BEGIN
+  IF NEW.status IS DISTINCT FROM OLD.status
+     AND current_setting('iam_v2.entitlement_transition', true) IS DISTINCT FROM 'on' THEN
+    RAISE EXCEPTION 'entitlements.status may change only via iam_v2.apply_entitlement_transition';
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_entitlement_status_guard BEFORE UPDATE ON iam_v2.entitlements
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_entitlement_status_guard();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_entitlement_status_guard() FROM PUBLIC;
+
+-- (item 5) THE controlled transition operation: locks the entitlement, updates status + terminal/activation
+-- fields, and appends the matching history row ATOMICALLY (exactly one concurrent writer wins via the row lock).
+-- Every Phase-2/3 Entitlement path (grant/activate/suspend/reactivate/expire/checkout-terminate/grace) uses it.
+CREATE OR REPLACE FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamptz, p_reason text) RETURNS void
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_from text; v_seq bigint; v_prev_at timestamptz; v_at timestamptz; v_term text;
+BEGIN
+  IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'transition reason must be a bounded machine code';
+  END IF;
+  SELECT status INTO v_from FROM iam_v2.entitlements WHERE id = p_ent FOR UPDATE;
+  IF v_from IS NULL THEN RAISE EXCEPTION 'entitlement % not found', p_ent; END IF;
+  SELECT COALESCE(max(seq),0)+1, max(effective_at) INTO v_seq, v_prev_at
+    FROM iam_v2.entitlement_state_transitions WHERE entitlement_id = p_ent;
+  -- effective_at never moves backwards: a transition is recorded at the LATER of the requested time and the
+  -- previous transition (a state change discovered late is stamped no earlier than the prior known state).
+  v_at := GREATEST(p_at, COALESCE(v_prev_at, p_at));
+  -- terminal_reason is the entitlements enum; a non-enum transition reason (e.g. a SEED/GRACE code) maps to OTHER.
+  v_term := CASE WHEN p_to='TERMINATED' THEN
+    (CASE WHEN p_reason IN ('TIME','DATA','HARD_EXPIRY','CHECKOUT','ADMIN','REVOKED','SUPERSEDED','CONVERTED','TRANSFERRED','CANCELLED','OTHER')
+          THEN p_reason ELSE 'OTHER' END) ELSE NULL END;
+  SET LOCAL iam_v2.entitlement_transition = 'on';
+  UPDATE iam_v2.entitlements SET
+    status = p_to,
+    activated_at    = CASE WHEN p_to='ACTIVE' AND activated_at IS NULL THEN v_at ELSE activated_at END,
+    terminal_reason = v_term,
+    terminated_at   = CASE WHEN p_to='TERMINATED' THEN v_at ELSE NULL END
+  WHERE id = p_ent;
+  INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at,reason)
+    SELECT tenant_id, site_id, id, v_seq, CASE WHEN v_seq=1 THEN NULL ELSE v_from END, p_to, v_at, p_reason
+    FROM iam_v2.entitlements WHERE id = p_ent;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text) FROM PUBLIC;
+
+-- (item 7) INSERT-time DEVICE-AUTHORIZATION-INTERVAL guard: contiguous seq per (entitlement,device); at most one
+-- OPEN interval; a new interval cannot begin before the prior one closes; and it must reference a real
+-- entitlement_devices binding. Combined with the append-only guard (which only allows closing the latest open
+-- interval once), the interval history is a clean monotonic timeline.
+CREATE OR REPLACE FUNCTION iam_v2.p3_eda_insert_guard() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE prev_seq bigint; prev_deauth timestamptz; prev_open int;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM iam_v2.entitlement_devices ed
+                 WHERE ed.entitlement_id=NEW.entitlement_id AND ed.device_id=NEW.device_id) THEN
+    RAISE EXCEPTION 'device authorization requires an entitlement_devices binding';
+  END IF;
+  SELECT seq, deauthorized_at INTO prev_seq, prev_deauth
+    FROM iam_v2.entitlement_device_authorizations
+    WHERE entitlement_id=NEW.entitlement_id AND device_id=NEW.device_id ORDER BY seq DESC LIMIT 1;
+  SELECT count(*) INTO prev_open FROM iam_v2.entitlement_device_authorizations
+    WHERE entitlement_id=NEW.entitlement_id AND device_id=NEW.device_id AND deauthorized_at IS NULL;
+  IF prev_seq IS NULL THEN
+    IF NEW.seq <> 1 THEN RAISE EXCEPTION 'first device authorization must have seq=1'; END IF;
+  ELSE
+    IF NEW.seq <> prev_seq + 1 THEN RAISE EXCEPTION 'device authorization seq must be contiguous'; END IF;
+    IF prev_open > 0 THEN RAISE EXCEPTION 'a device may not have two open authorization intervals'; END IF;
+    IF NEW.authorized_at < prev_deauth THEN RAISE EXCEPTION 'new authorization cannot begin before the prior interval closed'; END IF;
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_eda_insert BEFORE INSERT ON iam_v2.entitlement_device_authorizations
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_eda_insert_guard();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_eda_insert_guard() FROM PUBLIC;
+
 -- ============================================================================
 -- (4f) site_checkout_grace_config.config_version — monotonic version bumped on every Admin publish, so a
 --      Checkout can pin the EXACT config it converted against (item 9) and a concurrent publish only affects
@@ -386,17 +510,36 @@ BEGIN
     END IF;
     RETURN OLD;
   END IF;
+  -- protect BOTH the old and the new code: a reserved object cannot be renamed AWAY (OLD reserved -> NEW not),
+  -- nor can a non-reserved row be renamed INTO the reserved namespace as a non-system object.
+  IF TG_OP = 'UPDATE' AND OLD.code = ANY(reserved) AND NEW.code IS DISTINCT FROM OLD.code THEN
+    RAISE EXCEPTION 'reserved system grace object code is immutable (cannot rename away from %)', OLD.code;
+  END IF;
   IF NEW.code = ANY(reserved) THEN
     IF TG_TABLE_NAME = 'internet_packages' THEN
       IF NEW.is_system IS NOT TRUE THEN
         RAISE EXCEPTION 'reserved grace code % requires a system-owned package', NEW.code;
       END IF;
-      IF TG_OP = 'UPDATE' AND NEW.is_system IS DISTINCT FROM OLD.is_system THEN
-        RAISE EXCEPTION 'reserved system grace package is_system is immutable';
+      IF NEW.active IS NOT TRUE THEN
+        RAISE EXCEPTION 'reserved system grace package cannot be disabled';
       END IF;
-    END IF;
-    IF TG_OP = 'UPDATE' AND NEW.code IS DISTINCT FROM OLD.code THEN
-      RAISE EXCEPTION 'reserved system grace object code is immutable';
+      IF TG_OP = 'UPDATE' THEN
+        IF NEW.is_system IS DISTINCT FROM OLD.is_system THEN
+          RAISE EXCEPTION 'reserved system grace package is_system is immutable';
+        END IF;
+        -- current_revision_id may be SET once by bootstrap, never re-pointed afterwards.
+        IF OLD.current_revision_id IS NOT NULL AND NEW.current_revision_id IS DISTINCT FROM OLD.current_revision_id THEN
+          RAISE EXCEPTION 'reserved system grace package current revision cannot be re-pointed';
+        END IF;
+      END IF;
+    ELSIF TG_TABLE_NAME = 'service_plans' THEN
+      IF NEW.enabled IS NOT TRUE THEN
+        RAISE EXCEPTION 'reserved system grace plan cannot be disabled';
+      END IF;
+      IF TG_OP = 'UPDATE' AND OLD.current_revision_id IS NOT NULL
+         AND NEW.current_revision_id IS DISTINCT FROM OLD.current_revision_id THEN
+        RAISE EXCEPTION 'reserved system grace plan current revision cannot be re-pointed';
+      END IF;
     END IF;
   END IF;
   RETURN NEW;
@@ -412,12 +555,20 @@ REVOKE EXECUTE ON FUNCTION iam_v2.p3_reserved_grace_codes() FROM PUBLIC;
 -- pre-existing reserved-code row with mismatching identity/values FAILS CLOSED (raises); it is never adopted.
 CREATE OR REPLACE FUNCTION iam_v2.bootstrap_emergency_grace(p_tenant uuid, p_site uuid) RETURNS void
   LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
-DECLARE v_plan uuid; v_spr uuid; v_pkg uuid; v_ipr uuid; v_existing_system boolean;
+DECLARE v_plan uuid; v_spr uuid; v_pkg uuid; v_ipr uuid;
 BEGIN
-  -- service plan
-  SELECT id, is_system_ok INTO v_plan, v_existing_system FROM (
-    SELECT id, (enabled = true) AS is_system_ok FROM iam_v2.service_plans
-    WHERE tenant_id=p_tenant AND site_id=p_site AND code='__sys_emergency_grace_plan__') s;
+  -- (item 9) serialize per tenant/site so >=24 concurrent bootstraps are safe (exactly one provisions; the rest
+  -- verify). The tx-level advisory lock is released at commit; the caller supplies tenant/site as the key.
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_tenant::text || ':' || p_site::text || ':emergency-grace', 0));
+  -- service plan (verify-before-mutate: a pre-existing row must already be system-shaped/enabled or we fail
+  -- closed rather than adopt/repair it).
+  SELECT id INTO v_plan FROM iam_v2.service_plans
+    WHERE tenant_id=p_tenant AND site_id=p_site AND code='__sys_emergency_grace_plan__';
+  IF v_plan IS NOT NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM iam_v2.service_plans WHERE id=v_plan AND enabled=true) THEN
+      RAISE EXCEPTION 'reserved emergency service plan exists but is not enabled/system-shaped (fail closed)';
+    END IF;
+  END IF;
   IF v_plan IS NULL THEN
     INSERT INTO iam_v2.service_plans(tenant_id,site_id,code,enabled)
       VALUES (p_tenant,p_site,'__sys_emergency_grace_plan__',true) RETURNING id INTO v_plan;
@@ -472,6 +623,140 @@ CREATE OR REPLACE FUNCTION iam_v2.emergency_grace_health(p_tenant uuid, p_site u
 $fn$;
 REVOKE EXECUTE ON FUNCTION iam_v2.bootstrap_emergency_grace(uuid,uuid) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION iam_v2.emergency_grace_health(uuid,uuid) FROM PUBLIC;
+
+-- ============================================================================
+-- (4h) stays.last_applied_event_id (item 3): the EXACT durable Stay Event whose application last advanced the
+--      Stay, so the Checkout boundary verifier can prove exact event lineage (not a "seq >= counter" heuristic).
+--      The Stay engine pins it on every applied event; it FKs the durable event.
+-- ============================================================================
+ALTER TABLE iam_v2.stays ADD COLUMN last_applied_event_id uuid
+  REFERENCES iam_v2.stay_events (id);
+
+-- ============================================================================
+-- (4i) publish_checkout_grace_config (item 10): the SOLE controlled Hotel-Admin publication of the typed grace
+--      policy. It locks the site config (approved lock order), increments config_version by EXACTLY 1 (rejecting
+--      any decrease/jump/no-op), and applies only to later Checkouts. The no-config-row case serializes via a
+--      site-scoped advisory lock so a concurrent first publication cannot double-create.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION iam_v2.publish_checkout_grace_config(
+    p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration int, p_down int, p_up int, p_quota bigint,
+    p_dev_limit int, p_dev_policy text) RETURNS bigint
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_ver bigint;
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_tenant::text || ':' || p_site::text || ':grace-config', 0));
+  SELECT config_version INTO v_ver FROM iam_v2.site_checkout_grace_config
+    WHERE tenant_id=p_tenant AND site_id=p_site FOR UPDATE;
+  IF v_ver IS NULL THEN
+    INSERT INTO iam_v2.site_checkout_grace_config
+      (tenant_id,site_id,grace_package_revision_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,
+       grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy,config_version)
+      VALUES (p_tenant,p_site,p_pkg_rev,p_duration,p_down,p_up,p_quota,p_dev_limit,p_dev_policy,1);
+    RETURN 1;
+  END IF;
+  UPDATE iam_v2.site_checkout_grace_config SET
+    grace_package_revision_id=p_pkg_rev, grace_duration_seconds=p_duration, grace_down_kbps=p_down,
+    grace_up_kbps=p_up, grace_data_quota_bytes=p_quota, grace_device_limit=p_dev_limit,
+    grace_device_limit_policy=p_dev_policy, config_version=v_ver+1
+    WHERE tenant_id=p_tenant AND site_id=p_site;
+  RETURN v_ver+1;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text) FROM PUBLIC;
+
+-- ============================================================================
+-- (4j) resolvable operational-alert model (item 12): the immutable audit rows are the EVIDENCE; an alert's
+--      OPEN/ACKNOWLEDGED/RESOLVED lifecycle is a SEPARATE append-only action log (never an update that erases
+--      evidence). The active view returns only alerts whose latest action is not RESOLVED.
+-- ============================================================================
+CREATE TABLE iam_v2.checkout_grace_alert_actions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL,
+  audit_id uuid NOT NULL,
+  seq bigint NOT NULL CHECK (seq >= 1),
+  action text NOT NULL CHECK (action IN ('OPEN','ACKNOWLEDGED','RESOLVED')),
+  actor uuid,
+  reason_code text CHECK (reason_code IS NULL OR reason_code ~ '^[A-Z][A-Z0-9_]{0,63}$'),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (audit_id, seq),
+  FOREIGN KEY (tenant_id, site_id, audit_id) REFERENCES iam_v2.checkout_grace_audit (tenant_id, site_id, id) ON DELETE CASCADE);
+-- append-only lifecycle guard: seq contiguous; first is OPEN; RESOLVED is terminal; RESOLVED/ACK need an actor.
+CREATE OR REPLACE FUNCTION iam_v2.p3_alert_action_guard() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE prev_seq bigint; prev_action text;
+BEGIN
+  IF TG_OP <> 'INSERT' THEN RAISE EXCEPTION 'checkout_grace_alert_actions is append-only (% rejected)', TG_OP; END IF;
+  SELECT seq, action INTO prev_seq, prev_action FROM iam_v2.checkout_grace_alert_actions
+    WHERE audit_id=NEW.audit_id ORDER BY seq DESC LIMIT 1;
+  IF prev_seq IS NULL THEN
+    IF NEW.seq <> 1 OR NEW.action <> 'OPEN' THEN RAISE EXCEPTION 'first alert action must be seq=1 OPEN'; END IF;
+  ELSE
+    IF NEW.seq <> prev_seq + 1 THEN RAISE EXCEPTION 'alert action seq must be contiguous'; END IF;
+    IF prev_action = 'RESOLVED' THEN RAISE EXCEPTION 'a RESOLVED alert is terminal'; END IF;
+  END IF;
+  IF NEW.action IN ('ACKNOWLEDGED','RESOLVED') AND NEW.actor IS NULL THEN
+    RAISE EXCEPTION 'ACKNOWLEDGED/RESOLVED alert action requires an actor';
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_alert_action_insert BEFORE INSERT ON iam_v2.checkout_grace_alert_actions
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_alert_action_guard();
+CREATE TRIGGER p3_alert_action_appendonly BEFORE UPDATE OR DELETE ON iam_v2.checkout_grace_alert_actions
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_alert_action_guard();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_alert_action_guard() FROM PUBLIC;
+
+-- redefine the active view: an alert-bearing audit row whose latest action is not RESOLVED (an audit row with
+-- no action yet is implicitly OPEN and therefore active).
+CREATE OR REPLACE VIEW iam_v2.active_operational_alerts AS
+  SELECT a.id AS audit_id, a.tenant_id, a.site_id, a.pms_interface_id, a.stay_id, a.lifecycle_version,
+         a.alert_code, a.trigger, a.policy_version, a.reason_code, a.boundary_at, a.boundary_clock_suspect, a.created_at,
+         COALESCE((SELECT act.action FROM iam_v2.checkout_grace_alert_actions act
+                   WHERE act.audit_id=a.id ORDER BY act.seq DESC LIMIT 1), 'OPEN') AS state
+  FROM iam_v2.checkout_grace_audit a
+  WHERE a.alert_code IS NOT NULL
+    AND COALESCE((SELECT act.action FROM iam_v2.checkout_grace_alert_actions act
+                  WHERE act.audit_id=a.id ORDER BY act.seq DESC LIMIT 1), 'OPEN') <> 'RESOLVED';
+
+-- ============================================================================
+-- (4k) checkout audit provenance guard (item 11): the DB proves boundary-event + grace-entitlement lineage, not
+--      just that the Go writer supplied matching UUIDs.
+-- ============================================================================
+CREATE OR REPLACE FUNCTION iam_v2.p3_checkout_audit_provenance() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE ev RECORD; ent RECORD; pur_episode int;
+BEGIN
+  IF NEW.boundary_event_id IS NOT NULL THEN
+    SELECT tenant_id, site_id, pms_interface_id, stay_id, event_type, processing_status, sequence_version, normalization_version
+      INTO ev FROM iam_v2.stay_events WHERE id = NEW.boundary_event_id;
+    IF ev.tenant_id IS NULL THEN RAISE EXCEPTION 'boundary_event_id does not reference a stay_event'; END IF;
+    IF ev.tenant_id <> NEW.tenant_id OR ev.site_id <> NEW.site_id OR ev.pms_interface_id <> NEW.pms_interface_id
+       OR ev.stay_id IS DISTINCT FROM NEW.stay_id THEN
+      RAISE EXCEPTION 'boundary event scope must match the audit (tenant/site/interface/stay)';
+    END IF;
+    IF ev.event_type <> 'GO' THEN RAISE EXCEPTION 'boundary event must be the typed checkout (GO) event'; END IF;
+    IF ev.processing_status <> 'APPLIED' THEN RAISE EXCEPTION 'boundary event must be APPLIED'; END IF;
+    IF NEW.boundary_event_seq IS DISTINCT FROM ev.sequence_version
+       OR NEW.boundary_normalization_version IS DISTINCT FROM ev.normalization_version THEN
+      RAISE EXCEPTION 'audit boundary seq/normalization must match the source event';
+    END IF;
+  END IF;
+  IF NEW.grace_entitlement_id IS NOT NULL THEN
+    SELECT e.tenant_id, e.site_id, e.pms_interface_id, e.stay_id, e.purchase_id
+      INTO ent FROM iam_v2.entitlements e WHERE e.id = NEW.grace_entitlement_id;
+    IF ent.tenant_id IS NULL THEN RAISE EXCEPTION 'grace_entitlement_id does not reference an entitlement'; END IF;
+    IF ent.tenant_id <> NEW.tenant_id OR ent.site_id <> NEW.site_id OR ent.pms_interface_id IS DISTINCT FROM NEW.pms_interface_id
+       OR ent.stay_id IS DISTINCT FROM NEW.stay_id THEN
+      RAISE EXCEPTION 'grace entitlement scope must match the audit (tenant/site/interface/stay)';
+    END IF;
+    SELECT checkout_episode INTO pur_episode FROM iam_v2.purchases WHERE id = ent.purchase_id;
+    IF pur_episode IS DISTINCT FROM NEW.lifecycle_version THEN
+      RAISE EXCEPTION 'grace purchase checkout_episode % must equal audit lifecycle_version %', pur_episode, NEW.lifecycle_version;
+    END IF;
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_checkout_audit_provenance BEFORE INSERT ON iam_v2.checkout_grace_audit
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_checkout_audit_provenance();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_checkout_audit_provenance() FROM PUBLIC;
 
 -- ============================================================================
 -- (6) stay_events: application-result columns + append-only lineage guard.

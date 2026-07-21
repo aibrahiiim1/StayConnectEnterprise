@@ -40,7 +40,6 @@ var (
 const (
 	checkoutGracePolicyVersion  = "CHECKOUT_GRACE_V1"
 	emergencyGracePolicyVersion = "EMERGENCY_GRACE_V1"
-	defaultMaxSkew              = 5 * time.Minute
 )
 
 // Converter runs the atomic Checkout conversion against the site DB.
@@ -48,13 +47,18 @@ type Converter struct{ pool *pgxpool.Pool }
 
 func NewConverter(pool *pgxpool.Pool) *Converter { return &Converter{pool: pool} }
 
-// BoundarySource binds the conversion to a durable, verifiable server identity — the Stay Event that drives the
-// checkout. The Converter reads and verifies it from PostgreSQL inside the Stay-first transaction; an arbitrary
-// caller CANNOT inject a bare timestamp. MaxSkew bounds an acceptable future normalized timestamp (default 5m).
+// BoundarySource binds the conversion to a durable, verifiable server identity — ONLY the immutable Stay Event
+// identity. The Converter reads and verifies the event from PostgreSQL inside the Stay-first transaction; an
+// arbitrary caller CANNOT inject a bare timestamp or widen the trust window. The future-skew tolerance is a
+// FIXED, bounded, server-side policy (boundaryFutureSkew) — never a caller parameter.
 type BoundarySource struct {
 	StayEventID string
-	MaxSkew     time.Duration
 }
+
+// boundaryFutureSkew is the fixed server-side tolerance for a normalized PMS timestamp that reads slightly ahead
+// of the server clock (minor PMS/NTP drift). Beyond it the timestamp is implausible and the conversion falls
+// back to the conservative server clock, recorded clock-suspect. It is NOT caller-configurable.
+const boundaryFutureSkew = 5 * time.Minute
 
 // Result reports what the atomic conversion did. It carries no guest credential and no PII.
 type Result struct {
@@ -94,10 +98,6 @@ func (c *Converter) ConvertAtCheckout(ctx context.Context, tenant, site, iface, 
 }
 
 func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, src BoundarySource) (Result, error) {
-	skew := src.MaxSkew
-	if skew <= 0 {
-		skew = defaultMaxSkew
-	}
 	// L1: lock the Stay first.
 	var episode int
 	var status string
@@ -120,7 +120,7 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 	switch status {
 	case "IN_HOUSE":
 		// (item 5) derive + verify the boundary from the durable Stay Event before committing the checkout.
-		b, suspect, reason, seq, norm, evErr := deriveBoundary(ctx, tx, tenant, site, iface, stayID, lastApplied, skew, src.StayEventID)
+		b, suspect, reason, seq, norm, evErr := deriveBoundary(ctx, tx, tenant, site, iface, stayID, lastApplied, src.StayEventID)
 		if evErr != nil {
 			return Result{}, evErr
 		}
@@ -271,7 +271,7 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 // deriveBoundary reads + verifies the durable Stay Event and returns (boundary, clockSuspect, reasonCode).
 // Structural failures (wrong scope, unprocessed, unpublished RESYNC, stale version) are ErrInvalidBoundaryEvent.
 // Timestamp problems (clock-suspect, absent, implausibly future) fall back to the server clock, recorded suspect.
-func deriveBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, lastApplied int64, skew time.Duration, eventID string) (time.Time, bool, string, *int64, *int, error) {
+func deriveBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, lastApplied int64, eventID string) (time.Time, bool, string, *int64, *int, error) {
 	if eventID == "" {
 		return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent
 	}
@@ -281,9 +281,12 @@ func deriveBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID 
 	var norm int
 	var admission string
 	var resyncGen int64
+	// (item 2) the boundary source MUST be the typed checkout (GO) event for THIS exact Stay/interface/scope,
+	// APPLIED. A same-Stay GI/GC/room-move/reinstatement or any non-checkout APPLIED event is rejected.
 	err := tx.QueryRow(ctx, `SELECT pms_timestamp_utc, clock_suspect, sequence_version, normalization_version, admission_kind, resync_generation
 		FROM iam_v2.stay_events
-		WHERE id=$1 AND tenant_id=$2 AND site_id=$3 AND pms_interface_id=$4 AND stay_id=$5 AND processing_status='APPLIED'`,
+		WHERE id=$1 AND tenant_id=$2 AND site_id=$3 AND pms_interface_id=$4 AND stay_id=$5
+		  AND processing_status='APPLIED' AND event_type='GO'`,
 		eventID, tenant, site, iface, stayID).Scan(&ts, &clkSuspect, &seq, &norm, &admission, &resyncGen)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -317,7 +320,7 @@ func deriveBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID 
 		return time.Time{}, true, "PMS_TIME_ABSENT", &seq, &norm, nil
 	}
 	var future bool
-	if err := tx.QueryRow(ctx, `SELECT $1::timestamptz > now() + make_interval(secs => $2)`, *ts, skew.Seconds()).Scan(&future); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT $1::timestamptz > now() + make_interval(secs => $2)`, *ts, boundaryFutureSkew.Seconds()).Scan(&future); err != nil {
 		return time.Time{}, false, "", nil, nil, err
 	}
 	if future {
@@ -408,62 +411,45 @@ func validAtBoundary(ctx context.Context, tx pgx.Tx, entID string, boundary time
 }
 
 // terminateNonTerminalPreCheckout terminates every non-terminal pre-checkout (non-grace) Entitlement for the
-// Stay at the boundary and appends a TERMINATED state transition to each, returning the count ended.
+// Stay at the boundary through the CONTROLLED transition operation (status + append-only history atomically),
+// returning the count ended. The eligible original is reason CONVERTED; the rest CHECKOUT.
 func terminateNonTerminalPreCheckout(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, boundary time.Time, eligibleID string) (int, error) {
-	rows, err := tx.Query(ctx, `UPDATE iam_v2.entitlements e
-		SET status='TERMINATED',
-		    terminal_reason=CASE WHEN e.id::text=$6 THEN 'CONVERTED' ELSE 'CHECKOUT' END,
-		    terminated_at=$5
-		WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.pms_interface_id=$3 AND e.stay_id=$4
-		  AND e.end_mode <> 'GRACE_AFTER_CHECKOUT' AND e.status IN ('PENDING','ACTIVE','SUSPENDED')
-		RETURNING e.id::text, COALESCE(e.id::text = $6, false)`, tenant, site, iface, stayID, boundary, nilIfEmpty(eligibleID))
+	rows, err := tx.Query(ctx, `SELECT id::text FROM iam_v2.entitlements
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND stay_id=$4
+		  AND end_mode <> 'GRACE_AFTER_CHECKOUT' AND status IN ('PENDING','ACTIVE','SUSPENDED')
+		FOR UPDATE`, tenant, site, iface, stayID)
 	if err != nil {
 		return 0, err
 	}
-	type ended struct {
-		id       string
-		eligible bool
-	}
-	var list []ended
+	var ids []string
 	for rows.Next() {
-		var x ended
-		if err := rows.Scan(&x.id, &x.eligible); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			rows.Close()
 			return 0, err
 		}
-		list = append(list, x)
+		ids = append(ids, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	for _, x := range list {
+	for _, id := range ids {
 		reason := "CHECKOUT"
-		if x.eligible {
+		if id == eligibleID {
 			reason = "CONVERTED"
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_state_transitions
-			(tenant_id, site_id, entitlement_id, seq, from_state, to_state, effective_at, reason)
-			SELECT e.tenant_id, e.site_id, e.id,
-			       COALESCE((SELECT max(t.seq) FROM iam_v2.entitlement_state_transitions t WHERE t.entitlement_id=e.id),0)+1,
-			       NULL, 'TERMINATED', $2, $3
-			FROM iam_v2.entitlements e WHERE e.id=$1`, x.id, boundary, reason); err != nil {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1, 'TERMINATED', $2, $3)`, id, boundary, reason); err != nil {
 			return 0, err
 		}
 	}
-	return len(list), nil
+	return len(ids), nil
 }
 
 // grandfatherBoundaryDevices copies onto the grace Entitlement only devices whose authorization interval
 // contains the boundary, and rebinds only their boundary-valid live sessions. It also seeds the grace
 // Entitlement's own authorization intervals + an ACTIVE state transition.
 func grandfatherBoundaryDevices(ctx context.Context, tx pgx.Tx, tenant, site, oldEnt, newEnt string, boundary time.Time) (int, int, error) {
-	// grace entitlement starts ACTIVE at the boundary (state history).
-	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_state_transitions
-		(tenant_id, site_id, entitlement_id, seq, from_state, to_state, effective_at, reason)
-		VALUES ($1,$2,$3,1,NULL,'ACTIVE',$4,'GRACE_CONVERSION')`, tenant, site, newEnt, boundary); err != nil {
-		return 0, 0, err
-	}
 	ct, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_devices
 		(tenant_id, site_id, entitlement_id, device_id, status, grandfathered, first_authorized, last_authorized)
 		SELECT ed.tenant_id, ed.site_id, $2, ed.device_id, 'AUTHORIZED', true, ed.first_authorized, ed.last_authorized
@@ -533,6 +519,11 @@ func (c *Converter) createGrace(ctx context.Context, tx pgx.Tx, a createGraceArg
 		RETURNING id`,
 		a.tenant, a.site, a.stayID, a.iface, purchaseID, string(polJSON), a.svcRev, a.pkgRev, a.tam,
 		a.boundary, a.policy.DurationSeconds, a.isEmergency, a.oldEnt).Scan(&newEnt); err != nil {
+		return "", err
+	}
+	// record the grace Entitlement's initial (seq=1) ACTIVE transition through the controlled operation so its
+	// history exists from creation (item 5/6). The row is already ACTIVE, so this only appends the history.
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1, 'ACTIVE', $2, 'GRACE_CONVERSION')`, newEnt, a.boundary); err != nil {
 		return "", err
 	}
 	return newEnt, nil

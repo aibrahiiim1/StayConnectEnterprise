@@ -240,7 +240,11 @@ func finishEvent(ctx context.Context, tx pgx.Tx, eventID, terminal, stayID, revi
 		return errors.New("stayengine: event no longer PENDING (raced)")
 	}
 	if terminal == "APPLIED" && stayID != "" {
-		if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays SET last_applied_event_version = last_applied_event_version + 1 WHERE id=$1`, stayID); err != nil {
+		// pin the EXACT durable event whose application last advanced the Stay (item 3 lineage), alongside the
+		// per-application counter, so the Checkout boundary verifier can prove exact event lineage.
+		if _, err := tx.Exec(ctx, `UPDATE iam_v2.stays
+			SET last_applied_event_version = last_applied_event_version + 1, last_applied_event_id = $2::uuid
+			WHERE id=$1`, stayID, eventID); err != nil {
 			return err
 		}
 	}
