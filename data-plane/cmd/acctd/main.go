@@ -83,6 +83,10 @@ type acctd struct {
 	applID       string
 	legacyBridge string
 	prev         snapshot
+	// p3 is the Phase-3 arm (nil while dark). seq carries the per-session sample sequence that makes a
+	// delivered delta idempotent across retries and restarts.
+	p3  *phase3
+	seq map[string]int64
 }
 
 func main() {
@@ -141,6 +145,7 @@ func main() {
 		applID:       c.ApplianceID,
 		legacyBridge: c.LegacyBridge,
 		prev:         snapshot{},
+		seq:          map[string]int64{},
 	}
 
 	// Phase 3 (DARK): the enforcement arm is constructed only when the master + checkout-grace flags are on.
@@ -150,8 +155,10 @@ func main() {
 		slog.Error("acctd: phase3 config fail-closed", "err", err)
 		os.Exit(1)
 	}
-	p3 := newPhase3(pmsCfg, a, c.TenantID, assignedSite)
-	slog.Info("acctd phase3 arm", "flags", pmsCfg.SafeFlagSummary(), "active", p3 != nil)
+	a.p3 = newPhase3(pmsCfg, a, c.TenantID, assignedSite)
+	p3 := a.p3
+	slog.Info("acctd phase3 arm", "flags", pmsCfg.SafeFlagSummary(), "active", p3 != nil,
+		"accounting_owner", map[bool]string{true: "phase3", false: "legacy"}[p3.ownsAccounting()])
 
 	tick := time.NewTicker(time.Duration(c.TickSeconds) * time.Second)
 	defer tick.Stop()
@@ -268,17 +275,36 @@ func (a *acctd) loop(ctx context.Context) error {
 		}
 
 		if dUp != 0 || dDown != 0 {
-			_, _ = a.db.Exec(ctx, `
-				INSERT INTO accounting_records (ts, session_id, tenant_id, appliance_id, bytes_up, bytes_down)
-				VALUES ($1, $2, $3, $4, $5, $6)
-			`, now, s.id, s.tid, a.applID, dUp, dDown)
+			// EXACTLY ONE accounting path owns this delta. While Phase-3 accounting is live the sample goes
+			// through the controlled ingestion operation (which attributes it by binding at SAMPLE time,
+			// classifies a late pre-boundary sample as delayed and advances the session counters in the same
+			// transaction); otherwise the legacy path runs exactly as it always has. Writing both would double
+			// every total derived from them, with no way afterwards to tell which row was the duplicate.
+			if a.p3.ownsAccounting() {
+				a.seq[s.id]++
+				class, err := a.p3.ingestSample(ctx, sampleIdentity{SessionID: s.id, Seq: a.seq[s.id]}, dUp, dDown, now)
+				if err != nil {
+					// A refused sample is NOT progress: keep the previous baseline so the same delta is
+					// re-measured and re-offered on the next tick instead of being lost.
+					slog.Warn("phase3: accounting sample refused", "session", s.id, "err", err)
+					next[s.id] = prev
+				} else if class == "DELAYED" {
+					slog.Info("phase3: sample belongs to a frozen period; recorded as delayed",
+						"session", s.id, "sampled_at", now)
+				}
+			} else {
+				_, _ = a.db.Exec(ctx, `
+					INSERT INTO accounting_records (ts, session_id, tenant_id, appliance_id, bytes_up, bytes_down)
+					VALUES ($1, $2, $3, $4, $5, $6)
+				`, now, s.id, s.tid, a.applID, dUp, dDown)
 
-			s.totalUp += dUp
-			s.totalDown += dDown
-			_, _ = a.db.Exec(ctx, `
-				UPDATE sessions SET bytes_up = $2, bytes_down = $3, last_activity_at = $4
-				 WHERE id = $1
-			`, s.id, s.totalUp, s.totalDown, now)
+				s.totalUp += dUp
+				s.totalDown += dDown
+				_, _ = a.db.Exec(ctx, `
+					UPDATE sessions SET bytes_up = $2, bytes_down = $3, last_activity_at = $4
+					 WHERE id = $1
+				`, s.id, s.totalUp, s.totalDown, now)
+			}
 		}
 
 		// Quota enforcement (bytes + time). Data is enforced on the voucher's

@@ -18,6 +18,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -141,3 +142,39 @@ func (p *phase3) applyPlan(ctx context.Context, shp shapeApplier, plan enforce.P
 func (p *phase3) applyPlanForTest(ctx context.Context, shp shapeApplier, plan enforce.Plan, fallbackBridge string) {
 	p.applyPlan(ctx, shp, plan, fallbackBridge)
 }
+
+// ---------------------------------------------------------------- Phase-3 sample ingestion
+
+// SampleIdentity is what makes a delivered counter delta idempotent. It is derived from facts that are stable
+// across retries and restarts — the session and the tick's sample sequence — so replaying a tick stores the
+// sample once rather than inflating the guest's usage.
+type sampleIdentity struct {
+	SessionID string
+	Seq       int64
+}
+
+// ingestSample persists ONE physical counter delta through the controlled Phase-3 operation and returns its
+// bounded classification (ACCEPTED / DELAYED / DUPLICATE). It is the ONLY Phase-3 accounting writer: the
+// caller must not also write the sample through the legacy path, and enforcePhase3Only below is what makes
+// that a decision rather than a convention.
+//
+// sampledAt is when the counters were READ. It is passed explicitly (never defaulted to now()) because a
+// sample taken before a Checkout boundary can arrive after it, and the difference is what separates real
+// pre-boundary usage from usage that would silently rewrite a frozen decision.
+func (p *phase3) ingestSample(ctx context.Context, id sampleIdentity, up, down int64, sampledAt time.Time) (string, error) {
+	if p == nil {
+		return "", nil // dark: no Phase-3 write at all
+	}
+	var class string
+	err := p.enf.Pool().QueryRow(ctx, `SELECT iam_v2.ingest_accounting_sample($1,$2,$3::uuid,$4,$5,$6,$7)`,
+		p.tenant, p.site, id.SessionID, id.Seq, up, down, sampledAt).Scan(&class)
+	if err != nil {
+		return "", err
+	}
+	return class, nil
+}
+
+// ownsAccounting reports whether Phase-3 owns accounting for this appliance. When it does, the legacy writer
+// must not run for the same sample: two rows for one physical delta would double every total derived from
+// them, and there is no way to tell afterwards which one was the duplicate.
+func (p *phase3) ownsAccounting() bool { return p != nil }

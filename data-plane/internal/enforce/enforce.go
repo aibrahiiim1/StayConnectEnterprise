@@ -50,6 +50,10 @@ type Enforcer struct{ pool *pgxpool.Pool }
 
 func New(pool *pgxpool.Pool) *Enforcer { return &Enforcer{pool: pool} }
 
+// Pool exposes the database handle so a composition root can call the controlled Phase-3 operations directly
+// without opening a second pool. The operations themselves remain the authority on what is allowed.
+func (e *Enforcer) Pool() *pgxpool.Pool { return e.pool }
+
 // PlanForSite derives the complete shaping plan for a site from durable state alone.
 func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, error) {
 	var p Plan

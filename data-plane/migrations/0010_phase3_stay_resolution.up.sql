@@ -914,6 +914,93 @@ CREATE TABLE iam_v2.delayed_accounting_records (
 CREATE TRIGGER p3_dar_appendonly BEFORE UPDATE OR DELETE ON iam_v2.delayed_accounting_records
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_history_appendonly();
 
+-- ============================================================================
+-- (4o) CONTROLLED PHASE-3 ACCOUNTING INGESTION.
+--
+-- A physical counter delta is not, by itself, usable evidence. It has to be tied to WHEN it was measured, to
+-- WHICH Entitlement was in force at that moment, and it must survive being delivered twice. Doing that in the
+-- daemon would put the rules where nothing can enforce them; doing it here means every writer gets the same
+-- answers.
+--
+-- sampled_at is when the counter was READ; ingested_at is when the row arrived. They are separate columns
+-- because a sample taken before a Checkout boundary can legitimately arrive long after it, and collapsing the
+-- two would make late usage look like it happened after the boundary.
+--
+-- Returns a bounded classification: ACCEPTED | DELAYED | DUPLICATE. Failures use bounded prefixes:
+--   ACCT_SESSION_OUT_OF_SCOPE / ACCT_NO_BINDING / ACCT_COUNTER_REGRESSION / ACCT_INVALID
+-- ============================================================================
+ALTER TABLE iam_v2.accounting_records
+  ADD COLUMN ingested_at timestamptz NOT NULL DEFAULT now();
+
+CREATE OR REPLACE FUNCTION iam_v2.ingest_accounting_sample(
+    p_tenant uuid, p_site uuid, p_session uuid, p_sample_seq bigint,
+    p_bytes_up bigint, p_bytes_down bigint, p_sampled_at timestamptz) RETURNS text
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_ent uuid; v_started timestamptz; v_rec uuid; v_delayed boolean;
+BEGIN
+  IF p_sample_seq IS NULL OR p_sample_seq < 1 THEN
+    RAISE EXCEPTION 'ACCT_INVALID: a stable sample sequence (>= 1) is required';
+  END IF;
+  -- A counter delta cannot be negative. If a caller ever computes one, its baseline is wrong (a device
+  -- reconnected, tc was flushed, the process restarted) and silently storing it would corrupt every total
+  -- derived from it afterwards.
+  IF p_bytes_up IS NULL OR p_bytes_down IS NULL OR p_bytes_up < 0 OR p_bytes_down < 0 THEN
+    RAISE EXCEPTION 'ACCT_COUNTER_REGRESSION: a sample cannot carry negative bytes (up=%, down=%)', p_bytes_up, p_bytes_down;
+  END IF;
+  IF p_sampled_at IS NULL THEN
+    RAISE EXCEPTION 'ACCT_INVALID: sampled_at is required and is not the ingest time';
+  END IF;
+
+  -- SCOPE: the session must belong to this tenant AND site. Accounting attributed across a scope boundary is
+  -- worse than missing accounting.
+  SELECT started INTO v_started FROM iam_v2.sessions
+    WHERE id = p_session AND tenant_id = p_tenant AND site_id = p_site;
+  IF v_started IS NULL THEN
+    RAISE EXCEPTION 'ACCT_SESSION_OUT_OF_SCOPE: session % is not in this tenant/site', p_session;
+  END IF;
+  IF p_sampled_at < v_started THEN
+    RAISE EXCEPTION 'ACCT_INVALID: sample time % precedes the session start %', p_sampled_at, v_started;
+  END IF;
+
+  -- ATTRIBUTION: which Entitlement was bound AT SAMPLE TIME. A sample with no binding has no owner, and
+  -- guessing (for instance by using the session's CURRENT entitlement) is exactly how a rebound session's
+  -- pre-boundary usage would be charged to the grace Entitlement.
+  SELECT b.entitlement_id INTO v_ent FROM iam_v2.session_entitlement_bindings b
+    WHERE b.session_id = p_session AND b.bound_from <= p_sampled_at
+      AND (b.bound_until IS NULL OR b.bound_until > p_sampled_at)
+    ORDER BY b.seq DESC LIMIT 1;
+  IF v_ent IS NULL THEN
+    RAISE EXCEPTION 'ACCT_NO_BINDING: no entitlement was bound to session % at %', p_session, p_sampled_at;
+  END IF;
+
+  -- IDEMPOTENT: the same (session, sample identity) delivered twice is stored once. The unique index is the
+  -- authority; this simply reports what happened so a caller does not double-count in its own state.
+  INSERT INTO iam_v2.accounting_records
+    (tenant_id, site_id, session_id, sample_seq, bytes_up, bytes_down, sampled_at, ingested_at)
+    VALUES (p_tenant, p_site, p_session, p_sample_seq, p_bytes_up, p_bytes_down, p_sampled_at, now())
+    ON CONFLICT (session_id, sample_seq) DO NOTHING
+    RETURNING id INTO v_rec;
+  IF v_rec IS NULL THEN
+    RETURN 'DUPLICATE';
+  END IF;
+
+  -- Session counters advance MONOTONICALLY by the accepted delta, in the same transaction as the sample, so a
+  -- reader can never see a total that no set of samples supports.
+  UPDATE iam_v2.sessions
+     SET bytes_up = bytes_up + p_bytes_up, bytes_down = bytes_down + p_bytes_down
+   WHERE id = p_session;
+
+  -- DELAYED classification is done by the ingest trigger against the frozen watermarks; report it so the
+  -- caller can surface it without re-deriving the rule.
+  SELECT EXISTS (SELECT 1 FROM iam_v2.delayed_accounting_records WHERE accounting_record_id = v_rec)
+    INTO v_delayed;
+  IF v_delayed THEN
+    RETURN 'DELAYED';
+  END IF;
+  RETURN 'ACCEPTED';
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.ingest_accounting_sample(uuid,uuid,uuid,bigint,bigint,bigint,timestamptz) FROM PUBLIC;
+
 -- Detection happens at INGEST: acctd does not need to know a boundary exists. A sample whose sampled_at is at
 -- or before a frozen boundary of the Entitlement it was bound to is recorded as delayed. The sample itself is
 -- still stored (it is real usage), and the watermark is left exactly as it was.
