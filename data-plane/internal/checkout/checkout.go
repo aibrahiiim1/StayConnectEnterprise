@@ -83,6 +83,15 @@ type Result struct {
 	EntitlementsEnded    int
 }
 
+// ConvertTx performs the Checkout conversion INSIDE the caller's transaction. This is the entry point the Stay
+// engine uses so a Checkout Event's application and its conversion are ONE physical transaction: the engine
+// claims/locks the PENDING GO event, locks the Stay, marks the event APPLIED and pins the Stay application
+// lineage, then calls this — so a failure anywhere rolls back the Event, Stay, Entitlements, Purchase, Grace,
+// devices, sessions, audit and alerts together. It opens NO nested transaction.
+func (c *Converter) ConvertTx(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, src BoundarySource) (Result, error) {
+	return c.convertTx(ctx, tx, tenant, site, iface, stayID, src)
+}
+
 // ConvertAtCheckout performs the whole atomic Checkout conversion for one Stay, bound to the durable Stay Event.
 func (c *Converter) ConvertAtCheckout(ctx context.Context, tenant, site, iface, stayID string, src BoundarySource) (Result, error) {
 	tx, err := c.pool.Begin(ctx)
@@ -105,10 +114,10 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 	var episode int
 	var status string
 	var effcoSet bool
-	var lastApplied int64
-	err := tx.QueryRow(ctx, `SELECT lifecycle_version, status, effective_checkout_at IS NOT NULL, last_applied_event_version
+	var lastAppliedEvent *string
+	err := tx.QueryRow(ctx, `SELECT lifecycle_version, status, effective_checkout_at IS NOT NULL, last_applied_event_id::text
 		FROM iam_v2.stays WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND id=$4
-		FOR UPDATE`, tenant, site, iface, stayID).Scan(&episode, &status, &effcoSet, &lastApplied)
+		FOR UPDATE`, tenant, site, iface, stayID).Scan(&episode, &status, &effcoSet, &lastAppliedEvent)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Result{}, ErrStayNotFound
@@ -123,7 +132,7 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 	switch status {
 	case "IN_HOUSE":
 		// (item 5) derive + verify the boundary from the durable Stay Event before committing the checkout.
-		b, suspect, reason, seq, norm, evErr := deriveBoundary(ctx, tx, tenant, site, iface, stayID, lastApplied, src.StayEventID)
+		b, suspect, reason, seq, norm, evErr := deriveBoundary(ctx, tx, tenant, site, iface, stayID, lastAppliedEvent, src.StayEventID)
 		if evErr != nil {
 			return Result{}, evErr
 		}
@@ -279,7 +288,7 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 // deriveBoundary reads + verifies the durable Stay Event and returns (boundary, clockSuspect, reasonCode).
 // Structural failures (wrong scope, unprocessed, unpublished RESYNC, stale version) are ErrInvalidBoundaryEvent.
 // Timestamp problems (clock-suspect, absent, implausibly future) fall back to the server clock, recorded suspect.
-func deriveBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, lastApplied int64, eventID string) (time.Time, bool, string, *int64, *int, error) {
+func deriveBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, lastAppliedEvent *string, eventID string) (time.Time, bool, string, *int64, *int, error) {
 	if eventID == "" {
 		return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent
 	}
@@ -316,8 +325,12 @@ func deriveBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID 
 			return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent // unpublished resync
 		}
 	}
-	// event older than the already-applied Stay version → stale/superseded boundary source.
-	if seq < lastApplied {
+	// (exact lineage) stays.sequence_version is the PMS protocol version while last_applied_event_version is a
+	// per-application counter — they are DIFFERENT domains and must never be compared. The authoritative check is
+	// event IDENTITY: when the Stay engine has pinned the event whose application advanced this Stay, the
+	// boundary source MUST be exactly that event. (When no application lineage is recorded the structural checks
+	// above — scope, typed GO, APPLIED, published admission — stand alone.)
+	if lastAppliedEvent != nil && *lastAppliedEvent != eventID {
 		return time.Time{}, false, "", nil, nil, ErrInvalidBoundaryEvent
 	}
 	// timestamp trust: clock-suspect / absent / implausibly future → conservative server-clock fallback.

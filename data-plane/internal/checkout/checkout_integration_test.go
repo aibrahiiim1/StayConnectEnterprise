@@ -466,13 +466,24 @@ func TestIntegration_BoundaryEventVerification(t *testing.T) {
 		t.Fatalf("unprocessed event = %v, want ErrInvalidBoundaryEvent", err)
 	}
 
-	// stale version (< last_applied 5) -> reject
+	// EXACT LINEAGE: when the Stay engine has pinned the event whose application advanced the Stay, a DIFFERENT
+	// applied GO event is not a valid boundary source. (stay_events.sequence_version is the PMS protocol version
+	// and last_applied_event_version is a per-application counter — different domains, never compared.)
 	f = seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
 	activeEnt(t, p, f)
-	stale := seedEvent(t, p, f, &f.boundary, false, 3, "LIVE", 0, "")
-	applyEvent(t, p, stale, f.stay)
-	if _, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, BoundarySource{StayEventID: stale}); err != ErrInvalidBoundaryEvent {
-		t.Fatalf("stale-version event = %v, want ErrInvalidBoundaryEvent", err)
+	pinned := seedEvent(t, p, f, &f.boundary, false, 5, "LIVE", 0, "")
+	applyEvent(t, p, pinned, f.stay)
+	other := seedEvent(t, p, f, &f.boundary, false, 6, "LIVE", 0, "")
+	applyEvent(t, p, other, f.stay)
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.stays SET last_applied_event_id=$2::uuid WHERE id=$1`, f.stay, pinned); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, BoundarySource{StayEventID: other}); err != ErrInvalidBoundaryEvent {
+		t.Fatalf("event that is NOT the pinned last_applied_event_id = %v, want ErrInvalidBoundaryEvent", err)
+	}
+	// the pinned event IS accepted
+	if r, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, BoundarySource{StayEventID: pinned}); err != nil || !r.GraceCreated {
+		t.Fatalf("pinned lineage event must be accepted: %+v err=%v", r, err)
 	}
 
 	// unpublished RESYNC (gen 5 > published 0) -> reject

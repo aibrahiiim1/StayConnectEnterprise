@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
 )
 
 // parseYYMMDD parses a Protel GA/GD date (YYMMDD) into a date, or nil when absent/malformed (dates are
@@ -27,9 +29,27 @@ func parseYYMMDD(s string) *time.Time {
 // that are consumable — LIVE, or RESYNC whose generation is published — and applies each in ONE PostgreSQL
 // transaction, moving the event PENDING→terminal exactly once. It issues NO financial command and writes NO
 // Posting; Folios are identity records only.
-type Processor struct{ pool *pgxpool.Pool }
+type Processor struct {
+	pool *pgxpool.Pool
+	// conv, when set, makes Checkout ONE PHYSICAL TRANSACTION with the Event application: the engine skips its
+	// own Stay flip and delegates the whole boundary/eligibility/Grace/device/session/audit conversion to the
+	// Checkout Converter inside this same tx. Nil keeps the legacy Stay-domain-only flip.
+	conv CheckoutConverter
+}
+
+// CheckoutConverter is the transaction-bound Checkout conversion the engine delegates to (implemented by
+// checkout.Converter). It must NOT open its own transaction.
+type CheckoutConverter interface {
+	ConvertTx(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, src checkout.BoundarySource) (checkout.Result, error)
+}
 
 func NewProcessor(pool *pgxpool.Pool) *Processor { return &Processor{pool: pool} }
+
+// NewProcessorWithCheckout wires the Checkout Converter so a GO event's application and its conversion commit
+// (or roll back) as ONE physical transaction.
+func NewProcessorWithCheckout(pool *pgxpool.Pool, conv CheckoutConverter) *Processor {
+	return &Processor{pool: pool, conv: conv}
+}
 
 // payload mirrors the connector's eventPayloadJSON (bounded typed fields only; never the raw frame).
 type payload struct {
@@ -100,12 +120,20 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 	}
 
 	d := Resolve(ev, cur)
-	stayID, terminal, reviewCode, aerr := applyDecision(ctx, tx, tenant, site, iface, ev, cur, d)
+	stayID, terminal, reviewCode, aerr := applyDecision(ctx, tx, tenant, site, iface, ev, cur, d, p.conv != nil)
 	if aerr != nil {
 		return false, aerr
 	}
 	if err := finishEvent(ctx, tx, eventID, terminal, stayID, reviewCode); err != nil {
 		return false, err
+	}
+	// ONE PHYSICAL TRANSACTION: the event is now APPLIED with the Stay application lineage pinned, so the
+	// Converter's audit can cite it as the verified boundary event. Any failure here rolls the Event, Stay,
+	// Entitlements, Purchase, Grace, devices, sessions and audit back together (no nested transaction).
+	if d.Op == OpCheckout && p.conv != nil && stayID != "" && terminal == "APPLIED" {
+		if _, cerr := p.conv.ConvertTx(ctx, tx, tenant, site, iface, stayID, checkout.BoundarySource{StayEventID: eventID}); cerr != nil {
+			return false, cerr
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
@@ -115,7 +143,7 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 
 // applyDecision performs the authoritative Stay mutation for the decision and returns the resolved stay id (or
 // ""), the terminal processing_status and the review code. All within the caller's transaction.
-func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev InboxEvent, cur *StayView, d Decision) (stayID, terminal, reviewCode string, err error) {
+func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev InboxEvent, cur *StayView, d Decision, delegateCheckout bool) (stayID, terminal, reviewCode string, err error) {
 	switch d.Op {
 	case OpCreateStay:
 		if stayID, err = createStay(ctx, tx, tenant, site, iface, ev); err != nil {
@@ -142,9 +170,13 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		return cur.ID, "APPLIED", "", nil
 
 	case OpCheckout:
-		// establish the episode's immutable effective-checkout boundary (structural stays_checkedout_needs_boundary
-		// + posting_only_in_house). The commerce-aware checkout.Converter derives the exact boundary from the
-		// durable event; this Stay-domain flip uses the server clock and never overwrites an existing boundary.
+		// When the Checkout Converter is wired, it OWNS the boundary: it derives the trusted/conservative
+		// effective_checkout_at from this durable event inside the SAME transaction, so the engine must NOT do a
+		// separate server-clock flip first. Without a converter, keep the Stay-domain-only flip (which still
+		// satisfies stays_checkedout_needs_boundary + posting_only_in_house).
+		if delegateCheckout {
+			return cur.ID, "APPLIED", "", nil
+		}
 		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false,
 			effective_checkout_at=COALESCE(effective_checkout_at, now()) WHERE id=$1`, cur.ID); err != nil {
 			return "", "", "", err
