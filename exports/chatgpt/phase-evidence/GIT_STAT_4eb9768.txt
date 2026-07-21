@@ -1,4 +1,0 @@
-commit 4eb976833b96cb9b283ed4f11acc98ee8e4bb9ef
-Date:   Tue Jul 21 22:25:01 2026 +0300
-
-    Phase 3 correction item 4 (inventory_head): enforce composed into acctd (true-time expiry + derived shaping reconciliation) with composition-root tests
