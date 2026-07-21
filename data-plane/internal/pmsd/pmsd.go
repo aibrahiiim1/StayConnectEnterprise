@@ -16,6 +16,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -347,6 +348,11 @@ type Deps struct {
 	// Dial opens the owned read-only PMS connection AFTER lock + re-read + allocate + decrypt. Not while dark.
 	Dial func(ctx context.Context, p DialParams) (Conn, error)
 
+	// NewStayApplier builds the Stay-Event application owner (the Stay Engine with its Checkout Converter).
+	// Called ONLY when the ingest flag is on; nil while dark. Returning an error, or a nil applier, is a
+	// startup failure: applying PMS events without the engine is the unverified path Phase 3 removed.
+	NewStayApplier func(ctx context.Context, a Assignment) (StayApplier, error)
+
 	Now func() time.Time
 	Log *slog.Logger
 
@@ -404,6 +410,45 @@ func (d *Deps) withDefaults() {
 	}
 }
 
+// startStayApplier launches one application loop per assigned PMS Interface and returns a channel closed
+// when they have all drained. With the ingest flag OFF it starts nothing and closes immediately, so a
+// connector-only deployment pays nothing for a surface it does not run.
+func startStayApplier(ctx context.Context, cfg iamv2.PMSConfig, a Assignment, repo Repo, deps *Deps) <-chan struct{} {
+	done := make(chan struct{})
+	if !cfg.IngestOn() {
+		close(done)
+		return done
+	}
+	go func() {
+		defer close(done)
+		ap, err := deps.NewStayApplier(ctx, a)
+		if err != nil || ap == nil {
+			// A missing applier at this point is a real fault, not a reason to apply events unsafely.
+			logEvent(deps.log(), EventSupervisorNoAssignment, CodeConfigInvalid, SafeFields{Stage: StageDiscover})
+			return
+		}
+		// Interfaces come from the same authoritative discovery the connector uses, so the applier covers
+		// exactly the ACTIVE interfaces of the assigned scope and nothing else.
+		ifaces, err := repo.ListActiveInterfaces(ctx, a.TenantID, a.SiteID)
+		if err != nil {
+			logEvent(deps.log(), EventSupervisorNoAssignment, Classify(err), SafeFields{Stage: StageDiscover})
+			return
+		}
+		var wg sync.WaitGroup
+		for _, iface := range ifaces {
+			wg.Add(1)
+			go func(id string) {
+				defer wg.Done()
+				// one loop per Interface: an outage or backlog on one cannot stall another
+				runApplierScope(ctx, ap, applierScope{Tenant: a.TenantID, Site: a.SiteID, Interface: id},
+					applierConfig{}, deps.log())
+			}(iface.ID)
+		}
+		wg.Wait()
+	}()
+	return done
+}
+
 // Run is the daemon entry point. Fail-closed and DARK-gated: with the connector flag OFF it loads NO
 // assignment, constructs NO repository/lock/worker/socket and reads NO secret, returning nil. With the flag
 // ON it verifies the signed assignment (fail-closed if unassigned), opens the scoped repository, and serves
@@ -412,10 +457,19 @@ func Run(ctx context.Context, cfg iamv2.PMSConfig, deps Deps) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if !cfg.ConnectorOn() {
-		deps.log().Info("pmsd: connector flag OFF; no assignment, DB, secret, worker or PMS socket",
+	// Nothing is constructed unless at least one Phase-3 surface this daemon owns is live. With both the
+	// connector and the ingest flags OFF there is no assignment load, no database handle, no worker and no
+	// socket — the process starts and immediately reports that it has nothing to do.
+	if !cfg.ConnectorOn() && !cfg.IngestOn() {
+		deps.log().Info("pmsd: connector and ingest flags OFF; no assignment, DB, secret, worker or PMS socket",
 			"flags", cfg.SafeFlagSummary())
 		return nil
+	}
+	// The ingest surface REQUIRES an applier. Failing closed here means a misconfigured deployment cannot end
+	// up admitting events that nothing applies (a silently growing inbox), nor applying checkouts without the
+	// Converter that derives their boundary.
+	if cfg.IngestOn() && deps.NewStayApplier == nil {
+		return ErrApplierRequired
 	}
 	deps.withDefaults()
 	// Loop so an assignment rotation drains the old scope and re-scopes to the new one. ctx cancellation
@@ -436,9 +490,17 @@ func Run(ctx context.Context, cfg iamv2.PMSConfig, deps Deps) error {
 		if err != nil {
 			return err
 		}
+		// The Stay-Event applier is supervised ALONGSIDE the connector workers, not inside one: it owns a
+		// different job (applying the durable inbox) and must keep running while a PMS socket is down.
+		appCtx, stopApplier := context.WithCancel(ctx)
+		applierDone := startStayApplier(appCtx, cfg, assignment, repo, &deps)
+
 		sup := newSupervisor(cfg, assignment, repo, &deps)
 		serr := sup.run(ctx) // drains all workers before returning
-		_ = repo.Close()     // §9 explicit repository ownership + close (per scope)
+
+		stopApplier()
+		<-applierDone    // drain: no application is left half-running when the scope ends
+		_ = repo.Close() // §9 explicit repository ownership + close (per scope)
 		if errors.Is(serr, errAssignmentChanged) {
 			logEvent(deps.log(), EventSupervisorAssignChange, CodeAssignmentChanged, SafeFields{Stage: StageShutdown})
 			continue // re-scope to the new assignment

@@ -26,8 +26,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsd"
+	"github.com/stayconnect/enterprise/data-plane/internal/stayengine"
 )
 
 func main() {
@@ -98,6 +100,16 @@ func main() {
 				return pmsd.SecretMaterial{}, err
 			}
 			return pmsd.NewPgSecretDecryptor(p, keyring)(ctx, iface, rev, sg)
+		},
+		// The Stay-Event application owner: the real Stay Engine with the real Checkout Converter wired in, so
+		// a typed GO event's application and its whole conversion are ONE transaction. Constructed only when
+		// the ingest flag is on (Run gates the call), and never while dark.
+		NewStayApplier: func(ctx context.Context, _ pmsd.Assignment) (pmsd.StayApplier, error) {
+			p, err := getPool(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return stayengine.NewProcessorWithCheckout(p, checkout.NewConverter(p)), nil
 		},
 		Dial: pmsd.NewFIASDial(netDialer, pmsd.AdapterKeys{
 			IdentityKey: identKey, IdentityKeyVersion: identKeyVer,
