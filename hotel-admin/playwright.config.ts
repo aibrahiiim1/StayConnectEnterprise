@@ -25,7 +25,7 @@ export default defineConfig({
   // spike. NEXT_PUBLIC_PHASE2_ADMIN=1 makes this the flag-ON profile — a TEST-only server, never deployed.
   webServer: {
     command: `npx next dev -p ${PORT} -H 127.0.0.1`,
-    env: { NEXT_PUBLIC_PHASE2_ADMIN: "1", NEXT_TELEMETRY_DISABLED: "1" },
+    env: { NEXT_PUBLIC_PHASE2_ADMIN: "1", NEXT_PUBLIC_PHASE3_ADMIN: "1", NEXT_TELEMETRY_DISABLED: "1" },
     url: `http://127.0.0.1:${PORT}/login`,
     reuseExistingServer: true,
     timeout: 180_000,
