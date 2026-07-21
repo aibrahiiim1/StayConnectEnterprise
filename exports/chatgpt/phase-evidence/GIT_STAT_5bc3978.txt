@@ -1,0 +1,4 @@
+commit 5bc3978b522b0d3c7be3cf49d50d2aef5e167f5b
+Date:   Tue Jul 21 12:45:35 2026 +0300
+
+    Phase 3 Increment-7 controlled-writer first-insert + full-policy gaps (inventory_head): PG16-green + gate 196/196

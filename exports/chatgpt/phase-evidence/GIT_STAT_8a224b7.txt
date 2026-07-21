@@ -1,4 +1,0 @@
-commit 8a224b7631bb64b5b1f345733c102b8a1640fc28
-Date:   Tue Jul 21 11:53:17 2026 +0300
-
-    Phase 3 Increment-7 TRUE controlled-writer authorization boundary (inventory_head): PG16-green + gate 188/188
