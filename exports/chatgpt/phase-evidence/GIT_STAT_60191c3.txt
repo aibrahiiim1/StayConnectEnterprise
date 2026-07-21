@@ -1,0 +1,4 @@
+commit 60191c38eb11ca773c70413cf04a015e3d1a3dc9
+Date:   Tue Jul 21 16:16:41 2026 +0300
+
+    Phase 3 vertical slice: ONE physical Stay-Event->Checkout transaction + exact event lineage (inventory_head): PG16-green + gate 225/225
