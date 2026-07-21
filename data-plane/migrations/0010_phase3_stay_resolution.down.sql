@@ -44,6 +44,22 @@ DROP FUNCTION IF EXISTS iam_v2.supersede_entitlement_transition(uuid,text,timest
 DROP FUNCTION IF EXISTS iam_v2.terminate_entitlement_at_boundary(uuid,timestamptz,text);
 DROP FUNCTION IF EXISTS iam_v2.authorize_entitlement_device(uuid,uuid,timestamptz);
 DROP FUNCTION IF EXISTS iam_v2.deauthorize_entitlement_device(uuid,uuid,timestamptz,text);
+-- (4m) accounting attribution: delayed-record detection, watermarks, session binding intervals
+DROP TRIGGER IF EXISTS p3_detect_delayed_accounting ON iam_v2.accounting_records;
+DROP FUNCTION IF EXISTS iam_v2.p3_detect_delayed_accounting();
+DROP TABLE IF EXISTS iam_v2.delayed_accounting_records;
+DROP TABLE IF EXISTS iam_v2.entitlement_boundary_watermarks;
+DROP FUNCTION IF EXISTS iam_v2.entitlement_usage_bytes(uuid,timestamptz);
+DROP FUNCTION IF EXISTS iam_v2.rebind_session_entitlement(uuid,uuid,timestamptz);
+DROP TRIGGER IF EXISTS p3_session_open_binding ON iam_v2.sessions;
+DROP FUNCTION IF EXISTS iam_v2.p3_session_open_binding();
+DROP TRIGGER IF EXISTS p3_session_close_binding ON iam_v2.sessions;
+DROP FUNCTION IF EXISTS iam_v2.p3_session_close_binding();
+DROP TRIGGER IF EXISTS p3_seb_insert ON iam_v2.session_entitlement_bindings;
+DROP FUNCTION IF EXISTS iam_v2.p3_seb_insert_guard();
+DROP TRIGGER IF EXISTS p3_seb_appendonly ON iam_v2.session_entitlement_bindings;
+DROP FUNCTION IF EXISTS iam_v2.p3_seb_appendonly();
+DROP TABLE IF EXISTS iam_v2.session_entitlement_bindings;
 DROP FUNCTION IF EXISTS iam_v2.p3_rederive_entitlement_times(uuid);
 DROP TRIGGER IF EXISTS p3_est_appendonly ON iam_v2.entitlement_state_transitions;
 DROP TRIGGER IF EXISTS p3_est_insert ON iam_v2.entitlement_state_transitions;

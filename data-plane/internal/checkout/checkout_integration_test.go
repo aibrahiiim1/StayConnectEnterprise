@@ -266,6 +266,16 @@ func liveOriginals(t *testing.T, p *pgxpool.Pool, stay string) int {
 
 func ptr(tm time.Time) *time.Time { return &tm }
 
+// sample inserts one accounting record for a session at an explicit sample time.
+func sample(t *testing.T, p *pgxpool.Pool, f fixture, sess string, seq int, up, down int64, at time.Time) {
+	t.Helper()
+	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.accounting_records
+		(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+		f.tenant, f.site, sess, seq, up, down, at); err != nil {
+		t.Fatalf("sample: %v", err)
+	}
+}
+
 // activeEnt is a helper for an entitlement ACTIVE at the boundary (single transition to ACTIVE before it).
 func activeEnt(t *testing.T, p *pgxpool.Pool, f fixture) string {
 	act := f.boundary.Add(-30 * time.Minute)
@@ -767,5 +777,178 @@ func TestIntegration_BoundaryTerminationIsNotClamped(t *testing.T) {
 	}
 	if !terminated.Equal(f.boundary) {
 		t.Fatalf("terminated_at %v != boundary %v", terminated, f.boundary)
+	}
+}
+
+// TestIntegration_PostBoundaryRevocation proves that no access survives the boundary outside the grace cohort:
+// a device whose authorization interval contains the boundary is grandfathered and its live session is rebound
+// WITHOUT a logout, while a device authorized only AFTER the boundary loses access — its interval is closed at
+// the boundary and its session ends there. The original Entitlement is left with no open interval and no live
+// session at all.
+func TestIntegration_PostBoundaryRevocation(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	c := NewConverter(p)
+	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
+	b := f.boundary
+	ent := activeEnt(t, p, f)
+	// cohort device: authorized before the boundary, still open, with a live session started before it
+	inDev, inSess := seedDeviceAuth(t, p, f, ent, 1, b.Add(-time.Hour), nil, b.Add(-time.Hour), nil)
+	// outsider: authorized only AFTER the boundary, with a session that also started after it
+	outDev, outSess := seedDeviceAuth(t, p, f, ent, 2, b.Add(time.Hour), nil, b.Add(time.Hour), nil)
+
+	r, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.GraceCreated || r.DevicesGrandfathered != 1 || r.SessionsRebound != 1 {
+		t.Fatalf("grace=%v grandfathered=%d rebound=%d, want true/1/1", r.GraceCreated, r.DevicesGrandfathered, r.SessionsRebound)
+	}
+	// the cohort device keeps access on the GRACE entitlement, its session never ended
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.sessions WHERE id=$1 AND entitlement_id=$2 AND state='active' AND ended IS NULL`,
+		inSess, r.NewEntitlementID); n != 1 {
+		t.Fatal("the grandfathered device's session was not rebound without a logout")
+	}
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlement_device_authorizations
+		WHERE entitlement_id=$1 AND device_id=$2 AND deauthorized_at IS NULL`, r.NewEntitlementID, inDev); n != 1 {
+		t.Fatal("the grandfathered device has no open grace authorization interval")
+	}
+	// the outsider is revoked AT the boundary — no open interval, session ended with a bounded reason
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlement_device_authorizations
+		WHERE entitlement_id=$1 AND device_id=$2 AND deauthorized_at IS NOT NULL`, ent, outDev); n != 1 {
+		t.Fatal("the post-boundary device's interval was not closed")
+	}
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.sessions WHERE id=$1 AND state='ended' AND end_reason='CHECKOUT_BOUNDARY'`, outSess); n != 1 {
+		t.Fatal("the post-boundary device's session was not revoked")
+	}
+	// the ORIGINAL entitlement keeps nothing live
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlement_device_authorizations
+		WHERE entitlement_id=$1 AND deauthorized_at IS NULL`, ent); n != 0 {
+		t.Fatalf("the terminated entitlement still has %d open authorization intervals", n)
+	}
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.sessions WHERE entitlement_id=$1 AND state='active'`, ent); n != 0 {
+		t.Fatal("the terminated entitlement still has a live session")
+	}
+	if r.DevicesRevoked < 1 || r.SessionsRevoked < 1 {
+		t.Fatalf("revocation counts devices=%d sessions=%d, want >=1 each", r.DevicesRevoked, r.SessionsRevoked)
+	}
+}
+
+// TestIntegration_RevocationWithoutGrace proves the revocation also runs when NO grace is created (the guest
+// was not eligible at the boundary): every device and session on the terminated Entitlement is cut at the
+// boundary, so a non-eligible Stay cannot keep browsing after checkout.
+func TestIntegration_RevocationWithoutGrace(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	c := NewConverter(p)
+	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
+	b := f.boundary
+	win := b.Add(48 * time.Hour)
+	// SUSPENDED at the boundary -> not eligible -> no grace
+	ent := seedEnt(t, p, f, &win, []txn{{"ACTIVE", b.Add(-2 * time.Hour)}, {"SUSPENDED", b.Add(-time.Hour)}})
+	dev, sess := seedDeviceAuth(t, p, f, ent, 1, b.Add(-2*time.Hour), nil, b.Add(-2*time.Hour), nil)
+
+	r, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.GraceCreated {
+		t.Fatal("no grace should have been created for a boundary-ineligible entitlement")
+	}
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlement_device_authorizations
+		WHERE entitlement_id=$1 AND device_id=$2 AND deauthorized_at IS NOT NULL`, ent, dev); n != 1 {
+		t.Fatal("device interval not closed on the no-grace path")
+	}
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.sessions WHERE id=$1 AND state='ended' AND end_reason='CHECKOUT_BOUNDARY'`, sess); n != 1 {
+		t.Fatal("session not revoked on the no-grace path")
+	}
+}
+
+// TestIntegration_BoundaryWatermarkAndDelayedAccounting proves the accounting side of the boundary:
+//   - usage is attributed by BINDING INTERVAL, so a rebound session's pre-boundary samples stay with the
+//     original Entitlement instead of following the session onto the grace Entitlement;
+//   - the boundary decision's usage evidence is FROZEN in a watermark;
+//   - a sample ingested AFTER the decision but belonging to the frozen period is recorded as DELAYED and does
+//     NOT rewrite the watermark.
+func TestIntegration_BoundaryWatermarkAndDelayedAccounting(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	c := NewConverter(p)
+	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
+	b := f.boundary
+	ent := activeEnt(t, p, f)
+	_, sess := seedDeviceAuth(t, p, f, ent, 1, b.Add(-2*time.Hour), nil, b.Add(-2*time.Hour), nil)
+	sample(t, p, f, sess, 1, 1_000, 2_000, b.Add(-time.Hour)) // real pre-boundary usage
+
+	r, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.GraceCreated || r.SessionsRebound != 1 {
+		t.Fatalf("grace=%v rebound=%d, want true/1", r.GraceCreated, r.SessionsRebound)
+	}
+	// the session now points at the grace entitlement, but its PRE-boundary binding is preserved
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.session_entitlement_bindings
+		WHERE session_id=$1 AND entitlement_id=$2 AND bound_until IS NOT NULL`, sess, ent); n != 1 {
+		t.Fatal("the original binding interval was not closed and kept")
+	}
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.session_entitlement_bindings
+		WHERE session_id=$1 AND entitlement_id=$2 AND bound_until IS NULL`, sess, r.NewEntitlementID); n != 1 {
+		t.Fatal("no open binding interval on the grace entitlement")
+	}
+	// attribution: the pre-boundary sample belongs to the ORIGINAL, never to the grace entitlement
+	var up, down int64
+	if err := p.QueryRow(ctx, `SELECT bytes_up, bytes_down FROM iam_v2.entitlement_usage_bytes($1,now())`, ent).Scan(&up, &down); err != nil {
+		t.Fatal(err)
+	}
+	if up != 1_000 || down != 2_000 {
+		t.Fatalf("original usage = %d/%d, want 1000/2000", up, down)
+	}
+	if err := p.QueryRow(ctx, `SELECT bytes_up, bytes_down FROM iam_v2.entitlement_usage_bytes($1,now())`, r.NewEntitlementID).Scan(&up, &down); err != nil {
+		t.Fatal(err)
+	}
+	if up != 0 || down != 0 {
+		t.Fatalf("grace usage = %d/%d, want 0/0 (pre-boundary samples must not follow the session)", up, down)
+	}
+	// the decision's evidence is frozen
+	var wmUp, wmDown, wmRecs int64
+	var wmID string
+	if err := p.QueryRow(ctx, `SELECT id::text, bytes_up, bytes_down, records_counted
+		FROM iam_v2.entitlement_boundary_watermarks WHERE entitlement_id=$1 AND boundary_at=$2`, ent, b).Scan(&wmID, &wmUp, &wmDown, &wmRecs); err != nil {
+		t.Fatalf("no boundary watermark: %v", err)
+	}
+	if wmUp != 1_000 || wmDown != 2_000 || wmRecs != 1 {
+		t.Fatalf("watermark %d/%d over %d records, want 1000/2000 over 1", wmUp, wmDown, wmRecs)
+	}
+	// a LATE sample for the frozen period: recorded as delayed, watermark untouched
+	sample(t, p, f, sess, 2, 500, 700, b.Add(-30*time.Minute))
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.delayed_accounting_records
+		WHERE watermark_id=$1 AND entitlement_id=$2`, wmID, ent); n != 1 {
+		t.Fatal("the late sample was not recorded as delayed")
+	}
+	var stillUp, stillDown int64
+	if err := p.QueryRow(ctx, `SELECT bytes_up, bytes_down FROM iam_v2.entitlement_boundary_watermarks WHERE id=$1`, wmID).Scan(&stillUp, &stillDown); err != nil {
+		t.Fatal(err)
+	}
+	if stillUp != wmUp || stillDown != wmDown {
+		t.Fatal("a late sample rewrote the frozen watermark")
+	}
+	// the watermark itself is immutable
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.entitlement_boundary_watermarks SET bytes_up=999 WHERE id=$1`, wmID); err == nil {
+		t.Fatal("watermark must be append-only")
+	}
+	// a sample taken AFTER the boundary on the grace entitlement is ordinary usage, not delayed
+	sample(t, p, f, sess, 3, 10, 20, b.Add(time.Hour))
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.delayed_accounting_records WHERE session_id=$1`, sess); n != 1 {
+		t.Fatal("a post-boundary sample must not be flagged delayed")
+	}
+	if err := p.QueryRow(ctx, `SELECT bytes_up, bytes_down FROM iam_v2.entitlement_usage_bytes($1,now())`, r.NewEntitlementID).Scan(&up, &down); err != nil {
+		t.Fatal(err)
+	}
+	if up != 10 || down != 20 {
+		t.Fatalf("grace usage after the boundary = %d/%d, want 10/20", up, down)
 	}
 }

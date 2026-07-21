@@ -451,6 +451,56 @@ expect_err "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3700,4
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET grace_duration_seconds=9999 WHERE tenant_id='$T' AND site_id='$S';" && ok "raw policy UPDATE without version bump rejected (§9)" || no "raw policy update accepted"
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET config_version=config_version-1 WHERE tenant_id='$T' AND site_id='$S';" && ok "config_version decrease rejected (§9)" || no "config_version decrease accepted"
 
+echo '== ACCOUNTING ATTRIBUTION: session binding intervals, watermarks, delayed samples (§8) =='
+# A rebound session must not carry its pre-boundary samples to the next Entitlement, a frozen decision must not
+# be rewritten by a late sample, and no session may exist without attribution history.
+ASESS="$(Q "INSERT INTO iam_v2.sessions(tenant_id,site_id,entitlement_id,device_id,state,started) VALUES ('$RT','$RS','$DENT','$DDEV','active',now() - interval '3 hours') RETURNING id;")"
+[ "$(Q "SELECT count(*) FROM iam_v2.session_entitlement_bindings WHERE session_id='$ASESS' AND seq=1 AND bound_until IS NULL;")" = 1 ] \
+  && ok "every session opens its binding history at creation (total attribution) (§8)" || no "session created without a binding"
+Q "INSERT INTO iam_v2.accounting_records(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at) VALUES ('$RT','$RS','$ASESS',1,1000,2000,now() - interval '2 hours');" >/dev/null
+[ "$(Q "SELECT bytes_up||'/'||bytes_down FROM iam_v2.entitlement_usage_bytes('$DENT',now());")" = "1000/2000" ] \
+  && ok "usage attributed to the entitlement the sample was taken under (§8)" || no "usage attribution wrong"
+# a second entitlement for the same stay is impossible while one is live, so rebind onto a fresh stay's ent
+RST="$(Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$RT','$RS','$I','RAC','SAC','IN_HOUSE',1,0) RETURNING id;")"
+RENT="$(Q "SELECT gen_random_uuid();")"; RPUR="$(Q "SELECT gen_random_uuid();")"
+Q "DO \$do\$ BEGIN
+  INSERT INTO iam_v2.purchases(id,tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state) VALUES ('$RPUR','$RT','$RS','$EPKG','$I','$RST','ADMIN_GRANT',0,'GRANTED');
+  INSERT INTO iam_v2.entitlements(id,tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status) VALUES ('$RENT','$RT','$RS','$RST','$I','$RPUR','{}'::jsonb,'$ESPR','$EPKG','VALIDITY_WINDOW','GRACE_AFTER_CHECKOUT','PENDING');
+  PERFORM iam_v2.apply_entitlement_transition('$RENT','PENDING',now() - interval '90 minutes','SEED');
+END \$do\$;" >/dev/null
+REB="$(Q "SELECT iam_v2.rebind_session_entitlement('$ASESS','$RENT',now() - interval '1 hour');")"
+[ -n "$REB" ] && ok "controlled rebinding closed the old interval and opened the new one (§8)" || no "rebinding failed"
+[ "$(Q "SELECT count(*) FROM iam_v2.session_entitlement_bindings WHERE session_id='$ASESS' AND entitlement_id='$DENT' AND bound_until IS NOT NULL;")" = 1 ] \
+  && ok "the pre-rebind interval is CLOSED and kept (§8)" || no "old binding lost"
+[ "$(Q "SELECT bytes_up||'/'||bytes_down FROM iam_v2.entitlement_usage_bytes('$DENT',now());")" = "1000/2000" ] \
+  && ok "pre-rebind samples STAY with the original entitlement (§8)" || no "samples followed the session"
+[ "$(Q "SELECT bytes_up||'/'||bytes_down FROM iam_v2.entitlement_usage_bytes('$RENT',now());")" = "0/0" ] \
+  && ok "the new entitlement does NOT inherit pre-rebind usage (§8)" || no "usage inherited across a rebind"
+Q "INSERT INTO iam_v2.accounting_records(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at) VALUES ('$RT','$RS','$ASESS',2,7,9,now() - interval '30 minutes');" >/dev/null
+[ "$(Q "SELECT bytes_up||'/'||bytes_down FROM iam_v2.entitlement_usage_bytes('$RENT',now());")" = "7/9" ] \
+  && ok "post-rebind samples belong to the new entitlement (§8)" || no "post-rebind attribution wrong"
+# no overlapping/backwards binding intervals
+expect_err "INSERT INTO iam_v2.session_entitlement_bindings(tenant_id,site_id,session_id,entitlement_id,seq,bound_from) VALUES ('$RT','$RS','$ASESS','$DENT',3,now() - interval '5 hours');" \
+  && ok "a binding interval cannot begin before the previous one closed (§8)" || no "overlapping binding accepted"
+expect_err "UPDATE iam_v2.session_entitlement_bindings SET bound_from=now() WHERE session_id='$ASESS' AND seq=1;" \
+  && ok "binding intervals are append-only (§8)" || no "binding mutated"
+# WATERMARK: freeze, then a late sample for the frozen period is recorded as DELAYED and changes nothing
+WM="$(Q "INSERT INTO iam_v2.entitlement_boundary_watermarks(tenant_id,site_id,entitlement_id,boundary_at,bytes_up,bytes_down,records_counted) SELECT '$RT','$RS','$DENT',now() - interval '1 hour',u.bytes_up,u.bytes_down,u.records FROM iam_v2.entitlement_usage_bytes('$DENT',now() - interval '1 hour') u RETURNING id;")"
+[ -n "$WM" ] && ok "boundary watermark froze the decision evidence (§8)" || no "watermark not recorded"
+Q "INSERT INTO iam_v2.accounting_records(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at) VALUES ('$RT','$RS','$ASESS',3,55,66,now() - interval '150 minutes');" >/dev/null
+[ "$(Q "SELECT count(*) FROM iam_v2.delayed_accounting_records WHERE watermark_id='$WM' AND entitlement_id='$DENT';")" = 1 ] \
+  && ok "a sample belonging to a FROZEN period is recorded as DELAYED (§8)" || no "late sample not detected"
+[ "$(Q "SELECT bytes_up||'/'||bytes_down FROM iam_v2.entitlement_boundary_watermarks WHERE id='$WM';")" = "1000/2000" ] \
+  && ok "the frozen watermark is NOT rewritten by a late sample (§8)" || no "watermark rewritten"
+expect_err "UPDATE iam_v2.entitlement_boundary_watermarks SET bytes_up=1 WHERE id='$WM';" \
+  && ok "watermarks are append-only (§8)" || no "watermark mutated"
+expect_err "DELETE FROM iam_v2.delayed_accounting_records WHERE watermark_id='$WM';" \
+  && ok "delayed-sample records are append-only (§8)" || no "delayed record deleted"
+# ending a session closes its attribution interval at the same instant
+Q "UPDATE iam_v2.sessions SET state='ended', ended=now(), end_reason='TEST' WHERE id='$ASESS';" >/dev/null
+[ "$(Q "SELECT count(*) FROM iam_v2.session_entitlement_bindings WHERE session_id='$ASESS' AND bound_until IS NULL;")" = 0 ] \
+  && ok "ending a session closes its open attribution interval (§8)" || no "ended session still accrues attribution"
+
 echo '== CONTROLLED-WRITER authorization boundary, proven as a NON-OWNER role (§4/§7) =='
 # A role that HOLDS table DML privileges but is NOT the owner must still be refused: the boundary is the
 # SECURITY DEFINER controlled writer (inside it current_user IS the owner), not a session flag the caller can set.

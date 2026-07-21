@@ -738,6 +738,210 @@ BEGIN
 END $fn$;
 REVOKE EXECUTE ON FUNCTION iam_v2.deauthorize_entitlement_device(uuid,uuid,timestamptz,text) FROM PUBLIC;
 
+-- ============================================================================
+-- (4m) SESSION -> ENTITLEMENT BINDING INTERVALS + BOUNDARY USAGE WATERMARKS.
+--
+-- A Checkout REBINDS a grandfathered session from the original Entitlement to the grace Entitlement without a
+-- logout. sessions.entitlement_id therefore records only the CURRENT binding, and accounting samples that were
+-- taken BEFORE the boundary would silently follow the session to the grace Entitlement — inflating grace usage
+-- and erasing the usage the boundary decision was actually made against. These append-only intervals keep the
+-- binding history, so any sample is attributed to whichever Entitlement the session was bound to WHEN IT WAS
+-- SAMPLED, not to wherever the session points now.
+--
+-- The WATERMARK freezes the accounting position a boundary decision was made against. Accounting is delayed by
+-- nature (a sample taken before checkout can be ingested long after it), and a late sample must never silently
+-- rewrite a decision that has already been made and audited: it is recorded as DELAYED, visible to operators,
+-- while the frozen watermark keeps the decision reproducible.
+-- ============================================================================
+CREATE TABLE iam_v2.session_entitlement_bindings (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL,
+  session_id uuid NOT NULL, entitlement_id uuid NOT NULL,
+  seq bigint NOT NULL CHECK (seq >= 1),
+  bound_from timestamptz NOT NULL,
+  bound_until timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (session_id, seq),
+  CONSTRAINT seb_interval_ordered CHECK (bound_until IS NULL OR bound_until >= bound_from),
+  FOREIGN KEY (tenant_id, site_id, session_id) REFERENCES iam_v2.sessions (tenant_id, site_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (tenant_id, site_id, entitlement_id) REFERENCES iam_v2.entitlements (tenant_id, site_id, id));
+CREATE UNIQUE INDEX seb_one_open ON iam_v2.session_entitlement_bindings (session_id) WHERE bound_until IS NULL;
+CREATE INDEX seb_attribution ON iam_v2.session_entitlement_bindings (entitlement_id, bound_from);
+
+-- append-only: the ONLY permitted mutation is closing the open interval once (same rule as device intervals).
+CREATE OR REPLACE FUNCTION iam_v2.p3_seb_appendonly() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+BEGIN
+  IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'session_entitlement_bindings: append-only (DELETE rejected)'; END IF;
+  IF OLD.bound_until IS NOT NULL THEN RAISE EXCEPTION 'session binding interval is immutable once closed'; END IF;
+  IF NEW.bound_until IS NULL THEN RAISE EXCEPTION 'session binding UPDATE must close the interval'; END IF;
+  IF NEW.id IS DISTINCT FROM OLD.id OR NEW.session_id IS DISTINCT FROM OLD.session_id
+     OR NEW.entitlement_id IS DISTINCT FROM OLD.entitlement_id OR NEW.seq IS DISTINCT FROM OLD.seq
+     OR NEW.bound_from IS DISTINCT FROM OLD.bound_from THEN
+    RAISE EXCEPTION 'session binding identity/interval-start immutable';
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_seb_appendonly BEFORE UPDATE OR DELETE ON iam_v2.session_entitlement_bindings
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_seb_appendonly();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_seb_appendonly() FROM PUBLIC;
+
+-- contiguous seq per session; a new interval cannot begin before the previous one closed (no overlap, so a
+-- sample can never be attributed to two Entitlements at once).
+CREATE OR REPLACE FUNCTION iam_v2.p3_seb_insert_guard() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE prev_seq bigint; prev_until timestamptz; prev_open boolean;
+BEGIN
+  SELECT seq, bound_until, bound_until IS NULL INTO prev_seq, prev_until, prev_open
+    FROM iam_v2.session_entitlement_bindings WHERE session_id = NEW.session_id ORDER BY seq DESC LIMIT 1;
+  IF prev_seq IS NULL THEN
+    IF NEW.seq <> 1 THEN RAISE EXCEPTION 'first session binding must have seq=1 (got %)', NEW.seq; END IF;
+  ELSE
+    IF NEW.seq <> prev_seq + 1 THEN RAISE EXCEPTION 'session binding seq must be contiguous (% -> %)', prev_seq, NEW.seq; END IF;
+    IF prev_open THEN RAISE EXCEPTION 'session % already has an OPEN binding interval', NEW.session_id; END IF;
+    IF NEW.bound_from < prev_until THEN RAISE EXCEPTION 'session binding % cannot begin before the previous closed at %', NEW.bound_from, prev_until; END IF;
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_seb_insert BEFORE INSERT ON iam_v2.session_entitlement_bindings
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_seb_insert_guard();
+
+-- THE controlled rebinding operation: closes the open interval at p_at and opens the next one, so the history
+-- stays gapless and the CURRENT sessions row keeps agreeing with the head of the interval history.
+CREATE OR REPLACE FUNCTION iam_v2.rebind_session_entitlement(p_session uuid, p_ent uuid, p_at timestamptz) RETURNS uuid
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_t uuid; v_s uuid; v_open uuid; v_from timestamptz; v_cur uuid; v_seq bigint; v_id uuid;
+BEGIN
+  SELECT tenant_id, site_id, entitlement_id INTO v_t, v_s, v_cur FROM iam_v2.sessions WHERE id = p_session FOR UPDATE;
+  IF v_t IS NULL THEN RAISE EXCEPTION 'session % not found', p_session; END IF;
+  PERFORM 1 FROM iam_v2.entitlements WHERE id = p_ent AND tenant_id = v_t AND site_id = v_s;
+  IF NOT FOUND THEN RAISE EXCEPTION 'entitlement % is not in the session scope', p_ent; END IF;
+  SELECT id, bound_from INTO v_open, v_from FROM iam_v2.session_entitlement_bindings
+    WHERE session_id = p_session AND bound_until IS NULL;
+  IF v_open IS NOT NULL THEN
+    IF p_at < v_from THEN RAISE EXCEPTION 'rebinding at % precedes the open interval start %', p_at, v_from; END IF;
+    UPDATE iam_v2.session_entitlement_bindings SET bound_until = p_at WHERE id = v_open;
+  END IF;
+  SELECT COALESCE(max(seq),0)+1 INTO v_seq FROM iam_v2.session_entitlement_bindings WHERE session_id = p_session;
+  INSERT INTO iam_v2.session_entitlement_bindings(tenant_id,site_id,session_id,entitlement_id,seq,bound_from)
+    VALUES (v_t,v_s,p_session,p_ent,v_seq,p_at) RETURNING id INTO v_id;
+  UPDATE iam_v2.sessions SET entitlement_id = p_ent WHERE id = p_session;
+  RETURN v_id;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.rebind_session_entitlement(uuid,uuid,timestamptz) FROM PUBLIC;
+
+-- Every session gets its binding history from CREATION, without every session-creating path having to know:
+-- the initial interval opens at the session's own start against the Entitlement it was created under. This is
+-- what makes attribution total — there is no session whose samples have no owner.
+CREATE OR REPLACE FUNCTION iam_v2.p3_session_open_binding() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+BEGIN
+  INSERT INTO iam_v2.session_entitlement_bindings(tenant_id,site_id,session_id,entitlement_id,seq,bound_from)
+    VALUES (NEW.tenant_id,NEW.site_id,NEW.id,NEW.entitlement_id,1,NEW.started);
+  RETURN NULL;
+END $fn$;
+CREATE TRIGGER p3_session_open_binding AFTER INSERT ON iam_v2.sessions
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_session_open_binding();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_session_open_binding() FROM PUBLIC;
+
+-- When a session ends, its open binding closes at the SAME instant, so a dead session cannot keep accruing
+-- attribution. Never before the interval opened (that would invent negative online time).
+CREATE OR REPLACE FUNCTION iam_v2.p3_session_close_binding() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+BEGIN
+  IF NEW.ended IS NOT NULL AND OLD.ended IS NULL THEN
+    UPDATE iam_v2.session_entitlement_bindings b SET bound_until = GREATEST(NEW.ended, b.bound_from)
+      WHERE b.session_id = NEW.id AND b.bound_until IS NULL;
+  END IF;
+  RETURN NULL;
+END $fn$;
+CREATE TRIGGER p3_session_close_binding AFTER UPDATE ON iam_v2.sessions
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_session_close_binding();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_session_close_binding() FROM PUBLIC;
+
+-- Usage AT a point in time, attributed by BINDING INTERVAL rather than by the session's current pointer.
+-- Sessions with no binding history at all fall back to their current pointer, so pre-existing/simple sessions
+-- are still counted (a missing history must never silently zero real usage).
+CREATE OR REPLACE FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamptz)
+  RETURNS TABLE (bytes_up bigint, bytes_down bigint, records bigint, latest_sampled_at timestamptz)
+  LANGUAGE sql STABLE SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT COALESCE(sum(ar.bytes_up),0)::bigint, COALESCE(sum(ar.bytes_down),0)::bigint,
+         count(*)::bigint, max(ar.sampled_at)
+  FROM iam_v2.accounting_records ar
+  JOIN iam_v2.sessions s ON s.id = ar.session_id
+  WHERE ar.sampled_at <= p_at
+    AND (
+      EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b
+              WHERE b.session_id = ar.session_id AND b.entitlement_id = p_ent
+                AND b.bound_from <= ar.sampled_at AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at))
+      OR (s.entitlement_id = p_ent
+          AND NOT EXISTS (SELECT 1 FROM iam_v2.session_entitlement_bindings b2 WHERE b2.session_id = ar.session_id))
+    );
+$fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.entitlement_usage_bytes(uuid,timestamptz) FROM PUBLIC;
+
+-- The FROZEN evidence a boundary decision was made against. One row per (entitlement, boundary); append-only.
+CREATE TABLE iam_v2.entitlement_boundary_watermarks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL,
+  entitlement_id uuid NOT NULL,
+  boundary_at timestamptz NOT NULL,
+  bytes_up bigint NOT NULL CHECK (bytes_up >= 0),
+  bytes_down bigint NOT NULL CHECK (bytes_down >= 0),
+  records_counted bigint NOT NULL CHECK (records_counted >= 0),
+  latest_sampled_at timestamptz,
+  recorded_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (entitlement_id, boundary_at),
+  FOREIGN KEY (tenant_id, site_id, entitlement_id) REFERENCES iam_v2.entitlements (tenant_id, site_id, id) ON DELETE CASCADE);
+CREATE TRIGGER p3_ebw_appendonly BEFORE UPDATE OR DELETE ON iam_v2.entitlement_boundary_watermarks
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_history_appendonly();
+
+-- DELAYED accounting: a sample that belongs to a period ALREADY frozen by a watermark. It is recorded here for
+-- operators and reconciliation and NEVER folded back into the frozen decision.
+CREATE TABLE iam_v2.delayed_accounting_records (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL,
+  accounting_record_id uuid NOT NULL UNIQUE,
+  session_id uuid NOT NULL,
+  entitlement_id uuid NOT NULL,
+  watermark_id uuid NOT NULL,
+  sampled_at timestamptz NOT NULL,
+  bytes_up bigint NOT NULL, bytes_down bigint NOT NULL,
+  detected_at timestamptz NOT NULL DEFAULT now(),
+  FOREIGN KEY (watermark_id) REFERENCES iam_v2.entitlement_boundary_watermarks (id) ON DELETE CASCADE);
+CREATE TRIGGER p3_dar_appendonly BEFORE UPDATE OR DELETE ON iam_v2.delayed_accounting_records
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_history_appendonly();
+
+-- Detection happens at INGEST: acctd does not need to know a boundary exists. A sample whose sampled_at is at
+-- or before a frozen boundary of the Entitlement it was bound to is recorded as delayed. The sample itself is
+-- still stored (it is real usage), and the watermark is left exactly as it was.
+CREATE OR REPLACE FUNCTION iam_v2.p3_detect_delayed_accounting() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_ent uuid; v_t uuid; v_s uuid; v_wm uuid;
+BEGIN
+  -- the Entitlement this sample belongs to (by binding interval at SAMPLE time, else the current pointer)
+  SELECT b.entitlement_id INTO v_ent FROM iam_v2.session_entitlement_bindings b
+    WHERE b.session_id = NEW.session_id AND b.bound_from <= NEW.sampled_at
+      AND (b.bound_until IS NULL OR b.bound_until > NEW.sampled_at)
+    ORDER BY b.seq DESC LIMIT 1;
+  IF v_ent IS NULL THEN
+    SELECT entitlement_id INTO v_ent FROM iam_v2.sessions WHERE id = NEW.session_id;
+  END IF;
+  IF v_ent IS NULL THEN RETURN NEW; END IF;
+  SELECT id INTO v_wm FROM iam_v2.entitlement_boundary_watermarks
+    WHERE entitlement_id = v_ent AND boundary_at >= NEW.sampled_at ORDER BY boundary_at ASC LIMIT 1;
+  IF v_wm IS NULL THEN RETURN NEW; END IF;   -- nothing frozen for this period
+  SELECT tenant_id, site_id INTO v_t, v_s FROM iam_v2.sessions WHERE id = NEW.session_id;
+  INSERT INTO iam_v2.delayed_accounting_records
+    (tenant_id,site_id,accounting_record_id,session_id,entitlement_id,watermark_id,sampled_at,bytes_up,bytes_down)
+    VALUES (v_t,v_s,NEW.id,NEW.session_id,v_ent,v_wm,NEW.sampled_at,NEW.bytes_up,NEW.bytes_down)
+    ON CONFLICT (accounting_record_id) DO NOTHING;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_detect_delayed_accounting AFTER INSERT ON iam_v2.accounting_records
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_detect_delayed_accounting();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_detect_delayed_accounting() FROM PUBLIC;
+
 -- (item 4/7) CONTROLLED-WRITER AUTHORIZATION BOUNDARY. A caller can set any session GUC, but it cannot become
 -- the schema owner: inside a SECURITY DEFINER function current_user IS the owner, outside it is the caller.
 -- These guards therefore reject a NON-OWNER's raw status UPDATE, forged history INSERT, or direct authoritative

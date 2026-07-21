@@ -80,7 +80,11 @@ type Result struct {
 	ConfigVersion        int64
 	DevicesGrandfathered int
 	SessionsRebound      int
-	EntitlementsEnded    int
+	// DevicesRevoked / SessionsRevoked are the POST-BOUNDARY revocation counts: authorization intervals closed
+	// and sessions ended at the boundary because they were NOT part of the grace cohort.
+	DevicesRevoked    int
+	SessionsRevoked   int
+	EntitlementsEnded int
 }
 
 // ConvertTx performs the Checkout conversion INSIDE the caller's transaction. This is the entry point the Stay
@@ -280,6 +284,26 @@ func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, ifac
 		}
 	}
 
+	// FREEZE the accounting evidence the boundary decision was made against, per pre-checkout Entitlement.
+	// Accounting is delayed by nature: a sample taken before checkout can be ingested long afterwards. The
+	// watermark keeps the decision reproducible, and any later sample belonging to the frozen period is
+	// recorded as DELAYED (at ingest) instead of silently rewriting a decision that has already been audited.
+	if err := freezeBoundaryWatermarks(ctx, tx, tenant, site, iface, stayID, boundary); err != nil {
+		return Result{}, err
+	}
+
+	// POST-BOUNDARY REVOCATION. Whatever the outcome, no access may survive the boundary on a TERMINATED
+	// Entitlement: every authorization interval that was still open on a pre-checkout Entitlement is CLOSED at
+	// the boundary and every session still bound to one is ENDED at the boundary. The grace cohort is already
+	// bound to the NEW Entitlement by this point, so it is untouched — which is what makes the grandfathered
+	// devices keep working WITHOUT a logout while everything outside the cohort loses access.
+	dr, sr, err := revokeAtBoundary(ctx, tx, tenant, site, iface, stayID, graceEntArg, boundary)
+	if err != nil {
+		return Result{}, err
+	}
+	res.DevicesRevoked = dr
+	res.SessionsRevoked = sr
+
 	return res, writeAudit(ctx, tx, auditRow{tenant, site, iface, stayID, episode, string(trigger), d.IsEmergency,
 		policyVersion, alertCode, boundedReason(res.Reason), graceEntArg, src.StayEventID, evSeq, evNorm,
 		res.BoundaryReason, configVersion, boundary, res.BoundaryClockSuspect})
@@ -421,9 +445,10 @@ func validAtBoundary(ctx context.Context, tx pgx.Tx, entID string, boundary time
 	}
 	if quota != nil {
 		var used int64
-		if err := tx.QueryRow(ctx, `SELECT COALESCE(SUM(ar.bytes_up + ar.bytes_down),0)
-			FROM iam_v2.accounting_records ar JOIN iam_v2.sessions s ON s.id=ar.session_id
-			WHERE s.entitlement_id=$1 AND ar.sampled_at <= $2`, entID, boundary).Scan(&used); err != nil {
+		// usage is attributed by BINDING INTERVAL, not by the session's current pointer: a rebound session
+		// must not carry its pre-boundary samples over to the grace Entitlement (or away from this one).
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(bytes_up,0) + COALESCE(bytes_down,0)
+			FROM iam_v2.entitlement_usage_bytes($1,$2)`, entID, boundary).Scan(&used); err != nil {
 			return false, err
 		}
 		if used >= *quota {
@@ -495,15 +520,87 @@ func grandfatherBoundaryDevices(ctx context.Context, tx pgx.Tx, tenant, site, ol
 		SELECT tenant_id, site_id, entitlement_id, device_id, 1, $2 FROM iam_v2.entitlement_devices WHERE entitlement_id=$1`, newEnt, boundary); err != nil {
 		return 0, 0, err
 	}
-	// rebind only boundary-valid live sessions of grandfathered devices (session interval contains boundary).
-	ct2, err := tx.Exec(ctx, `UPDATE iam_v2.sessions s SET entitlement_id=$2
+	// rebind only boundary-valid live sessions of grandfathered devices (session interval contains boundary),
+	// through the CONTROLLED rebinding operation so the append-only binding history stays gapless — that
+	// history is what attributes each accounting sample to the Entitlement it was actually taken under.
+	rows2, err := tx.Query(ctx, `SELECT s.id::text FROM iam_v2.sessions s
 		WHERE s.entitlement_id=$1 AND s.state='active' AND s.started <= $3 AND (s.ended IS NULL OR s.ended > $3)
-		  AND EXISTS (SELECT 1 FROM iam_v2.entitlement_devices ed WHERE ed.entitlement_id=$2 AND ed.device_id=s.device_id AND ed.grandfathered)`,
-		oldEnt, newEnt, boundary)
+		  AND EXISTS (SELECT 1 FROM iam_v2.entitlement_devices ed WHERE ed.entitlement_id=$2 AND ed.device_id=s.device_id AND ed.grandfathered)
+		FOR UPDATE OF s`, oldEnt, newEnt, boundary)
 	if err != nil {
 		return 0, 0, err
 	}
-	return gf, int(ct2.RowsAffected()), nil
+	var sessions []string
+	for rows2.Next() {
+		var id string
+		if err := rows2.Scan(&id); err != nil {
+			rows2.Close()
+			return 0, 0, err
+		}
+		sessions = append(sessions, id)
+	}
+	rows2.Close()
+	if err := rows2.Err(); err != nil {
+		return 0, 0, err
+	}
+	for _, sid := range sessions {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.rebind_session_entitlement($1,$2,$3)`, sid, newEnt, boundary); err != nil {
+			return 0, 0, err
+		}
+	}
+	return gf, len(sessions), nil
+}
+
+// freezeBoundaryWatermarks records, for every pre-checkout (non-grace) Entitlement of the Stay, the exact
+// usage totals the boundary decision was taken against. One row per (entitlement, boundary), append-only; a
+// re-run of the same boundary is idempotent and never moves an existing watermark.
+func freezeBoundaryWatermarks(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, boundary time.Time) error {
+	_, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_boundary_watermarks
+		(tenant_id, site_id, entitlement_id, boundary_at, bytes_up, bytes_down, records_counted, latest_sampled_at)
+		SELECT e.tenant_id, e.site_id, e.id, $5, u.bytes_up, u.bytes_down, u.records, u.latest_sampled_at
+		FROM iam_v2.entitlements e, LATERAL iam_v2.entitlement_usage_bytes(e.id,$5) u
+		WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.pms_interface_id=$3 AND e.stay_id=$4
+		  AND e.end_mode <> 'GRACE_AFTER_CHECKOUT'
+		ON CONFLICT (entitlement_id, boundary_at) DO NOTHING`, tenant, site, iface, stayID, boundary)
+	return err
+}
+
+// revokeAtBoundary closes every authorization interval that is still open on a pre-checkout (non-grace)
+// Entitlement of this Stay and ends every session still bound to one, both AT the boundary. It deliberately
+// runs on EVERY outcome — grace, no grace, manual review — because a TERMINATED Entitlement must never leave
+// live access behind it, and it deliberately skips the grace Entitlement so the boundary cohort's rebound
+// sessions continue uninterrupted.
+func revokeAtBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, graceEnt any, boundary time.Time) (int, int, error) {
+	// devices: close open intervals through the same append-only interval model the boundary reads from, and
+	// mark the current view disconnected with a bounded machine reason.
+	ct, err := tx.Exec(ctx, `WITH victims AS (
+		SELECT a.id FROM iam_v2.entitlement_device_authorizations a
+		JOIN iam_v2.entitlements e ON e.id=a.entitlement_id
+		WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.pms_interface_id=$3 AND e.stay_id=$4
+		  AND e.end_mode <> 'GRACE_AFTER_CHECKOUT' AND ($5::uuid IS NULL OR e.id <> $5::uuid)
+		  AND a.deauthorized_at IS NULL),
+	closed AS (
+		UPDATE iam_v2.entitlement_device_authorizations a SET deauthorized_at = GREATEST($6::timestamptz, a.authorized_at)
+		WHERE a.id IN (SELECT id FROM victims) RETURNING a.entitlement_id, a.device_id)
+	UPDATE iam_v2.entitlement_devices ed SET status='DISCONNECTED', disconnected_reason='CHECKOUT_BOUNDARY'
+	FROM closed WHERE ed.entitlement_id=closed.entitlement_id AND ed.device_id=closed.device_id`,
+		tenant, site, iface, stayID, graceEnt, boundary)
+	if err != nil {
+		return 0, 0, err
+	}
+	// sessions: anything still bound to a pre-checkout Entitlement ends AT the boundary (never before it
+	// started, so a session opened after the boundary cannot record negative online time).
+	ct2, err := tx.Exec(ctx, `UPDATE iam_v2.sessions s
+		SET state='ended', ended=GREATEST($6::timestamptz, s.started), end_reason='CHECKOUT_BOUNDARY'
+		FROM iam_v2.entitlements e
+		WHERE e.id=s.entitlement_id AND s.state='active'
+		  AND e.tenant_id=$1 AND e.site_id=$2 AND e.pms_interface_id=$3 AND e.stay_id=$4
+		  AND e.end_mode <> 'GRACE_AFTER_CHECKOUT' AND ($5::uuid IS NULL OR e.id <> $5::uuid)`,
+		tenant, site, iface, stayID, graceEnt, boundary)
+	if err != nil {
+		return 0, 0, err
+	}
+	return int(ct.RowsAffected()), int(ct2.RowsAffected()), nil
 }
 
 type createGraceArgs struct {
