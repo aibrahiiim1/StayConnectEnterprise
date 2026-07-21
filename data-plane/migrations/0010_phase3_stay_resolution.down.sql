@@ -21,6 +21,7 @@ DROP FUNCTION IF EXISTS iam_v2.emergency_grace_health(uuid,uuid);
 -- (4i/4j/4k) grace-config publish + alert-action model + audit provenance
 DROP TRIGGER IF EXISTS p3_grace_config_version_guard ON iam_v2.site_checkout_grace_config;
 DROP FUNCTION IF EXISTS iam_v2.p3_grace_config_version_guard();
+DROP FUNCTION IF EXISTS iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int);
 DROP FUNCTION IF EXISTS iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text);
 DROP TRIGGER IF EXISTS p3_checkout_audit_provenance ON iam_v2.checkout_grace_audit;
 DROP FUNCTION IF EXISTS iam_v2.p3_checkout_audit_provenance();

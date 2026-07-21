@@ -515,7 +515,9 @@ CREATE TRIGGER p3_entitlement_controlled_writer BEFORE UPDATE ON iam_v2.entitlem
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
 CREATE TRIGGER p3_est_controlled_writer BEFORE INSERT ON iam_v2.entitlement_state_transitions
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
-CREATE TRIGGER p3_grace_config_controlled_writer BEFORE UPDATE ON iam_v2.site_checkout_grace_config
+-- (item 1) INSERT is protected too: seeding the FIRST authoritative grace-config row is itself an authoritative
+-- write, so it must come through publish_checkout_grace_config() and never from a raw non-owner INSERT.
+CREATE TRIGGER p3_grace_config_controlled_writer BEFORE INSERT OR UPDATE ON iam_v2.site_checkout_grace_config
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
 REVOKE EXECUTE ON FUNCTION iam_v2.p3_controlled_writer_only() FROM PUBLIC;
 
@@ -731,18 +733,23 @@ ALTER TABLE iam_v2.stays ADD COLUMN last_applied_event_id uuid
 -- ============================================================================
 CREATE OR REPLACE FUNCTION iam_v2.publish_checkout_grace_config(
     p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration int, p_down int, p_up int, p_quota bigint,
-    p_dev_limit int, p_dev_policy text) RETURNS bigint
+    p_dev_limit int, p_dev_policy text, p_eligibility int) RETURNS bigint
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_ver bigint;
 BEGIN
+  -- (item 2) eligibility_window_seconds is an AUTHORITATIVE grace-policy field: validated, versioned, compared
+  -- for idempotency and included in material-change detection exactly like the shaping/quota/device fields.
+  IF p_eligibility IS NULL OR p_eligibility <= 0 OR p_eligibility > 604800 THEN
+    RAISE EXCEPTION 'eligibility_window_seconds must be within 1..604800 (got %)', p_eligibility;
+  END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended(p_tenant::text || ':' || p_site::text || ':grace-config', 0));
   SELECT config_version INTO v_ver FROM iam_v2.site_checkout_grace_config
     WHERE tenant_id=p_tenant AND site_id=p_site FOR UPDATE;
   IF v_ver IS NULL THEN
     INSERT INTO iam_v2.site_checkout_grace_config
       (tenant_id,site_id,grace_package_revision_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,
-       grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy,config_version)
-      VALUES (p_tenant,p_site,p_pkg_rev,p_duration,p_down,p_up,p_quota,p_dev_limit,p_dev_policy,1);
+       grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy,eligibility_window_seconds,config_version)
+      VALUES (p_tenant,p_site,p_pkg_rev,p_duration,p_down,p_up,p_quota,p_dev_limit,p_dev_policy,p_eligibility,1);
     RETURN 1;
   END IF;
   -- idempotent re-publication of the IDENTICAL typed policy does NOT bump the version (a material change does).
@@ -753,17 +760,18 @@ BEGIN
                AND grace_down_kbps IS NOT DISTINCT FROM p_down AND grace_up_kbps IS NOT DISTINCT FROM p_up
                AND grace_data_quota_bytes IS NOT DISTINCT FROM p_quota
                AND grace_device_limit IS NOT DISTINCT FROM p_dev_limit
-               AND grace_device_limit_policy IS NOT DISTINCT FROM p_dev_policy) THEN
+               AND grace_device_limit_policy IS NOT DISTINCT FROM p_dev_policy
+               AND eligibility_window_seconds IS NOT DISTINCT FROM p_eligibility) THEN
     RETURN v_ver;
   END IF;
   UPDATE iam_v2.site_checkout_grace_config SET
     grace_package_revision_id=p_pkg_rev, grace_duration_seconds=p_duration, grace_down_kbps=p_down,
     grace_up_kbps=p_up, grace_data_quota_bytes=p_quota, grace_device_limit=p_dev_limit,
-    grace_device_limit_policy=p_dev_policy, config_version=v_ver+1
+    grace_device_limit_policy=p_dev_policy, eligibility_window_seconds=p_eligibility, config_version=v_ver+1
     WHERE tenant_id=p_tenant AND site_id=p_site;
   RETURN v_ver+1;
 END $fn$;
-REVOKE EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int) FROM PUBLIC;
 
 -- (item 9) config_version integrity: a material policy change REQUIRES config_version = OLD+1; the version can
 -- never decrease or jump; and the version may not be bumped without a change. This makes a raw UPDATE that
@@ -778,7 +786,8 @@ BEGIN
     OR NEW.grace_down_kbps IS DISTINCT FROM OLD.grace_down_kbps OR NEW.grace_up_kbps IS DISTINCT FROM OLD.grace_up_kbps
     OR NEW.grace_data_quota_bytes IS DISTINCT FROM OLD.grace_data_quota_bytes
     OR NEW.grace_device_limit IS DISTINCT FROM OLD.grace_device_limit
-    OR NEW.grace_device_limit_policy IS DISTINCT FROM OLD.grace_device_limit_policy);
+    OR NEW.grace_device_limit_policy IS DISTINCT FROM OLD.grace_device_limit_policy
+    OR NEW.eligibility_window_seconds IS DISTINCT FROM OLD.eligibility_window_seconds);
   IF NEW.config_version < OLD.config_version THEN
     RAISE EXCEPTION 'site grace config_version cannot decrease (% -> %)', OLD.config_version, NEW.config_version;
   END IF;

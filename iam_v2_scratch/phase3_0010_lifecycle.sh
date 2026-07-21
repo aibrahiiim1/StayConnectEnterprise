@@ -272,11 +272,19 @@ expect_ok  "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_
 expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',2,now());" && ok "second OPEN interval for the same device rejected (§7)" || no "two open intervals accepted"
 expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',3,now());" && ok "non-contiguous device authorization seq rejected (§7)" || no "sparse device seq accepted"
 # config publish (§10): a material change increments config_version by exactly 1; an IDENTICAL re-publish does not
-V1="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE');")"
-V2="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE');")"
-[ "$V2" = "$V1" ] && ok "identical re-publish is idempotent (no config_version bump) (§9/§10)" || no "idempotent publish bumped version"
-V3="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3700,4000,1500,524288000,2,'REJECT_NEW_DEVICE');")"
+V1="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400);")"
+V2="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400);")"
+[ "$V2" = "$V1" ] && ok "identical FULL-policy re-publish is idempotent (no config_version bump) (§2/§9)" || no "idempotent publish bumped version"
+V3="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3700,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400);")"
 [ "$V3" = "$((V2+1))" ] && ok "material change increments config_version by exactly 1 (§10)" || no "config_version not +1 on change"
+# (item 2) eligibility_window_seconds is part of the complete authoritative policy
+V4="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3700,4000,1500,524288000,2,'REJECT_NEW_DEVICE',43200);")"
+[ "$V4" = "$((V3+1))" ] && ok "eligibility_window-ONLY change increments config_version (§2)" || no "eligibility-window change did not version"
+V5="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3700,4000,1500,524288000,2,'REJECT_NEW_DEVICE',43200);")"
+[ "$V5" = "$V4" ] && ok "identical replay incl. eligibility_window is idempotent (§2)" || no "identical replay bumped"
+[ "$(Q "SELECT eligibility_window_seconds FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$T' AND site_id='$S';")" = 43200 ] && ok "published eligibility_window persisted (§2)" || no "eligibility window not published"
+expect_err "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3700,4000,1500,524288000,2,'REJECT_NEW_DEVICE',0);" && ok "invalid eligibility_window (0) rejected (§2)" || no "zero eligibility window accepted"
+expect_err "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3700,4000,1500,524288000,2,'REJECT_NEW_DEVICE',604801);" && ok "out-of-range eligibility_window rejected (§2)" || no "out-of-range eligibility accepted"
 # raw policy change without the controlled publish fails closed (config_version guard)
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET grace_duration_seconds=9999 WHERE tenant_id='$T' AND site_id='$S';" && ok "raw policy UPDATE without version bump rejected (§9)" || no "raw policy update accepted"
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET config_version=config_version-1 WHERE tenant_id='$T' AND site_id='$S';" && ok "config_version decrease rejected (§9)" || no "config_version decrease accepted"
@@ -294,6 +302,14 @@ AS_PROBE "INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,ent
 AS_PROBE "UPDATE iam_v2.entitlements SET status='SUSPENDED' WHERE id='$ENT'; INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at) VALUES ('$RT','$RS','$ENT',3,'ACTIVE','SUSPENDED',now());" && no "non-owner raw update + forged matching transition accepted" || ok "non-owner raw status UPDATE + forged MATCHING transition still refused (§4)"
 AS_PROBE "UPDATE iam_v2.site_checkout_grace_config SET grace_duration_seconds=1234, config_version=config_version+1 WHERE tenant_id='$T' AND site_id='$S';" && no "non-owner raw policy update with correct +1 accepted" || ok "non-owner raw grace-policy UPDATE with a correct config_version+1 STILL refused (§7)"
 [ "$(Q "SELECT status FROM iam_v2.entitlements WHERE id='$ENT';")" = "ACTIVE" ] && ok "entitlement status unchanged after every non-owner attempt (§4)" || no "non-owner mutated status"
+# (item 1) raw FIRST-ROW grace-config INSERT for a FRESH site must also be refused (INSERT is authoritative)
+FT="$(Q "INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id;")"
+FS="$(Q "INSERT INTO public.sites(id,tenant_id) VALUES (gen_random_uuid(),'$FT') RETURNING id;")"
+AS_PROBE "INSERT INTO iam_v2.site_checkout_grace_config(tenant_id,site_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy,eligibility_window_seconds) VALUES ('$FT','$FS',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400);" && no "non-owner raw FIRST config INSERT accepted" || ok "non-owner raw FIRST grace-config INSERT refused (§1)"
+[ "$(Q "SELECT count(*) FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$FT' AND site_id='$FS';")" = 0 ] && ok "refused first INSERT left ZERO rows / no version evidence (§1)" || no "rows leaked from refused insert"
+# the SECURITY DEFINER publication function CAN create the first row (version 1)
+FV="$(Q "SELECT iam_v2.publish_checkout_grace_config('$FT','$FS',NULL,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400);")"
+[ "$FV" = 1 ] && ok "controlled publication creates the FIRST config row at version 1 (§1/§2)" || no "controlled first publication failed"
 Q "REVOKE ALL ON iam_v2.entitlements, iam_v2.entitlement_state_transitions, iam_v2.site_checkout_grace_config FROM p3_writer_probe; REVOKE USAGE ON SCHEMA iam_v2 FROM p3_writer_probe; DROP ROLE IF EXISTS p3_writer_probe;" >/dev/null
 ok "probe role cleaned up (no residual runtime grants)"
 
