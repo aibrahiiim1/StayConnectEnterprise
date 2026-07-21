@@ -142,6 +142,50 @@ export type Session = {
   bytes_up: number; bytes_down: number;
 };
 
+// ---- Phase 3 (DARK) PMS stay resolution + checkout grace -------------------
+// These mirror edged's resources_phase3.go exactly. Resolution evidence deliberately carries NO guest
+// identity: an operator learns that a resolution succeeded, never who it was.
+
+export type Stay = {
+  id: string; pms_interface_id: string; external_reservation_id: string;
+  room?: string | null; status: string; lifecycle_version: number;
+  arrival?: string | null; departure?: string | null;
+  effective_checkout_at?: string | null; posting_allowed: boolean; occupants: number;
+};
+
+export type StayDetail = Stay & {
+  occupant_list: { display_name?: string | null; is_primary: boolean }[];
+  folios: { external_folio_id: string; folio_kind: string; status: string; is_default_posting_target: boolean }[];
+};
+
+export type StayEvent = {
+  id: string; pms_interface_id: string; external_event_identity: string; event_type: string;
+  processing_status: string; review_code?: string | null; stay_id?: string | null;
+  pms_timestamp_utc?: string | null; received_at: string;
+};
+
+export type PmsResolution = {
+  id: string; guest_network_id: string; outcome_code: string; resolved: boolean; resolved_at: string;
+};
+
+export type CheckoutGraceConfig = {
+  grace_package_revision_id?: string | null;
+  grace_duration_seconds: number;
+  grace_down_kbps: number;
+  grace_up_kbps: number;
+  grace_data_quota_bytes: number;
+  grace_device_limit: number;
+  grace_device_limit_policy: string;
+  eligibility_window_seconds: number;
+  config_version: number;
+};
+
+export type OperationalAlert = {
+  audit_id: string; stay_id: string; lifecycle_version: number;
+  alert_code: string; trigger: string; reason_code?: string | null;
+  boundary_at: string; boundary_clock_suspect: boolean; created_at: string;
+};
+
 export type Operator = {
   id: string;
   email: string;

@@ -14,6 +14,11 @@ import {
 // Even when shown, the edged routes are the authority — they are absent unless the backend flag is on.
 const PHASE2_ADMIN = process.env.NEXT_PUBLIC_PHASE2_ADMIN === "1";
 
+// Phase 3 (DARK) PMS stay resolution + checkout grace: same rule as Phase 2 — the nav items stay hidden
+// unless the deployment sets NEXT_PUBLIC_PHASE3_ADMIN=1 (mirroring the edged STAYCONNECT_PHASE3_* flags),
+// and even then edged is the authority: its routes do not exist unless the backend flags are on.
+const PHASE3_ADMIN = process.env.NEXT_PUBLIC_PHASE3_ADMIN === "1";
+
 // Each item names the edged resource that gates its visibility. Items the
 // operator's roles cannot read are hidden (edged still enforces server-side).
 // `enabled: false` hides an item behind a dark feature flag regardless of role.
@@ -41,6 +46,10 @@ const SECTIONS: Section[] = [
     title: "Integrations",
     items: [
       { href: "/pms-providers",    label: "PMS providers", icon: Hotel,    resource: "pms-providers" },
+      { href: "/stays",             label: "Stays",             icon: Hotel,   resource: "pms-stays",          enabled: PHASE3_ADMIN },
+      { href: "/stay-events",       label: "Stay events",       icon: Send,    resource: "pms-events",         enabled: PHASE3_ADMIN },
+      { href: "/checkout-grace",    label: "Checkout grace",    icon: Shield,  resource: "checkout-grace",     enabled: PHASE3_ADMIN },
+      { href: "/operational-alerts", label: "Operational alerts", icon: Shield, resource: "operational-alerts", enabled: PHASE3_ADMIN },
       { href: "/notifications",    label: "Notifications", icon: Send,     resource: "notification-providers" },
       { href: "/social-providers", label: "Social login",  icon: KeyRound, resource: "social-providers" },
       { href: "/payments",         label: "Payments",      icon: Wallet,   resource: "payments" },

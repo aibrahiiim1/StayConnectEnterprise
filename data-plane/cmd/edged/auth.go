@@ -161,13 +161,19 @@ var rolePerms = map[string]map[string]perm{
 		"network": permWrite,
 		// Phase 2 (DARK) commercial packages: revisioned CRUD is a manager action.
 		"commercial-packages": permWrite,
-		"payments":            permRead, "operators": permRead, "audit": permRead,
+		// Phase 3 (DARK): the IT manager owns the PMS integration, so publishing the checkout-grace policy
+		// and clearing operational alerts are manager actions; stays/events/resolutions are read evidence.
+		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
+		"checkout-grace": permWrite, "operational-alerts": permWrite,
+		"payments": permRead, "operators": permRead, "audit": permRead,
 		"reports": permRead, "backups": permRead, "license": permRead,
 		// Health & diagnostics: managers may run Recheck/Restart (write, step-up).
 		"diagnostics": permWrite,
 	},
 	"front_office_operator": {
 		"voucher-batches": permWrite, "guest-accounts": permWrite, "vouchers": permWrite, "sessions": permWrite,
+		// Phase 3 (DARK): front desk reads stays/events and triages alerts, but never edits the grace policy.
+		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "walled-garden": permRead, "payments": permRead,
 		"reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
@@ -175,6 +181,7 @@ var rolePerms = map[string]map[string]perm{
 	},
 	"guest_relations_operator": {
 		"voucher-batches": permWrite, "guest-accounts": permWrite, "vouchers": permWrite, "sessions": permWrite,
+		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "payments": permRead, "reports": permRead,
 		"audit": permRead, "license": permRead, "backups": permRead, "walled-garden": permRead,
@@ -198,6 +205,9 @@ var rolePerms = map[string]map[string]perm{
 		"stripe-accounts": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,
 		"commercial-packages": permRead,
+		// Phase 3 (DARK): a viewer sees the evidence and never acts on it.
+		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
+		"checkout-grace": permRead, "operational-alerts": permRead,
 	},
 	// Legacy tenant roles accepted for migrated operators.
 	"tenant_admin":    nil, // treated like site_admin below

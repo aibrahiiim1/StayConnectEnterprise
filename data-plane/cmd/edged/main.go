@@ -84,6 +84,10 @@ type server struct {
 	// the master flag is OFF (zero Phase-2 SQL); commerceCfg gates whether the admin routes are mounted.
 	commerce    *iamv2.CommerceAdmin
 	commerceCfg iamv2.CommerceConfig
+
+	// Phase 3 DARK Hotel-Admin PMS/Stay surface. pmsCfg gates whether ANY Phase-3 route is mounted; while
+	// the master flag is OFF the routes do not exist at all and edged issues zero Phase-3 SQL.
+	pmsCfg iamv2.PMSConfig
 }
 
 func main() {
@@ -200,6 +204,16 @@ func main() {
 	s.commerceCfg = commCfg
 	slog.Info("phase2 dark commerce admin constructed", "flags", commCfg.SafeFlagSummary())
 
+	// Phase 3 DARK Hotel-Admin PMS/Stay surface. All flags default OFF and a child flag set while the master
+	// flag is OFF is a startup failure (a deployment mistake must be loud, not silently "off anyway").
+	pmsCfg, err := iamv2.LoadPMSConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("phase3 pms config", "err", err)
+		os.Exit(2)
+	}
+	s.pmsCfg = pmsCfg
+	slog.Info("phase3 dark pms admin surface", "flags", pmsCfg.SafeFlagSummary())
+
 	// Appliance Health Supervisor: observe/diagnose every critical service,
 	// persist the authoritative health model, track boot convergence and push
 	// sanitized telemetry. It never controls restarts (systemd + adaptive
@@ -261,6 +275,15 @@ func main() {
 			// surface is ON; while dark it is absent and the admin engine holds a nil repository.
 			if s.commerceCfg.AdminOn() {
 				mountResource(r, s, "commercial-packages", s.commercialPackagesRoutes)
+			}
+			// Phase 3 (DARK): the Stay/Event/Folio/Resolution/Grace surface is mounted ONLY when the
+			// Phase-3 master flag AND its admin flag are both ON. While dark these paths do not exist.
+			if s.pmsCfg.AdminOn() {
+				mountResource(r, s, "pms-stays", s.pmsStaysRoutes)
+				mountResource(r, s, "pms-events", s.pmsEventsRoutes)
+				mountResource(r, s, "pms-resolutions", s.pmsResolutionsRoutes)
+				mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
+				mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
 			}
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "reports", s.reportsRoutes)
