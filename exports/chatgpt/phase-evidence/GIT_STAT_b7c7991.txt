@@ -1,4 +1,0 @@
-commit b7c7991a5b08bd0c73026fae094a528698b5abcb
-Date:   Wed Jul 22 00:33:21 2026 +0300
-
-    Phase 3 corrections round 3 items 1-5 (inventory_head): required exact policy version, whole reserved catalog excluded, selector on the authoritative validator, complete metadata, honest reconcile + two-process evidence
