@@ -361,12 +361,14 @@ type eligibility struct {
 func eligibleOriginalAtBoundary(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, boundary time.Time) (eligibility, error) {
 	var e eligibility
 	// state-at-boundary per non-grace entitlement = the latest transition with effective_at <= boundary.
+	// superseded_by IS NULL keeps this on the LIVE history: a corrected (superseded) fact must never answer a
+	// state-at-boundary question, while both it and its correction stay readable forever.
 	rows, err := tx.Query(ctx, `WITH latest AS (
 		SELECT DISTINCT ON (t.entitlement_id) t.entitlement_id, t.to_state
 		FROM iam_v2.entitlement_state_transitions t
 		JOIN iam_v2.entitlements e ON e.id=t.entitlement_id
 		WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.pms_interface_id=$3 AND e.stay_id=$4
-		  AND e.end_mode <> 'GRACE_AFTER_CHECKOUT' AND t.effective_at <= $5
+		  AND e.end_mode <> 'GRACE_AFTER_CHECKOUT' AND t.effective_at <= $5 AND t.superseded_by IS NULL
 		ORDER BY t.entitlement_id, t.effective_at DESC, t.seq DESC)
 		SELECT entitlement_id::text FROM latest WHERE to_state='ACTIVE'`, tenant, site, iface, stayID, boundary)
 	if err != nil {
@@ -460,7 +462,10 @@ func terminateNonTerminalPreCheckout(ctx context.Context, tx pgx.Tx, tenant, sit
 		if id == eligibleID {
 			reason = "CONVERTED"
 		}
-		if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1, 'TERMINATED', $2, $3)`, id, boundary, reason); err != nil {
+		// terminate_entitlement_at_boundary (not the ordinary append): the boundary is a TRUE past business time
+		// and TERMINATED is terminal, so any lifecycle fact effective after it is explicitly invalidated instead
+		// of the termination being silently clamped forward to the last known fact.
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.terminate_entitlement_at_boundary($1, $2, $3)`, id, boundary, reason); err != nil {
 			return 0, err
 		}
 	}

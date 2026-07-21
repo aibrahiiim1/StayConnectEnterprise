@@ -716,3 +716,56 @@ func TestIntegration_IdempotentAndConcurrent(t *testing.T) {
 		t.Fatal("no live original may remain after concurrent checkout")
 	}
 }
+
+// TestIntegration_BoundaryTerminationIsNotClamped proves the conversion terminates the original Entitlement at
+// the TRUE checkout boundary even when a later lifecycle fact was already recorded: the termination keeps the
+// boundary's effective_at (never clamped forward), the post-boundary fact is explicitly INVALIDATED rather than
+// deleted or ignored, and recorded_at (system time) stays distinct from effective_at (business time).
+func TestIntegration_BoundaryTerminationIsNotClamped(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	c := NewConverter(p)
+	f := seedBase(t, p, seedOpts{configureTypedPolicy: true, pinGracePackage: true, systemGracePackage: true, bootstrapEmergency: true})
+	win := f.boundary.Add(48 * time.Hour)
+	// ACTIVE before the boundary, then SUSPENDED an hour AFTER it (a fact recorded for a period the guest had
+	// already checked out of).
+	ent := seedEnt(t, p, f, &win, []txn{{"ACTIVE", f.boundary.Add(-time.Hour)}, {"SUSPENDED", f.boundary.Add(time.Hour)}})
+
+	if _, err := c.ConvertAtCheckout(ctx, f.tenant, f.site, f.iface, f.stay, checkoutEvent(t, p, f)); err != nil {
+		t.Fatal(err)
+	}
+
+	var termAt, recAt time.Time
+	var termID string
+	if err := p.QueryRow(ctx, `SELECT id::text, effective_at, recorded_at FROM iam_v2.entitlement_state_transitions
+		WHERE entitlement_id=$1 AND to_state='TERMINATED' AND superseded_by IS NULL`, ent).Scan(&termID, &termAt, &recAt); err != nil {
+		t.Fatal(err)
+	}
+	if !termAt.Equal(f.boundary) {
+		t.Fatalf("termination effective_at %v != boundary %v (it must NOT be clamped forward)", termAt, f.boundary)
+	}
+	if !recAt.After(termAt) {
+		t.Fatalf("recorded_at %v must be the system time, distinct from the business time %v", recAt, termAt)
+	}
+	// the post-boundary SUSPENDED fact is invalidated by the termination, and still readable
+	var supBy *string
+	if err := p.QueryRow(ctx, `SELECT superseded_by::text FROM iam_v2.entitlement_state_transitions
+		WHERE entitlement_id=$1 AND to_state='SUSPENDED'`, ent).Scan(&supBy); err != nil {
+		t.Fatal(err)
+	}
+	if supBy == nil || *supBy != termID {
+		t.Fatalf("post-boundary SUSPENDED fact was not invalidated by the boundary termination (superseded_by=%v)", supBy)
+	}
+	if n := count(t, p, `SELECT count(*) FROM iam_v2.entitlement_state_transitions WHERE entitlement_id=$1`, ent); n != 3 {
+		t.Fatalf("history rows = %d, want 3 (nothing deleted)", n)
+	}
+	// the entitlement's derived terminal time follows the LIVE chain
+	var terminated time.Time
+	if err := p.QueryRow(ctx, `SELECT terminated_at FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&terminated); err != nil {
+		t.Fatal(err)
+	}
+	if !terminated.Equal(f.boundary) {
+		t.Fatalf("terminated_at %v != boundary %v", terminated, f.boundary)
+	}
+}

@@ -319,12 +319,31 @@ CREATE TABLE iam_v2.entitlement_state_transitions (
   seq bigint NOT NULL CHECK (seq >= 1),
   from_state text CHECK (from_state IS NULL OR from_state IN ('PENDING','ACTIVE','SUSPENDED','TERMINATED')),
   to_state text NOT NULL CHECK (to_state IN ('PENDING','ACTIVE','SUSPENDED','TERMINATED')),
+  -- BITEMPORAL. effective_at is the TRUE business time the state change took effect and is stored EXACTLY as
+  -- supplied - it is never clamped, shifted or otherwise rewritten. recorded_at is the SYSTEM time the fact was
+  -- learned. They are different domains: a late-discovered change has an OLD effective_at and a NEW recorded_at.
+  -- Monotonicity applies to recorded_at (knowledge only ever grows), never to effective_at.
   effective_at timestamptz NOT NULL,
+  recorded_at timestamptz NOT NULL DEFAULT now(),
+  -- SUPERSESSION is the ONLY way a recorded fact is corrected: nothing is mutated or deleted, a new transition is
+  -- appended that supersedes the previous one, and the superseded row is marked (its single permitted mutation).
+  supersedes uuid,
+  superseded_by uuid,
   reason text CHECK (reason IS NULL OR reason ~ '^[A-Z][A-Z0-9_]{0,63}$'),
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (entitlement_id, seq),
+  CONSTRAINT est_no_self_supersede CHECK (supersedes IS NULL OR supersedes <> id),
+  CONSTRAINT est_not_self_superseded CHECK (superseded_by IS NULL OR superseded_by <> id),
+  -- a transition is corrected AT MOST ONCE by exactly one successor (no forked correction chains)
+  UNIQUE (supersedes),
+  FOREIGN KEY (supersedes) REFERENCES iam_v2.entitlement_state_transitions (id) DEFERRABLE INITIALLY DEFERRED,
+  -- DEFERRABLE: a correction MARKS the facts it invalidates before it is itself inserted, so the chain guard
+  -- evaluates the new row against the history that REMAINS live. The reference is still proven at COMMIT.
+  FOREIGN KEY (superseded_by) REFERENCES iam_v2.entitlement_state_transitions (id) DEFERRABLE INITIALLY DEFERRED,
   FOREIGN KEY (tenant_id, site_id, entitlement_id) REFERENCES iam_v2.entitlements (tenant_id, site_id, id) ON DELETE CASCADE);
-CREATE INDEX est_boundary_lookup ON iam_v2.entitlement_state_transitions (entitlement_id, effective_at);
+-- boundary lookups read the LIVE (non-superseded) history only
+CREATE INDEX est_boundary_lookup ON iam_v2.entitlement_state_transitions (entitlement_id, effective_at)
+  WHERE superseded_by IS NULL;
 
 -- ============================================================================
 -- (4e) entitlement_device_authorizations — APPEND-ONLY authorization INTERVALS, so a Checkout can prove a device
@@ -368,6 +387,24 @@ BEGIN
     END IF;
     RETURN NEW;
   END IF;
+  -- entitlement_state_transitions: the ONLY permitted mutation is marking a row superseded (NULL -> the id of the
+  -- correcting transition), exactly once. Every other column, including effective_at, stays immutable forever.
+  IF TG_TABLE_NAME = 'entitlement_state_transitions' THEN
+    IF OLD.superseded_by IS NOT NULL THEN
+      RAISE EXCEPTION 'entitlement_state_transitions row % is already superseded', OLD.id;
+    END IF;
+    IF NEW.superseded_by IS NULL THEN
+      RAISE EXCEPTION 'entitlement_state_transitions UPDATE must record a supersession';
+    END IF;
+    IF NEW.id IS DISTINCT FROM OLD.id OR NEW.entitlement_id IS DISTINCT FROM OLD.entitlement_id
+       OR NEW.seq IS DISTINCT FROM OLD.seq OR NEW.from_state IS DISTINCT FROM OLD.from_state
+       OR NEW.to_state IS DISTINCT FROM OLD.to_state OR NEW.effective_at IS DISTINCT FROM OLD.effective_at
+       OR NEW.recorded_at IS DISTINCT FROM OLD.recorded_at OR NEW.supersedes IS DISTINCT FROM OLD.supersedes
+       OR NEW.reason IS DISTINCT FROM OLD.reason THEN
+      RAISE EXCEPTION 'entitlement_state_transitions is immutable except for the supersession mark';
+    END IF;
+    RETURN NEW;
+  END IF;
   RAISE EXCEPTION '%: append-only history (UPDATE rejected)', TG_TABLE_NAME;
 END $fn$;
 CREATE TRIGGER p3_est_appendonly BEFORE UPDATE OR DELETE ON iam_v2.entitlement_state_transitions
@@ -383,16 +420,49 @@ REVOKE EXECUTE ON FUNCTION iam_v2.p3_history_appendonly() FROM PUBLIC;
 CREATE OR REPLACE FUNCTION iam_v2.p3_est_insert_guard() RETURNS trigger
   LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE prev_seq bigint; prev_to text; prev_at timestamptz; cur_status text;
+        max_seq bigint; max_rec timestamptz; tgt_ent uuid; tgt_by uuid;
 BEGIN
+  -- seq/recorded_at monotonicity is measured over the WHOLE table (knowledge only grows); the STATE CHAIN is
+  -- measured over the LIVE (non-superseded) history, because an invalidated fact is no longer part of the chain.
+  SELECT COALESCE(max(seq),0), max(recorded_at) INTO max_seq, max_rec
+    FROM iam_v2.entitlement_state_transitions WHERE entitlement_id = NEW.entitlement_id;
+  IF max_seq > 0 AND NEW.seq <> max_seq + 1 THEN
+    RAISE EXCEPTION 'entitlement transition seq must be contiguous (% -> %)', max_seq, NEW.seq;
+  END IF;
+  IF max_seq = 0 AND NEW.seq <> 1 THEN
+    RAISE EXCEPTION 'first entitlement transition must have seq=1 (got %)', NEW.seq;
+  END IF;
+  -- recorded_at (SYSTEM time) is the axis that can never move backwards. effective_at (BUSINESS time) is stored
+  -- verbatim and may legitimately be earlier than an already-recorded fact, but only as an explicit correction
+  -- that first INVALIDATES (supersedes) the facts it replaces.
+  IF max_rec IS NOT NULL AND NEW.recorded_at < max_rec THEN
+    RAISE EXCEPTION 'transition recorded_at cannot move backwards (% < %)', NEW.recorded_at, max_rec;
+  END IF;
+  IF NEW.supersedes IS NOT NULL THEN
+    SELECT entitlement_id, superseded_by INTO tgt_ent, tgt_by
+      FROM iam_v2.entitlement_state_transitions WHERE id = NEW.supersedes;
+    IF tgt_ent IS NULL OR tgt_ent <> NEW.entitlement_id THEN
+      RAISE EXCEPTION 'superseded transition % does not belong to entitlement %', NEW.supersedes, NEW.entitlement_id;
+    END IF;
+    -- the correction must ALREADY own the fact it claims to correct: the invalidated rows are marked with THIS
+    -- row's id before it is inserted, so a caller cannot append a row that merely points at someone else's fact.
+    IF tgt_by IS DISTINCT FROM NEW.id THEN
+      RAISE EXCEPTION 'superseded transition % is not marked as corrected by this transition', NEW.supersedes;
+    END IF;
+  END IF;
+  -- chain continuity is evaluated against what REMAINS live (post-invalidation)
   SELECT seq, to_state, effective_at INTO prev_seq, prev_to, prev_at
-    FROM iam_v2.entitlement_state_transitions WHERE entitlement_id = NEW.entitlement_id ORDER BY seq DESC LIMIT 1;
+    FROM iam_v2.entitlement_state_transitions
+    WHERE entitlement_id = NEW.entitlement_id AND superseded_by IS NULL ORDER BY seq DESC LIMIT 1;
   IF prev_seq IS NULL THEN
-    IF NEW.seq <> 1 THEN RAISE EXCEPTION 'first entitlement transition must have seq=1 (got %)', NEW.seq; END IF;
-    IF NEW.from_state IS NOT NULL THEN RAISE EXCEPTION 'initial transition from_state must be NULL'; END IF;
+    IF NEW.from_state IS NOT NULL THEN RAISE EXCEPTION 'transition with no live predecessor must have from_state NULL'; END IF;
   ELSE
-    IF NEW.seq <> prev_seq + 1 THEN RAISE EXCEPTION 'entitlement transition seq must be contiguous (% -> %)', prev_seq, NEW.seq; END IF;
     IF NEW.from_state IS DISTINCT FROM prev_to THEN RAISE EXCEPTION 'from_state % must equal previous to_state %', NEW.from_state, prev_to; END IF;
-    IF NEW.effective_at < prev_at THEN RAISE EXCEPTION 'transition effective_at cannot move backwards'; END IF;
+    -- an append may not be back-dated behind the live chain: silently accepting an earlier effective_at would
+    -- rewrite the state-at-boundary answer with no record. Corrections invalidate what they replace, first.
+    IF NEW.effective_at < prev_at THEN
+      RAISE EXCEPTION 'transition effective_at % precedes the live head % - record a correction (supersede_entitlement_transition / terminate_entitlement_at_boundary)', NEW.effective_at, prev_at;
+    END IF;
   END IF;
   IF NEW.from_state IS NOT NULL AND NOT (
        (NEW.from_state='PENDING'   AND NEW.to_state IN ('ACTIVE','SUSPENDED','TERMINATED'))
@@ -434,7 +504,7 @@ BEGIN
   SELECT status INTO cur FROM iam_v2.entitlements WHERE id = NEW.id;
   IF cur IS NULL THEN RETURN NULL; END IF; -- row removed within the tx; nothing to check
   SELECT to_state INTO latest FROM iam_v2.entitlement_state_transitions
-    WHERE entitlement_id = NEW.id ORDER BY seq DESC LIMIT 1;
+    WHERE entitlement_id = NEW.id AND superseded_by IS NULL ORDER BY seq DESC LIMIT 1;
   IF latest IS DISTINCT FROM cur THEN
     RAISE EXCEPTION 'entitlement % status % is not backed by its latest transition % (use apply_entitlement_transition)',
       NEW.id, cur, COALESCE(latest, 'NONE');
@@ -465,11 +535,18 @@ BEGIN
   END IF;
   SELECT status INTO v_from FROM iam_v2.entitlements WHERE id = p_ent FOR UPDATE;
   IF v_from IS NULL THEN RAISE EXCEPTION 'entitlement % not found', p_ent; END IF;
-  SELECT COALESCE(max(seq),0)+1, max(effective_at) INTO v_seq, v_prev_at
+  SELECT COALESCE(max(seq),0)+1 INTO v_seq
     FROM iam_v2.entitlement_state_transitions WHERE entitlement_id = p_ent;
-  -- effective_at never moves backwards: a transition is recorded at the LATER of the requested time and the
-  -- previous transition (a state change discovered late is stamped no earlier than the prior known state).
-  v_at := GREATEST(p_at, COALESCE(v_prev_at, p_at));
+  SELECT effective_at INTO v_prev_at FROM iam_v2.entitlement_state_transitions
+    WHERE entitlement_id = p_ent AND superseded_by IS NULL ORDER BY seq DESC LIMIT 1;
+  -- TRUE effective time: the requested business time is recorded EXACTLY as given and is NEVER clamped to the
+  -- previous transition - clamping would silently rewrite when the change actually took effect. An ordinary
+  -- append that precedes the live head is a CORRECTION, and corrections must be explicit (fail closed here and
+  -- go through supersede_entitlement_transition, which records the correction instead of hiding it).
+  v_at := p_at;
+  IF v_prev_at IS NOT NULL AND v_at < v_prev_at THEN
+    RAISE EXCEPTION 'requested effective_at % precedes the live head % - use supersede_entitlement_transition to record a correction', v_at, v_prev_at;
+  END IF;
   -- terminal_reason is the entitlements enum; a non-enum transition reason (e.g. a SEED/GRACE code) maps to OTHER.
   v_term := CASE WHEN p_to='TERMINATED' THEN
     (CASE WHEN p_reason IN ('TIME','DATA','HARD_EXPIRY','CHECKOUT','ADMIN','REVOKED','SUPERSEDED','CONVERTED','TRANSFERRED','CANCELLED','OTHER')
@@ -481,11 +558,110 @@ BEGIN
     terminal_reason = v_term,
     terminated_at   = CASE WHEN p_to='TERMINATED' THEN v_at ELSE NULL END
   WHERE id = p_ent;
-  INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at,reason)
-    SELECT tenant_id, site_id, id, v_seq, CASE WHEN v_seq=1 THEN NULL ELSE v_from END, p_to, v_at, p_reason
+  INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at,recorded_at,reason)
+    SELECT tenant_id, site_id, id, v_seq, CASE WHEN v_seq=1 THEN NULL ELSE v_from END, p_to, v_at, now(), p_reason
     FROM iam_v2.entitlements WHERE id = p_ent;
 END $fn$;
 REVOKE EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text) FROM PUBLIC;
+
+-- THE controlled CORRECTION operation. A fact that was recorded wrongly (wrong state, or a business time later
+-- discovered to be different) is NEVER edited and NEVER deleted: a new transition is APPENDED that supersedes the
+-- previous live head, carrying the TRUE effective_at verbatim - which may legitimately precede the superseded
+-- row's effective_at, because business time and system time are different domains. The superseded row is then
+-- marked (its one permitted mutation), so the correction and the thing it corrected both remain readable forever.
+-- entitlements.activated_at / terminated_at are re-derived from the LIVE chain, never left stale.
+CREATE OR REPLACE FUNCTION iam_v2.supersede_entitlement_transition(p_target uuid, p_to text, p_at timestamptz, p_reason text) RETURNS uuid
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_ent uuid; v_seq bigint; v_new uuid; v_term text; v_head uuid; v_from text;
+BEGIN
+  IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'transition reason must be a bounded machine code';
+  END IF;
+  IF p_to NOT IN ('PENDING','ACTIVE','SUSPENDED','TERMINATED') THEN
+    RAISE EXCEPTION 'invalid target state %', p_to;
+  END IF;
+  SELECT entitlement_id INTO v_ent
+    FROM iam_v2.entitlement_state_transitions WHERE id = p_target AND superseded_by IS NULL;
+  IF v_ent IS NULL THEN RAISE EXCEPTION 'transition % not found or already superseded', p_target; END IF;
+  -- L3 Entitlement lock before any write (global lock order)
+  PERFORM 1 FROM iam_v2.entitlements WHERE id = v_ent FOR UPDATE;
+  SELECT id INTO v_head FROM iam_v2.entitlement_state_transitions
+    WHERE entitlement_id = v_ent AND superseded_by IS NULL ORDER BY seq DESC LIMIT 1;
+  IF v_head IS DISTINCT FROM p_target THEN
+    RAISE EXCEPTION 'only the live head transition may be superseded (head is %)', v_head;
+  END IF;
+  SELECT COALESCE(max(seq),0)+1 INTO v_seq FROM iam_v2.entitlement_state_transitions WHERE entitlement_id = v_ent;
+  v_new := gen_random_uuid();
+  -- INVALIDATE first, then append: the chain guard must judge the correction against the history that remains.
+  UPDATE iam_v2.entitlement_state_transitions SET superseded_by = v_new WHERE id = p_target;
+  SELECT to_state INTO v_from FROM iam_v2.entitlement_state_transitions
+    WHERE entitlement_id = v_ent AND superseded_by IS NULL ORDER BY seq DESC LIMIT 1;
+  v_term := CASE WHEN p_to='TERMINATED' THEN
+    (CASE WHEN p_reason IN ('TIME','DATA','HARD_EXPIRY','CHECKOUT','ADMIN','REVOKED','SUPERSEDED','CONVERTED','TRANSFERRED','CANCELLED','OTHER')
+          THEN p_reason ELSE 'OTHER' END) ELSE NULL END;
+  -- status first, so the INSERT guard's history<->row coherence check sees the corrected state
+  UPDATE iam_v2.entitlements SET status = p_to, terminal_reason = v_term WHERE id = v_ent;
+  INSERT INTO iam_v2.entitlement_state_transitions
+    (id,tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at,recorded_at,supersedes,reason)
+    SELECT v_new, tenant_id, site_id, id, v_seq, v_from, p_to, p_at, now(), p_target, p_reason
+    FROM iam_v2.entitlements WHERE id = v_ent;
+  PERFORM iam_v2.p3_rederive_entitlement_times(v_ent);
+  RETURN v_new;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.supersede_entitlement_transition(uuid,text,timestamptz,text) FROM PUBLIC;
+
+-- entitlements.activated_at / terminated_at are DERIVED from the live chain; after any correction they are
+-- re-derived rather than left carrying a value that the live history no longer supports.
+CREATE OR REPLACE FUNCTION iam_v2.p3_rederive_entitlement_times(p_ent uuid) RETURNS void
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+BEGIN
+  UPDATE iam_v2.entitlements e SET
+    activated_at = (SELECT min(t.effective_at) FROM iam_v2.entitlement_state_transitions t
+                    WHERE t.entitlement_id = e.id AND t.superseded_by IS NULL AND t.to_state='ACTIVE'),
+    terminated_at = (SELECT t.effective_at FROM iam_v2.entitlement_state_transitions t
+                     WHERE t.entitlement_id = e.id AND t.superseded_by IS NULL AND t.to_state='TERMINATED'
+                     ORDER BY t.seq DESC LIMIT 1)
+  WHERE e.id = p_ent;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_rederive_entitlement_times(uuid) FROM PUBLIC;
+
+-- THE controlled BOUNDARY TERMINATION. A Checkout boundary is a real past business time, and TERMINATED is
+-- terminal: any lifecycle fact that is effective AFTER the boundary cannot survive it (a suspension or
+-- reactivation recorded for a period the guest had already checked out of is void). Rather than silently
+-- clamping the termination forward to the last known fact - which would rewrite WHEN access actually ended -
+-- this operation records the termination at the TRUE boundary and explicitly INVALIDATES (supersedes) every
+-- live post-boundary fact, all of which remain readable. Idempotent for an already-TERMINATED entitlement.
+CREATE OR REPLACE FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamptz, p_reason text) RETURNS uuid
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_status text; v_seq bigint; v_new uuid; v_term text; v_from text; v_head uuid; v_marked int;
+BEGIN
+  IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'transition reason must be a bounded machine code';
+  END IF;
+  SELECT status INTO v_status FROM iam_v2.entitlements WHERE id = p_ent FOR UPDATE;
+  IF v_status IS NULL THEN RAISE EXCEPTION 'entitlement % not found', p_ent; END IF;
+  IF v_status = 'TERMINATED' THEN RETURN NULL; END IF;
+  SELECT COALESCE(max(seq),0)+1 INTO v_seq FROM iam_v2.entitlement_state_transitions WHERE entitlement_id = p_ent;
+  v_new := gen_random_uuid();
+  SELECT id INTO v_head FROM iam_v2.entitlement_state_transitions
+    WHERE entitlement_id = p_ent AND superseded_by IS NULL AND effective_at > p_at ORDER BY seq DESC LIMIT 1;
+  UPDATE iam_v2.entitlement_state_transitions SET superseded_by = v_new
+    WHERE entitlement_id = p_ent AND superseded_by IS NULL AND effective_at > p_at;
+  GET DIAGNOSTICS v_marked = ROW_COUNT;
+  SELECT to_state INTO v_from FROM iam_v2.entitlement_state_transitions
+    WHERE entitlement_id = p_ent AND superseded_by IS NULL ORDER BY seq DESC LIMIT 1;
+  v_term := CASE WHEN p_reason IN ('TIME','DATA','HARD_EXPIRY','CHECKOUT','ADMIN','REVOKED','SUPERSEDED','CONVERTED','TRANSFERRED','CANCELLED','OTHER')
+                 THEN p_reason ELSE 'OTHER' END;
+  UPDATE iam_v2.entitlements SET status = 'TERMINATED', terminal_reason = v_term WHERE id = p_ent;
+  INSERT INTO iam_v2.entitlement_state_transitions
+    (id,tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at,recorded_at,supersedes,reason)
+    SELECT v_new, tenant_id, site_id, id, v_seq, v_from, 'TERMINATED', p_at, now(),
+           CASE WHEN v_marked > 0 THEN v_head ELSE NULL END, p_reason
+    FROM iam_v2.entitlements WHERE id = p_ent;
+  PERFORM iam_v2.p3_rederive_entitlement_times(p_ent);
+  RETURN v_new;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.terminate_entitlement_at_boundary(uuid,timestamptz,text) FROM PUBLIC;
 
 -- (item 4/7) CONTROLLED-WRITER AUTHORIZATION BOUNDARY. A caller can set any session GUC, but it cannot become
 -- the schema owner: inside a SECURITY DEFINER function current_user IS the owner, outside it is the caller.
@@ -569,7 +745,8 @@ BEGIN
 END $fn$;
 CREATE TRIGGER p3_entitlement_controlled_writer BEFORE UPDATE ON iam_v2.entitlements
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
-CREATE TRIGGER p3_est_controlled_writer BEFORE INSERT ON iam_v2.entitlement_state_transitions
+-- INSERT *and* UPDATE: appending a transition and marking one superseded are both authoritative history writes.
+CREATE TRIGGER p3_est_controlled_writer BEFORE INSERT OR UPDATE ON iam_v2.entitlement_state_transitions
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
 -- (item 1) INSERT is protected too: seeding the FIRST authoritative grace-config row is itself an authoritative
 -- write, so it must come through publish_checkout_grace_config() and never from a raw non-owner INSERT.

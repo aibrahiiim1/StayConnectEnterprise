@@ -271,6 +271,107 @@ expect_ok  "SELECT iam_v2.apply_entitlement_transition('$ENT','ACTIVE',now(),'SE
 [ "$(Q "SELECT count(*) FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$ENT';")" = 2 ] && ok "controlled transitions recorded (seq1 PENDING + seq2 ACTIVE) (§5)" || no "history not recorded"
 expect_err "INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at) VALUES ('$RT','$RS','$ENT',3,'ACTIVE','SUSPENDED',now());" && ok "direct transition whose to_state != current status rejected (§5)" || no "mismatched transition accepted"
 expect_err "SELECT iam_v2.apply_entitlement_transition('$ENT','TERMINATED',now(),'ADMIN'); SELECT iam_v2.apply_entitlement_transition('$ENT','ACTIVE',now(),'SEED');" && ok "no transition out of TERMINATED (terminal) (§5)" || no "resurrected terminated entitlement"
+
+echo '== BITEMPORAL history: TRUE effective_at + recorded_at + explicit SUPERSESSION (no clamping) (§5) =='
+# a dedicated STAY + entitlement: ent_live_stay allows only ONE live entitlement per Stay, and these proofs
+# must not disturb the shared one.
+BST="$(Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$RT','$RS','$I','RBI','SBI','IN_HOUSE',1,0) RETURNING id;")"
+BENT="$(Q "SELECT gen_random_uuid();")"; BPUR="$(Q "SELECT gen_random_uuid();")"
+Q "DO \$do\$ BEGIN
+  INSERT INTO iam_v2.purchases(id,tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state) VALUES ('$BPUR','$RT','$RS','$EPKG','$I','$BST','ADMIN_GRANT',0,'GRANTED');
+  INSERT INTO iam_v2.entitlements(id,tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status) VALUES ('$BENT','$RT','$RS','$BST','$I','$BPUR','{}'::jsonb,'$ESPR','$EPKG','VALIDITY_WINDOW','AT_CHECKOUT','PENDING');
+  PERFORM iam_v2.apply_entitlement_transition('$BENT','PENDING',now() - interval '5 hours','SEED');
+END \$do\$;" >/dev/null
+# (1) effective_at is stored EXACTLY as supplied - never clamped to the previous transition
+Q "SELECT iam_v2.apply_entitlement_transition('$BENT','ACTIVE',now() - interval '3 hours','GRANT');" >/dev/null
+[ "$(Q "SELECT effective_at <= now() - interval '2 hours 59 minutes' FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$BENT' AND seq=2;")" = t ] \
+  && ok "a LATE-recorded transition keeps its TRUE past effective_at (no clamping to now()) (§5)" || no "effective_at was rewritten"
+# (2) effective_at and recorded_at are DIFFERENT domains: business time is in the past, system time is now
+[ "$(Q "SELECT recorded_at > effective_at + interval '2 hours' FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$BENT' AND seq=2;")" = t ] \
+  && ok "recorded_at (system time) is distinct from effective_at (business time) (§5)" || no "recorded_at collapsed onto effective_at"
+# (3) an ORDINARY append may NOT be back-dated: it fails CLOSED instead of silently clamping or rewriting history
+expect_err "SELECT iam_v2.apply_entitlement_transition('$BENT','SUSPENDED',now() - interval '4 hours','ADMIN');" \
+  && ok "back-dated ORDINARY append rejected (corrections must be explicit supersessions) (§5)" || no "silent back-dated append accepted"
+[ "$(Q "SELECT status FROM iam_v2.entitlements WHERE id='$BENT';")" = "ACTIVE" ] && ok "refused back-dated append left the entitlement untouched (§5)" || no "refused append mutated status"
+# (4) SUPERSESSION records a correction whose TRUE effective_at legitimately PRECEDES the row it corrects
+HEAD2="$(Q "SELECT id FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$BENT' AND seq=2;")"
+NEWT="$(Q "SELECT iam_v2.supersede_entitlement_transition('$HEAD2','ACTIVE',now() - interval '4 hours','CORRECTION');")"
+[ -n "$NEWT" ] && ok "supersede_entitlement_transition recorded a correction (§5)" || no "supersession failed"
+[ "$(Q "SELECT effective_at < (SELECT effective_at FROM iam_v2.entitlement_state_transitions WHERE id='$HEAD2') FROM iam_v2.entitlement_state_transitions WHERE id='$NEWT';")" = t ] \
+  && ok "correction carries the TRUE (EARLIER) effective_at verbatim (§5)" || no "correction effective_at rewritten"
+[ "$(Q "SELECT superseded_by='$NEWT' FROM iam_v2.entitlement_state_transitions WHERE id='$HEAD2';")" = t ] \
+  && ok "superseded row is MARKED, not deleted or edited (§5)" || no "supersession mark missing"
+[ "$(Q "SELECT count(*) FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$BENT';")" = 3 ] \
+  && ok "both the corrected fact and its correction remain readable forever (append-only) (§5)" || no "history rows lost"
+[ "$(Q "SELECT recorded_at >= (SELECT recorded_at FROM iam_v2.entitlement_state_transitions WHERE id='$HEAD2') FROM iam_v2.entitlement_state_transitions WHERE id='$NEWT';")" = t ] \
+  && ok "recorded_at (knowledge) still moves FORWARD across a backdated correction (§5)" || no "recorded_at moved backwards"
+# (5) state-at-boundary reads the LIVE chain only: at -3h30m the corrected (earlier) ACTIVE now answers
+[ "$(Q "SELECT to_state FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$BENT' AND superseded_by IS NULL AND effective_at <= now() - interval '3 hours 30 minutes' ORDER BY effective_at DESC, seq DESC LIMIT 1;")" = "ACTIVE" ] \
+  && ok "state-at-boundary uses the LIVE history and reflects the correction (§5)" || no "boundary answer ignored the correction"
+[ "$(Q "SELECT count(*) FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$BENT' AND superseded_by IS NULL;")" = 2 ] \
+  && ok "the superseded fact no longer participates in the live chain (§5)" || no "superseded fact still live"
+# (6) only the LIVE HEAD may be corrected (a mid-chain rewrite would invalidate everything after it)
+expect_err "SELECT iam_v2.supersede_entitlement_transition('$HEAD2','SUSPENDED',now(),'CORRECTION');" \
+  && ok "an already-superseded transition cannot be superseded again (§5)" || no "double supersession accepted"
+SEQ1="$(Q "SELECT id FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$BENT' AND seq=1;")"
+expect_err "SELECT iam_v2.supersede_entitlement_transition('$SEQ1','SUSPENDED',now(),'CORRECTION');" \
+  && ok "a mid-chain (non-head) transition cannot be superseded (§5)" || no "mid-chain rewrite accepted"
+# (7) the history row itself stays immutable: only the supersession mark may ever change
+expect_err "UPDATE iam_v2.entitlement_state_transitions SET effective_at=now() WHERE id='$NEWT';" \
+  && ok "raw effective_at UPDATE rejected (history immutable) (§5)" || no "effective_at mutated"
+expect_err "UPDATE iam_v2.entitlement_state_transitions SET recorded_at=now() - interval '9 hours' WHERE id='$NEWT';" \
+  && ok "raw recorded_at UPDATE rejected (§5)" || no "recorded_at mutated"
+expect_err "DELETE FROM iam_v2.entitlement_state_transitions WHERE id='$NEWT';" \
+  && ok "history DELETE rejected (§5)" || no "history row deleted"
+# (8) recorded_at can never move backwards, even through a direct insert attempt
+expect_err "INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at,recorded_at) VALUES ('$RT','$RS','$BENT',4,'ACTIVE','ACTIVE',now(),now() - interval '9 hours');" \
+  && ok "backwards recorded_at rejected (knowledge only grows) (§5)" || no "backwards recorded_at accepted"
+# (9) the correction is reflected in the entitlement row's DERIVED timestamps (never left stale)
+[ "$(Q "SELECT activated_at = (SELECT effective_at FROM iam_v2.entitlement_state_transitions WHERE id='$NEWT') FROM iam_v2.entitlements WHERE id='$BENT';")" = t ] \
+  && ok "entitlements.activated_at re-derived from the LIVE chain after correction (§5)" || no "activated_at left stale"
+
+echo '== BOUNDARY termination: TRUE boundary time + explicit post-boundary invalidation (§5/§7) =='
+# A Checkout boundary is a real PAST business time and TERMINATED is terminal: facts effective AFTER the
+# boundary cannot survive it. The termination must be recorded AT the boundary (never clamped forward) and the
+# post-boundary facts must be explicitly invalidated, not deleted and not silently ignored.
+KST="$(Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$RT','$RS','$I','RBT','SBT','IN_HOUSE',1,0) RETURNING id;")"
+KENT="$(Q "SELECT gen_random_uuid();")"; KPUR="$(Q "SELECT gen_random_uuid();")"
+Q "DO \$do\$ BEGIN
+  INSERT INTO iam_v2.purchases(id,tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state) VALUES ('$KPUR','$RT','$RS','$EPKG','$I','$KST','ADMIN_GRANT',0,'GRANTED');
+  INSERT INTO iam_v2.entitlements(id,tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status) VALUES ('$KENT','$RT','$RS','$KST','$I','$KPUR','{}'::jsonb,'$ESPR','$EPKG','VALIDITY_WINDOW','AT_CHECKOUT','PENDING');
+  PERFORM iam_v2.apply_entitlement_transition('$KENT','PENDING',now() - interval '6 hours','SEED');
+END \$do\$;" >/dev/null
+Q "SELECT iam_v2.apply_entitlement_transition('$KENT','ACTIVE',now() - interval '5 hours','GRANT');" >/dev/null
+Q "SELECT iam_v2.apply_entitlement_transition('$KENT','SUSPENDED',now() - interval '1 hour','ADMIN');" >/dev/null
+# checkout boundary at -3h: BEFORE the suspension that was already recorded
+KTERM="$(Q "SELECT iam_v2.terminate_entitlement_at_boundary('$KENT',now() - interval '3 hours','CHECKOUT');")"
+[ -n "$KTERM" ] && ok "terminate_entitlement_at_boundary recorded a termination at the TRUE boundary (§5)" || no "boundary termination failed"
+[ "$(Q "SELECT effective_at < now() - interval '2 hours 59 minutes' AND effective_at > now() - interval '3 hours 1 minute' FROM iam_v2.entitlement_state_transitions WHERE id='$KTERM';")" = t ] \
+  && ok "termination recorded AT the boundary, NOT clamped forward to the last known fact (§5)" || no "termination time was clamped"
+[ "$(Q "SELECT superseded_by='$KTERM' FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$KENT' AND to_state='SUSPENDED';")" = t ] \
+  && ok "the post-boundary SUSPENDED fact is explicitly INVALIDATED by the termination (§5)" || no "post-boundary fact survived the boundary"
+[ "$(Q "SELECT count(*) FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$KENT';")" = 4 ] \
+  && ok "invalidated post-boundary fact is still READABLE (nothing deleted) (§5)" || no "history rows lost at the boundary"
+[ "$(Q "SELECT to_state FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$KENT' AND superseded_by IS NULL ORDER BY seq DESC LIMIT 1;")" = "TERMINATED" ] \
+  && ok "the LIVE chain ends at the boundary termination (§5)" || no "live chain head is not the termination"
+[ "$(Q "SELECT from_state FROM iam_v2.entitlement_state_transitions WHERE id='$KTERM';")" = "ACTIVE" ] \
+  && ok "the termination continues from the state that was live AT the boundary (§5)" || no "boundary termination broke chain continuity"
+[ "$(Q "SELECT status='TERMINATED' AND terminated_at = (SELECT effective_at FROM iam_v2.entitlement_state_transitions WHERE id='$KTERM') FROM iam_v2.entitlements WHERE id='$KENT';")" = t ] \
+  && ok "entitlements.terminated_at equals the TRUE boundary (§5)" || no "terminated_at does not match the boundary"
+# state-at-boundary questions after the boundary now answer TERMINATED, not the invalidated suspension
+[ "$(Q "SELECT to_state FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$KENT' AND superseded_by IS NULL AND effective_at <= now() - interval '30 minutes' ORDER BY effective_at DESC, seq DESC LIMIT 1;")" = "TERMINATED" ] \
+  && ok "post-boundary state reads TERMINATED (the invalidated fact cannot answer) (§5)" || no "invalidated fact still answers"
+# terminal + idempotent
+[ -z "$(Q "SELECT iam_v2.terminate_entitlement_at_boundary('$KENT',now() - interval '3 hours','CHECKOUT');")" ] \
+  && ok "boundary termination is idempotent for an already-TERMINATED entitlement (§5)" || no "double termination recorded"
+expect_err "SELECT iam_v2.apply_entitlement_transition('$KENT','ACTIVE',now(),'ADMIN');" \
+  && ok "no resurrection after a boundary termination (TERMINATED stays terminal) (§5)" || no "resurrected after boundary termination"
+# a forged correction that does not own the fact it claims to correct is refused
+FORGED="$(Q "SELECT id FROM iam_v2.entitlement_state_transitions WHERE entitlement_id='$BENT' AND seq=1;")"
+expect_err "INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at,supersedes) VALUES ('$RT','$RS','$BENT',4,'ACTIVE','ACTIVE',now(),'$FORGED');" \
+  && ok "a transition claiming to supersede a fact it has not invalidated is refused (§5)" || no "forged supersession accepted"
+
+
 # device intervals (§7): open one, then a second open is rejected; interval without a binding rejected
 DEV="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:aa:01'::macaddr) RETURNING id;")"
 DEV2="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:aa:02'::macaddr) RETURNING id;")"
@@ -340,6 +441,7 @@ Q "DROP ROLE IF EXISTS p3_ent_writer; DROP ROLE IF EXISTS p3_cfg_writer;
    GRANT SELECT (id,tenant_id,site_id,stay_id,pms_interface_id,status,activated_at,terminal_reason,terminated_at,end_mode,window_ends_at,service_plan_revision_id,purchase_id) ON iam_v2.entitlements TO p3_ent_writer;
    GRANT UPDATE (status,activated_at,terminal_reason,terminated_at) ON iam_v2.entitlements TO p3_ent_writer;
    GRANT SELECT, INSERT ON iam_v2.entitlement_state_transitions TO p3_ent_writer;
+   GRANT UPDATE (superseded_by) ON iam_v2.entitlement_state_transitions TO p3_ent_writer;
    GRANT SELECT (tenant_id,site_id,grace_package_revision_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy,eligibility_window_seconds,config_version) ON iam_v2.site_checkout_grace_config TO p3_cfg_writer;
    GRANT INSERT, UPDATE (grace_package_revision_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy,eligibility_window_seconds,config_version) ON iam_v2.site_checkout_grace_config TO p3_cfg_writer;" >/dev/null
 # the deferred coherence checker must run as a capability that can read, not as the EXECUTE-only caller (§2)
