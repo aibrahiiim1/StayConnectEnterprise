@@ -82,7 +82,7 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 	if o.mismatchField == "duration" {
 		dur = 7200
 	}
-	durPolicy := fmt.Sprintf(`{"end_mode":"GRACE_AFTER_CHECKOUT","grace_duration_seconds":%d}`, dur)
+	durPolicy := fmt.Sprintf(`{"end_mode":"GRACE_AFTER_CHECKOUT","grace_duration_seconds":%d,"policy_version":"CHECKOUT_GRACE_V1"}`, dur)
 
 	err := p.QueryRow(ctx, `WITH
 	  t  AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),

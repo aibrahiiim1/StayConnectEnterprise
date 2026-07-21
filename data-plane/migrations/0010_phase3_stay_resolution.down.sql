@@ -34,6 +34,7 @@ DROP FUNCTION IF EXISTS iam_v2.p3_alert_open_on_audit();
 DROP FUNCTION IF EXISTS iam_v2.record_alert_action(uuid,uuid,uuid,text,uuid,text,text);
 DROP FUNCTION IF EXISTS iam_v2.publish_checkout_grace_policy(uuid,uuid,uuid,int,int,int,bigint,int,text,int,int,uuid,text);
 DROP FUNCTION IF EXISTS iam_v2.grace_package_matches_policy(uuid,uuid,uuid,int,int,int,bigint,int,text);
+DROP FUNCTION IF EXISTS iam_v2.selectable_grace_packages(uuid,uuid);
 DROP FUNCTION IF EXISTS iam_v2.grace_package_mismatch_reason(uuid,uuid,uuid,int,int,int,bigint,int,text);
 DROP TABLE IF EXISTS iam_v2.checkout_grace_policy_publications;
 DROP TABLE IF EXISTS iam_v2.checkout_grace_alert_actions;

@@ -1481,7 +1481,8 @@ BEGIN
   SELECT ipr.id, ipr.package_type, ipr.price_minor, ipr.settlement_methods, ipr.duration_policy,
          ipr.service_plan_revision_id, ip.is_system, ip.active AS pkg_active, ip.current_revision_id, ip.code AS pkg_code,
          spr.id AS spr_id, spr.down_kbps, spr.up_kbps, spr.data_quota_bytes,
-         spr.max_concurrent_devices, spr.device_limit_policy, spr.time_accounting_mode, sp.enabled AS plan_enabled
+         spr.max_concurrent_devices, spr.device_limit_policy, spr.time_accounting_mode, sp.enabled AS plan_enabled,
+         sp.code AS plan_code
     INTO r
     FROM iam_v2.internet_package_revisions ipr
     JOIN iam_v2.internet_packages ip
@@ -1500,8 +1501,14 @@ BEGIN
   -- The RESERVED Emergency catalog is the fallback of last resort, not a policy an operator may adopt as the
   -- ordinary one. Allowing it would make "configured" and "emergency" indistinguishable in the audit trail and
   -- would silence the very alert that tells an operator their real policy is broken.
+  --
+  -- Checking the PACKAGE code alone is not enough: an ordinary-looking package can pin the reserved Emergency
+  -- SERVICE PLAN, which repurposes the same reserved infrastructure through a different door.
   IF r.pkg_code IN ('__sys_emergency_grace_pkg__','__sys_emergency_grace_plan__') THEN
     RETURN 'PACKAGE_IS_EMERGENCY_CATALOG';
+  END IF;
+  IF r.plan_code IN ('__sys_emergency_grace_plan__','__sys_emergency_grace_pkg__') THEN
+    RETURN 'PLAN_IS_EMERGENCY_CATALOG';
   END IF;
   IF r.price_minor <> 0 THEN RETURN 'PACKAGE_NOT_FREE'; END IF;
   IF array_length(r.settlement_methods,1) <> 1 OR r.settlement_methods[1] <> 'NOT_REQUIRED' THEN
@@ -1512,9 +1519,18 @@ BEGIN
   -- duration policy: the package must END as grace, for exactly the published duration, under the approved
   -- policy version when it declares one.
   IF COALESCE(r.duration_policy->>'end_mode','') <> 'GRACE_AFTER_CHECKOUT' THEN RETURN 'DURATION_END_MODE'; END IF;
-  IF COALESCE(r.duration_policy->>'grace_duration_seconds','') <> p_duration::text THEN RETURN 'DURATION_SECONDS'; END IF;
-  IF r.duration_policy ? 'policy_version'
-     AND COALESCE(r.duration_policy->>'policy_version','') <> 'CHECKOUT_GRACE_V1' THEN
+  IF jsonb_typeof(r.duration_policy->'grace_duration_seconds') IS DISTINCT FROM 'number'
+     OR (r.duration_policy->>'grace_duration_seconds') !~ '^[0-9]{1,9}$'
+     OR (r.duration_policy->>'grace_duration_seconds')::int <> p_duration THEN
+    RETURN 'DURATION_SECONDS';
+  END IF;
+  -- The approved policy version is REQUIRED, not optional-if-present: a package that simply omits the key
+  -- would otherwise pass, and "no declared version" is not the same as "the approved version". It must also be
+  -- a scalar string — a number, array or object is a malformed declaration, not a version.
+  IF jsonb_typeof(r.duration_policy->'policy_version') IS DISTINCT FROM 'string' THEN
+    RETURN 'DURATION_POLICY_VERSION';
+  END IF;
+  IF r.duration_policy->>'policy_version' <> 'CHECKOUT_GRACE_V1' THEN
     RETURN 'DURATION_POLICY_VERSION';
   END IF;
   -- the pinned plan revision must carry EXACTLY the published scalars: a policy the plan cannot deliver is a
@@ -1528,6 +1544,61 @@ BEGIN
   RETURN NULL;
 END $fn$;
 REVOKE EXECUTE ON FUNCTION iam_v2.grace_package_mismatch_reason(uuid,uuid,uuid,int,int,int,bigint,int,text) FROM PUBLIC;
+
+-- selectable_grace_packages is the ONE answer to "what may an operator choose?". It derives each candidate's
+-- typed values from its OWN pinned immutable revision and judges them with the SAME validator publication
+-- uses, so the list can never contain a package that publication will then refuse. It returns the mismatch
+-- reason too: an excluded candidate is a bounded, operator-visible diagnostic rather than a mystery or a 500.
+--
+-- Derivation is defensive on purpose. duration_policy is operator-authored JSON, so a malformed value must
+-- exclude THAT candidate, never break the whole list.
+CREATE OR REPLACE FUNCTION iam_v2.selectable_grace_packages(p_tenant uuid, p_site uuid)
+  RETURNS TABLE (
+    package_revision_id uuid, package_code text, revision_no int,
+    service_plan_revision_id uuid, service_plan_code text, service_plan_revision_no int,
+    down_kbps int, up_kbps int, data_quota_bytes bigint,
+    device_limit int, device_limit_policy text, time_accounting_mode text,
+    grace_duration_seconds int, end_mode text, policy_version text,
+    settlement_mode text, is_current boolean, is_active boolean, mismatch_reason text)
+  LANGUAGE sql STABLE SET search_path = iam_v2, pg_temp AS $fn$
+  WITH candidate AS (
+    SELECT ipr.id AS package_revision_id, ip.code AS package_code, ipr.revision_no,
+           spr.id AS service_plan_revision_id, sp.code AS service_plan_code, spr.revision_no AS service_plan_revision_no,
+           spr.down_kbps, spr.up_kbps, spr.data_quota_bytes,
+           spr.max_concurrent_devices AS device_limit, spr.device_limit_policy, spr.time_accounting_mode,
+           -- a non-numeric or oversized duration yields NULL, which the validator then rejects for THIS row
+           CASE WHEN jsonb_typeof(ipr.duration_policy->'grace_duration_seconds') = 'number'
+                     AND (ipr.duration_policy->>'grace_duration_seconds') ~ '^[0-9]{1,9}$'
+                THEN (ipr.duration_policy->>'grace_duration_seconds')::int END AS grace_duration_seconds,
+           CASE WHEN jsonb_typeof(ipr.duration_policy->'end_mode') = 'string'
+                THEN ipr.duration_policy->>'end_mode' END AS end_mode,
+           CASE WHEN jsonb_typeof(ipr.duration_policy->'policy_version') = 'string'
+                THEN ipr.duration_policy->>'policy_version' END AS policy_version,
+           array_to_string(ipr.settlement_methods, ',') AS settlement_mode,
+           (ip.current_revision_id = ipr.id) AS is_current, ip.active AS is_active
+      FROM iam_v2.internet_package_revisions ipr
+      JOIN iam_v2.internet_packages ip
+        ON ip.tenant_id = ipr.tenant_id AND ip.site_id = ipr.site_id AND ip.id = ipr.package_id
+      JOIN iam_v2.service_plan_revisions spr
+        ON spr.tenant_id = ipr.tenant_id AND spr.site_id = ipr.site_id AND spr.id = ipr.service_plan_revision_id
+      JOIN iam_v2.service_plans sp
+        ON sp.tenant_id = spr.tenant_id AND sp.site_id = spr.site_id AND sp.id = spr.service_plan_id
+     WHERE ipr.tenant_id = p_tenant AND ipr.site_id = p_site
+       AND ipr.package_type = 'CHECKOUT_GRACE')
+  SELECT c.package_revision_id, c.package_code, c.revision_no,
+         c.service_plan_revision_id, c.service_plan_code, c.service_plan_revision_no,
+         c.down_kbps, c.up_kbps, c.data_quota_bytes,
+         c.device_limit, c.device_limit_policy, c.time_accounting_mode,
+         c.grace_duration_seconds, c.end_mode, c.policy_version,
+         c.settlement_mode, c.is_current, c.is_active,
+         -- judged by the SAME function publication uses, against the candidate's OWN values
+         iam_v2.grace_package_mismatch_reason(p_tenant, p_site, c.package_revision_id,
+             COALESCE(c.grace_duration_seconds, -1), c.down_kbps, c.up_kbps, c.data_quota_bytes,
+             c.device_limit, c.device_limit_policy) AS mismatch_reason
+    FROM candidate c
+   ORDER BY c.package_code, c.revision_no DESC;
+$fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.selectable_grace_packages(uuid,uuid) FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION iam_v2.grace_package_matches_policy(
     p_tenant uuid, p_site uuid, p_pkg_rev uuid,

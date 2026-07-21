@@ -26,17 +26,33 @@ import (
 // than a notification because the authoritative answer lives in the database, and a poll cannot miss an edge.
 const defaultApplierReconcileInterval = 15 * time.Second
 
-// runningLoop is one Interface's live application loop.
+// runningLoop is one Interface's live application loop. generation increases every time a loop is created for
+// that Interface, so a test (and an operator reading logs) can tell a REPLACEMENT loop from a duplicate one.
 type runningLoop struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	cancel     context.CancelFunc
+	done       chan struct{}
+	generation int
+}
+
+// loopObserver is how a test watches the loop lifecycle from OUTSIDE the supervisor. Production leaves it nil.
+// Without it, "exactly one loop per Interface" can only be asserted indirectly, and the previous four-supervisor
+// test proved nothing of the sort: four supervisors keep four independent loop maps.
+type loopObserver interface {
+	loopStarted(iface string, generation int)
+	loopStopped(iface string, generation int)
 }
 
 // runApplierSupervisor keeps the set of application loops equal to the set of ACTIVE Interfaces until ctx ends,
 // then cancels and drains every loop it started.
 func runApplierSupervisor(ctx context.Context, a Assignment, repo Repo, ap StayApplier, deps *Deps) {
+	runApplierSupervisorObserved(ctx, a, repo, ap, deps, nil)
+}
+
+// runApplierSupervisorObserved is runApplierSupervisor with an optional lifecycle observer for tests.
+func runApplierSupervisorObserved(ctx context.Context, a Assignment, repo Repo, ap StayApplier, deps *Deps, obs loopObserver) {
 	var mu sync.Mutex
 	loops := map[string]*runningLoop{}
+	generations := map[string]int{} // per-Interface loop generation, monotonic for the life of the supervisor
 
 	stopAll := func() {
 		mu.Lock()
@@ -82,10 +98,19 @@ func runApplierSupervisor(ctx context.Context, a Assignment, repo Repo, ap StayA
 				continue
 			}
 			lctx, cancel := context.WithCancel(ctx)
-			l := &runningLoop{cancel: cancel, done: make(chan struct{})}
+			generations[id]++
+			l := &runningLoop{cancel: cancel, done: make(chan struct{}), generation: generations[id]}
 			loops[id] = l
+			if obs != nil {
+				obs.loopStarted(id, l.generation)
+			}
 			go func(id string, l *runningLoop) {
-				defer close(l.done)
+				defer func() {
+					if obs != nil {
+						obs.loopStopped(id, l.generation)
+					}
+					close(l.done)
+				}()
 				runApplierScope(lctx, ap, applierScope{Tenant: a.TenantID, Site: a.SiteID, Interface: id},
 					applierConfig{}, deps.log())
 			}(id, l)

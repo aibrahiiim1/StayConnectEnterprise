@@ -28,7 +28,7 @@ func commerce(t *testing.T, p *pgxpool.Pool, s scope, bootstrapEmergency bool) s
 	         VALUES (gen_random_uuid(),$1,$2,'grace-pkg',true) RETURNING id),
 	  ipr AS (INSERT INTO iam_v2.internet_package_revisions(id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,settlement_methods,duration_policy)
 	          SELECT gen_random_uuid(),$1,$2,ip.id,1,spr.id,'CHECKOUT_GRACE',0,ARRAY['NOT_REQUIRED']::text[],
-	                 '{"end_mode":"GRACE_AFTER_CHECKOUT","grace_duration_seconds":3600}'::jsonb FROM ip, spr RETURNING id)
+	                 '{"end_mode":"GRACE_AFTER_CHECKOUT","grace_duration_seconds":3600,"policy_version":"CHECKOUT_GRACE_V1"}'::jsonb FROM ip, spr RETURNING id)
 	SELECT id::text FROM ipr`, s.tenant, s.site).Scan(&pkgRev); err != nil {
 		t.Fatalf("seed commerce: %v", err)
 	}
@@ -592,5 +592,90 @@ func TestIntegration_F2_StaleEventIsANoOp(t *testing.T) {
 	outcome, code := eventOutcome(t, p, s, "F2-LATE")
 	if outcome != "MANUAL_REVIEW" || code != "GC_ON_TERMINAL_STAY" {
 		t.Fatalf("late event outcome=%s code=%s, want MANUAL_REVIEW/GC_ON_TERMINAL_STAY", outcome, code)
+	}
+}
+
+// TestIntegration_TwoDaemonProcessesCannotApplyOneEventTwice proves the property that matters when more than
+// one pmsd instance exists: the loop-per-Interface bookkeeping inside a single process is NOT what prevents
+// double application — the database is. Two processors built on SEPARATE connection pools stand in exactly the
+// relationship two daemon processes have to the database (independent connections, no shared memory, no shared
+// loop map), and the per-Interface advisory application barrier plus the transactional event claim still
+// admit exactly one application per event.
+func TestIntegration_TwoDaemonProcessesCannotApplyOneEventTwice(t *testing.T) {
+	ctx := context.Background()
+	// two independent pools = two independent "processes" as far as PostgreSQL is concerned
+	p1 := pool(t)
+	defer p1.Close()
+	p2 := pool(t)
+	defer p2.Close()
+
+	s := seed(t, p1)
+	commerce(t, p1, s, true)
+	daemonA := NewProcessorWithCheckout(p1, checkout.NewConverter(p1))
+	daemonB := NewProcessorWithCheckout(p2, checkout.NewConverter(p2))
+
+	// a full arrival + departure for the same reservation, queued before anything starts
+	insertLive(t, p1, s, "TP-GI", "GI", pay("R930", "930", "Two", "Daemons", "F930", "260101", "260105"))
+	insertLiveAt(t, p1, s, "TP-GO", "GO", pay("R930", "930", "Two", "Daemons", "F930", "260101", "260105"),
+		time.Now().Add(-time.Hour))
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 32)
+	for _, d := range []*Processor{daemonA, daemonB} {
+		for i := 0; i < 8; i++ { // several workers per "process", as a real daemon runs
+			wg.Add(1)
+			go func(d *Processor) {
+				defer wg.Done()
+				for {
+					ok, err := d.ProcessNext(context.Background(), s.tenant, s.site, s.iface)
+					if err != nil {
+						errs <- err
+						return
+					}
+					if !ok {
+						return
+					}
+				}
+			}(d)
+		}
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("two-process application did not drain — possible cross-process deadlock")
+	}
+	close(errs)
+	for e := range errs {
+		t.Fatalf("cross-process application error: %v", e)
+	}
+
+	// each event applied exactly once, in order, with exactly one conversion
+	giStatus, _ := eventOutcome(t, p1, s, "TP-GI")
+	goStatus, goReview := eventOutcome(t, p1, s, "TP-GO")
+	if giStatus != "APPLIED" || goStatus != "APPLIED" {
+		t.Fatalf("GI=%s GO=%s (review=%s): both events must apply exactly once", giStatus, goStatus, goReview)
+	}
+	var stayID, status string
+	var version int
+	if err := p1.QueryRow(ctx, `SELECT id::text, status, last_applied_event_version FROM iam_v2.stays
+		WHERE pms_interface_id=$1 AND external_reservation_id='R930'`, s.iface).Scan(&stayID, &status, &version); err != nil {
+		t.Fatal(err)
+	}
+	if status != "CHECKED_OUT" {
+		t.Fatalf("stay=%s, want CHECKED_OUT", status)
+	}
+	// the application counter is the strongest statement: exactly two applications happened, not three
+	if version != 2 {
+		t.Fatalf("last_applied_event_version = %d, want exactly 2 (one per event, applied once each)", version)
+	}
+	if n := countRows(t, p1, `SELECT count(*) FROM iam_v2.checkout_grace_audit WHERE stay_id=$1`, stayID); n != 1 {
+		t.Fatalf("checkout audits = %d, want exactly 1", n)
+	}
+	// (this Stay never held an entitlement — both events are queued before anything can grant one — so the
+	// conversion correctly produces NO grace. The audit is the evidence that it ran exactly once.)
+	if n := countRows(t, p1, `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1 AND end_mode='GRACE_AFTER_CHECKOUT'`, stayID); n != 0 {
+		t.Fatalf("grace entitlements = %d: a Stay with no entitlement at the boundary must earn none", n)
 	}
 }

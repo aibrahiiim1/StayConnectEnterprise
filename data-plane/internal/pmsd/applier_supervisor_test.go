@@ -175,41 +175,167 @@ func TestApplierReconcilesInterfaceChanges(t *testing.T) {
 	}
 }
 
-// Reconciling concurrently must never produce two loops for one Interface: the loop map is the single source
-// of truth for whether one already exists.
-func TestConcurrentReconcileDoesNotDuplicateLoops(t *testing.T) {
+// loopLedger watches the supervisor's loop lifecycle from outside and records, per Interface, every start and
+// stop with its generation. It is what makes "exactly one live loop per Interface" an assertion rather than a
+// hope: counting live loops directly is the only way to distinguish a REPLACEMENT from a DUPLICATE.
+type loopLedger struct {
+	mu    sync.Mutex
+	live  map[string]int      // interface -> currently live loops
+	peak  map[string]int      // interface -> highest simultaneous live loops ever observed
+	order map[string][]string // interface -> ordered lifecycle events ("start:1", "stop:1", ...)
+}
+
+func newLoopLedger() *loopLedger {
+	return &loopLedger{live: map[string]int{}, peak: map[string]int{}, order: map[string][]string{}}
+}
+
+func (l *loopLedger) loopStarted(iface string, gen int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.live[iface]++
+	if l.live[iface] > l.peak[iface] {
+		l.peak[iface] = l.live[iface]
+	}
+	l.order[iface] = append(l.order[iface], "start:"+itoa(gen))
+}
+
+func (l *loopLedger) loopStopped(iface string, gen int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.live[iface]--
+	l.order[iface] = append(l.order[iface], "stop:"+itoa(gen))
+}
+
+func (l *loopLedger) snapshot(iface string) (live, peak int, events []string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.live[iface], l.peak[iface], append([]string(nil), l.order[iface]...)
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
+}
+
+// ONE production supervisor, hammered with concurrent reconcile-triggering changes: there must never be two
+// live loops for one Interface, and a removed loop must fully stop before its replacement starts (generations
+// must not overlap). The previous four-supervisor test could not show this — four supervisors keep four
+// independent loop maps, so it only ever proved that they all drain.
+func TestSingleSupervisorKeepsExactlyOneLoopPerInterface(t *testing.T) {
 	ap := newFakeApplier()
 	repo := &reconcileRepo{}
-	repo.set("i1", "i2", "i3")
-	deps := &Deps{Log: quietLog(), ApplierReconcileInterval: 50 * time.Millisecond}
+	repo.set("i1", "i2")
+	deps := &Deps{Log: quietLog(), ApplierReconcileInterval: 20 * time.Millisecond}
+	ledger := newLoopLedger()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	// several supervisors would be a bug in production, but running them here is the cheapest way to hammer
-	// the reconcile path concurrently; each keeps its OWN loop set, so we assert on drain rather than count.
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			runApplierSupervisor(ctx, Assignment{TenantID: "t", SiteID: "s"}, repo, ap, deps)
-		}()
-	}
-	waitUntil(t, "all interfaces to be applied", func() bool {
-		return ap.callsFor("i1") > 0 && ap.callsFor("i2") > 0 && ap.callsFor("i3") > 0
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runApplierSupervisorObserved(ctx, Assignment{TenantID: "t", SiteID: "s"}, repo, ap, deps, ledger)
+	}()
+
+	waitUntil(t, "both interfaces to be applying", func() bool {
+		return ap.callsFor("i1") > 0 && ap.callsFor("i2") > 0
 	})
-	// flip the set repeatedly while everything is running: no panic, no deadlock, and a clean drain
-	for i := 0; i < 5; i++ {
+
+	// flip i2 in and out repeatedly while i1 is untouched
+	for i := 0; i < 6; i++ {
 		repo.set("i1")
-		time.Sleep(20 * time.Millisecond)
-		repo.set("i1", "i2", "i3")
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(40 * time.Millisecond)
+		repo.set("i1", "i2")
+		time.Sleep(40 * time.Millisecond)
 	}
 	cancel()
-	drained := make(chan struct{})
-	go func() { wg.Wait(); close(drained) }()
 	select {
-	case <-drained:
+	case <-done:
 	case <-time.After(15 * time.Second):
-		t.Fatal("concurrent reconciliation did not drain — likely a deadlock in the loop map")
+		t.Fatal("the supervisor did not drain")
 	}
+
+	for _, iface := range []string{"i1", "i2"} {
+		live, peak, events := ledger.snapshot(iface)
+		if peak > 1 {
+			t.Fatalf("%s had %d simultaneous loops: %v", iface, peak, events)
+		}
+		if live != 0 {
+			t.Fatalf("%s left %d loops running after shutdown: %v", iface, live, events)
+		}
+		// generations must alternate start/stop with no overlap: start:1 stop:1 start:2 stop:2 ...
+		for i, e := range events {
+			wantPrefix := "start:"
+			if i%2 == 1 {
+				wantPrefix = "stop:"
+			}
+			if len(e) < len(wantPrefix) || e[:len(wantPrefix)] != wantPrefix {
+				t.Fatalf("%s lifecycle is not strictly alternating: %v", iface, events)
+			}
+			if i%2 == 1 && e[len(wantPrefix):] != events[i-1][len("start:"):] {
+				t.Fatalf("%s stopped a different generation than it started: %v", iface, events)
+			}
+		}
+	}
+	// i1 was never removed, so it must have run exactly one generation for the whole test
+	if _, _, events := ledger.snapshot("i1"); len(events) != 2 || events[0] != "start:1" {
+		t.Fatalf("an untouched interface was disturbed: %v", events)
+	}
+	// i2 must have been replaced, never duplicated
+	if _, _, events := ledger.snapshot("i2"); len(events) < 4 {
+		t.Fatalf("i2 was expected to stop and restart at least once: %v", events)
+	}
+}
+
+// A slow-draining removed loop must not overlap with its replacement: the supervisor waits for the old
+// generation to finish before a new one for the same Interface can start.
+func TestReplacementLoopWaitsForTheOldOneToDrain(t *testing.T) {
+	slow := &slowApplier{delay: 200 * time.Millisecond, inner: newFakeApplier()}
+	repo := &reconcileRepo{}
+	repo.set("i1")
+	deps := &Deps{Log: quietLog(), ApplierReconcileInterval: 20 * time.Millisecond}
+	ledger := newLoopLedger()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runApplierSupervisorObserved(ctx, Assignment{TenantID: "t", SiteID: "s"}, repo, slow, deps, ledger)
+	}()
+	waitUntil(t, "the slow interface to start", func() bool { return slow.inner.callsFor("i1") > 0 })
+
+	repo.set() // remove it while an application is mid-flight
+	time.Sleep(50 * time.Millisecond)
+	repo.set("i1") // and immediately bring it back
+	waitUntil(t, "the replacement loop", func() bool {
+		_, _, events := ledger.snapshot("i1")
+		return len(events) >= 3
+	})
+	cancel()
+	<-done
+
+	_, peak, events := ledger.snapshot("i1")
+	if peak > 1 {
+		t.Fatalf("a replacement loop overlapped a draining one: %v", events)
+	}
+}
+
+// slowApplier makes each application take measurable time, so a removal lands mid-flight.
+type slowApplier struct {
+	delay time.Duration
+	inner *fakeApplier
+}
+
+func (s *slowApplier) ProcessNext(ctx context.Context, tenant, site, iface string) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case <-time.After(s.delay):
+	}
+	return s.inner.ProcessNext(ctx, tenant, site, iface)
 }

@@ -181,9 +181,20 @@ export function CheckoutGraceForm({ canWrite = true }: { canWrite?: boolean }) {
                   <dt>Settlement</dt>
                   <dd>{chosen.settlement_mode.replace(/_/g, " ").toLowerCase()}</dd>
                   <dt>Plan revision</dt>
-                  <dd>{chosen.service_plan_code}</dd>
+                  <dd>
+                    {chosen.service_plan_code} · revision {chosen.service_plan_revision_no}
+                  </dd>
+                  <dt>Time accounting</dt>
+                  <dd>{chosen.time_accounting_mode.replace(/_/g, " ").toLowerCase()}</dd>
+                  <dt>End mode</dt>
+                  <dd>{chosen.end_mode.replace(/_/g, " ").toLowerCase()}</dd>
+                  <dt>Policy version</dt>
+                  <dd>{chosen.policy_version}</dd>
                   <dt>Status</dt>
-                  <dd>{chosen.is_current ? "current revision" : "superseded"}</dd>
+                  <dd>
+                    {chosen.is_current ? "current revision" : "superseded"}
+                    {chosen.is_active ? "" : " · package inactive"}
+                  </dd>
                 </dl>
               )}
 

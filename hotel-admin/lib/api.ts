@@ -189,14 +189,19 @@ export type GracePackageOption = {
   revision_no: number;
   service_plan_revision_id: string;
   service_plan_code: string;
+  service_plan_revision_no: number;
   down_kbps: number;
   up_kbps: number;
   data_quota_bytes: number;
   device_limit: number;
   device_limit_policy: string;
+  time_accounting_mode: string;
   grace_duration_seconds: number;
+  end_mode: string;
+  policy_version: string;
   settlement_mode: string;
   is_current: boolean;
+  is_active: boolean;
   selected: boolean;
 };
 

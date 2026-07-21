@@ -146,7 +146,9 @@ describe("Checkout grace page", () => {
     service_plan_revision_id: "plan-1", service_plan_code: "site-grace-plan",
     down_kbps: 4000, up_kbps: 1500, data_quota_bytes: 524288000, device_limit: 2,
     device_limit_policy: "REJECT_NEW_DEVICE", grace_duration_seconds: 3600,
-    settlement_mode: "NOT_REQUIRED", is_current: true, selected: true,
+    settlement_mode: "NOT_REQUIRED", is_current: true, is_active: true, selected: true,
+    service_plan_revision_no: 1, time_accounting_mode: "VALIDITY_WINDOW",
+    end_mode: "GRACE_AFTER_CHECKOUT", policy_version: "CHECKOUT_GRACE_V1",
   };
   const state = (v: number) => ({ published: v > 0, config_version: v, supported_device_policies: ["REJECT_NEW_DEVICE"] });
 
@@ -238,7 +240,9 @@ describe("Concurrency contracts in the UI", () => {
             service_plan_revision_id: "plan-1", service_plan_code: "site-grace-plan",
             down_kbps: 4000, up_kbps: 1500, data_quota_bytes: 524288000, device_limit: 2,
             device_limit_policy: "REJECT_NEW_DEVICE", grace_duration_seconds: 3600,
-            settlement_mode: "NOT_REQUIRED", is_current: true, selected: true,
+            settlement_mode: "NOT_REQUIRED", is_current: true, is_active: true, selected: true,
+            service_plan_revision_no: 1, time_accounting_mode: "VALIDITY_WINDOW",
+            end_mode: "GRACE_AFTER_CHECKOUT", policy_version: "CHECKOUT_GRACE_V1",
           }],
           meta: { has_more: false },
         });
