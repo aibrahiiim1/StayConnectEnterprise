@@ -1,0 +1,4 @@
+commit 30757b1ed8e5d74984796906bfcc4a72b6448b09
+Date:   Tue Jul 21 19:51:02 2026 +0300
+
+    Phase 3 netd shaping plan + acctd expiry enforcement (inventory_head): derived plan, true-time window/quota endings with revocation: PG16-green
