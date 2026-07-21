@@ -371,15 +371,68 @@ FORGED="$(Q "SELECT id FROM iam_v2.entitlement_state_transitions WHERE entitleme
 expect_err "INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at,supersedes) VALUES ('$RT','$RS','$BENT',4,'ACTIVE','ACTIVE',now(),'$FORGED');" \
   && ok "a transition claiming to supersede a fact it has not invalidated is refused (§5)" || no "forged supersession accepted"
 
+echo '== CONTROLLED device authorization / deauthorization (§7) =='
+# the two controlled operations are the ONLY approved way to open/close an authorization interval: they keep
+# the CURRENT view and the append-only interval history in step, enforce the plan device limit atomically, and
+# are idempotent in both directions.
+DST="$(Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$RT','$RS','$I','RDV','SDV','IN_HOUSE',1,0) RETURNING id;")"
+DENT="$(Q "SELECT gen_random_uuid();")"; DPUR="$(Q "SELECT gen_random_uuid();")"
+DDEV="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:bb:01'::macaddr) RETURNING id;")"
+Q "DO \$do\$ BEGIN
+  INSERT INTO iam_v2.purchases(id,tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state) VALUES ('$DPUR','$RT','$RS','$EPKG','$I','$DST','ADMIN_GRANT',0,'GRANTED');
+  INSERT INTO iam_v2.entitlements(id,tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status) VALUES ('$DENT','$RT','$RS','$DST','$I','$DPUR','{}'::jsonb,'$ESPR','$EPKG','VALIDITY_WINDOW','AT_CHECKOUT','PENDING');
+  PERFORM iam_v2.apply_entitlement_transition('$DENT','PENDING',now() - interval '2 hours','SEED');
+END \$do\$;" >/dev/null
+# a device may only be authorized on an ACTIVE entitlement
+expect_err "SELECT iam_v2.authorize_entitlement_device('$DENT','$DDEV',now());" \
+  && ok "device authorization refused while the entitlement is not ACTIVE (§7)" || no "authorized a device on a non-ACTIVE entitlement"
+Q "SELECT iam_v2.apply_entitlement_transition('$DENT','ACTIVE',now() - interval '90 minutes','GRANT');" >/dev/null
+DA1="$(Q "SELECT iam_v2.authorize_entitlement_device('$DENT','$DDEV',now() - interval '80 minutes');")"
+[ -n "$DA1" ] && ok "controlled device authorization opened an interval (§7)" || no "controlled authorization failed"
+[ "$(Q "SELECT count(*) FROM iam_v2.entitlement_devices WHERE entitlement_id='$DENT' AND device_id='$DDEV' AND status='AUTHORIZED';")" = 1 ] \
+  && ok "current view and interval history written together (§7)" || no "current view not updated"
+[ "$(Q "SELECT iam_v2.authorize_entitlement_device('$DENT','$DDEV',now());")" = "$DA1" ] \
+  && ok "re-authorizing an already-open device is IDEMPOTENT (no second interval) (§7)" || no "duplicate interval opened"
+# the plan limit (the canonical Emergency plan allows exactly 1) is enforced by the controlled operation itself
+DEV3="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:bb:03'::macaddr) RETURNING id;")"
+DEV4="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:bb:04'::macaddr) RETURNING id;")"
+expect_err "SELECT iam_v2.authorize_entitlement_device('$DENT','$DEV3',now());" \
+  && ok "plan device limit enforced by the controlled authorization (MAX_DEVICES_REACHED) (§7)" || no "device limit exceeded"
+# a device from a DIFFERENT site can never be authorized
+XT="$(Q "INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id;")"
+XS="$(Q "INSERT INTO public.sites(id,tenant_id) VALUES (gen_random_uuid(),'$XT') RETURNING id;")"
+XDEV="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$XT','$XS',gen_random_uuid(),'02:00:00:00:bb:09'::macaddr) RETURNING id;")"
+expect_err "SELECT iam_v2.authorize_entitlement_device('$DENT','$XDEV',now());" \
+  && ok "a device outside the entitlement's tenant/site is never authorizable (§7)" || no "cross-scope device authorized"
+# deauthorization closes the interval, is idempotent, and cannot precede the interval start
+expect_err "SELECT iam_v2.deauthorize_entitlement_device('$DENT','$DDEV',now() - interval '5 hours','ADMIN');" \
+  && ok "deauthorization before the interval start refused (no negative authorized time) (§7)" || no "interval closed before it opened"
+[ "$(Q "SELECT iam_v2.deauthorize_entitlement_device('$DENT','$DDEV',now(),'GUEST_LOGOUT');")" = t ] \
+  && ok "controlled deauthorization closed the open interval (§7)" || no "deauthorization failed"
+[ "$(Q "SELECT iam_v2.deauthorize_entitlement_device('$DENT','$DDEV',now(),'GUEST_LOGOUT');")" = f ] \
+  && ok "deauthorizing an already-closed device is a no-op, not an error (§7)" || no "double deauthorization errored"
+[ "$(Q "SELECT count(*) FROM iam_v2.entitlement_device_authorizations WHERE entitlement_id='$DENT' AND device_id='$DDEV' AND deauthorized_at IS NOT NULL;")" = 1 ] \
+  && ok "the CLOSED interval remains readable (append-only) (§7)" || no "closed interval lost"
+# the freed slot lets the previously-refused device in, still bounded by the plan limit
+Q "SELECT iam_v2.authorize_entitlement_device('$DENT','$DEV3',now());" >/dev/null
+[ "$(Q "SELECT count(*) FROM iam_v2.entitlement_device_authorizations WHERE entitlement_id='$DENT' AND deauthorized_at IS NULL;")" = 1 ] \
+  && ok "a freed device slot is reusable, still bounded by the plan limit (§7)" || no "device slots not reused correctly"
+expect_err "SELECT iam_v2.authorize_entitlement_device('$DENT','$DEV4',now());"   && ok "the limit still holds after the slot was reused (§7)" || no "limit not re-enforced"
+Q "SELECT iam_v2.deauthorize_entitlement_device('$DENT','$DEV3',now(),'ADMIN');" >/dev/null
+Q "SELECT iam_v2.authorize_entitlement_device('$DENT','$DDEV',now());" >/dev/null
+[ "$(Q "SELECT count(*) FROM iam_v2.entitlement_device_authorizations WHERE entitlement_id='$DENT' AND device_id='$DDEV' AND seq=2 AND deauthorized_at IS NULL;")" = 1 ] \
+  && ok "re-authorization opens a FRESH interval instead of reopening a closed one (§7)" || no "closed interval reopened"
+
+
 
 # device intervals (§7): open one, then a second open is rejected; interval without a binding rejected
 DEV="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:aa:01'::macaddr) RETURNING id;")"
 DEV2="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:aa:02'::macaddr) RETURNING id;")"
-Q "INSERT INTO iam_v2.entitlement_devices(tenant_id,site_id,entitlement_id,device_id,status,first_authorized,last_authorized) VALUES ('$RT','$RS','$ENT','$DEV','AUTHORIZED',now(),now());" >/dev/null
+Q "INSERT INTO iam_v2.entitlement_devices(tenant_id,site_id,entitlement_id,device_id,status,first_authorized,last_authorized) VALUES ('$RT','$RS','$ENT','$DDEV','AUTHORIZED',now(),now());" >/dev/null
 expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV2',1,now());" && ok "device authorization without an entitlement_devices binding rejected (§7)" || no "unbound interval accepted"
-expect_ok  "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',1,now());" && ok "first device authorization interval (seq=1) accepted (§7)" || no "valid interval blocked"
-expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',2,now());" && ok "second OPEN interval for the same device rejected (§7)" || no "two open intervals accepted"
-expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DEV',3,now());" && ok "non-contiguous device authorization seq rejected (§7)" || no "sparse device seq accepted"
+expect_ok  "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DDEV',1,now());" && ok "first device authorization interval (seq=1) accepted (§7)" || no "valid interval blocked"
+expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DDEV',2,now());" && ok "second OPEN interval for the same device rejected (§7)" || no "two open intervals accepted"
+expect_err "INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at) VALUES ('$RT','$RS','$ENT','$DDEV',3,now());" && ok "non-contiguous device authorization seq rejected (§7)" || no "sparse device seq accepted"
 # config publish (§10): a material change increments config_version by exactly 1; an IDENTICAL re-publish does not
 V1="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400);")"
 V2="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',86400);")"

@@ -42,6 +42,8 @@ DROP FUNCTION IF EXISTS iam_v2.p3_entitlement_status_coherent();
 DROP FUNCTION IF EXISTS iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text);
 DROP FUNCTION IF EXISTS iam_v2.supersede_entitlement_transition(uuid,text,timestamptz,text);
 DROP FUNCTION IF EXISTS iam_v2.terminate_entitlement_at_boundary(uuid,timestamptz,text);
+DROP FUNCTION IF EXISTS iam_v2.authorize_entitlement_device(uuid,uuid,timestamptz);
+DROP FUNCTION IF EXISTS iam_v2.deauthorize_entitlement_device(uuid,uuid,timestamptz,text);
 DROP FUNCTION IF EXISTS iam_v2.p3_rederive_entitlement_times(uuid);
 DROP TRIGGER IF EXISTS p3_est_appendonly ON iam_v2.entitlement_state_transitions;
 DROP TRIGGER IF EXISTS p3_est_insert ON iam_v2.entitlement_state_transitions;

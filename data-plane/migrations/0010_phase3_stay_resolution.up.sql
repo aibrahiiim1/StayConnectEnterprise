@@ -663,6 +663,81 @@ BEGIN
 END $fn$;
 REVOKE EXECUTE ON FUNCTION iam_v2.terminate_entitlement_at_boundary(uuid,timestamptz,text) FROM PUBLIC;
 
+-- ============================================================================
+-- CONTROLLED DEVICE AUTHORIZATION / DEAUTHORIZATION. entitlement_devices is the CURRENT view and
+-- entitlement_device_authorizations is the append-only INTERVAL history that a past-boundary question is
+-- answered from. Keeping the two in step is not something each caller should re-implement: these two
+-- operations are the ONLY approved way to open and close an authorization interval, they take the L3
+-- Entitlement lock first (global lock order), they enforce the Entitlement's own device limit atomically
+-- against concurrent authorizations, and they are IDEMPOTENT (re-authorizing an already-open device does not
+-- open a second interval; deauthorizing an already-closed one is a no-op).
+-- ============================================================================
+CREATE OR REPLACE FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamptz) RETURNS uuid
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_t uuid; v_s uuid; v_status text; v_limit int; v_policy text; v_open int; v_seq bigint; v_id uuid; v_existing uuid;
+BEGIN
+  SELECT tenant_id, site_id, status INTO v_t, v_s, v_status FROM iam_v2.entitlements WHERE id = p_ent FOR UPDATE;
+  IF v_t IS NULL THEN RAISE EXCEPTION 'entitlement % not found', p_ent; END IF;
+  IF v_status <> 'ACTIVE' THEN
+    RAISE EXCEPTION 'device authorization requires an ACTIVE entitlement (status %)', v_status;
+  END IF;
+  -- the device must exist in the SAME tenant/site scope (never another tenant's device)
+  PERFORM 1 FROM iam_v2.devices WHERE id = p_device AND tenant_id = v_t AND site_id = v_s;
+  IF NOT FOUND THEN RAISE EXCEPTION 'device % is not in the entitlement scope', p_device; END IF;
+  -- IDEMPOTENT: an already-open interval for this device is returned unchanged
+  SELECT id INTO v_existing FROM iam_v2.entitlement_device_authorizations
+    WHERE entitlement_id = p_ent AND device_id = p_device AND deauthorized_at IS NULL;
+  IF v_existing IS NOT NULL THEN
+    UPDATE iam_v2.entitlement_devices SET last_authorized = p_at
+      WHERE entitlement_id = p_ent AND device_id = p_device;
+    RETURN v_existing;
+  END IF;
+  -- device limit is enforced HERE, under the entitlement row lock, so concurrent authorizations cannot both win
+  SELECT spr.max_concurrent_devices, spr.device_limit_policy INTO v_limit, v_policy
+    FROM iam_v2.entitlements e JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+    WHERE e.id = p_ent;
+  SELECT count(*) INTO v_open FROM iam_v2.entitlement_device_authorizations
+    WHERE entitlement_id = p_ent AND deauthorized_at IS NULL;
+  IF v_limit IS NOT NULL AND v_open >= v_limit THEN
+    IF COALESCE(v_policy,'REJECT_NEW_DEVICE') <> 'REJECT_NEW_DEVICE' THEN
+      RAISE EXCEPTION 'device limit policy % is not implemented in this phase (fail closed)', v_policy;
+    END IF;
+    RAISE EXCEPTION 'MAX_DEVICES_REACHED: entitlement % already has % of % devices authorized', p_ent, v_open, v_limit;
+  END IF;
+  INSERT INTO iam_v2.entitlement_devices(tenant_id,site_id,entitlement_id,device_id,status,first_authorized,last_authorized)
+    VALUES (v_t,v_s,p_ent,p_device,'AUTHORIZED',p_at,p_at)
+    ON CONFLICT (entitlement_id,device_id) DO UPDATE SET status='AUTHORIZED', last_authorized=p_at,
+      first_authorized = COALESCE(iam_v2.entitlement_devices.first_authorized, p_at), disconnected_reason=NULL;
+  SELECT COALESCE(max(seq),0)+1 INTO v_seq FROM iam_v2.entitlement_device_authorizations
+    WHERE entitlement_id = p_ent AND device_id = p_device;
+  INSERT INTO iam_v2.entitlement_device_authorizations(tenant_id,site_id,entitlement_id,device_id,seq,authorized_at)
+    VALUES (v_t,v_s,p_ent,p_device,v_seq,p_at) RETURNING id INTO v_id;
+  RETURN v_id;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.authorize_entitlement_device(uuid,uuid,timestamptz) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION iam_v2.deauthorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamptz, p_reason text) RETURNS boolean
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_open uuid; v_start timestamptz;
+BEGIN
+  IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'deauthorization reason must be a bounded machine code';
+  END IF;
+  PERFORM 1 FROM iam_v2.entitlements WHERE id = p_ent FOR UPDATE;    -- L3 lock first
+  SELECT id, authorized_at INTO v_open, v_start FROM iam_v2.entitlement_device_authorizations
+    WHERE entitlement_id = p_ent AND device_id = p_device AND deauthorized_at IS NULL;
+  IF v_open IS NULL THEN RETURN false; END IF;                        -- idempotent
+  -- an interval may not close before it opened (that would invent negative authorized time)
+  IF p_at < v_start THEN
+    RAISE EXCEPTION 'deauthorization % precedes the interval start %', p_at, v_start;
+  END IF;
+  UPDATE iam_v2.entitlement_device_authorizations SET deauthorized_at = p_at WHERE id = v_open;
+  UPDATE iam_v2.entitlement_devices SET status='DISCONNECTED', disconnected_reason = p_reason
+    WHERE entitlement_id = p_ent AND device_id = p_device;
+  RETURN true;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.deauthorize_entitlement_device(uuid,uuid,timestamptz,text) FROM PUBLIC;
+
 -- (item 4/7) CONTROLLED-WRITER AUTHORIZATION BOUNDARY. A caller can set any session GUC, but it cannot become
 -- the schema owner: inside a SECURITY DEFINER function current_user IS the owner, outside it is the caller.
 -- These guards therefore reject a NON-OWNER's raw status UPDATE, forged history INSERT, or direct authoritative
