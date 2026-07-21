@@ -184,8 +184,8 @@
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D14",
   "latest_transition_id": "T0015",
-  "acceptance_candidate_head": "32b7701be7424a777bd1b19fe2a97a3c4814fd5e",
+  "acceptance_candidate_head": "8aee1f35252f3851657984c5ab5f54281d38d5b7",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "32b7701be7424a777bd1b19fe2a97a3c4814fd5e",
+  "inventory_head": "8aee1f35252f3851657984c5ab5f54281d38d5b7",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }
