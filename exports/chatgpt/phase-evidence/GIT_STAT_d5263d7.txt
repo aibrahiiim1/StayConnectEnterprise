@@ -1,4 +1,0 @@
-commit d5263d782a142681675a8ceda7339b1ddb108bc3
-Date:   Tue Jul 21 13:47:32 2026 +0300
-
-    Phase 3 Increment-7 config-DELETE + per-family writer-owner gaps (inventory_head): PG16-green + gate 209/209
