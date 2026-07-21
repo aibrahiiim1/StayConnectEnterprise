@@ -1,0 +1,4 @@
+commit b8aeca1aa08f09b916e386d15617338e37e641d2
+Date:   Tue Jul 21 19:13:00 2026 +0300
+
+    Phase 3 post-boundary revocation + accounting attribution intervals/watermarks/delayed samples (inventory_head): PG16-green + gate 282/282

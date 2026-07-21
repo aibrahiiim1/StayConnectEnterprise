@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `d9764193f3ec318be5d938ced2aa214d1fbda50f`
-- **Provenance (generation HEAD = inventory_head):** `d9764193f3ec318be5d938ced2aa214d1fbda50f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `b8aeca1aa08f09b916e386d15617338e37e641d2`
+- **Provenance (generation HEAD = inventory_head):** `b8aeca1aa08f09b916e386d15617338e37e641d2`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 109
@@ -17,8 +17,8 @@
 | `data-plane/internal/authctx/authctx.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 Auth Context lock-order + evidence-version enforcement + UUID pin validation (inventory_head): PG16-green + lifecycle-gate 131/131 |
 | `data-plane/internal/authctx/authctx_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 Increment-7 Checkout historical-boundary + emergency-catalog + policy-consistency corrections (inventory_head): PG16-green + gate 157/157 |
 | `data-plane/internal/authctx/authctx_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 Auth Context lock-order + evidence-version enforcement + UUID pin validation (inventory_head): PG16-green + lifecycle-gate 131/131 |
-| `data-plane/internal/checkout/checkout.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 bitemporal entitlement history (inventory_head): true effective_at + recorded_at, explicit supersession, boundary termination without clamping: PG16-green + gate 254/254 |
-| `data-plane/internal/checkout/checkout_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 bitemporal entitlement history (inventory_head): true effective_at + recorded_at, explicit supersession, boundary termination without clamping: PG16-green + gate 254/254 |
+| `data-plane/internal/checkout/checkout.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 post-boundary revocation + accounting attribution intervals/watermarks/delayed samples (inventory_head): PG16-green + gate 282/282 |
+| `data-plane/internal/checkout/checkout_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 post-boundary revocation + accounting attribution intervals/watermarks/delayed samples (inventory_head): PG16-green + gate 282/282 |
 | `data-plane/internal/grace/grace.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 corrections: REJECT_NEW_DEVICE (no limit exception) + complete Auth Context pin set (inventory_head); lifecycle-gate 121/121 + PG16-green + race-green |
 | `data-plane/internal/grace/grace_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | @ Phase 3 corrections: REJECT_NEW_DEVICE (no limit exception) + complete Auth Context pin set (inventory_head); lifecycle-gate 121/121 + PG16-green + race-green |
 | `data-plane/internal/iamv2/pms_config.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | @ Phase 3 increment 2 (inventory_head): migration 0010 + pms_config flags + machine-grounded gap audit |
@@ -65,8 +65,8 @@
 | `data-plane/internal/stayengine/resolve_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | @ Phase 3 Increment 4 foundation (inventory_head): deterministic Stay-resolution decision core (internal/stayengine) |
 | `data-plane/internal/staygrant/staygrant.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 atomic Auth-Context/Quote/Purchase/Entitlement grant + controlled device authorization (inventory_head): PG16-green + gate 267/267 |
 | `data-plane/internal/staygrant/staygrant_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 atomic Auth-Context/Quote/Purchase/Entitlement grant + controlled device authorization (inventory_head): PG16-green + gate 267/267 |
-| `data-plane/migrations/0010_phase3_stay_resolution.down.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Phase 3 atomic Auth-Context/Quote/Purchase/Entitlement grant + controlled device authorization (inventory_head): PG16-green + gate 267/267 |
-| `data-plane/migrations/0010_phase3_stay_resolution.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Phase 3 atomic Auth-Context/Quote/Purchase/Entitlement grant + controlled device authorization (inventory_head): PG16-green + gate 267/267 |
+| `data-plane/migrations/0010_phase3_stay_resolution.down.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Phase 3 post-boundary revocation + accounting attribution intervals/watermarks/delayed samples (inventory_head): PG16-green + gate 282/282 |
+| `data-plane/migrations/0010_phase3_stay_resolution.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | Phase 3 post-boundary revocation + accounting attribution intervals/watermarks/delayed samples (inventory_head): PG16-green + gate 282/282 |
 | `deploy/systemd/stayconnect-pmsd.service` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | @ Phase 3 increment 3 (inventory_head): pmsd read-only PMS connector daemon (ADR-0001), DARK |
 | `docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/Phase3-Controlled-Writer-Privilege-Manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 controlled-writer manifest documentation sync (inventory_head): doc-only |
@@ -79,31 +79,31 @@
 | `docs/architecture/adr/ADR-0001-pmsd-connector-ownership.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
-| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_c018f84.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/GIT_STAT_d976419.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `exports/chatgpt/stayconnectenterprise/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 Increment-7 Checkout history-integrity corrections (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 increment 3 hardening PART A (delivery_head): complete staged manifest + rebuilt packs + pointer |
@@ -113,9 +113,9 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 Increment-7 Checkout history-integrity corrections (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 3 atomic Auth-Context/Quote/Purchase/Entitlement grant + controlled device authorization (inventory_head): PG16-green + gate 267/267 |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 3 post-boundary revocation + accounting attribution intervals/watermarks/delayed samples (inventory_head): PG16-green + gate 282/282 |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `iam_v2_scratch/phase3_0010_lifecycle.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 atomic Auth-Context/Quote/Purchase/Entitlement grant + controlled device authorization (inventory_head): PG16-green + gate 267/267 |
+| `iam_v2_scratch/phase3_0010_lifecycle.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 post-boundary revocation + accounting attribution intervals/watermarks/delayed samples (inventory_head): PG16-green + gate 282/282 |
 | `scripts/edge-migrate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
 | `scripts/pmsd-pg-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 atomic Auth-Context/Quote/Purchase/Entitlement grant + controlled device authorization (inventory_head): PG16-green + gate 267/267 |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
@@ -127,14 +127,14 @@
  .github/workflows/phase3-software.yml              |   64 +
  data-plane/cmd/pmsd/main.go                        |  120 ++
  data-plane/internal/authctx/authctx.go             |  296 ++++
- .../internal/authctx/authctx_integration_test.go   |  726 ++++++++++
+ .../internal/authctx/authctx_integration_test.go   |  726 +++++++++
  data-plane/internal/authctx/authctx_test.go        |   90 ++
- data-plane/internal/checkout/checkout.go           |  690 +++++++++
- .../internal/checkout/checkout_integration_test.go |  771 ++++++++++
- data-plane/internal/grace/grace.go                 |  159 +++
+ data-plane/internal/checkout/checkout.go           |  787 +++++++++
+ .../internal/checkout/checkout_integration_test.go |  954 +++++++++++
+ data-plane/internal/grace/grace.go                 |  159 ++
  data-plane/internal/grace/grace_test.go            |  126 ++
  data-plane/internal/iamv2/pms_config.go            |  120 ++
- data-plane/internal/iamv2/pms_config_test.go       |  157 +++
+ data-plane/internal/iamv2/pms_config_test.go       |  157 ++
  data-plane/internal/localkeys/localkeys.go         |   38 +-
  data-plane/internal/pms/apaleo_test.go             |   25 +-
  data-plane/internal/pms/fias_wire.go               |   73 +
@@ -145,29 +145,29 @@
  data-plane/internal/pms/stub.go                    |    8 +-
  data-plane/internal/pmsd/adapter_fias.go           |  286 ++++
  data-plane/internal/pmsd/adapter_fias_test.go      |  542 +++++++
- data-plane/internal/pmsd/adapter_frames_test.go    |  257 ++++
+ data-plane/internal/pmsd/adapter_frames_test.go    |  257 +++
  data-plane/internal/pmsd/assignment.go             |  103 ++
  data-plane/internal/pmsd/barrier_test.go           |  150 ++
  data-plane/internal/pmsd/errcodes.go               |  215 +++
  data-plane/internal/pmsd/errcodes_test.go          |  136 ++
  data-plane/internal/pmsd/events.go                 |  273 ++++
  data-plane/internal/pmsd/fias_adapter.go           |   58 +
- data-plane/internal/pmsd/lockkey.go                |   86 ++
+ data-plane/internal/pmsd/lockkey.go                |   86 +
  data-plane/internal/pmsd/lockkey_test.go           |   74 +
  data-plane/internal/pmsd/pg.go                     |  379 +++++
- data-plane/internal/pmsd/pg_integration_test.go    |  613 ++++++++
+ data-plane/internal/pmsd/pg_integration_test.go    |  613 +++++++
  data-plane/internal/pmsd/pmsd.go                   |  448 ++++++
- data-plane/internal/pmsd/pmsd_test.go              |  660 +++++++++
+ data-plane/internal/pmsd/pmsd_test.go              |  660 ++++++++
  data-plane/internal/pmsd/queue.go                  |  204 +++
- data-plane/internal/pmsd/queue_test.go             |  266 ++++
- data-plane/internal/pmsd/secret.go                 |   87 ++
+ data-plane/internal/pmsd/queue_test.go             |  266 +++
+ data-plane/internal/pmsd/secret.go                 |   87 +
  data-plane/internal/pmsd/secret_test.go            |   62 +
- data-plane/internal/pmsd/strict_parse.go           |  177 +++
+ data-plane/internal/pmsd/strict_parse.go           |  177 ++
  data-plane/internal/pmsd/strict_parse_test.go      |  150 ++
  data-plane/internal/pmsd/supervisor.go             |  156 ++
- data-plane/internal/pmsd/worker.go                 |  342 +++++
+ data-plane/internal/pmsd/worker.go                 |  342 ++++
  data-plane/internal/pmsd/writer.go                 |  154 ++
- data-plane/internal/pmsd/writer_test.go            |  256 ++++
+ data-plane/internal/pmsd/writer_test.go            |  256 +++
  data-plane/internal/pmsresolve/resolve.go          |   96 ++
  data-plane/internal/pmsresolve/resolve_test.go     |  112 ++
  .../stayengine/checkout_slice_integration_test.go  |  366 +++++
@@ -176,9 +176,9 @@
  data-plane/internal/stayengine/resolve.go          |  128 ++
  data-plane/internal/stayengine/resolve_test.go     |  106 ++
  data-plane/internal/staygrant/staygrant.go         |  232 +++
- .../staygrant/staygrant_integration_test.go        |  436 ++++++
- .../0010_phase3_stay_resolution.down.sql           |  141 ++
- .../migrations/0010_phase3_stay_resolution.up.sql  | 1489 ++++++++++++++++++++
+ .../staygrant/staygrant_integration_test.go        |  436 +++++
+ .../0010_phase3_stay_resolution.down.sql           |  157 ++
+ .../migrations/0010_phase3_stay_resolution.up.sql  | 1693 ++++++++++++++++++++
  deploy/systemd/stayconnect-pmsd.service            |   41 +
  .../StayConnect-IAM-Phase2-Live-Dark-Acceptance.md |    2 +-
  .../Phase3-Controlled-Writer-Privilege-Manifest.md |   92 ++
@@ -187,17 +187,17 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   12 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   12 +-
  docs/architecture/StayConnect-IAM-Phase2-Plan.md   |    2 +-
- docs/architecture/StayConnect-IAM-Phase3-Plan.md   |  161 +++
+ docs/architecture/StayConnect-IAM-Phase3-Plan.md   |  161 ++
  .../adr/ADR-0001-pmsd-connector-ownership.md       |   53 +
  docs/context/StayConnect-IAM-Handoff.md            |   16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 ++
- docs/manifests/Phase3-change-manifest.md           |  364 +++++
+ docs/manifests/Phase3-change-manifest.md           |  370 +++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 276551 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 103256 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 41999 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 276675 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 103234 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42000 bytes
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
- .../chatgpt/phase-evidence/GIT_STAT_c018f84.txt    |    4 +
+ .../chatgpt/phase-evidence/GIT_STAT_d976419.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -215,7 +215,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   12 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  351 +++++
+ .../Phase3-change-manifest.md                      |  357 +++++
  .../StayConnect-IAM-Handoff.md                     |   16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   16 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   12 +-
@@ -223,17 +223,17 @@
  .../StayConnect-IAM-Phase2-Final-Report.md         |    4 +-
  .../StayConnect-IAM-Phase2-Live-Dark-Acceptance.md |    2 +-
  .../StayConnect-IAM-Phase2-Plan.md                 |    2 +-
- .../StayConnect-IAM-Phase3-Plan.md                 |  161 +++
+ .../StayConnect-IAM-Phase3-Plan.md                 |  161 ++
  governance/decision-register.json                  |    1 +
  governance/project-state.json                      |   73 +-
  governance/transitions/T0015.json                  |   18 +
- iam_v2_scratch/phase3_0010_lifecycle.sh            |  690 +++++++++
- scripts/edge-migrate.sh                            |  251 ++++
+ iam_v2_scratch/phase3_0010_lifecycle.sh            |  740 +++++++++
+ scripts/edge-migrate.sh                            |  251 +++
  scripts/pmsd-pg-integration.sh                     |   48 +
  tools/project-state.py                             |   49 +-
  .../tests/project_state_validator/run_mutations.py |   69 +-
  tools/validate-project-state.sh                    |    2 +-
- 109 files changed, 15966 insertions(+), 284 deletions(-)
+ 109 files changed, 16528 insertions(+), 284 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -252,6 +252,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+b8aeca1 Phase 3 post-boundary revocation + accounting attribution intervals/watermarks/delayed samples (inventory_head): PG16-green + gate 282/282
+1ffba2b @ Phase 3 atomic grant + controlled device authorization (delivery_head): complete staged manifest + rebuilt packs + pointer
 d976419 Phase 3 atomic Auth-Context/Quote/Purchase/Entitlement grant + controlled device authorization (inventory_head): PG16-green + gate 267/267
 3010a70 @ Phase 3 bitemporal entitlement history (delivery_head): complete staged manifest + rebuilt packs + pointer
 c018f84 Phase 3 bitemporal entitlement history (inventory_head): true effective_at + recorded_at, explicit supersession, boundary termination without clamping: PG16-green + gate 254/254

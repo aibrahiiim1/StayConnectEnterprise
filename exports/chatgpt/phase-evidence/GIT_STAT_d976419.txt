@@ -1,4 +1,0 @@
-commit d9764193f3ec318be5d938ced2aa214d1fbda50f
-Date:   Tue Jul 21 18:51:05 2026 +0300
-
-    Phase 3 atomic Auth-Context/Quote/Purchase/Entitlement grant + controlled device authorization (inventory_head): PG16-green + gate 267/267
