@@ -1,0 +1,4 @@
+commit b8f49f496be5a687681ecb3cb4b72a2066e758e8
+Date:   Tue Jul 21 20:17:07 2026 +0300
+
+    Phase 3 guest-portal uniform non-success contract (inventory_head): byte-identical failure responses, no oracle, audit reasons kept server-side

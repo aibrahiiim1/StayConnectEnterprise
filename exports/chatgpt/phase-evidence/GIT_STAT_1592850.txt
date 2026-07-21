@@ -1,4 +1,0 @@
-commit 1592850c714175b099e846f51a37bc0fb65ea5e8
-Date:   Tue Jul 21 20:12:18 2026 +0300
-
-    Phase 3 Hotel-Admin E2E + accessibility (inventory_head): 7 Playwright specs over mocked edged, named controls and labelled filters proven
