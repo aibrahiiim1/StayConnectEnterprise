@@ -1,4 +1,0 @@
-commit de24d2c7e598a03825368e42827c2fde5cfa84cc
-Date:   Wed Jul 22 00:51:53 2026 +0300
-
-    Phase 3 correction item 7 (inventory_head): controlled Phase-3 accounting ingestion wired into acctd with 11 composition-root cases
