@@ -29,7 +29,11 @@
 --         - stays.last_applied_event_id (exact event lineage pin);
 --         - bootstrap_emergency_grace()/emergency_grace_health() (system Emergency catalog, reserved-namespace
 --           protected) and publish_checkout_grace_config() (controlled, version-incrementing config publication).
--- No public-schema mutation. No SECURITY DEFINER. Zero runtime grants (dark).
+-- No public-schema mutation. Zero runtime grants (dark). SECURITY DEFINER is used ONLY for the narrow
+-- controlled-writer functions the PO corrections require (apply_entitlement_transition,
+-- publish_checkout_grace_config, bootstrap_emergency_grace) — each with a fixed search_path, no dynamic SQL,
+-- EXECUTE revoked from PUBLIC, and NO per-service EXECUTE grant yet: those land at Gate-P/cutover so Phase 3
+-- keeps its zero-runtime-privilege invariant. Every other function remains SECURITY INVOKER.
 BEGIN;
 
 -- ============================================================================
@@ -441,8 +445,14 @@ REVOKE EXECUTE ON FUNCTION iam_v2.p3_entitlement_status_coherent() FROM PUBLIC;
 -- (item 5) THE controlled transition operation: locks the entitlement, updates status + terminal/activation
 -- fields, and appends the matching history row ATOMICALLY (exactly one concurrent writer wins via the row lock).
 -- Every Phase-2/3 Entitlement path (grant/activate/suspend/reactivate/expire/checkout-terminate/grace) uses it.
+-- (item 4) THE CONTROLLED WRITER. SECURITY DEFINER so it executes as the schema OWNER: inside it current_user
+-- is the owner, outside it is the caller. That is an UNSPOOFABLE authorization boundary (unlike a session GUC a
+-- caller can set) and it lets a future runtime role mutate Entitlement status WITHOUT holding any direct
+-- UPDATE/INSERT grant on entitlements or the history table. Fixed search_path, no dynamic SQL, PUBLIC revoked.
+-- NOTE (DARK): EXECUTE is deliberately granted to NO runtime role yet — Phase 3 keeps ZERO runtime iam_v2
+-- privileges (gate-enforced). The exact per-service EXECUTE grants land with the Gate-P/cutover privilege step.
 CREATE OR REPLACE FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamptz, p_reason text) RETURNS void
-  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_from text; v_seq bigint; v_prev_at timestamptz; v_at timestamptz; v_term text;
 BEGIN
   IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
@@ -471,6 +481,43 @@ BEGIN
     FROM iam_v2.entitlements WHERE id = p_ent;
 END $fn$;
 REVOKE EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text) FROM PUBLIC;
+
+-- (item 4/7) CONTROLLED-WRITER AUTHORIZATION BOUNDARY. A caller can set any session GUC, but it cannot become
+-- the schema owner: inside a SECURITY DEFINER function current_user IS the owner, outside it is the caller.
+-- These guards therefore reject a NON-OWNER's raw status UPDATE, forged history INSERT, or direct authoritative
+-- grace-policy UPDATE (even one that correctly recomputes config_version+1), while the controlled functions
+-- pass. The deferred status/history coherence trigger stays as defense-in-depth behind this boundary.
+CREATE OR REPLACE FUNCTION iam_v2.p3_controlled_writer_only() RETURNS trigger
+  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE owner_role text; changed boolean := true;
+BEGIN
+  owner_role := pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid = 'iam_v2.entitlements'::regclass));
+  IF TG_TABLE_NAME = 'entitlements' THEN
+    changed := (NEW.status IS DISTINCT FROM OLD.status);   -- only status is controlled-writer-only
+  ELSIF TG_TABLE_NAME = 'site_checkout_grace_config' AND TG_OP = 'UPDATE' THEN
+    changed := (NEW.grace_package_revision_id IS DISTINCT FROM OLD.grace_package_revision_id
+      OR NEW.grace_duration_seconds IS DISTINCT FROM OLD.grace_duration_seconds
+      OR NEW.grace_down_kbps IS DISTINCT FROM OLD.grace_down_kbps
+      OR NEW.grace_up_kbps IS DISTINCT FROM OLD.grace_up_kbps
+      OR NEW.grace_data_quota_bytes IS DISTINCT FROM OLD.grace_data_quota_bytes
+      OR NEW.grace_device_limit IS DISTINCT FROM OLD.grace_device_limit
+      OR NEW.grace_device_limit_policy IS DISTINCT FROM OLD.grace_device_limit_policy
+      OR NEW.eligibility_window_seconds IS DISTINCT FROM OLD.eligibility_window_seconds
+      OR NEW.config_version IS DISTINCT FROM OLD.config_version);
+  END IF;
+  IF changed AND current_user <> owner_role THEN
+    RAISE EXCEPTION '%: authoritative writes go through the controlled iam_v2 writer functions (caller %)',
+      TG_TABLE_NAME, current_user;
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_entitlement_controlled_writer BEFORE UPDATE ON iam_v2.entitlements
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_est_controlled_writer BEFORE INSERT ON iam_v2.entitlement_state_transitions
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_grace_config_controlled_writer BEFORE UPDATE ON iam_v2.site_checkout_grace_config
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_controlled_writer_only() FROM PUBLIC;
 
 -- (item 7) INSERT-time DEVICE-AUTHORIZATION-INTERVAL guard: contiguous seq per (entitlement,device); at most one
 -- OPEN interval; a new interval cannot begin before the prior one closes; and it must reference a real
@@ -573,7 +620,7 @@ REVOKE EXECUTE ON FUNCTION iam_v2.p3_reserved_grace_codes() FROM PUBLIC;
 -- place the Emergency Package/Revision + Service-Plan/Revision are created — NOT the Checkout hot path. A
 -- pre-existing reserved-code row with mismatching identity/values FAILS CLOSED (raises); it is never adopted.
 CREATE OR REPLACE FUNCTION iam_v2.bootstrap_emergency_grace(p_tenant uuid, p_site uuid) RETURNS void
-  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_plan uuid; v_spr uuid; v_pkg uuid; v_ipr uuid;
 BEGIN
   -- (item 9) serialize per tenant/site so >=24 concurrent bootstraps are safe (exactly one provisions; the rest
@@ -685,7 +732,7 @@ ALTER TABLE iam_v2.stays ADD COLUMN last_applied_event_id uuid
 CREATE OR REPLACE FUNCTION iam_v2.publish_checkout_grace_config(
     p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration int, p_down int, p_up int, p_quota bigint,
     p_dev_limit int, p_dev_policy text) RETURNS bigint
-  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_ver bigint;
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended(p_tenant::text || ':' || p_site::text || ':grace-config', 0));

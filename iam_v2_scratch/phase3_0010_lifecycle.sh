@@ -281,6 +281,22 @@ V3="$(Q "SELECT iam_v2.publish_checkout_grace_config('$T','$S','$EPKG',3700,4000
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET grace_duration_seconds=9999 WHERE tenant_id='$T' AND site_id='$S';" && ok "raw policy UPDATE without version bump rejected (§9)" || no "raw policy update accepted"
 expect_err "UPDATE iam_v2.site_checkout_grace_config SET config_version=config_version-1 WHERE tenant_id='$T' AND site_id='$S';" && ok "config_version decrease rejected (§9)" || no "config_version decrease accepted"
 
+echo '== CONTROLLED-WRITER authorization boundary, proven as a NON-OWNER role (§4/§7) =='
+# A role that HOLDS table DML privileges but is NOT the owner must still be refused: the boundary is the
+# SECURITY DEFINER controlled writer (inside it current_user IS the owner), not a session flag the caller can set.
+Q "DROP ROLE IF EXISTS p3_writer_probe; CREATE ROLE p3_writer_probe LOGIN PASSWORD 'x' NOSUPERUSER NOCREATEDB NOCREATEROLE;" >/dev/null
+Q "GRANT USAGE ON SCHEMA iam_v2 TO p3_writer_probe;
+   GRANT SELECT, INSERT, UPDATE ON iam_v2.entitlements, iam_v2.entitlement_state_transitions, iam_v2.site_checkout_grace_config TO p3_writer_probe;" >/dev/null
+AS_PROBE(){ docker exec -e PGPASSWORD=x "$C" psql -h 127.0.0.1 -U p3_writer_probe -d "$DB" -v ON_ERROR_STOP=1 -tAqc "$1" >/dev/null 2>&1; }
+AS_PROBE "SELECT 1;" && ok "non-owner probe role can connect + read (has real table grants)" || no "probe role cannot connect"
+AS_PROBE "UPDATE iam_v2.entitlements SET status='SUSPENDED' WHERE id='$ENT';" && no "non-owner raw status UPDATE accepted" || ok "non-owner raw entitlements.status UPDATE refused by the controlled-writer boundary (§4)"
+AS_PROBE "INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at) VALUES ('$RT','$RS','$ENT',3,'ACTIVE','SUSPENDED',now());" && no "non-owner forged transition accepted" || ok "non-owner FORGED history INSERT refused (§4)"
+AS_PROBE "UPDATE iam_v2.entitlements SET status='SUSPENDED' WHERE id='$ENT'; INSERT INTO iam_v2.entitlement_state_transitions(tenant_id,site_id,entitlement_id,seq,from_state,to_state,effective_at) VALUES ('$RT','$RS','$ENT',3,'ACTIVE','SUSPENDED',now());" && no "non-owner raw update + forged matching transition accepted" || ok "non-owner raw status UPDATE + forged MATCHING transition still refused (§4)"
+AS_PROBE "UPDATE iam_v2.site_checkout_grace_config SET grace_duration_seconds=1234, config_version=config_version+1 WHERE tenant_id='$T' AND site_id='$S';" && no "non-owner raw policy update with correct +1 accepted" || ok "non-owner raw grace-policy UPDATE with a correct config_version+1 STILL refused (§7)"
+[ "$(Q "SELECT status FROM iam_v2.entitlements WHERE id='$ENT';")" = "ACTIVE" ] && ok "entitlement status unchanged after every non-owner attempt (§4)" || no "non-owner mutated status"
+Q "REVOKE ALL ON iam_v2.entitlements, iam_v2.entitlement_state_transitions, iam_v2.site_checkout_grace_config FROM p3_writer_probe; REVOKE USAGE ON SCHEMA iam_v2 FROM p3_writer_probe; DROP ROLE IF EXISTS p3_writer_probe;" >/dev/null
+ok "probe role cleaned up (no residual runtime grants)"
+
 # alert-action legal edges (§10): the first action must be OPEN — proven directly against the valid NO_GRACE
 # audit id ($CGAID). (The full OPEN->ACK->RESOLVED lifecycle + active-view semantics are proven in the PG16
 # checkout suite against a real emergency-alert audit.)
