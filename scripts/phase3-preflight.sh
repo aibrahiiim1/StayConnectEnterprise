@@ -100,6 +100,21 @@ else
   no "0010 grants a runtime privilege (Gate-P is a separate, authorized step)"
 fi
 
+# ---------------------------------------------------------------- 4b. exactly one Phase-3 shaping writer
+# ADR-0002: netd is the ONLY process that mutates Phase-3 tc state. This is checked structurally rather than
+# trusted: if acctd ever regains a tc mutation call, two daemons can race the same kernel classes on their own
+# schedules, and nothing at runtime would report it.
+if grep -qE '(AddSession|DeleteSession|EnsureBridgeInfra)\(' "$ROOT/data-plane/cmd/netd/phase3_shaping.go" 2>/dev/null; then
+  ok "netd is a Phase-3 shaping writer (ADR-0002)"
+else
+  no "netd does not perform Phase-3 shaping"
+fi
+if grep -qE '(AddSession|DeleteSession)\(' "$ROOT/data-plane/cmd/acctd/phase3.go" 2>/dev/null; then
+  no "acctd mutates tc directly — ADR-0002 requires netd to be the single shaping writer"
+else
+  ok "acctd derives the plan and performs NO Phase-3 tc mutation (single writer holds)"
+fi
+
 # ---------------------------------------------------------------- 5. no live-evidence fabrication
 # The evidence bundle must never contain claims about an appliance this tooling has not actually touched.
 if grep -RIn "LIVE VERIFIED" "$ROOT/docs/manifests" 2>/dev/null | grep -q .; then

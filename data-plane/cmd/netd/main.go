@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 )
 
@@ -119,7 +120,11 @@ func main() {
 		dryRun:        dryRun,
 	}
 
-	srv := &server{st: st, ap: ap, kea: ap.kea, topo: topo, sn: sn}
+	// Phase 3 (ADR-0002): netd is the ONLY process that mutates Phase-3 shaping. The writer is constructed
+	// unconditionally because it holds no policy and does nothing until a plan is submitted; acctd submits a
+	// plan only when the Phase-3 flags are on, so a dark appliance never reaches it.
+	srv := &server{st: st, ap: ap, kea: ap.kea, topo: topo, sn: sn,
+		phase3: &phase3Shaping{shp: shape.New()}}
 
 	// Watchdog: roll back any pending revision whose deadline has passed. Also
 	// runs once at boot to recover from a crash during pending_confirmation.
@@ -144,6 +149,9 @@ func main() {
 	r.Get("/v1/leases", srv.leases)
 	r.Get("/v1/pending", srv.pending)
 	// System (WAN/LAN) network management — the appliance's own base networking.
+	// Phase 3: the ONLY Phase-3 tc mutation entry point on this appliance (ADR-0002).
+	r.Post("/v1/phase3/shaping", srv.phase3ShapingHandler)
+
 	r.Get("/v1/system-network", srv.sysnetGet)
 	r.Post("/v1/system-network/validate", srv.sysnetValidate)
 	r.Post("/v1/system-network/apply", srv.sysnetApply)
@@ -187,6 +195,8 @@ type server struct {
 	kea  *keaClient
 	topo netcfg.Topology
 	sn   *sysNetMgr
+	// phase3 is the SINGLE Phase-3 shaping writer (ADR-0002). acctd derives the plan; netd applies it.
+	phase3 *phase3Shaping
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

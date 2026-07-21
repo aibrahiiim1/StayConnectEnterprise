@@ -156,6 +156,8 @@ func main() {
 		os.Exit(1)
 	}
 	a.p3 = newPhase3(pmsCfg, a, c.TenantID, assignedSite)
+	// ADR-0002: acctd derives the plan; netd is the ONLY process that mutates Phase-3 tc state.
+	netdShaping := newNetdShaper(envOr("ACCTD_NETD_SOCKET", "/run/stayconnect/netd.sock"))
 	p3 := a.p3
 	slog.Info("acctd phase3 arm", "flags", pmsCfg.SafeFlagSummary(), "active", p3 != nil,
 		"accounting_owner", map[bool]string{true: "phase3", false: "legacy"}[p3.ownsAccounting()])
@@ -176,7 +178,7 @@ func main() {
 			// attributed before access that ended is closed out. Enforce first, then reconcile shaping, so the
 			// plan the edge receives already reflects what just ended. Both are no-ops while dark.
 			p3.enforceExpiries(rootCtx)
-			p3.reconcileShaping(rootCtx, a.shp, c.LegacyBridge)
+			p3.reconcileShaping(rootCtx, netdShaping, c.LegacyBridge)
 			// Liveness heartbeat: proves the accounting loop is PROGRESSING (not
 			// just that the process is up) for the edged health supervisor.
 			livez.Touch("acctd")

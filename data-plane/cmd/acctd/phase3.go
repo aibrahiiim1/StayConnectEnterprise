@@ -15,9 +15,13 @@ package main
 // composition root that runs them, logs what happened, and stays out of the way.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
@@ -27,7 +31,10 @@ import (
 // phase3 is acctd's Phase-3 arm. A zero value is inert, which is what a dark appliance gets.
 type phase3 struct {
 	cfg iamv2.PMSConfig
-	enf *enforce.Enforcer
+	// degraded is non-empty when the last derived plan could not be put in force. It is reported rather than
+	// hidden: an unapplied plan means the kernel and durable state disagree.
+	degraded string
+	enf      *enforce.Enforcer
 	// site is the single site this appliance serves; expiry enforcement is scoped to it.
 	tenant, site string
 }
@@ -76,22 +83,26 @@ func (p *phase3) shapingPlan(ctx context.Context) (enforce.Plan, bool) {
 	return plan, true
 }
 
-// shapeApplier is the narrow slice of the tc client the reconciliation needs. Keeping it an interface is what
-// lets the composition-root test prove the ORDER of operations without touching the kernel.
-type shapeApplier interface {
-	EnsureBridgeInfra(ctx context.Context, bridge string) error
-	AddSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error
-	DeleteSession(ctx context.Context, bridge string, ip net.IP) error
+// planSubmitter delivers a complete shaping plan to netd, the single Phase-3 shaping writer (ADR-0002).
+// acctd deliberately has no tc client for Phase-3: it cannot race netd because it cannot write.
+type planSubmitter interface {
+	SubmitShapingPlan(ctx context.Context, plan enforce.Plan, fallbackBridge string) (shapingResult, error)
 }
 
-// reconcileShaping makes the edge match what durable state says it should be. It is a RECONCILIATION, not an
-// event handler: it re-derives the whole plan every tick, so a process restart, a reboot, or a manual change
-// to tc converges back on the next pass without any remembered state of its own.
-//
-// Order matters and is deliberate: tear down first, then shape. A session that has lost its entitlement must
-// stop being forwarded before capacity is handed to whoever is still entitled — the other order leaves a
-// window where ended access is still shaped.
-func (p *phase3) reconcileShaping(ctx context.Context, shp shapeApplier, fallbackBridge string) {
+// shapingResult is what netd reports back. Degraded is surfaced rather than swallowed: a plan that could not
+// be applied means the kernel is not enforcing what durable state says it should.
+type shapingResult struct {
+	TornDown int      `json:"torn_down"`
+	Shaped   int      `json:"shaped"`
+	Failed   int      `json:"failed"`
+	Degraded bool     `json:"degraded"`
+	Problems []string `json:"problems,omitempty"`
+}
+
+// reconcileShaping derives the current plan and submits it to netd. It is a full RECONCILIATION every tick,
+// not a delta: a process restart, a reboot, or a manual tc change converges on the next submission, and
+// neither side has to remember anything for that to work.
+func (p *phase3) reconcileShaping(ctx context.Context, netd planSubmitter, fallbackBridge string) {
 	if p == nil {
 		return
 	}
@@ -99,48 +110,30 @@ func (p *phase3) reconcileShaping(ctx context.Context, shp shapeApplier, fallbac
 	if !ok {
 		return
 	}
-	p.applyPlan(ctx, shp, plan, fallbackBridge)
+	res, err := netd.SubmitShapingPlan(ctx, plan, fallbackBridge)
+	if err != nil {
+		// Bounded retry: the plan is re-derived and re-submitted on the next tick, so a missed submission is
+		// never stale — it is superseded. What must not happen is pretending it was applied.
+		p.degraded = "shaping plan not applied: " + err.Error()
+		slog.Warn("phase3: could not submit the shaping plan to netd", "err", err)
+		return
+	}
+	if res.Degraded {
+		p.degraded = "netd applied the plan with problems"
+		slog.Warn("phase3: netd applied the shaping plan with problems",
+			"failed", res.Failed, "torn_down", res.TornDown, "shaped", res.Shaped)
+		return
+	}
+	p.degraded = ""
 }
 
-// applyPlan is the part that talks to the edge, separated so the ORDER and the rate/bridge decisions can be
-// proven without a database or a kernel.
-func (p *phase3) applyPlan(ctx context.Context, shp shapeApplier, plan enforce.Plan, fallbackBridge string) {
-	bridgeOf := func(s enforce.SessionShape) string {
-		if s.Bridge != "" {
-			return s.Bridge
-		}
-		return fallbackBridge
+// Degraded reports the truthful current enforcement state for health reporting: empty when the last plan was
+// applied cleanly, otherwise why it was not.
+func (p *phase3) Degraded() string {
+	if p == nil {
+		return ""
 	}
-	for _, s := range plan.Tear {
-		ip := net.ParseIP(s.IP)
-		if ip == nil {
-			continue
-		}
-		if err := shp.DeleteSession(ctx, bridgeOf(s), ip); err != nil {
-			slog.Warn("phase3: could not tear down shaping", "session", s.SessionID, "err", err)
-		}
-	}
-	for _, s := range plan.Shape {
-		ip := net.ParseIP(s.IP)
-		if ip == nil || s.DownKbps <= 0 || s.UpKbps <= 0 {
-			// A session with no addressing or no rates is not shaped at all: applying a zero rate would be a
-			// silent full-speed pass, which is the opposite of what an unratable session should get.
-			continue
-		}
-		b := bridgeOf(s)
-		if err := shp.EnsureBridgeInfra(ctx, b); err != nil {
-			slog.Warn("phase3: bridge infrastructure unavailable", "bridge", b, "err", err)
-			continue
-		}
-		if err := shp.AddSession(ctx, b, ip, s.DownKbps, s.UpKbps); err != nil {
-			slog.Warn("phase3: could not apply shaping", "session", s.SessionID, "err", err)
-		}
-	}
-}
-
-// applyPlanForTest exposes the plan-application half to composition-root tests.
-func (p *phase3) applyPlanForTest(ctx context.Context, shp shapeApplier, plan enforce.Plan, fallbackBridge string) {
-	p.applyPlan(ctx, shp, plan, fallbackBridge)
+	return p.degraded
 }
 
 // ---------------------------------------------------------------- Phase-3 sample ingestion
@@ -178,3 +171,74 @@ func (p *phase3) ingestSample(ctx context.Context, id sampleIdentity, up, down i
 // must not run for the same sample: two rows for one physical delta would double every total derived from
 // them, and there is no way to tell afterwards which one was the duplicate.
 func (p *phase3) ownsAccounting() bool { return p != nil }
+
+// netdShaper submits plans to netd over its protected local Unix socket. It is the only thing standing
+// between acctd's derivation and the kernel, and it deliberately cannot do anything else.
+type netdShaper struct {
+	client *http.Client
+	url    string
+}
+
+func newNetdShaper(socketPath string) *netdShaper {
+	return &netdShaper{
+		client: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					var d net.Dialer
+					return d.DialContext(ctx, "unix", socketPath)
+				},
+			},
+			Timeout: 10 * time.Second,
+		},
+		url: "http://netd/v1/phase3/shaping",
+	}
+}
+
+func (n *netdShaper) SubmitShapingPlan(ctx context.Context, plan enforce.Plan, fallbackBridge string) (shapingResult, error) {
+	bridgeOf := func(s enforce.SessionShape) string {
+		if s.Bridge != "" {
+			return s.Bridge
+		}
+		return fallbackBridge
+	}
+	type sess struct {
+		SessionID string `json:"session_id"`
+		IP        string `json:"ip"`
+		Bridge    string `json:"bridge"`
+		DownKbps  int    `json:"down_kbps"`
+		UpKbps    int    `json:"up_kbps"`
+	}
+	body := struct {
+		Tear  []sess `json:"tear"`
+		Shape []sess `json:"shape"`
+	}{Tear: []sess{}, Shape: []sess{}}
+	for _, s := range plan.Tear {
+		body.Tear = append(body.Tear, sess{SessionID: s.SessionID, IP: s.IP, Bridge: bridgeOf(s)})
+	}
+	for _, s := range plan.Shape {
+		body.Shape = append(body.Shape, sess{SessionID: s.SessionID, IP: s.IP, Bridge: bridgeOf(s),
+			DownKbps: s.DownKbps, UpKbps: s.UpKbps})
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return shapingResult{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.url, bytes.NewReader(raw))
+	if err != nil {
+		return shapingResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return shapingResult{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return shapingResult{}, fmt.Errorf("netd rejected the shaping plan: %s", resp.Status)
+	}
+	var out shapingResult
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return shapingResult{}, err
+	}
+	return out, nil
+}

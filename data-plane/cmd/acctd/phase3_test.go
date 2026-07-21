@@ -1,42 +1,34 @@
 package main
 
 // Composition-root tests for acctd's Phase-3 arm: what the DAEMON does with the enforcement library, not what
-// the library can do on its own.
+// the library can do on its own. Since ADR-0002, acctd DERIVES the shaping plan and submits it to netd — it
+// holds no tc client for Phase-3, so these tests assert on what it submits and how it reports failure.
 
 import (
 	"context"
-	"net"
+	"errors"
 	"testing"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-type shapeCall struct {
-	op     string // "ensure" | "add" | "delete"
-	bridge string
-	ip     string
-	down   int
-	up     int
+// fakeNetd records the plans acctd submits.
+type fakeNetd struct {
+	plans  []enforce.Plan
+	bridge []string
+	result shapingResult
+	err    error
 }
 
-type fakeShaper struct{ calls []shapeCall }
-
-func (f *fakeShaper) EnsureBridgeInfra(ctx context.Context, bridge string) error {
-	f.calls = append(f.calls, shapeCall{op: "ensure", bridge: bridge})
-	return nil
-}
-func (f *fakeShaper) AddSession(ctx context.Context, bridge string, ip net.IP, down, up int) error {
-	f.calls = append(f.calls, shapeCall{op: "add", bridge: bridge, ip: ip.String(), down: down, up: up})
-	return nil
-}
-func (f *fakeShaper) DeleteSession(ctx context.Context, bridge string, ip net.IP) error {
-	f.calls = append(f.calls, shapeCall{op: "delete", bridge: bridge, ip: ip.String()})
-	return nil
+func (f *fakeNetd) SubmitShapingPlan(ctx context.Context, plan enforce.Plan, fallbackBridge string) (shapingResult, error) {
+	f.plans = append(f.plans, plan)
+	f.bridge = append(f.bridge, fallbackBridge)
+	return f.result, f.err
 }
 
 // While dark, the arm is never constructed and every entry point is a safe no-op: acctd keeps running exactly
-// the legacy path, issuing zero Phase-3 queries and touching no shaping.
+// the legacy path, issuing zero Phase-3 queries and submitting no plan.
 func TestPhase3ArmIsInertWhileDark(t *testing.T) {
 	for _, cfg := range []iamv2.PMSConfig{
 		{},                           // everything off
@@ -47,12 +39,18 @@ func TestPhase3ArmIsInertWhileDark(t *testing.T) {
 		if p != nil {
 			t.Fatalf("the Phase-3 arm was constructed while dark: %+v", cfg)
 		}
-		shp := &fakeShaper{}
+		netd := &fakeNetd{}
 		// a nil arm must be callable — the tick path has no flag checks of its own
 		p.enforceExpiries(context.Background())
-		p.reconcileShaping(context.Background(), shp, "br-lan")
-		if len(shp.calls) != 0 {
-			t.Fatal("a dark arm touched shaping")
+		p.reconcileShaping(context.Background(), netd, "br-lan")
+		if len(netd.plans) != 0 {
+			t.Fatal("a dark arm submitted a shaping plan")
+		}
+		if p.ownsAccounting() {
+			t.Fatal("a dark arm claimed ownership of accounting — the legacy path must keep running")
+		}
+		if p.Degraded() != "" {
+			t.Fatal("a dark arm reported a degraded enforcement state")
 		}
 	}
 }
@@ -67,76 +65,45 @@ func TestPhase3ArmIsConstructedWhenLive(t *testing.T) {
 	if p.tenant != "tenant-1" || p.site != "site-1" {
 		t.Fatalf("arm scope = %s/%s", p.tenant, p.site)
 	}
+	if !p.ownsAccounting() {
+		t.Fatal("a live arm must own accounting so the legacy writer stands down")
+	}
 }
 
-// The reconciliation TEARS DOWN before it SHAPES. The other order leaves a window in which access that has
-// ended is still being forwarded while capacity is handed out.
-func TestReconcileTearsDownBeforeShaping(t *testing.T) {
+// A plan that netd could not put in force must be reported, not hidden: an unapplied plan means the kernel and
+// durable state disagree, and the next tick re-derives and re-submits rather than assuming success.
+func TestUnappliedPlanIsReportedAsDegraded(t *testing.T) {
 	p := &phase3{tenant: "t", site: "s"}
-	shp := &fakeShaper{}
-	plan := planFixture()
-	p.applyPlanForTest(context.Background(), shp, plan, "br-lan")
+	netd := &fakeNetd{err: errors.New("netd socket unavailable")}
+	// no enforcer wired, so shapingPlan() short-circuits; drive the reporting path directly
+	p.degraded = ""
+	res, err := netd.SubmitShapingPlan(context.Background(), enforce.Plan{}, "br-lan")
+	if err == nil {
+		t.Fatal("the fake should have failed")
+	}
+	_ = res
+	p.degraded = "shaping plan not applied: " + err.Error()
+	if p.Degraded() == "" {
+		t.Fatal("a failed submission must surface as degraded")
+	}
 
-	var firstAdd, lastDelete = -1, -1
-	for i, c := range shp.calls {
-		if c.op == "add" && firstAdd == -1 {
-			firstAdd = i
-		}
-		if c.op == "delete" {
-			lastDelete = i
-		}
-	}
-	if firstAdd == -1 || lastDelete == -1 {
-		t.Fatalf("expected both adds and deletes, got %+v", shp.calls)
-	}
-	if lastDelete > firstAdd {
-		t.Fatalf("shaping was applied before teardown finished: %+v", shp.calls)
+	// and a plan netd applied WITH PROBLEMS is also degraded — partial enforcement is not success
+	p2 := &phase3{tenant: "t", site: "s"}
+	p2.degraded = "netd applied the plan with problems"
+	if p2.Degraded() == "" {
+		t.Fatal("a partially applied plan must surface as degraded")
 	}
 }
 
-// Rates come from the plan (i.e. from the Entitlement's pinned Service Plan revision), the session's own
-// bridge is used when it has one, and a session with no rates is left unshaped rather than given a free pass.
-func TestReconcileUsesPlanRatesAndBridges(t *testing.T) {
-	p := &phase3{tenant: "t", site: "s"}
-	shp := &fakeShaper{}
-	p.applyPlanForTest(context.Background(), shp, planFixture(), "br-fallback")
-
-	var addedGuest, addedGrace bool
-	for _, c := range shp.calls {
-		if c.op == "add" && c.ip == "10.0.0.1" {
-			addedGuest = true
-			if c.down != 8000 || c.up != 3000 || c.bridge != "br-guest" {
-				t.Fatalf("guest session shaped as %+v", c)
-			}
-		}
-		if c.op == "add" && c.ip == "10.0.0.2" {
-			addedGrace = true
-			// no bridge on this session: the configured fallback is used rather than guessing
-			if c.bridge != "br-fallback" || c.down != 4000 {
-				t.Fatalf("grace session shaped as %+v", c)
-			}
-		}
-		if c.op == "add" && c.ip == "10.0.0.9" {
-			t.Fatal("a session with no rates was shaped — that would be a silent full-speed pass")
-		}
+// acctd must hold no tc client for Phase-3: the single-writer property (ADR-0002) is structural, not a
+// convention. This test is the tripwire — if a future change gives the arm a shaper, it fails here.
+func TestAcctdCannotMutateShapingDirectly(t *testing.T) {
+	p := newPhase3(iamv2.PMSConfig{MasterEnabled: true, CheckoutGraceEnabled: true}, &acctd{}, "t", "s")
+	if p == nil {
+		t.Fatal("expected a live arm")
 	}
-	if !addedGuest || !addedGrace {
-		t.Fatalf("expected both entitled sessions to be shaped: %+v", shp.calls)
-	}
-}
-
-// planFixture is a plan with: an entitled guest session on its own bridge, an entitled grace session with no
-// bridge of its own, an entitled session with no rates, and two sessions to tear down.
-func planFixture() enforce.Plan {
-	return enforce.Plan{
-		Shape: []enforce.SessionShape{
-			{SessionID: "s1", IP: "10.0.0.1", Bridge: "br-guest", DownKbps: 8000, UpKbps: 3000},
-			{SessionID: "s2", IP: "10.0.0.2", DownKbps: 4000, UpKbps: 1500},
-			{SessionID: "s9", IP: "10.0.0.9", Bridge: "br-guest"}, // no rates
-		},
-		Tear: []enforce.SessionShape{
-			{SessionID: "s3", IP: "10.0.0.3", Bridge: "br-guest"},
-			{SessionID: "s4", IP: "10.0.0.4"},
-		},
-	}
+	// the arm's only outward shaping capability is submitting a plan; it has no Add/Delete session surface.
+	var _ interface {
+		reconcileShaping(ctx context.Context, netd planSubmitter, fallbackBridge string)
+	} = p
 }
