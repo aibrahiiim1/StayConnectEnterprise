@@ -65,6 +65,9 @@ type payload struct {
 	Folio       string `json:"folio"`
 	ArrivalRaw  string `json:"arrival_raw"`
 	Departure   string `json:"departure_raw"`
+	// Sharers is the OPTIONAL full occupancy list. Sharers are ordinary and legal (several occupants share one
+	// Stay); when the connector reports none, the event's own name fields describe the single primary guest.
+	Sharers []Sharer `json:"sharers"`
 }
 
 // ProcessNext claims and processes ONE pending consumable inbox event for the scope in a single transaction.
@@ -118,7 +121,16 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 	ev := InboxEvent{
 		EventIdentity: identity, EventType: EventType(eventType),
 		Reservation: pl.Reservation, Room: pl.Room, LastName: pl.LastName, FirstName: pl.FirstName,
-		Folio: pl.Folio, ArrivalRaw: pl.ArrivalRaw, DepartureRaw: pl.Departure,
+		Folio: pl.Folio, ArrivalRaw: pl.ArrivalRaw, DepartureRaw: pl.Departure, Sharers: pl.Sharers,
+	}
+
+	// a payload that contradicts itself (the same occupant twice, or two occupants both claiming to be the
+	// primary) is never half-applied or silently decided — it goes to review before anything is written.
+	if code := validateSharers(ev.Sharers); code != "" {
+		if ferr := failEvent(ctx, tx, eventID, "MANUAL_REVIEW", code); ferr != nil {
+			return false, ferr
+		}
+		return true, tx.Commit(ctx)
 	}
 
 	// load the CURRENT stay for this reservation within the interface (one authoritative row per reservation;
@@ -133,6 +145,22 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 		cur = &sv
 	} else if !errors.Is(lerr, pgx.ErrNoRows) {
 		return false, lerr
+	}
+
+	// SOURCE CONFLICT pre-check, BEFORE anything is written: a GUEST folio that already acts as another Stay's
+	// posting target must never be silently re-pointed (that would move one Stay's postings onto another). It is
+	// checked here so the event can be routed to MANUAL_REVIEW without leaving a half-created Stay behind.
+	curID := ""
+	if cur != nil {
+		curID = cur.ID
+	}
+	if code, cerr := precheckFolioConflict(ctx, tx, tenant, site, iface, curID, ev.Folio); cerr != nil {
+		return false, cerr
+	} else if code != "" {
+		if ferr := failEvent(ctx, tx, eventID, "MANUAL_REVIEW", code); ferr != nil {
+			return false, ferr
+		}
+		return true, tx.Commit(ctx)
 	}
 
 	d := Resolve(ev, cur)
@@ -165,6 +193,9 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		if stayID, err = createStay(ctx, tx, tenant, site, iface, ev); err != nil {
 			return "", "", "", err
 		}
+		if _, aerr := applyOccupancyFacts(ctx, tx, tenant, site, iface, stayID, ev); aerr != nil {
+			return "", "", "", aerr
+		}
 		return stayID, "APPLIED", "", nil
 
 	case OpUpdateStay:
@@ -174,8 +205,8 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 			WHERE id=$1`, cur.ID, d.NewStatus, parseYYMMDD(ev.ArrivalRaw), parseYYMMDD(ev.DepartureRaw)); err != nil {
 			return "", "", "", err
 		}
-		if err = upsertPrimaryGuest(ctx, tx, tenant, site, iface, cur.ID, ev); err != nil {
-			return "", "", "", err
+		if _, aerr := applyOccupancyFacts(ctx, tx, tenant, site, iface, cur.ID, ev); aerr != nil {
+			return "", "", "", aerr
 		}
 		return cur.ID, "APPLIED", "", nil
 
@@ -229,30 +260,29 @@ func createStay(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev I
 		tenant, site, iface, ev.Reservation, ev.Room, parseYYMMDD(ev.ArrivalRaw), parseYYMMDD(ev.DepartureRaw)).Scan(&stayID); err != nil {
 		return "", err
 	}
-	if err := upsertPrimaryGuest(ctx, tx, tenant, site, iface, stayID, ev); err != nil {
-		return "", err
-	}
-	if ev.Folio != "" {
-		var folioID string
-		if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.folios
-			(tenant_id, site_id, pms_interface_id, external_folio_id, folio_kind, status)
-			VALUES ($1,$2,$3,$4,'GUEST','OPEN')
-			ON CONFLICT (tenant_id, site_id, pms_interface_id, external_folio_id) WHERE status='OPEN'
-			DO UPDATE SET external_folio_id=EXCLUDED.external_folio_id
-			RETURNING id::text`, tenant, site, iface, ev.Folio).Scan(&folioID); err != nil {
-			return "", err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.stay_folios
-			(tenant_id, site_id, pms_interface_id, stay_id, folio_id, is_default_posting_target)
-			VALUES ($1,$2,$3,$4,$5,true) ON CONFLICT (stay_id, folio_id) DO NOTHING`,
-			tenant, site, iface, stayID, folioID); err != nil {
-			return "", err
-		}
-	}
+	// occupancy + folio facts are written by applyOccupancyFacts on BOTH the create and update paths, so the
+	// same conflict rules apply either way and nothing is written twice.
 	return stayID, nil
 }
 
 // upsertPrimaryGuest inserts or refreshes the single primary guest for the Stay from the (validated) names.
+// applyOccupancyFacts writes the event's occupancy + folio facts for the Stay. With no sharer list the event's
+// own name fields describe the single primary guest (the historical behaviour); with one, the whole list is
+// reconciled. A folio SOURCE CONFLICT returns its bounded code and ErrSourceConflict so the caller can route
+// the event to MANUAL_REVIEW with the transaction intact.
+func applyOccupancyFacts(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, ev InboxEvent) (string, error) {
+	if len(ev.Sharers) == 0 {
+		if ev.FirstName != "" || ev.LastName != "" {
+			if err := upsertPrimaryGuest(ctx, tx, tenant, site, iface, stayID, ev); err != nil {
+				return "", err
+			}
+		}
+	} else if err := applySharers(ctx, tx, tenant, site, iface, stayID, ev.Sharers); err != nil {
+		return "", err
+	}
+	return applyFolio(ctx, tx, tenant, site, iface, stayID, ev.Folio)
+}
+
 func upsertPrimaryGuest(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, ev InboxEvent) error {
 	display := ev.LastName
 	if ev.FirstName != "" && ev.LastName != "" {

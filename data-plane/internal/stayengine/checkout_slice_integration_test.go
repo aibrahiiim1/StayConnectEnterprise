@@ -364,3 +364,136 @@ func TestIntegration_LateStageRollback(t *testing.T) {
 		t.Fatalf("late-stage rollback left grace=%d audit=%d, want 0/0", graceN, auditN)
 	}
 }
+
+// paySharers builds an event payload carrying a full occupancy list.
+func paySharers(res, room, folio string, sharers string) string {
+	return `{"reservation":"` + res + `","room":"` + room + `","folio":"` + folio +
+		`","arrival_raw":"260101","departure_raw":"260105","sharers":[` + sharers + `]}`
+}
+
+// TestIntegration_SharersAndFolios proves sharing a Stay is ordinary and legal: several occupants are recorded
+// for one Stay with EXACTLY one primary, the primary can move between them across events without ever
+// duplicating, and the event's folio becomes the Stay's single default posting target.
+func TestIntegration_SharersAndFolios(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	s := seed(t, p)
+	pr := NewProcessor(p)
+
+	insertLive(t, p, s, "SH-1", "GI", paySharers("R700", "700", "F700",
+		`{"external_guest_id":"G1","first_name":"Ada","last_name":"Byron","is_primary":true},`+
+			`{"external_guest_id":"G2","first_name":"Chas","last_name":"Babbage"}`))
+	process(t, pr, s)
+	var stayID string
+	if err := p.QueryRow(ctx, `SELECT id::text FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id='R700'`, s.iface).Scan(&stayID); err != nil {
+		t.Fatal(err)
+	}
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1`, stayID); n != 2 {
+		t.Fatalf("occupants = %d, want 2 (sharing a stay is legal)", n)
+	}
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1 AND is_primary`, stayID); n != 1 {
+		t.Fatalf("primaries = %d, want exactly 1", n)
+	}
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1 AND external_guest_id='G1' AND is_primary`, stayID); n != 1 {
+		t.Fatal("the flagged occupant is not the primary")
+	}
+	// the folio is linked as the single default posting target
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
+		WHERE sf.stay_id=$1 AND f.external_folio_id='F700' AND sf.is_default_posting_target`, stayID); n != 1 {
+		t.Fatal("folio not linked as the default posting target")
+	}
+
+	// a later event moves the primary AND adds a third occupant — still exactly one primary, no duplicates
+	insertLive(t, p, s, "SH-2", "GC", paySharers("R700", "700", "F700",
+		`{"external_guest_id":"G2","first_name":"Chas","last_name":"Babbage","is_primary":true},`+
+			`{"external_guest_id":"G3","first_name":"Mary","last_name":"Somerville"}`))
+	process(t, pr, s)
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1`, stayID); n != 3 {
+		t.Fatalf("occupants after the change = %d, want 3", n)
+	}
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1 AND is_primary AND external_guest_id='G2'`, stayID); n != 1 {
+		t.Fatal("the primary did not move to G2")
+	}
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_guests WHERE stay_id=$1 AND is_primary`, stayID); n != 1 {
+		t.Fatal("more than one primary after moving it")
+	}
+}
+
+// TestIntegration_ContradictorySharerPayloadGoesToReview proves a payload that contradicts itself is never
+// half-applied or silently decided: it is routed to MANUAL_REVIEW with a bounded code and writes NOTHING.
+func TestIntegration_ContradictorySharerPayloadGoesToReview(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	s := seed(t, p)
+	pr := NewProcessor(p)
+	for _, tc := range []struct{ name, ident, sharers, code string }{
+		{"two-primaries", "SH-P", `{"external_guest_id":"G1","last_name":"A","is_primary":true},{"external_guest_id":"G2","last_name":"B","is_primary":true}`, CodeSharerTwoPrimary},
+		{"duplicate-identity", "SH-D", `{"external_guest_id":"G9","last_name":"A"},{"external_guest_id":"G9","last_name":"B"}`, CodeSharerDuplicate},
+	} {
+		insertLive(t, p, s, tc.ident, "GI", paySharers("R70"+tc.ident, "701", "F701", tc.sharers))
+		process(t, pr, s)
+		var status, code string
+		if err := p.QueryRow(ctx, `SELECT processing_status, COALESCE(review_code,'') FROM iam_v2.stay_events
+			WHERE pms_interface_id=$1 AND external_event_identity=$2`, s.iface, tc.ident).Scan(&status, &code); err != nil {
+			t.Fatal(err)
+		}
+		if status != "MANUAL_REVIEW" || code != tc.code {
+			t.Fatalf("%s: status=%s code=%s, want MANUAL_REVIEW/%s", tc.name, status, code, tc.code)
+		}
+		if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id=$2`,
+			s.iface, "R70"+tc.ident); n != 0 {
+			t.Fatalf("%s: a contradictory payload created a stay", tc.name)
+		}
+	}
+}
+
+// TestIntegration_FolioSourceConflictGoesToReview proves a GUEST folio already acting as another Stay's
+// posting target is never silently stolen — that would move one Stay's postings onto another. The event goes
+// to MANUAL_REVIEW and the original link is untouched.
+func TestIntegration_FolioSourceConflictGoesToReview(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	s := seed(t, p)
+	pr := NewProcessor(p)
+	insertLive(t, p, s, "FC-1", "GI", paySharers("R710", "710", "FSHARED", `{"external_guest_id":"G1","last_name":"First","is_primary":true}`))
+	process(t, pr, s)
+	var firstStay string
+	if err := p.QueryRow(ctx, `SELECT id::text FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id='R710'`, s.iface).Scan(&firstStay); err != nil {
+		t.Fatal(err)
+	}
+	// a DIFFERENT reservation claiming the same open GUEST folio
+	insertLive(t, p, s, "FC-2", "GI", paySharers("R711", "711", "FSHARED", `{"external_guest_id":"G2","last_name":"Second","is_primary":true}`))
+	process(t, pr, s)
+	var status, code string
+	if err := p.QueryRow(ctx, `SELECT processing_status, COALESCE(review_code,'') FROM iam_v2.stay_events
+		WHERE pms_interface_id=$1 AND external_event_identity='FC-2'`, s.iface).Scan(&status, &code); err != nil {
+		t.Fatal(err)
+	}
+	if status != "MANUAL_REVIEW" || code != CodeFolioStayConflict {
+		t.Fatalf("status=%s code=%s, want MANUAL_REVIEW/%s", status, code, CodeFolioStayConflict)
+	}
+	// the first Stay keeps the folio, and the conflicting event wrote nothing
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
+		WHERE f.external_folio_id='FSHARED' AND sf.is_default_posting_target`); n != 1 {
+		t.Fatal("the folio's default posting target was stolen or duplicated")
+	}
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
+		WHERE f.external_folio_id='FSHARED' AND sf.stay_id=$1`, firstStay); n != 1 {
+		t.Fatal("the original stay lost its folio link")
+	}
+	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stays WHERE pms_interface_id=$1 AND external_reservation_id='R711'`, s.iface); n != 0 {
+		t.Fatal("the conflicting event created a stay anyway")
+	}
+}
+
+func countRows(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := p.QueryRow(context.Background(), q, args...).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}

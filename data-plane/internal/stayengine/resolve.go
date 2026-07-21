@@ -27,6 +27,9 @@ type InboxEvent struct {
 	Folio         string
 	ArrivalRaw    string
 	DepartureRaw  string
+	// Sharers is the full occupancy list when the connector reports one. Sharing a Stay is legal and ordinary;
+	// exactly one occupant is the primary.
+	Sharers []Sharer
 }
 
 // StayView is the CURRENT persisted state of the Stay for this reservation within one interface (nil if none).
