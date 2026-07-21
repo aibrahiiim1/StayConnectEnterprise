@@ -1,4 +1,0 @@
-commit 32b382b9eb1cf882ccc629a6e587b0f5441ae911
-Date:   Tue Jul 21 19:21:09 2026 +0300
-
-    Phase 3 strict resolver fan-out + idempotent auth_resolutions (inventory_head): complete-vector concurrency, fail-closed indeterminacy, >=24 concurrent resolutions: PG16-green
