@@ -209,6 +209,9 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"service": "netd", "version": version,
 		"kea_healthy": s.kea.Healthy(),
+		// Phase-3 shaping is reported here because netd is its only writer (ADR-0002): if a submitted plan
+		// could not be put in force, this is where it becomes visible.
+		"phase3_shaping": s.phase3.status(),
 	})
 }
 

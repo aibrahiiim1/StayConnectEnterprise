@@ -223,3 +223,41 @@ func TestConcurrentSubmissionsDoNotInterleave(t *testing.T) {
 		t.Fatalf("installed %d sessions after concurrent submissions, want exactly 2", len(installed))
 	}
 }
+
+// Health must tell the truth about enforcement. A plan that failed to apply is invisible otherwise, and
+// "shaping looks fine" is the most expensive kind of wrong.
+func TestHealthReportsTruthfulShapingState(t *testing.T) {
+	tc := newFakeTC()
+	p := &phase3Shaping{shp: tc}
+
+	// nothing submitted yet: not degraded, and no last-applied claim
+	st := p.status()
+	if st["degraded"] != false {
+		t.Fatalf("a writer that has done nothing reported degraded: %v", st)
+	}
+	if _, ok := st["last_applied_at"]; ok {
+		t.Fatal("a writer that has applied nothing claimed a last-applied time")
+	}
+
+	// a clean apply
+	p.apply(context.Background(), plan())
+	st = p.status()
+	if st["degraded"] != false || st["last_applied_at"] == nil {
+		t.Fatalf("a clean apply was not reported: %v", st)
+	}
+
+	// a failed teardown must surface, with a reason
+	tc.failDel["10.0.0.8"] = errors.New("class busy")
+	p.apply(context.Background(), plan())
+	st = p.status()
+	if st["degraded"] != true || st["problem"] == nil {
+		t.Fatalf("a failed apply was not reported as degraded: %v", st)
+	}
+
+	// and recovering clears it, so a stale problem cannot linger
+	delete(tc.failDel, "10.0.0.8")
+	p.apply(context.Background(), plan())
+	if st := p.status(); st["degraded"] != false {
+		t.Fatalf("a recovered writer still reports degraded: %v", st)
+	}
+}

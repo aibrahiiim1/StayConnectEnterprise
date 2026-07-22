@@ -134,3 +134,19 @@ func (s *server) phase3ShapingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, res)
 }
+
+// status reports the truthful current enforcement state. An operator (and the health supervisor) must be able
+// to see that the kernel is NOT enforcing what durable state says it should — a plan that failed to apply is
+// invisible otherwise, and "shaping looks fine" is the most expensive kind of wrong.
+func (p *phase3Shaping) status() map[string]any {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := map[string]any{"degraded": p.lastDegrade != ""}
+	if !p.lastApplied.IsZero() {
+		out["last_applied_at"] = p.lastApplied.UTC().Format(time.RFC3339)
+	}
+	if p.lastDegrade != "" {
+		out["problem"] = p.lastDegrade
+	}
+	return out
+}

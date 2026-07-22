@@ -34,6 +34,9 @@ type phase3 struct {
 	// degraded is non-empty when the last derived plan could not be put in force. It is reported rather than
 	// hidden: an unapplied plan means the kernel and durable state disagree.
 	degraded string
+	// baseline is the previous counter reading per Phase-3 session. It is a BASELINE, not persisted state:
+	// after a restart it is empty, the next pass re-baselines and writes nothing, and no usage is invented.
+	baseline map[string]snapEntry
 	enf      *enforce.Enforcer
 	// site is the single site this appliance serves; expiry enforcement is scoped to it.
 	tenant, site string

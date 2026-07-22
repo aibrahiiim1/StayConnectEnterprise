@@ -83,10 +83,8 @@ type acctd struct {
 	applID       string
 	legacyBridge string
 	prev         snapshot
-	// p3 is the Phase-3 arm (nil while dark). seq carries the per-session sample sequence that makes a
-	// delivered delta idempotent across retries and restarts.
-	p3  *phase3
-	seq map[string]int64
+	// p3 is the Phase-3 arm (nil while dark).
+	p3 *phase3
 }
 
 func main() {
@@ -145,7 +143,6 @@ func main() {
 		applID:       c.ApplianceID,
 		legacyBridge: c.LegacyBridge,
 		prev:         snapshot{},
-		seq:          map[string]int64{},
 	}
 
 	// Phase 3 (DARK): the enforcement arm is constructed only when the master + checkout-grace flags are on.
@@ -174,9 +171,12 @@ func main() {
 			if err := a.loop(rootCtx); err != nil {
 				slog.Error("loop", "err", err)
 			}
-			// Phase-3 runs on the same tick, AFTER legacy accounting, so a sample taken this tick is already
-			// attributed before access that ended is closed out. Enforce first, then reconcile shaping, so the
-			// plan the edge receives already reflects what just ended. Both are no-ops while dark.
+			// Phase 3 runs on the same tick over its OWN session domain: measure first (so this tick's usage
+			// is attributed before anything is closed out), then enforce expiry at its true time, then submit
+			// the derived plan to netd — the single shaping writer. All three are no-ops while dark.
+			if n := p3.accountingPass(rootCtx, a.shp, c.LegacyBridge, time.Now()); n > 0 {
+				slog.Debug("phase3: accounting samples ingested", "count", n)
+			}
 			p3.enforceExpiries(rootCtx)
 			p3.reconcileShaping(rootCtx, netdShaping, c.LegacyBridge)
 			// Liveness heartbeat: proves the accounting loop is PROGRESSING (not
@@ -212,6 +212,14 @@ type activeSession struct {
 }
 
 func (a *acctd) loop(ctx context.Context) error {
+	// When Phase-3 owns enforcement, netd is the ONLY shaping writer (ADR-0002) and Phase-3 sessions are
+	// accounted by their own pass. The legacy loop stands down entirely rather than measuring and shaping a
+	// second, overlapping view of the same guests — two writers to one set of tc classes is a race with no
+	// owner, and that is precisely what the single-owner decision exists to remove.
+	if a.p3.ownsAccounting() {
+		a.prev = snapshot{}
+		return nil
+	}
 	sessions, err := a.loadActive(ctx)
 	if err != nil {
 		return err
@@ -277,36 +285,20 @@ func (a *acctd) loop(ctx context.Context) error {
 		}
 
 		if dUp != 0 || dDown != 0 {
-			// EXACTLY ONE accounting path owns this delta. While Phase-3 accounting is live the sample goes
-			// through the controlled ingestion operation (which attributes it by binding at SAMPLE time,
-			// classifies a late pre-boundary sample as delayed and advances the session counters in the same
-			// transaction); otherwise the legacy path runs exactly as it always has. Writing both would double
-			// every total derived from them, with no way afterwards to tell which row was the duplicate.
-			if a.p3.ownsAccounting() {
-				a.seq[s.id]++
-				class, err := a.p3.ingestSample(ctx, sampleIdentity{SessionID: s.id, Seq: a.seq[s.id]}, dUp, dDown, now)
-				if err != nil {
-					// A refused sample is NOT progress: keep the previous baseline so the same delta is
-					// re-measured and re-offered on the next tick instead of being lost.
-					slog.Warn("phase3: accounting sample refused", "session", s.id, "err", err)
-					next[s.id] = prev
-				} else if class == "DELAYED" {
-					slog.Info("phase3: sample belongs to a frozen period; recorded as delayed",
-						"session", s.id, "sampled_at", now)
-				}
-			} else {
-				_, _ = a.db.Exec(ctx, `
-					INSERT INTO accounting_records (ts, session_id, tenant_id, appliance_id, bytes_up, bytes_down)
-					VALUES ($1, $2, $3, $4, $5, $6)
-				`, now, s.id, s.tid, a.applID, dUp, dDown)
+			// This is the LEGACY session domain (public.sessions). Phase-3 sessions live in iam_v2.sessions and
+			// are accounted by their own pass (phase3.accountingPass) — mixing the two here is what made an
+			// earlier attempt call the Phase-3 ingest with ids it could never resolve.
+			_, _ = a.db.Exec(ctx, `
+				INSERT INTO accounting_records (ts, session_id, tenant_id, appliance_id, bytes_up, bytes_down)
+				VALUES ($1, $2, $3, $4, $5, $6)
+			`, now, s.id, s.tid, a.applID, dUp, dDown)
 
-				s.totalUp += dUp
-				s.totalDown += dDown
-				_, _ = a.db.Exec(ctx, `
-					UPDATE sessions SET bytes_up = $2, bytes_down = $3, last_activity_at = $4
-					 WHERE id = $1
-				`, s.id, s.totalUp, s.totalDown, now)
-			}
+			s.totalUp += dUp
+			s.totalDown += dDown
+			_, _ = a.db.Exec(ctx, `
+				UPDATE sessions SET bytes_up = $2, bytes_down = $3, last_activity_at = $4
+				 WHERE id = $1
+			`, s.id, s.totalUp, s.totalDown, now)
 		}
 
 		// Quota enforcement (bytes + time). Data is enforced on the voucher's

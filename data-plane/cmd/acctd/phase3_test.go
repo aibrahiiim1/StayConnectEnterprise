@@ -107,3 +107,17 @@ func TestAcctdCannotMutateShapingDirectly(t *testing.T) {
 		reconcileShaping(ctx context.Context, netd planSubmitter, fallbackBridge string)
 	} = p
 }
+
+// The legacy loop must stand down when Phase-3 owns enforcement. Leaving it running would measure and shape a
+// second, overlapping view of the same guests through acctd's own tc client — reintroducing exactly the second
+// writer ADR-0002 removed.
+func TestLegacyLoopStandsDownWhenPhase3Owns(t *testing.T) {
+	live := newPhase3(iamv2.PMSConfig{MasterEnabled: true, CheckoutGraceEnabled: true}, &acctd{}, "t", "s")
+	if !live.ownsAccounting() {
+		t.Fatal("a live arm must own accounting")
+	}
+	var dark *phase3
+	if dark.ownsAccounting() {
+		t.Fatal("a dark arm must NOT own accounting — the legacy loop keeps running")
+	}
+}
