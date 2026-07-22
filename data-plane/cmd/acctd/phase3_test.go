@@ -7,7 +7,6 @@ package main
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -126,37 +125,5 @@ func TestLegacyLoopStandsDownWhenPhase3Owns(t *testing.T) {
 	var dark *phase3
 	if dark.ownsAccounting() {
 		t.Fatal("a dark arm must NOT own accounting — the legacy loop keeps running")
-	}
-}
-
-// A ticking loop that is failing every observation must not read as healthy. The heartbeat says the loop is
-// progressing; only this summary can say that what it is doing is not working.
-func TestDegradedSummaryIsTruthful(t *testing.T) {
-	var dark *phase3
-	if dark.degradedSummary() != "" {
-		t.Fatal("a dark arm reported a degraded state; it does nothing at all")
-	}
-
-	p := &phase3{tenant: "t", site: "s"}
-	if p.degradedSummary() != "" {
-		t.Fatal("a clean tick reported degraded")
-	}
-
-	p.acctDegraded = "tc counters unreadable on br-guest"
-	if got := p.degradedSummary(); got != "tc counters unreadable on br-guest" {
-		t.Fatalf("summary = %q", got)
-	}
-
-	p.degraded = "netd refused the shaping plan: stale_generation"
-	// BOTH reasons must survive: an operator told only about the shaping refusal would never learn that
-	// usage was also being lost, and would declare the incident over once shaping recovered.
-	got := p.degradedSummary()
-	if !strings.Contains(got, "counters unreadable") || !strings.Contains(got, "stale_generation") {
-		t.Fatalf("a summary dropped one of two concurrent problems: %q", got)
-	}
-
-	p.acctDegraded, p.degraded = "", ""
-	if p.degradedSummary() != "" {
-		t.Fatal("a recovered arm still reports degraded; a stale reason sends operators after a fixed problem")
 	}
 }

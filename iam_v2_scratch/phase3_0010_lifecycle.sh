@@ -79,10 +79,26 @@ echo '== privilege hardening (§3) =='
 [ "$(Q "SELECT has_function_privilege('public','iam_v2.p3_stay_lifecycle_guard()','EXECUTE');")" = f ] && ok "PUBLIC has NO EXECUTE on p3_stay_lifecycle_guard" || no "PUBLIC can execute lifecycle guard"
 [ "$(Q "SELECT has_function_privilege('public','iam_v2.p3_stay_event_appendonly()','EXECUTE');")" = f ] && ok "PUBLIC has NO EXECUTE on p3_stay_event_appendonly" || no "PUBLIC can execute event guard"
 [ "$(Q "SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema='iam_v2' AND table_name='pms_interface_runtime' AND grantee <> current_user AND grantee <> 'PUBLIC';")" = 0 ] && ok "no non-owner grants on pms_interface_runtime (dark)" || no "unexpected runtime-table grants"
-# SECURITY DEFINER allowlist: every p3_* guard must stay SECURITY INVOKER EXCEPT the deferred coherence checker,
-# which MUST be DEFINER so an EXECUTE-only caller needs no direct table SELECT at COMMIT (PO item 2). Any other
-# p3_* DEFINER function is unexpected.
-[ "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname LIKE 'p3_%' AND p.prosecdef AND p.proname <> 'p3_entitlement_status_coherent';")" = 0 ] && ok "no unapproved SECURITY DEFINER on p3_* functions (allowlist)" || no "unexpected SECURITY DEFINER"
+# SECURITY DEFINER allowlist. Every p3_* guard stays SECURITY INVOKER unless it has a stated reason to be
+# DEFINER, because DEFINER means "runs with the schema owner's rights" and an unexamined one is a privilege
+# escalation with a trigger attached. Three are approved:
+#
+#   p3_entitlement_status_coherent   deferred coherence checker: an EXECUTE-only caller must not need direct
+#                                    table SELECT at COMMIT (PO item 2).
+#   p3_accounting_needs_binding      calls iam_v2.p3_entitlement_at, whose EXECUTE is revoked from PUBLIC. As
+#                                    INVOKER a forged insert by a non-owner fails with "permission denied for
+#                                    function" instead of naming the missing binding — still refused, but the
+#                                    reason misdirects whoever reads the log after an incident.
+#   p3_detect_delayed_accounting     same resolver, same reason: it must give the SAME binding answer the
+#                                    ingestion operation gave, not a privilege error.
+#
+# The list is exact and the count assertion stays at zero, so the next unexplained DEFINER still fails here.
+UNAPPROVED_SECDEF="$(Q "SELECT COALESCE(string_agg(p.proname, ','), '') FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname LIKE 'p3_%' AND p.prosecdef AND p.proname NOT IN ('p3_entitlement_status_coherent','p3_accounting_needs_binding','p3_detect_delayed_accounting');")"
+[ -z "$UNAPPROVED_SECDEF" ] && ok "no unapproved SECURITY DEFINER on p3_* functions (allowlist)" || no "unexpected SECURITY DEFINER: $UNAPPROVED_SECDEF"
+# and every APPROVED one must still pin a search_path and keep PUBLIC out — a DEFINER without both is the
+# escalation the allowlist exists to prevent, allowlisted or not.
+SECDEF_BAD="$(Q "SELECT COALESCE(string_agg(p.proname, ','), '') FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND (p.proconfig IS NULL OR array_to_string(p.proconfig,',') NOT LIKE '%search_path=%' OR has_function_privilege('public', p.oid, 'EXECUTE'));")"
+[ -z "$SECDEF_BAD" ] && ok "every SECURITY DEFINER function pins search_path AND excludes PUBLIC (§3)" || no "unsafe SECURITY DEFINER: $SECDEF_BAD"
 [ "$(Q "SELECT prosecdef FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p3_entitlement_status_coherent';")" = t ] && ok "deferred coherence checker IS SECURITY DEFINER (EXECUTE-only callers need no table SELECT)" || no "coherence checker not DEFINER"
 [ "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p3_entitlement_status_coherent' AND p.proconfig::text LIKE '%search_path=iam_v2%';")" = 1 ] && ok "coherence checker pins a fixed search_path" || no "coherence checker missing fixed search_path"
 [ "$(Q "SELECT has_function_privilege('public','iam_v2.p3_entitlement_status_coherent()','EXECUTE');")" = f ] && ok "PUBLIC has NO EXECUTE on the coherence checker" || no "PUBLIC can execute coherence checker"
@@ -706,8 +722,12 @@ ING(){ Q "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','b
   && ok "exactly the counter DIFFERENCE is stored (400/600) (§4p)" || no "wrong delta stored"
 [ "$(Q "SELECT bytes_up||'/'||bytes_down FROM iam_v2.sessions WHERE id='$CSESS';")" = "400/600" ] \
   && ok "session totals advanced by the same delta, in the same transaction (§4p)" || no "session totals disagree with the ledger"
-# EXACT REPLAY: an uncertain commit retried later must find the persisted state and bill nothing more.
-[ "$(ING 1 1400 2600 '90 minutes')" = "DUPLICATE" ] && ok "an exact replay is DUPLICATE, not new usage (§4p)" || no "replay double-counted"
+# EXACT REPLAY: an uncertain commit retried later must find the persisted state and bill nothing more. The
+# reply carries WHAT WAS PERSISTED (here ACCEPTED) behind a REPLAY: marker, so the caller learns the fate of
+# its observation — in particular whether it landed in a frozen window as DELAYED — while still being able to
+# tell "accepted just now" from "accepted earlier" and not counting it as fresh traffic.
+[ "$(ING 1 1400 2600 '90 minutes')" = "REPLAY:ACCEPTED" ] \
+  && ok "an exact replay reports the persisted classification, marked as a replay (§4p)" || no "replay double-counted"
 [ "$(Q "SELECT count(*) FROM iam_v2.accounting_records WHERE session_id='$CSESS';")" = 1 ] && ok "a replay stores no second row (§4p)" || no "replay stored a row"
 # REGRESSION WITHOUT A NEW EPOCH is ambiguous (recreated class, misread, reused minor). Guessing "count from
 # zero" invents usage; guessing "ignore" loses it. Fail closed and KEEP the checkpoint.
@@ -730,12 +750,18 @@ expect_err "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV',
   && ok "negative absolute counters are refused (§4p)" || no "negative absolutes accepted"
 expect_err "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','br-guest',4097,2,50,50,now() - interval '10 hours');" \
   && ok "a sample timed BEFORE the session started is refused (§4p)" || no "pre-session sample accepted"
-# ONE checkpoint per counter series, and a different bridge is a different series (a reused minor on another
-# bridge must not be measured against this one).
-[ "$(Q "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','br-g301',4097,1,7,8,now());")" = "BASELINED" ] \
-  && ok "a different bridge starts its OWN counter series (§4p)" || no "bridge change reused a checkpoint"
-[ "$(Q "SELECT count(*) FROM iam_v2.accounting_checkpoints WHERE session_id='$CSESS';")" = 2 ] \
+# ONE checkpoint per counter series. A Session's bridge is now ACCOUNTING IDENTITY: the operation re-derives
+# it from the Session's own row, so a caller cannot name a different bridge for the same Session at all --
+# which is the stronger property. The scenario the old assertion simulated (a guest appearing on another
+# bridge) is really a NEW Session, and it must get its own series rather than inherit this one's.
+expect_err "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','br-g301',4097,1,7,8,now());" \
+  && ok "a bridge the Session is not on is refused, not silently re-baselined (§4p)" || no "cross-bridge counters accepted"
+[ "$(Q "SELECT count(*) FROM iam_v2.accounting_checkpoints WHERE session_id='$CSESS';")" = 1 ] \
   && ok "one checkpoint per (session, device, bridge, class) (§4p)" || no "checkpoint cardinality wrong"
+# a genuinely different Session on another bridge gets its OWN series
+CSESS2="$(Q "INSERT INTO iam_v2.sessions(tenant_id,site_id,entitlement_id,device_id,state,started,ip,ingress_interface) VALUES ('$RT','$RS','$CENT','$CDEV2','active',now() - interval '2 hours','10.9.0.2'::inet,'br-g301') RETURNING id;")"
+[ "$(Q "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS2','$CDEV2','br-g301',4098,1,7,8,now());")" = "BASELINED" ] \
+  && ok "a different Session on another bridge starts its OWN counter series (§4p)" || no "second session reused a checkpoint"
 expect_err "INSERT INTO iam_v2.accounting_checkpoints(tenant_id,site_id,session_id,source_device_id,bridge,class_minor,source_epoch,prev_bytes_up,prev_bytes_down,prev_sampled_at,last_classification) VALUES ('$RT','$RS','$CSESS','$DDEV','br-guest',4097,1,0,0,now(),'BASELINED');" \
   && ok "a duplicate checkpoint for the same series is impossible (§4p)" || no "duplicate checkpoint accepted"
 # an ENDED session cannot accrue more usage: its traffic belongs to whatever runs next, not to it

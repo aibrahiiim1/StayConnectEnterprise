@@ -20,6 +20,17 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 )
 
+// The bounded reasons an accounting pass can be degraded for. They are constants rather than formatted
+// strings so that no error text, statement or identifier can reach a health reader through this path.
+const (
+	reasonSessionsUnreadable = "phase3 session inventory unreadable"
+	reasonNoClassGenerations = "managed-class generations unavailable"
+	reasonCountersUnreadable = "tc counters unreadable on a managed bridge"
+	reasonSourceIncoherent   = "a live session's counter source is incoherent"
+	reasonObservationRefused = "an observation was refused by the accounting boundary"
+	reasonNoRecentPass       = "no accounting pass has completed within the freshness window"
+)
+
 // phase3Session is one live Phase-3 session as the accounting pass sees it.
 type phase3Session struct {
 	ID       string
@@ -80,19 +91,22 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 	}
 	sessions, err := p.livePhase3Sessions(ctx)
 	if err != nil {
-		p.acctDegraded = "cannot load Phase-3 sessions: " + err.Error()
+		p.acctDegraded = reasonSessionsUnreadable
 		slog.Error("phase3: could not load sessions for accounting", "err", err)
 		return 0
 	}
 	if len(sessions) == 0 {
+		// Nothing to measure is a CLEAN pass, not a missing one: an appliance with no guests online must not
+		// drift into "stale" and page somebody at 3am.
 		p.acctDegraded = ""
+		p.lastPassOK = now
 		return 0
 	}
 	epochs, err := ep.ClassEpochs(ctx)
 	if err != nil {
 		// Without the TC owner's generation a backwards counter cannot be told from a reset. Skipping the pass
 		// preserves every checkpoint; the next tick tries again.
-		p.acctDegraded = "class generations unavailable: " + err.Error()
+		p.acctDegraded = reasonNoClassGenerations
 		slog.Warn("phase3: class generations unavailable; accounting deferred", "err", err)
 		return 0
 	}
@@ -119,21 +133,21 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 			// A Session that does not record its own interface cannot be measured. Substituting a default
 			// here would be the daemon DECIDING where the counters came from — and the controlled operation
 			// re-derives that from the Session's row precisely so the daemon cannot. Report it; do not guess.
-			degraded = "a live session records no ingress interface"
+			degraded = reasonSourceIncoherent
 			slog.Warn("phase3: session has no ingress interface; not accounted", "session", s.ID)
 			continue
 		}
 		bridge := s.Bridge
 		minor, ok := shape.MinorForIP(s.IP)
 		if !ok {
-			degraded = "a live session has an unmeasurable address"
+			degraded = reasonSourceIncoherent
 			continue
 		}
 		down := read(bridge)
 		up := read(shape.IFBName(bridge))
 		if down.err != nil || up.err != nil {
 			// preserve the checkpoint and this session's history; retry next tick
-			degraded = "tc counters unreadable on " + bridge
+			degraded = reasonCountersUnreadable
 			continue
 		}
 		epoch, known := epochs[bridge+"|"+s.ID]
@@ -145,7 +159,7 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 		class, err := p.ingestAbsolute(ctx, s, bridge, minor, epoch,
 			int64(up.classes[minor].Bytes), int64(down.classes[minor].Bytes), now)
 		if err != nil {
-			degraded = "accounting refused for a session: " + err.Error()
+			degraded = reasonObservationRefused
 			slog.Warn("phase3: absolute counter observation refused", "session", s.ID, "err", err)
 			continue
 		}
@@ -158,6 +172,9 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 		}
 	}
 	p.acctDegraded = degraded
+	if degraded == "" {
+		p.lastPassOK = now
+	}
 	return accepted
 }
 
@@ -174,9 +191,41 @@ func (p *phase3) ingestAbsolute(ctx context.Context, s phase3Session, bridge str
 
 // AccountingDegraded reports the truthful accounting state for health: empty when the last pass completed
 // cleanly, otherwise why it did not.
+//
+// The reason is a BOUNDED phrase, never raw SQL and never a guest or session identifier. A health endpoint is
+// read by people and by machines that were not authorised to see who is staying at the property, and an error
+// string pasted straight through is the easiest way for a session id or a PostgreSQL statement to end up in a
+// monitoring system, a screenshot, or a support ticket.
 func (p *phase3) AccountingDegraded() string {
 	if p == nil {
 		return ""
 	}
 	return p.acctDegraded
+}
+
+// STALENESS. A pass that has not completed for longer than this is degraded even if nothing errored: silence
+// is indistinguishable from success from the outside, and an accounting loop that stopped producing is
+// exactly the failure nobody notices until a Folio is short.
+const accountingFreshness = 5 * time.Minute
+
+// accountingHealth is the whole truthful answer, for the health supervisor.
+func (p *phase3) accountingHealth(now time.Time) map[string]any {
+	if p == nil {
+		return map[string]any{"active": false}
+	}
+	out := map[string]any{"active": true}
+	stale := p.lastPassOK.IsZero() || now.Sub(p.lastPassOK) > accountingFreshness
+	if !p.lastPassOK.IsZero() {
+		out["last_clean_pass_at"] = p.lastPassOK.UTC().Format(time.RFC3339)
+	}
+	out["stale"] = stale
+	reason := p.acctDegraded
+	if reason == "" && stale {
+		reason = reasonNoRecentPass
+	}
+	out["degraded"] = reason != ""
+	if reason != "" {
+		out["reason"] = reason
+	}
+	return out
 }

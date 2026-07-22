@@ -227,8 +227,10 @@ func TestDarkNetdRefusesEveryPlan(t *testing.T) {
 	}
 	// and it does not even disclose the managed-class generations
 	srv := &server{phase3: p}
+	epochReq := httptest.NewRequest(http.MethodGet, "/v1/phase3/shaping/epochs", nil)
+	epochReq = epochReq.WithContext(context.WithValue(epochReq.Context(), peerConnKey{}, producerIdentity{UID: testUID}))
 	rec := httptest.NewRecorder()
-	http.HandlerFunc(srv.phase3EpochsHandler).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/phase3/shaping/epochs", nil))
+	http.HandlerFunc(srv.phase3EpochsHandler).ServeHTTP(rec, epochReq)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("a dark netd served class generations: %d", rec.Code)
 	}
@@ -690,60 +692,71 @@ func TestShapingEndpointContract(t *testing.T) {
 
 // ---- health ---------------------------------------------------------------
 
-// Health must tell the truth about enforcement. A plan that failed to apply is invisible otherwise, and
-// "shaping looks fine" is the most expensive kind of wrong.
+// Health must tell the truth about enforcement, in a state an operator can act on. The five states exist
+// because the interesting failures are not "an error occurred" — they are "nothing is known to be in force"
+// and "what is in force is no longer confirmed", both of which an earlier version reported as healthy.
 func TestHealthReportsTruthfulShapingState(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
 
-	// nothing submitted yet: not degraded, no last-applied claim, and explicitly stale — because a live
-	// appliance with no plan is NOT enforcing anything, which an operator must be able to see.
+	// LIVE, NOTHING IN FORCE. This is degraded: the appliance is supposed to be enforcing and demonstrably
+	// is not. Reporting degraded=false here — with the fact buried in a plan_stale field — reads as healthy
+	// at a glance while saying the opposite in small print.
 	st := p.status()
-	if st["degraded"] != false {
-		t.Fatalf("a writer that has done nothing reported degraded: %v", st)
+	if st["state"] != shapingNoPlan || st["degraded"] != true {
+		t.Fatalf("a live writer with nothing in force: %v", st)
 	}
 	if _, ok := st["last_applied_at"]; ok {
 		t.Fatal("a writer that has applied nothing claimed a last-applied time")
-	}
-	if st["plan_stale"] != true {
-		t.Fatalf("a live writer with no plan did not report a stale plan: %v", st)
 	}
 	if st["active"] != true || st["producer_authenticated"] != true {
 		t.Fatalf("health did not report the enforcement mode: %v", st)
 	}
 
-	// a clean apply
+	// CONVERGED: the kernel was driven to a current plan with nothing failing.
 	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	st = p.status()
-	if st["degraded"] != false || st["last_applied_at"] == nil {
-		t.Fatalf("a clean apply was not reported: %v", st)
+	if st["state"] != shapingConverged || st["degraded"] != false {
+		t.Fatalf("a clean apply: %v", st)
 	}
-	if st["accepted_generation"] != int64(1) || st["plan_stale"] != false {
-		t.Fatalf("health did not report the accepted plan: %v", st)
+	if st["converged_generation"] != int64(1) || st["admitted_generation"] != int64(1) || st["plan_stale"] != false {
+		t.Fatalf("health did not report the converged plan: %v", st)
 	}
 
-	// a failed teardown must surface, with a reason
+	// DEGRADED: a teardown failed, so traffic may still be forwarded for access that ended.
 	tc.failDel["10.0.0.8"] = errors.New("class busy")
 	if _, err := p.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	st = p.status()
-	if st["degraded"] != true || st["problem"] == nil {
-		t.Fatalf("a failed apply was not reported as degraded: %v", st)
+	if st["state"] != shapingDegradedState || st["degraded"] != true || st["problem"] == nil {
+		t.Fatalf("a failed apply: %v", st)
+	}
+	// the ADMISSION advanced (so a replay of generation 1 still cannot reinstate anything) but CONVERGENCE
+	// did not: claiming generation 2 was put in force would be a false record of the kernel's state
+	if st["admitted_generation"] != int64(2) {
+		t.Fatalf("a partially applied plan was not admitted: %v", st)
+	}
+	if st["converged_generation"] != int64(1) {
+		t.Fatalf("a partially applied plan was recorded as converged: %v", st)
 	}
 
-	// recovering clears it, so a stale problem cannot linger
+	// RECOVERY: re-submitting the SAME generation and hash is allowed, and finishing convergence clears it.
 	delete(tc.failDel, "10.0.0.8")
-	if _, err := p.submit(context.Background(), standardPlan(3), time.Now()); err != nil {
-		t.Fatal(err)
+	if _, err := p.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
+		t.Fatalf("retrying the admitted generation was refused: %v", err)
 	}
-	if st := p.status(); st["degraded"] != false {
-		t.Fatalf("a recovered writer still reports degraded: %v", st)
+	st = p.status()
+	if st["state"] != shapingConverged || st["degraded"] != false {
+		t.Fatalf("a recovered writer: %v", st)
+	}
+	if st["converged_generation"] != int64(2) {
+		t.Fatalf("convergence did not catch up: %v", st)
 	}
 
-	// a refusal is counted and named, so an operator can see that netd is REFUSING plans rather than quietly
+	// a refusal is counted and named, so an operator can see netd REFUSING plans rather than quietly
 	// enforcing nothing
 	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err == nil {
 		t.Fatal("expected the stale plan to be refused")
@@ -754,26 +767,44 @@ func TestHealthReportsTruthfulShapingState(t *testing.T) {
 	}
 }
 
-// An expired plan with no replacement means the producer has gone quiet: what is installed is no longer known
-// to be current. That is a health fact, not an internal detail.
-func TestExpiredPlanShowsAsStale(t *testing.T) {
+// A plan that expired without a replacement means the producer went quiet. What is installed may still be
+// correct, but nothing is confirming it — and "probably still correct" is not a state to stay silent about.
+func TestExpiredPlanIsStaleAndDegraded(t *testing.T) {
 	tc := newFakeTC()
 	p := liveWriter(tc)
-	env := standardPlan(1)
 	now := time.Now()
+	env := standardPlan(1)
 	env.ExpiresAt = now.Add(30 * time.Second)
 	if _, err := p.submit(context.Background(), env, now); err != nil {
 		t.Fatal(err)
 	}
-	if p.status()["plan_stale"] != false {
-		t.Fatal("a fresh plan was reported stale")
+	if st := p.status(); st["state"] != shapingConverged || st["plan_stale"] != false {
+		t.Fatalf("a fresh plan: %v", st)
 	}
-	// wind the accepted plan's expiry into the past, as a producer that died would leave it
+
+	// wind the converged plan's validity into the past, as a producer that died would leave it
 	p.mu.Lock()
-	p.lastAccepted.ExpiresAt = time.Now().Add(-time.Second)
+	p.lastConverged.ExpiresAt = time.Now().Add(-time.Second)
 	p.mu.Unlock()
-	if p.status()["plan_stale"] != true {
-		t.Fatal("an expired plan was not reported as stale")
+
+	st := p.status()
+	if st["state"] != shapingStale {
+		t.Fatalf("an expired plan reported state %v", st["state"])
+	}
+	if st["degraded"] != true {
+		t.Fatalf("an expired plan reported degraded=false: %v", st)
+	}
+	if st["plan_stale"] != true {
+		t.Fatalf("plan_stale was not set: %v", st)
+	}
+}
+
+// A dark appliance is not "degraded" — it is doing exactly what it should.
+func TestDarkIsNotDegraded(t *testing.T) {
+	p := &phase3Shaping{shp: newFakeTC(), authz: shapingAuthz{allowedUID: testUID, configured: true}}
+	st := p.status()
+	if st["state"] != shapingDark || st["degraded"] != false {
+		t.Fatalf("a dark writer: %v", st)
 	}
 }
 
@@ -1037,4 +1068,148 @@ func TestEpochsExposesOnlyVerifiedKernelClasses(t *testing.T) {
 	if blind.restoreNote == "" {
 		t.Fatal("an unverifiable restore did not record why nothing was carried forward")
 	}
+}
+
+// The class-generation endpoint is control-plane state: it enumerates which sessions are shaped, where, and
+// how often each class has been replaced. Every other service on the appliance can reach the socket, so it
+// requires the same authenticated producer identity as a submission.
+func TestEpochsEndpointRequiresTheAuthenticatedProducer(t *testing.T) {
+	tc := newFakeTC()
+	srv := &server{phase3: liveWriter(tc)}
+	if _, err := srv.phase3.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	h := http.HandlerFunc(srv.phase3EpochsHandler)
+
+	// no peer credentials at all
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/phase3/shaping/epochs", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("an unauthenticated caller read class generations: %d %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "live-1") {
+		t.Fatal("a refused read disclosed managed sessions")
+	}
+
+	// another local service — edged, portald, scd all share the socket group
+	other := httptest.NewRequest(http.MethodGet, "/v1/phase3/shaping/epochs", nil)
+	other = other.WithContext(context.WithValue(other.Context(), peerConnKey{}, producerIdentity{UID: testUID + 1}))
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, other)
+	if rec2.Code != http.StatusForbidden {
+		t.Fatalf("uid %d read class generations: %d", testUID+1, rec2.Code)
+	}
+
+	// the authorised producer
+	ok := httptest.NewRequest(http.MethodGet, "/v1/phase3/shaping/epochs", nil)
+	ok = ok.WithContext(context.WithValue(ok.Context(), peerConnKey{}, producerIdentity{UID: testUID}))
+	rec3 := httptest.NewRecorder()
+	h.ServeHTTP(rec3, ok)
+	if rec3.Code != http.StatusOK {
+		t.Fatalf("the authorised producer was refused: %d", rec3.Code)
+	}
+	if !strings.Contains(rec3.Body.String(), "live-1") {
+		t.Fatalf("the authorised producer got no generations: %s", rec3.Body.String())
+	}
+}
+
+// THE WHOLE REBOOT SEQUENCE, end to end.
+//
+// Each piece is tested on its own above; this drives them in the order a real reboot produces them, because
+// the failure being guarded against is an interaction, not a unit: durable admission state and durable class
+// state must recover together, the kernel must be re-driven from a single desired-state submission, strays
+// left by the previous boot must go, recreated classes must be new series, and the accounting checkpoints
+// acctd still holds must be able to continue without a regression or a phantom delta.
+func TestRebootConvergesFromOneSubmission(t *testing.T) {
+	dir := t.TempDir()
+	classState := filepath.Join(dir, "classes.json")
+	planState := filepath.Join(dir, "plan.json")
+	gens := &fakeGenerations{}
+	tc := newFakeTC()
+
+	// ---- before the reboot: a converged appliance --------------------------
+	before := liveWriter(tc)
+	before.classStore = &classStore{path: classState}
+	before.store = &planStore{path: planState}
+	before.generations = gens
+	before.restore(classState4(), "boot-aaaa", map[string]map[int]bool{}, true)
+	if _, err := before.submit(context.Background(), standardPlan(7), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if st := before.status(); st["state"] != shapingConverged {
+		t.Fatalf("the appliance did not converge before the reboot: %v", st)
+	}
+	oldEpochs := before.Epochs()
+	if len(oldEpochs) != 2 {
+		t.Fatalf("managed classes before the reboot = %d", len(oldEpochs))
+	}
+
+	// ---- the reboot --------------------------------------------------------
+	// Every tc class is gone. One class from the previous boot is left behind in the kernel by a partial
+	// teardown, to prove stray removal still happens after a restart.
+	tc.wipe()
+	tc.preinstall("br-guest", "10.0.0.55")
+
+	after := liveWriter(tc)
+	after.classStore = &classStore{path: classState}
+	after.store = &planStore{path: planState}
+	after.generations = gens
+	prev, _ := after.classStore.load()
+	inv, verified := kernelInventory(context.Background(), tc, bridgesIn(prev))
+	after.restore(prev, "boot-bbbb", inv, verified)
+
+	// durable ADMISSION state survived: a replay of a superseded generation is still refused
+	if res, err := after.submit(context.Background(), standardPlan(6), time.Now()); err == nil {
+		t.Fatalf("a superseded plan was accepted after a reboot: %+v", res)
+	} else if res.Reason != shapeplan.ReasonStaleGeneration {
+		t.Fatalf("refusal reason after reboot = %q", res.Reason)
+	}
+
+	// nothing is claimed to be in force yet
+	if st := after.status(); st["state"] != shapingNoPlan || st["degraded"] != true {
+		t.Fatalf("a rebooted appliance did not report that nothing is in force: %v", st)
+	}
+
+	// ---- one complete desired-state submission -----------------------------
+	res, err := after.submit(context.Background(), standardPlan(8), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Degraded {
+		t.Fatalf("the appliance did not converge from one submission: %+v", res)
+	}
+	if res.StraysRemoved != 1 {
+		t.Fatalf("strays removed = %d; the class left by the previous boot must go", res.StraysRemoved)
+	}
+	if res.Shaped != 2 {
+		t.Fatalf("shaped = %d, want both entitled sessions", res.Shaped)
+	}
+	if st := after.status(); st["state"] != shapingConverged || st["degraded"] != false {
+		t.Fatalf("after convergence: %v", st)
+	}
+
+	// ---- the accounting side can continue safely ---------------------------
+	// Every recreated class is a STRICTLY NEWER generation, so a checkpoint still holding the previous one
+	// sees a new series (a trustworthy reset) rather than a counter that appears to have gone backwards.
+	newEpochs := after.Epochs()
+	if len(newEpochs) != len(oldEpochs) {
+		t.Fatalf("managed classes after convergence = %d, want %d", len(newEpochs), len(oldEpochs))
+	}
+	for k, old := range oldEpochs {
+		if newEpochs[k] <= old {
+			t.Fatalf("class %s came back as generation %d, not newer than %d", k, newEpochs[k], old)
+		}
+	}
+	seen := map[int64]string{}
+	for k, v := range newEpochs {
+		if other, dup := seen[v]; dup {
+			t.Fatalf("classes %s and %s share generation %d", other, k, v)
+		}
+		seen[v] = k
+	}
+}
+
+// classState4 is an empty starting inventory, spelled out so the reboot test reads in order.
+func classState4() classState {
+	return classState{Classes: map[string]managedClass{}}
 }

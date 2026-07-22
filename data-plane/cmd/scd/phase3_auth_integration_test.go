@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -137,9 +138,19 @@ func newAuthFixture(t *testing.T) *authFixture {
 		  occupancy_revision_id = $3,
 		  occupancy_normalization_version = 1,
 		  occupancy_clock_suspect = false,
-		  occupancy_evidence_version = 1
+		  occupancy_evidence_version = 1,
+		  room_type = 'SUITE', rate_plan = 'CORP', travel_agent = 'ACME', vip = true,
+		  arrival = (now() - interval '3 days')::date, departure = (now() + interval '1 day')::date
 		 WHERE tenant_id=$1 AND site_id=$2`, f.tenant, f.site, f.revision); err != nil {
 		t.Fatalf("seed occupancy evidence: %v", err)
+	}
+	// PUBLISH the interface revision. scd pins the published pointer, never max(revision_no), so a fixture
+	// that creates a revision without publishing it is correctly refused — which is the behaviour a Draft
+	// mid-configuration must get.
+	if _, err := p.Exec(ctx, `
+		UPDATE iam_v2.pms_interfaces SET current_revision_id=$3
+		 WHERE tenant_id=$1 AND site_id=$2`, f.tenant, f.site, f.revision); err != nil {
+		t.Fatalf("publish the interface revision: %v", err)
 	}
 	// The catalog's current-revision pointer is a separate statement: a data-modifying CTE cannot see a
 	// sibling CTE's insert.
@@ -481,4 +492,236 @@ func TestIntegration_Phase3Auth_ExpiredContextGrantsNothing(t *testing.T) {
 		t.Fatal("an expired Auth Context still granted access")
 	}
 	_ = time.Now
+}
+
+// ---- offers, published revisions, and grant binding -------------------------
+
+// addPackage creates a current, visible, free package with the given eligibility rules, and returns its
+// revision id. It is the shape a property actually configures: a package plus the rules that decide who sees
+// it.
+func (f *authFixture) addPackage(t *testing.T, code string, rules []map[string]any) string {
+	t.Helper()
+	ctx := context.Background()
+	var pkgRev string
+	if err := f.pool.QueryRow(ctx, `WITH
+	  sp AS (SELECT id FROM iam_v2.service_plan_revisions WHERE tenant_id=$1 AND site_id=$2 LIMIT 1),
+	  ip AS (INSERT INTO iam_v2.internet_packages(id,tenant_id,site_id,code,is_system,active)
+	         VALUES (gen_random_uuid(),$1,$2,$3,false,true) RETURNING id),
+	  ipr AS (INSERT INTO iam_v2.internet_package_revisions
+	            (id,tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,
+	             price_minor,settlement_methods,duration_policy)
+	          SELECT gen_random_uuid(),$1,$2,ip.id,1,sp.id,'FREE_STAY',0,ARRAY['NOT_REQUIRED']::text[],
+	                 '{"mode":"VALIDITY_WINDOW","seconds":86400}'::jsonb FROM ip, sp RETURNING id)
+	SELECT (SELECT id FROM ipr)::text`, f.tenant, f.site, code).Scan(&pkgRev); err != nil {
+		t.Fatalf("add package %s: %v", code, err)
+	}
+	if _, err := f.pool.Exec(ctx, `
+		UPDATE iam_v2.internet_packages ip SET current_revision_id = r.id
+		  FROM iam_v2.internet_package_revisions r
+		 WHERE r.id=$1 AND ip.id = r.package_id`, pkgRev); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rules {
+		raw, _ := json.Marshal(r["value"])
+		if _, err := f.pool.Exec(ctx, `
+			INSERT INTO iam_v2.package_eligibility_rules
+			  (tenant_id,site_id,package_revision_id,rule_type,rule_value)
+			VALUES ($1,$2,$3,$4,$5::jsonb)`,
+			f.tenant, f.site, pkgRev, r["type"], string(raw)); err != nil {
+			t.Fatalf("add rule %v: %v", r["type"], err)
+		}
+	}
+	return pkgRev
+}
+
+// THE OFFER SET IS DECIDED BY THE RULES, not by the catalogue. The suite package is offered because this
+// Stay is in a SUITE; the standard-only package is not offered at all, even though it is free and visible.
+func TestIntegration_Phase3Auth_OffersFollowStayEligibility(t *testing.T) {
+	f := newAuthFixture(t)
+
+	suiteOnly := f.addPackage(t, "SUITE_ONLY", []map[string]any{
+		{"type": "ROOM_TYPE", "value": map[string]any{"room_types": []string{"SUITE"}}}})
+	standardOnly := f.addPackage(t, "STANDARD_ONLY", []map[string]any{
+		{"type": "ROOM_TYPE", "value": map[string]any{"room_types": []string{"STANDARD"}}}})
+
+	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "0000ff01-0000-4000-8000-000000000000"))
+	if res.Outcome != outcomeVerified {
+		t.Fatalf("the stay did not verify: %+v", res)
+	}
+	offered := map[string]bool{}
+	for _, o := range res.Offers {
+		offered[o.PackageRevisionID] = true
+	}
+	if !offered[suiteOnly] {
+		t.Fatal("a package this SUITE stay qualifies for was not offered")
+	}
+	if offered[standardOnly] {
+		t.Fatal("a package restricted to STANDARD rooms was offered to a SUITE stay")
+	}
+	if !offered[f.pkgRev] {
+		t.Fatal("the unrestricted included package was not offered")
+	}
+}
+
+// A guest may only redeem what was OFFERED TO THEM. Naming another free, generally-grantable package on the
+// site — one whose rules they do not satisfy — must fail closed, because "grantable" is not "authorised".
+func TestIntegration_Phase3Auth_GrantIsBoundToTheOfferedSet(t *testing.T) {
+	f := newAuthFixture(t)
+	standardOnly := f.addPackage(t, "STANDARD_ONLY", []map[string]any{
+		{"type": "ROOM_TYPE", "value": map[string]any{"room_types": []string{"STANDARD"}}}})
+
+	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "0000ff02-0000-4000-8000-000000000000"))
+	if res.Outcome != outcomeVerified {
+		t.Fatal("setup: the stay did not verify")
+	}
+	for _, o := range res.Offers {
+		if o.PackageRevisionID == standardOnly {
+			t.Fatal("setup: the ineligible package was offered")
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	raw, _ := json.Marshal(map[string]any{
+		"auth_context_id":     res.AuthContextID,
+		"package_revision_id": standardOnly, // free, visible, current — but never offered to this Stay
+		"device":              map[string]string{"ip": f.net.guestIP, "mac": f.net.mac},
+	})
+	f.p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
+	var out phase3GrantResp
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if out.Outcome == outcomeVerified {
+		t.Fatal("a package that was never offered to this Stay was granted")
+	}
+	var n int
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1`, f.stay).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("an unoffered grant created %d entitlements", n)
+	}
+}
+
+// An UNPUBLISHED higher-numbered Draft must never be pinned. Somebody mid-way through configuring a connector
+// change has not authorised anything, and the Auth Context would record their draft as the authority for a
+// guest's access.
+func TestIntegration_Phase3Auth_PinsThePublishedRevisionNotTheHighest(t *testing.T) {
+	f := newAuthFixture(t)
+	ctx := context.Background()
+
+	var draft string
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO iam_v2.pms_interface_revisions
+		  (id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,config)
+		VALUES (gen_random_uuid(),$1,$2,$3,99,'UTC','{}'::jsonb) RETURNING id::text`,
+		f.tenant, f.site, f.iface).Scan(&draft); err != nil {
+		t.Fatalf("create the draft: %v", err)
+	}
+	// the publication pointer still names revision 1; the draft is not current
+	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "0000ff03-0000-4000-8000-000000000000"))
+	if res.Outcome != outcomeVerified {
+		t.Fatalf("the stay did not verify: %+v", res)
+	}
+	var pinned string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT authentication_interface_revision_id::text FROM iam_v2.auth_contexts WHERE id=$1`,
+		res.AuthContextID).Scan(&pinned); err != nil {
+		t.Fatal(err)
+	}
+	if pinned == draft {
+		t.Fatal("the Auth Context pinned an unpublished Draft revision")
+	}
+	if pinned != f.revision {
+		t.Fatalf("pinned %s, want the published revision %s", pinned, f.revision)
+	}
+}
+
+// ONE RESOLUTION, ONE LIVE CONTEXT. A guest tapping Connect repeatedly on a bad connection must not leave a
+// pile of independently redeemable credentials behind for one identity proof.
+func TestIntegration_Phase3Auth_OneResolutionYieldsOneLiveContext(t *testing.T) {
+	f := newAuthFixture(t)
+	ctx := context.Background()
+	const reqID = "0000ff04-0000-4000-8000-000000000000"
+
+	seen := map[string]bool{}
+	for i := 0; i < 5; i++ {
+		_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", reqID))
+		if res.Outcome != outcomeVerified {
+			t.Fatalf("attempt %d did not verify: %+v", i, res)
+		}
+		seen[res.AuthContextID] = true
+	}
+	if len(seen) != 1 {
+		t.Fatalf("five retries of one resolution minted %d distinct contexts", len(seen))
+	}
+	var live int
+	if err := f.pool.QueryRow(ctx, `
+		SELECT count(*) FROM iam_v2.auth_contexts
+		 WHERE resolution_request_id=$1::uuid AND consumed_at IS NULL`, reqID).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if live != 1 {
+		t.Fatalf("live contexts for one resolution = %d, want exactly 1", live)
+	}
+
+	// once REDEEMED, a further retry must not silently hand back a fresh credential for the spent proof
+	var ctxID string
+	for id := range seen {
+		ctxID = id
+	}
+	rec := httptest.NewRecorder()
+	raw, _ := json.Marshal(map[string]any{
+		"auth_context_id":     ctxID,
+		"package_revision_id": f.pkgRev,
+		"device":              map[string]string{"ip": f.net.guestIP, "mac": f.net.mac},
+	})
+	f.p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
+	var granted phase3GrantResp
+	_ = json.Unmarshal(rec.Body.Bytes(), &granted)
+	if granted.Outcome != outcomeVerified {
+		t.Fatalf("the grant failed: %s", rec.Body.String())
+	}
+	_, after := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", reqID))
+	if after.Outcome == outcomeVerified && after.AuthContextID == ctxID {
+		t.Fatal("a consumed context was handed back for reuse")
+	}
+}
+
+// Concurrent replays of one resolution converge on a single context: the uniqueness is enforced by the
+// database, not by the handler happening to be called sequentially.
+func TestIntegration_Phase3Auth_ConcurrentReplaysConvergeOnOneContext(t *testing.T) {
+	f := newAuthFixture(t)
+	const reqID = "0000ff05-0000-4000-8000-000000000000"
+
+	var mu sync.Mutex
+	ids := map[string]bool{}
+	var wg sync.WaitGroup
+	for i := 0; i < 24; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			raw, _ := json.Marshal(f.resolveBody("412", "Okonkwo", "", reqID))
+			rec := httptest.NewRecorder()
+			f.p3.resolveHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
+			var out phase3Response
+			if json.Unmarshal(rec.Body.Bytes(), &out) == nil && out.AuthContextID != "" {
+				mu.Lock()
+				ids[out.AuthContextID] = true
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if len(ids) > 1 {
+		t.Fatalf("24 concurrent replays produced %d distinct contexts", len(ids))
+	}
+	var live int
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM iam_v2.auth_contexts
+		 WHERE resolution_request_id=$1::uuid AND consumed_at IS NULL`, reqID).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if live > 1 {
+		t.Fatalf("live contexts after concurrent replay = %d", live)
+	}
 }

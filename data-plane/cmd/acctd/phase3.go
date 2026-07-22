@@ -40,7 +40,10 @@ type phase3 struct {
 	// unavailable class generations, a refused observation). acctd keeps NO counter baseline of its own: the
 	// durable checkpoint in the database is the baseline, which is what makes a restart safe.
 	acctDegraded string
-	enf          *enforce.Enforcer
+	// lastPassOK is when a pass last completed with nothing degraded. Silence is indistinguishable from
+	// success from the outside, so health needs to know when the loop last actually worked.
+	lastPassOK time.Time
+	enf        *enforce.Enforcer
 	// site is the single site this appliance serves; expiry enforcement is scoped to it.
 	tenant, site string
 	// scope and plans are the producer half of the shaping contract: the appliance identity a submitted plan
@@ -268,6 +271,10 @@ func (p *phase3) Degraded() string {
 func (p *phase3) degradedSummary() string {
 	if p == nil {
 		return ""
+	}
+	if p.acctDegraded == "" && p.degraded == "" && !p.lastPassOK.IsZero() &&
+		time.Since(p.lastPassOK) > accountingFreshness {
+		return reasonNoRecentPass
 	}
 	switch {
 	case p.acctDegraded != "" && p.degraded != "":

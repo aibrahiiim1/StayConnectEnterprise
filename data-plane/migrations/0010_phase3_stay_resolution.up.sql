@@ -989,6 +989,140 @@ CREATE TABLE iam_v2.accounting_checkpoints (
   UNIQUE (session_id, source_device_id, bridge, class_minor),
   FOREIGN KEY (tenant_id, site_id, session_id) REFERENCES iam_v2.sessions (tenant_id, site_id, id) ON DELETE CASCADE);
 
+-- THE controlled offer-set writer. It exists so the offer record has exactly one author, and so the row can
+-- never be back-filled: an offer inserted after the fact would make an unoffered package look offered.
+CREATE OR REPLACE FUNCTION iam_v2.record_auth_context_offer(
+    p_tenant uuid, p_site uuid, p_auth_context uuid, p_package_revision uuid,
+    p_tier int, p_evidence_version bigint, p_expires_at timestamptz) RETURNS uuid
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_id uuid; v_consumed timestamptz;
+BEGIN
+  IF p_evidence_version IS NULL OR p_evidence_version <= 0 THEN
+    RAISE EXCEPTION 'OFFER_INVALID: an offer must record the evidence version it was decided under';
+  END IF;
+  SELECT consumed_at INTO v_consumed FROM iam_v2.auth_contexts
+    WHERE id = p_auth_context AND tenant_id = p_tenant AND site_id = p_site;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'OFFER_INVALID: auth context % is not in this tenant/site', p_auth_context;
+  END IF;
+  IF v_consumed IS NOT NULL THEN
+    -- Offering something to a context that has already been redeemed would let a second grant find an offer
+    -- that was never shown to the guest at the time they proved who they were.
+    RAISE EXCEPTION 'OFFER_INVALID: auth context % is already consumed', p_auth_context;
+  END IF;
+  INSERT INTO iam_v2.auth_context_offers
+    (tenant_id, site_id, auth_context_id, package_revision_id, matched_tier_order, evidence_version, expires_at)
+    VALUES (p_tenant, p_site, p_auth_context, p_package_revision, p_tier, p_evidence_version, p_expires_at)
+    ON CONFLICT (auth_context_id, package_revision_id) DO NOTHING
+    RETURNING id INTO v_id;
+  RETURN v_id;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.record_auth_context_offer(uuid,uuid,uuid,uuid,int,bigint,timestamptz) FROM PUBLIC;
+
+-- ============================================================================
+-- (4s) ONE RESOLUTION, ONE LIVE AUTH CONTEXT.
+--
+-- The resolution itself is idempotent per request id — submit the same one twice and the stored outcome is
+-- replayed rather than re-decided. But issuing a CONTEXT from that replay was not: every retry minted another
+-- unconsumed, independently redeemable Context. A guest tapping Connect five times on a bad connection would
+-- leave five live credentials for one identity proof, any of which could be redeemed later by whoever held it.
+--
+-- The rule is one LIVE context per resolution request. A retry returns the still-valid one it already has; it
+-- does not create a second. A consumed context is never silently replaced — that would let a redeemed proof
+-- be re-redeemed — so a new grant needs a new identity proof.
+ALTER TABLE iam_v2.auth_contexts ADD COLUMN resolution_request_id uuid;
+CREATE UNIQUE INDEX ac_one_live_per_resolution
+  ON iam_v2.auth_contexts (tenant_id, site_id, resolution_request_id)
+  WHERE resolution_request_id IS NOT NULL AND consumed_at IS NULL;
+
+-- Issue-or-return. Returns the existing live Context for this resolution when there is one, so a retry is
+-- idempotent rather than accumulative, and the caller cannot tell (or need to tell) which happened.
+CREATE OR REPLACE FUNCTION iam_v2.issue_or_return_pms_context(
+    p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_stay uuid,
+    p_device uuid, p_guest_network uuid, p_request uuid, p_ttl_seconds int)
+  RETURNS TABLE (context_id uuid, reused boolean)
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_existing uuid; v_lifecycle int; v_ev bigint;
+BEGIN
+  IF p_request IS NULL THEN
+    RAISE EXCEPTION 'CONTEXT_INVALID: a PMS context must name the resolution it came from';
+  END IF;
+  -- An existing LIVE context for this resolution is returned as-is. Note what is deliberately not matched:
+  -- a CONSUMED one. Returning that would hand back a credential that has already bought access.
+  SELECT id INTO v_existing FROM iam_v2.auth_contexts
+    WHERE tenant_id = p_tenant AND site_id = p_site AND resolution_request_id = p_request
+      AND consumed_at IS NULL AND expires_at > now()
+    FOR UPDATE;
+  IF v_existing IS NOT NULL THEN
+    RETURN QUERY SELECT v_existing, true;
+    RETURN;
+  END IF;
+
+  -- Same authoritative Stay snapshot the plain issue path takes: IN_HOUSE, ACTIVE interface, occupancy
+  -- evidence present, versioned, not clock-suspect, produced by the SAME revision, and still fresh.
+  SELECT st.lifecycle_version, st.occupancy_evidence_version INTO v_lifecycle, v_ev
+    FROM iam_v2.stays st
+    JOIN iam_v2.pms_interfaces pi
+      ON pi.tenant_id=st.tenant_id AND pi.site_id=st.site_id AND pi.id=st.pms_interface_id
+    JOIN iam_v2.pms_interface_revisions pr
+      ON pr.tenant_id=st.tenant_id AND pr.site_id=st.site_id
+     AND pr.pms_interface_id=st.pms_interface_id AND pr.id=p_revision
+   WHERE st.tenant_id=p_tenant AND st.site_id=p_site AND st.pms_interface_id=p_interface AND st.id=p_stay
+     AND st.status='IN_HOUSE' AND pi.lifecycle_state='ACTIVE'
+     AND st.occupancy_evidence_at IS NOT NULL AND st.occupancy_clock_suspect IS NOT TRUE
+     AND st.occupancy_evidence_version > 0 AND st.occupancy_revision_id = p_revision
+     AND st.occupancy_evidence_at > now() - make_interval(secs =>
+           CASE WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
+                THEN CASE WHEN (pr.config->>'max_auth_cache_age_seconds')::int <= 604800
+                          THEN (pr.config->>'max_auth_cache_age_seconds')::int ELSE 300 END
+                ELSE 300 END)
+   FOR UPDATE OF st;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
+  END IF;
+
+  RETURN QUERY
+    INSERT INTO iam_v2.auth_contexts
+      (tenant_id, site_id, method, stay_id, pms_interface_id, authentication_interface_revision_id,
+       device_id, guest_network_id, pinned_lifecycle_version, pinned_occupancy_evidence_version,
+       resolution_request_id, expires_at)
+    VALUES (p_tenant, p_site, 'PMS', p_stay, p_interface, p_revision, p_device, p_guest_network,
+            v_lifecycle, v_ev, p_request, now() + make_interval(secs => p_ttl_seconds))
+    RETURNING id, false;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.issue_or_return_pms_context(uuid,uuid,uuid,uuid,uuid,uuid,uuid,uuid,int) FROM PUBLIC;
+
+-- ============================================================================
+-- (4r) RATE PLAN, AND THE OFFER SET A VERIFIED STAY WAS ACTUALLY SHOWN.
+--
+-- RATE_PLAN is one of the seven PMS eligibility rule types. A property can publish "corporate rate plans get
+-- the business package", so the rule needs an authoritative source — without one it would be permanently
+-- unanswerable, which fails closed correctly but means the rule type could never be used for anything.
+ALTER TABLE iam_v2.stays ADD COLUMN rate_plan text;
+
+-- THE OFFER SET. A grant must be able to answer "was this package offered to THIS verified Stay?", which is a
+-- different question from "is this package generally grantable?". Without this record only the second can be
+-- asked, and a guest naming any other free package on the site passes it.
+--
+-- One row per (Auth Context, package revision), written in the same transaction that issues the Context, and
+-- carrying the evidence version the decision was made under so it can be re-justified later.
+CREATE TABLE iam_v2.auth_context_offers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL,
+  auth_context_id uuid NOT NULL,
+  package_revision_id uuid NOT NULL,
+  matched_tier_order int,
+  evidence_version bigint NOT NULL CHECK (evidence_version > 0),
+  offered_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  UNIQUE (auth_context_id, package_revision_id),
+  FOREIGN KEY (tenant_id, site_id, auth_context_id)
+    REFERENCES iam_v2.auth_contexts (tenant_id, site_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (tenant_id, site_id, package_revision_id)
+    REFERENCES iam_v2.internet_package_revisions (tenant_id, site_id, id),
+  CONSTRAINT aco_expiry_after_offer CHECK (expires_at > offered_at));
+CREATE INDEX aco_by_context ON iam_v2.auth_context_offers (auth_context_id);
+
 -- ============================================================================
 -- (4q) THE CLASS-GENERATION ALLOCATOR.
 --
@@ -1374,6 +1508,7 @@ BEGIN
     WHEN 'accounting' THEN 'iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)'
     WHEN 'accounting_origin' THEN 'iam_v2.register_class_origin(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)'
     WHEN 'class_generation' THEN 'iam_v2.allocate_class_generation(uuid,uuid,uuid)'
+    WHEN 'auth_offers' THEN 'iam_v2.record_auth_context_offer(uuid,uuid,uuid,uuid,int,bigint,timestamptz)'
     ELSE NULL END;
   IF v_sig IS NULL THEN
     RAISE EXCEPTION 'no approved controlled-writer family %', p_family;
@@ -1402,6 +1537,8 @@ BEGIN
       THEN 'iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)'
     WHEN TG_TABLE_NAME = 'appliance_class_generation'
       THEN 'iam_v2.allocate_class_generation(uuid,uuid,uuid)'
+    WHEN TG_TABLE_NAME = 'auth_context_offers'
+      THEN 'iam_v2.record_auth_context_offer(uuid,uuid,uuid,uuid,int,bigint,timestamptz)'
     WHEN TG_TABLE_NAME IN ('accounting_records','accounting_checkpoints','delayed_accounting_records','sessions')
       THEN 'iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)'
     ELSE 'iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)' END;
@@ -1424,7 +1561,7 @@ BEGIN
     RETURN OLD;
   END IF;
   IF TG_TABLE_NAME IN ('accounting_records','accounting_checkpoints','delayed_accounting_records',
-                       'appliance_class_generation') THEN
+                       'appliance_class_generation','auth_context_offers') THEN
     -- EVERY write is controlled. A physical measurement has exactly one legitimate author: the operation that
     -- computed it from a locked checkpoint. A raw INSERT here is invented usage; a raw UPDATE is rewritten
     -- history; and a raw checkpoint write is worse than either, because it silently changes what every FUTURE
@@ -1482,6 +1619,13 @@ CREATE TRIGGER p3_delayed_accounting_controlled_writer
   BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.delayed_accounting_records
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
 -- Session usage totals only (see the guard body): creating, binding and ending a Session stay ordinary writes.
+-- The offer set is authoritative state: a row inserted afterwards would retroactively make an unoffered
+-- package look offered, which is precisely the check it exists to support. Attached HERE, with the other
+-- guards, because the guard function is defined in this section -- a trigger created earlier in the file
+-- would reference a function that does not exist yet and the whole migration would fail to apply.
+CREATE TRIGGER p3_auth_context_offers_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.auth_context_offers
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
 CREATE TRIGGER p3_class_generation_controlled_writer
   BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.appliance_class_generation
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();

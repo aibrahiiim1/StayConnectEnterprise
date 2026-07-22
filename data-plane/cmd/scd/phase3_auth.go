@@ -235,70 +235,70 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	// The REVISION is pinned server-side from the interface that verified: the guest never names which
 	// configuration their access was granted under, and the Auth Context records it so the later grant cannot
 	// drift onto a newer one.
-	rev, err := p.currentRevision(ctx, iface)
+	rev, err := p.publishedRevision(ctx, iface)
 	if err != nil {
 		notVerified(w, "no_published_revision")
 		return
 	}
-	id, err := p.ctxs.IssuePMS(ctx, authctx.PMSGrant{
-		Tenant: p.srv.tenID, Site: p.srv.siteID,
-		Interface: iface, Revision: rev, Stay: out.Stay,
-		Device: dev.DeviceID, GuestNetwork: dev.GuestNetwork,
-		TTLSeconds: int(p.contextTTL.Seconds()),
-	})
-	if err != nil {
-		notVerified(w, "context_issue: "+err.Error())
-		return
-	}
-	offers, err := p.offers(ctx)
+	// THE OFFER SET the real eligibility engine says this verified Stay qualifies for — not the site's whole
+	// free catalogue. Two Stays verified a second apart can legitimately get different answers.
+	decisions, err := p.offersFor(ctx, out.Stay, iface, time.Now())
 	if err != nil {
 		notVerified(w, "offers: "+err.Error())
 		return
 	}
-	if len(offers) == 0 {
-		// A verified guest with nothing they may be granted is a CONFIGURATION problem, not an identity one.
-		// The guest still gets the uniform answer — they cannot act on the difference — but the operator sees
-		// the real reason in the log and in the recorded resolution.
-		notVerified(w, "verified_but_no_grantable_package")
+	if len(decisions) == 0 {
+		// A verified guest with nothing they qualify for is a CONFIGURATION or eligibility outcome, not an
+		// identity one. The guest gets the uniform answer either way — they cannot act on the difference —
+		// but the operator sees the real reason in the log and in the recorded resolution.
+		notVerified(w, "verified_but_no_eligible_package")
 		return
+	}
+	evidenceVersion := decisions[0].EvidenceVersion
+
+	// The Context and the offer set it authorises are written TOGETHER. A Context that existed for even an
+	// instant without its offer set would be redeemable against nothing, and the grant's "was this offered?"
+	// check would have to fall back to "is this generally grantable?" — the exact weakening it replaces.
+	tx, err := p.srv.db.Begin(ctx)
+	if err != nil {
+		notVerified(w, "begin: "+err.Error())
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// ONE LIVE CONTEXT PER RESOLUTION. A retry — the guest's second tap, or a response their phone never
+	// received — returns the context this resolution already has rather than minting another. Five taps used
+	// to leave five independently redeemable credentials for a single identity proof.
+	var id string
+	var reused bool
+	if err := tx.QueryRow(ctx, `
+		SELECT context_id::text, reused FROM iam_v2.issue_or_return_pms_context(
+			$1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8::uuid,$9)`,
+		p.srv.tenID, p.srv.siteID, iface, rev, out.Stay, dev.DeviceID, dev.GuestNetwork,
+		strings.TrimSpace(req.RequestID), int(p.contextTTL.Seconds())).Scan(&id, &reused); err != nil {
+		notVerified(w, "context_issue: "+err.Error())
+		return
+	}
+	// A reused context already carries the offer set it was issued with; the controlled writer is idempotent
+	// per (context, package), so a retry re-states the same set rather than widening it.
+	if err := p.recordOfferSet(ctx, tx, id, evidenceVersion, decisions,
+		time.Now().Add(p.contextTTL)); err != nil {
+		notVerified(w, "offer_record: "+err.Error())
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		notVerified(w, "commit: "+err.Error())
+		return
+	}
+
+	offers := make([]phase3Offer, 0, len(decisions))
+	for _, d := range decisions {
+		offers = append(offers, phase3Offer{
+			PackageRevisionID: d.PackageRevisionID, Code: d.Code,
+			DownKbps: d.DownKbps, UpKbps: d.UpKbps})
 	}
 	writeJSONScd(w, http.StatusOK, phase3Response{
 		Outcome: outcomeVerified, AuthContextID: id, ExpiresIn: int(p.contextTTL.Seconds()), Offers: offers})
-}
-
-// offers lists the INCLUDED packages a verified stay may be granted. The predicate is deliberately the SAME
-// one staygrant enforces at grant time — current revision only, never a system/grace catalog, inside its
-// visibility window, zero price, settlement NOT_REQUIRED. Two predicates that "should" agree are how a portal
-// ends up offering something the grant then refuses.
-func (p *phase3Auth) offers(ctx context.Context) ([]phase3Offer, error) {
-	rows, err := p.srv.db.Query(ctx, `
-		SELECT ipr.id::text, ip.code, COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0)
-		  FROM iam_v2.internet_package_revisions ipr
-		  JOIN iam_v2.internet_packages ip
-		    ON ip.tenant_id=ipr.tenant_id AND ip.site_id=ipr.site_id AND ip.id=ipr.package_id
-		  LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = ipr.service_plan_revision_id
-		 WHERE ipr.tenant_id=$1 AND ipr.site_id=$2
-		   AND ip.current_revision_id = ipr.id
-		   AND ip.is_system IS NOT TRUE
-		   AND ipr.package_type <> 'CHECKOUT_GRACE'
-		   AND (ipr.visible_from IS NULL OR ipr.visible_from <= now())
-		   AND (ipr.visible_until IS NULL OR ipr.visible_until > now())
-		   AND ipr.price_minor = 0
-		   AND ipr.settlement_methods = ARRAY['NOT_REQUIRED']::text[]
-		 ORDER BY ip.code`, p.srv.tenID, p.srv.siteID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []phase3Offer
-	for rows.Next() {
-		var o phase3Offer
-		if err := rows.Scan(&o.PackageRevisionID, &o.Code, &o.DownKbps, &o.UpKbps); err != nil {
-			return nil, err
-		}
-		out = append(out, o)
-	}
-	return out, rows.Err()
 }
 
 // validRequestID reports whether s is a canonical 8-4-4-4-12 hex UUID. Deliberately not "close enough": the
@@ -372,13 +372,26 @@ func (p *phase3Auth) interfaceForStay(ctx context.Context, stay string) (string,
 	return iface, err
 }
 
-// currentRevision returns the interface's published revision — the configuration the access will be pinned to.
-func (p *phase3Auth) currentRevision(ctx context.Context, ifaceID string) (string, error) {
+// publishedRevision returns the interface's PUBLISHED revision — the one the operator made current.
+//
+// Not max(revision_no). A higher-numbered revision is routinely a DRAFT: somebody is mid-way through
+// configuring a connector change and has not published it. Pinning that would authenticate guests against a
+// configuration nobody approved, and the Auth Context would record it as the authority for their access.
+// The publication pointer is the only statement of what is live, so it is the only thing read here.
+//
+// Fails closed on every ambiguity: no published revision, a pointer that leaves this tenant/site/interface,
+// or an interface that is not ACTIVE. Each of those means "we cannot say which configuration is authoritative",
+// and a guest must not be admitted on an unanswerable question.
+func (p *phase3Auth) publishedRevision(ctx context.Context, ifaceID string) (string, error) {
 	var rev string
 	err := p.srv.db.QueryRow(ctx, `
-		SELECT r.id::text FROM iam_v2.pms_interface_revisions r
-		 WHERE r.tenant_id=$1 AND r.site_id=$2 AND r.pms_interface_id=$3
-		 ORDER BY r.revision_no DESC LIMIT 1`,
+		SELECT r.id::text
+		  FROM iam_v2.pms_interfaces i
+		  JOIN iam_v2.pms_interface_revisions r
+		    ON r.tenant_id = i.tenant_id AND r.site_id = i.site_id
+		   AND r.pms_interface_id = i.id AND r.id = i.current_revision_id
+		 WHERE i.tenant_id=$1 AND i.site_id=$2 AND i.id=$3
+		   AND i.lifecycle_state='ACTIVE'`,
 		p.srv.tenID, p.srv.siteID, ifaceID).Scan(&rev)
 	return rev, err
 }
@@ -425,6 +438,44 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// THE OFFER CHECK. "Is this package grantable?" and "was this package offered to THIS verified Stay?" are
+	// different questions, and only the second is authorisation. Without this a guest could name any other
+	// free package on the site — one whose eligibility rules they do not satisfy — and the generic
+	// grantability checks would all pass.
+	//
+	// It runs inside the SAME transaction as the grant and takes the offer row FOR UPDATE, so a concurrent
+	// consumption cannot slip between the check and the grant.
+	var offeredTier *int
+	var offerEvidence int64
+	err = tx.QueryRow(ctx, `
+		SELECT o.matched_tier_order, o.evidence_version
+		  FROM iam_v2.auth_context_offers o
+		 WHERE o.tenant_id=$1 AND o.site_id=$2 AND o.auth_context_id=$3::uuid
+		   AND o.package_revision_id=$4::uuid AND o.expires_at > now()
+		 FOR UPDATE`,
+		p.srv.tenID, p.srv.siteID, strings.TrimSpace(req.AuthContextID),
+		strings.TrimSpace(req.PackageRevID)).Scan(&offeredTier, &offerEvidence)
+	if err != nil {
+		notVerified(w, "package_not_offered_to_this_context")
+		return
+	}
+	// The evidence must still be the evidence the offer was decided under. A Stay that moved room, changed
+	// rate or checked out since the offer was made is a different subject, and honouring an offer computed
+	// against the old facts would grant something the guest no longer qualifies for.
+	var nowEvidence int64
+	if err := tx.QueryRow(ctx, `
+		SELECT s.occupancy_evidence_version FROM iam_v2.stays s
+		  JOIN iam_v2.auth_contexts c ON c.stay_id = s.id
+		 WHERE c.id=$1::uuid AND c.tenant_id=$2 AND c.site_id=$3`,
+		strings.TrimSpace(req.AuthContextID), p.srv.tenID, p.srv.siteID).Scan(&nowEvidence); err != nil {
+		notVerified(w, "stay_evidence_unreadable")
+		return
+	}
+	if nowEvidence != offerEvidence {
+		notVerified(w, "stay_evidence_changed_since_the_offer")
+		return
+	}
 
 	granted, err := p.grants.GrantTx(ctx, tx, p.srv.tenID, p.srv.siteID, staygrant.Request{
 		AuthContextID: strings.TrimSpace(req.AuthContextID),

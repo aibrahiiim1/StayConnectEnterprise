@@ -55,12 +55,33 @@ the first instinct is to blame the deployment.
 | Setting | Owner | What it does |
 |---|---|---|
 | `NETD_PHASE3_PRODUCER_UID` | netd | The uid of the ONE local process (`acctd`) allowed to submit shaping plans. Authentication is `SO_PEERCRED` on the socket — the kernel's statement about the caller, not a header the caller writes. |
-| `NETD_PHASE3_PLAN_STATE` | netd | Where the last accepted plan generation is persisted (default `/var/lib/stayconnect/netd-phase3-plan.json`). It is what stops a restarted netd from accepting a plan it had already superseded. |
+| `NETD_PHASE3_PLAN_STATE` | netd | Where the last **admitted** plan generation is persisted (default `/var/lib/stayconnect/netd-phase3-plan.json`). It is what stops a restarted netd from accepting a plan it had already superseded. |
+| `NETD_PHASE3_CLASS_STATE` | netd | The managed-class inventory — session, device, bridge, minor, generation, boot (default `/var/lib/stayconnect/netd-phase3-classes.json`). Written with file **and directory** fsynced before rename. |
+| `NETD_BOOT_ID_FILE` | netd | Where the kernel's boot id is read from (default `/proc/sys/kernel/random/boot_id`). Used as a first filter only — continuity is proved by reading the kernel. |
 | `ACCTD_PHASE3_PLAN_STATE` | acctd | Where the monotonic plan generation is persisted (default `/var/lib/stayconnect/acctd-phase3-plan.json`). A producer that restarted at generation 1 would have every plan correctly refused as stale — and enforcement would freeze with nothing appearing broken. |
 
 **With the flags ON and no producer uid configured, netd refuses to start.** Live enforcement that cannot
 authenticate its producer is not a degraded mode; it is an unenforceable one, and starting anyway would mean
 any local process could shape the guest network.
+
+### What survives a reboot, and what deliberately does not
+
+After a reboot every `tc` class is gone. Recovery is one desired-state submission, and three things make it
+safe:
+
+* the **admitted** plan generation survives, so a delayed or replayed older plan is still refused;
+* the **managed-class inventory** survives, but every entry is re-proved against the kernel — anything not
+  actually installed is dropped;
+* every recreated class gets a **strictly newer generation** from the database allocator, so the accounting
+  checkpoints `acctd` still holds treat it as a new counter series (a trustworthy reset) rather than a
+  counter that appears to have gone backwards.
+
+Until that first submission converges, `/v1/health` reports `phase3_shaping.state = ACTIVE_NO_PLAN` with
+`degraded: true`. That is correct and expected: the appliance is supposed to be enforcing and is not yet.
+
+Expect `state` to be one of `DARK`, `ACTIVE_NO_PLAN`, `ACTIVE_FRESH_CONVERGED`, `ACTIVE_STALE` or
+`ACTIVE_DEGRADED`. `ACTIVE_STALE` means the producer went quiet — what is installed may still be right, but
+nothing is confirming it.
 
 **With the flags ON, every Phase-3 writing service (`acctd`, `edged`, `scd`, `pmsd`) verifies the
 controlled-writer boundary before it serves anything**, and exits if it does not hold. It refuses in two

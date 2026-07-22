@@ -78,10 +78,16 @@ type phase3Shaping struct {
 	// before the guest can push traffic through it (see phase3_origin.go).
 	origins originRegistrar
 
-	lastApplied   time.Time
-	lastDegrade   string
-	lastAccepted  shapeplan.Accepted
+	lastApplied time.Time
+	lastDegrade string
+	// ADMITTED and CONVERGED are different facts and must not share a field. A plan can be admitted (it is
+	// current, in scope, correctly hashed) and still fail to be put in force. Recording only one of them
+	// means either the anti-replay guard forgets a generation it accepted, or health claims a kernel state
+	// that was never reached.
+	lastAccepted  shapeplan.Accepted // admitted: what the anti-replay guard compares against
 	hasAccepted   bool
+	lastConverged shapeplan.Accepted // converged: what the kernel was actually driven to, cleanly
+	hasConverged  bool
 	lastRejection string
 	rejections    int64
 	// epochs is the TC owner's generation per managed class, keyed by bridge/session identity. netd is the
@@ -175,9 +181,18 @@ func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now 
 		TenantID: env.TenantID, SiteID: env.SiteID,
 		AcceptedAt: now.UTC(), ExpiresAt: env.ExpiresAt.UTC(),
 	}
+	// The ADMISSION record advances even when application was partial, so a replay of an older generation
+	// still cannot reinstate revoked access. Re-submitting this SAME generation and hash is explicitly
+	// allowed (shapeplan.Validate permits an equal generation with an equal hash), which is what lets the
+	// producer retry until the kernel actually converges.
 	p.lastAccepted, p.hasAccepted = accepted, true
 	if p.store != nil {
 		p.store.save(accepted)
+	}
+	// CONVERGENCE is recorded only when the kernel was driven to this state with nothing failing. Anything
+	// else and health must keep saying so, however many times the same plan is admitted.
+	if !res.Degraded {
+		p.lastConverged, p.hasConverged = accepted, true
 	}
 	return res, nil
 }
@@ -462,13 +477,48 @@ func (s *server) phase3ShapingHandler(w http.ResponseWriter, r *http.Request) {
 // status reports the truthful current enforcement state. An operator (and the health supervisor) must be able
 // to see that the kernel is NOT enforcing what durable state says it should — a plan that failed to apply is
 // invisible otherwise, and "shaping looks fine" is the most expensive kind of wrong.
+// The five states an operator actually needs to tell apart. Reporting "degraded=false, plan_stale=true" — as
+// an earlier version did — is the worst of both: it reads as healthy at a glance while saying, in a field
+// nobody aggregates, that nothing is known to be enforced.
+const (
+	shapingDark          = "DARK"                   // Phase 3 is off here; nothing is enforced and nothing should be
+	shapingNoPlan        = "ACTIVE_NO_PLAN"         // live, but no plan has ever been put in force
+	shapingConverged     = "ACTIVE_FRESH_CONVERGED" // live, current plan, kernel driven to it cleanly
+	shapingStale         = "ACTIVE_STALE"           // live, but the plan in force has expired without a replacement
+	shapingDegradedState = "ACTIVE_DEGRADED"        // live, but the kernel is not known to match the plan
+)
+
+// shapingState derives the single truthful state. Caller holds p.mu.
+func (p *phase3Shaping) shapingState(now time.Time) (string, bool) {
+	if !p.mode.Active {
+		return shapingDark, false
+	}
+	switch {
+	case p.lastDegrade != "":
+		return shapingDegradedState, true
+	case !p.hasConverged:
+		// Live with nothing proven in force. Whether that is because nothing was ever submitted or because
+		// every submission failed, the appliance is not enforcing what durable state says it should.
+		return shapingNoPlan, true
+	case !p.lastConverged.ExpiresAt.After(now):
+		// The producer has gone quiet. What is installed may still be right, but nothing is confirming it,
+		// and "probably still right" is not a state to page nobody about.
+		return shapingStale, true
+	default:
+		return shapingConverged, false
+	}
+}
+
 func (p *phase3Shaping) status() map[string]any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	now := time.Now()
+	state, degraded := p.shapingState(now)
 	out := map[string]any{
 		"active":                 p.mode.Active,
+		"state":                  state,
 		"contract_version":       shapeplan.ContractVersion,
-		"degraded":               p.lastDegrade != "",
+		"degraded":               degraded,
 		"producer_authenticated": p.authz.configured,
 		"refused_total":          p.rejections,
 	}
@@ -482,22 +532,46 @@ func (p *phase3Shaping) status() map[string]any {
 		out["last_refusal"] = p.lastRejection
 	}
 	if p.hasAccepted {
-		out["accepted_generation"] = p.lastAccepted.Generation
-		out["accepted_at"] = p.lastAccepted.AcceptedAt.UTC().Format(time.RFC3339)
-		out["plan_expires_at"] = p.lastAccepted.ExpiresAt.UTC().Format(time.RFC3339)
-		// A plan that has expired without a replacement means the producer has gone quiet, and what is
-		// installed is no longer known to be current. That is a health fact, not an internal detail.
-		out["plan_stale"] = !p.lastAccepted.ExpiresAt.After(time.Now())
+		out["admitted_generation"] = p.lastAccepted.Generation
+		out["admitted_at"] = p.lastAccepted.AcceptedAt.UTC().Format(time.RFC3339)
+	}
+	if p.hasConverged {
+		out["converged_generation"] = p.lastConverged.Generation
+		out["converged_at"] = p.lastConverged.AcceptedAt.UTC().Format(time.RFC3339)
+		out["plan_expires_at"] = p.lastConverged.ExpiresAt.UTC().Format(time.RFC3339)
+		out["plan_stale"] = !p.lastConverged.ExpiresAt.After(now)
 	} else if p.mode.Active {
 		out["plan_stale"] = true
 	}
-	out["managed_classes"] = len(p.minorOwner)
+	out["managed_classes"] = len(p.classes)
+	if p.restoreNote != "" {
+		out["restore_note"] = p.restoreNote
+	}
 	return out
 }
 
-// phase3EpochsHandler serves the current managed-class generations. Accounting reads them so a counter that
-// went backwards can be judged: a new generation is a trustworthy reset, the same generation is a regression.
+// phase3EpochsHandler serves the current managed-class generations.
+//
+// This is CONTROL-PLANE state, not a public status page. It enumerates which sessions are shaped, on which
+// bridge, and how many times each class has been replaced — enough to profile guest activity and to time an
+// attack against a reset. The socket is group-readable by scd, edged, portald and pmsd, none of which have
+// any business reading it, so it requires the SAME authenticated producer identity as a submission.
+//
+// While dark it refuses without disclosing anything, including whether any classes exist.
 func (s *server) phase3EpochsHandler(w http.ResponseWriter, r *http.Request) {
+	pc, ok := r.Context().Value(peerConnKey{}).(producerIdentity)
+	var credErr error
+	if !ok {
+		credErr = errors.New("connection carried no peer credentials")
+	}
+	if err := s.phase3.authz.authorize(pc, credErr); err != nil {
+		s.phase3.mu.Lock()
+		s.phase3.noteRejection("unauthorized_epoch_read")
+		s.phase3.mu.Unlock()
+		slog.Warn("phase3 class-generation read refused", "uid", pc.UID, "err", err)
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden"})
+		return
+	}
 	if !s.phase3.mode.Active {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "phase3_dark"})
 		return

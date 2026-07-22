@@ -107,9 +107,25 @@ turns that assumption into a structural property: `acctd` cannot race `netd` bec
 - A plan submission can fail (socket down, `netd` restarting). It is retried with bounds on the next tick;
   the plan is derived fresh each time, so a missed submission is never stale — it is simply superseded.
 - One extra hop of latency between deriving and applying, which is irrelevant at the tick cadence.
-- Two pieces of durable state now exist purely to make refusals correct: the producer's plan generation and
-  the applier's last-accepted record. Both are small, both are rewritten atomically, and losing either fails
-  in the safe direction (a refused plan, retried on the next tick — never an applied stale one).
+- Four pieces of durable state now exist, and each closes a specific silent failure:
+  - the producer's **plan generation** — without it a restarted producer starts at 1 and every plan it makes
+    is correctly refused as stale, freezing enforcement with nothing appearing broken;
+  - the applier's **last-admitted record** — what the anti-replay guard compares against, advanced even when
+    application was only partial, so a replayed older generation can never reinstate revoked access;
+  - the applier's **last-converged record** — kept separately because "admitted" and "in force" are different
+    facts, and health must never claim the second when only the first happened;
+  - the applier's **managed-class inventory** (session, device, bridge, minor, generation, boot) — written
+    with the file and its directory fsynced before rename, because a lost rename brings the appliance back
+    with the old inventory against new kernel classes.
+- Class **generations** come from a durable, appliance-scoped database allocator that reconciles against the
+  highest generation any surviving accounting checkpoint pins. Deliberately not a clock: system time moves
+  backwards on RTC reset, NTP correction, offline operation and image restore, and a generation that went
+  backwards lets a recreated class impersonate the series a checkpoint still remembers. If the allocator is
+  unreachable, the class is not made accountable at all — no value is invented locally.
+- Continuity across a restart is **proven against the kernel**, not inferred from a matching boot id. A boot
+  id says the machine did not reboot; it says nothing about whether a particular class still exists. A
+  flushed qdisc, a hand-recreated class, or a minor now held by a different session all keep the boot id and
+  all must produce a new series.
 - **Cutover is exclusive.** Once Phase 3 is live, a bridge that appears in the desired state belongs entirely
   to Phase 3: any per-session class on it that the plan does not claim is removed, including one the legacy
   path installed before cutover. This is the intended consequence of single ownership — `acctd`'s legacy
@@ -132,3 +148,9 @@ turns that assumption into a structural property: `acctd` cannot race `netd` bec
    plan accepted — across restarts.
 10. Reconciliation removes managed classes the desired state does not claim, and reports when the installed
     state could not be read.
+11. A class generation is allocated from durable, appliance-scoped authority, is never reissued, and is never
+    derived from wall-clock time; a class that cannot obtain one is not installed.
+12. An existing generation is carried forward only when the kernel is confirmed to still hold that exact
+    class; otherwise its successor gets a new one.
+13. Health distinguishes DARK, ACTIVE_NO_PLAN, ACTIVE_FRESH_CONVERGED, ACTIVE_STALE and ACTIVE_DEGRADED, and
+    never reports a plan as in force when only its admission succeeded.
