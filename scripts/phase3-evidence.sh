@@ -94,5 +94,34 @@ run "PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pm
   fi
 } >>"$BUNDLE"
 
+# ---------------------------------------------------------------- integrity manifest
+# The bundle is a downloadable artifact, and a downloadable artifact is one somebody will eventually receive
+# by a route nobody planned — pasted into a ticket, forwarded, copied off a laptop. The manifest below lets
+# the recipient establish that what they hold is what was produced, without having to trust the path it took.
+#
+# It covers the exact artifacts this bundle makes claims ABOUT, not merely the bundle text: a hash of a
+# document that says "the migration passed" proves nothing about the migration.
+{
+  echo
+  echo "## Artifact integrity (SHA-256)"
+  echo
+  echo "Every artifact this bundle makes a claim about, hashed at generation time on \`$HEAD_SHA\`."
+  echo "Verify with: \`sha256sum -c\` against the list below, from the repository root."
+  echo
+  echo '```'
+  for f in     data-plane/migrations/0010_phase3_stay_resolution.up.sql     data-plane/migrations/0010_phase3_stay_resolution.down.sql     scripts/phase3-preflight.sh     scripts/pmsd-pg-integration.sh     scripts/phase3-evidence.sh     iam_v2_scratch/phase3_0010_lifecycle.sh     docs/manifests/Phase3-change-manifest.md     governance/project-state.json
+  do
+    [ -f "$ROOT/$f" ] && (cd "$ROOT" && sha256sum "$f")
+  done
+  echo '```'
+  echo
+  echo "The bundle's own digest cannot appear inside the bundle. Compute it after generation:"
+  echo
+  echo '```'
+  echo "sha256sum $(basename "$BUNDLE")"
+  echo '```'
+} >>"$BUNDLE"
+
 echo "evidence bundle: $BUNDLE"
+echo "bundle sha256:  $(sha256sum "$BUNDLE" | awk '{print $1}')"
 [ $overall -eq 0 ]
