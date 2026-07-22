@@ -20,6 +20,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 var (
@@ -89,6 +91,11 @@ func (s *Store) Grant(ctx context.Context, tenant, site string, r Request) (Resu
 // whatever else must commit atomically with it.
 func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r Request) (Result, error) {
 	var res Result
+	// The Quote and the Purchase are both capability-scoped; the grant declares that operation once for
+	// the whole chain it is about to write.
+	if err := writerguard.Open(ctx, tx, writerguard.CapCommerceIntent); err != nil {
+		return res, err
+	}
 	if r.QuoteTTLSeconds <= 0 {
 		r.QuoteTTLSeconds = 300
 	}

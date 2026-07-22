@@ -55,7 +55,27 @@ DROP TRIGGER IF EXISTS p3_delayed_accounting_controlled_writer ON iam_v2.delayed
 DROP TRIGGER IF EXISTS p3_class_generation_controlled_writer ON iam_v2.appliance_class_generation;
 DROP TRIGGER IF EXISTS p3_auth_context_offers_controlled_writer ON iam_v2.auth_context_offers;
 DROP TRIGGER IF EXISTS p3_session_usage_controlled_writer ON iam_v2.sessions;
+-- (4t/C8) the remaining authoritative families. Every one of these MUST be dropped before the guard function
+-- below: PostgreSQL refuses to drop a function while a trigger still depends on it, and one missing line here
+-- aborts the entire rollback. scripts/phase3-preflight.sh checks this statically for exactly that reason.
+DROP TRIGGER IF EXISTS p3_auth_context_controlled_writer ON iam_v2.auth_contexts;
+DROP TRIGGER IF EXISTS p3_device_auth_controlled_writer ON iam_v2.entitlement_device_authorizations;
+DROP TRIGGER IF EXISTS p3_session_binding_controlled_writer ON iam_v2.session_entitlement_bindings;
+DROP TRIGGER IF EXISTS p3_grace_publication_controlled_writer ON iam_v2.checkout_grace_policy_publications;
+DROP TRIGGER IF EXISTS p3_alert_action_controlled_writer ON iam_v2.checkout_grace_alert_actions;
+DROP TRIGGER IF EXISTS p3_source_conflict_controlled_writer ON iam_v2.pms_source_conflicts;
+DROP TRIGGER IF EXISTS p3_stay_controlled_writer ON iam_v2.stays;
+DROP TRIGGER IF EXISTS p3_stay_event_controlled_writer ON iam_v2.stay_events;
+DROP TRIGGER IF EXISTS p3_auth_resolution_controlled_writer ON iam_v2.auth_resolutions;
+DROP TRIGGER IF EXISTS p3_quote_controlled_writer ON iam_v2.offer_quotes;
+DROP TRIGGER IF EXISTS p3_purchase_controlled_writer ON iam_v2.purchases;
+DROP TRIGGER IF EXISTS p3_checkout_conversion_controlled_writer ON iam_v2.checkout_grace_audit;
+DROP TRIGGER IF EXISTS p3_boundary_watermark_controlled_writer ON iam_v2.entitlement_boundary_watermarks;
+DROP TRIGGER IF EXISTS p3_operation_scope_controlled_writer ON iam_v2.controlled_operation_scope;
 DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_only();
+DROP FUNCTION IF EXISTS iam_v2.p3_controlled_operation_open(text);
+DROP FUNCTION IF EXISTS iam_v2.begin_controlled_operation(text);
+DROP TABLE IF EXISTS iam_v2.controlled_operation_scope;
 DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_owner(text);
 DROP TRIGGER IF EXISTS p3_entitlement_status_coherent ON iam_v2.entitlements;
 DROP FUNCTION IF EXISTS iam_v2.p3_entitlement_status_coherent();

@@ -19,6 +19,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 // SessionShape is one live session's desired treatment at the edge.
@@ -169,6 +171,10 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 // revoke closes the Entitlement's open authorization intervals and ends its live sessions at the same instant,
 // so nothing keeps forwarding traffic for access that has ended.
 func revoke(ctx context.Context, tx pgx.Tx, ent string, at time.Time) (int, int, error) {
+	// Closing an authorization interval is a write to the device-authorization family.
+	if err := writerguard.Open(ctx, tx, writerguard.CapDeviceAuth); err != nil {
+		return 0, 0, err
+	}
 	ct, err := tx.Exec(ctx, `WITH closed AS (
 		UPDATE iam_v2.entitlement_device_authorizations a SET deauthorized_at = GREATEST($2::timestamptz, a.authorized_at)
 		WHERE a.entitlement_id=$1 AND a.deauthorized_at IS NULL RETURNING a.entitlement_id, a.device_id)

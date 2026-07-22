@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Querier is the narrow surface this package needs — satisfied by *pgxpool.Pool, a pgx.Conn or a transaction,
@@ -27,12 +28,41 @@ type Querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// Tier is HOW a family's boundary is enforced. The two are not equivalent, and the difference is recorded
+// here so that a family cannot be quietly moved from the stronger form to the weaker one: downgrading one is
+// a visible edit to this list, not an invisible change to a trigger body.
+type Tier int
+
+const (
+	// TierOperationOwned: the authoritative write is performed BY the SECURITY DEFINER operation, so the
+	// operation's owner is the only role that ever appears as the writer. Nothing else can write the row at
+	// all — not even the service that legitimately calls the operation.
+	TierOperationOwned Tier = iota
+	// TierCapabilityScoped: the authoritative operation is multi-statement service logic, so the write is
+	// performed by the service under a scope only an approved opener can create. This proves the write came
+	// from a role holding EXECUTE on that family's opener, inside a declared operation for that family. It
+	// does NOT prove the write is the exact statement the operation intended — a service that may write
+	// Stays can, inside its own declared Stay operation, write a wrong Stay.
+	TierCapabilityScoped
+)
+
+func (t Tier) String() string {
+	if t == TierCapabilityScoped {
+		return "capability-scoped"
+	}
+	return "operation-owned"
+}
+
 // Requirement is one controlled-writer family: the approved operation, and the tables whose authoritative
 // writes only it may perform.
 type Requirement struct {
 	Family   string
 	Function string // exact regprocedure signature — never a bare name, which overloads make ambiguous
 	Tables   []string
+	Tier     Tier
+	// Capability is the family name passed to iam_v2.begin_controlled_operation. Set only for
+	// TierCapabilityScoped requirements.
+	Capability string
 }
 
 // Phase3Requirements is the complete set. It is deliberately checked in full by every Phase-3 service rather
@@ -40,6 +70,7 @@ type Requirement struct {
 // families would happily start on a database where another family's guards had been dropped.
 func Phase3Requirements() []Requirement {
 	return []Requirement{
+		// ---- operation-owned: the function performs the write itself -------------------------------------
 		{
 			Family:   "entitlement",
 			Function: "iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)",
@@ -57,6 +88,103 @@ func Phase3Requirements() []Requirement {
 				"accounting_records", "accounting_checkpoints", "delayed_accounting_records", "sessions",
 			},
 		},
+		{
+			Family:   "class_generation",
+			Function: "iam_v2.allocate_class_generation(uuid,uuid,uuid)",
+			Tables:   []string{"appliance_class_generation"},
+		},
+		{
+			Family:   "auth_offers",
+			Function: "iam_v2.record_auth_context_offer(uuid,uuid,uuid,uuid,int,bigint,timestamptz)",
+			Tables:   []string{"auth_context_offers"},
+		},
+		// ---- capability-scoped: the operation is service logic, the scope is the boundary ----------------
+		// Every one of these is a family whose authoritative operation spans several statements with their own
+		// invariants — a Stay lifecycle transition, a checkout conversion, a quote/purchase pair, consuming an
+		// Auth Context, closing a device-authorization interval. Reimplementing them in PL/pgSQL purely to move
+		// the writer identity would create a second implementation of rules that already exist, tested, in the
+		// service — and two implementations of one rule is how the rules start to differ.
+		//
+		// The SQL operations that write these families (issue_or_return_pms_context, rebind_session_entitlement,
+		// record_alert_action, …) declare their own scope as their first statement, so they keep working when
+		// Gate-P gives each function its own owner.
+		{
+			Family:     "auth_context",
+			Function:   "iam_v2.begin_controlled_operation(text)",
+			Tables:     []string{"auth_contexts"},
+			Tier:       TierCapabilityScoped,
+			Capability: "auth_context",
+		},
+		{
+			Family:     "device_auth",
+			Function:   "iam_v2.begin_controlled_operation(text)",
+			Tables:     []string{"entitlement_device_authorizations"},
+			Tier:       TierCapabilityScoped,
+			Capability: "device_auth",
+		},
+		{
+			Family:     "session_binding",
+			Function:   "iam_v2.begin_controlled_operation(text)",
+			Tables:     []string{"session_entitlement_bindings"},
+			Tier:       TierCapabilityScoped,
+			Capability: "session_binding",
+		},
+		{
+			Family:     "grace_publication",
+			Function:   "iam_v2.begin_controlled_operation(text)",
+			Tables:     []string{"checkout_grace_policy_publications"},
+			Tier:       TierCapabilityScoped,
+			Capability: "grace_publication",
+		},
+		{
+			Family:     "alert",
+			Function:   "iam_v2.begin_controlled_operation(text)",
+			Tables:     []string{"checkout_grace_alert_actions"},
+			Tier:       TierCapabilityScoped,
+			Capability: "alert",
+		},
+		{
+			Family:     "stay",
+			Function:   "iam_v2.begin_controlled_operation(text)",
+			Tables:     []string{"stays", "stay_events"},
+			Tier:       TierCapabilityScoped,
+			Capability: "stay",
+		},
+		{
+			Family:     "auth_resolution",
+			Function:   "iam_v2.begin_controlled_operation(text)",
+			Tables:     []string{"auth_resolutions"},
+			Tier:       TierCapabilityScoped,
+			Capability: "auth_resolution",
+		},
+		{
+			Family:     "commerce_intent",
+			Function:   "iam_v2.begin_controlled_operation(text)",
+			Tables:     []string{"offer_quotes", "purchases"},
+			Tier:       TierCapabilityScoped,
+			Capability: "commerce_intent",
+		},
+		{
+			Family:     "checkout_conversion",
+			Function:   "iam_v2.begin_controlled_operation(text)",
+			Tables:     []string{"checkout_grace_audit", "entitlement_boundary_watermarks"},
+			Tier:       TierCapabilityScoped,
+			Capability: "checkout_conversion",
+		},
+		{
+			Family:     "source_conflict",
+			Function:   "iam_v2.begin_controlled_operation(text)",
+			Tables:     []string{"pms_source_conflicts"},
+			Tier:       TierCapabilityScoped,
+			Capability: "source_conflict",
+		},
+		// The scope table itself is operation-owned, not capability-scoped — a capability that could
+		// authorise writing its own token would authorise nothing.
+		{
+			Family:   "operation_scope",
+			Function: "iam_v2.begin_controlled_operation(text)",
+			Tables:   []string{"controlled_operation_scope"},
+		},
 	}
 }
 
@@ -66,6 +194,11 @@ func Verify(ctx context.Context, q Querier, reqs []Requirement) error {
 	for _, r := range reqs {
 		if err := verifyFunction(ctx, q, r); err != nil {
 			return err
+		}
+		if r.Tier == TierCapabilityScoped {
+			if err := verifyCapability(ctx, q, r); err != nil {
+				return err
+			}
 		}
 		for _, tbl := range r.Tables {
 			if err := verifyTrigger(ctx, q, r, tbl); err != nil {
@@ -117,6 +250,31 @@ func verifyFunction(ctx context.Context, q Querier, r Requirement) error {
 	return nil
 }
 
+// verifyCapability checks the half of a capability-scoped family that verifyFunction cannot: this process must
+// be ABLE to open a scope for it.
+//
+// Without this the service starts happily and fails at the first authoritative write — which for the Stay
+// family means the first PMS event of the day, and for the commerce family means the first guest trying to
+// connect. A boundary that is discovered to be misconfigured by a guest is a boundary that gets disabled.
+func verifyCapability(ctx context.Context, q Querier, r Requirement) error {
+	if r.Capability == "" {
+		return fmt.Errorf("phase3 writer boundary: capability-scoped family %q names no capability", r.Family)
+	}
+	var canOpen bool
+	if err := q.QueryRow(ctx, `
+		SELECT COALESCE(has_function_privilege(current_user, to_regprocedure($1)::oid, 'EXECUTE'), false)`,
+		r.Function).Scan(&canOpen); err != nil {
+		return fmt.Errorf("phase3 writer boundary: cannot inspect EXECUTE on %s: %w", r.Function, err)
+	}
+	if !canOpen {
+		return fmt.Errorf(
+			"phase3 writer boundary: this process cannot open a %q operation (no EXECUTE on %s), "+
+				"so every authoritative write in that family would be refused at the first attempt",
+			r.Capability, r.Function)
+	}
+	return nil
+}
+
 func verifyTrigger(ctx context.Context, q Querier, r Requirement, table string) error {
 	var enabled bool
 	err := q.QueryRow(ctx, `
@@ -137,6 +295,39 @@ func verifyTrigger(ctx context.Context, q Querier, r Requirement, table string) 
 		return fmt.Errorf(
 			"phase3 writer boundary: iam_v2.%s has no ENABLED controlled-writer guard, so raw writes to %s state would be accepted",
 			table, r.Family)
+	}
+	return nil
+}
+
+// Exec is the narrow surface Open needs. *pgxpool.Pool, a pgx.Conn and a pgx.Tx all satisfy it.
+type Exec interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// Capability names, so a caller cannot open a scope by typing a string that only looks right. A typo would
+// otherwise open no scope at all, and the family's first write would be refused at run time, on the path that
+// matters, rather than here.
+const (
+	CapStay               = "stay"
+	CapAuthResolution     = "auth_resolution"
+	CapCommerceIntent     = "commerce_intent"
+	CapCheckoutConversion = "checkout_conversion"
+	CapSourceConflict     = "source_conflict"
+	CapAuthContext        = "auth_context"
+	CapDeviceAuth         = "device_auth"
+	CapSessionBinding     = "session_binding"
+	CapGracePublication   = "grace_publication"
+	CapAlert              = "alert"
+)
+
+// Open declares that the current transaction is performing the named family's authoritative operation.
+//
+// It MUST be called on the transaction that will do the writing: the scope is transaction-local, so opening
+// it on the pool and writing on a transaction (or the reverse) declares a scope nothing will ever see. That
+// is also why it takes an Exec rather than a pool — the type makes the mistake harder to write.
+func Open(ctx context.Context, db Exec, capability string) error {
+	if _, err := db.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, capability); err != nil {
+		return fmt.Errorf("phase3 writer boundary: cannot open a %q operation: %w", capability, err)
 	}
 	return nil
 }

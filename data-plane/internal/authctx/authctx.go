@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 // maxTTLSeconds bounds a PMS Auth Context lifetime (a one-time context is short-lived by design).
@@ -131,6 +133,11 @@ func (s *Store) IssuePMSTx(ctx context.Context, tx pgx.Tx, g PMSGrant) (string, 
 	if !g.valid() {
 		return "", ErrGrantIncomplete
 	}
+	// The Auth Context family is capability-scoped: this transaction declares the operation it is about to
+	// perform, and writes to auth_contexts are refused without that declaration.
+	if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
+		return "", err
+	}
 	var lifecycleVer int
 	var evVer int64
 	// authoritative snapshot from the resolved Stay: locked (L1 Stay-first), IN_HOUSE, occupancy evidence
@@ -215,6 +222,11 @@ func (s *Store) Consume(ctx context.Context, id string, p Presenter) (Consumed, 
 func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter) (Consumed, error) {
 	if !validPinUUID(strings.TrimSpace(id)) || !p.valid() {
 		return Consumed{}, ErrContextInvalid // typed/sanitized BEFORE any SQL — never a raw cast error
+	}
+	// The Auth Context family is capability-scoped: this transaction declares the operation it is about to
+	// perform, and writes to auth_contexts are refused without that declaration.
+	if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
+		return Consumed{}, err
 	}
 
 	// (1) Resolve the context's scoped Stay identity WITHOUT locking the context. Presenter scope + one-time +

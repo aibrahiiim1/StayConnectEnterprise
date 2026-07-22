@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 // Probe asks ONE interface for its determinate verdict on the guest evidence. An implementation must never
@@ -189,13 +191,27 @@ func (r *Resolver) store(ctx context.Context, tenant, site, guestNetwork, reques
 	if res.Stay != "" {
 		stayArg = res.Stay
 	}
-	ct, err := r.pool.Exec(ctx, `INSERT INTO iam_v2.auth_resolutions
+	// The resolution record is capability-scoped, and a scope lives for exactly one transaction. That is why
+	// this runs in an explicit transaction rather than as a single pool statement: opening the scope on the
+	// pool and inserting on the pool are two transactions, and the second would find no scope open.
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := writerguard.Open(ctx, tx, writerguard.CapAuthResolution); err != nil {
+		return nil, err
+	}
+	ct, err := tx.Exec(ctx, `INSERT INTO iam_v2.auth_resolutions
 		(tenant_id, site_id, guest_network_id, resolved_stay_id, outcome_code, resolution_request_id)
 		VALUES ($1,$2,$3,$4::uuid,$5,$6)
 		ON CONFLICT (tenant_id, site_id, resolution_request_id) WHERE resolution_request_id IS NOT NULL
 		DO NOTHING`,
 		tenant, site, guestNetwork, stayArg, string(res.Resolution), requestID)
 	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	if ct.RowsAffected() == 1 {

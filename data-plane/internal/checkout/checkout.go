@@ -23,6 +23,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/grace"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 var (
@@ -113,6 +115,17 @@ func (c *Converter) ConvertAtCheckout(ctx context.Context, tenant, site, iface, 
 }
 
 func (c *Converter) convertTx(ctx context.Context, tx pgx.Tx, tenant, site, iface, stayID string, src BoundarySource) (Result, error) {
+	// A conversion writes across four capability-scoped families: it moves the Stay to CHECKED_OUT, freezes
+	// the boundary watermarks, records the audit, and may create the grace Purchase. Each is declared, and
+	// each is declared HERE so that a conversion which fails partway has opened nothing it did not use.
+	for _, cap := range []string{
+		writerguard.CapStay, writerguard.CapCheckoutConversion,
+		writerguard.CapCommerceIntent, writerguard.CapDeviceAuth,
+	} {
+		if err := writerguard.Open(ctx, tx, cap); err != nil {
+			return Result{}, err
+		}
+	}
 	// L1: lock the Stay first.
 	var episode int
 	var status string

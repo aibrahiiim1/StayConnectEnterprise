@@ -91,19 +91,58 @@ echo '== privilege hardening (§3) =='
 #                                    reason misdirects whoever reads the log after an incident.
 #   p3_detect_delayed_accounting     same resolver, same reason: it must give the SAME binding answer the
 #                                    ingestion operation gave, not a privilege error.
+#   p3_session_open_binding          the trigger IS the controlled writer for the binding it creates. It fires
+#   p3_session_close_binding         as whichever role opened or ended the Session, and the binding table is
+#                                    closed to that role; as INVOKER it could never write the row it exists
+#                                    to write.
+#   p3_alert_open_on_audit           same shape: opening the alert is a write to the guarded alert family,
+#                                    performed as a consequence of an audit row written by another role.
+#   p3_controlled_operation_open     reads the operation-scope tokens, which are closed to every role but the
+#                                    opener's owner. As INVOKER the guard could only evaluate it for roles
+#                                    that can already read the tokens — that is, for nobody. See below: this
+#                                    is also the ONE function that intentionally keeps PUBLIC EXECUTE.
 #
 # The list is exact and the count assertion stays at zero, so the next unexplained DEFINER still fails here.
-UNAPPROVED_SECDEF="$(Q "SELECT COALESCE(string_agg(p.proname, ','), '') FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname LIKE 'p3_%' AND p.prosecdef AND p.proname NOT IN ('p3_entitlement_status_coherent','p3_accounting_needs_binding','p3_detect_delayed_accounting');")"
+UNAPPROVED_SECDEF="$(Q "SELECT COALESCE(string_agg(p.proname, ','), '') FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname LIKE 'p3_%' AND p.prosecdef AND p.proname NOT IN ('p3_entitlement_status_coherent','p3_accounting_needs_binding','p3_detect_delayed_accounting','p3_session_open_binding','p3_session_close_binding','p3_alert_open_on_audit','p3_controlled_operation_open');")"
 [ -z "$UNAPPROVED_SECDEF" ] && ok "no unapproved SECURITY DEFINER on p3_* functions (allowlist)" || no "unexpected SECURITY DEFINER: $UNAPPROVED_SECDEF"
 # and every APPROVED one must still pin a search_path and keep PUBLIC out — a DEFINER without both is the
 # escalation the allowlist exists to prevent, allowlisted or not.
-SECDEF_BAD="$(Q "SELECT COALESCE(string_agg(p.proname, ','), '') FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND (p.proconfig IS NULL OR array_to_string(p.proconfig,',') NOT LIKE '%search_path=%' OR has_function_privilege('public', p.oid, 'EXECUTE'));")"
+# p3_controlled_operation_open is the single approved exception to the "no PUBLIC EXECUTE" half. The guard
+# trigger runs as whichever role is attempting the write, so that role must be able to call it; without the
+# grant the guard still fails closed, but with "permission denied for function" instead of the refusal that
+# says what to do — and an error nobody can act on is an error somebody eventually works around. What a caller
+# learns by invoking it is whether IT has an open scope, in ITS OWN transaction, for a token IT set.
+# It must still pin its search_path, which the clause below continues to require of it.
+SECDEF_BAD="$(Q "SELECT COALESCE(string_agg(p.proname, ','), '') FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND (p.proconfig IS NULL OR array_to_string(p.proconfig,',') NOT LIKE '%search_path=%' OR (has_function_privilege('public', p.oid, 'EXECUTE') AND p.proname <> 'p3_controlled_operation_open'));")"
 [ -z "$SECDEF_BAD" ] && ok "every SECURITY DEFINER function pins search_path AND excludes PUBLIC (§3)" || no "unsafe SECURITY DEFINER: $SECDEF_BAD"
 [ "$(Q "SELECT prosecdef FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p3_entitlement_status_coherent';")" = t ] && ok "deferred coherence checker IS SECURITY DEFINER (EXECUTE-only callers need no table SELECT)" || no "coherence checker not DEFINER"
 [ "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p3_entitlement_status_coherent' AND p.proconfig::text LIKE '%search_path=iam_v2%';")" = 1 ] && ok "coherence checker pins a fixed search_path" || no "coherence checker missing fixed search_path"
 [ "$(Q "SELECT has_function_privilege('public','iam_v2.p3_entitlement_status_coherent()','EXECUTE');")" = f ] && ok "PUBLIC has NO EXECUTE on the coherence checker" || no "PUBLIC can execute coherence checker"
 # every SECURITY DEFINER function in iam_v2 must pin a fixed search_path (no dynamic-search_path definer)
 [ "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND (p.proconfig IS NULL OR p.proconfig::text NOT LIKE '%search_path=%');")" = 0 ] && ok "every SECURITY DEFINER function pins a fixed search_path" || no "definer without fixed search_path"
+
+# THE CONTROLLED-WRITER BOUNDARY IS INSTALLED OVER EVERY AUTHORITATIVE FAMILY. Counting the guarded tables
+# rather than naming them would pass while a family was quietly dropped; naming them is the point, because a
+# family that loses its guard loses it silently -- every write still succeeds.
+GUARDED="$(Q "SELECT COALESCE(string_agg(c.relname, ',' ORDER BY c.relname), '') FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam_v2' AND NOT t.tgisinternal AND t.tgfoid=to_regprocedure('iam_v2.p3_controlled_writer_only()')::oid AND t.tgenabled <> 'D';")"
+WANT="accounting_checkpoints,accounting_records,appliance_class_generation,auth_context_offers,auth_contexts,auth_resolutions,checkout_grace_alert_actions,checkout_grace_audit,checkout_grace_policy_publications,controlled_operation_scope,delayed_accounting_records,entitlement_boundary_watermarks,entitlement_device_authorizations,entitlement_state_transitions,entitlements,offer_quotes,pms_source_conflicts,purchases,session_entitlement_bindings,sessions,site_checkout_grace_config,stay_events,stays"
+[ "$GUARDED" = "$WANT" ] && ok "every authoritative Phase-3 family carries an ENABLED controlled-writer guard" || no "guarded families differ: got [$GUARDED]"
+
+# The capability tier is only real if a NON-OWNER is actually refused. Everything else in this gate runs as the
+# owner, for whom every guard passes trivially -- so without this the whole second tier could be inert.
+Q "DO \$\$ BEGIN CREATE ROLE p3_cap_probe NOSUPERUSER NOCREATEDB NOCREATEROLE; EXCEPTION WHEN duplicate_object THEN NULL; END \$\$;" >/dev/null
+# The INSERT grant on the scope table is deliberate: without it the probe would be refused by ordinary table
+# permissions, and the test would pass while proving nothing about the GUARD. Granting it asks the harder
+# question -- if an operator hands out the table, does the boundary still hold?
+Q "GRANT USAGE ON SCHEMA iam_v2 TO p3_cap_probe; GRANT INSERT, SELECT ON iam_v2.stays TO p3_cap_probe; GRANT INSERT, SELECT ON iam_v2.controlled_operation_scope TO p3_cap_probe;" >/dev/null
+RAWSTAY="$(Q "SET ROLE p3_cap_probe; INSERT INTO iam_v2.stays (tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version) VALUES (gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),'CAP1','CAP1','IN_HOUSE',1);" 2>&1)"
+echo "$RAWSTAY" | grep -q "require an open controlled operation" && ok "a non-owner cannot write a capability-scoped family outside a declared operation" || no "a raw non-owner Stay write was not refused: $RAWSTAY"
+# and the scope cannot be forged by setting the GUC the guard reads
+FORGED="$(Q "SET ROLE p3_cap_probe; SELECT set_config('iam_v2.op_stay', gen_random_uuid()::text, true); INSERT INTO iam_v2.stays (tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version) VALUES (gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),'CAP2','CAP2','IN_HOUSE',1);" 2>&1)"
+echo "$FORGED" | grep -q "require an open controlled operation" && ok "a forged operation-scope GUC does not open a scope" || no "a forged scope GUC was accepted: $FORGED"
+# nor by writing the token table directly
+FORGEDROW="$(Q "SET ROLE p3_cap_probe; INSERT INTO iam_v2.controlled_operation_scope(txid,family,token) VALUES (txid_current(),'stay',gen_random_uuid());" 2>&1)"
+echo "$FORGEDROW" | grep -q "controlled iam_v2 writer" && ok "the operation-scope token table refuses a non-owner write" || no "a forged scope token row was accepted: $FORGEDROW"
 
 echo '== seed interface+revision (+2nd interface for cross-interface tests) =='
 Q "DO \$\$DECLARE t uuid:=gen_random_uuid(); s uuid:=gen_random_uuid(); i uuid:=gen_random_uuid(); i2 uuid:=gen_random_uuid(); r uuid:=gen_random_uuid(); r2 uuid:=gen_random_uuid(); st uuid:=gen_random_uuid(); st2 uuid:=gen_random_uuid();

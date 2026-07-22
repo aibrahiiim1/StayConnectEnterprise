@@ -678,6 +678,10 @@ CREATE OR REPLACE FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_dev
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_t uuid; v_s uuid; v_status text; v_limit int; v_policy text; v_open int; v_seq bigint; v_id uuid; v_existing uuid;
 BEGIN
+  -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
+  -- rather than relying on ownership is what lets Gate-P give every function its own owner without
+  -- any of them losing the right to perform its own writes.
+  PERFORM iam_v2.begin_controlled_operation('device_auth');
   SELECT tenant_id, site_id, status INTO v_t, v_s, v_status FROM iam_v2.entitlements WHERE id = p_ent FOR UPDATE;
   IF v_t IS NULL THEN RAISE EXCEPTION 'entitlement % not found', p_ent; END IF;
   IF v_status <> 'ACTIVE' THEN
@@ -722,6 +726,10 @@ CREATE OR REPLACE FUNCTION iam_v2.deauthorize_entitlement_device(p_ent uuid, p_d
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_open uuid; v_start timestamptz;
 BEGIN
+  -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
+  -- rather than relying on ownership is what lets Gate-P give every function its own owner without
+  -- any of them losing the right to perform its own writes.
+  PERFORM iam_v2.begin_controlled_operation('device_auth');
   IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
     RAISE EXCEPTION 'deauthorization reason must be a bounded machine code';
   END IF;
@@ -814,6 +822,10 @@ CREATE OR REPLACE FUNCTION iam_v2.rebind_session_entitlement(p_session uuid, p_e
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_t uuid; v_s uuid; v_open uuid; v_from timestamptz; v_cur uuid; v_seq bigint; v_id uuid;
 BEGIN
+  -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
+  -- rather than relying on ownership is what lets Gate-P give every function its own owner without
+  -- any of them losing the right to perform its own writes.
+  PERFORM iam_v2.begin_controlled_operation('session_binding');
   SELECT tenant_id, site_id, entitlement_id INTO v_t, v_s, v_cur FROM iam_v2.sessions WHERE id = p_session FOR UPDATE;
   IF v_t IS NULL THEN RAISE EXCEPTION 'session % not found', p_session; END IF;
   PERFORM 1 FROM iam_v2.entitlements WHERE id = p_ent AND tenant_id = v_t AND site_id = v_s;
@@ -836,8 +848,14 @@ REVOKE EXECUTE ON FUNCTION iam_v2.rebind_session_entitlement(uuid,uuid,timestamp
 -- the initial interval opens at the session's own start against the Entitlement it was created under. This is
 -- what makes attribution total — there is no session whose samples have no owner.
 CREATE OR REPLACE FUNCTION iam_v2.p3_session_open_binding() RETURNS trigger
-  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+  -- SECURITY DEFINER because this trigger IS the controlled writer for the binding it creates: it fires as
+  -- whichever role opened the Session, and the binding table is closed to every role but the operation owner.
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 BEGIN
+  -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
+  -- rather than relying on ownership is what lets Gate-P give every function its own owner without
+  -- any of them losing the right to perform its own writes.
+  PERFORM iam_v2.begin_controlled_operation('session_binding');
   INSERT INTO iam_v2.session_entitlement_bindings(tenant_id,site_id,session_id,entitlement_id,seq,bound_from)
     VALUES (NEW.tenant_id,NEW.site_id,NEW.id,NEW.entitlement_id,1,NEW.started);
   RETURN NULL;
@@ -849,8 +867,14 @@ REVOKE EXECUTE ON FUNCTION iam_v2.p3_session_open_binding() FROM PUBLIC;
 -- When a session ends, its open binding closes at the SAME instant, so a dead session cannot keep accruing
 -- attribution. Never before the interval opened (that would invent negative online time).
 CREATE OR REPLACE FUNCTION iam_v2.p3_session_close_binding() RETURNS trigger
-  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+  -- SECURITY DEFINER for the same reason as p3_session_open_binding: closing a binding is a write to the
+  -- guarded binding table, performed on behalf of whichever role ended the Session.
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 BEGIN
+  -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
+  -- rather than relying on ownership is what lets Gate-P give every function its own owner without
+  -- any of them losing the right to perform its own writes.
+  PERFORM iam_v2.begin_controlled_operation('session_binding');
   IF NEW.ended IS NOT NULL AND OLD.ended IS NULL THEN
     UPDATE iam_v2.session_entitlement_bindings b SET bound_until = GREATEST(NEW.ended, b.bound_from)
       WHERE b.session_id = NEW.id AND b.bound_until IS NULL;
@@ -1044,6 +1068,10 @@ CREATE OR REPLACE FUNCTION iam_v2.issue_or_return_pms_context(
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_existing uuid; v_lifecycle int; v_ev bigint;
 BEGIN
+  -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
+  -- rather than relying on ownership is what lets Gate-P give every function its own owner without
+  -- any of them losing the right to perform its own writes.
+  PERFORM iam_v2.begin_controlled_operation('auth_context');
   IF p_request IS NULL THEN
     RAISE EXCEPTION 'CONTEXT_INVALID: a PMS context must name the resolution it came from';
   END IF;
@@ -1488,6 +1516,104 @@ CREATE TRIGGER p3_detect_delayed_accounting AFTER INSERT ON iam_v2.accounting_re
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_detect_delayed_accounting();
 REVOKE EXECUTE ON FUNCTION iam_v2.p3_detect_delayed_accounting() FROM PUBLIC;
 
+-- ============================================================================
+-- (4t) THE SECOND TIER OF THE WRITER BOUNDARY: CAPABILITY-SCOPED OPERATIONS.
+--
+-- The boundary below has one shape: the authoritative write is performed BY a SECURITY DEFINER operation, so
+-- the owner is the only role that ever appears as the writer. That is the strongest form and it is the right
+-- one wherever the write is a single well-specified statement.
+--
+-- It is the wrong tool for the families whose authoritative operation is genuinely multi-statement SERVICE
+-- logic — the Stay lifecycle (create, room move, status change, reinstatement, each with its own invariants
+-- and its own event lineage), the checkout conversion, the resolution record, the quote/purchase pair.
+-- Reimplementing those in PL/pgSQL purely to move the writer identity would replace tested, reviewed service
+-- code with a second implementation of the same rules, and two implementations of one rule is how the rules
+-- start to differ.
+--
+-- So those families get a capability instead. An approved operation opens a scope for its family; writes to
+-- that family are refused unless such a scope is open in the SAME transaction. The scope cannot be forged: a
+-- caller can set any GUC it likes, but the token in the GUC must match a row that only the SECURITY DEFINER
+-- opener can write, keyed to the current transaction id.
+--
+-- BE PRECISE ABOUT WHAT THIS PROVES, because the two tiers are not equivalent:
+--
+--   it DOES prove   the write came from a role holding EXECUTE on that family's opener, inside a declared
+--                   operation for that family. An ad-hoc psql session, a restored-dump repair script, a
+--                   different service, or a stray statement elsewhere in the SAME service outside any
+--                   declared operation are all refused.
+--   it does NOT prove the write is the exact statement the operation intended. A service that legitimately
+--                   writes Stays can, within its own declared Stay operation, write a Stay row that is
+--                   wrong. Tier 1 excludes that; tier 2 does not.
+--
+-- writerguard.Phase3Requirements() records which tier each family is in, so a family cannot be quietly
+-- downgraded from the first to the second without that showing up as a change to the recorded contract.
+CREATE UNLOGGED TABLE iam_v2.controlled_operation_scope (
+  txid      bigint      NOT NULL,
+  family    text        NOT NULL,
+  token     uuid        NOT NULL,
+  opened_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (txid, family)
+);
+-- UNLOGGED deliberately: every row is meaningful only for the duration of one transaction, so surviving a
+-- crash would mean nothing. The rows a crash leaves behind are cleaned by the opener's janitor below.
+COMMENT ON TABLE iam_v2.controlled_operation_scope IS
+  'Transaction-scoped capability tokens for controlled-writer families whose operation is service logic. '
+  'Written only by iam_v2.begin_controlled_operation().';
+
+CREATE OR REPLACE FUNCTION iam_v2.begin_controlled_operation(p_family text) RETURNS void
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_token uuid;
+BEGIN
+  -- The allowlist is the whole authorization decision, and it is also what keeps the GUC name below safe:
+  -- the family is never caller-shaped text by the time it is concatenated.
+  IF p_family NOT IN ('stay','auth_resolution','commerce_intent','checkout_conversion','source_conflict',
+                      'auth_context','device_auth','session_binding','grace_publication','alert') THEN
+    RAISE EXCEPTION 'no approved capability-scoped controlled-writer family %', p_family;
+  END IF;
+  -- Bounded janitor. A transaction that rolled back or a backend that died leaves its row behind; nothing
+  -- reads a stale row (the txid will not recur inside the retention window) but the table should not grow
+  -- without limit on an appliance that runs for years.
+  DELETE FROM iam_v2.controlled_operation_scope WHERE opened_at < now() - interval '1 hour';
+  v_token := gen_random_uuid();
+  INSERT INTO iam_v2.controlled_operation_scope (txid, family, token)
+  VALUES (txid_current(), p_family, v_token)
+  ON CONFLICT (txid, family) DO UPDATE SET token = EXCLUDED.token, opened_at = now();
+  -- is_local = true: the setting dies with the transaction, so a scope cannot outlive the operation that
+  -- opened it and be reused by the next statement on a pooled connection.
+  PERFORM set_config('iam_v2.op_' || p_family, v_token::text, true);
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) FROM PUBLIC;
+
+-- p3_controlled_operation_open answers the guard's question: "is a scope for this family open in MY
+-- transaction?". It is called once per guarded row write, so it must stay cheap.
+--
+-- SECURITY DEFINER, and deliberately WITHOUT the usual REVOKE FROM PUBLIC. Both are needed for the guard to
+-- work at all, and neither weakens it:
+--
+--   DEFINER — it reads the scope table, which is closed to every role but the opener's owner. As INVOKER it
+--             could only be evaluated by roles that can already read the tokens, which is nobody.
+--   PUBLIC  — the guard trigger runs as whichever role is attempting the write, so that role must be able to
+--             call this. Without PUBLIC EXECUTE the guard still fails closed, but with "permission denied
+--             for function p3_controlled_operation_open" instead of the refusal that explains what to do —
+--             and an error nobody can act on is an error somebody eventually works around.
+--
+-- What a caller learns by invoking it directly is whether IT has an open scope, in ITS OWN transaction, for a
+-- token IT set. There is nothing there that the caller did not already know.
+CREATE OR REPLACE FUNCTION iam_v2.p3_controlled_operation_open(p_family text) RETURNS boolean
+  LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_tok text;
+BEGIN
+  v_tok := current_setting('iam_v2.op_' || p_family, true);   -- missing_ok: NULL when never set
+  IF v_tok IS NULL OR v_tok = '' THEN
+    RETURN false;
+  END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM iam_v2.controlled_operation_scope s
+     WHERE s.txid = txid_current() AND s.family = p_family AND s.token::text = v_tok);
+END $fn$;
+-- NO "REVOKE ... FROM PUBLIC" here; see the reasoning above. This is the one Phase-3 SECURITY DEFINER
+-- function that intentionally keeps it, and iam_v2_scratch/phase3_0010_lifecycle.sh names it individually.
+
 -- (item 4/7) CONTROLLED-WRITER AUTHORIZATION BOUNDARY. A caller can set any session GUC, but it cannot become
 -- the schema owner: inside a SECURITY DEFINER function current_user IS the owner, outside it is the caller.
 -- These guards therefore reject a NON-OWNER's raw status UPDATE, forged history INSERT, or direct authoritative
@@ -1527,8 +1653,23 @@ REVOKE EXECUTE ON FUNCTION iam_v2.p3_controlled_writer_owner(text) FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION iam_v2.p3_controlled_writer_only() RETURNS trigger
   LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
-DECLARE owner_role text; changed boolean := true; v_sig text; v_oid oid;
+DECLARE owner_role text; changed boolean := true; v_sig text; v_oid oid; v_cap text;
 BEGIN
+  -- CAPABILITY-SCOPED FAMILIES (see 4t). The write is allowed when a scope for the family is open in this
+  -- transaction, or when the caller is already the opener's owner — the latter so that the operations
+  -- themselves, and a database whose roles have not yet been separated, behave identically.
+  v_cap := CASE
+    WHEN TG_TABLE_NAME IN ('stays','stay_events')                                   THEN 'stay'
+    WHEN TG_TABLE_NAME = 'auth_resolutions'                                          THEN 'auth_resolution'
+    WHEN TG_TABLE_NAME IN ('offer_quotes','purchases')                               THEN 'commerce_intent'
+    WHEN TG_TABLE_NAME IN ('checkout_grace_audit','entitlement_boundary_watermarks') THEN 'checkout_conversion'
+    WHEN TG_TABLE_NAME = 'pms_source_conflicts'                                      THEN 'source_conflict'
+    WHEN TG_TABLE_NAME = 'auth_contexts'                                             THEN 'auth_context'
+    WHEN TG_TABLE_NAME = 'entitlement_device_authorizations'                          THEN 'device_auth'
+    WHEN TG_TABLE_NAME = 'session_entitlement_bindings'                               THEN 'session_binding'
+    WHEN TG_TABLE_NAME = 'checkout_grace_policy_publications'                         THEN 'grace_publication'
+    WHEN TG_TABLE_NAME = 'checkout_grace_alert_actions'                               THEN 'alert'
+    ELSE NULL END;
   -- resolve the family's approved function owner INLINE (catalog-only). Deliberately NOT a call to the
   -- introspection helper: this trigger fires as whichever role is writing, and a cross-function EXECUTE
   -- dependency would break exactly the dedicated-owner separation Gate-P needs.
@@ -1541,6 +1682,14 @@ BEGIN
       THEN 'iam_v2.record_auth_context_offer(uuid,uuid,uuid,uuid,int,bigint,timestamptz)'
     WHEN TG_TABLE_NAME IN ('accounting_records','accounting_checkpoints','delayed_accounting_records','sessions')
       THEN 'iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)'
+    -- Capability-scoped families resolve their owner through the operation-scope opener (see 4t), as does the
+    -- scope table itself: a token nobody but the opener can write is what makes the scope unforgeable.
+    WHEN TG_TABLE_NAME IN ('stays','stay_events','auth_resolutions','offer_quotes','purchases',
+                           'checkout_grace_audit','entitlement_boundary_watermarks','pms_source_conflicts',
+                           'auth_contexts','entitlement_device_authorizations','session_entitlement_bindings',
+                           'checkout_grace_policy_publications','checkout_grace_alert_actions',
+                           'controlled_operation_scope')
+      THEN 'iam_v2.begin_controlled_operation(text)'
     ELSE 'iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)' END;
   v_oid := to_regprocedure(v_sig);
   IF v_oid IS NULL THEN
@@ -1550,6 +1699,19 @@ BEGIN
   IF owner_role IS NULL OR owner_role = '' THEN
     RAISE EXCEPTION 'controlled-writer owner for % is not resolvable (fail closed)', v_sig;
   END IF;
+
+  IF v_cap IS NOT NULL THEN
+    -- EVERY write to a capability-scoped family is checked, including DELETE: an authoritative record that
+    -- can be removed outside a declared operation is a record that can be made to have never happened.
+    IF current_user <> owner_role AND NOT iam_v2.p3_controlled_operation_open(v_cap) THEN
+      -- RAISE takes only '%' substitutions; '%L' is format()'s syntax and would print a literal L.
+      RAISE EXCEPTION
+        '%: writes to the % family require an open controlled operation (caller %) — call iam_v2.begin_controlled_operation(''%'') in the transaction that performs them',
+        TG_TABLE_NAME, v_cap, current_user, v_cap;
+    END IF;
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  END IF;
+
   -- (item 1) DELETE of the authoritative site grace config is ALWAYS a controlled-writer-only operation. There
   -- is no approved ordinary DELETE for this row; a future reset/disable must be its own audited, PO-approved API
   -- with explicit semantics (this guard deliberately does NOT silently convert DELETE into "disable").
@@ -1974,8 +2136,14 @@ REVOKE EXECUTE ON FUNCTION iam_v2.p3_alert_action_guard() FROM PUBLIC;
 -- application would allow an alert that exists but has no lifecycle — invisible to the queue, impossible to
 -- acknowledge — so the database creates it structurally instead.
 CREATE OR REPLACE FUNCTION iam_v2.p3_alert_open_on_audit() RETURNS trigger
-  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+  -- SECURITY DEFINER: opening the alert is a write to the guarded alert-action family, and it happens as a
+  -- consequence of an audit row written by whichever role performed the conversion.
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 BEGIN
+  -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
+  -- rather than relying on ownership is what lets Gate-P give every function its own owner without
+  -- any of them losing the right to perform its own writes.
+  PERFORM iam_v2.begin_controlled_operation('alert');
   IF NEW.alert_code IS NOT NULL THEN
     INSERT INTO iam_v2.checkout_grace_alert_actions(tenant_id, site_id, audit_id, seq, action, reason_code)
       VALUES (NEW.tenant_id, NEW.site_id, NEW.id, 1, 'OPEN', NEW.reason_code);
@@ -2000,6 +2168,10 @@ CREATE OR REPLACE FUNCTION iam_v2.record_alert_action(
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_seq bigint; v_head text; v_head_seq bigint; v_audit uuid;
 BEGIN
+  -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
+  -- rather than relying on ownership is what lets Gate-P give every function its own owner without
+  -- any of them losing the right to perform its own writes.
+  PERFORM iam_v2.begin_controlled_operation('alert');
   IF p_action NOT IN ('ACKNOWLEDGED','RESOLVED') THEN
     -- OPEN belongs to the audit that raised the alert; an operator can only move it forward.
     RAISE EXCEPTION 'ALERT_ACTION_INVALID: % is not an operator action', p_action;
@@ -2241,6 +2413,10 @@ CREATE OR REPLACE FUNCTION iam_v2.publish_checkout_grace_policy(
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_current int; v_new int; v_mismatch text;
 BEGIN
+  -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
+  -- rather than relying on ownership is what lets Gate-P give every function its own owner without
+  -- any of them losing the right to perform its own writes.
+  PERFORM iam_v2.begin_controlled_operation('grace_publication');
   -- ACTOR: an existing, active operator of this tenant. A policy nobody can be held to is not governed.
   IF p_actor IS NULL THEN RAISE EXCEPTION 'GRACE_ACTOR_INVALID: an actor is required'; END IF;
   PERFORM 1 FROM public.operators o
@@ -2623,6 +2799,63 @@ CREATE TRIGGER p3_stay_lifecycle_guard
 -- Runtime service roles receive NO privileges on the new objects (dark; Gate-P least privilege preserved).
 REVOKE EXECUTE ON FUNCTION iam_v2.p3_stay_event_appendonly() FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION iam_v2.p3_stay_lifecycle_guard() FROM PUBLIC;
+
+-- (C8) THE REMAINING AUTHORITATIVE FAMILIES.
+--
+-- Everything above closes the families whose corruption is silent. These close the families whose corruption
+-- is ATTRIBUTABLE — the rows that answer "who was allowed what, when, and on whose authority". They matter
+-- for a different reason: not because a bad row is invisible, but because a bad row is the ANSWER. An
+-- Auth Context consumed by a raw UPDATE, a device authorization interval closed by hand, an alert action
+-- appended without going through its state machine — each of those is a durable false statement about what
+-- happened, and every audit afterwards reads it as fact.
+--
+-- The intervals are guarded rather than the point events: an authorization that was never closed and an
+-- authorization that was closed retroactively are the same row shape, and only the controlled operation
+-- knows the difference.
+CREATE TRIGGER p3_auth_context_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.auth_contexts
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_device_auth_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.entitlement_device_authorizations
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_session_binding_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.session_entitlement_bindings
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_grace_publication_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.checkout_grace_policy_publications
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_alert_action_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.checkout_grace_alert_actions
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_source_conflict_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.pms_source_conflicts
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_stay_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.stays
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_stay_event_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.stay_events
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_auth_resolution_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.auth_resolutions
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_quote_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.offer_quotes
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_purchase_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.purchases
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_checkout_conversion_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.checkout_grace_audit
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_boundary_watermark_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.entitlement_boundary_watermarks
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+-- The scope table is guarded by the FIRST tier (owner-only), not by a capability — a capability that could
+-- authorise writing its own token would authorise nothing at all.
+CREATE TRIGGER p3_operation_scope_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.controlled_operation_scope
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
 
 -- migration ledger (prod parity with 0009; the authoritative runner scripts/edge-migrate.sh gates on this)
 INSERT INTO public.schema_migrations (version) VALUES ('0010_phase3_stay_resolution') ON CONFLICT DO NOTHING;

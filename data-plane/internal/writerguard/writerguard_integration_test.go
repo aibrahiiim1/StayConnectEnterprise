@@ -37,10 +37,19 @@ func ownerPool(t *testing.T) *pgxpool.Pool {
 func probeConn(t *testing.T, owner *pgxpool.Pool) *pgx.Conn {
 	t.Helper()
 	ctx := context.Background()
+	// The EXECUTE grant is part of what "the shape a Gate-P runtime has" MEANS. A service that writes a
+	// capability-scoped family must be able to open that family's scope, or every one of its authoritative
+	// writes is refused — so a probe without it would be testing a role that could not do the job at all.
+	//
+	// This is a test-only role, so it does not touch the dark-privilege invariant the migration lifecycle gate
+	// asserts: the named runtime service roles (scd, edged, portald, acctd, pmsd) still hold ZERO iam_v2
+	// function EXECUTE while Phase 3 is dark. They receive this grant at Gate-P, alongside the rest of their
+	// least-privilege set, and Verify runs only where the Phase-3 surface is actually mounted.
 	if _, err := owner.Exec(ctx, `
 		DO $$ BEGIN CREATE ROLE p3_guard_probe LOGIN PASSWORD 'x' NOSUPERUSER NOCREATEDB NOCREATEROLE;
 		EXCEPTION WHEN duplicate_object THEN NULL; END $$;
-		GRANT USAGE ON SCHEMA iam_v2 TO p3_guard_probe;`); err != nil {
+		GRANT USAGE ON SCHEMA iam_v2 TO p3_guard_probe;
+		GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO p3_guard_probe;`); err != nil {
 		t.Fatalf("create the probe role: %v", err)
 	}
 	u, err := url.Parse(os.Getenv("PHASE3_TEST_DSN"))
@@ -148,5 +157,77 @@ func TestIntegration_UnsafeFunctionShapesAreRefused(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Fatalf("%s: expected %q, got %v", c.fn, c.want, err)
 		}
+	}
+}
+
+// A runtime that cannot OPEN a capability-scoped family's operation is refused at startup rather than at the
+// first write. The difference matters more than it looks: the first Stay write is the first PMS event of the
+// day, and the first commerce write is a guest standing in the lobby. Both are terrible places to discover a
+// missing grant, and both are places where the pressure is to disable the check rather than fix the grant.
+func TestIntegration_ARuntimeThatCannotOpenAScopeIsRefusedAtStartup(t *testing.T) {
+	owner := ownerPool(t)
+	ctx := context.Background()
+	if _, err := owner.Exec(ctx, `
+		DO $$ BEGIN CREATE ROLE p3_noexec_probe LOGIN PASSWORD 'x' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+		EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+		GRANT USAGE ON SCHEMA iam_v2 TO p3_noexec_probe;
+		REVOKE EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) FROM p3_noexec_probe;`); err != nil {
+		t.Fatalf("create the probe role: %v", err)
+	}
+	u, err := url.Parse(os.Getenv("PHASE3_TEST_DSN"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.User = url.UserPassword("p3_noexec_probe", "x")
+	c, err := pgx.Connect(ctx, u.String())
+	if err != nil {
+		t.Fatalf("connect as the probe role: %v", err)
+	}
+	defer func() { _ = c.Close(context.Background()) }()
+
+	err = Verify(ctx, c, Phase3Requirements())
+	if err == nil {
+		t.Fatal("a runtime with no EXECUTE on the operation opener was accepted")
+	}
+	if !strings.Contains(err.Error(), "cannot open") {
+		t.Fatalf("the refusal does not name the missing capability: %v", err)
+	}
+}
+
+// The two tiers must stay distinguishable in the recorded contract. If every family drifted to the weaker
+// tier the package would still compile, every test above would still pass, and the boundary would quietly be
+// a different, weaker thing than the one that was reviewed.
+func TestPhase3RequirementsRecordBothTiers(t *testing.T) {
+	var owned, scoped int
+	seen := map[string]bool{}
+	for _, r := range Phase3Requirements() {
+		if seen[r.Family] {
+			t.Fatalf("family %q is listed twice", r.Family)
+		}
+		seen[r.Family] = true
+		if len(r.Tables) == 0 {
+			t.Fatalf("family %q guards no tables", r.Family)
+		}
+		switch r.Tier {
+		case TierOperationOwned:
+			owned++
+			if r.Capability != "" {
+				t.Fatalf("operation-owned family %q names a capability", r.Family)
+			}
+		case TierCapabilityScoped:
+			scoped++
+			if r.Capability == "" {
+				t.Fatalf("capability-scoped family %q names no capability", r.Family)
+			}
+		}
+	}
+	// The five families whose corruption is silent — entitlement, grace config, accounting, class generation
+	// and the offer set — are the ones that must stay operation-owned. This is a floor, not an equality: new
+	// families may be added at either tier, but these five may not be downgraded without this failing.
+	if owned < 6 {
+		t.Fatalf("only %d operation-owned families remain; the strong tier is being eroded", owned)
+	}
+	if scoped == 0 {
+		t.Fatal("no capability-scoped families are recorded, so verifyCapability is never exercised")
 	}
 }

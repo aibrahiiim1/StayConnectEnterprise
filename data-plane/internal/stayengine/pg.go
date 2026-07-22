@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 // parseYYMMDD parses a Protel GA/GD date (YYMMDD) into a date, or nil when absent/malformed (dates are
@@ -79,6 +81,12 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 		return false, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Applying an event writes both the Stay and the event row, and both belong to the capability-scoped
+	// Stay family. The scope is declared once, here, for the whole application.
+	if err := writerguard.Open(ctx, tx, writerguard.CapStay); err != nil {
+		return false, err
+	}
 
 	// ORDERED APPLICATION. Events for one PMS Interface form an ordered stream: a Stay's GI must be applied
 	// before its GO, and a room-move before a later correction. With only FOR UPDATE SKIP LOCKED, two processors

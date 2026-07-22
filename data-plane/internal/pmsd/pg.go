@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 // pgRepo is the PostgreSQL-backed, assignment-scoped typed PMS repository (iam_v2). It uses ONE pool for its
@@ -246,6 +248,10 @@ func (r *pgRepo) insertInboxRow(ctx context.Context, row InboxRow) (string, erro
 		return "", err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	// Appending to the inbox is a write to the capability-scoped Stay family.
+	if err := writerguard.Open(ctx, tx, writerguard.CapStay); err != nil {
+		return "", err
+	}
 	// synchronous ownership proof under the exact runtime generation
 	var owned int
 	err = tx.QueryRow(ctx, `SELECT 1 FROM iam_v2.pms_interface_runtime
