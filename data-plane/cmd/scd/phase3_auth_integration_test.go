@@ -275,8 +275,20 @@ func TestIntegration_Phase3Auth_GuestGetsAccess(t *testing.T) {
 	}
 }
 
-// A one-time context is one-time. The second use is the same uniform non-success as a wrong room — and, more
-// importantly, it grants nothing.
+// A one-time context is one-time: it can produce AT MOST ONE grant, ever.
+//
+// "One-time" is a statement about what gets written, not about what the second caller is told. Presenting a
+// spent context twice must not produce a second Entitlement, a second Purchase, a second Quote or a second
+// Session — that is the property, and it is what this test measures.
+//
+// What the second caller is told depends on WHO is asking, and the two cases are covered separately:
+//
+//	the same device   → the session its own earlier grant already created, because the reply to that grant
+//	                    may simply have been lost (abandoned at portald's response-time budget, a dropped
+//	                    connection). Refusing there would strand a guest who has working access. See
+//	                    TestIntegration_Phase3Auth_ARetryAfterALostReplyReturnsTheSameSession.
+//	another device    → the uniform non-success. See
+//	                    TestIntegration_Phase3Auth_AnotherDeviceCannotClaimTheGrantedSession.
 func TestIntegration_Phase3Auth_ContextIsConsumedExactlyOnce(t *testing.T) {
 	f := newAuthFixture(t)
 	ctx := context.Background()
@@ -301,16 +313,34 @@ func TestIntegration_Phase3Auth_ContextIsConsumedExactlyOnce(t *testing.T) {
 		t.Fatal("the first grant failed")
 	}
 	second := grant()
-	if second.Outcome == outcomeVerified {
-		t.Fatal("a consumed Auth Context granted access a second time")
+
+	// THE PROPERTY: nothing was granted a second time. Every row family the grant writes is counted, because
+	// a duplicate anywhere in the chain is a duplicate grant — an extra Purchase says the Folio was billed
+	// twice, an extra Session is a second period of access nobody authorised.
+	counts := map[string]int{}
+	for name, sql := range map[string]string{
+		"entitlements": `SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1`,
+		"sessions": `SELECT count(*) FROM iam_v2.sessions s
+			JOIN iam_v2.entitlements e ON e.id=s.entitlement_id WHERE e.stay_id=$1`,
+		"purchases": `SELECT count(*) FROM iam_v2.purchases p
+			JOIN iam_v2.auth_contexts c ON c.id=p.auth_context_id WHERE c.stay_id=$1`,
+		"device authorizations": `SELECT count(*) FROM iam_v2.entitlement_device_authorizations a
+			JOIN iam_v2.entitlements e ON e.id=a.entitlement_id WHERE e.stay_id=$1`,
+	} {
+		var n int
+		if err := f.pool.QueryRow(ctx, sql, f.stay).Scan(&n); err != nil {
+			t.Fatalf("counting %s: %v", name, err)
+		}
+		counts[name] = n
+		if n != 1 {
+			t.Fatalf("presenting the context twice produced %d %s, want exactly 1", n, name)
+		}
 	}
-	var entitlements int
-	if err := f.pool.QueryRow(ctx,
-		`SELECT count(*) FROM iam_v2.entitlements WHERE stay_id=$1`, f.stay).Scan(&entitlements); err != nil {
-		t.Fatal(err)
-	}
-	if entitlements != 1 {
-		t.Fatalf("the stay ended up with %d entitlements, want exactly 1", entitlements)
+
+	// And the second answer names that same single grant rather than a new one. (A refusal here would also
+	// satisfy "one-time", but would strand a guest whose first reply was lost — see the doc comment.)
+	if second.SessionID != first.SessionID || second.EntitlementID != first.EntitlementID {
+		t.Fatalf("the second presentation named different access:\n  first  %+v\n  second %+v", first, second)
 	}
 }
 

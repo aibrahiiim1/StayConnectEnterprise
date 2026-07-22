@@ -55,14 +55,24 @@ func (s *scdStub) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func stubHandler(t *testing.T, stub *scdStub) *handler {
 	t.Helper()
-	h := &handler{scd: &http.Client{Transport: stub}}
+	h, _ := stubHandlerWithClock(t, stub)
+	return h
+}
+
+// stubHandlerWithClock installs the recording clock so a failing case does not spend the real response-time
+// budget. Every failure test in this file goes through the budget, and six of them at 1.2 real seconds each
+// would be a suite nobody runs. The clock is also what makes the budget ASSERTABLE — see phase3_budget_test.go.
+func stubHandlerWithClock(t *testing.T, stub *scdStub) (*handler, *recordingClock) {
+	t.Helper()
+	clk := newRecordingClock()
+	h := &handler{scd: &http.Client{Transport: stub}, clock: clk}
 	// A fixed neighbour lookup stands in for the appliance's ARP table: the identity is server-derived in
 	// production and must be server-derived here too, or the test would prove the wrong thing.
 	h.arpCache = func(ip net.IP) (net.HardwareAddr, bool) {
 		mac, _ := net.ParseMAC("02:00:00:aa:00:01")
 		return mac, true
 	}
-	return h
+	return h, clk
 }
 
 func phase3Post(t *testing.T, h *handler, body map[string]any) (*httptest.ResponseRecorder, phase3Out) {

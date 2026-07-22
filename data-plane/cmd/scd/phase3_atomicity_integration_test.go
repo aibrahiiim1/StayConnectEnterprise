@@ -196,6 +196,121 @@ func TestIntegration_Phase3Auth_RetryAfterAFailedGrantSucceeds(t *testing.T) {
 	}
 }
 
+// grantVia drives the real grant handler for a device of the test's choosing.
+func (f *authFixture) grantVia(t *testing.T, authContextID, ip, mac string) (*httptest.ResponseRecorder, phase3GrantResp) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	raw, _ := json.Marshal(map[string]any{
+		"auth_context_id":     authContextID,
+		"package_revision_id": f.pkgRev,
+		"device":              map[string]string{"ip": ip, "mac": mac},
+	})
+	f.p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
+	var out phase3GrantResp
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("undecodable grant response %q: %v", rec.Body.String(), err)
+	}
+	return rec, out
+}
+
+// THE LOST REPLY. The grant commits and the answer never arrives — portald abandoned the hop at its
+// response-time budget, the guest closed the page, a proxy dropped the connection. The rows are durable and
+// correct; only the reply is gone.
+//
+// Without idempotency the retry finds the Auth Context consumed and refuses, and the guest is permanently
+// unable to obtain a session they already have, on a network already carrying their traffic. That is worse
+// than a plain refusal: it is real access the guest is told they do not have, and no amount of retrying fixes
+// it because the proof is spent.
+func TestIntegration_Phase3Auth_ARetryAfterALostReplyReturnsTheSameSession(t *testing.T) {
+	f := newAuthFixture(t)
+
+	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
+		"0000fb01-0000-4000-8000-000000000000"))
+	if res.Outcome != outcomeVerified {
+		t.Fatalf("setup: %+v", res)
+	}
+	_, first := f.grantVia(t, res.AuthContextID, f.net.guestIP, f.net.mac)
+	if first.Outcome != outcomeVerified || first.SessionID == "" {
+		t.Fatalf("setup: the first grant did not connect the guest: %+v", first)
+	}
+
+	// the reply was lost; the same device asks again
+	_, again := f.grantVia(t, res.AuthContextID, f.net.guestIP, f.net.mac)
+	if again.Outcome != outcomeVerified {
+		t.Fatalf("a retry after a lost reply was refused: %+v", again)
+	}
+	if again.SessionID != first.SessionID {
+		t.Fatalf("the retry produced a different session: %s then %s", first.SessionID, again.SessionID)
+	}
+	if again.EntitlementID != first.EntitlementID {
+		t.Fatalf("the retry produced a different entitlement: %s then %s", first.EntitlementID, again.EntitlementID)
+	}
+
+	// and it produced no second chain — the retry RETURNED the grant, it did not repeat it
+	c := f.census(t, res.AuthContextID)
+	if c.entitlements != 1 || c.sessions != 1 || c.purchases != 1 || c.quotes != 1 {
+		t.Fatalf("a retry duplicated the grant chain: %+v", c)
+	}
+}
+
+// The retry is answered on DEVICE identity, not on knowledge of a context id. A second device that somehow
+// learned the id — a shared screen, a log, a guessed value — must not be handed the first device's session.
+func TestIntegration_Phase3Auth_AnotherDeviceCannotClaimTheGrantedSession(t *testing.T) {
+	f := newAuthFixture(t)
+
+	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
+		"0000fb02-0000-4000-8000-000000000000"))
+	if res.Outcome != outcomeVerified {
+		t.Fatalf("setup: %+v", res)
+	}
+	_, first := f.grantVia(t, res.AuthContextID, f.net.guestIP, f.net.mac)
+	if first.Outcome != outcomeVerified || first.SessionID == "" {
+		t.Fatalf("setup: %+v", first)
+	}
+
+	// same context id, different device on the same guest network
+	_, other := f.grantVia(t, res.AuthContextID, f.net.otherIP, "02:00:00:bb:00:09")
+	if other.Outcome == outcomeVerified || other.SessionID != "" {
+		t.Fatalf("a second device claimed the first device's session: %+v", other)
+	}
+}
+
+// A CLOSED session is not access, and the idempotent path must not resurrect one. If a guest's session was
+// ended — checkout, revocation, an operator action — replaying the old grant has to be refused like any other
+// spent context, or the retry would become a way to undo an operator's decision.
+func TestIntegration_Phase3Auth_AClosedSessionIsNotReturnedToARetry(t *testing.T) {
+	f := newAuthFixture(t)
+	ctx := context.Background()
+
+	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
+		"0000fb03-0000-4000-8000-000000000000"))
+	if res.Outcome != outcomeVerified {
+		t.Fatalf("setup: %+v", res)
+	}
+	_, first := f.grantVia(t, res.AuthContextID, f.net.guestIP, f.net.mac)
+	if first.Outcome != outcomeVerified {
+		t.Fatalf("setup: %+v", first)
+	}
+
+	// Closed the way production closes one: enforce and the checkout boundary both end a session by moving it
+	// to 'ended' with a reason. Reproducing that statement rather than inventing a state keeps the test honest
+	// about which sessions the idempotent path will actually see.
+	ct, err := f.pool.Exec(ctx, `UPDATE iam_v2.sessions
+		SET state='ended', ended=now(), end_reason='TEST_OPERATOR_ACTION'
+		WHERE id=$1::uuid AND state='active'`, first.SessionID)
+	if err != nil {
+		t.Fatalf("closing the session: %v", err)
+	}
+	if ct.RowsAffected() != 1 {
+		t.Fatalf("setup: the session was not open to be closed (%d rows)", ct.RowsAffected())
+	}
+
+	_, again := f.grantVia(t, res.AuthContextID, f.net.guestIP, f.net.mac)
+	if again.Outcome == outcomeVerified || again.SessionID != "" {
+		t.Fatalf("a retry resurrected a closed session: %+v", again)
+	}
+}
+
 // The guest-facing response must not carry the Entitlement id. It is internal identity: the guest can act on
 // their session, and nothing in the approved guest contract needs the Entitlement.
 func TestIntegration_Phase3Auth_GuestResponseCarriesNoEntitlementIdentity(t *testing.T) {

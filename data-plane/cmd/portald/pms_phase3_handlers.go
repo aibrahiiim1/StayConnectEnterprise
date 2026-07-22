@@ -85,31 +85,37 @@ type phase3Choice struct {
 
 // authPMSPhase3 serves POST /auth/pms/phase3.
 func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
+	// The budget starts HERE, before the body is even read, so the offset every non-success leaves at is
+	// measured from the guest's arrival. Starting it after the cheap local checks would leave exactly those
+	// checks — malformed body, unknown device — distinguishable by how early they answer.
+	b := h.newPhase3Budget(r)
+	defer b.cancel()
+
 	var in phase3In
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
-		h.phase3Fail(w, "malformed_request")
+		h.phase3Fail(w, r, b, "malformed_request")
 		return
 	}
 	// IDENTITY, derived here and nowhere else.
 	ip := clientIP(r)
 	if ip == nil {
-		h.phase3Fail(w, "no_source_address")
+		h.phase3Fail(w, r, b, "no_source_address")
 		return
 	}
 	mac, ok := h.arpCache(ip)
 	if !ok {
-		h.phase3Fail(w, "device_not_on_guest_network")
+		h.phase3Fail(w, r, b, "device_not_on_guest_network")
 		return
 	}
 	device := map[string]string{"ip": ipString(ip), "mac": mac.String()}
 
 	// SECOND CALL: the guest already proved who they are and has now chosen a package.
 	if strings.TrimSpace(in.AuthContextID) != "" {
-		h.phase3Grant(w, r, in.AuthContextID, in.PackageRevisionID, device)
+		h.phase3Grant(w, r, b, in.AuthContextID, in.PackageRevisionID, device)
 		return
 	}
 
-	res, ok := h.phase3Resolve(w, r, in, device)
+	res, ok := h.phase3Resolve(w, r, b, in, device)
 	if !ok {
 		return // the uniform failure has already been written
 	}
@@ -118,9 +124,9 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 		// A verified guest with nothing they may be granted is a configuration problem, not an identity one —
 		// but the guest cannot act on that difference, and an empty "choose your package" step is a dead end
 		// that looks like the portal is broken. It collapses to the uniform answer like everything else.
-		h.phase3Fail(w, "verified_without_offers")
+		h.phase3Fail(w, r, b, "verified_without_offers")
 	case 1:
-		h.phase3Grant(w, r, res.AuthContextID, res.Offers[0].PackageRevisionID, device)
+		h.phase3Grant(w, r, b, res.AuthContextID, res.Offers[0].PackageRevisionID, device)
 	default:
 		choices := make([]phase3Choice, 0, len(res.Offers))
 		for _, o := range res.Offers {
@@ -132,7 +138,7 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, in phase3In, device map[string]string) (scdResolveResp, bool) {
+func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, b *phase3Budget, in phase3In, device map[string]string) (scdResolveResp, bool) {
 	body, _ := json.Marshal(map[string]any{
 		"room":               in.Room,
 		"last_name":          in.LastName,
@@ -141,42 +147,49 @@ func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, in phase
 		"device":             device,
 	})
 	var out scdResolveResp
-	if !h.scdPhase3Call(r, "http://unix/v1/phase3/auth/pms/resolve", body, &out) {
-		h.phase3Fail(w, "scd_unavailable")
+	if !h.scdPhase3Call(b, "http://unix/v1/phase3/auth/pms/resolve", body, &out) {
+		// This covers an abandoned hop as well as a refused one: when the budget expires mid-flight the hop
+		// returns a context error and lands here, which is the same uniform answer at the same offset. The
+		// resolution is idempotent by request id, so the guest's retry returns the same Auth Context.
+		h.phase3Fail(w, r, b, "scd_unavailable")
 		return out, false
 	}
 	if out.Outcome != "VERIFIED" || out.AuthContextID == "" {
 		// Every resolver outcome that is not a clean single match collapses to the same guest answer here.
-		h.phase3Fail(w, "not_verified")
+		h.phase3Fail(w, r, b, "not_verified")
 		return out, false
 	}
 	return out, true
 }
 
-func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, authContextID, packageRevID string, device map[string]string) {
+func (h *handler) phase3Grant(w http.ResponseWriter, r *http.Request, b *phase3Budget, authContextID, packageRevID string, device map[string]string) {
 	body, _ := json.Marshal(map[string]any{
 		"auth_context_id":     authContextID,
 		"package_revision_id": packageRevID,
 		"device":              device,
 	})
 	var out scdGrantResp
-	if !h.scdPhase3Call(r, "http://unix/v1/phase3/auth/pms/grant", body, &out) {
-		h.phase3Fail(w, "scd_unavailable")
+	if !h.scdPhase3Call(b, "http://unix/v1/phase3/auth/pms/grant", body, &out) {
+		h.phase3Fail(w, r, b, "scd_unavailable")
 		return
 	}
 	if out.Outcome != "VERIFIED" || out.SessionID == "" {
 		// A grant that did not produce a session produced NO access. Reporting success here would leave the
 		// guest staring at a "you're connected" page on a network that will not carry their traffic.
-		h.phase3Fail(w, "grant_refused")
+		h.phase3Fail(w, r, b, "grant_refused")
 		return
 	}
 	writeJSONPortal(w, http.StatusOK, phase3Out{OK: true, SessionID: out.SessionID, RedirectTo: "/success"})
 }
 
-// scdPhase3Call performs one internal hop. A transport failure and a refusal are both handled by the caller
-// as the same uniform guest answer; the distinction only reaches the log.
-func (h *handler) scdPhase3Call(r *http.Request, url string, body []byte, out any) bool {
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, url, bytes.NewReader(body))
+// scdPhase3Call performs one internal hop, under the BUDGET's context rather than the request's. That is what
+// makes the budget a ceiling: a hop that has not answered when the budget expires is cut off there instead of
+// running on to the 5s client timeout and handing the guest a distinguishably slow refusal.
+//
+// A transport failure, an abandonment and a refusal are all handled by the caller as the same uniform guest
+// answer; the distinction only reaches the log.
+func (h *handler) scdPhase3Call(b *phase3Budget, url string, body []byte, out any) bool {
+	req, err := http.NewRequestWithContext(b.ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return false
 	}
@@ -198,11 +211,15 @@ func (h *handler) scdPhase3Call(r *http.Request, url string, body []byte, out an
 // phase3Fail writes THE uniform non-success — through the SAME builder the legacy PMS path uses. Reusing it
 // is the point: two functions that each "write the uniform failure" are two places that can drift, and the
 // drift would only ever be discovered by an attacker noticing the difference.
-func (h *handler) phase3Fail(w http.ResponseWriter, reason string) {
+func (h *handler) phase3Fail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason string) {
 	// Every internal cause collapses to one outcome here. The real reason is logged and, for a resolution,
 	// already recorded durably by scd.
 	status, body, audit := buildGuestPMSResponse(outcomeNoMatch, reason, "", "")
 	slog.Info("phase3 guest auth not verified", "reason", audit.ReasonCode)
+	// The wait happens BEFORE the write, and before the log line is of any use to the guest. Waiting after
+	// writing would be indistinguishable from not waiting at all: the bytes are already on the wire, and the
+	// clock the attacker reads stops when they arrive.
+	b.wait(r)
 	writeGuestPMSResponse(w, status, body)
 }
 

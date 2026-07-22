@@ -244,6 +244,9 @@ const landingHTML = `<!doctype html>
     // the name is wrong" is an occupancy oracle for anyone sitting in the lobby.
     let PHASE3_PMS = false;
     let PMS_REQUEST_ID = '';
+    // PMS_ATTEMPT_KEY is the details the current request id belongs to. The id must survive a retry of the
+    // SAME attempt and must not survive a different one — see phase3RequestID below.
+    let PMS_ATTEMPT_KEY = '';
     let PMS_AUTH_CONTEXT = '';
     const PHASE3_FAIL = 'We could not verify your stay. Please check your details or contact reception.';
 
@@ -251,6 +254,26 @@ const landingHTML = `<!doctype html>
       if (window.crypto && window.crypto.randomUUID) { return window.crypto.randomUUID(); }
       const b = new Uint8Array(16); (window.crypto || {}).getRandomValues && window.crypto.getRandomValues(b);
       return Array.from(b, function(x){ return ('0'+x.toString(16)).slice(-2); }).join('');
+    }
+
+    // phase3RequestID decides whether this submission is a RETRY of the attempt already in flight or a NEW
+    // attempt, and returns the id accordingly.
+    //
+    // This distinction is the whole value of the request id, and getting it wrong fails in both directions.
+    // Minting a fresh id every time means a guest on a flaky lobby connection — the normal case for a captive
+    // portal — records a second resolution and a second Auth Context every time they tap again, which is
+    // precisely the duplication the id exists to prevent. Never minting a new one means a guest who mistyped
+    // their room is stuck replaying the failed attempt forever, because the server correctly returns the same
+    // answer for the same id.
+    //
+    // The details themselves are the discriminator: same details, same attempt.
+    function phase3RequestID(body) {
+      const key = JSON.stringify([body.room||'', body.last_name||'', body.first_name||'', body.reservation_number||'']);
+      if (key !== PMS_ATTEMPT_KEY || !PMS_REQUEST_ID) {
+        PMS_ATTEMPT_KEY = key;
+        PMS_REQUEST_ID = newRequestID();
+      }
+      return PMS_REQUEST_ID;
     }
 
     async function submitPhase3(body, errEl) {
@@ -263,7 +286,7 @@ const landingHTML = `<!doctype html>
       } catch (e) { j = {}; }
       if (j.ok && j.session_id) {
         // A new attempt after this one must be a NEW resolution, not a replay of a spent request id.
-        PMS_REQUEST_ID = '';
+        PMS_REQUEST_ID = ''; PMS_ATTEMPT_KEY = '';
         window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
         return;
       }
@@ -273,7 +296,12 @@ const landingHTML = `<!doctype html>
         return;
       }
       // EVERY other answer — including a transport failure — is the same message.
-      PMS_REQUEST_ID = '';
+      //
+      // The request id is deliberately KEPT. A non-success can mean the guest's details were wrong, but it can
+      // equally mean the attempt was abandoned at the server's response-time budget or lost in transit with
+      // the resolution already recorded. Discarding the id would turn the second of those into a duplicate
+      // resolution; keeping it lets the retry return the same Auth Context. A guest who corrects their details
+      // gets a new id automatically, because the details are what the id is keyed to.
       errEl.textContent = PHASE3_FAIL;
     }
 
@@ -337,8 +365,7 @@ const landingHTML = `<!doctype html>
         }
         // PHASE 3: the Stay-resolution flow. The request id makes a double-tap or a retry on a bad
         // connection resolve ONCE — without it the guest's second attempt records a second resolution.
-        if (!PMS_REQUEST_ID) { PMS_REQUEST_ID = newRequestID(); }
-        body.request_id = PMS_REQUEST_ID;
+        body.request_id = phase3RequestID(body);
         await submitPhase3(body, errEl);
       } finally { btn.disabled = false; }
     });

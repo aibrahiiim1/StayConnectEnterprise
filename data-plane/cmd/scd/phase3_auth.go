@@ -435,6 +435,26 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// THE ALREADY-GRANTED CASE, answered before anything is locked.
+	//
+	// A grant is one transaction, but the ANSWER to it crosses a network hop, and that hop can be lost after
+	// the transaction commits: portald abandons the call at its response-time budget, the guest closes the
+	// page, a proxy drops the connection. The rows are durable and correct; only the reply is gone. If the
+	// retry then went down the normal path it would find the Auth Context consumed and refuse — leaving the
+	// guest permanently unable to obtain a session they already have, on a network that is already carrying
+	// their traffic. That is the worst of the possible outcomes: real access the guest is told they lack.
+	//
+	// So a retry from THE SAME DEVICE against a context that device already consumed returns the session that
+	// consumption produced. The device identity is the safety: it is derived from the connection and the
+	// appliance's neighbour table (never from the body), so this cannot hand one guest's session to another
+	// device that happens to know a context id.
+	if sid, ent, ok := p.alreadyGranted(ctx, strings.TrimSpace(req.AuthContextID), dev); ok {
+		slog.Info("phase3 auth: returning the session an earlier grant already created",
+			"session", sid, "entitlement", ent)
+		writeJSONScd(w, http.StatusOK, phase3GrantResp{Outcome: outcomeVerified, SessionID: sid, EntitlementID: ent})
+		return
+	}
+
 	tx, err := p.srv.db.Begin(ctx)
 	if err != nil {
 		notVerified(w, "begin: "+err.Error())
@@ -508,6 +528,43 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		"stay", granted.Stay, "entitlement", granted.EntitlementID, "session", sessionID)
 	writeJSONScd(w, http.StatusOK, phase3GrantResp{
 		Outcome: outcomeVerified, SessionID: sessionID, EntitlementID: granted.EntitlementID})
+}
+
+// alreadyGranted answers "did THIS device already turn THIS Auth Context into a live session?".
+//
+// Every clause is load-bearing:
+//
+//	consumed_at IS NOT NULL   — an unconsumed context has produced nothing, and must go down the real path;
+//	c.device_id = dev         — the context was issued TO this device, so a stolen context id is not enough;
+//	s.device_id = dev         — the session belongs to this device, not merely to the same Stay. Two devices
+//	                            in one room hold two contexts and must hold two sessions;
+//	s.state = 'active'        — a closed session is not access. A guest whose session was ended (checkout,
+//	                            revocation, an operator action) gets the uniform refusal, not a resurrection.
+//
+// It reads outside the grant transaction on purpose: it is a read-only fast path, and taking locks to answer
+// "you already have this" would serialise retries behind the very grants they are duplicating.
+func (p *phase3Auth) alreadyGranted(ctx context.Context, authContextID string, dev deviceIdentity) (string, string, bool) {
+	if authContextID == "" {
+		return "", "", false
+	}
+	var sid, ent string
+	err := p.srv.db.QueryRow(ctx, `
+		SELECT s.id::text, e.id::text
+		  FROM iam_v2.auth_contexts c
+		  JOIN iam_v2.entitlements e ON e.stay_id = c.stay_id
+		                            AND e.tenant_id = c.tenant_id AND e.site_id = c.site_id
+		  JOIN iam_v2.sessions s ON s.entitlement_id = e.id
+		 WHERE c.id = $1::uuid AND c.tenant_id = $2 AND c.site_id = $3
+		   AND c.consumed_at IS NOT NULL
+		   AND c.device_id = $4 AND s.device_id = $4
+		   AND s.state = 'active'
+		 ORDER BY s.started DESC
+		 LIMIT 1`,
+		authContextID, p.srv.tenID, p.srv.siteID, dev.DeviceID).Scan(&sid, &ent)
+	if err != nil {
+		return "", "", false
+	}
+	return sid, ent, true
 }
 
 // openSessionTx creates the guest's session against an Entitlement that already exists in this transaction.

@@ -67,6 +67,10 @@ type handler struct {
 	// commerceSessions holds trusted server-derived pins (empty while IAM-v2 auth is dark).
 	commerceCfg      iamv2.CommerceConfig
 	commerceSessions *commerceSessionStore
+
+	// clock drives the Phase-3 guest response-time budget (pms_phase3_budget.go). Nil means the real clock;
+	// only tests set it, so they can assert the budget arithmetic instead of measuring a loaded CI runner.
+	clock phase3Clock
 }
 
 func newHandler(c cfg) (*handler, error) {
