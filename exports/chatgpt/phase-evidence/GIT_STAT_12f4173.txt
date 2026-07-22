@@ -1,0 +1,4 @@
+commit 12f417345294c71a34c4d2b642348fd86866d530
+Date:   Wed Jul 22 08:35:15 2026 +0300
+
+    Phase 3 accounting item 6 reopen corrected + shaping 7-8 closed (inventory_head): right session domain, restart-durable sample identity, wiring-level tests, truthful shaping health, legacy loop stands down

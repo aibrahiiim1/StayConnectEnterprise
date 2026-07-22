@@ -1,4 +1,0 @@
-commit 7dc27e83e2a14190a3c2728fb352dd01cb8ac324
-Date:   Wed Jul 22 01:01:30 2026 +0300
-
-    Phase 3 correction item 8 (inventory_head): ADR-0002 single shaping owner - netd applies, acctd derives and submits; structural preflight check
