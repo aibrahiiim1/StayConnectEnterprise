@@ -1,4 +1,0 @@
-commit 51bafc0d81b6a8f9623d2037012c625744a66821
-Date:   Wed Jul 22 19:14:38 2026 +0300
-
-    Phase 3 (D15 / Option C): accounting attribution, source binding, temporal order, class origin, generation authority

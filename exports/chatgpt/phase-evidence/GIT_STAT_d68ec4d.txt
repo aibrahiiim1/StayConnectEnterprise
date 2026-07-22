@@ -1,0 +1,4 @@
+commit d68ec4da2226cfb361aff9525e8df7b208a9b015
+Date:   Wed Jul 22 23:01:10 2026 +0300
+
+    Phase 3: fix the failed migration gate; real PMS eligibility, published-Revision pinning, offer-bound grants
