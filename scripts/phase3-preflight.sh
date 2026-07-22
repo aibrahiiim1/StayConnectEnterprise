@@ -157,11 +157,14 @@ fi
 
 # (d) every Phase-3 composition root verifies the controlled-writer boundary before it can write. A service
 #     that skipped this could run against a schema whose guards were never applied and never notice.
+# netd is included because although it writes no Phase-3 TABLE directly, it performs two authoritative
+# operations (allocating a class generation, registering a class origin) and those mean nothing on a schema
+# whose guards were never applied. portald is deliberately absent: it writes no iam_v2 state at all, it
+# proxies to scd, so requiring the check there would be requiring a promise it has no way to keep.
 missing=""
-for root in acctd edged scd; do
+for root in acctd edged scd pmsd netd; do
   grep -q 'writerguard.Verify' "$ROOT/data-plane/cmd/$root/main.go" || missing="$missing $root"
 done
-grep -q 'writerguard.Verify' "$ROOT/data-plane/cmd/pmsd/main.go" || missing="$missing pmsd"
 if [ -z "$missing" ]; then
   ok "every Phase-3 writing service verifies the controlled-writer boundary at startup"
 else

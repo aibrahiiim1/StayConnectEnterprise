@@ -32,6 +32,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 var version = "0.1.0-netd"
@@ -135,6 +136,16 @@ func main() {
 		// mode, it is an unenforceable one. Refuse to start rather than accept plans from anyone.
 		slog.Error("netd: phase3 is live but NETD_PHASE3_PRODUCER_UID is unset — no producer can be authenticated")
 		os.Exit(1)
+	}
+	if p3mode.Active {
+		// netd writes no Phase-3 table directly, but it DOES perform two authoritative operations — allocating
+		// a class generation and registering a class origin — and both are only meaningful if the boundary
+		// they belong to is actually installed. On a schema whose guards were never applied, netd would go on
+		// allocating generations perfectly happily while nothing enforced that they were the only ones.
+		if err := writerguard.Verify(rootCtx, pool, writerguard.Phase3Requirements()); err != nil {
+			slog.Error("netd: refusing to run Phase-3 shaping", "err", err)
+			os.Exit(1)
+		}
 	}
 	p3shaping := &phase3Shaping{
 		shp:   shape.New(),
