@@ -1,0 +1,4 @@
+commit fb15bf036b56f6c7c084e7bdd90eac29a7e4c661
+Date:   Wed Jul 22 12:45:28 2026 +0300
+
+    Phase 3: durable accounting, netd shaping control plane, controlled-writer boundary, guest vertical slice
