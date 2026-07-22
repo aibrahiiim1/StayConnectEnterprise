@@ -203,6 +203,36 @@ func (c *Client) DeleteSession(ctx context.Context, bridge string, ip net.IP) er
 	return nil
 }
 
+// DeleteSessionClass removes a managed class by MINOR, on both directions of a
+// bridge. It exists for reconciliation: a class left behind by a session that no
+// longer exists — after a crash, or a restart that lost the in-memory map — is
+// only identifiable by its minor, because the IP that produced it is no longer
+// known anywhere. Deleting by pref/classid needs no IP: the add path derives
+// both deterministically from the same minor.
+func (c *Client) DeleteSessionClass(ctx context.Context, bridge string, minor int) error {
+	if minor < GuestMinorBase || minor > GuestMinorMax {
+		// Refuse to touch anything outside the guest range. The root and default
+		// classes are appliance infrastructure, not per-session state, and a
+		// reconciliation that removed them would take the whole bridge down.
+		return fmt.Errorf("minor %d is outside the managed guest class range", minor)
+	}
+	cid := fmt.Sprintf("%s:%x", RootMajor, minor)
+	unlock := c.lockBridge(bridge)
+	defer unlock()
+	c.removeClassByPref(ctx, bridge, cid, minor)
+	c.removeClassByPref(ctx, IFBName(bridge), cid, minor)
+	return nil
+}
+
+// removeClassByPref is removeClassAndFilter without needing the IP: the filter
+// pref and the classid are both functions of the minor alone.
+func (c *Client) removeClassByPref(ctx context.Context, ifc, cid string, pref int) {
+	_ = c.run(ctx, "filter", "del", "dev", ifc, "parent", RootParent,
+		"pref", strconv.Itoa(pref), "protocol", "ip", "u32")
+	_ = c.run(ctx, "qdisc", "del", "dev", ifc, "parent", cid)
+	_ = c.run(ctx, "class", "del", "dev", ifc, "classid", cid)
+}
+
 // filterPrefFor returns a per-IP u32 filter pref, unique within a device
 // because each device serves one subnet and the minor is host-unique there.
 func filterPrefFor(ip net.IP) int {

@@ -32,6 +32,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/livez"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 type cfg struct {
@@ -112,9 +113,11 @@ func main() {
 	}
 	asgStore := &assignment.Store{Dir: envOr("ACCTD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
 	assignedSite := ""
-	if aTen, aSite, _, _ := asgStore.Resolved(); aTen != "" {
+	assignedGen := int64(0)
+	if aTen, aSite, _, aVer := asgStore.Resolved(); aTen != "" {
 		c.TenantID = aTen
 		assignedSite = aSite
+		assignedGen = aVer
 	} else {
 		c.TenantID = "" // unassigned appliance bills nobody
 	}
@@ -152,7 +155,28 @@ func main() {
 		slog.Error("acctd: phase3 config fail-closed", "err", err)
 		os.Exit(1)
 	}
-	a.p3 = newPhase3(pmsCfg, a, c.TenantID, assignedSite)
+	// The controlled-writer boundary must be REAL before this process writes anything Phase-3. A schema whose
+	// guards were never applied accepts raw writes silently, and a process connected as the operations' owner
+	// satisfies every guard trivially — both are "Phase 3 is running" with none of its guarantees.
+	if pmsCfg.Enabled() {
+		if err := writerguard.Verify(rootCtx, pool, writerguard.Phase3Requirements()); err != nil {
+			slog.Error("acctd: refusing to start", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	// The shaping contract is scoped to THIS appliance under THIS assignment: netd checks a submitted plan
+	// against its own copy of the same facts, so a plan derived for another site can never be applied here.
+	p3scope := planScope{TenantID: c.TenantID, SiteID: assignedSite, ApplianceID: c.ApplianceID,
+		AssignmentGe: assignedGen}
+	if rec, err := asgStore.Load(); err == nil && rec != nil && rec.Current != nil {
+		p3scope.AssignmentID = rec.Current.AssignmentID
+	}
+	// The plan generation is durable: a restarted producer that began again at 1 would have every plan
+	// correctly refused as stale, freezing enforcement at the pre-restart state with nothing looking broken.
+	p3plans := newPlanCounter(envOr("ACCTD_PHASE3_PLAN_STATE", "/var/lib/stayconnect/acctd-phase3-plan.json"))
+	p3plans.start()
+	a.p3 = newPhase3(pmsCfg, a, c.TenantID, assignedSite, p3scope, p3plans)
 	// ADR-0002: acctd derives the plan; netd is the ONLY process that mutates Phase-3 tc state.
 	netdShaping := newNetdShaper(envOr("ACCTD_NETD_SOCKET", "/run/stayconnect/netd.sock"))
 	p3 := a.p3
@@ -180,8 +204,11 @@ func main() {
 			p3.enforceExpiries(rootCtx)
 			p3.reconcileShaping(rootCtx, netdShaping, c.LegacyBridge)
 			// Liveness heartbeat: proves the accounting loop is PROGRESSING (not
-			// just that the process is up) for the edged health supervisor.
+			// just that the process is up) for the edged health supervisor — together with WHY it is
+			// degraded, if it is. A ticking loop whose every observation is refused is not healthy, and
+			// the heartbeat alone cannot say so.
 			livez.Touch("acctd")
+			livez.Report("acctd", p3.degradedSummary())
 		}
 	}
 }

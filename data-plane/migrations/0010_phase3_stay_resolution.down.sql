@@ -43,6 +43,16 @@ DROP TABLE IF EXISTS iam_v2.checkout_grace_alert_actions;
 DROP TRIGGER IF EXISTS p3_entitlement_controlled_writer ON iam_v2.entitlements;
 DROP TRIGGER IF EXISTS p3_est_controlled_writer ON iam_v2.entitlement_state_transitions;
 DROP TRIGGER IF EXISTS p3_grace_config_controlled_writer ON iam_v2.site_checkout_grace_config;
+-- Every controlled-writer guard 0010 attached. Three of these tables PRE-DATE 0010 and survive the rollback,
+-- so their triggers must be dropped by name or the guard function cannot be dropped and the whole rollback
+-- fails. The fourth table is dropped by this migration, but only later in the script — naming its trigger too
+-- makes the rollback independent of statement order rather than quietly dependent on it.
+DROP TRIGGER IF EXISTS p3_accounting_records_controlled_writer ON iam_v2.accounting_records;
+-- accounting_checkpoints IS dropped by this migration, but not until later in the script — and the function
+-- drop comes first. Dropping its trigger explicitly makes the rollback independent of statement order.
+DROP TRIGGER IF EXISTS p3_accounting_checkpoints_controlled_writer ON iam_v2.accounting_checkpoints;
+DROP TRIGGER IF EXISTS p3_delayed_accounting_controlled_writer ON iam_v2.delayed_accounting_records;
+DROP TRIGGER IF EXISTS p3_session_usage_controlled_writer ON iam_v2.sessions;
 DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_only();
 DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_owner(text);
 DROP TRIGGER IF EXISTS p3_entitlement_status_coherent ON iam_v2.entitlements;
@@ -55,7 +65,6 @@ DROP FUNCTION IF EXISTS iam_v2.deauthorize_entitlement_device(uuid,uuid,timestam
 -- (4m) accounting attribution: delayed-record detection, watermarks, session binding intervals
 DROP TRIGGER IF EXISTS p3_detect_delayed_accounting ON iam_v2.accounting_records;
 DROP FUNCTION IF EXISTS iam_v2.p3_detect_delayed_accounting();
-DROP FUNCTION IF EXISTS iam_v2.ingest_accounting_sample(uuid,uuid,uuid,bigint,bigint,bigint,timestamptz);
 DROP FUNCTION IF EXISTS iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz);
 DROP TABLE IF EXISTS iam_v2.accounting_checkpoints;
 ALTER TABLE iam_v2.accounting_records DROP COLUMN IF EXISTS ingested_at;

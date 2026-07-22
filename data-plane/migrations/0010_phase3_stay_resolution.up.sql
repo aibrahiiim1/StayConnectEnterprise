@@ -932,74 +932,13 @@ CREATE TRIGGER p3_dar_appendonly BEFORE UPDATE OR DELETE ON iam_v2.delayed_accou
 ALTER TABLE iam_v2.accounting_records
   ADD COLUMN ingested_at timestamptz NOT NULL DEFAULT now();
 
-CREATE OR REPLACE FUNCTION iam_v2.ingest_accounting_sample(
-    p_tenant uuid, p_site uuid, p_session uuid, p_sample_seq bigint,
-    p_bytes_up bigint, p_bytes_down bigint, p_sampled_at timestamptz) RETURNS text
-  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
-DECLARE v_ent uuid; v_started timestamptz; v_rec uuid; v_delayed boolean;
-BEGIN
-  IF p_sample_seq IS NULL OR p_sample_seq < 1 THEN
-    RAISE EXCEPTION 'ACCT_INVALID: a stable sample sequence (>= 1) is required';
-  END IF;
-  -- A counter delta cannot be negative. If a caller ever computes one, its baseline is wrong (a device
-  -- reconnected, tc was flushed, the process restarted) and silently storing it would corrupt every total
-  -- derived from it afterwards.
-  IF p_bytes_up IS NULL OR p_bytes_down IS NULL OR p_bytes_up < 0 OR p_bytes_down < 0 THEN
-    RAISE EXCEPTION 'ACCT_COUNTER_REGRESSION: a sample cannot carry negative bytes (up=%, down=%)', p_bytes_up, p_bytes_down;
-  END IF;
-  IF p_sampled_at IS NULL THEN
-    RAISE EXCEPTION 'ACCT_INVALID: sampled_at is required and is not the ingest time';
-  END IF;
+-- The sample-sequence ingestion function that used to live here has been REMOVED, not deprecated. It took a
+-- caller-supplied sample_seq and a caller-computed delta, which is exactly the contract the durable-checkpoint
+-- design replaced: a runtime that restarts cannot produce a trustworthy delta, and a caller-chosen sequence is
+-- an idempotency key the caller can get wrong. Leaving it in place as an unused SECURITY DEFINER function would
+-- have left a second, weaker way to write accounting rows — one that bypasses the checkpoint entirely.
+-- See (4p) below for the operation that replaced it.
 
-  -- SCOPE: the session must belong to this tenant AND site. Accounting attributed across a scope boundary is
-  -- worse than missing accounting.
-  SELECT started INTO v_started FROM iam_v2.sessions
-    WHERE id = p_session AND tenant_id = p_tenant AND site_id = p_site;
-  IF v_started IS NULL THEN
-    RAISE EXCEPTION 'ACCT_SESSION_OUT_OF_SCOPE: session % is not in this tenant/site', p_session;
-  END IF;
-  IF p_sampled_at < v_started THEN
-    RAISE EXCEPTION 'ACCT_INVALID: sample time % precedes the session start %', p_sampled_at, v_started;
-  END IF;
-
-  -- ATTRIBUTION: which Entitlement was bound AT SAMPLE TIME. A sample with no binding has no owner, and
-  -- guessing (for instance by using the session's CURRENT entitlement) is exactly how a rebound session's
-  -- pre-boundary usage would be charged to the grace Entitlement.
-  SELECT b.entitlement_id INTO v_ent FROM iam_v2.session_entitlement_bindings b
-    WHERE b.session_id = p_session AND b.bound_from <= p_sampled_at
-      AND (b.bound_until IS NULL OR b.bound_until > p_sampled_at)
-    ORDER BY b.seq DESC LIMIT 1;
-  IF v_ent IS NULL THEN
-    RAISE EXCEPTION 'ACCT_NO_BINDING: no entitlement was bound to session % at %', p_session, p_sampled_at;
-  END IF;
-
-  -- IDEMPOTENT: the same (session, sample identity) delivered twice is stored once. The unique index is the
-  -- authority; this simply reports what happened so a caller does not double-count in its own state.
-  INSERT INTO iam_v2.accounting_records
-    (tenant_id, site_id, session_id, sample_seq, bytes_up, bytes_down, sampled_at, ingested_at)
-    VALUES (p_tenant, p_site, p_session, p_sample_seq, p_bytes_up, p_bytes_down, p_sampled_at, now())
-    ON CONFLICT (session_id, sample_seq) DO NOTHING
-    RETURNING id INTO v_rec;
-  IF v_rec IS NULL THEN
-    RETURN 'DUPLICATE';
-  END IF;
-
-  -- Session counters advance MONOTONICALLY by the accepted delta, in the same transaction as the sample, so a
-  -- reader can never see a total that no set of samples supports.
-  UPDATE iam_v2.sessions
-     SET bytes_up = bytes_up + p_bytes_up, bytes_down = bytes_down + p_bytes_down
-   WHERE id = p_session;
-
-  -- DELAYED classification is done by the ingest trigger against the frozen watermarks; report it so the
-  -- caller can surface it without re-deriving the rule.
-  SELECT EXISTS (SELECT 1 FROM iam_v2.delayed_accounting_records WHERE accounting_record_id = v_rec)
-    INTO v_delayed;
-  IF v_delayed THEN
-    RETURN 'DELAYED';
-  END IF;
-  RETURN 'ACCEPTED';
-END $fn$;
-REVOKE EXECUTE ON FUNCTION iam_v2.ingest_accounting_sample(uuid,uuid,uuid,bigint,bigint,bigint,timestamptz) FROM PUBLIC;
 
 -- ============================================================================
 -- (4p) DURABLE ACCOUNTING CHECKPOINTS + ABSOLUTE-COUNTER INGESTION.
@@ -1210,6 +1149,7 @@ BEGIN
   v_sig := CASE p_family
     WHEN 'entitlement' THEN 'iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)'
     WHEN 'grace_config' THEN 'iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)'
+    WHEN 'accounting' THEN 'iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)'
     ELSE NULL END;
   IF v_sig IS NULL THEN
     RAISE EXCEPTION 'no approved controlled-writer family %', p_family;
@@ -1233,9 +1173,12 @@ BEGIN
   -- resolve the family's approved function owner INLINE (catalog-only). Deliberately NOT a call to the
   -- introspection helper: this trigger fires as whichever role is writing, and a cross-function EXECUTE
   -- dependency would break exactly the dedicated-owner separation Gate-P needs.
-  v_sig := CASE WHEN TG_TABLE_NAME = 'site_checkout_grace_config'
-                THEN 'iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)'
-                ELSE 'iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)' END;
+  v_sig := CASE
+    WHEN TG_TABLE_NAME = 'site_checkout_grace_config'
+      THEN 'iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)'
+    WHEN TG_TABLE_NAME IN ('accounting_records','accounting_checkpoints','delayed_accounting_records','sessions')
+      THEN 'iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)'
+    ELSE 'iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)' END;
   v_oid := to_regprocedure(v_sig);
   IF v_oid IS NULL THEN
     RAISE EXCEPTION 'controlled-writer function % is not resolvable (fail closed)', v_sig;
@@ -1254,7 +1197,18 @@ BEGIN
     END IF;
     RETURN OLD;
   END IF;
-  IF TG_TABLE_NAME = 'entitlements' THEN
+  IF TG_TABLE_NAME IN ('accounting_records','accounting_checkpoints','delayed_accounting_records') THEN
+    -- EVERY write is controlled. A physical measurement has exactly one legitimate author: the operation that
+    -- computed it from a locked checkpoint. A raw INSERT here is invented usage; a raw UPDATE is rewritten
+    -- history; and a raw checkpoint write is worse than either, because it silently changes what every FUTURE
+    -- observation will be measured against.
+    changed := true;
+  ELSIF TG_TABLE_NAME = 'sessions' AND TG_OP = 'UPDATE' THEN
+    -- A Session row is written by several legitimate paths (it is created, bound, rebound and ended), but its
+    -- USAGE TOTALS are accounting state and are advanced only by the ingestion operation, in the same
+    -- transaction as the record that justifies them. Anything else could move a total without a row behind it.
+    changed := (NEW.bytes_up IS DISTINCT FROM OLD.bytes_up OR NEW.bytes_down IS DISTINCT FROM OLD.bytes_down);
+  ELSIF TG_TABLE_NAME = 'entitlements' THEN
     changed := (NEW.status IS DISTINCT FROM OLD.status);   -- only status is controlled-writer-only
   ELSIF TG_TABLE_NAME = 'site_checkout_grace_config' AND TG_OP = 'UPDATE' THEN
     changed := (NEW.grace_package_revision_id IS DISTINCT FROM OLD.grace_package_revision_id
@@ -1282,6 +1236,24 @@ CREATE TRIGGER p3_est_controlled_writer BEFORE INSERT OR UPDATE ON iam_v2.entitl
 -- write, so it must come through publish_checkout_grace_config() and never from a raw non-owner INSERT.
 CREATE TRIGGER p3_grace_config_controlled_writer BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.site_checkout_grace_config
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+-- (C7) THE ACCOUNTING WRITER BOUNDARY. Physical usage is the one kind of Phase-3 state that can be corrupted
+-- without anything looking wrong afterwards: there is no second copy to reconcile against, and a plausible row
+-- is indistinguishable from a real one. So every table in the measurement chain is closed to raw DML, and the
+-- checkpoint — the value every future delta is computed FROM — is closed hardest.
+CREATE TRIGGER p3_accounting_records_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.accounting_records
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_accounting_checkpoints_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.accounting_checkpoints
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+CREATE TRIGGER p3_delayed_accounting_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.delayed_accounting_records
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+-- Session usage totals only (see the guard body): creating, binding and ending a Session stay ordinary writes.
+CREATE TRIGGER p3_session_usage_controlled_writer
+  BEFORE UPDATE ON iam_v2.sessions
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
+
 REVOKE EXECUTE ON FUNCTION iam_v2.p3_controlled_writer_only() FROM PUBLIC;
 
 -- (item 7) INSERT-time DEVICE-AUTHORIZATION-INTERVAL guard: contiguous seq per (entitlement,device); at most one

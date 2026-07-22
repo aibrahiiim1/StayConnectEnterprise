@@ -120,11 +120,30 @@ func main() {
 		dryRun:        dryRun,
 	}
 
-	// Phase 3 (ADR-0002): netd is the ONLY process that mutates Phase-3 shaping. The writer is constructed
-	// unconditionally because it holds no policy and does nothing until a plan is submitted; acctd submits a
-	// plan only when the Phase-3 flags are on, so a dark appliance never reaches it.
+	// Phase 3 (ADR-0002): netd is the ONLY process that mutates Phase-3 shaping — and it decides for itself
+	// whether Phase 3 is live. Deriving the mode here, from the same flags, enrollment identity and signed
+	// assignment every other daemon uses, is what makes the kill switch real: a dark appliance refuses to
+	// mutate tc no matter what any other local process submits.
+	p3mode, p3err := loadPhase3Mode(rootCtx, os.Getenv)
+	if p3err != nil {
+		slog.Error("netd: phase3 config fail-closed", "err", p3err)
+		os.Exit(1)
+	}
+	p3authz := newShapingAuthz(os.Getenv)
+	if p3mode.Active && !p3authz.configured {
+		// Live enforcement with no way to tell the producer from any other local process is not a degraded
+		// mode, it is an unenforceable one. Refuse to start rather than accept plans from anyone.
+		slog.Error("netd: phase3 is live but NETD_PHASE3_PRODUCER_UID is unset — no producer can be authenticated")
+		os.Exit(1)
+	}
 	srv := &server{st: st, ap: ap, kea: ap.kea, topo: topo, sn: sn,
-		phase3: &phase3Shaping{shp: shape.New()}}
+		phase3: &phase3Shaping{
+			shp:   shape.New(),
+			mode:  p3mode,
+			authz: p3authz,
+			store: &planStore{path: envOr("NETD_PHASE3_PLAN_STATE", "/var/lib/stayconnect/netd-phase3-plan.json")},
+		}}
+	slog.Info("netd phase3 shaping writer", "active", p3mode.Active, "producer_authenticated", p3authz.configured)
 
 	// Watchdog: roll back any pending revision whose deadline has passed. Also
 	// runs once at boot to recover from a crash during pending_confirmation.
@@ -176,10 +195,21 @@ func main() {
 		}
 	}
 
-	hs := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second}
+	// Every accepted connection carries the kernel's statement of who is on the other end, so the Phase-3
+	// handler can authenticate its caller instead of believing a header.
+	hs := &http.Server{
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			if pc, ok := c.(*peerConn); ok && pc.err == nil {
+				return context.WithValue(ctx, peerConnKey{}, pc.id)
+			}
+			return ctx
+		},
+	}
 	go func() {
 		slog.Info("netd listening", "socket", sock, "dry_run", dryRun, "version", version)
-		if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := hs.Serve(&peerListener{Listener: ln, authz: p3authz}); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("serve", "err", err)
 			stop()
 		}

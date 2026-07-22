@@ -29,7 +29,7 @@ fi
 # gofmt is checked over the PHASE-3 package set (the same list the Phase-3 CI enforces). Pre-existing
 # formatting elsewhere in the repository is out of this preflight's scope and is deliberately not asserted
 # here, so a Phase-3 go/no-go is never blocked or falsely reassured by unrelated code.
-P3_PKGS="internal/pmsd internal/pms internal/stayengine internal/pmsresolve internal/authctx internal/grace internal/checkout internal/staygrant internal/enforce cmd/pmsd cmd/edged cmd/portald"
+P3_PKGS="internal/pmsd internal/pms internal/stayengine internal/pmsresolve internal/authctx internal/grace internal/checkout internal/staygrant internal/enforce internal/shapeplan internal/writerguard cmd/pmsd cmd/edged cmd/portald cmd/acctd cmd/netd cmd/scd"
 if (cd "$ROOT/data-plane" && [ -z "$(gofmt -l $P3_PKGS 2>/dev/null)" ]); then
   ok "Phase-3 Go sources are gofmt-clean"
 else
@@ -134,7 +134,52 @@ if [ $JSON -eq 1 ]; then
   done
   printf ']}\n'
 else
-  echo "============================================================"
+  # ---------------------------------------------------------------- 8. the Phase-3 control-plane invariants
+# These four are the properties that make the single-writer decision (ADR-0002) and the controlled-writer
+# boundary real rather than documentary. Each is checked structurally, because each can be silently undone by
+# an ordinary-looking change.
+
+# (a) netd refuses to mutate tc while Phase 3 is dark, on its OWN authority. If this check ever fails, the
+#     kill switch depends on acctd staying correct instead of on netd enforcing it.
+if grep -q 'phase3_dark' "$ROOT/data-plane/cmd/netd/phase3_shaping.go" \
+   && grep -q 'if !p.mode.Active' "$ROOT/data-plane/cmd/netd/phase3_shaping.go"; then
+  ok "netd refuses shaping submissions while Phase 3 is dark (its own check, not the producer's)"
+else
+  no "netd does not independently refuse shaping while dark"
+fi
+
+# (b) the shaping producer is authenticated by peer credentials, never by a request header. A header is a
+#     claim any local process can write; SO_PEERCRED is the kernel's statement.
+if grep -q 'SO_PEERCRED' "$ROOT/data-plane/cmd/netd/phase3_peer_linux.go" \
+   && ! grep -qE 'r\.Header\.Get\("X-[^"]*(Producer|Service|Caller)' "$ROOT/data-plane/cmd/netd/phase3_shaping.go"; then
+  ok "the Phase-3 shaping producer is authenticated by peer credentials, not a header"
+else
+  no "the shaping producer is not authenticated by peer credentials"
+fi
+
+# (c) both ends of the shaping contract use the ONE shared definition. Two hand-written copies of a canonical
+#     hash drift silently, and the drift only shows up as a refused plan in production.
+if grep -q 'internal/shapeplan' "$ROOT/data-plane/cmd/netd/phase3_shaping.go" \
+   && grep -q 'internal/shapeplan' "$ROOT/data-plane/cmd/acctd/phase3.go"; then
+  ok "producer and applier share one shaping contract definition (internal/shapeplan)"
+else
+  no "the shaping contract is defined separately on each side"
+fi
+
+# (d) every Phase-3 composition root verifies the controlled-writer boundary before it can write. A service
+#     that skipped this could run against a schema whose guards were never applied and never notice.
+missing=""
+for root in acctd edged scd; do
+  grep -q 'writerguard.Verify' "$ROOT/data-plane/cmd/$root/main.go" || missing="$missing $root"
+done
+grep -q 'writerguard.Verify' "$ROOT/data-plane/cmd/pmsd/main.go" || missing="$missing pmsd"
+if [ -z "$missing" ]; then
+  ok "every Phase-3 writing service verifies the controlled-writer boundary at startup"
+else
+  no "these Phase-3 services do not verify the writer boundary:$missing"
+fi
+
+echo "============================================================"
   echo "PHASE3_PREFLIGHT: pass=$pass fail=$fail -> $([ $fail -eq 0 ] && echo PASS || echo FAIL)"
 fi
 [ $fail -eq 0 ]

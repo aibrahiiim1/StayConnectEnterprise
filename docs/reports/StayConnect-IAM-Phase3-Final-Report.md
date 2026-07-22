@@ -26,6 +26,18 @@
 - **PO authorization reference:** the Phase-3 execution directive and the eleven successive correction
   directives against the Increment-7 Checkout subsystem, followed by the closing scorecard.
 
+## 2a. Where this candidate stands
+
+**Software evidence: complete for every dimension marked `PASS — SOFTWARE` in the Acceptance Matrix (§6a).**
+**Live Increment-9 evidence: PENDING.** Nothing in this report was produced by contacting an appliance, a
+production database or a PMS, and no live result is simulated or inferred anywhere in it.
+
+Two dimensions are neither: the Hotel-Admin operator surfaces listed in
+`docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md` await an explicit Product-Owner decision. They are recorded in the
+matrix as such rather than being counted as passed or quietly dropped.
+
+**Phase 3 is NOT marked accepted or closed by this report.**
+
 ## 3. What was implemented
 
 **Stay domain and event application**
@@ -88,21 +100,82 @@ be re-derived rather than trusted.
 
 ## 6. Acceptance tests
 
+Every row below ran on the delivery HEAD recorded in §12. "PASS" means the suite ran to completion with no
+failing assertion and no skipped required test; nothing here is inferred from a previous run.
+
 | Test | Result | Evidence |
 |---|---|---|
-| Offline preflight (build, flags, migration reversibility, zero runtime privilege) | **PASS 11/11** | `scripts/phase3-preflight.sh` |
-| Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 282/282** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
-| PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce) | **PASS** | `scripts/pmsd-pg-integration.sh` |
+| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants) | **PASS 17/17** | `scripts/phase3-preflight.sh` |
+| Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 356/356** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
+| PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** | `scripts/pmsd-pg-integration.sh` |
 | Go unit tests, whole module | **PASS** | `go test ./...` |
+| Go race suite | **PASS** | `go test -race` (CI) |
 | F1–F7 named flow suite | **PASS** | `internal/checkout/f_flows_integration_test.go`, `internal/stayengine` |
 | ≥24 concurrent checkout handlers / resolutions / grants / device authorizations | **PASS** | integration suites |
-| Hotel-Admin component tests | **PASS 48/48** | `npx vitest run` |
-| Hotel-Admin E2E + accessibility | **PASS 7/7** | `npx playwright test` |
+| Hotel-Admin component tests | **PASS 51/51** | `npx vitest run` |
+| Hotel-Admin + guest-portal E2E and accessibility (real browser) | **PASS 23/23** | `npx playwright test` |
 | TypeScript typecheck | **PASS** | `npx tsc --noEmit` |
-| Guest-portal uniform non-success contract | **PASS** | `cmd/portald/pms_phase3_test.go` |
+| Guest-portal uniform non-success contract (server) | **PASS** | `cmd/portald/pms_phase3_test.go`, `pms_phase3_handlers_test.go` |
+| Guest-portal Phase-3 flow (real browser, real template) | **PASS 5/5** | `hotel-admin/e2e/phase3-guest-portal.spec.ts` |
 | Software CI + Governance CI on the same pushed HEAD | **PASS** | §12 |
 | Live read-only PMS protocol verification | **PENDING** | operator-executed; not simulated |
 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING** | operator-executed; runbook §2–§5 |
+
+### On retries
+
+Both disposable-PostgreSQL gates now separate an infrastructure failure (exit 2 — the container or the
+baseline schema could not be built, and no assertion was ever reached) from a failed assertion (exit 1). CI
+retries **only** exit 2, once. A failed assertion is final. The previous policy retried the whole script on
+any failure, which would have let an order- or timing-dependent defect pass on a second attempt and be
+reported green.
+
+## 6a. Phase-3 Acceptance Matrix
+
+Three verdicts were authorised: `PASS — SOFTWARE`, `PENDING — LIVE INCREMENT 9`, and
+`OUT OF SCOPE BY APPROVED CONTRACT`. A fourth appears below —
+`PENDING — PO SCOPE DECISION` — for the Hotel-Admin surfaces covered by
+`docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md`. None of the three authorised verdicts is true of those rows: they
+did not pass, they are not waiting on live evidence, and no approved contract has excluded them. Recording
+them under any of the three would have been a false statement, so they are recorded as what they are — work
+awaiting a Product-Owner decision that has been formally proposed, not omitted.
+
+| # | Dimension | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Migration 0010 applies, behaves, rolls back and re-applies (disposable PG16) | **PASS — SOFTWARE** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
+| 2 | Durable accounting checkpoints; absolute-counter ingestion; restart bills the gap exactly once | **PASS — SOFTWARE** | migration §4p; `cmd/acctd/phase3_pass_integration_test.go` |
+| 3 | Accounting attribution at SAMPLE time across a Grace rebinding; no current-entitlement fallback | **PASS — SOFTWARE** | `cmd/acctd/phase3_boundary_integration_test.go` |
+| 4 | Accounting writer boundary: raw INSERT/UPDATE/DELETE refused for a privileged non-owner | **PASS — SOFTWARE** | lifecycle gate §C7; `phase3_boundary_integration_test.go` |
+| 5 | Controlled operations: SECURITY DEFINER, pinned `search_path`, PUBLIC EXECUTE revoked, zero runtime grants | **PASS — SOFTWARE** | lifecycle gate §1/§5/§6 |
+| 6 | Every Phase-3 writing service refuses to start on an unenforced boundary or as the writer's owner | **PASS — SOFTWARE** | `internal/writerguard` + its PG16 suite |
+| 7 | netd is the only Phase-3 tc writer (ADR-0002); acctd holds no tc client | **PASS — SOFTWARE** | `cmd/acctd/phase3_test.go`; preflight |
+| 8 | The shaping producer is authenticated by `SO_PEERCRED` against one allowlisted uid | **PASS — SOFTWARE** | `cmd/netd/phase3_shaping_test.go` |
+| 9 | A dark netd refuses every plan on its own authority, and discloses no class generations | **PASS — SOFTWARE** | `cmd/netd/phase3_shaping_test.go` |
+| 10 | Scoped, versioned, expiring, hashed plan envelope; stale/replayed/out-of-scope plans refused across restart | **PASS — SOFTWARE** | `internal/shapeplan`; `cmd/netd/phase3_shaping_test.go` |
+| 11 | Full-state reconciliation removes unclaimed classes, including on a bridge with no sessions | **PASS — SOFTWARE** | `cmd/netd/phase3_shaping_test.go` |
+| 12 | Teardown precedes shaping; partial application and an unreadable kernel are reported degraded | **PASS — SOFTWARE** | `cmd/netd/phase3_shaping_test.go` |
+| 13 | STRICT multi-interface resolution; ambiguity and indeterminacy grant nothing | **PASS — SOFTWARE** | `internal/pmsresolve`; `cmd/scd/phase3_auth_integration_test.go` |
+| 14 | Server-derived identity only: no stay, interface, device, network or price from a guest body | **PASS — SOFTWARE** | `cmd/scd/phase3_auth.go`; `cmd/portald/pms_phase3_handlers_test.go` |
+| 15 | One-time Auth Context: consumed exactly once, device-bound, expiring | **PASS — SOFTWARE** | `internal/authctx`; `cmd/scd/phase3_auth_integration_test.go` |
+| 16 | Atomic Quote → Purchase → Entitlement → device authorization → Session; no session before its entitlement | **PASS — SOFTWARE** | `internal/staygrant`; `cmd/scd/phase3_auth_integration_test.go` |
+| 17 | Paid packages refused even when named directly (no silent free grant) | **PASS — SOFTWARE** | `cmd/scd/phase3_auth_integration_test.go` |
+| 18 | Uniform guest non-success contract: every failure identical, byte for byte | **PASS — SOFTWARE** | scd + portald suites; `hotel-admin/e2e/phase3-guest-portal.spec.ts` |
+| 19 | Guest Portal Phase-3 flow in a real browser on the real template | **PASS — SOFTWARE** | `hotel-admin/e2e/phase3-guest-portal.spec.ts` |
+| 20 | Hotel Admin: Stays, occupants, folios | **PASS — SOFTWARE** | vitest + Playwright |
+| 21 | Hotel Admin: Stay-Event review queue and refusal reasons | **PASS — SOFTWARE** | vitest + Playwright |
+| 22 | Hotel Admin: Checkout-Grace selector, publication, version conflict | **PASS — SOFTWARE** | vitest + Playwright; `cmd/edged` PG16 suite |
+| 23 | Hotel Admin: operational alert triage, bounded actions, concurrent change | **PASS — SOFTWARE** | vitest + Playwright; `cmd/edged` PG16 suite |
+| 24 | Hotel Admin: PMS Interfaces, Revisions, publish state | **PENDING — PO SCOPE DECISION** | `docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md` |
+| 25 | Hotel Admin: write-only Secret rotation | **PENDING — PO SCOPE DECISION** | proposal §2, §3 (needs its own write-path review) |
+| 26 | Hotel Admin: routing + intersection validation | **PENDING — PO SCOPE DECISION** | proposal §2 |
+| 27 | Hotel Admin: transport / continuity / sync / occupancy health, ingestion backlog | **PENDING — PO SCOPE DECISION** | proposal §2 |
+| 28 | Hotel Admin: Resolution evidence, source conflicts | **PENDING — PO SCOPE DECISION** | proposal §2 |
+| 29 | Flags OFF by default; a child flag without its master is a startup failure | **PASS — SOFTWARE** | `internal/iamv2/pms_config.go`; preflight |
+| 30 | Dark appliance issues zero Phase-3 SQL, mounts no Phase-3 route, mutates no tc | **PASS — SOFTWARE** | acctd/netd/scd/edged dark tests |
+| 31 | Live read-only PMS protocol verification | **PENDING — LIVE INCREMENT 9** | operator-executed; never simulated |
+| 32 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING — LIVE INCREMENT 9** | runbook §2–§5 |
+| 33 | Gate-P per-service EXECUTE grants and role separation | **OUT OF SCOPE BY APPROVED CONTRACT** | separately gated; zero runtime grants while dark |
+| 34 | Paid access, financial posting, `PS`/`PA`, implicit FX, programmatic reversal | **OUT OF SCOPE BY APPROVED CONTRACT** | refused in code (`ErrSettlementRequired`) |
+| 35 | Phase 4 | **OUT OF SCOPE BY APPROVED CONTRACT** | not started |
 
 ## 7. Production and guest impact
 

@@ -46,6 +46,35 @@ A child flag set while the master flag is OFF makes `edged` **exit at startup**.
 deployment mistake must be visible immediately, not lie dormant until someone flips the master flag and
 discovers a half-configured surface.
 
+### Two settings that are not flags, and one refusal to expect
+
+These exist because turning Phase 3 on is not only a matter of flags. They are listed here rather than in the
+cutover section because getting them wrong looks like a *dark* problem — a service that will not start — and
+the first instinct is to blame the deployment.
+
+| Setting | Owner | What it does |
+|---|---|---|
+| `NETD_PHASE3_PRODUCER_UID` | netd | The uid of the ONE local process (`acctd`) allowed to submit shaping plans. Authentication is `SO_PEERCRED` on the socket — the kernel's statement about the caller, not a header the caller writes. |
+| `NETD_PHASE3_PLAN_STATE` | netd | Where the last accepted plan generation is persisted (default `/var/lib/stayconnect/netd-phase3-plan.json`). It is what stops a restarted netd from accepting a plan it had already superseded. |
+| `ACCTD_PHASE3_PLAN_STATE` | acctd | Where the monotonic plan generation is persisted (default `/var/lib/stayconnect/acctd-phase3-plan.json`). A producer that restarted at generation 1 would have every plan correctly refused as stale — and enforcement would freeze with nothing appearing broken. |
+
+**With the flags ON and no producer uid configured, netd refuses to start.** Live enforcement that cannot
+authenticate its producer is not a degraded mode; it is an unenforceable one, and starting anyway would mean
+any local process could shape the guest network.
+
+**With the flags ON, every Phase-3 writing service (`acctd`, `edged`, `scd`, `pmsd`) verifies the
+controlled-writer boundary before it serves anything**, and exits if it does not hold. It refuses in two
+cases:
+
+* the schema's controlled-writer guards are missing or disabled — the service would be writing Phase-3 state
+  raw while believing it was protected;
+* the service's own database role **is** (or can become) the controlled operations' owner — every guard would
+  pass trivially for it, so the boundary would exist on paper and constrain nothing.
+
+The second case is the one to expect on a unit that has not been through the Gate-P role separation. It is
+not a bug in the deployment; it is the check telling you the runtime role is still too privileged for Phase 3
+to be turned on.
+
 ---
 
 ## 2. Deploy (dark)
@@ -92,8 +121,20 @@ ss -tanp | grep -i pmsd || echo 'no pmsd sockets — correct while dark'
 psql -c "SELECT count(*) FROM pg_stat_statements WHERE query ILIKE '%iam_v2.stay_events%'"   # expect 0
 ```
 
+```bash
+# 5. the guest Stay-resolution endpoint does not exist either (scd mounts it only with the auth flag on)
+curl -s -o /dev/null -w '%{http_code}
+' --unix-socket /run/stayconnect/scd.sock   -X POST http://scd/v1/phase3/auth/pms/resolve -d '{}'                                  # expect 404
+
+# 6. netd refuses to shape, on its own authority — even if something submitted a plan
+curl -s --unix-socket /run/stayconnect/netd.sock http://netd/v1/health |   python3 -c 'import json,sys; print(json.load(sys.stdin)["phase3_shaping"])'
+#    expect: active=false. A dark netd also returns 409 phase3_dark for the class-generation read.
+```
+
 A 404 rather than a "feature disabled" response is intentional: an unmounted route cannot leak the shape of a
-schema that is not live yet.
+schema that is not live yet. Check 6 is the one worth doing even when you are confident: it is the only check
+that asks the process that would actually mutate the network whether it believes Phase 3 is live, rather than
+asking the process that would ask it to.
 
 ---
 

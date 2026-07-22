@@ -36,6 +36,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 var version = "0.1.0-edge"
@@ -213,6 +214,15 @@ func main() {
 	}
 	s.pmsCfg = pmsCfg
 	slog.Info("phase3 dark pms admin surface", "flags", pmsCfg.SafeFlagSummary())
+	// Before any Phase-3 admin surface is served, prove the controlled-writer boundary is actually in force
+	// for this process. An operator publishing a grace policy through a UI that turns out to be writing raw
+	// rows would leave authoritative state with no provenance and no way to tell afterwards.
+	if pmsCfg.Enabled() {
+		if err := writerguard.Verify(rootCtx, pool, writerguard.Phase3Requirements()); err != nil {
+			slog.Error("edged: refusing to serve the Phase-3 surface", "err", err)
+			os.Exit(2)
+		}
+	}
 
 	// Appliance Health Supervisor: observe/diagnose every critical service,
 	// persist the authoritative health model, track boot convergence and push

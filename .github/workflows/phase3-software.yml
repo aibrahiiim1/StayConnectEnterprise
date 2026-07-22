@@ -54,11 +54,30 @@ jobs:
 
       - name: Migration 0010 lifecycle + concurrency gate (disposable PG16)
         working-directory: .
-        # The gate spins its own disposable postgres container; under variable runner load the container
-        # setup can flake. Retry ONCE (a real defect fails deterministically both times; a transient
-        # container/timing flake clears). The test assertions themselves are unchanged.
-        run: bash iam_v2_scratch/phase3_0010_lifecycle.sh || (echo "gate flaked; retrying once" && bash iam_v2_scratch/phase3_0010_lifecycle.sh)
+        # The gate spins its own disposable postgres container, and under variable runner load that setup
+        # can genuinely flake. It may be retried — but ONLY that. The script exits 2 for an infrastructure
+        # failure and 1 for a failed assertion, and a failed assertion is never retried: a second run that
+        # passed would report green while hiding an order- or timing-dependent defect.
+        run: |
+          set -o pipefail
+          bash iam_v2_scratch/phase3_0010_lifecycle.sh; rc=$?
+          if [ $rc -eq 2 ]; then
+            echo "::warning::disposable infrastructure failed to build; retrying ONCE (assertions were never reached)"
+            bash iam_v2_scratch/phase3_0010_lifecycle.sh
+          else
+            exit $rc
+          fi
 
       - name: pmsd PG16 connector integration (disposable PG16)
         working-directory: .
-        run: bash scripts/pmsd-pg-integration.sh || (echo "integration flaked; retrying once" && bash scripts/pmsd-pg-integration.sh)
+        # Same policy as the lifecycle gate: exit 2 (infrastructure) may be retried once; exit 1 (a failed
+        # test) is final.
+        run: |
+          set -o pipefail
+          bash scripts/pmsd-pg-integration.sh; rc=$?
+          if [ $rc -eq 2 ]; then
+            echo "::warning::disposable infrastructure failed to build; retrying ONCE (tests were never reached)"
+            bash scripts/pmsd-pg-integration.sh
+          else
+            exit $rc
+          fi

@@ -22,10 +22,12 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
 // phase3 is acctd's Phase-3 arm. A zero value is inert, which is what a dark appliance gets.
@@ -41,15 +43,24 @@ type phase3 struct {
 	enf          *enforce.Enforcer
 	// site is the single site this appliance serves; expiry enforcement is scoped to it.
 	tenant, site string
+	// scope and plans are the producer half of the shaping contract: the appliance identity a submitted plan
+	// is scoped to, and the durable monotonic generation that lets netd refuse a stale or replayed one.
+	scope planScope
+	plans *planCounter
 }
 
 // newPhase3 constructs the enforcement arm ONLY when the Phase-3 master + checkout-grace flags are on. It
 // returns nil while dark, and a nil *phase3 is safe to call — so the tick path needs no flag checks of its own.
-func newPhase3(cfg iamv2.PMSConfig, a *acctd, tenant, site string) *phase3 {
+func newPhase3(cfg iamv2.PMSConfig, a *acctd, tenant, site string, scope planScope, plans *planCounter) *phase3 {
 	if !cfg.CheckoutGraceOn() {
 		return nil
 	}
-	return &phase3{cfg: cfg, enf: enforce.New(a.db), tenant: tenant, site: site}
+	if plans == nil {
+		// An in-memory counter is only correct for a test: it restarts at 1, and netd would then refuse every
+		// plan this process produced. Callers that mean it pass a durable one.
+		plans = newPlanCounter("")
+	}
+	return &phase3{cfg: cfg, enf: enforce.New(a.db), tenant: tenant, site: site, scope: scope, plans: plans}
 }
 
 // enforce runs one expiry pass. It is idempotent: an Entitlement already terminated is not re-terminated, so
@@ -87,24 +98,94 @@ func (p *phase3) shapingPlan(ctx context.Context) (enforce.Plan, bool) {
 	return plan, true
 }
 
-// planSubmitter delivers a complete shaping plan to netd, the single Phase-3 shaping writer (ADR-0002).
+// planSubmitter delivers a complete desired state to netd, the single Phase-3 shaping writer (ADR-0002).
 // acctd deliberately has no tc client for Phase-3: it cannot race netd because it cannot write.
 type planSubmitter interface {
-	SubmitShapingPlan(ctx context.Context, plan enforce.Plan, fallbackBridge string) (shapingResult, error)
+	SubmitShapingPlan(ctx context.Context, env shapeplan.Envelope) (shapingResult, error)
 }
 
-// shapingResult is what netd reports back. Degraded is surfaced rather than swallowed: a plan that could not
-// be applied means the kernel is not enforcing what durable state says it should.
+// shapingResult is what netd reports back. A refusal and a degraded application are different failures and are
+// reported differently: the first means netd would not act on the plan at all, the second means the kernel is
+// not enforcing what durable state says it should.
 type shapingResult struct {
-	TornDown int      `json:"torn_down"`
-	Shaped   int      `json:"shaped"`
-	Failed   int      `json:"failed"`
-	Degraded bool     `json:"degraded"`
-	Problems []string `json:"problems,omitempty"`
+	Accepted      bool     `json:"accepted"`
+	Reason        string   `json:"reason,omitempty"`
+	TornDown      int      `json:"torn_down"`
+	StraysRemoved int      `json:"strays_removed"`
+	Shaped        int      `json:"shaped"`
+	Failed        int      `json:"failed"`
+	Degraded      bool     `json:"degraded"`
+	Problems      []string `json:"problems,omitempty"`
 }
 
-// reconcileShaping derives the current plan and submits it to netd. It is a full RECONCILIATION every tick,
-// not a delta: a process restart, a reboot, or a manual tc change converges on the next submission, and
+// planValidity is how long a submitted plan may be considered current. It is deliberately a few ticks: long
+// enough that one missed submission is not an incident, short enough that a producer which has silently died
+// shows up as a stale plan on netd health instead of looking like a quiet, healthy site.
+const planValidity = 90 * time.Second
+
+// buildEnvelope turns the derived plan into a complete, scoped, hashed desired state. Every live session
+// appears exactly once — entitled or not — because "not mentioned" must never be how access ends: that is
+// indistinguishable from a truncated body.
+func (p *phase3) buildEnvelope(plan enforce.Plan, managedBridges []string, fallbackBridge string, now time.Time) shapeplan.Envelope {
+	bridgeOf := func(b string) string {
+		if b != "" {
+			return b
+		}
+		return fallbackBridge
+	}
+	sessions := make([]shapeplan.Session, 0, len(plan.Tear)+len(plan.Shape))
+	for _, s := range plan.Tear {
+		sessions = append(sessions, shapeplan.Session{
+			SessionID: s.SessionID, IP: s.IP, Bridge: bridgeOf(s.Bridge), Entitled: false})
+	}
+	for _, s := range plan.Shape {
+		sessions = append(sessions, shapeplan.Session{
+			SessionID: s.SessionID, IP: s.IP, Bridge: bridgeOf(s.Bridge),
+			DownKbps: s.DownKbps, UpKbps: s.UpKbps, Entitled: true})
+	}
+	// Every bridge a session is on must be declared, plus every guest bridge the site has — including ones
+	// with no sessions at all. Those are the ones that can quietly keep forwarding for access that ended.
+	declared := map[string]bool{}
+	for _, b := range managedBridges {
+		if b != "" {
+			declared[b] = true
+		}
+	}
+	for _, s := range sessions {
+		if s.Bridge != "" {
+			declared[s.Bridge] = true
+		}
+	}
+	if fallbackBridge != "" {
+		declared[fallbackBridge] = true
+	}
+	bridges := make([]string, 0, len(declared))
+	for b := range declared {
+		bridges = append(bridges, b)
+	}
+	sort.Strings(bridges)
+
+	gen, runtime := p.plans.next()
+	env := shapeplan.Envelope{
+		ContractVersion:    shapeplan.ContractVersion,
+		TenantID:           p.tenant,
+		SiteID:             p.site,
+		ApplianceID:        p.scope.ApplianceID,
+		AssignmentID:       p.scope.AssignmentID,
+		AssignmentGen:      p.scope.AssignmentGe,
+		ProducerRuntimeGen: runtime,
+		PlanGeneration:     gen,
+		GeneratedAt:        now.UTC(),
+		ExpiresAt:          now.UTC().Add(planValidity),
+		ManagedBridges:     bridges,
+		Sessions:           sessions,
+	}
+	env.DesiredStateHash = shapeplan.HashDesiredState(bridges, sessions)
+	return env
+}
+
+// reconcileShaping derives the current desired state and submits it to netd. It is a full RECONCILIATION every
+// tick, not a delta: a process restart, a reboot, or a manual tc change converges on the next submission, and
 // neither side has to remember anything for that to work.
 func (p *phase3) reconcileShaping(ctx context.Context, netd planSubmitter, fallbackBridge string) {
 	if p == nil {
@@ -114,7 +195,7 @@ func (p *phase3) reconcileShaping(ctx context.Context, netd planSubmitter, fallb
 	if !ok {
 		return
 	}
-	res, err := netd.SubmitShapingPlan(ctx, plan, fallbackBridge)
+	res, err := netd.SubmitShapingPlan(ctx, p.buildEnvelope(plan, p.managedBridges(ctx), fallbackBridge, time.Now()))
 	if err != nil {
 		// Bounded retry: the plan is re-derived and re-submitted on the next tick, so a missed submission is
 		// never stale — it is superseded. What must not happen is pretending it was applied.
@@ -122,13 +203,55 @@ func (p *phase3) reconcileShaping(ctx context.Context, netd planSubmitter, fallb
 		slog.Warn("phase3: could not submit the shaping plan to netd", "err", err)
 		return
 	}
+	if !res.Accepted {
+		// netd refused the envelope outright. That is a contract or scope problem, not a kernel problem, and it
+		// must be visible as such: re-deriving the same plan will be refused for the same reason.
+		p.degraded = "netd refused the shaping plan: " + res.Reason
+		slog.Error("phase3: netd refused the shaping plan", "reason", res.Reason)
+		return
+	}
 	if res.Degraded {
 		p.degraded = "netd applied the plan with problems"
 		slog.Warn("phase3: netd applied the shaping plan with problems",
-			"failed", res.Failed, "torn_down", res.TornDown, "shaped", res.Shaped)
+			"failed", res.Failed, "torn_down", res.TornDown, "strays_removed", res.StraysRemoved, "shaped", res.Shaped)
 		return
 	}
+	if res.StraysRemoved > 0 {
+		// Not an error, but never silent: a stray means the kernel was forwarding for a session durable state
+		// does not have, which is exactly the drift reconciliation exists to catch.
+		slog.Warn("phase3: reconciliation removed shaping classes with no live session", "count", res.StraysRemoved)
+	}
 	p.degraded = ""
+}
+
+// managedBridges lists every guest bridge this site has. It is read from the appliance's own network
+// configuration rather than derived from live sessions, because the interesting case is precisely a bridge
+// with no sessions: nothing else would ever mention it, and a class left behind there would forward traffic
+// for access that ended, indefinitely.
+//
+// A failed read returns nothing extra rather than failing the tick: the session bridges are still declared,
+// so reconciliation stays correct where guests actually are, and the empty-bridge sweep resumes next tick.
+func (p *phase3) managedBridges(ctx context.Context) []string {
+	if p == nil || p.enf == nil {
+		return nil
+	}
+	rows, err := p.enf.Pool().Query(ctx,
+		`SELECT DISTINCT bridge_name FROM public.guest_networks
+		  WHERE enabled AND bridge_name <> '' ORDER BY bridge_name`)
+	if err != nil {
+		slog.Warn("phase3: could not list guest bridges; only bridges with live sessions are reconciled", "err", err)
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var b string
+		if err := rows.Scan(&b); err != nil {
+			return out
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 // Degraded reports the truthful current enforcement state for health reporting: empty when the last plan was
@@ -138,6 +261,22 @@ func (p *phase3) Degraded() string {
 		return ""
 	}
 	return p.degraded
+}
+
+// degradedSummary is the single truthful line the health supervisor sees: empty when this tick's accounting
+// and enforcement both completed, otherwise both reasons. A dark arm is never degraded — it does nothing.
+func (p *phase3) degradedSummary() string {
+	if p == nil {
+		return ""
+	}
+	switch {
+	case p.acctDegraded != "" && p.degraded != "":
+		return p.acctDegraded + "; " + p.degraded
+	case p.acctDegraded != "":
+		return p.acctDegraded
+	default:
+		return p.degraded
+	}
 }
 
 // ownsAccounting reports whether Phase-3 owns accounting for this appliance. When it does, the legacy writer
@@ -167,32 +306,8 @@ func newNetdShaper(socketPath string) *netdShaper {
 	}
 }
 
-func (n *netdShaper) SubmitShapingPlan(ctx context.Context, plan enforce.Plan, fallbackBridge string) (shapingResult, error) {
-	bridgeOf := func(s enforce.SessionShape) string {
-		if s.Bridge != "" {
-			return s.Bridge
-		}
-		return fallbackBridge
-	}
-	type sess struct {
-		SessionID string `json:"session_id"`
-		IP        string `json:"ip"`
-		Bridge    string `json:"bridge"`
-		DownKbps  int    `json:"down_kbps"`
-		UpKbps    int    `json:"up_kbps"`
-	}
-	body := struct {
-		Tear  []sess `json:"tear"`
-		Shape []sess `json:"shape"`
-	}{Tear: []sess{}, Shape: []sess{}}
-	for _, s := range plan.Tear {
-		body.Tear = append(body.Tear, sess{SessionID: s.SessionID, IP: s.IP, Bridge: bridgeOf(s)})
-	}
-	for _, s := range plan.Shape {
-		body.Shape = append(body.Shape, sess{SessionID: s.SessionID, IP: s.IP, Bridge: bridgeOf(s),
-			DownKbps: s.DownKbps, UpKbps: s.UpKbps})
-	}
-	raw, err := json.Marshal(body)
+func (n *netdShaper) SubmitShapingPlan(ctx context.Context, env shapeplan.Envelope) (shapingResult, error) {
+	raw, err := json.Marshal(env)
 	if err != nil {
 		return shapingResult{}, err
 	}
@@ -206,12 +321,18 @@ func (n *netdShaper) SubmitShapingPlan(ctx context.Context, plan enforce.Plan, f
 		return shapingResult{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return shapingResult{}, fmt.Errorf("netd rejected the shaping plan: %s", resp.Status)
-	}
 	var out shapingResult
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return shapingResult{}, err
+	// A refusal carries its bounded reason in the same shape as an acceptance, so the producer can report WHY
+	// enforcement is not in force instead of a bare status code.
+	if derr := json.NewDecoder(resp.Body).Decode(&out); derr != nil && resp.StatusCode == http.StatusOK {
+		return shapingResult{}, derr
+	}
+	if resp.StatusCode != http.StatusOK {
+		if out.Reason == "" {
+			out.Reason = "http " + resp.Status
+		}
+		out.Accepted = false
+		return out, nil
 	}
 	return out, nil
 }

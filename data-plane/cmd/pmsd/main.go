@@ -30,6 +30,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsd"
 	"github.com/stayconnect/enterprise/data-plane/internal/stayengine"
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 func main() {
@@ -83,6 +84,12 @@ func main() {
 		OpenRepo: func(ctx context.Context, _ pmsd.Assignment) (pmsd.Repo, error) {
 			p, err := getPool(ctx)
 			if err != nil {
+				return nil, err
+			}
+			// The boundary check lives HERE, on the path that opens the repository, rather than in main's
+			// preamble: while dark pmsd never reaches this point, so the check runs exactly when Phase-3
+			// writes become possible and never a moment before.
+			if err := writerguard.Verify(ctx, p, writerguard.Phase3Requirements()); err != nil {
 				return nil, err
 			}
 			return pmsd.NewPgRepoFromPool(p), nil

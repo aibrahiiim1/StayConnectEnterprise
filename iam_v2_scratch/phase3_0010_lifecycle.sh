@@ -28,13 +28,23 @@ docker rm -f "$C" >/dev/null 2>&1 || true
 docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" -p 127.0.0.1:$PORT:5432 postgres:16-alpine >/dev/null
 # robust readiness: a real query must succeed (pg_isready can pass during initdb's transient server, which
 # then restarts; running SQL in that window fails and can corrupt a mid-run gate on slow CI hosts).
-for i in $(seq 1 60); do docker exec "$C" psql -U postgres -d "$DB" -tAqc 'select 1' >/dev/null 2>&1 && break; sleep 1; done
+ready=0
+for i in $(seq 1 60); do docker exec "$C" psql -U postgres -d "$DB" -tAqc 'select 1' >/dev/null 2>&1 && { ready=1; break; }; sleep 1; done
+# EXIT CODES: 0 = all assertions passed, 1 = an ASSERTION failed (deterministic — CI must not retry),
+# 2 = the disposable infrastructure could not be built (transient; the only retryable condition).
+[ "$ready" = 1 ] || { echo "INFRA: postgres did not become ready"; docker logs "$C" 2>&1 | tail -20; exit 2; }
 sleep 1
 SCRATCH_ACK=I_UNDERSTAND_DISPOSABLE bash "$ROOT/iam_v2_scratch/run.sh" fresh >/dev/null 2>&1
 Q "CREATE TABLE IF NOT EXISTS public.schema_migrations(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-plane/migrations/0009_phase2_commerce.up.sql" >/dev/null 2>&1
 Q "INSERT INTO public.schema_migrations(version) VALUES ('0009_phase2_commerce') ON CONFLICT DO NOTHING;" >/dev/null
-[ "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")" = 49 ] && ok "accepted iam_v2 schema built (49 tables)" || no "schema build failed"
+if [ "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")" = 49 ]; then
+  ok "accepted iam_v2 schema built (49 tables)"
+else
+  # Nothing below this point can be judged if the baseline schema was never built, and the cause is the
+  # environment rather than the code under test.
+  echo "INFRA: accepted iam_v2 schema was not built"; docker rm -f "$C" >/dev/null 2>&1; exit 2
+fi
 
 # --- Part-A runner: mandatory positive-identity flags + helper ---
 UPSHA="$(sha256sum "$UP" | awk '{print $1}')"
@@ -671,6 +681,111 @@ AS_PROBE "DELETE FROM iam_v2.site_checkout_grace_config WHERE tenant_id='$T' AND
 Q "REVOKE DELETE ON iam_v2.site_checkout_grace_config FROM p3_writer_probe;" >/dev/null
 Q "REVOKE ALL ON iam_v2.entitlements, iam_v2.entitlement_state_transitions, iam_v2.site_checkout_grace_config FROM p3_writer_probe; REVOKE USAGE ON SCHEMA iam_v2 FROM p3_writer_probe; DROP ROLE IF EXISTS p3_writer_probe;" >/dev/null
 ok "probe role cleaned up (no residual runtime grants)"
+
+echo '== DURABLE ACCOUNTING CHECKPOINTS + absolute-counter ingestion (§4p) =='
+# The runtime submits what it can SEE (absolute tc counters) and the database decides what that means. Every
+# case below is one a memory-based baseline or a caller-chosen sequence gets wrong -- and gets wrong silently.
+KST2="$(Q "INSERT INTO iam_v2.stays(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,lifecycle_version,last_applied_event_version) VALUES (gen_random_uuid(),'$RT','$RS','$I','RCKP','SCKP','IN_HOUSE',1,0) RETURNING id;")"
+CENT="$(Q "SELECT gen_random_uuid();")"; CPUR="$(Q "SELECT gen_random_uuid();")"
+Q "DO \$do\$ BEGIN
+  INSERT INTO iam_v2.purchases(id,tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state) VALUES ('$CPUR','$RT','$RS','$EPKG','$I','$KST2','ADMIN_GRANT',0,'GRANTED');
+  INSERT INTO iam_v2.entitlements(id,tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,status) VALUES ('$CENT','$RT','$RS','$KST2','$I','$CPUR','{}'::jsonb,'$ESPR','$EPKG','VALIDITY_WINDOW','GRACE_AFTER_CHECKOUT','ACTIVE');
+  PERFORM iam_v2.apply_entitlement_transition('$CENT','ACTIVE',now() - interval '4 hours','SEED');
+END \$do\$;" >/dev/null
+CDEV2="$(Q "INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac) VALUES ('$RT','$RS',gen_random_uuid(),'02:00:00:00:c7:01'::macaddr) RETURNING id;")"
+CSESS="$(Q "INSERT INTO iam_v2.sessions(tenant_id,site_id,entitlement_id,device_id,state,started,ip,ingress_interface) VALUES ('$RT','$RS','$CENT','$DDEV','active',now() - interval '3 hours','10.9.0.1'::inet,'br-guest') RETURNING id;")"
+ING(){ Q "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','br-guest',4097,$1,$2,$3,now() - interval '$4');"; }
+
+# FIRST OBSERVATION: there is nothing to subtract from, so nothing is billed. Storing the absolute counter as
+# usage would charge the guest for everything since the class was created.
+[ "$(ING 1 1000 2000 '2 hours')" = "BASELINED" ] && ok "first absolute observation BASELINES and bills nothing (§4p)" || no "first observation not baselined"
+[ "$(Q "SELECT count(*) FROM iam_v2.accounting_records WHERE session_id='$CSESS';")" = 0 ] && ok "a baseline stores no accounting row (§4p)" || no "baseline stored usage"
+# ORDINARY: the difference, and only the difference
+[ "$(ING 1 1400 2600 '100 minutes')" = "ACCEPTED" ] && ok "a later absolute observation is ACCEPTED (§4p)" || no "second observation refused"
+[ "$(Q "SELECT bytes_up||'/'||bytes_down FROM iam_v2.accounting_records WHERE session_id='$CSESS';")" = "400/600" ] \
+  && ok "exactly the counter DIFFERENCE is stored (400/600) (§4p)" || no "wrong delta stored"
+[ "$(Q "SELECT bytes_up||'/'||bytes_down FROM iam_v2.sessions WHERE id='$CSESS';")" = "400/600" ] \
+  && ok "session totals advanced by the same delta, in the same transaction (§4p)" || no "session totals disagree with the ledger"
+# EXACT REPLAY: an uncertain commit retried later must find the persisted state and bill nothing more.
+[ "$(ING 1 1400 2600 '90 minutes')" = "DUPLICATE" ] && ok "an exact replay is DUPLICATE, not new usage (§4p)" || no "replay double-counted"
+[ "$(Q "SELECT count(*) FROM iam_v2.accounting_records WHERE session_id='$CSESS';")" = 1 ] && ok "a replay stores no second row (§4p)" || no "replay stored a row"
+# REGRESSION WITHOUT A NEW EPOCH is ambiguous (recreated class, misread, reused minor). Guessing "count from
+# zero" invents usage; guessing "ignore" loses it. Fail closed and KEEP the checkpoint.
+expect_err "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','br-guest',4097,1,10,20,now());" \
+  && ok "a counter that went backwards WITHOUT a new epoch is refused (§4p)" || no "silent counter regression accepted"
+[ "$(Q "SELECT prev_bytes_up||'/'||prev_bytes_down FROM iam_v2.accounting_checkpoints WHERE session_id='$CSESS';")" = "1400/2600" ] \
+  && ok "a refused observation leaves the checkpoint intact (§4p)" || no "refused observation moved the checkpoint"
+# TRUSTED RESET: only the TC owner's generation makes a restart of the counter series believable.
+[ "$(ING 2 10 20 '60 minutes')" = "RESET_BASELINED" ] && ok "a NEW source epoch re-baselines the series (§4p)" || no "reset not honoured"
+[ "$(Q "SELECT count(*) FROM iam_v2.accounting_records WHERE session_id='$CSESS';")" = 1 ] && ok "a reset bills nothing (§4p)" || no "reset invented usage"
+expect_err "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','br-guest',4097,1,9000,9000,now());" \
+  && ok "an OLDER source epoch is refused as stale (§4p)" || no "stale epoch accepted"
+# SOURCE identity: a class minor reused by another guest must never bill its traffic to whoever held it before.
+expect_err "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$CDEV2','br-guest',4097,2,99999,99999,now());" \
+  && ok "counters from a DIFFERENT device are refused for this session (§4p)" || no "cross-device counters accepted"
+# SCOPE: accounting attributed across a tenant/site boundary is worse than missing accounting.
+expect_err "SELECT iam_v2.ingest_absolute_counters(gen_random_uuid(),gen_random_uuid(),'$CSESS','$DDEV','br-guest',4097,2,50,50,now());" \
+  && ok "a session outside the caller's tenant/site is refused (§4p)" || no "cross-tenant accounting accepted"
+expect_err "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','br-guest',4097,2,-1,5,now());" \
+  && ok "negative absolute counters are refused (§4p)" || no "negative absolutes accepted"
+expect_err "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','br-guest',4097,2,50,50,now() - interval '10 hours');" \
+  && ok "a sample timed BEFORE the session started is refused (§4p)" || no "pre-session sample accepted"
+# ONE checkpoint per counter series, and a different bridge is a different series (a reused minor on another
+# bridge must not be measured against this one).
+[ "$(Q "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','br-g301',4097,1,7,8,now());")" = "BASELINED" ] \
+  && ok "a different bridge starts its OWN counter series (§4p)" || no "bridge change reused a checkpoint"
+[ "$(Q "SELECT count(*) FROM iam_v2.accounting_checkpoints WHERE session_id='$CSESS';")" = 2 ] \
+  && ok "one checkpoint per (session, device, bridge, class) (§4p)" || no "checkpoint cardinality wrong"
+expect_err "INSERT INTO iam_v2.accounting_checkpoints(tenant_id,site_id,session_id,source_device_id,bridge,class_minor,source_epoch,prev_bytes_up,prev_bytes_down,prev_sampled_at,last_classification) VALUES ('$RT','$RS','$CSESS','$DDEV','br-guest',4097,1,0,0,now(),'BASELINED');" \
+  && ok "a duplicate checkpoint for the same series is impossible (§4p)" || no "duplicate checkpoint accepted"
+# an ENDED session cannot accrue more usage: its traffic belongs to whatever runs next, not to it
+Q "UPDATE iam_v2.sessions SET state='ended', ended=now() - interval '1 minute', end_reason='TEST' WHERE id='$CSESS';" >/dev/null
+expect_err "SELECT iam_v2.ingest_absolute_counters('$RT','$RS','$CSESS','$DDEV','br-guest',4097,2,999999,999999,now());" \
+  && ok "an ENDED session refuses further observations (§4p)" || no "ended session still accrued usage"
+
+echo '== ACCOUNTING WRITER BOUNDARY, proven as a privileged NON-OWNER role (§C7) =='
+# The probe gets FULL table DML on the whole measurement chain. That is the point: even a role holding every
+# table privilege cannot write accounting state, because writing it requires BEING the controlled operation.
+Q "DROP ROLE IF EXISTS p3_acct_probe; CREATE ROLE p3_acct_probe LOGIN PASSWORD 'x' NOSUPERUSER NOCREATEDB NOCREATEROLE;" >/dev/null
+Q "GRANT USAGE ON SCHEMA iam_v2 TO p3_acct_probe;
+   GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.accounting_records, iam_v2.accounting_checkpoints, iam_v2.delayed_accounting_records, iam_v2.sessions TO p3_acct_probe;" >/dev/null
+AS_ACCT(){ docker exec -e PGPASSWORD=x "$C" psql -h 127.0.0.1 -U p3_acct_probe -d "$DB" -v ON_ERROR_STOP=1 -tAqc "$1" >/dev/null 2>&1; }
+AS_ACCT "SELECT 1;" && ok "accounting probe role can connect + read (holds real table grants) (§C7)" || no "accounting probe cannot connect"
+AS_ACCT "INSERT INTO iam_v2.accounting_records(tenant_id,site_id,session_id,sample_seq,bytes_up,bytes_down,sampled_at) VALUES ('$RT','$RS','$CSESS',99,500,500,now());" \
+  && no "non-owner INVENTED an accounting row" || ok "non-owner raw accounting INSERT refused (invented usage) (§C7)"
+AS_ACCT "UPDATE iam_v2.accounting_records SET bytes_up=0 WHERE session_id='$CSESS';" \
+  && no "non-owner rewrote stored usage" || ok "non-owner raw accounting UPDATE refused (rewritten history) (§C7)"
+AS_ACCT "DELETE FROM iam_v2.accounting_records WHERE session_id='$CSESS';" \
+  && no "non-owner erased stored usage" || ok "non-owner raw accounting DELETE refused (erased history) (§C7)"
+# THE WORST ONE: the checkpoint is what every FUTURE delta is computed from. Set it to zero and the next
+# ordinary observation bills the guest for the session's entire history.
+AS_ACCT "UPDATE iam_v2.accounting_checkpoints SET prev_bytes_up=0, prev_bytes_down=0 WHERE session_id='$CSESS';" \
+  && no "non-owner moved a checkpoint" || ok "non-owner raw CHECKPOINT UPDATE refused (§C7)"
+AS_ACCT "DELETE FROM iam_v2.accounting_checkpoints WHERE session_id='$CSESS';" \
+  && no "non-owner deleted a checkpoint" || ok "non-owner raw CHECKPOINT DELETE refused (§C7)"
+AS_ACCT "INSERT INTO iam_v2.accounting_checkpoints(tenant_id,site_id,session_id,source_device_id,bridge,class_minor,source_epoch,prev_bytes_up,prev_bytes_down,prev_sampled_at,last_classification) VALUES ('$RT','$RS','$CSESS','$DDEV','br-evil',1,1,0,0,now(),'BASELINED');" \
+  && no "non-owner forged a checkpoint" || ok "non-owner raw CHECKPOINT INSERT refused (§C7)"
+AS_ACCT "UPDATE iam_v2.sessions SET bytes_up = bytes_up + 100000 WHERE id='$CSESS';" \
+  && no "non-owner moved a session usage total" || ok "non-owner raw session USAGE update refused (§C7)"
+# ...and the boundary is PRECISE: the ordinary parts of a session stay writable, or session creation, binding
+# and ending would all break behind it.
+AS_ACCT "UPDATE iam_v2.sessions SET expires_at = now() + interval '1 hour' WHERE id='$CSESS';" \
+  && ok "ordinary (non-usage) session writes still succeed (§C7)" || no "the boundary blocked an ordinary session write"
+[ "$(Q "SELECT bytes_up||'/'||bytes_down FROM iam_v2.sessions WHERE id='$CSESS';")" = "400/600" ] \
+  && ok "session totals unchanged after every non-owner attempt (§C7)" || no "non-owner mutated session totals"
+[ "$(Q "SELECT prev_bytes_up||'/'||prev_bytes_down FROM iam_v2.accounting_checkpoints WHERE session_id='$CSESS' AND bridge='br-guest';")" = "10/20" ] \
+  && ok "checkpoint unchanged after every non-owner attempt (§C7)" || no "non-owner mutated a checkpoint"
+Q "REVOKE ALL ON iam_v2.accounting_records, iam_v2.accounting_checkpoints, iam_v2.delayed_accounting_records, iam_v2.sessions FROM p3_acct_probe; REVOKE USAGE ON SCHEMA iam_v2 FROM p3_acct_probe; DROP ROLE IF EXISTS p3_acct_probe;" >/dev/null
+ok "accounting probe role cleaned up (no residual runtime grants) (§C7)"
+# the approved operation's own shape: SECURITY DEFINER, pinned search_path, PUBLIC EXECUTE revoked
+[ "$(Q "SELECT prosecdef FROM pg_proc WHERE oid = to_regprocedure('iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)');")" = t ] \
+  && ok "the accounting operation is SECURITY DEFINER (§C7)" || no "accounting operation is not SECURITY DEFINER"
+[ "$(Q "SELECT count(*) FROM pg_proc WHERE oid = to_regprocedure('iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)') AND array_to_string(proconfig,',') LIKE '%search_path=iam_v2%';")" = 1 ] \
+  && ok "the accounting operation pins its search_path (§C7)" || no "accounting operation does not pin search_path"
+[ "$(Q "SELECT has_function_privilege('public', to_regprocedure('iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)'), 'EXECUTE');")" = f ] \
+  && ok "PUBLIC cannot EXECUTE the accounting operation (§C7)" || no "PUBLIC holds EXECUTE on the accounting operation"
+[ "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='ingest_accounting_sample';")" = 0 ] \
+  && ok "the superseded sample-sequence ingestion function is GONE, not left as a weaker second writer (§C7)" || no "superseded ingestion function still present"
 
 echo '== Gate-P FEASIBILITY: per-family dedicated NOLOGIN writer owners (disposable only, baseline restored) (§3) =='
 BASE_OWNER="$(Q "SELECT iam_v2.p3_controlled_writer_owner('entitlement');")"

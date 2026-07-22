@@ -319,6 +319,10 @@ func (h *handler) routes() http.Handler {
 	r.Get("/api/oauth/stub/authorize", h.stubAuthorize)
 	r.Post("/api/oauth/stub/authorize-confirm", h.stubAuthorizeConfirm)
 	r.Post("/auth/pms/verify", h.authPMS)
+	// Phase 3 (DARK): the Stay-resolution guest flow. It is mounted unconditionally because it is a pure
+	// proxy — scd does not mount its Phase-3 endpoints while dark, so this path answers with the same uniform
+	// non-success a wrong room gets. A guest can therefore never tell whether the feature exists here.
+	r.Post("/auth/pms/phase3", h.authPMSPhase3)
 	r.Get("/api/auth-methods", h.authMethods)
 
 	// Phase 2 (DARK): guest commerce bridge routes are mounted ONLY when the portal surface is ON. While
