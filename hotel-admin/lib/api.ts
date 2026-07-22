@@ -799,3 +799,45 @@ export type SysNetAudit = {
   failure_reason: string;
   backup_path: string;
 };
+
+// ---- Phase 3 (DARK): the PMS interface itself -------------------------------
+// The credential never appears in any of these shapes. There is no field for it because there is no endpoint
+// that returns it — see the write-only rule in edged's resources_phase3_interfaces.go.
+
+export type PmsInterface = {
+  id: string; connector_kind: string; display_label: string; lifecycle_state: string;
+  current_revision_id?: string; current_revision_no?: number | null;
+  revision_count: number; published: boolean;
+  secret_generation?: number | null; secret_rotated_at?: string | null;
+};
+
+export type PmsRevision = {
+  id: string; revision_no: number; source_timezone: string; folio_identity_strategy: string;
+  normalization_version: number; source_fingerprint?: string;
+  // already redacted by edged; the client never un-redacts anything
+  config: Record<string, unknown>;
+  published: boolean;
+};
+
+export type PmsInterfaceHealth = {
+  pms_interface_id: string;
+  transport_status: string; last_connected_at?: string | null; last_heartbeat_at?: string | null;
+  disconnected_since?: string | null; transport_error_code?: string;
+  continuity_status: string; last_valid_event_at?: string | null; discontinuity_detected_at?: string | null;
+  sync_status: string; resync_requested_at?: string | null; resync_started_at?: string | null;
+  last_complete_sync_at?: string | null; last_sync_failure_code?: string;
+  in_house_stays: number; last_stay_event_at?: string | null;
+  pending_events: number; review_events: number; oldest_pending_at?: string | null;
+};
+
+export type PmsGuestNetworkRoute = {
+  guest_network_id: string; guest_network_name?: string;
+  pms_interface_id: string; pms_interface_label?: string;
+  is_default: boolean; routing_mode: string;
+};
+
+export type PmsSourceConflict = {
+  id: string; interface_a: string; interface_a_label?: string;
+  interface_b: string; interface_b_label?: string;
+  severity?: string; resolution?: string;
+};

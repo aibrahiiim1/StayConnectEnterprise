@@ -46,6 +46,12 @@ const SECTIONS: Section[] = [
     title: "Integrations",
     items: [
       { href: "/pms-providers",    label: "PMS providers", icon: Hotel,    resource: "pms-providers" },
+      // The interface itself comes before what it produces: when guests cannot get online, "is the PMS
+      // connected and what is it running" is the question, and the stays are the symptom.
+      { href: "/pms-interfaces",     label: "PMS interfaces",     icon: Hotel,   resource: "pms-interfaces",     enabled: PHASE3_ADMIN },
+      { href: "/pms-routing",        label: "Network routing",    icon: Router,  resource: "pms-routing",        enabled: PHASE3_ADMIN },
+      { href: "/pms-source-conflicts", label: "Source conflicts", icon: Shield,  resource: "pms-source-conflicts", enabled: PHASE3_ADMIN },
+      { href: "/pms-resolutions",    label: "Resolution evidence", icon: Send,   resource: "pms-resolutions",    enabled: PHASE3_ADMIN },
       { href: "/stays",             label: "Stays",             icon: Hotel,   resource: "pms-stays",          enabled: PHASE3_ADMIN },
       { href: "/stay-events",       label: "Stay events",       icon: Send,    resource: "pms-events",         enabled: PHASE3_ADMIN },
       { href: "/checkout-grace",    label: "Checkout grace",    icon: Shield,  resource: "checkout-grace",     enabled: PHASE3_ADMIN },
