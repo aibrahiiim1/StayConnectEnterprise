@@ -94,11 +94,7 @@ func (f *ingestFixture) live(t *testing.T, ip, bridge string, quotaEnt ...string
 	t.Helper()
 	started := time.Now().Add(-3 * time.Hour)
 	ent = f.grantEntitlement(t, started, nil)
-	sess = f.openSession(t, ent, f.device, started, ip)
-	if _, err := f.pool.Exec(context.Background(),
-		`UPDATE iam_v2.sessions SET ingress_interface=$2 WHERE id=$1`, sess, bridge); err != nil {
-		t.Fatal(err)
-	}
+	sess = f.openSessionOn(t, ent, f.device, started, ip, bridge)
 	ep = newEpochs()
 	ep.set(bridge, sess, 1)
 	return
@@ -313,9 +309,6 @@ func TestIntegration_Acct_CheckpointsAreNotInheritedAcrossSessions(t *testing.T)
 	started := time.Now().Add(-time.Hour)
 	entB := f.grantEntitlementFor(t, f.device2, started)
 	sessB := f.openSession(t, entB, f.device2, started, "10.9.0.1")
-	if _, err := f.pool.Exec(ctx, `UPDATE iam_v2.sessions SET ingress_interface='br-guest' WHERE id=$1`, sessB); err != nil {
-		t.Fatal(err)
-	}
 	ep := newEpochs()
 	ep.set("br-guest", sessB, 1)
 	c := newFakeCounters()

@@ -102,12 +102,20 @@ func (f *ingestFixture) grantEntitlement(t *testing.T, activatedAt time.Time, wi
 	return ent
 }
 
+// openSession creates a session on a bridge. The interface and address are set AT CREATION because they are
+// accounting identity: the controlled operation re-derives the counter source from them, and the writer
+// boundary refuses a later UPDATE of either.
 func (f *ingestFixture) openSession(t *testing.T, ent, device string, startedAt time.Time, ip string) string {
+	return f.openSessionOn(t, ent, device, startedAt, ip, "br-guest")
+}
+
+func (f *ingestFixture) openSessionOn(t *testing.T, ent, device string, startedAt time.Time, ip, bridge string) string {
 	t.Helper()
 	var sess string
 	if err := f.pool.QueryRow(context.Background(), `INSERT INTO iam_v2.sessions
-		(tenant_id,site_id,entitlement_id,device_id,state,started,ip) VALUES ($1,$2,$3,$4,'active',$5,$6::inet)
-		RETURNING id::text`, f.tenant, f.site, ent, device, startedAt, ip).Scan(&sess); err != nil {
+		(tenant_id,site_id,entitlement_id,device_id,state,started,ip,ingress_interface)
+		VALUES ($1,$2,$3,$4,'active',$5,$6::inet,$7)
+		RETURNING id::text`, f.tenant, f.site, ent, device, startedAt, ip, bridge).Scan(&sess); err != nil {
 		t.Fatalf("open session: %v", err)
 	}
 	return sess
@@ -117,6 +125,16 @@ func (f *ingestFixture) usage(t *testing.T, ent string) (up, down int64) {
 	t.Helper()
 	if err := f.pool.QueryRow(context.Background(),
 		`SELECT bytes_up, bytes_down FROM iam_v2.entitlement_usage_bytes($1,now())`, ent).Scan(&up, &down); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+// sessionTotals reads the Session's own running usage — the number a refused sample must never move.
+func (f *ingestFixture) sessionTotals(t *testing.T, sess string) (up, down int64) {
+	t.Helper()
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT bytes_up, bytes_down FROM iam_v2.sessions WHERE id=$1`, sess).Scan(&up, &down); err != nil {
 		t.Fatal(err)
 	}
 	return

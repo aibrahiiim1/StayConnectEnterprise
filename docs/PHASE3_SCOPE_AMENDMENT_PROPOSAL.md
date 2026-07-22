@@ -1,8 +1,12 @@
 # Phase-3 scope-amendment proposal — Hotel-Admin operator surfaces
 
-**Status:** PROPOSED — awaiting Product-Owner decision. Nothing here has been implemented or omitted
-silently; this document exists because the Phase-3 Plan lists operator surfaces that the current software
-candidate does not deliver, and the standing instruction is to *record* such a gap rather than quietly drop it.
+**Status: REJECTED — OPTION C SELECTED** (Product-Owner decision **D15**, 2026-07-22). The Product Owner reviewed this proposal and declined every reduced-scope option. **There is no Hotel-Admin
+scope reduction and no deferral to a follow-on Phase.** All ten surfaces listed in §2 are mandatory Phase-3
+software deliverables and must be delivered to the same standard as the four already delivered before Phase-3
+software acceptance.
+
+This document is retained as the record of the question and its answer, not as an open item. §4 (the three
+options) is preserved verbatim so the rejected alternatives stay auditable — **Option C was selected**.
 
 **Scope of this document:** Hotel-Admin (operator) UI only. It proposes nothing about the guest path, the
 enforcement path, the accounting path or the database contract, all of which are delivered.
@@ -93,6 +97,18 @@ the same test standard as the delivered four, and with a separate design review 
 * No claim that the absent surfaces are unnecessary — only that their absence is an observability cost, and
   that the Product Owner should decide whether to pay it now or later.
 
-**This proposal requires an explicit Product-Owner decision (A, B or C) before Phase 3 can be marked accepted
-on the Hotel-Admin dimension.** Until then, the Acceptance Matrix records these surfaces as awaiting that
-decision — not as passed, and not as silently out of scope.
+---
+
+## 6. The decision
+
+**Option C was selected (D15, 2026-07-22). This proposal is REJECTED.**
+
+All ten surfaces in §2 are mandatory Phase-3 software deliverables, to the same standard as the delivered
+four: real `edged`→middleware→PostgreSQL tests, RBAC, cross-Site refusal, step-up where required, optimistic
+concurrency, audit, redaction, Vitest, Playwright and accessibility. Write-only Secret rotation is delivered
+with its write path reviewed before implementation rather than deferred.
+
+§3 above argued that building them at a lower standard would be worse than not having them. That argument
+stands and is not overridden — it is *satisfied* by holding them to the full standard, which is what Option C
+requires. The Acceptance Matrix no longer carries a `PENDING — PO SCOPE DECISION` verdict; every row is
+`PASS — SOFTWARE`, `PENDING — LIVE INCREMENT 9`, or `OUT OF SCOPE BY APPROVED CONTRACT`.

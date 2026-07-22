@@ -69,7 +69,8 @@ func (p *phase3) livePhase3Sessions(ctx context.Context) ([]phase3Session, error
 }
 
 // accountingPass reads each live Phase-3 session's absolute counters once and submits them to the controlled
-// operation. It returns how many observations the database ACCEPTED as usage (baselines and duplicates are not
+// operation. fallbackBridge is used only to decide which interfaces to READ; it is never substituted into a
+// Session's identity, because the database validates the bridge against the Session's own row. It returns how many observations the database ACCEPTED as usage (baselines and duplicates are not
 // usage). A tc read failure for an interface skips every session on it — never a zero substitution, which
 // would look like "the guest stopped using the network" and, worse, would make the next real reading look like
 // a huge burst.
@@ -114,12 +115,18 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 
 	accepted, degraded := 0, ""
 	for _, s := range sessions {
-		bridge := s.Bridge
-		if bridge == "" {
-			bridge = fallbackBridge
+		if s.Bridge == "" {
+			// A Session that does not record its own interface cannot be measured. Substituting a default
+			// here would be the daemon DECIDING where the counters came from — and the controlled operation
+			// re-derives that from the Session's row precisely so the daemon cannot. Report it; do not guess.
+			degraded = "a live session records no ingress interface"
+			slog.Warn("phase3: session has no ingress interface; not accounted", "session", s.ID)
+			continue
 		}
+		bridge := s.Bridge
 		minor, ok := shape.MinorForIP(s.IP)
 		if !ok {
+			degraded = "a live session has an unmeasurable address"
 			continue
 		}
 		down := read(bridge)
@@ -144,6 +151,9 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochS
 		}
 		switch class {
 		case "ACCEPTED", "DELAYED":
+			// genuinely new usage. A REPLAY:* classification means the database recognised this exact
+			// observation and stored nothing further — counting it would make every retry look like fresh
+			// traffic in this daemon's own tallies.
 			accepted++
 		}
 	}

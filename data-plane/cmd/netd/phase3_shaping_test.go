@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -113,6 +114,20 @@ func (f *fakeTC) put(bridge string, minor int, c tcCall) {
 	f.installed[bridge][minor] = c
 }
 
+// wipe empties the kernel, as a reboot does.
+func (f *fakeTC) wipe() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.installed = map[string]map[int]tcCall{}
+}
+
+// wipeBridge empties one bridge, as a flushed qdisc does within a single boot.
+func (f *fakeTC) wipeBridge(bridge string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.installed, bridge)
+}
+
 // preinstall seeds the kernel with a class no plan will claim — a leftover from a crash or an earlier run.
 func (f *fakeTC) preinstall(bridge, ip string) {
 	f.mu.Lock()
@@ -158,7 +173,10 @@ func liveMode() phase3Mode {
 }
 
 func liveWriter(tc shaper) *phase3Shaping {
-	return &phase3Shaping{shp: tc, mode: liveMode(), authz: shapingAuthz{allowedUID: testUID, configured: true}}
+	// A live writer always has generation authority — without it no class can be made accountable, which is
+	// its own test (TestNoGenerationAuthorityMeansNoAccountableClass) rather than the default condition.
+	return &phase3Shaping{shp: tc, mode: liveMode(), authz: shapingAuthz{allowedUID: testUID, configured: true},
+		generations: &fakeGenerations{}}
 }
 
 // envelope builds a well-formed plan for the live scope, declaring the bridges its sessions use plus the
@@ -182,10 +200,10 @@ func envelopeOn(bridges []string, gen int64, sessions ...shapeplan.Session) shap
 
 func standardPlan(gen int64) shapeplan.Envelope {
 	return envelope(gen,
-		shapeplan.Session{SessionID: "gone-1", IP: "10.0.0.8", Bridge: "br-guest"},
-		shapeplan.Session{SessionID: "gone-2", IP: "10.0.0.9", Bridge: "br-guest"},
-		shapeplan.Session{SessionID: "live-1", IP: "10.0.0.1", Bridge: "br-guest", DownKbps: 8000, UpKbps: 3000, Entitled: true},
-		shapeplan.Session{SessionID: "live-2", IP: "10.0.0.2", Bridge: "br-lan", DownKbps: 4000, UpKbps: 1500, Entitled: true},
+		shapeplan.Session{SessionID: "gone-1", DeviceID: "dev-gone-1", IP: "10.0.0.8", Bridge: "br-guest"},
+		shapeplan.Session{SessionID: "gone-2", DeviceID: "dev-gone-2", IP: "10.0.0.9", Bridge: "br-guest"},
+		shapeplan.Session{SessionID: "live-1", DeviceID: "dev-live-1", IP: "10.0.0.1", Bridge: "br-guest", DownKbps: 8000, UpKbps: 3000, Entitled: true},
+		shapeplan.Session{SessionID: "live-2", DeviceID: "dev-live-2", IP: "10.0.0.2", Bridge: "br-lan", DownKbps: 4000, UpKbps: 1500, Entitled: true},
 	)
 }
 
@@ -756,5 +774,267 @@ func TestExpiredPlanShowsAsStale(t *testing.T) {
 	p.mu.Unlock()
 	if p.status()["plan_stale"] != true {
 		t.Fatal("an expired plan was not reported as stale")
+	}
+}
+
+// ---- generation authority and kernel-proven continuity ----------------------
+
+// fakeGenerations stands in for the durable allocator: strictly increasing, never reissued, able to fail.
+type fakeGenerations struct {
+	mu     sync.Mutex
+	last   int64
+	err    error
+	issued []int64 // every value handed out, so a test can prove none was repeated
+}
+
+func (g *fakeGenerations) AllocateClassGeneration(ctx context.Context, tenant, site, appliance string) (int64, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.err != nil {
+		return 0, g.err
+	}
+	g.last++
+	g.issued = append(g.issued, g.last)
+	return g.last, nil
+}
+
+// writerWithState builds a writer backed by a real state file and a durable allocator, as netd's main does.
+func writerWithState(tc *fakeTC, gens generationAllocator, path, bootID string) *phase3Shaping {
+	p := liveWriter(tc)
+	p.classStore = &classStore{path: path}
+	p.generations = gens
+	prev, _ := p.classStore.load()
+	inv, verified := kernelInventory(context.Background(), tc, bridgesIn(prev))
+	p.restore(prev, bootID, inv, verified)
+	return p
+}
+
+// A RESTART with the kernel intact keeps every generation. If it did not, acctd — holding a checkpoint at the
+// older generation — would refuse every later observation as stale and accounting would simply stop.
+func TestRestartWithKernelIntactKeepsGenerations(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "classes.json")
+	tc := newFakeTC()
+	gens := &fakeGenerations{}
+	const boot = "boot-aaaa"
+
+	p := writerWithState(tc, gens, state, boot)
+	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	before := p.Epochs()
+	if len(before) != 2 {
+		t.Fatalf("managed classes = %d, want the two shaped sessions: %v", len(before), before)
+	}
+
+	restarted := writerWithState(tc, gens, state, boot)
+	for k, v := range before {
+		if restarted.Epochs()[k] != v {
+			t.Fatalf("class %s: generation changed across a restart, %d -> %d", k, v, restarted.Epochs()[k])
+		}
+	}
+	if _, err := restarted.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range before {
+		if got := restarted.Epochs()[k]; got != v {
+			t.Fatalf("class %s: generation changed on re-application, %d -> %d", k, v, got)
+		}
+	}
+}
+
+// A REBOOT loses every class. Their successors must be strictly newer generations, or a checkpoint that still
+// pins the old one would measure a counter restarting at zero against it.
+func TestRebootAllocatesStrictlyNewerGenerations(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "classes.json")
+	tc := newFakeTC()
+	gens := &fakeGenerations{}
+
+	p := writerWithState(tc, gens, state, "boot-aaaa")
+	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	before := p.Epochs()
+
+	tc.wipe() // reboot: new boot id AND an empty kernel
+	rebooted := writerWithState(tc, gens, state, "boot-bbbb")
+	if len(rebooted.Epochs()) != 0 {
+		t.Fatalf("a rebooted appliance claimed %d surviving classes", len(rebooted.Epochs()))
+	}
+	if _, err := rebooted.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for k, old := range before {
+		if got := rebooted.Epochs()[k]; got <= old {
+			t.Fatalf("class %s reused generation %d after a reboot (now %d)", k, old, got)
+		}
+	}
+}
+
+// SAME BOOT but the class is gone — a flushed qdisc, a manual removal. The boot id still matches, so only the
+// kernel reading can catch it. The successor must be a new series; untouched classes keep theirs.
+func TestSameBootWithClassRemovedRegenerates(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "classes.json")
+	tc := newFakeTC()
+	gens := &fakeGenerations{}
+	const boot = "boot-aaaa"
+
+	p := writerWithState(tc, gens, state, boot)
+	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	before := p.Epochs()
+
+	tc.wipeBridge("br-guest")
+	restarted := writerWithState(tc, gens, state, boot)
+	if _, still := restarted.Epochs()[classKey("br-guest", "live-1")]; still {
+		t.Fatal("a class the kernel no longer has was carried forward on a boot-id match alone")
+	}
+	if got := restarted.Epochs()[classKey("br-lan", "live-2")]; got != before[classKey("br-lan", "live-2")] {
+		t.Fatalf("an untouched class lost its generation: %d -> %d", before[classKey("br-lan", "live-2")], got)
+	}
+	if _, err := restarted.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.Epochs()[classKey("br-guest", "live-1")]; got <= before[classKey("br-guest", "live-1")] {
+		t.Fatalf("the recreated class reused generation %d", got)
+	}
+}
+
+// SAME BOOT, same minor, DIFFERENT session. The slot is occupied, so a presence check alone would carry the
+// old generation forward and hand the new guest the previous guest's checkpoint.
+func TestSameMinorReusedByAnotherSessionDoesNotInherit(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "classes.json")
+	tc := newFakeTC()
+	gens := &fakeGenerations{}
+
+	p := writerWithState(tc, gens, state, "boot-aaaa")
+	first := envelope(1, shapeplan.Session{SessionID: "guest-a", DeviceID: "dev-a", IP: "10.0.0.1",
+		Bridge: "br-guest", DownKbps: 1000, UpKbps: 500, Entitled: true})
+	if _, err := p.submit(context.Background(), first, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	epochA := p.Epochs()[classKey("br-guest", "guest-a")]
+
+	second := envelope(2, shapeplan.Session{SessionID: "guest-b", DeviceID: "dev-b", IP: "10.0.0.1",
+		Bridge: "br-guest", DownKbps: 1000, UpKbps: 500, Entitled: true})
+	if _, err := p.submit(context.Background(), second, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	epochB := p.Epochs()[classKey("br-guest", "guest-b")]
+	if epochB == 0 || epochB == epochA {
+		t.Fatalf("the new occupant of the slot got generation %d; the previous was %d", epochB, epochA)
+	}
+	if _, stale := p.Epochs()[classKey("br-guest", "guest-a")]; stale {
+		t.Fatal("the previous occupant is still reported as a managed class")
+	}
+}
+
+// Corrupted durable state with OLDER generations already in use must not reuse one. The allocator is the
+// authority; a lost inventory cannot hand back a value some checkpoint still pins.
+func TestCorruptedStateWithOlderGenerationsNeverReuses(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "classes.json")
+	tc := newFakeTC()
+	gens := &fakeGenerations{last: 5} // 1..5 already issued and pinned by existing checkpoints
+
+	p := writerWithState(tc, gens, state, "boot-aaaa")
+	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	before := p.Epochs()
+
+	if err := os.WriteFile(state, []byte("{ this is not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recovered := writerWithState(tc, gens, state, "boot-aaaa")
+	if len(recovered.Epochs()) != 0 {
+		t.Fatal("unreadable state was treated as a valid empty inventory")
+	}
+	if _, err := recovered.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for k, old := range before {
+		if got := recovered.Epochs()[k]; got <= old {
+			t.Fatalf("class %s reused generation %d after corrupted state (now %d)", k, old, got)
+		}
+	}
+	seen := map[int64]bool{}
+	for _, g := range gens.issued {
+		if seen[g] {
+			t.Fatalf("generation %d was issued more than once", g)
+		}
+		seen[g] = true
+	}
+}
+
+// The generation is NOT derived from the wall clock. A clock that jumps backwards — RTC reset, NTP
+// correction, image restore — must not affect it at all.
+func TestGenerationsAreIndependentOfTheWallClock(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "classes.json")
+	tc := newFakeTC()
+	gens := &fakeGenerations{}
+	p := writerWithState(tc, gens, state, "boot-aaaa")
+
+	past := standardPlan(1)
+	past.GeneratedAt = time.Now().Add(-72 * time.Hour)
+	if _, err := p.submit(context.Background(), past, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	first := p.Epochs()
+
+	tc.wipe()
+	restarted := writerWithState(tc, gens, state, "boot-aaaa")
+	// a plan evaluated against a clock that has moved BACKWARDS two days
+	if _, err := restarted.submit(context.Background(), standardPlan(2), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for k, old := range first {
+		if got := restarted.Epochs()[k]; got <= old {
+			t.Fatalf("class %s: generation %d did not advance past %d despite a backwards clock", k, got, old)
+		}
+	}
+}
+
+// Without generation authority a class is NOT made accountable. Installing it anyway would put traffic on the
+// wire that no checkpoint can ever attribute, and no local value may be manufactured to fill the gap.
+func TestNoGenerationAuthorityMeansNoAccountableClass(t *testing.T) {
+	tc := newFakeTC()
+	gens := &fakeGenerations{err: errors.New("database unavailable")}
+	p := writerWithState(tc, gens, filepath.Join(t.TempDir(), "classes.json"), "boot-aaaa")
+
+	res, err := p.submit(context.Background(), standardPlan(1), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Shaped != 0 || !res.Degraded {
+		t.Fatalf("classes were installed without a generation: %+v", res)
+	}
+	if len(p.Epochs()) != 0 {
+		t.Fatalf("generations were manufactured locally: %v", p.Epochs())
+	}
+}
+
+// Epochs() reports only classes the kernel is currently verified to hold. Reporting a torn-down or
+// unverifiable class would tell acctd it may account against something that no longer exists.
+func TestEpochsExposesOnlyVerifiedKernelClasses(t *testing.T) {
+	state := filepath.Join(t.TempDir(), "classes.json")
+	tc := newFakeTC()
+	gens := &fakeGenerations{}
+	p := writerWithState(tc, gens, state, "boot-aaaa")
+	if _, err := p.submit(context.Background(), standardPlan(1), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for k := range p.Epochs() {
+		if strings.Contains(k, "gone-") {
+			t.Fatalf("a torn-down session is reported as a managed class: %s", k)
+		}
+	}
+
+	tc.readErr["br-guest"] = errors.New("netlink unavailable")
+	blind := writerWithState(tc, gens, state, "boot-aaaa")
+	if len(blind.Epochs()) != 0 {
+		t.Fatalf("classes were claimed without reading the kernel: %v", blind.Epochs())
+	}
+	if blind.restoreNote == "" {
+		t.Fatal("an unverifiable restore did not record why nothing was carried forward")
 	}
 }

@@ -74,6 +74,9 @@ type phase3Shaping struct {
 	// store remembers the last accepted plan across a restart, so a replayed or delayed older plan cannot
 	// reinstate access that a newer plan removed.
 	store *planStore
+	// origins records a newly created class's accounting starting point, through the controlled operation,
+	// before the guest can push traffic through it (see phase3_origin.go).
+	origins originRegistrar
 
 	lastApplied   time.Time
 	lastDegrade   string
@@ -89,6 +92,16 @@ type phase3Shaping struct {
 	// minorOwner remembers which session a managed minor was installed for, so a stray removal can end that
 	// session's counter series precisely instead of guessing.
 	minorOwner map[string]string
+	// classes/epochCeiling/bootID are the DURABLE half of the same state (see phase3_classstate.go). Without
+	// them a restart re-issues epoch 1 and accounting stalls; a reboot re-issues epoch 1 and a recreated
+	// class is mistaken for the series a checkpoint still remembers.
+	classes     map[string]managedClass
+	bootID      string
+	classStore  *classStore
+	generations generationAllocator
+	// restoreNote records why durable class state was not carried forward, so an operator can tell
+	// "nothing was running" from "we could not prove what was running".
+	restoreNote string
 }
 
 // classKey identifies one managed class for epoch purposes.
@@ -99,21 +112,27 @@ func minorKey(bridge string, minor int) string { return fmt.Sprintf("%s|%d", bri
 
 // bumpEpoch records that a managed class was (re)created or destroyed, so the next counter reading is judged
 // against a new generation rather than compared with a series that no longer exists.
-func (p *phase3Shaping) bumpEpoch(bridge, sessionID string) int64 {
-	if p.epochs == nil {
-		p.epochs = map[string]int64{}
-	}
-	p.epochs[classKey(bridge, sessionID)]++
-	return p.epochs[classKey(bridge, sessionID)]
+// endSeries forgets a class's generation. The series is over; whatever replaces it will allocate a NEW
+// generation from the durable allocator, which is strictly greater than anything issued before — so a
+// successor can never inherit the checkpoint of the class it replaced.
+func (p *phase3Shaping) endSeries(bridge, sessionID string) {
+	delete(p.epochs, classKey(bridge, sessionID))
+	delete(p.classes, classKey(bridge, sessionID))
 }
 
-// Epochs returns the current generation of every managed class, for the accounting reader.
+// Epochs returns the generation of every class this appliance CURRENTLY manages.
+//
+// It is derived from the managed inventory, not from the raw epoch map, because the map also holds the
+// generations of classes that have since been torn down. Reporting those would tell acctd it may account
+// against a class the kernel no longer has — and the answer would look authoritative. A session whose class
+// was removed and later returns gets a fresh generation from the monotonic ceiling, which is strictly higher
+// than the one it had, so nothing is lost by forgetting it here.
 func (p *phase3Shaping) Epochs() map[string]int64 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	out := make(map[string]int64, len(p.epochs))
-	for k, v := range p.epochs {
-		out[k] = v
+	out := make(map[string]int64, len(p.classes))
+	for _, c := range p.classes {
+		out[classKey(c.Bridge, c.SessionID)] = c.Epoch
 	}
 	return out
 }
@@ -241,7 +260,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Problems = append(res.Problems, "tear: unusable addressing for session "+s.SessionID)
 			continue
 		}
-		p.bumpEpoch(s.Bridge, s.SessionID) // the series ends here; a future class for this session is a new one
+		p.endSeries(s.Bridge, s.SessionID) // the series ends here; a future class for this session is a new one
 		if err := p.shp.DeleteSession(ctx, s.Bridge, ip); err != nil {
 			// A teardown failure is the serious one: it means traffic may still be forwarded for access that
 			// has ended, so it is reported as degraded rather than swallowed.
@@ -252,6 +271,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		if minor, ok := shape.MinorForIP(ip); ok {
 			delete(p.minorOwner, minorKey(s.Bridge, minor))
 		}
+		delete(p.classes, classKey(s.Bridge, s.SessionID))
 		res.TornDown++
 	}
 
@@ -279,7 +299,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 				continue
 			}
 			if owner != "" {
-				p.bumpEpoch(bridge, owner)
+				p.endSeries(bridge, owner)
 			}
 			delete(p.minorOwner, minorKey(bridge, minor))
 			res.StraysRemoved++
@@ -308,12 +328,56 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			if p.epochs == nil {
 				p.epochs = map[string]int64{}
 			}
-			if _, known := p.epochs[classKey(bridge, s.SessionID)]; !known {
-				// first time this class is managed: establish its generation
-				p.epochs[classKey(bridge, s.SessionID)] = 1
+			created := false
+			epoch, known := p.epochs[classKey(bridge, s.SessionID)]
+			if !known {
+				// A NEW class needs a generation from the durable allocator BEFORE it can carry traffic.
+				// There is no local fallback: a class installed without an accountable generation is a class
+				// whose bytes cannot be attributed to anyone, and manufacturing a value here is how a
+				// recreated class ends up masquerading as the series a checkpoint still remembers.
+				alloc, err := p.allocEpoch(ctx)
+				if err != nil {
+					res.Failed++
+					res.Problems = append(res.Problems,
+						"shape "+s.SessionID+": no class generation could be allocated; not made accountable")
+					continue
+				}
+				epoch, created = alloc, true
+				p.epochs[classKey(bridge, s.SessionID)] = epoch
+			}
+			// If this class slot was held by a DIFFERENT session, that session's series ends here. Leaving it
+			// in the inventory would let the previous occupant's generation be carried forward on the next
+			// restart, handing the new guest a checkpoint that describes someone else's counters.
+			if prev, held := p.minorOwner[minorKey(bridge, minor)]; held && prev != s.SessionID {
+				p.endSeries(bridge, prev)
 			}
 			p.minorOwner[minorKey(bridge, minor)] = s.SessionID
+			if p.classes == nil {
+				p.classes = map[string]managedClass{}
+			}
+			p.classes[classKey(bridge, s.SessionID)] = managedClass{
+				SessionID: s.SessionID, DeviceID: s.DeviceID, Bridge: bridge, Minor: minor,
+				Epoch: epoch, BootID: p.bootID}
+			if created {
+				// BEFORE the guest can use it: record what the counters actually read, so the first periodic
+				// observation measures a difference rather than starting from nothing.
+				if problem := p.registerOrigin(ctx, s, minor, epoch); problem != "" {
+					res.Failed++
+					res.Problems = append(res.Problems, problem)
+				}
+			}
 			res.Shaped++
+		}
+	}
+
+	// The durable inventory is written once the kernel has been driven to this desired state, so a restart
+	// resumes from what is actually installed rather than from what was merely intended. A failed write is
+	// reported: the next start would silently re-generate every class, which is safe but loses accounting
+	// continuity, and an operator should know it happened.
+	if p.classStore != nil {
+		if err := p.classStore.save(p.snapshot()); err != nil {
+			res.Failed++
+			res.Problems = append(res.Problems, "durable class state not written: "+err.Error())
 		}
 	}
 

@@ -32,11 +32,16 @@ const ContractVersion = "phase3-shaping/1"
 // Session is one session's desired treatment. Entitled=false means "must not be forwarded".
 type Session struct {
 	SessionID string `json:"session_id"`
-	IP        string `json:"ip"`
-	Bridge    string `json:"bridge"`
-	DownKbps  int    `json:"down_kbps"`
-	UpKbps    int    `json:"up_kbps"`
-	Entitled  bool   `json:"entitled"`
+	// DeviceID travels with the session because the APPLIER registers the accounting origin for a class it
+	// creates, and a checkpoint is keyed by its whole source tuple — session, device, bridge, class. Without
+	// it the applier could not name the series it just created, and the origin would have to be inferred
+	// later by the producer, which is the gap that loses the first tick's traffic.
+	DeviceID string `json:"device_id"`
+	IP       string `json:"ip"`
+	Bridge   string `json:"bridge"`
+	DownKbps int    `json:"down_kbps"`
+	UpKbps   int    `json:"up_kbps"`
+	Entitled bool   `json:"entitled"`
 }
 
 // Envelope is a COMPLETE, scoped, versioned statement of the Phase-3 managed state.
@@ -106,7 +111,7 @@ func HashDesiredState(bridges []string, sessions []Session) string {
 	}
 	for _, s := range sessions {
 		rows = append(rows, strings.Join([]string{
-			"S", s.SessionID, s.IP, s.Bridge,
+			"S", s.SessionID, s.DeviceID, s.IP, s.Bridge,
 			strconv.Itoa(s.DownKbps), strconv.Itoa(s.UpKbps), strconv.FormatBool(s.Entitled),
 		}, "\x1f"))
 	}

@@ -954,6 +954,19 @@ ALTER TABLE iam_v2.accounting_records
 -- The checkpoint moves both facts into the database, next to the rows they protect. The runtime submits what
 -- it can actually see — the ABSOLUTE counters — and the database decides what that means.
 -- ============================================================================
+-- The managed class minor a Session's address MUST occupy, computed HERE rather than trusted from the caller.
+-- It mirrors internal/shape.MinorForIP exactly: 0x1000 + (low nibble of the third octet << 8 | fourth octet).
+-- Deriving it in the database is the point — acctd computing it correctly is not evidence that the value
+-- arriving in the operation is the one acctd computed.
+CREATE OR REPLACE FUNCTION iam_v2.p3_expected_class_minor(p_ip inet) RETURNS int
+  LANGUAGE sql IMMUTABLE SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT CASE
+    WHEN p_ip IS NULL OR family(p_ip) <> 4 THEN NULL
+    ELSE 4096 + (((split_part(host(p_ip), '.', 3)::int & 15) << 8) | split_part(host(p_ip), '.', 4)::int)
+  END;
+$fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_expected_class_minor(inet) FROM PUBLIC;
+
 CREATE TABLE iam_v2.accounting_checkpoints (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL, site_id uuid NOT NULL,
@@ -976,10 +989,135 @@ CREATE TABLE iam_v2.accounting_checkpoints (
   UNIQUE (session_id, source_device_id, bridge, class_minor),
   FOREIGN KEY (tenant_id, site_id, session_id) REFERENCES iam_v2.sessions (tenant_id, site_id, id) ON DELETE CASCADE);
 
+-- ============================================================================
+-- (4q) THE CLASS-GENERATION ALLOCATOR.
+--
+-- A managed class's generation is the only trustworthy answer to "did this counter series restart?", so the
+-- one thing it must never do is repeat. An earlier attempt seeded it from the wall clock; that is not an
+-- allocator. System time moves BACKWARDS on RTC reset, on NTP correction, after offline operation, and after
+-- a snapshot or image restore — and a generation that went backwards would let a recreated class present
+-- itself as a continuation of the series a checkpoint still remembers, billing one guest's counters as
+-- another's delta.
+--
+-- The allocator is therefore durable, appliance-scoped, and independent of any clock. It is also
+-- SELF-RECONCILING: it takes the greatest of its own counter and the highest generation any surviving
+-- accounting checkpoint actually pins, so even a lost or rolled-back counter row cannot hand out a value some
+-- checkpoint has already seen. That reconciliation is what makes the guarantee survive a restore, not just a
+-- restart.
+-- ============================================================================
+CREATE TABLE iam_v2.appliance_class_generation (
+  tenant_id uuid NOT NULL, site_id uuid NOT NULL, appliance_id uuid NOT NULL,
+  last_generation bigint NOT NULL DEFAULT 0 CHECK (last_generation >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, site_id, appliance_id));
+
+-- Allocates the next generation for this appliance. Strictly increasing, never reissued, no wall clock.
+CREATE OR REPLACE FUNCTION iam_v2.allocate_class_generation(
+    p_tenant uuid, p_site uuid, p_appliance uuid) RETURNS bigint
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_next bigint; v_pinned bigint;
+BEGIN
+  IF p_tenant IS NULL OR p_site IS NULL OR p_appliance IS NULL THEN
+    RAISE EXCEPTION 'ACCT_INVALID: a class generation is allocated per tenant/site/appliance';
+  END IF;
+  INSERT INTO iam_v2.appliance_class_generation (tenant_id, site_id, appliance_id, last_generation)
+    VALUES (p_tenant, p_site, p_appliance, 0)
+    ON CONFLICT (tenant_id, site_id, appliance_id) DO NOTHING;
+  -- Row lock first: two netd instances (or a restart racing itself) must not both read the same value.
+  SELECT last_generation INTO v_next FROM iam_v2.appliance_class_generation
+    WHERE tenant_id = p_tenant AND site_id = p_site AND appliance_id = p_appliance FOR UPDATE;
+  -- RECONCILE against what is actually pinned. If this counter were ever lost, restored from an older
+  -- backup, or rolled back, the checkpoints are the surviving evidence of which generations have been used.
+  SELECT COALESCE(max(cp.source_epoch), 0) INTO v_pinned FROM iam_v2.accounting_checkpoints cp
+    WHERE cp.tenant_id = p_tenant AND cp.site_id = p_site;
+  v_next := GREATEST(COALESCE(v_next, 0), v_pinned) + 1;
+  UPDATE iam_v2.appliance_class_generation
+     SET last_generation = v_next, updated_at = now()
+   WHERE tenant_id = p_tenant AND site_id = p_site AND appliance_id = p_appliance;
+  RETURN v_next;
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.allocate_class_generation(uuid,uuid,uuid) FROM PUBLIC;
+
+-- THE CLASS ORIGIN. Registered by the TC owner at the moment it creates or replaces a managed class, BEFORE
+-- the guest can send a packet through it.
+--
+-- Without this there is a hole between class creation and the first periodic accounting pass: the first
+-- observation has nothing to subtract from, so it BASELINES and everything used in that window is discarded.
+-- On a tick interval that is seconds of traffic per session, every session, forever — and it looks like
+-- nothing at all, because a baseline is a normal, expected outcome.
+--
+-- The owner states the counters it read IMMEDIATELY after creating the class (zero for a genuinely new class;
+-- the exact reading when it adopted an existing one). That reading, not the first tick's, becomes the origin.
+-- Nothing here infers zero: a caller that cannot prove the class was newly created passes what it actually
+-- read, and the difference from that point on is still exact.
+CREATE OR REPLACE FUNCTION iam_v2.register_class_origin(
+    p_tenant uuid, p_site uuid, p_session uuid, p_source_device uuid,
+    p_bridge text, p_class_minor int, p_epoch bigint,
+    p_origin_up bigint, p_origin_down bigint, p_created_at timestamptz) RETURNS text
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_started timestamptz; v_device uuid; v_ended timestamptz; v_iface text; v_ip inet; cp record;
+BEGIN
+  IF p_origin_up IS NULL OR p_origin_down IS NULL OR p_origin_up < 0 OR p_origin_down < 0 THEN
+    RAISE EXCEPTION 'ACCT_INVALID: origin counters must be non-negative';
+  END IF;
+  IF p_epoch IS NULL OR p_epoch < 1 OR p_created_at IS NULL THEN
+    RAISE EXCEPTION 'ACCT_INVALID: a class origin needs a source epoch (>= 1) and a creation time';
+  END IF;
+
+  -- the SAME source coherence the ingestion operation enforces: an origin is a checkpoint, and a checkpoint
+  -- for a source tuple that does not describe this Session would be a way to pre-seed someone else's series
+  SELECT started, device_id, ended, ingress_interface, ip
+    INTO v_started, v_device, v_ended, v_iface, v_ip
+    FROM iam_v2.sessions WHERE id = p_session AND tenant_id = p_tenant AND site_id = p_site;
+  IF v_started IS NULL THEN
+    RAISE EXCEPTION 'ACCT_SESSION_OUT_OF_SCOPE: session % is not in this tenant/site', p_session;
+  END IF;
+  IF v_ended IS NOT NULL THEN
+    RAISE EXCEPTION 'ACCT_SESSION_OUT_OF_SCOPE: session % has ended', p_session;
+  END IF;
+  IF v_device IS DISTINCT FROM p_source_device
+     OR v_iface IS DISTINCT FROM p_bridge
+     OR iam_v2.p3_expected_class_minor(v_ip) IS DISTINCT FROM p_class_minor THEN
+    RAISE EXCEPTION 'ACCT_SOURCE_MISMATCH: the class origin does not describe session %', p_session;
+  END IF;
+
+  SELECT * INTO cp FROM iam_v2.accounting_checkpoints
+    WHERE session_id = p_session AND source_device_id = p_source_device
+      AND bridge = p_bridge AND class_minor = p_class_minor
+    FOR UPDATE;
+
+  IF cp.id IS NULL THEN
+    INSERT INTO iam_v2.accounting_checkpoints
+      (tenant_id, site_id, session_id, source_device_id, bridge, class_minor, source_epoch,
+       prev_bytes_up, prev_bytes_down, prev_sampled_at, last_classification)
+      VALUES (p_tenant, p_site, p_session, p_source_device, p_bridge, p_class_minor, p_epoch,
+              p_origin_up, p_origin_down, p_created_at, 'BASELINED');
+    RETURN 'ORIGIN_REGISTERED';
+  END IF;
+
+  IF p_epoch < cp.source_epoch THEN
+    RAISE EXCEPTION 'ACCT_STALE_EPOCH: origin epoch % is older than the accepted epoch %', p_epoch, cp.source_epoch;
+  END IF;
+  IF p_epoch = cp.source_epoch THEN
+    -- The same class generation is already registered. Re-registering would move the origin forward and
+    -- silently forgive whatever was used since — which is exactly the loss this operation exists to close.
+    RETURN 'ORIGIN_UNCHANGED';
+  END IF;
+
+  -- A NEW generation: the class was replaced, so its counters legitimately restart from the stated origin.
+  UPDATE iam_v2.accounting_checkpoints
+     SET source_epoch = p_epoch, prev_bytes_up = p_origin_up, prev_bytes_down = p_origin_down,
+         prev_sampled_at = p_created_at, last_classification = 'RESET_BASELINED', updated_at = now()
+   WHERE id = cp.id;
+  RETURN 'ORIGIN_RESET';
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.register_class_origin(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz) FROM PUBLIC;
+
 -- THE controlled absolute-counter ingestion. One transaction decides everything: scope, binding, checkpoint,
 -- delta, accounting row, session totals, delayed classification and the new checkpoint.
 --
 -- Bounded outcomes: BASELINED | ACCEPTED | DELAYED | DUPLICATE | RESET_BASELINED
+--                   | REPLAY:ACCEPTED | REPLAY:DELAYED   (an exact replay, reporting what was persisted)
 -- Bounded failures: ACCT_SESSION_OUT_OF_SCOPE / ACCT_SOURCE_MISMATCH / ACCT_NO_BINDING /
 --                   ACCT_COUNTER_REGRESSION / ACCT_STALE_EPOCH / ACCT_INVALID
 CREATE OR REPLACE FUNCTION iam_v2.ingest_absolute_counters(
@@ -988,7 +1126,7 @@ CREATE OR REPLACE FUNCTION iam_v2.ingest_absolute_counters(
     p_abs_up bigint, p_abs_down bigint, p_sampled_at timestamptz) RETURNS text
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE
-  v_started timestamptz; v_device uuid; v_ended timestamptz;
+  v_started timestamptz; v_device uuid; v_ended timestamptz; v_iface text; v_ip inet; v_other int;
   cp record; v_ent uuid; v_up bigint; v_down bigint; v_seq bigint; v_rec uuid; v_class text; v_delayed boolean;
 BEGIN
   IF p_abs_up IS NULL OR p_abs_down IS NULL OR p_abs_up < 0 OR p_abs_down < 0 THEN
@@ -998,20 +1136,50 @@ BEGIN
     RAISE EXCEPTION 'ACCT_INVALID: sampled_at, bridge, class minor and source epoch are all required';
   END IF;
 
-  -- SCOPE. Accounting attributed across a tenant/site boundary is worse than missing accounting.
-  SELECT started, device_id, ended INTO v_started, v_device, v_ended FROM iam_v2.sessions
-    WHERE id = p_session AND tenant_id = p_tenant AND site_id = p_site;
+  -- SCOPE AND SOURCE COHERENCE. Every field describing WHERE these counters came from is re-derived here from
+  -- the Session's own row and compared. The daemon computing them correctly is not evidence: the operation
+  -- has to be able to refuse a caller that computed them wrongly, was fed the wrong session, or is replaying
+  -- one session's counters under another's identity.
+  SELECT started, device_id, ended, ingress_interface, ip
+    INTO v_started, v_device, v_ended, v_iface, v_ip
+    FROM iam_v2.sessions
+   WHERE id = p_session AND tenant_id = p_tenant AND site_id = p_site;
   IF v_started IS NULL THEN
     RAISE EXCEPTION 'ACCT_SESSION_OUT_OF_SCOPE: session % is not in this tenant/site', p_session;
   END IF;
-  -- The counters must belong to THIS session's device. Without this a class minor reused by another guest
-  -- would quietly bill its traffic to whoever held the minor before.
+  -- DEVICE. Without this a class minor reused by another guest would quietly bill its traffic to whoever
+  -- held the minor before.
   IF v_device IS DISTINCT FROM p_source_device THEN
     RAISE EXCEPTION 'ACCT_SOURCE_MISMATCH: session % is not bound to device %', p_session, p_source_device;
+  END IF;
+  -- BRIDGE. The Session records the interface it is actually on. A Session with none cannot be measured at
+  -- all: there is no server-pinned answer to compare against, and accepting the caller's bridge would let it
+  -- open a second counter series for the same guest.
+  IF v_iface IS NULL OR v_iface = '' THEN
+    RAISE EXCEPTION 'ACCT_SOURCE_MISMATCH: session % records no ingress interface', p_session;
+  END IF;
+  IF v_iface IS DISTINCT FROM p_bridge THEN
+    RAISE EXCEPTION 'ACCT_SOURCE_MISMATCH: session % is on %, not %', p_session, v_iface, p_bridge;
+  END IF;
+  -- ADDRESS + CLASS. The minor is a pure function of the Session's own address, so a caller cannot name a
+  -- different guest's class, and a Session whose address changed cannot keep accruing against the old one.
+  IF v_ip IS NULL THEN
+    RAISE EXCEPTION 'ACCT_SOURCE_MISMATCH: session % has no address to measure', p_session;
+  END IF;
+  IF iam_v2.p3_expected_class_minor(v_ip) IS DISTINCT FROM p_class_minor THEN
+    RAISE EXCEPTION 'ACCT_SOURCE_MISMATCH: session % belongs to class %, not %',
+      p_session, iam_v2.p3_expected_class_minor(v_ip), p_class_minor;
   END IF;
   IF p_sampled_at < v_started THEN
     RAISE EXCEPTION 'ACCT_INVALID: sample time % precedes the session start %', p_sampled_at, v_started;
   END IF;
+  -- ONE AUTHORITATIVE SERIES. Every component of the checkpoint key is now pinned to the Session's own row,
+  -- so a second source tuple for the same Session cannot be invented. This assertion states that explicitly
+  -- rather than leaving it as a property somebody has to re-derive: if a stale checkpoint from a previous
+  -- address or bridge still exists, it is not the one this observation may advance.
+  SELECT count(*) INTO v_other FROM iam_v2.accounting_checkpoints cp2
+   WHERE cp2.session_id = p_session
+     AND (cp2.bridge, cp2.class_minor, cp2.source_device_id) IS DISTINCT FROM (p_bridge, p_class_minor, p_source_device);
   -- An ENDED session owns no further traffic. Refusing here (rather than only on the delta path) means an
   -- ended session cannot even establish a baseline, so nothing can later be billed against it.
   IF v_ended IS NOT NULL THEN
@@ -1052,11 +1220,34 @@ BEGIN
   END IF;
 
   -- SAME EPOCH from here on.
+  --
+  -- TEMPORAL ORDER. Within one counter series, time only moves forward. An observation dated before the last
+  -- accepted one is a delayed or misrouted delivery, and treating it as new usage would date a CURRENT delta
+  -- into a HISTORICAL window — potentially one already frozen by a boundary watermark, where it would be
+  -- recorded as delayed usage that never happened then.
+  IF p_sampled_at < cp.prev_sampled_at THEN
+    RAISE EXCEPTION 'ACCT_STALE_SAMPLE: sample at % precedes the last accepted sample at %',
+      p_sampled_at, cp.prev_sampled_at;
+  END IF;
+  -- EQUAL sample times are explicitly ALLOWED when the counters advanced. The absolute counters are the
+  -- authoritative evidence of how much was used; the timestamp only says when it was read. Two readings
+  -- sharing an instant means the caller's clock is coarser than its sampling rate — a real and ordinary
+  -- condition — and refusing the pair would throw away measured bytes to defend a precision assumption.
+  -- A DECREASE at the same instant is still a regression and is refused below, and an identical pair is the
+  -- replay case; neither can slip through here.
+
   IF p_abs_up = cp.prev_bytes_up AND p_abs_down = cp.prev_bytes_down THEN
     -- EXACT REPLAY. The counters have not moved since the last accepted observation, so whatever the caller
     -- believes about its own delivery, there is nothing new to store. This is what makes an uncertain commit
     -- safe: the retry sees the persisted state and is told so.
-    RETURN 'DUPLICATE';
+    --
+    -- The persisted classification is reported so a caller retrying after an uncertain commit learns what
+    -- actually happened to its observation — in particular whether it was ACCEPTED or landed in a frozen
+    -- window as DELAYED. It is prefixed REPLAY: because the caller must be able to tell "your observation was
+    -- accepted, just now" from "your observation was accepted, earlier": counting the second as fresh usage
+    -- would make every retry look like new traffic in the daemon's own tallies and health.
+    RETURN CASE WHEN cp.last_classification IN ('ACCEPTED','DELAYED')
+                THEN 'REPLAY:' || cp.last_classification ELSE 'DUPLICATE' END;
   END IF;
 
   IF p_abs_up < cp.prev_bytes_up OR p_abs_down < cp.prev_bytes_down THEN
@@ -1070,12 +1261,9 @@ BEGIN
   v_up := p_abs_up - cp.prev_bytes_up;
   v_down := p_abs_down - cp.prev_bytes_down;
 
-  -- ATTRIBUTION at SAMPLE time. There is no fallback to the session's current entitlement: that fallback is
-  -- exactly how a rebound session's pre-boundary usage would be charged to the grace entitlement.
-  SELECT b.entitlement_id INTO v_ent FROM iam_v2.session_entitlement_bindings b
-    WHERE b.session_id = p_session AND b.bound_from <= p_sampled_at
-      AND (b.bound_until IS NULL OR b.bound_until > p_sampled_at)
-    ORDER BY b.seq DESC LIMIT 1;
+  -- ATTRIBUTION at SAMPLE time, through the ONE shared resolver (iam_v2.p3_entitlement_at). There is no
+  -- fallback to the session's current entitlement anywhere in this chain.
+  v_ent := iam_v2.p3_entitlement_at(p_session, p_sampled_at);
   IF v_ent IS NULL THEN
     RAISE EXCEPTION 'ACCT_NO_BINDING: no entitlement was bound to session % at %', p_session, p_sampled_at;
   END IF;
@@ -1105,19 +1293,53 @@ REVOKE EXECUTE ON FUNCTION iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,t
 -- Detection happens at INGEST: acctd does not need to know a boundary exists. A sample whose sampled_at is at
 -- or before a frozen boundary of the Entitlement it was bound to is recorded as delayed. The sample itself is
 -- still stored (it is real usage), and the watermark is left exactly as it was.
+-- THE binding answer. One function, used by the controlled ingestion operation AND by every trigger beneath
+-- it, so "which Entitlement owned this Session at this instant" cannot have two answers.
+--
+-- There is deliberately NO fallback to iam_v2.sessions.entitlement_id. That pointer says who owns the session
+-- NOW; a sample says who owned it THEN. Using the first to answer the second is exactly how a departing
+-- guest's pre-boundary traffic gets charged to the grace allowance that replaced it — and it silently
+-- "rescues" rows that the exact-interval rule would have refused, which is worse than refusing them.
+CREATE OR REPLACE FUNCTION iam_v2.p3_entitlement_at(p_session uuid, p_at timestamptz) RETURNS uuid
+  LANGUAGE sql STABLE SET search_path = iam_v2, pg_temp AS $fn$
+  SELECT b.entitlement_id FROM iam_v2.session_entitlement_bindings b
+   WHERE b.session_id = p_session AND b.bound_from <= p_at
+     AND (b.bound_until IS NULL OR b.bound_until > p_at)
+   ORDER BY b.seq DESC LIMIT 1;
+$fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_entitlement_at(uuid,timestamptz) FROM PUBLIC;
+
+-- Every accounting row must be attributable AT ITS OWN SAMPLE TIME, enforced at the table rather than only
+-- inside the operation: a forged row that somehow reached the table would otherwise be attributed by whatever
+-- read it later. With no covering interval the insert fails, so there is no row, no delayed row, no session
+-- total change and no checkpoint advance.
+-- SECURITY DEFINER because a trigger function runs as whoever is WRITING, and the resolver's EXECUTE is
+-- revoked from PUBLIC. Without this, a forged insert by a non-owner fails with "permission denied for
+-- function p3_entitlement_at" — still refused, but the reason names a privilege instead of the missing
+-- binding, which sends whoever reads the log after an incident down the wrong path entirely.
+CREATE OR REPLACE FUNCTION iam_v2.p3_accounting_needs_binding() RETURNS trigger
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+BEGIN
+  IF iam_v2.p3_entitlement_at(NEW.session_id, NEW.sampled_at) IS NULL THEN
+    RAISE EXCEPTION 'ACCT_NO_BINDING: no entitlement was bound to session % at %', NEW.session_id, NEW.sampled_at;
+  END IF;
+  RETURN NEW;
+END $fn$;
+CREATE TRIGGER p3_accounting_needs_binding BEFORE INSERT ON iam_v2.accounting_records
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_accounting_needs_binding();
+REVOKE EXECUTE ON FUNCTION iam_v2.p3_accounting_needs_binding() FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION iam_v2.p3_detect_delayed_accounting() RETURNS trigger
-  LANGUAGE plpgsql SET search_path = iam_v2, pg_temp AS $fn$
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
 DECLARE v_ent uuid; v_t uuid; v_s uuid; v_wm uuid;
 BEGIN
-  -- the Entitlement this sample belongs to (by binding interval at SAMPLE time, else the current pointer)
-  SELECT b.entitlement_id INTO v_ent FROM iam_v2.session_entitlement_bindings b
-    WHERE b.session_id = NEW.session_id AND b.bound_from <= NEW.sampled_at
-      AND (b.bound_until IS NULL OR b.bound_until > NEW.sampled_at)
-    ORDER BY b.seq DESC LIMIT 1;
+  -- The SAME binding answer the ingestion operation used — no second opinion, and no fallback to the
+  -- session's current pointer. The BEFORE INSERT guard has already refused any row without one, so a NULL
+  -- here would mean the guard was bypassed; fail closed rather than attribute it to whatever is current.
+  v_ent := iam_v2.p3_entitlement_at(NEW.session_id, NEW.sampled_at);
   IF v_ent IS NULL THEN
-    SELECT entitlement_id INTO v_ent FROM iam_v2.sessions WHERE id = NEW.session_id;
+    RAISE EXCEPTION 'ACCT_NO_BINDING: no entitlement was bound to session % at %', NEW.session_id, NEW.sampled_at;
   END IF;
-  IF v_ent IS NULL THEN RETURN NEW; END IF;
   SELECT id INTO v_wm FROM iam_v2.entitlement_boundary_watermarks
     WHERE entitlement_id = v_ent AND boundary_at >= NEW.sampled_at ORDER BY boundary_at ASC LIMIT 1;
   IF v_wm IS NULL THEN RETURN NEW; END IF;   -- nothing frozen for this period
@@ -1150,6 +1372,8 @@ BEGIN
     WHEN 'entitlement' THEN 'iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)'
     WHEN 'grace_config' THEN 'iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)'
     WHEN 'accounting' THEN 'iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)'
+    WHEN 'accounting_origin' THEN 'iam_v2.register_class_origin(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)'
+    WHEN 'class_generation' THEN 'iam_v2.allocate_class_generation(uuid,uuid,uuid)'
     ELSE NULL END;
   IF v_sig IS NULL THEN
     RAISE EXCEPTION 'no approved controlled-writer family %', p_family;
@@ -1176,6 +1400,8 @@ BEGIN
   v_sig := CASE
     WHEN TG_TABLE_NAME = 'site_checkout_grace_config'
       THEN 'iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)'
+    WHEN TG_TABLE_NAME = 'appliance_class_generation'
+      THEN 'iam_v2.allocate_class_generation(uuid,uuid,uuid)'
     WHEN TG_TABLE_NAME IN ('accounting_records','accounting_checkpoints','delayed_accounting_records','sessions')
       THEN 'iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)'
     ELSE 'iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)' END;
@@ -1197,17 +1423,23 @@ BEGIN
     END IF;
     RETURN OLD;
   END IF;
-  IF TG_TABLE_NAME IN ('accounting_records','accounting_checkpoints','delayed_accounting_records') THEN
+  IF TG_TABLE_NAME IN ('accounting_records','accounting_checkpoints','delayed_accounting_records',
+                       'appliance_class_generation') THEN
     -- EVERY write is controlled. A physical measurement has exactly one legitimate author: the operation that
     -- computed it from a locked checkpoint. A raw INSERT here is invented usage; a raw UPDATE is rewritten
     -- history; and a raw checkpoint write is worse than either, because it silently changes what every FUTURE
     -- observation will be measured against.
     changed := true;
   ELSIF TG_TABLE_NAME = 'sessions' AND TG_OP = 'UPDATE' THEN
-    -- A Session row is written by several legitimate paths (it is created, bound, rebound and ended), but its
-    -- USAGE TOTALS are accounting state and are advanced only by the ingestion operation, in the same
-    -- transaction as the record that justifies them. Anything else could move a total without a row behind it.
-    changed := (NEW.bytes_up IS DISTINCT FROM OLD.bytes_up OR NEW.bytes_down IS DISTINCT FROM OLD.bytes_down);
+    -- A Session row is written by several legitimate paths (it is created, bound, rebound and ended), but two
+    -- groups of columns are accounting state:
+    --   * the USAGE TOTALS, advanced only by the ingestion operation in the same transaction as the record
+    --     that justifies them — anything else moves a total with no row behind it;
+    --   * the ACCOUNTING IDENTITY (address and ingress interface), which the operation re-derives the
+    --     counter source from. Rewriting either retroactively changes which physical counters a Session is
+    --     measured against, which is a silent way to make one guest's traffic land on another's checkpoint.
+    changed := (NEW.bytes_up IS DISTINCT FROM OLD.bytes_up OR NEW.bytes_down IS DISTINCT FROM OLD.bytes_down
+      OR NEW.ip IS DISTINCT FROM OLD.ip OR NEW.ingress_interface IS DISTINCT FROM OLD.ingress_interface);
   ELSIF TG_TABLE_NAME = 'entitlements' THEN
     changed := (NEW.status IS DISTINCT FROM OLD.status);   -- only status is controlled-writer-only
   ELSIF TG_TABLE_NAME = 'site_checkout_grace_config' AND TG_OP = 'UPDATE' THEN
@@ -1250,6 +1482,9 @@ CREATE TRIGGER p3_delayed_accounting_controlled_writer
   BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.delayed_accounting_records
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
 -- Session usage totals only (see the guard body): creating, binding and ending a Session stay ordinary writes.
+CREATE TRIGGER p3_class_generation_controlled_writer
+  BEFORE INSERT OR UPDATE OR DELETE ON iam_v2.appliance_class_generation
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();
 CREATE TRIGGER p3_session_usage_controlled_writer
   BEFORE UPDATE ON iam_v2.sessions
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();

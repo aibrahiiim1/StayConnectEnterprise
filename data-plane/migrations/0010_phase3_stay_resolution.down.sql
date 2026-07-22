@@ -52,6 +52,7 @@ DROP TRIGGER IF EXISTS p3_accounting_records_controlled_writer ON iam_v2.account
 -- drop comes first. Dropping its trigger explicitly makes the rollback independent of statement order.
 DROP TRIGGER IF EXISTS p3_accounting_checkpoints_controlled_writer ON iam_v2.accounting_checkpoints;
 DROP TRIGGER IF EXISTS p3_delayed_accounting_controlled_writer ON iam_v2.delayed_accounting_records;
+DROP TRIGGER IF EXISTS p3_class_generation_controlled_writer ON iam_v2.appliance_class_generation;
 DROP TRIGGER IF EXISTS p3_session_usage_controlled_writer ON iam_v2.sessions;
 DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_only();
 DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_owner(text);
@@ -64,9 +65,16 @@ DROP FUNCTION IF EXISTS iam_v2.authorize_entitlement_device(uuid,uuid,timestampt
 DROP FUNCTION IF EXISTS iam_v2.deauthorize_entitlement_device(uuid,uuid,timestamptz,text);
 -- (4m) accounting attribution: delayed-record detection, watermarks, session binding intervals
 DROP TRIGGER IF EXISTS p3_detect_delayed_accounting ON iam_v2.accounting_records;
+DROP TRIGGER IF EXISTS p3_accounting_needs_binding ON iam_v2.accounting_records;
+DROP FUNCTION IF EXISTS iam_v2.p3_accounting_needs_binding();
 DROP FUNCTION IF EXISTS iam_v2.p3_detect_delayed_accounting();
+DROP FUNCTION IF EXISTS iam_v2.p3_entitlement_at(uuid,timestamptz);
 DROP FUNCTION IF EXISTS iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz);
+DROP FUNCTION IF EXISTS iam_v2.register_class_origin(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz);
+DROP FUNCTION IF EXISTS iam_v2.allocate_class_generation(uuid,uuid,uuid);
 DROP TABLE IF EXISTS iam_v2.accounting_checkpoints;
+DROP TABLE IF EXISTS iam_v2.appliance_class_generation;
+DROP FUNCTION IF EXISTS iam_v2.p3_expected_class_minor(inet);
 ALTER TABLE iam_v2.accounting_records DROP COLUMN IF EXISTS ingested_at;
 DROP TABLE IF EXISTS iam_v2.delayed_accounting_records;
 DROP TABLE IF EXISTS iam_v2.entitlement_boundary_watermarks;

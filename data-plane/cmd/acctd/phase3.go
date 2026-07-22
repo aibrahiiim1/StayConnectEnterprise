@@ -136,11 +136,11 @@ func (p *phase3) buildEnvelope(plan enforce.Plan, managedBridges []string, fallb
 	sessions := make([]shapeplan.Session, 0, len(plan.Tear)+len(plan.Shape))
 	for _, s := range plan.Tear {
 		sessions = append(sessions, shapeplan.Session{
-			SessionID: s.SessionID, IP: s.IP, Bridge: bridgeOf(s.Bridge), Entitled: false})
+			SessionID: s.SessionID, DeviceID: s.DeviceID, IP: s.IP, Bridge: bridgeOf(s.Bridge), Entitled: false})
 	}
 	for _, s := range plan.Shape {
 		sessions = append(sessions, shapeplan.Session{
-			SessionID: s.SessionID, IP: s.IP, Bridge: bridgeOf(s.Bridge),
+			SessionID: s.SessionID, DeviceID: s.DeviceID, IP: s.IP, Bridge: bridgeOf(s.Bridge),
 			DownKbps: s.DownKbps, UpKbps: s.UpKbps, Entitled: true})
 	}
 	// Every bridge a session is on must be declared, plus every guest bridge the site has — including ones

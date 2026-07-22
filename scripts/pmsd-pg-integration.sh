@@ -43,7 +43,12 @@ bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi
 runtime_cols="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_runtime' AND column_name='pinned_secret_generation_id';")"
-if [ "${runtime_cols:-0}" != "1" ]; then echo "INFRA: 0010 NOT APPLIED (pinned_secret_generation_id missing)"; exit 2; fi
+if [ "${runtime_cols:-0}" != "1" ]; then
+  # Deterministic: the migration itself did not apply. Exit 1 so CI does NOT retry -- a broken migration
+  # fails the same way twice, and a retry that passed would mean something non-deterministic was hiding.
+  echo "0010 NOT APPLIED (pinned_secret_generation_id missing) -- the migration did not apply; this is a defect, not a flake"
+  exit 1
+fi
 echo "  iam_v2 tables=$built + 0010 applied"
 
 export PHASE3_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB"
