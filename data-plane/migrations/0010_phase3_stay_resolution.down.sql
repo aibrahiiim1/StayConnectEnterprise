@@ -56,6 +56,8 @@ DROP FUNCTION IF EXISTS iam_v2.deauthorize_entitlement_device(uuid,uuid,timestam
 DROP TRIGGER IF EXISTS p3_detect_delayed_accounting ON iam_v2.accounting_records;
 DROP FUNCTION IF EXISTS iam_v2.p3_detect_delayed_accounting();
 DROP FUNCTION IF EXISTS iam_v2.ingest_accounting_sample(uuid,uuid,uuid,bigint,bigint,bigint,timestamptz);
+DROP FUNCTION IF EXISTS iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz);
+DROP TABLE IF EXISTS iam_v2.accounting_checkpoints;
 ALTER TABLE iam_v2.accounting_records DROP COLUMN IF EXISTS ingested_at;
 DROP TABLE IF EXISTS iam_v2.delayed_accounting_records;
 DROP TABLE IF EXISTS iam_v2.entitlement_boundary_watermarks;

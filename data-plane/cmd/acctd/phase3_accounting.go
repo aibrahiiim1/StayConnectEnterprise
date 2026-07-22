@@ -2,23 +2,14 @@ package main
 
 // PHASE-3 ACCOUNTING PASS.
 //
-// This exists because the previous wiring was wrong in a way the tests could not see: the Phase-3 ingest was
-// called from the LEGACY loop, using session ids from the legacy `sessions` table, while the controlled
-// operation resolves sessions in `iam_v2.sessions`. Every call would have been refused as out-of-scope. The
-// tests passed because they invoked the operation directly with iam_v2 ids — they proved the operation, not
-// the composition. So the pass now reads its OWN session domain, and a composition-root test drives THIS
-// function rather than the operation beneath it.
+// The runtime submits what it can actually see — the ABSOLUTE tc counters — and the database decides what that
+// means. acctd keeps NO baseline of its own: the durable checkpoint is the baseline, which is the only way a
+// restart can be safe. A process that came back and adopted the current counter as "zero" would silently lose
+// every byte the guest used while it was down, and nothing anywhere would say so.
 //
-// Two further properties matter more than they look:
-//
-//   - SAMPLE IDENTITY IS DERIVED FROM THE SAMPLE, NOT FROM MEMORY. An in-memory per-session counter resets on
-//     restart, so the next sample would reuse an identity that is already stored, be classified DUPLICATE and
-//     have its bytes silently dropped — real usage lost, and nothing anywhere would say so. The identity is
-//     the sample's own tick instant (epoch seconds), which is stable across restarts, identical for a genuine
-//     retry of the same tick, and monotonic.
-//   - A FIRST OBSERVATION IS A BASELINE, NEVER A SAMPLE. After a start, a restart or a re-created tc class
-//     there is no previous reading to subtract, so the pass adopts the current counter and writes nothing.
-//     Writing the absolute counter would bill the guest for everything since the class was created.
+// The trusted reset signal comes from netd, the only process that creates or replaces these managed classes.
+// A counter that went backwards is otherwise ambiguous — a recreated class, a misread, or a minor reused by a
+// different guest — and accounting must never guess between those.
 
 import (
 	"context"
@@ -31,26 +22,28 @@ import (
 
 // phase3Session is one live Phase-3 session as the accounting pass sees it.
 type phase3Session struct {
-	ID     string
-	IP     net.IP
-	Bridge string
+	ID       string
+	DeviceID string
+	IP       net.IP
+	Bridge   string
 }
 
 // counterReader reads the tc classes of one interface. It is an interface so the pass can be driven with
-// synthetic deltas in a composition-root test.
+// synthetic counters in a composition-root test.
 type counterReader interface {
 	ReadClasses(ctx context.Context, iface string) (map[int]shape.ClassBytes, error)
 }
 
-// sampleSeqFor derives the durable identity of a sample from WHEN it was taken. Seconds are the right
-// granularity: the tick is seconds-scale, so two readings that land in the same second ARE the same tick and
-// collapsing them is correct, while a restart mid-tick re-derives exactly the same identity instead of
-// inventing a fresh one.
-func sampleSeqFor(at time.Time) int64 { return at.Unix() }
+// epochSource supplies the TC owner's generation per managed class. acctd never invents one: if netd cannot be
+// asked, the affected sessions are skipped rather than accounted against an unknown generation.
+type epochSource interface {
+	ClassEpochs(ctx context.Context) (map[string]int64, error)
+}
 
 // livePhase3Sessions returns the site's active Phase-3 sessions with the addressing the counters are keyed by.
 func (p *phase3) livePhase3Sessions(ctx context.Context) ([]phase3Session, error) {
-	rows, err := p.enf.Pool().Query(ctx, `SELECT s.id::text, COALESCE(host(s.ip),''), COALESCE(s.ingress_interface,'')
+	rows, err := p.enf.Pool().Query(ctx, `SELECT s.id::text, s.device_id::text, COALESCE(host(s.ip),''),
+			COALESCE(s.ingress_interface,'')
 		FROM iam_v2.sessions s
 		WHERE s.tenant_id=$1 AND s.site_id=$2 AND s.state='active' AND s.ended IS NULL
 		ORDER BY s.started`, p.tenant, p.site)
@@ -60,8 +53,8 @@ func (p *phase3) livePhase3Sessions(ctx context.Context) ([]phase3Session, error
 	defer rows.Close()
 	var out []phase3Session
 	for rows.Next() {
-		var id, ip, bridge string
-		if err := rows.Scan(&id, &ip, &bridge); err != nil {
+		var id, dev, ip, bridge string
+		if err := rows.Scan(&id, &dev, &ip, &bridge); err != nil {
 			return nil, err
 		}
 		parsed := net.ParseIP(ip)
@@ -70,55 +63,56 @@ func (p *phase3) livePhase3Sessions(ctx context.Context) ([]phase3Session, error
 			// attribute somebody else's traffic to this guest.
 			continue
 		}
-		out = append(out, phase3Session{ID: id, IP: parsed, Bridge: bridge})
+		out = append(out, phase3Session{ID: id, DeviceID: dev, IP: parsed, Bridge: bridge})
 	}
 	return out, rows.Err()
 }
 
-// accountingPass reads each live Phase-3 session's counters once, computes the delta against the previous
-// observation, and ingests it through the controlled operation. It returns the number of samples accepted,
-// which the tick logs — a pass that accepts nothing for a busy site is a symptom worth seeing.
-func (p *phase3) accountingPass(ctx context.Context, rd counterReader, fallbackBridge string, now time.Time) int {
+// accountingPass reads each live Phase-3 session's absolute counters once and submits them to the controlled
+// operation. It returns how many observations the database ACCEPTED as usage (baselines and duplicates are not
+// usage). A tc read failure for an interface skips every session on it — never a zero substitution, which
+// would look like "the guest stopped using the network" and, worse, would make the next real reading look like
+// a huge burst.
+func (p *phase3) accountingPass(ctx context.Context, rd counterReader, ep epochSource, fallbackBridge string, now time.Time) int {
 	if p == nil || !p.ownsAccounting() {
 		return 0
 	}
 	sessions, err := p.livePhase3Sessions(ctx)
 	if err != nil {
+		p.acctDegraded = "cannot load Phase-3 sessions: " + err.Error()
 		slog.Error("phase3: could not load sessions for accounting", "err", err)
 		return 0
 	}
 	if len(sessions) == 0 {
-		// No live sessions: drop the baselines so a returning session re-baselines rather than measuring a
-		// delta against a counter that belonged to a different class.
-		p.baseline = nil
+		p.acctDegraded = ""
 		return 0
 	}
-	if p.baseline == nil {
-		p.baseline = map[string]snapEntry{}
+	epochs, err := ep.ClassEpochs(ctx)
+	if err != nil {
+		// Without the TC owner's generation a backwards counter cannot be told from a reset. Skipping the pass
+		// preserves every checkpoint; the next tick tries again.
+		p.acctDegraded = "class generations unavailable: " + err.Error()
+		slog.Warn("phase3: class generations unavailable; accounting deferred", "err", err)
+		return 0
 	}
 
-	downCache := map[string]map[int]shape.ClassBytes{}
-	upCache := map[string]map[int]shape.ClassBytes{}
-	readDown := func(bridge string) map[int]shape.ClassBytes {
-		if m, ok := downCache[bridge]; ok {
-			return m
-		}
-		m, _ := rd.ReadClasses(ctx, bridge)
-		downCache[bridge] = m
-		return m
+	// counters are read once per interface, and a failed read poisons only that interface
+	type reading struct {
+		classes map[int]shape.ClassBytes
+		err     error
 	}
-	readUp := func(bridge string) map[int]shape.ClassBytes {
-		ifb := shape.IFBName(bridge)
-		if m, ok := upCache[ifb]; ok {
-			return m
+	cache := map[string]reading{}
+	read := func(iface string) reading {
+		if r, ok := cache[iface]; ok {
+			return r
 		}
-		m, _ := rd.ReadClasses(ctx, ifb)
-		upCache[ifb] = m
-		return m
+		m, err := rd.ReadClasses(ctx, iface)
+		r := reading{classes: m, err: err}
+		cache[iface] = r
+		return r
 	}
 
-	next := map[string]snapEntry{}
-	accepted := 0
+	accepted, degraded := 0, ""
 	for _, s := range sessions {
 		bridge := s.Bridge
 		if bridge == "" {
@@ -128,46 +122,51 @@ func (p *phase3) accountingPass(ctx context.Context, rd counterReader, fallbackB
 		if !ok {
 			continue
 		}
-		curUp := readUp(bridge)[minor].Bytes
-		curDown := readDown(bridge)[minor].Bytes
-		next[s.ID] = snapEntry{BytesUp: curUp, BytesDown: curDown}
-
-		prev, seen := p.baseline[s.ID]
-		if !seen {
-			// First observation (fresh session, acctd restart, or a rebuilt class): adopt the baseline and
-			// write nothing, so already-persisted usage is never counted twice.
+		down := read(bridge)
+		up := read(shape.IFBName(bridge))
+		if down.err != nil || up.err != nil {
+			// preserve the checkpoint and this session's history; retry next tick
+			degraded = "tc counters unreadable on " + bridge
 			continue
 		}
-		dUp := int64(curUp) - int64(prev.BytesUp)
-		dDown := int64(curDown) - int64(prev.BytesDown)
-		if dUp < 0 { // the class was re-created; count from zero rather than storing a negative delta
-			dUp = int64(curUp)
-		}
-		if dDown < 0 {
-			dDown = int64(curDown)
-		}
-		if dUp == 0 && dDown == 0 {
+		epoch, known := epochs[bridge+"|"+s.ID]
+		if !known {
+			// netd is not managing a class for this session yet (it has not been shaped, or the plan has not
+			// been applied). There is no trustworthy generation, so the observation is not submitted.
 			continue
 		}
-		class, err := p.ingestSample(ctx, sampleIdentity{SessionID: s.ID, Seq: sampleSeqFor(now)}, dUp, dDown, now)
+		class, err := p.ingestAbsolute(ctx, s, bridge, minor, epoch,
+			int64(up.classes[minor].Bytes), int64(down.classes[minor].Bytes), now)
 		if err != nil {
-			// A refused sample is NOT progress: keep the previous baseline so this delta is re-measured and
-			// re-offered next tick instead of being lost.
-			slog.Warn("phase3: accounting sample refused", "session", s.ID, "err", err)
-			next[s.ID] = prev
+			degraded = "accounting refused for a session: " + err.Error()
+			slog.Warn("phase3: absolute counter observation refused", "session", s.ID, "err", err)
 			continue
 		}
 		switch class {
-		case "ACCEPTED":
+		case "ACCEPTED", "DELAYED":
 			accepted++
-		case "DELAYED":
-			accepted++
-			slog.Info("phase3: sample belongs to a frozen period; recorded as delayed", "session", s.ID)
-		case "DUPLICATE":
-			// The same tick was already ingested (a retry, or two passes inside one second). The bytes are
-			// already stored, so advancing the baseline is correct — this is not lost usage.
 		}
 	}
-	p.baseline = next
+	p.acctDegraded = degraded
 	return accepted
+}
+
+// ingestAbsolute submits one session's absolute counters through the controlled operation.
+func (p *phase3) ingestAbsolute(ctx context.Context, s phase3Session, bridge string, minor int, epoch, absUp, absDown int64, at time.Time) (string, error) {
+	var class string
+	err := p.enf.Pool().QueryRow(ctx, `SELECT iam_v2.ingest_absolute_counters($1,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10)`,
+		p.tenant, p.site, s.ID, s.DeviceID, bridge, minor, epoch, absUp, absDown, at).Scan(&class)
+	if err != nil {
+		return "", err
+	}
+	return class, nil
+}
+
+// AccountingDegraded reports the truthful accounting state for health: empty when the last pass completed
+// cleanly, otherwise why it did not.
+func (p *phase3) AccountingDegraded() string {
+	if p == nil {
+		return ""
+	}
+	return p.acctDegraded
 }

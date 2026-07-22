@@ -174,7 +174,7 @@ func main() {
 			// Phase 3 runs on the same tick over its OWN session domain: measure first (so this tick's usage
 			// is attributed before anything is closed out), then enforce expiry at its true time, then submit
 			// the derived plan to netd — the single shaping writer. All three are no-ops while dark.
-			if n := p3.accountingPass(rootCtx, a.shp, c.LegacyBridge, time.Now()); n > 0 {
+			if n := p3.accountingPass(rootCtx, a.shp, netdShaping, c.LegacyBridge, time.Now()); n > 0 {
 				slog.Debug("phase3: accounting samples ingested", "count", n)
 			}
 			p3.enforceExpiries(rootCtx)

@@ -34,10 +34,11 @@ type phase3 struct {
 	// degraded is non-empty when the last derived plan could not be put in force. It is reported rather than
 	// hidden: an unapplied plan means the kernel and durable state disagree.
 	degraded string
-	// baseline is the previous counter reading per Phase-3 session. It is a BASELINE, not persisted state:
-	// after a restart it is empty, the next pass re-baselines and writes nothing, and no usage is invented.
-	baseline map[string]snapEntry
-	enf      *enforce.Enforcer
+	// acctDegraded is non-empty when the last accounting pass could not complete cleanly (unreadable counters,
+	// unavailable class generations, a refused observation). acctd keeps NO counter baseline of its own: the
+	// durable checkpoint in the database is the baseline, which is what makes a restart safe.
+	acctDegraded string
+	enf          *enforce.Enforcer
 	// site is the single site this appliance serves; expiry enforcement is scoped to it.
 	tenant, site string
 }
@@ -139,37 +140,6 @@ func (p *phase3) Degraded() string {
 	return p.degraded
 }
 
-// ---------------------------------------------------------------- Phase-3 sample ingestion
-
-// SampleIdentity is what makes a delivered counter delta idempotent. It is derived from facts that are stable
-// across retries and restarts — the session and the tick's sample sequence — so replaying a tick stores the
-// sample once rather than inflating the guest's usage.
-type sampleIdentity struct {
-	SessionID string
-	Seq       int64
-}
-
-// ingestSample persists ONE physical counter delta through the controlled Phase-3 operation and returns its
-// bounded classification (ACCEPTED / DELAYED / DUPLICATE). It is the ONLY Phase-3 accounting writer: the
-// caller must not also write the sample through the legacy path, and enforcePhase3Only below is what makes
-// that a decision rather than a convention.
-//
-// sampledAt is when the counters were READ. It is passed explicitly (never defaulted to now()) because a
-// sample taken before a Checkout boundary can arrive after it, and the difference is what separates real
-// pre-boundary usage from usage that would silently rewrite a frozen decision.
-func (p *phase3) ingestSample(ctx context.Context, id sampleIdentity, up, down int64, sampledAt time.Time) (string, error) {
-	if p == nil {
-		return "", nil // dark: no Phase-3 write at all
-	}
-	var class string
-	err := p.enf.Pool().QueryRow(ctx, `SELECT iam_v2.ingest_accounting_sample($1,$2,$3::uuid,$4,$5,$6,$7)`,
-		p.tenant, p.site, id.SessionID, id.Seq, up, down, sampledAt).Scan(&class)
-	if err != nil {
-		return "", err
-	}
-	return class, nil
-}
-
 // ownsAccounting reports whether Phase-3 owns accounting for this appliance. When it does, the legacy writer
 // must not run for the same sample: two rows for one physical delta would double every total derived from
 // them, and there is no way to tell afterwards which one was the duplicate.
@@ -244,4 +214,31 @@ func (n *netdShaper) SubmitShapingPlan(ctx context.Context, plan enforce.Plan, f
 		return shapingResult{}, err
 	}
 	return out, nil
+}
+
+// ClassEpochs asks netd for the current managed-class generations. acctd never invents one: if netd cannot be
+// reached the pass defers rather than judging a backwards counter on its own.
+func (n *netdShaper) ClassEpochs(ctx context.Context) (map[string]int64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://netd/v1/phase3/shaping/epochs", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := n.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("netd refused the class-generation request: %s", resp.Status)
+	}
+	var out struct {
+		Epochs map[string]int64 `json:"epochs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	if out.Epochs == nil {
+		out.Epochs = map[string]int64{}
+	}
+	return out.Epochs, nil
 }

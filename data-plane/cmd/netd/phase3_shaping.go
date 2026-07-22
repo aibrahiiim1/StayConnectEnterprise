@@ -63,6 +63,35 @@ type phase3Shaping struct {
 	shp         shaper
 	lastApplied time.Time
 	lastDegrade string
+	// epochs is the TC owner's generation per managed class, keyed by bridge/minor identity. netd is the only
+	// process that creates or replaces these classes, so it is the only honest source of "this counter series
+	// restarted". Without it, a counter that went backwards is ambiguous — a reset, a misread, or a minor
+	// reused by a different guest — and accounting would have to guess.
+	epochs map[string]int64
+}
+
+// classKey identifies one managed class for epoch purposes.
+func classKey(bridge, sessionID string) string { return bridge + "|" + sessionID }
+
+// bumpEpoch records that a managed class was (re)created, so the next counter reading is judged against a new
+// generation rather than compared with a series that no longer exists.
+func (p *phase3Shaping) bumpEpoch(bridge, sessionID string) int64 {
+	if p.epochs == nil {
+		p.epochs = map[string]int64{}
+	}
+	p.epochs[classKey(bridge, sessionID)]++
+	return p.epochs[classKey(bridge, sessionID)]
+}
+
+// Epochs returns the current generation of every managed class, for the accounting reader.
+func (p *phase3Shaping) Epochs() map[string]int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make(map[string]int64, len(p.epochs))
+	for k, v := range p.epochs {
+		out[k] = v
+	}
+	return out
 }
 
 // applyPhase3Shaping reconciles the kernel to the submitted plan. Teardown first, then shaping: the other
@@ -79,6 +108,7 @@ func (p *phase3Shaping) apply(ctx context.Context, plan shapingPlanRequest) shap
 			res.Problems = append(res.Problems, "tear: unusable addressing for session "+s.SessionID)
 			continue
 		}
+		p.bumpEpoch(s.Bridge, s.SessionID) // the series ends here; a future class for this session is a new one
 		if err := p.shp.DeleteSession(ctx, s.Bridge, ip); err != nil {
 			// A teardown failure is the serious one: it means traffic may still be forwarded for access that
 			// has ended, so it is reported as degraded rather than swallowed.
@@ -106,6 +136,13 @@ func (p *phase3Shaping) apply(ctx context.Context, plan shapingPlanRequest) shap
 			res.Failed++
 			res.Problems = append(res.Problems, "shape "+s.SessionID+": "+err.Error())
 			continue
+		}
+		if p.epochs == nil {
+			p.epochs = map[string]int64{}
+		}
+		if _, known := p.epochs[classKey(s.Bridge, s.SessionID)]; !known {
+			// first time this class is managed in this run: establish its generation
+			p.epochs[classKey(s.Bridge, s.SessionID)] = 1
 		}
 		res.Shaped++
 	}
@@ -149,4 +186,10 @@ func (p *phase3Shaping) status() map[string]any {
 		out["problem"] = p.lastDegrade
 	}
 	return out
+}
+
+// phase3EpochsHandler serves the current managed-class generations. Accounting reads them so a counter that
+// went backwards can be judged: a new generation is a trustworthy reset, the same generation is a regression.
+func (s *server) phase3EpochsHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"epochs": s.phase3.Epochs()})
 }

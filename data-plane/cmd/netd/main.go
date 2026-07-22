@@ -151,6 +151,8 @@ func main() {
 	// System (WAN/LAN) network management — the appliance's own base networking.
 	// Phase 3: the ONLY Phase-3 tc mutation entry point on this appliance (ADR-0002).
 	r.Post("/v1/phase3/shaping", srv.phase3ShapingHandler)
+	// the TC owner's per-class generations: the only trustworthy answer to "did this counter series restart?"
+	r.Get("/v1/phase3/shaping/epochs", srv.phase3EpochsHandler)
 
 	r.Get("/v1/system-network", srv.sysnetGet)
 	r.Post("/v1/system-network/validate", srv.sysnetValidate)
