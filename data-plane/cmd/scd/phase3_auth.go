@@ -111,6 +111,8 @@ func writeJSONScd(w http.ResponseWriter, code int, v any) {
 // ---- device identity (server-derived) --------------------------------------
 
 type deviceIdentity struct {
+	Tenant       string
+	Site         string
 	DeviceID     string
 	GuestNetwork string
 	IP           net.IP
@@ -157,7 +159,8 @@ func (p *phase3Auth) device(ctx context.Context, d wireDevice) (deviceIdentity, 
 	if err != nil {
 		return out, err
 	}
-	return deviceIdentity{DeviceID: id, GuestNetwork: nc.NetworkID, IP: ip, MAC: mac}, nil
+	return deviceIdentity{Tenant: p.srv.tenID, Site: p.srv.siteID,
+		DeviceID: id, GuestNetwork: nc.NetworkID, IP: ip, MAC: mac}, nil
 }
 
 // ---- resolve ---------------------------------------------------------------

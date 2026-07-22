@@ -53,6 +53,7 @@ DROP TRIGGER IF EXISTS p3_accounting_records_controlled_writer ON iam_v2.account
 DROP TRIGGER IF EXISTS p3_accounting_checkpoints_controlled_writer ON iam_v2.accounting_checkpoints;
 DROP TRIGGER IF EXISTS p3_delayed_accounting_controlled_writer ON iam_v2.delayed_accounting_records;
 DROP TRIGGER IF EXISTS p3_class_generation_controlled_writer ON iam_v2.appliance_class_generation;
+DROP TRIGGER IF EXISTS p3_auth_context_offers_controlled_writer ON iam_v2.auth_context_offers;
 DROP TRIGGER IF EXISTS p3_session_usage_controlled_writer ON iam_v2.sessions;
 DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_only();
 DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_owner(text);

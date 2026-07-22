@@ -123,18 +123,7 @@ else
   ok "no offline artifact claims live verification"
 fi
 
-if [ $JSON -eq 1 ]; then
-  printf '{"pass":%d,"fail":%d,"checks":[' "$pass" "$fail"
-  first=1
-  for r in "${RESULTS[@]}"; do
-    st="${r%%|*}"; msg="${r#*|}"
-    [ $first -eq 1 ] || printf ','
-    printf '{"status":"%s","check":"%s"}' "$st" "$(printf '%s' "$msg" | sed 's/"/\\"/g')"
-    first=0
-  done
-  printf ']}\n'
-else
-  # ---------------------------------------------------------------- 8. the Phase-3 control-plane invariants
+# ---------------------------------------------------------------- 8. the Phase-3 control-plane invariants
 # These four are the properties that make the single-writer decision (ADR-0002) and the controlled-writer
 # boundary real rather than documentary. Each is checked structurally, because each can be silently undone by
 # an ordinary-looking change.
@@ -179,7 +168,59 @@ else
   no "these Phase-3 services do not verify the writer boundary:$missing"
 fi
 
-echo "============================================================"
+# ---------------------------------------------------------------- 9. rollback ordering
+# Every trigger the up migration attaches to the controlled-writer guard has to be dropped BY NAME in the down
+# migration, and BEFORE the guard function itself is dropped. PostgreSQL refuses to drop a function while a
+# trigger still depends on it, so one missing line aborts the entire rollback -- and nothing that merely
+# APPLIES the migration can see it. That is why this has now slipped through twice: the failure only appears
+# on the rollback path, and only in CI. The check is static so it costs nothing and names the missing line.
+UP_SQL="$ROOT/data-plane/migrations/0010_phase3_stay_resolution.up.sql"
+DOWN_SQL="$ROOT/data-plane/migrations/0010_phase3_stay_resolution.down.sql"
+guard_line="$(grep -n 'DROP FUNCTION IF EXISTS iam_v2.p3_controlled_writer_only' "$DOWN_SQL" | head -1 | cut -d: -f1)"
+order_defect=""
+if [ -z "$guard_line" ]; then
+  order_defect=" the down migration never drops the controlled-writer guard function"
+else
+  # Each "CREATE TRIGGER <name> ... EXECUTE FUNCTION iam_v2.p3_controlled_writer_only();" in the up migration.
+  # The whole statement is accumulated up to its terminating semicolon before matching, so a trigger that
+  # merely happens to sit above a guarded one is not mistaken for a guarded trigger itself.
+  guarded="$(awk '
+    /CREATE TRIGGER/            { stmt=$0; name=$3; open=1 }
+    open && !/CREATE TRIGGER/   { stmt=stmt " " $0 }
+    open && /;[[:space:]]*$/    { if (stmt ~ /p3_controlled_writer_only\(\)/) print name; open=0 }
+  ' "$UP_SQL" | sort -u)"
+  [ -n "$guarded" ] || order_defect=" no guarded triggers found in the up migration (the check would be vacuous)"
+  for trg in $guarded; do
+    dl="$(grep -n "DROP TRIGGER IF EXISTS $trg " "$DOWN_SQL" | head -1 | cut -d: -f1)"
+    if [ -z "$dl" ]; then
+      order_defect="$order_defect $trg(never dropped)"
+    elif [ "$dl" -gt "$guard_line" ]; then
+      order_defect="$order_defect $trg(dropped after the guard function)"
+    fi
+  done
+fi
+if [ -z "$order_defect" ]; then
+  ok "every controlled-writer trigger is dropped by name before its guard function (rollback ordering)"
+else
+  no "rollback ordering defect:$order_defect"
+fi
+
+
+# ============================================================================== report
+# Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json
+# silently reported a smaller, all-passing suite.
+if [ $JSON -eq 1 ]; then
+  printf '{"pass":%d,"fail":%d,"checks":[' "$pass" "$fail"
+  first=1
+  for r in "${RESULTS[@]}"; do
+    st="${r%%|*}"; msg="${r#*|}"
+    [ $first -eq 1 ] || printf ','
+    printf '{"status":"%s","check":"%s"}' "$st" "$(printf '%s' "$msg" | sed 's/"/\\"/g')"
+    first=0
+  done
+  printf ']}\n'
+else
+  echo "============================================================"
   echo "PHASE3_PREFLIGHT: pass=$pass fail=$fail -> $([ $fail -eq 0 ] && echo PASS || echo FAIL)"
 fi
 [ $fail -eq 0 ]
