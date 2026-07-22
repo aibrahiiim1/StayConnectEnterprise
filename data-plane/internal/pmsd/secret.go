@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"errors"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -85,3 +86,59 @@ func aeadOpen(key, nonce, ciphertext, aad []byte) ([]byte, error) {
 	}
 	return gcm.Open(nil, nonce, ciphertext, aad)
 }
+
+// ---------- provisioning (the encrypt side) ----------
+
+// ErrSecretEncrypt is the single failure the provisioning side reports. It is deliberately not detailed: the
+// caller is an admin endpoint, and "which part of encrypting your credential failed" is not something an
+// operator can act on and not something worth putting in a response body.
+var ErrSecretEncrypt = errors.New("pmsd: secret encrypt failed")
+
+// SealedSecret is a credential ready to be stored as one generation row. It carries no plaintext.
+type SealedSecret struct {
+	GenerationID  string // the row id, chosen BEFORE sealing because it is part of the AAD
+	Ciphertext    []byte
+	Nonce         []byte
+	EncryptionKey string
+	CipherVersion int
+}
+
+// SealSecret encrypts a credential for exactly one (tenant, site, interface, generation).
+//
+// The AAD is produced by the SAME ownerAAD the decrypt path uses — not a copy of it. That is the whole point
+// of the binding: a ciphertext provisioned for one interface or one generation must fail authentication
+// anywhere else, and two hand-written AAD builders would drift until it didn't.
+//
+// generationID must be the id the row will actually be stored under. Sealing under one id and inserting under
+// another produces a row that decrypts nowhere, and the failure surfaces later as an unreachable PMS rather
+// than as a rejected rotation.
+func SealSecret(kr Keyring, keyID string, iface Interface, generationID string, plaintext []byte) (SealedSecret, error) {
+	key, ok := kr.Key(keyID)
+	if !ok || len(key) != 32 {
+		return SealedSecret{}, ErrSecretEncrypt
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return SealedSecret{}, ErrSecretEncrypt
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return SealedSecret{}, ErrSecretEncrypt
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return SealedSecret{}, ErrSecretEncrypt
+	}
+	aad := ownerAAD(iface, SecretGeneration{ID: generationID})
+	return SealedSecret{
+		GenerationID:  generationID,
+		Ciphertext:    gcm.Seal(nil, nonce, plaintext, aad),
+		Nonce:         nonce,
+		EncryptionKey: keyID,
+		CipherVersion: secretCipherVersion,
+	}, nil
+}
+
+// secretCipherVersion is the on-disk format marker for AES-256-GCM with the v1 owner AAD. It is stored with
+// every row so a future format change can be rolled out without guessing what an existing row is.
+const secretCipherVersion = 1

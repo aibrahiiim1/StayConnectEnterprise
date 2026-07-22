@@ -294,6 +294,9 @@ func main() {
 				mountResource(r, s, "pms-resolutions", s.pmsResolutionsRoutes)
 				mountResource(r, s, "checkout-grace", s.checkoutGraceConfigRoutes)
 				mountResource(r, s, "operational-alerts", s.operationalAlertsRoutes)
+				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
+				mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
+				mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
 			}
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "reports", s.reportsRoutes)
