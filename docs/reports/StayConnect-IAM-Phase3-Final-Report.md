@@ -827,9 +827,13 @@ b08b6cc @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege m
 
 ## 13. Remote reachability of HEAD
 
-- **Local HEAD:** `960ac3ef58a80289dd4fcb44ec6d0fa517adba03`
-- **Remote HEAD:** identical (pushed to `origin/phase/3-stay-resolution-grace`)
-- **Match:** yes
+- **Delivery HEAD:** the current tip of `phase/3-stay-resolution-grace`, pushed to
+  `origin/phase/3-stay-resolution-grace` and identical local/remote. A frozen SHA is deliberately **not**
+  written here: the delivery-only commit that adds this report cannot cite its own hash, so the authoritative
+  delivery HEAD lives in `governance/project-state.json` (`acceptance_candidate_head` = inventory_head, one
+  commit below the delivery HEAD) and in the PR #6 body, which also records the same-HEAD run IDs, the
+  evidence artifact id/name/size/retention, and the integrity-manifest SHA-256.
+- **Match:** local == remote (the push in §11 is fast-forward).
 
 ## 14. Full working-tree status
 
