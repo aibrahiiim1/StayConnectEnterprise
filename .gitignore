@@ -32,3 +32,7 @@ __pycache__/
 # scripts/phase3-evidence.sh at deployment time, not committed (a committed bundle is stale the moment the
 # next commit lands, and a stale bundle reads as current evidence).
 evidence/
+
+# Phase-3 software-gate staging + artifact (produced in CI, never committed)
+.phase3-evidence/
+.phase3-artifact/

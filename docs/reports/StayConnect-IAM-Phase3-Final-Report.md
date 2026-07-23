@@ -32,9 +32,9 @@
 **Live Increment-9 evidence: PENDING.** Nothing in this report was produced by contacting an appliance, a
 production database or a PMS, and no live result is simulated or inferred anywhere in it.
 
-Two dimensions are neither: the Hotel-Admin operator surfaces listed in
-`docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md` await an explicit Product-Owner decision. They are recorded in the
-matrix as such rather than being counted as passed or quietly dropped.
+The Hotel-Admin operator surfaces once listed in `docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md` are no longer
+pending a decision: the Product Owner **rejected the proposal (D15, Option C) with no scope reduction**, and
+they were built and are `PASS — SOFTWARE` in the matrix.
 
 **Phase 3 is NOT marked accepted or closed by this report.**
 
@@ -100,24 +100,30 @@ be re-derived rather than trusted.
 
 ## 6. Acceptance tests
 
-Every row below ran on the delivery HEAD recorded in §12. "PASS" means the suite ran to completion with no
-failing assertion and no skipped required test; nothing here is inferred from a previous run.
+Every row below is executed by the **Phase-3 Software workflow** (`.github/workflows/phase3-software.yml`,
+job `phase3-full-software-gate`) on the delivery HEAD recorded in §12, in one run, and its totals are recorded
+in the evidence artifact that run uploads (`phase3-software-evidence-<delivery-HEAD>`). "PASS" means the suite
+ran to completion with no failing assertion and no skipped required test; nothing here is a workstation number
+or inferred from a previous run. The totals below are deterministic for this HEAD and are the ones the
+artifact records; the run's numeric run IDs, artifact ID and integrity-manifest SHA-256 are in the PR #6 body
+(they cannot be embedded in the commit they describe — the same self-reference rule as the change manifest).
 
 | Test | Result | Evidence |
 |---|---|---|
-| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants) | **PASS 17/17** | `scripts/phase3-preflight.sh` |
-| Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 356/356** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
-| PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** | `scripts/pmsd-pg-integration.sh` |
-| Go unit tests, whole module | **PASS** | `go test ./...` |
-| Go race suite | **PASS** | `go test -race` (CI) |
+| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering) | **PASS 18/18** | `scripts/phase3-preflight.sh --json` |
+| Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 362/362** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
+| PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** (all eleven) | `scripts/pmsd-pg-integration.sh` |
+| Go unit tests, whole module | **PASS** | `go test ./... -count=1` (JSON-counted) |
+| Go race suite (pmsd, resolver, authctx, staygrant, checkout, scd, acctd, netd, writerguard, shape/shapeplan) | **PASS** | `go test -race` (CI) |
 | F1–F7 named flow suite | **PASS** | `internal/checkout/f_flows_integration_test.go`, `internal/stayengine` |
 | ≥24 concurrent checkout handlers / resolutions / grants / device authorizations | **PASS** | integration suites |
-| Hotel-Admin component tests | **PASS 51/51** | `npx vitest run` |
-| Hotel-Admin + guest-portal E2E and accessibility (real browser) | **PASS 23/23** | `npx playwright test` |
-| TypeScript typecheck | **PASS** | `npx tsc --noEmit` |
-| Guest-portal uniform non-success contract (server) | **PASS** | `cmd/portald/pms_phase3_test.go`, `pms_phase3_handlers_test.go` |
-| Guest-portal Phase-3 flow (real browser, real template) | **PASS 5/5** | `hotel-admin/e2e/phase3-guest-portal.spec.ts` |
-| Software CI + Governance CI on the same pushed HEAD | **PASS** | §12 |
+| Hotel-Admin component tests (Vitest) | **PASS 63/63** | `npx vitest run` (CI, JSON reporter) |
+| Hotel-Admin + guest-portal E2E and accessibility (real browser) | **PASS 49/49** | `npx playwright test` (CI, JSON reporter) |
+| TypeScript typecheck | **PASS** | `npx tsc --noEmit` (CI) |
+| Production build with Phase-3 flags OFF | **PASS** | `npx next build` (CI) |
+| Guest-portal uniform non-success contract (server) | **PASS** | `cmd/portald/pms_phase3_test.go`, `pms_phase3_handlers_test.go`, `pms_phase3_budget_test.go` |
+| Guest-portal Phase-3 flow + resilience (real browser, real template) | **PASS** | `hotel-admin/e2e/phase3-guest-portal*.spec.ts` |
+| Full Phase-3 Software CI + Governance CI on the same pushed HEAD, evidence artifact uploaded | **PASS** | §12 |
 | Live read-only PMS protocol verification | **PENDING** | operator-executed; not simulated |
 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING** | operator-executed; runbook §2–§5 |
 
@@ -131,13 +137,14 @@ reported green.
 
 ## 6a. Phase-3 Acceptance Matrix
 
-Three verdicts were authorised: `PASS — SOFTWARE`, `PENDING — LIVE INCREMENT 9`, and
-`OUT OF SCOPE BY APPROVED CONTRACT`. A fourth appears below —
-`PENDING — PO SCOPE DECISION` — for the Hotel-Admin surfaces covered by
-`docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md`. None of the three authorised verdicts is true of those rows: they
-did not pass, they are not waiting on live evidence, and no approved contract has excluded them. Recording
-them under any of the three would have been a false statement, so they are recorded as what they are — work
-awaiting a Product-Owner decision that has been formally proposed, not omitted.
+Three verdicts are used: `PASS — SOFTWARE`, `PENDING — LIVE INCREMENT 9`, and
+`OUT OF SCOPE BY APPROVED CONTRACT`. An earlier draft carried a fourth,
+`PENDING — PO SCOPE DECISION`, for the Hotel-Admin surfaces in
+`docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md`. **The Product Owner decided (D15, Option C): the proposal was
+REJECTED and no scope was reduced.** Those surfaces were built and are now `PASS — SOFTWARE` on the same
+footing as the rest — real `edged`→PostgreSQL API tests, RBAC, cross-site refusal, step-up, optimistic
+conflict, audit and redaction, plus Vitest, Playwright and accessibility. The fourth verdict no longer
+appears.
 
 | # | Dimension | Verdict | Evidence |
 |---|---|---|---|
@@ -164,11 +171,11 @@ awaiting a Product-Owner decision that has been formally proposed, not omitted.
 | 21 | Hotel Admin: Stay-Event review queue and refusal reasons | **PASS — SOFTWARE** | vitest + Playwright |
 | 22 | Hotel Admin: Checkout-Grace selector, publication, version conflict | **PASS — SOFTWARE** | vitest + Playwright; `cmd/edged` PG16 suite |
 | 23 | Hotel Admin: operational alert triage, bounded actions, concurrent change | **PASS — SOFTWARE** | vitest + Playwright; `cmd/edged` PG16 suite |
-| 24 | Hotel Admin: PMS Interfaces, Revisions, publish state | **PENDING — PO SCOPE DECISION** | `docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md` |
-| 25 | Hotel Admin: write-only Secret rotation | **PENDING — PO SCOPE DECISION** | proposal §2, §3 (needs its own write-path review) |
-| 26 | Hotel Admin: routing + intersection validation | **PENDING — PO SCOPE DECISION** | proposal §2 |
-| 27 | Hotel Admin: transport / continuity / sync / occupancy health, ingestion backlog | **PENDING — PO SCOPE DECISION** | proposal §2 |
-| 28 | Hotel Admin: Resolution evidence, source conflicts | **PENDING — PO SCOPE DECISION** | proposal §2 |
+| 24 | Hotel Admin: PMS Interfaces, immutable Revisions, current/published publish state | **PASS — SOFTWARE** | `cmd/edged/phase3_interfaces_api_integration_test.go`; `hotel-admin/test/phase3-interface-pages.test.tsx`; `e2e/phase3-pms-interfaces.spec.ts` |
+| 25 | Hotel Admin: write-only Secret rotation (AES-256-GCM, no read path, refused without a key) | **PASS — SOFTWARE** | `cmd/edged/phase3_interfaces_api_integration_test.go`; `internal/pmsd/secret.go` seal path |
+| 26 | Hotel Admin: Guest-Network→PMS routing, including the networks mapped to nothing | **PASS — SOFTWARE** | `cmd/edged/phase3_interfaces_api_integration_test.go`; `e2e/phase3-pms-interfaces.spec.ts` |
+| 27 | Hotel Admin: transport / continuity / sync / occupancy health, ingestion backlog with oldest-waiting age | **PASS — SOFTWARE** | `cmd/edged/phase3_interfaces_api_integration_test.go` (derived-health + never-connected) |
+| 28 | Hotel Admin: Resolution evidence (no guest PII), source conflicts naming both interfaces | **PASS — SOFTWARE** | `cmd/edged/phase3_interfaces_api_integration_test.go`; `e2e/phase3-pms-interfaces.spec.ts` |
 | 29 | Flags OFF by default; a child flag without its master is a startup failure | **PASS — SOFTWARE** | `internal/iamv2/pms_config.go`; preflight |
 | 30 | Dark appliance issues zero Phase-3 SQL, mounts no Phase-3 route, mutates no tc | **PASS — SOFTWARE** | acctd/netd/scd/edged dark tests |
 | 31 | Live read-only PMS protocol verification | **PENDING — LIVE INCREMENT 9** | operator-executed; never simulated |
@@ -796,8 +803,27 @@ b08b6cc @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege m
 - **Branch:** `phase/3-stay-resolution-grace`
 - **PR URL:** https://github.com/aibrahiiim1/StayConnectEnterprise/pull/6 (**OPEN, UNMERGED**)
 - **PR base ← head:** `master` ← `phase/3-stay-resolution-grace`
-- **CI on the delivery HEAD:** Phase 3 Software CI — SUCCESS · Project Governance — SUCCESS (both on the same
-  pushed HEAD; run IDs recorded in the PR body).
+- **CI on the delivery HEAD (both on the same pushed HEAD):**
+  - **Phase 3 Software CI** — job `phase3-full-software-gate`. One run executes the WHOLE software gate:
+    gofmt over the entire Phase-3 Go surface, `go build`, full `go vet`, the whole Go unit suite, the race
+    detector over every Phase-3 concurrency-sensitive package, the Migration 0010 lifecycle gate, all eleven
+    disposable-PG16 integration suites, the offline preflight, and — under a locked Node install from
+    `hotel-admin/` — TypeScript typecheck, Vitest, the production build with Phase-3 flags OFF, and the
+    Playwright browser suite (Hotel-Admin pages + guest-portal real template + accessibility). After every
+    step passes it assembles and **uploads a downloadable evidence artifact**, `phase3-software-evidence-<HEAD>`
+    (retention 90 days), whose `RUN_META.json` records the delivery/inventory/base HEADs, the run id, the UTC
+    window, tool versions, lock/migration hashes, per-step exit codes and durations, per-suite test totals and
+    skip totals, infrastructure retries, the restrictions confirmation and the Live-Increment-9 pending list,
+    plus a `MANIFEST.sha256` over every file in the artifact.
+  - **Project Governance** — SUCCESS on the same HEAD.
+  - The numeric **run IDs**, the **artifact ID**, the **artifact size/retention** and the
+    **integrity-manifest SHA-256** are recorded in the PR #6 body. They are run metadata and cannot be
+    embedded in the commit they describe — the same self-reference rule the change manifest already follows.
+  - **Correction of record:** an earlier revision of this report and the PR body stated that the Software CI
+    proved the Vitest and Playwright suites and published the evidence artifact. That was not true of the
+    then-current workflow, which ran only the Go/backend steps; the frontend suites had been run on a
+    workstation. This is the corrected, full gate. No historical run is described as having contained steps it
+    did not run.
 
 ## 13. Remote reachability of HEAD
 
@@ -828,8 +854,16 @@ b08b6cc @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege m
 
 SHA-256 values are recorded in `exports/chatgpt/*/PACK_SHA256SUMS.txt`, regenerated with the packs.
 
-Per-run evidence bundles are produced by `scripts/phase3-evidence.sh` and are deliberately **not committed**: a
-committed bundle is stale the moment the next commit lands yet still reads as current evidence.
+**The authoritative Phase-3 software evidence is the artifact the Software CI uploads on the delivery HEAD**
+(`phase3-software-evidence-<HEAD>`), not a repository ZIP. It is downloadable from the exact successful
+Software run, contains only Phase-3 evidence, and carries a `MANIFEST.sha256` over all of its files. The
+committed export packs above are the project/plan packs; **the older Phase-1A live-dark acceptance pack was
+NOT reused, renamed or repurposed as Phase-3 evidence** — the Phase-3 artifact is generated fresh, in CI, per
+run, and its `RUN_META.json` embeds this delivery HEAD.
+
+`scripts/phase3-evidence.sh` remains as a local offline convenience bundle and is deliberately **not
+committed**: a committed bundle is stale the moment the next commit lands yet still reads as current evidence.
+It is not the same-HEAD CI artifact and is not cited as acceptance evidence.
 
 ## 17. `PROJECT_STATE_GOVERNANCE` result
 
