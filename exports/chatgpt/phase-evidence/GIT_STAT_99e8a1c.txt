@@ -1,4 +1,0 @@
-commit 99e8a1ce97f2fcbd5aac3bfa5aa49da2b29ce22b
-Date:   Thu Jul 23 01:24:23 2026 +0300
-
-    Phase 3 Â§7: downloadable evidence artifact with a SHA-256 integrity manifest
