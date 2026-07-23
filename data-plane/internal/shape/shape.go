@@ -44,15 +44,25 @@ type Client struct {
 	TCPath string
 	IPPath string
 
+	// exec runs one external command and returns its combined output. It is a field so the staged
+	// provisioning can be proven at the command level — that a re-rate is `class change` (counter-preserving)
+	// and not delete+add, that a prepared class has no filter — without a kernel. Production uses realExec.
+	exec func(ctx context.Context, name string, args ...string) ([]byte, error)
+
 	mu         sync.Mutex
 	infraReady map[string]bool // bridge -> ingress/IFB redirect established this process
 	bridgeMu   map[string]*sync.Mutex
+}
+
+func realExec(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 func New() *Client {
 	return &Client{
 		TCPath:     "/usr/sbin/tc",
 		IPPath:     "/usr/sbin/ip",
+		exec:       realExec,
 		infraReady: map[string]bool{},
 		bridgeMu:   map[string]*sync.Mutex{},
 	}
@@ -191,6 +201,172 @@ func (c *Client) AddSession(ctx context.Context, bridge string, ip net.IP, downK
 	return nil
 }
 
+// ---- staged, accountable-before-forwarding provisioning ---------------------
+//
+// AddSession above installs the class AND its forwarding filter in one call, so the moment it returns the
+// guest's packets are already being classified into that class. That is wrong for a MANAGED Phase-3 class:
+// nothing may be forwarded through it until its counter series has a durable, authoritative accounting
+// origin. So the Phase-3 path (netd) never calls AddSession — it stages provisioning:
+//
+//	PrepareSession   creates the download and upload classes WITHOUT any forwarding filter. The classes exist
+//	                 and their absolute counters can be read, but no guest packet is classified into them —
+//	                 the guest's traffic still flows through the bridge's default class, exactly as it did
+//	                 before this session was ever prepared. This is the state an origin is registered against.
+//	ActivateSession  installs both forwarding filters, so from this instant the guest's traffic is classified
+//	                 into the (now accountable) class. It rolls the first filter back if the second fails, so a
+//	                 half-activated session never forwards in only one direction.
+//	AbortSession     removes filters and classes in both directions and PROVES they are gone, for the
+//	                 fail-closed path: anything that did not fully provision leaves nothing forwarding.
+//	DenyForwarding   the last-resort quarantine: strip the forwarding filters even if the classes cannot be
+//	                 removed, so a class that will not delete is left provably non-forwarding.
+//	ReRateSession    changes an already-active class's rate IN PLACE (`tc class change`, never delete+add), so
+//	                 an ordinary re-rate preserves the byte counters and the class keeps its generation.
+
+// PrepareSession creates the download+upload HTB classes for ip WITHOUT their guest forwarding filters. The
+// prepared classes carry no guest packets; they exist only to be read (for the accounting origin) and later
+// activated. It clears any stale leaf first so a crashed prior attempt cannot survive as a half-class.
+func (c *Client) PrepareSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error {
+	cid := ClassidForIP(ip)
+	if cid == "" {
+		return fmt.Errorf("ipv4 required, got %s", ip)
+	}
+	if err := c.EnsureBridgeInfra(ctx, bridge); err != nil {
+		return err
+	}
+	// Remove any stale class+filter for this slot (a crashed prepare, or a different session that held the
+	// same minor) so preparation starts from nothing forwarding.
+	_ = c.DeleteSession(ctx, bridge, ip)
+
+	const unlimitedKbps = 1_000_000
+	downRate, upRate := downKbps, upKbps
+	if downRate <= 0 {
+		downRate = unlimitedKbps
+	}
+	if upRate <= 0 {
+		upRate = unlimitedKbps
+	}
+	ifb := IFBName(bridge)
+	if err := c.addClass(ctx, bridge, cid, downRate); err != nil {
+		return fmt.Errorf("prepare download class on %s: %w", bridge, err)
+	}
+	if err := c.addClass(ctx, ifb, cid, upRate); err != nil {
+		// Roll the download class back so a failed prepare leaves no half-class behind.
+		c.removeClassByPref(ctx, bridge, cid, filterPrefFor(ip))
+		return fmt.Errorf("prepare upload class on %s: %w", ifb, err)
+	}
+	return nil
+}
+
+// ActivateSession installs the download and upload forwarding filters for an already-prepared class. Only
+// after this does the class carry guest packets. If the second filter fails, the first is removed, so a
+// session is never left forwarding in one direction only.
+func (c *Client) ActivateSession(ctx context.Context, bridge string, ip net.IP) error {
+	cid := ClassidForIP(ip)
+	if cid == "" {
+		return fmt.Errorf("ipv4 required, got %s", ip)
+	}
+	ifb := IFBName(bridge)
+	if err := c.addFilter(ctx, bridge, cid, "dst", ip); err != nil {
+		return fmt.Errorf("activate download filter on %s: %w", bridge, err)
+	}
+	if err := c.addFilter(ctx, ifb, cid, "src", ip); err != nil {
+		_ = c.removeFilter(ctx, bridge, ip)
+		return fmt.Errorf("activate upload filter on %s: %w", ifb, err)
+	}
+	return nil
+}
+
+// AbortSession removes both classes and both filters and then PROVES the class is gone on both devices. It is
+// the fail-closed cleanup: after it returns nil, nothing for this ip forwards or is countable. If it cannot
+// prove removal it returns an error, so the caller can escalate to DenyForwarding.
+func (c *Client) AbortSession(ctx context.Context, bridge string, ip net.IP) error {
+	// Filters first, so forwarding stops even if a class delete later fails.
+	_ = c.removeFilter(ctx, bridge, ip)
+	_ = c.removeFilter(ctx, IFBName(bridge), ip)
+	_ = c.removeClassAndFilter(ctx, bridge, cidClass(ip), ip)
+	_ = c.removeClassAndFilter(ctx, IFBName(bridge), cidClass(ip), ip)
+	minor, ok := MinorForIP(ip)
+	if !ok {
+		return nil
+	}
+	for _, dev := range []string{bridge, IFBName(bridge)} {
+		classes, err := c.ReadClasses(ctx, dev)
+		if err != nil {
+			return fmt.Errorf("abort: could not confirm class removal on %s: %w", dev, err)
+		}
+		if _, still := classes[minor]; still {
+			return fmt.Errorf("abort: class %d still present on %s after removal", minor, dev)
+		}
+	}
+	return nil
+}
+
+// DenyForwarding is the last-resort quarantine used when AbortSession could not prove the classes gone: strip
+// the forwarding filters in both directions so, whatever state the classes are in, no guest packet is
+// classified into them. A class with no filter forwards nothing.
+func (c *Client) DenyForwarding(ctx context.Context, bridge string, ip net.IP) error {
+	e1 := c.removeFilter(ctx, bridge, ip)
+	e2 := c.removeFilter(ctx, IFBName(bridge), ip)
+	if e1 != nil {
+		return e1
+	}
+	return e2
+}
+
+// ReRateSession changes an already-active class's rate/ceil in place on both directions. It uses
+// `tc class change`, never delete+add, so the class's byte counters are preserved — an ordinary re-rate must
+// not look like a counter reset. It fails if the class is not already present (the caller then provisions).
+func (c *Client) ReRateSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error {
+	cid := ClassidForIP(ip)
+	if cid == "" {
+		return fmt.Errorf("ipv4 required, got %s", ip)
+	}
+	const unlimitedKbps = 1_000_000
+	downRate, upRate := downKbps, upKbps
+	if downRate <= 0 {
+		downRate = unlimitedKbps
+	}
+	if upRate <= 0 {
+		upRate = unlimitedKbps
+	}
+	if err := c.changeClass(ctx, bridge, cid, downRate); err != nil {
+		return fmt.Errorf("re-rate download on %s: %w", bridge, err)
+	}
+	if err := c.changeClass(ctx, IFBName(bridge), cid, upRate); err != nil {
+		return fmt.Errorf("re-rate upload on %s: %w", IFBName(bridge), err)
+	}
+	return nil
+}
+
+// cidClass is ClassidForIP but panics-free for callers that already validated ip.
+func cidClass(ip net.IP) string { return ClassidForIP(ip) }
+
+// SessionForwarding reports whether the guest forwarding filter is installed in BOTH directions — i.e. the
+// class is actually classifying packets, not merely prepared. It is the post-activation verification: a class
+// that exists but whose filter never took is a class that silently forwards nothing.
+func (c *Client) SessionForwarding(ctx context.Context, bridge string, ip net.IP) (bool, error) {
+	down, err := c.filterPresent(ctx, bridge, ip)
+	if err != nil {
+		return false, err
+	}
+	up, err := c.filterPresent(ctx, IFBName(bridge), ip)
+	if err != nil {
+		return false, err
+	}
+	return down && up, nil
+}
+
+// filterPresent reports whether the per-IP u32 filter (identified by its pref) is installed on a device.
+func (c *Client) filterPresent(ctx context.Context, dev string, ip net.IP) (bool, error) {
+	out, err := c.exec(ctx, c.TCPath, "filter", "show", "dev", dev, "parent", RootParent)
+	if err != nil {
+		// A missing device has no filters; that is a definite "not forwarding", not an error to propagate.
+		return false, nil
+	}
+	want := fmt.Sprintf("pref %d ", filterPrefFor(ip))
+	return bytes.Contains(out, []byte(want)), nil
+}
+
 // DeleteSession removes the classes & filters for ip on both directions
 // (no-op if absent).
 func (c *Client) DeleteSession(ctx context.Context, bridge string, ip net.IP) error {
@@ -244,6 +420,15 @@ func filterPrefFor(ip net.IP) int {
 }
 
 func (c *Client) addClassAndFilter(ctx context.Context, ifc, cid string, kbps int, matchField string, ip net.IP) error {
+	if err := c.addClass(ctx, ifc, cid, kbps); err != nil {
+		return err
+	}
+	return c.addFilter(ctx, ifc, cid, matchField, ip)
+}
+
+// addClass creates the HTB class and its leaf qdisc on a device, WITHOUT any classifying filter. A class with
+// no filter receives no packets, so this is the "prepared, non-forwarding" half of provisioning.
+func (c *Client) addClass(ctx context.Context, ifc, cid string, kbps int) error {
 	rate := fmt.Sprintf("%dkbit", kbps)
 	if err := c.run(ctx, "class", "add", "dev", ifc, "parent", RootParent,
 		"classid", cid, "htb", "rate", rate, "ceil", rate, "burst", "32k"); err != nil {
@@ -254,13 +439,32 @@ func (c *Client) addClassAndFilter(ctx context.Context, ifc, cid string, kbps in
 		"handle", minor+":", "fq_codel"); err != nil {
 		return err
 	}
-	pref := fmt.Sprintf("%d", filterPrefFor(ip))
-	if err := c.run(ctx, "filter", "add", "dev", ifc, "protocol", "ip",
-		"parent", RootParent, "pref", pref, "u32",
-		"match", "ip", matchField, ip.String()+"/32", "flowid", cid); err != nil {
-		return err
-	}
 	return nil
+}
+
+// changeClass adjusts an existing class's rate/ceil in place. `class change` preserves the class's byte
+// counters — unlike delete+add, which resets them — so an ordinary re-rate does not look like a series reset.
+func (c *Client) changeClass(ctx context.Context, ifc, cid string, kbps int) error {
+	rate := fmt.Sprintf("%dkbit", kbps)
+	return c.run(ctx, "class", "change", "dev", ifc, "parent", RootParent,
+		"classid", cid, "htb", "rate", rate, "ceil", rate, "burst", "32k")
+}
+
+// addFilter installs the u32 classifying filter that directs the guest's packets into the class. This is the
+// step that makes a prepared class start forwarding.
+func (c *Client) addFilter(ctx context.Context, ifc, cid, matchField string, ip net.IP) error {
+	pref := fmt.Sprintf("%d", filterPrefFor(ip))
+	return c.run(ctx, "filter", "add", "dev", ifc, "protocol", "ip",
+		"parent", RootParent, "pref", pref, "u32",
+		"match", "ip", matchField, ip.String()+"/32", "flowid", cid)
+}
+
+// removeFilter deletes just the classifying filter (by its per-IP pref), leaving the class in place. Removing
+// the filter stops forwarding into the class without destroying its counters.
+func (c *Client) removeFilter(ctx context.Context, ifc string, ip net.IP) error {
+	pref := fmt.Sprintf("%d", filterPrefFor(ip))
+	return c.run(ctx, "filter", "del", "dev", ifc, "parent", RootParent,
+		"pref", pref, "protocol", "ip", "u32")
 }
 
 func (c *Client) removeClassAndFilter(ctx context.Context, ifc, cid string, ip net.IP) error {
@@ -293,7 +497,7 @@ var sentRe = regexp.MustCompile(`^\s*Sent\s+(\d+)\s+bytes\s+(\d+)\s+pkt\b`)
 // (e.g. 0x1067). Non-guest classes and a missing device are ignored/empty.
 // Ubuntu 22.04's tc has no JSON for class stats, so we parse the text form.
 func (c *Client) ReadClasses(ctx context.Context, device string) (map[int]ClassBytes, error) {
-	out, err := exec.CommandContext(ctx, c.TCPath, "-s", "class", "show", "dev", device).Output()
+	out, err := c.exec(ctx, c.TCPath, "-s", "class", "show", "dev", device)
 	if err != nil {
 		// Device may not exist yet (no sessions on this bridge) — treat as empty.
 		return map[int]ClassBytes{}, nil
@@ -338,8 +542,7 @@ func (c *Client) ReadClasses(ctx context.Context, device string) (map[int]ClassB
 }
 
 func (c *Client) run(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, c.TCPath, args...)
-	out, err := cmd.CombinedOutput()
+	out, err := c.exec(ctx, c.TCPath, args...)
 	if err != nil {
 		return fmt.Errorf("tc %v: %w — %s", args, err, strings.TrimSpace(string(out)))
 	}
@@ -347,8 +550,7 @@ func (c *Client) run(ctx context.Context, args ...string) error {
 }
 
 func (c *Client) ipRun(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, c.IPPath, args...)
-	out, err := cmd.CombinedOutput()
+	out, err := c.exec(ctx, c.IPPath, args...)
 	if err != nil {
 		return fmt.Errorf("ip %v: %w — %s", args, err, strings.TrimSpace(string(out)))
 	}

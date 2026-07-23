@@ -171,6 +171,30 @@ else
   no "these Phase-3 services do not verify the writer boundary:$missing"
 fi
 
+# (e) ACCOUNTABLE BEFORE FORWARDING. netd must register a class's accounting origin BEFORE it activates the
+# guest forwarding filters, or a class could carry unaccounted traffic. This is checked structurally, by line
+# order in the one function that provisions a class: the registerOrigin call must precede the ActivateSession
+# call, and the guest filters must never be installed by anything but ActivateSession. A reordering that broke
+# the invariant would pass every functional test that only checks the happy path — this catches it at the door.
+PROV="$ROOT/data-plane/cmd/netd/phase3_provision.go"
+reg_line="$(grep -n 'registerOrigin(' "$PROV" | head -1 | cut -d: -f1)"
+act_line="$(grep -n 'ActivateSession(' "$PROV" | head -1 | cut -d: -f1)"
+prep_line="$(grep -n 'PrepareSession(' "$PROV" | head -1 | cut -d: -f1)"
+if [ -n "$reg_line" ] && [ -n "$act_line" ] && [ -n "$prep_line" ] \
+   && [ "$prep_line" -lt "$reg_line" ] && [ "$reg_line" -lt "$act_line" ]; then
+  ok "netd prepares, then registers the accounting origin, then activates forwarding (accountable before forwarding)"
+else
+  no "netd's provisioning order is not prepare -> register origin -> activate (accountable-before-forwarding invariant)"
+fi
+# The forwarding filter is installed ONLY by the staged ActivateSession — never by AddSession, which installs a
+# class and its filter together and is the legacy (non-Phase-3) path scd uses.
+if grep -q 'AddSession(' "$ROOT/data-plane/cmd/netd/phase3_provision.go" 2>/dev/null \
+   || grep -q 'shp.AddSession(' "$ROOT/data-plane/cmd/netd/phase3_shaping.go" 2>/dev/null; then
+  no "netd's Phase-3 shaping path calls AddSession (class+filter in one step); it must stage Prepare/Activate"
+else
+  ok "netd's Phase-3 shaping never installs a class-and-filter in one step (no AddSession on the managed path)"
+fi
+
 # ---------------------------------------------------------------- 9. rollback ordering
 # Every trigger the up migration attaches to the controlled-writer guard has to be dropped BY NAME in the down
 # migration, and BEFORE the guard function itself is dropped. PostgreSQL refuses to drop a function while a

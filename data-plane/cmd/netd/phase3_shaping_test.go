@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -38,15 +39,31 @@ type fakeTC struct {
 	calls   []tcCall
 	failAdd map[string]error
 	failDel map[string]error
-	// installed models the kernel: bridge -> minor -> the class that is actually there. Reconciliation is
-	// only meaningful against something that remembers what a previous plan (or a crash) left behind.
+	// installed models the kernel CLASSES: device -> minor -> the class that is actually there (a prepared
+	// class exists here even though it has no forwarding filter). Reconciliation is only meaningful against
+	// something that remembers what a previous plan (or a crash) left behind.
 	installed map[string]map[int]tcCall
-	readErr   map[string]error
+	// forwarding models the kernel FILTERS separately: device -> minor -> whether a guest forwarding filter is
+	// installed. A prepared-but-not-activated class is installed==true, forwarding==false — it carries no
+	// guest packets. This split is what lets the staged-provisioning tests prove "prepared does not forward".
+	forwarding map[string]map[int]bool
+	readErr    map[string]error
+
+	// per-stage failure injection, keyed by guest IP.
+	failPrepare        map[string]error // download (bridge) class preparation
+	failPrepareUpload  map[string]error // upload (ifb) class preparation
+	failActivate       map[string]error // download filter activation
+	failActivateUpload map[string]error // upload filter activation
+	failReRate         map[string]error
+	failAbort          map[string]bool // AbortSession cannot remove the class (returns error, leaves it)
 }
 
 func newFakeTC() *fakeTC {
 	return &fakeTC{failAdd: map[string]error{}, failDel: map[string]error{},
-		installed: map[string]map[int]tcCall{}, readErr: map[string]error{}}
+		installed: map[string]map[int]tcCall{}, forwarding: map[string]map[int]bool{}, readErr: map[string]error{},
+		failPrepare: map[string]error{}, failPrepareUpload: map[string]error{},
+		failActivate: map[string]error{}, failActivateUpload: map[string]error{},
+		failReRate: map[string]error{}, failAbort: map[string]bool{}}
 }
 
 func (f *fakeTC) EnsureBridgeInfra(ctx context.Context, bridge string) error {
@@ -56,17 +73,119 @@ func (f *fakeTC) EnsureBridgeInfra(ctx context.Context, bridge string) error {
 	return nil
 }
 
-func (f *fakeTC) AddSession(ctx context.Context, bridge string, ip net.IP, down, up int) error {
+// setFwd records/clears a forwarding filter for a minor on a device (caller holds the lock).
+func (f *fakeTC) setFwd(device string, minor int, on bool) {
+	if f.forwarding[device] == nil {
+		f.forwarding[device] = map[int]bool{}
+	}
+	if on {
+		f.forwarding[device][minor] = true
+	} else {
+		delete(f.forwarding[device], minor)
+	}
+}
+
+// PrepareSession installs the download+upload classes WITHOUT forwarding filters, on both the bridge and its
+// ifb. It clears any stale class+filter for the slot first, as the real client does.
+func (f *fakeTC) PrepareSession(ctx context.Context, bridge string, ip net.IP, down, up int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	minor, _ := shape.MinorForIP(ip)
-	c := tcCall{op: "add", bridge: bridge, ip: ip.String(), minor: minor, down: down, up: up}
-	f.calls = append(f.calls, c)
-	if err, ok := f.failAdd[ip.String()]; ok {
+	ifb := shape.IFBName(bridge)
+	f.calls = append(f.calls, tcCall{op: "prepare", bridge: bridge, ip: ip.String(), minor: minor, down: down, up: up})
+	// clear stale first (like DeleteSession)
+	f.delClass(bridge, minor)
+	f.delClass(ifb, minor)
+	if err, ok := f.failPrepare[ip.String()]; ok {
 		return err
 	}
-	f.put(bridge, minor, c)
+	f.put(bridge, minor, tcCall{op: "prepare", bridge: bridge, ip: ip.String(), minor: minor, down: down, up: up})
+	if err, ok := f.failPrepareUpload[ip.String()]; ok {
+		f.delClass(bridge, minor) // roll the download class back, as the real client does
+		return err
+	}
+	f.put(ifb, minor, tcCall{op: "prepare", bridge: ifb, ip: ip.String(), minor: minor, down: down, up: up})
 	return nil
+}
+
+func (f *fakeTC) ActivateSession(ctx context.Context, bridge string, ip net.IP) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	minor, _ := shape.MinorForIP(ip)
+	ifb := shape.IFBName(bridge)
+	f.calls = append(f.calls, tcCall{op: "activate", bridge: bridge, ip: ip.String(), minor: minor})
+	if err, ok := f.failActivate[ip.String()]; ok {
+		return err
+	}
+	f.setFwd(bridge, minor, true)
+	if err, ok := f.failActivateUpload[ip.String()]; ok {
+		f.setFwd(bridge, minor, false) // roll the download filter back
+		return err
+	}
+	f.setFwd(ifb, minor, true)
+	return nil
+}
+
+func (f *fakeTC) AbortSession(ctx context.Context, bridge string, ip net.IP) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	minor, _ := shape.MinorForIP(ip)
+	ifb := shape.IFBName(bridge)
+	f.calls = append(f.calls, tcCall{op: "abort", bridge: bridge, ip: ip.String(), minor: minor})
+	// forwarding always stops first
+	f.setFwd(bridge, minor, false)
+	f.setFwd(ifb, minor, false)
+	if f.failAbort[ip.String()] {
+		// class cannot be removed; it remains installed but non-forwarding
+		return fmt.Errorf("abort: class %d could not be removed", minor)
+	}
+	f.delClass(bridge, minor)
+	f.delClass(ifb, minor)
+	return nil
+}
+
+func (f *fakeTC) DenyForwarding(ctx context.Context, bridge string, ip net.IP) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	minor, _ := shape.MinorForIP(ip)
+	f.calls = append(f.calls, tcCall{op: "deny", bridge: bridge, ip: ip.String(), minor: minor})
+	f.setFwd(bridge, minor, false)
+	f.setFwd(shape.IFBName(bridge), minor, false)
+	return nil
+}
+
+func (f *fakeTC) ReRateSession(ctx context.Context, bridge string, ip net.IP, down, up int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	minor, _ := shape.MinorForIP(ip)
+	ifb := shape.IFBName(bridge)
+	f.calls = append(f.calls, tcCall{op: "rerate", bridge: bridge, ip: ip.String(), minor: minor, down: down, up: up})
+	if err, ok := f.failReRate[ip.String()]; ok {
+		return err
+	}
+	// class change requires the class present on both devices; it never deletes+recreates (counters preserved)
+	if _, d := f.installed[bridge][minor]; !d {
+		return fmt.Errorf("re-rate: no download class for minor %d", minor)
+	}
+	if _, u := f.installed[ifb][minor]; !u {
+		return fmt.Errorf("re-rate: no upload class for minor %d", minor)
+	}
+	return nil
+}
+
+func (f *fakeTC) SessionForwarding(ctx context.Context, bridge string, ip net.IP) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	minor, _ := shape.MinorForIP(ip)
+	return f.forwarding[bridge][minor] && f.forwarding[shape.IFBName(bridge)][minor], nil
+}
+
+// delClass removes a class and its forwarding filter on one device (caller holds the lock).
+func (f *fakeTC) delClass(device string, minor int) {
+	if m := f.installed[device]; m != nil {
+		delete(m, minor)
+	}
+	f.setFwd(device, minor, false)
 }
 
 func (f *fakeTC) DeleteSession(ctx context.Context, bridge string, ip net.IP) error {
@@ -77,9 +196,8 @@ func (f *fakeTC) DeleteSession(ctx context.Context, bridge string, ip net.IP) er
 	if err, ok := f.failDel[ip.String()]; ok {
 		return err
 	}
-	if m := f.installed[bridge]; m != nil {
-		delete(m, minor)
-	}
+	f.delClass(bridge, minor)
+	f.delClass(shape.IFBName(bridge), minor)
 	return nil
 }
 
@@ -100,9 +218,9 @@ func (f *fakeTC) DeleteSessionClass(ctx context.Context, bridge string, minor in
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, tcCall{op: "delete-minor", bridge: bridge, minor: minor})
-	if m := f.installed[bridge]; m != nil {
-		delete(m, minor)
-	}
+	// A managed class is a pair — download on the bridge, upload on its ifb — so a stray removal drops both.
+	f.delClass(bridge, minor)
+	f.delClass(shape.IFBName(bridge), minor)
 	return nil
 }
 
@@ -119,13 +237,17 @@ func (f *fakeTC) wipe() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.installed = map[string]map[int]tcCall{}
+	f.forwarding = map[string]map[int]bool{}
 }
 
-// wipeBridge empties one bridge, as a flushed qdisc does within a single boot.
+// wipeBridge empties one bridge (and its paired ifb), as a flushed qdisc does within a single boot.
 func (f *fakeTC) wipeBridge(bridge string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	delete(f.installed, bridge)
+	delete(f.installed, shape.IFBName(bridge))
+	delete(f.forwarding, bridge)
+	delete(f.forwarding, shape.IFBName(bridge))
 }
 
 // preinstall seeds the kernel with a class no plan will claim — a leftover from a crash or an earlier run.
@@ -149,10 +271,30 @@ func (f *fakeTC) snapshot() ([]tcCall, map[string]map[int]tcCall) {
 	return append([]tcCall(nil), f.calls...), out
 }
 
+// countInstalled counts DOWNLOAD classes only (on bridges, not the paired ifb devices), so it still equals
+// the number of shaped sessions now that the fake models both directions of each managed class.
 func (f *fakeTC) countInstalled() int {
 	_, inst := f.snapshot()
 	n := 0
-	for _, m := range inst {
+	for dev, m := range inst {
+		if strings.HasPrefix(dev, "ifb-") {
+			continue
+		}
+		n += len(m)
+	}
+	return n
+}
+
+// countForwarding counts sessions with an ACTIVE download forwarding filter — i.e. classes actually carrying
+// guest packets, as distinct from merely prepared. The staged-provisioning tests assert on this.
+func (f *fakeTC) countForwarding() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for dev, m := range f.forwarding {
+		if strings.HasPrefix(dev, "ifb-") {
+			continue
+		}
 		n += len(m)
 	}
 	return n
@@ -421,16 +563,16 @@ func TestShapingTearsDownBeforeShaping(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", res)
 	}
 	calls, _ := tc.snapshot()
-	firstAdd, lastDelete := -1, -1
+	firstShape, lastDelete := -1, -1
 	for i, c := range calls {
-		if c.op == "add" && firstAdd == -1 {
-			firstAdd = i
+		if (c.op == "prepare" || c.op == "activate" || c.op == "rerate") && firstShape == -1 {
+			firstShape = i
 		}
 		if c.op == "delete" || c.op == "delete-minor" {
 			lastDelete = i
 		}
 	}
-	if lastDelete > firstAdd {
+	if lastDelete > firstShape {
 		t.Fatalf("shaping was applied before teardown finished: %+v", calls)
 	}
 }

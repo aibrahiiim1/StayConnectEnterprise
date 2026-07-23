@@ -51,7 +51,14 @@ type shapingPlanResponse struct {
 // properties can be proven without a kernel.
 type shaper interface {
 	EnsureBridgeInfra(ctx context.Context, bridge string) error
-	AddSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error
+	// The staged, accountable-before-forwarding provisioning surface. netd never installs a forwarding filter
+	// (ActivateSession) until the class has a durable generation and a registered accounting origin.
+	PrepareSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error
+	ActivateSession(ctx context.Context, bridge string, ip net.IP) error
+	AbortSession(ctx context.Context, bridge string, ip net.IP) error
+	DenyForwarding(ctx context.Context, bridge string, ip net.IP) error
+	ReRateSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error
+	SessionForwarding(ctx context.Context, bridge string, ip net.IP) (bool, error)
 	DeleteSession(ctx context.Context, bridge string, ip net.IP) error
 	// ReadClasses enumerates what is ACTUALLY installed on a device. Reconciliation cannot be honest without
 	// it: netd's own memory only knows what this process did, and the dangerous leftovers are precisely the
@@ -95,6 +102,12 @@ type phase3Shaping struct {
 	// series restarted". Without it, a counter that went backwards is ambiguous — a reset, a misread, or a
 	// minor reused by a different guest — and accounting would have to guess.
 	epochs map[string]int64
+	// pending holds a class generation allocated for a class that has NOT yet fully provisioned (prepared and
+	// registered but not yet activated+verified, or a provisioning that failed after allocation). It exists so
+	// a retry of the same plan reuses the same generation instead of allocating a fresh one and re-baselining
+	// the origin — which would be the very counter loss the origin exists to prevent. A generation only leaves
+	// pending when its class is fully in force (moved to epochs) or its session is torn down.
+	pending map[string]int64
 	// minorOwner remembers which session a managed minor was installed for, so a stray removal can end that
 	// session's counter series precisely instead of guessing.
 	minorOwner map[string]string
@@ -124,6 +137,9 @@ func minorKey(bridge string, minor int) string { return fmt.Sprintf("%s|%d", bri
 func (p *phase3Shaping) endSeries(bridge, sessionID string) {
 	delete(p.epochs, classKey(bridge, sessionID))
 	delete(p.classes, classKey(bridge, sessionID))
+	// A generation half-allocated for a class that never came into force is void once the series ends: a
+	// session that returns later is a genuinely new class and must allocate a fresh generation.
+	delete(p.pending, classKey(bridge, sessionID))
 }
 
 // Epochs returns the generation of every class this appliance CURRENTLY manages.
@@ -321,7 +337,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		}
 	}
 
-	// 3. SHAPE what must be forwarded.
+	// 3. SHAPE what must be forwarded — STAGED and FAIL-CLOSED (see provisionSession).
 	for _, bridge := range sortedKeys(bridges) {
 		byMinor := desired[bridge]
 		if len(byMinor) == 0 {
@@ -333,55 +349,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			continue
 		}
 		for _, minor := range sortedIntKeys(byMinor) {
-			s := byMinor[minor]
-			ip := net.ParseIP(s.IP)
-			if err := p.shp.AddSession(ctx, bridge, ip, s.DownKbps, s.UpKbps); err != nil {
-				res.Failed++
-				res.Problems = append(res.Problems, "shape "+s.SessionID+": "+err.Error())
-				continue
-			}
-			if p.epochs == nil {
-				p.epochs = map[string]int64{}
-			}
-			created := false
-			epoch, known := p.epochs[classKey(bridge, s.SessionID)]
-			if !known {
-				// A NEW class needs a generation from the durable allocator BEFORE it can carry traffic.
-				// There is no local fallback: a class installed without an accountable generation is a class
-				// whose bytes cannot be attributed to anyone, and manufacturing a value here is how a
-				// recreated class ends up masquerading as the series a checkpoint still remembers.
-				alloc, err := p.allocEpoch(ctx)
-				if err != nil {
-					res.Failed++
-					res.Problems = append(res.Problems,
-						"shape "+s.SessionID+": no class generation could be allocated; not made accountable")
-					continue
-				}
-				epoch, created = alloc, true
-				p.epochs[classKey(bridge, s.SessionID)] = epoch
-			}
-			// If this class slot was held by a DIFFERENT session, that session's series ends here. Leaving it
-			// in the inventory would let the previous occupant's generation be carried forward on the next
-			// restart, handing the new guest a checkpoint that describes someone else's counters.
-			if prev, held := p.minorOwner[minorKey(bridge, minor)]; held && prev != s.SessionID {
-				p.endSeries(bridge, prev)
-			}
-			p.minorOwner[minorKey(bridge, minor)] = s.SessionID
-			if p.classes == nil {
-				p.classes = map[string]managedClass{}
-			}
-			p.classes[classKey(bridge, s.SessionID)] = managedClass{
-				SessionID: s.SessionID, DeviceID: s.DeviceID, Bridge: bridge, Minor: minor,
-				Epoch: epoch, BootID: p.bootID}
-			if created {
-				// BEFORE the guest can use it: record what the counters actually read, so the first periodic
-				// observation measures a difference rather than starting from nothing.
-				if problem := p.registerOrigin(ctx, s, minor, epoch); problem != "" {
-					res.Failed++
-					res.Problems = append(res.Problems, problem)
-				}
-			}
-			res.Shaped++
+			p.provisionSession(ctx, bridge, minor, byMinor[minor], &res)
 		}
 	}
 

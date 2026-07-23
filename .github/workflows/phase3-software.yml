@@ -157,6 +157,16 @@ jobs:
           printf 'preflight\t%d\t%d\n' "$rc" "$((end-start))" >> "$EVID/steps.tsv"
           exit "$rc"
 
+      - name: Staged-provisioning failure tests (accountable before forwarding)
+        working-directory: data-plane
+        # The adversarial provisioning suite (netd) and the command-level staged shape suite, counted on their
+        # own so the evidence artifact carries an explicit result for the accountable-before-forwarding work.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh provisioning --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh provisioning
+          ./cmd/netd/ ./internal/shape/
+          -run 'Provision|Prepare|Activate|ReRate|Abort|Deny|SessionForwarding' -count=1
+
       # ---------------------------------------------------------------- Hotel Admin / Guest Portal
       - name: npm ci (locked dependencies)
         working-directory: hotel-admin

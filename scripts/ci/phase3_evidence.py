@@ -54,6 +54,85 @@ def read_text(path: str, default: str = "") -> str:
         return default
 
 
+def extract_acceptance_matrix(report_path):
+    """Pull the §6a Phase-3 Acceptance Matrix table out of the Final Report.
+
+    Returns (markdown, rows) where rows is a list of {num, dimension, verdict}. The table is the block of
+    pipe-rows following the '## 6a' heading; extraction stops at the next heading.
+    """
+    text = read_text(report_path)
+    idx = text.find("## 6a")
+    if idx < 0:
+        return "", []
+    end = text.find("\n## ", idx + 5)
+    block = text[idx:end if end > 0 else len(text)]
+    rows = []
+    md_lines = ["# Phase 3 — Complete Acceptance Matrix (from the Final Report §6a)", ""]
+    for line in block.splitlines():
+        s = line.strip()
+        if not s.startswith("|"):
+            continue
+        md_lines.append(s)
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        # data rows have a leading integer id; header/separator rows do not
+        if len(cells) >= 3 and cells[0].isdigit():
+            rows.append({"num": int(cells[0]), "dimension": cells[1], "verdict": cells[2]})
+    return "\n".join(md_lines) + "\n", rows
+
+
+def _manifest_paths(md_text):
+    """Return the set of repo-relative paths a change-manifest markdown table lists (first table column)."""
+    paths = set()
+    for line in md_text.splitlines():
+        s = line.strip()
+        if not s.startswith("| `"):
+            continue
+        first = s.split("|")[1].strip()
+        # cell is `path` or `old -> new`; take the code-spanned path(s)
+        for tok in re.findall(r"`([^`]+)`", first):
+            tok = tok.strip()
+            if " -> " in tok:
+                tok = tok.split(" -> ")[-1].strip()
+            paths.add(tok)
+    return paths
+
+
+def manifest_parity_result(report_path, manifest_path):
+    """Compare the manifest embedded in the Final Report to the standalone generated manifest."""
+    report = read_text(report_path)
+    # the report embeds its own changed-file table; compare its path set to the generated manifest's path set
+    gen_paths = _manifest_paths(read_text(manifest_path))
+    rep_paths = _manifest_paths(report)
+    only_report = sorted(rep_paths - gen_paths)
+    only_generated = sorted(gen_paths - rep_paths)
+    return {
+        "generated_manifest": "docs/manifests/Phase3-change-manifest.md",
+        "generated_path_count": len(gen_paths),
+        "report_embedded_path_count": len(rep_paths),
+        "match": not only_report and not only_generated and len(gen_paths) > 0,
+        "in_report_not_generated": only_report[:20],
+        "in_generated_not_report": only_generated[:20],
+    }
+
+
+def run_zero_stale(root):
+    """Run the governance zero-stale + project-state validators and record their verdicts."""
+    import subprocess
+    out = {}
+    for name, cmd in [
+        ("project_state_validate", ["python3", "tools/project-state.py", "validate"]),
+        ("zero_stale_leftovers", ["bash", "tools/validate-project-state.sh"]),
+    ]:
+        try:
+            r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, timeout=600)
+            tail = (r.stdout or "")[-400:]
+            out[name] = {"exit": r.returncode, "verdict": "PASS" if r.returncode == 0 else "FAIL",
+                         "tail": tail.strip().splitlines()[-1] if tail.strip() else ""}
+        except Exception as e:  # noqa: BLE001 — record the failure rather than aborting evidence assembly
+            out[name] = {"exit": -1, "verdict": "ERROR", "tail": str(e)[:120]}
+    return out
+
+
 def main() -> int:
     evid = os.environ["EVID"]
     art = os.environ["ART"]
@@ -80,6 +159,27 @@ def main() -> int:
     vitest = read_json(os.path.join(counts_dir, "vitest.json"), {})
     playwright = read_json(os.path.join(counts_dir, "playwright.json"), {})
     preflight = read_json(os.path.join(counts_dir, "preflight.json"), {})
+    provisioning = read_json(os.path.join(counts_dir, "provisioning.json"), {})
+
+    logs_dir = os.path.join(evid, "logs")
+
+    # ---- migration lifecycle summary (parsed from the gate log — the truthful assertion total) ------------
+    # The lifecycle gate prints "PHASE3_0010_LIFECYCLE: pass=N fail=M -> PASS". We extract the assertion
+    # totals, never the raw log (which we keep out of the artifact), so the number is provably the one CI saw.
+    migration_summary = {}
+    m = re.search(r"PHASE3_0010_LIFECYCLE:\s*pass=(\d+)\s+fail=(\d+)",
+                  read_text(os.path.join(logs_dir, "migration-lifecycle.log")))
+    if m:
+        migration_summary = {"assertions_passed": int(m.group(1)), "assertions_failed": int(m.group(2)),
+                             "gate": "iam_v2_scratch/phase3_0010_lifecycle.sh"}
+
+    # ---- the eleven disposable-PG16 integration suites, each with its result -----------------------------
+    pg16_suites = []
+    for line in read_text(os.path.join(logs_dir, "pg16-integration.log")).splitlines():
+        mm = re.match(r"^(ok|FAIL|---)\s+(github\.com/\S+)\s", line)
+        if mm and "data-plane/" in mm.group(2):
+            pg16_suites.append({"suite": mm.group(2).split("data-plane/")[-1],
+                                "result": "PASS" if mm.group(1) == "ok" else "FAIL"})
 
     def vitest_totals(v):
         return {
@@ -104,7 +204,22 @@ def main() -> int:
         "vitest": vitest_totals(vitest) if vitest else {},
         "playwright": playwright_totals(playwright) if playwright else {},
         "preflight": {"pass": preflight.get("pass"), "fail": preflight.get("fail")} if preflight else {},
+        "provisioning": {"passed": provisioning.get("pass", 0), "failed": provisioning.get("fail", 0),
+                         "skipped": provisioning.get("skip", 0)} if provisioning else {},
     }
+
+    # ---- the complete Phase-3 Acceptance Matrix (dimensional, ~35 rows) ----------------------------------
+    # The authoritative matrix lives in the Final Report §6a. It is extracted here so the artifact carries the
+    # WHOLE Phase-3 verdict set, not only the gate steps — and so a verifier can read it without the report.
+    report_path = os.path.join(root, "docs/reports/StayConnect-IAM-Phase3-Final-Report.md")
+    accept_matrix_md, accept_matrix_rows = extract_acceptance_matrix(report_path)
+
+    # ---- embedded-report / generated-manifest parity ----------------------------------------------------
+    manifest_parity = manifest_parity_result(report_path,
+                                             os.path.join(root, "docs/manifests/Phase3-change-manifest.md"))
+
+    # ---- Zero-Stale document + governance checks, run here and recorded ----------------------------------
+    zero_stale = run_zero_stale(root)
 
     # ---- integrity inputs the artifact makes claims about --------------------------
     hashed_inputs = {}
@@ -150,6 +265,12 @@ def main() -> int:
         "lock_and_migration_hashes": hashed_inputs,
         "steps": steps,
         "test_totals": totals,
+        "migration_lifecycle": migration_summary,
+        "pg16_integration_suites": pg16_suites,
+        "acceptance_matrix_rows": accept_matrix_rows,
+        "acceptance_matrix_row_count": len(accept_matrix_rows),
+        "manifest_parity": manifest_parity,
+        "zero_stale_checks": zero_stale,
         "skipped_totals": {
             "go_unit": go_unit.get("skip", 0),
             "vitest": totals["vitest"].get("skipped", 0) if totals["vitest"] else 0,
@@ -194,6 +315,11 @@ def main() -> int:
     for name in os.listdir(counts_dir) if os.path.isdir(counts_dir) else []:
         shutil.copyfile(os.path.join(counts_dir, name), os.path.join(art, "counts", name))
 
+    # The complete dimensional acceptance matrix, as its own artifact file.
+    if accept_matrix_md:
+        with open(os.path.join(art, "PHASE3_ACCEPTANCE_MATRIX.md"), "w", encoding="utf-8", newline="\n") as f:
+            f.write(accept_matrix_md)
+
     # Render the preflight checks into a human-readable file, from the structured output.
     if preflight and isinstance(preflight.get("checks"), list):
         lines = [f"Phase-3 offline preflight — {preflight.get('pass',0)} passed, {preflight.get('fail',0)} failed", ""]
@@ -236,6 +362,38 @@ def main() -> int:
                  f"{p.get('flaky',0)} flaky")
     if preflight:
         m.append(f"- **Preflight** — {preflight.get('pass',0)} passed, {preflight.get('fail',0)} failed")
+    if totals.get("provisioning"):
+        pr = totals["provisioning"]
+        m.append(f"- **Staged-provisioning failure tests** — {pr['passed']} passed, {pr['failed']} failed "
+                 "(accountable-before-forwarding)")
+    m.append("")
+    if migration_summary:
+        m.append(f"## Migration 0010 lifecycle — {migration_summary['assertions_passed']} assertions passed, "
+                 f"{migration_summary['assertions_failed']} failed")
+        m.append("")
+    if pg16_suites:
+        m.append("## Disposable-PG16 integration suites")
+        m.append("")
+        for s in pg16_suites:
+            m.append(f"- {s['result']} · `{s['suite']}`")
+        m.append("")
+    m.append("## Governance")
+    m.append("")
+    mp = manifest_parity
+    m.append(f"- Embedded-report / generated-manifest parity: **{'MATCH' if mp['match'] else 'MISMATCH'}** "
+             f"({mp['report_embedded_path_count']} report paths vs {mp['generated_path_count']} generated)")
+    for k, v in zero_stale.items():
+        m.append(f"- {k}: **{v['verdict']}**")
+    m.append("")
+    m.append(f"## Complete Phase-3 Acceptance Matrix — {len(accept_matrix_rows)} dimensions "
+             "(see `PHASE3_ACCEPTANCE_MATRIX.md`)")
+    m.append("")
+    verdict_counts = {}
+    for rrow in accept_matrix_rows:
+        key = re.sub(r"[*`]", "", rrow["verdict"]).strip()
+        verdict_counts[key] = verdict_counts.get(key, 0) + 1
+    for k in sorted(verdict_counts):
+        m.append(f"- {k}: {verdict_counts[k]}")
     m.append("")
     with open(os.path.join(art, "ACCEPTANCE_MATRIX.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(m) + "\n")

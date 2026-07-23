@@ -95,8 +95,11 @@ be re-derived rather than trusted.
 - **Gate-P privileges are prepared but NOT applied.** Every runtime service role holds zero `iam_v2` table and
   function privileges; the gate asserts it on every run.
 - **Device-limit policies other than `REJECT_NEW_DEVICE`** are refused rather than approximated.
-- The Phase-2 Commerce (`internal/iamv2`) admin path is untouched by Phase 3 and still writes entitlements
-  directly; it must be routed through the controlled writers at cutover.
+- The Phase-2 Commerce (`internal/iamv2`) direct-Entitlement writer is **eliminated** (§5 of this round): the
+  admin path no longer sets Entitlement status with a raw `UPDATE`; it terminates a superseded Entitlement
+  through `iam_v2.apply_entitlement_transition`, which also appends the transition history the raw path never
+  wrote. There is no remaining Phase-3 family whose authoritative writes bypass the controlled-writer boundary,
+  and nothing here waits on cutover for that. (Cutover itself remains a separate, unauthorized future step.)
 
 ## 6. Acceptance tests
 
@@ -178,6 +181,9 @@ appears.
 | 28 | Hotel Admin: Resolution evidence (no guest PII), source conflicts naming both interfaces | **PASS — SOFTWARE** | `cmd/edged/phase3_interfaces_api_integration_test.go`; `e2e/phase3-pms-interfaces.spec.ts` |
 | 29 | Flags OFF by default; a child flag without its master is a startup failure | **PASS — SOFTWARE** | `internal/iamv2/pms_config.go`; preflight |
 | 30 | Dark appliance issues zero Phase-3 SQL, mounts no Phase-3 route, mutates no tc | **PASS — SOFTWARE** | acctd/netd/scd/edged dark tests |
+| 30a | Accountable before forwarding: a managed class carries no guest packet before its origin is registered (staged prepare → register → activate) | **PASS — SOFTWARE** | `cmd/netd/phase3_provision.go`; `phase3_provision_test.go`; `internal/shape/shape_staged_test.go`; preflight |
+| 30b | Every provisioning failure fails closed: nothing forwards, no epoch exposed, `Shaped` stays 0, plan admitted-not-converged, retry reuses the generation (no duplicate origin) | **PASS — SOFTWARE** | `phase3_provision_test.go` (15 adversarial paths) |
+| 30c | An ordinary re-rate preserves counters and the generation (`tc class change`, never delete+add) | **PASS — SOFTWARE** | `internal/shape/shape_staged_test.go`; `phase3_provision_test.go` |
 | 31 | Live read-only PMS protocol verification | **PENDING — LIVE INCREMENT 9** | operator-executed; never simulated |
 | 32 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING — LIVE INCREMENT 9** | runbook §2–§5 |
 | 33 | Gate-P per-service EXECUTE grants and role separation | **OUT OF SCOPE BY APPROVED CONTRACT** | separately gated; zero runtime grants while dark |
