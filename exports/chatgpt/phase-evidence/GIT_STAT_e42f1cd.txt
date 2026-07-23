@@ -1,0 +1,4 @@
+commit e42f1cd08d7868bb8ca1308d3221144129f4da09
+Date:   Thu Jul 23 12:50:32 2026 +0300
+
+    Phase 3 Â§7: fix `npm ci` in the full gate â€” drop the unused, conflicting @vitejs/plugin-react
