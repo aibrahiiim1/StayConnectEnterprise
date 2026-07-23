@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `e42f1cd08d7868bb8ca1308d3221144129f4da09`
-- **Provenance (generation HEAD = inventory_head):** `e42f1cd08d7868bb8ca1308d3221144129f4da09`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `d57715de146d349fbf0cb3dfa374665f292ec585`
+- **Provenance (generation HEAD = inventory_head):** `d57715de146d349fbf0cb3dfa374665f292ec585`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 220
@@ -163,8 +163,8 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_4184bf3.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/GIT_STAT_e42f1cd.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
@@ -211,7 +211,7 @@
 | `hotel-admin/e2e/phase3-stays-grace.spec.ts` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 3 items 1-5 (inventory_head): required exact policy version, whole reserved catalog excluded, selector on the authoritative validator, complete metadata, honest reconcile + two-process evidence |
 | `hotel-admin/lib/api.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 Â§6 (frontend): four Hotel-Admin pages over the PMS interface surface |
 | `hotel-admin/lib/roles.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 Hotel-Admin surface (inventory_head): dark-gated stays/events/resolutions/grace/alerts API + RBAC + four UI pages: tsc clean, Vitest 48/48 |
-| `hotel-admin/package-lock.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 Â§7: fix `npm ci` in the full gate â€” drop the unused, conflicting @vitejs/plugin-react |
+| `hotel-admin/package-lock.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 Â§7: regenerate the hotel-admin lockfile on Linux so `npm ci` resolves on the runner |
 | `hotel-admin/package.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 Â§7: fix `npm ci` in the full gate â€” drop the unused, conflicting @vitejs/plugin-react |
 | `hotel-admin/playwright.config.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 Hotel-Admin E2E + accessibility (inventory_head): 7 Playwright specs over mocked edged, named controls and labelled filters proven |
 | `hotel-admin/test/nav.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 Hotel-Admin surface (inventory_head): dark-gated stays/events/resolutions/grace/alerts API + RBAC + four UI pages: tsc clean, Vitest 48/48 |
@@ -380,14 +380,14 @@
  .../adr/ADR-0002-phase3-single-shaping-owner.md    |  156 ++
  docs/context/StayConnect-IAM-Handoff.md            |   16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           |  637 +++++
+ docs/manifests/Phase3-change-manifest.md           |  643 +++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |  871 ++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 282178 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 104105 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42002 bytes
- .../chatgpt/phase-evidence/GIT_STAT_4184bf3.txt    |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 282296 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 104112 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 41998 bytes
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
+ .../chatgpt/phase-evidence/GIT_STAT_e42f1cd.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -405,7 +405,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   12 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  624 +++++
+ .../Phase3-change-manifest.md                      |  630 +++++
  .../StayConnect-IAM-Handoff.md                     |   16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   16 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   12 +-
@@ -434,7 +434,7 @@
  hotel-admin/e2e/phase3-stays-grace.spec.ts         |  290 ++
  hotel-admin/lib/api.ts                             |  116 +
  hotel-admin/lib/roles.ts                           |    8 +
- hotel-admin/package-lock.json                      |  120 +-
+ hotel-admin/package-lock.json                      |   97 +-
  hotel-admin/package.json                           |    1 -
  hotel-admin/playwright.config.ts                   |    2 +-
  hotel-admin/test/nav.test.tsx                      |   37 +
@@ -455,7 +455,7 @@
  tools/project-state.py                             |   49 +-
  .../tests/project_state_validator/run_mutations.py |   69 +-
  tools/validate-project-state.sh                    |    2 +-
- 220 files changed, 40037 insertions(+), 464 deletions(-)
+ 220 files changed, 40042 insertions(+), 448 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -465,6 +465,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+d57715d Phase 3 Â§7: regenerate the hotel-admin lockfile on Linux so `npm ci` resolves on the runner
+7d7e4ea Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer
 e42f1cd Phase 3 Â§7: fix `npm ci` in the full gate â€” drop the unused, conflicting @vitejs/plugin-react
 90f7cc1 Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer
 4184bf3 Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent
