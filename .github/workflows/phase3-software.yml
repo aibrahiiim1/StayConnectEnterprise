@@ -200,5 +200,9 @@ jobs:
         with:
           name: phase3-software-evidence-${{ steps.head.outputs.sha }}
           path: ${{ github.workspace }}/.phase3-artifact
+          # The staging dir is dot-prefixed, so upload-artifact v4 treats its contents as hidden and would
+          # otherwise skip them ("No files were found"). The files inside are the derived, PII-free evidence
+          # summaries — nothing secret — so including them is correct.
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 90
