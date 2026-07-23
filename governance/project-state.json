@@ -15,7 +15,7 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "3",
-  "current_activity": "PHASE_3_IMPLEMENTATION_IN_PROGRESS",
+  "current_activity": "PHASE_3_SOFTWARE_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION",
   "current_maturity": "Phase 1A/1B/2 all ACCEPTED_AND_CLOSED at DARK maturity (Phase 2 merged to master via D13/T0014, merge commit fe6a0d12a49f74b7b7b84ef0c848a38512273370). DARK -- every new auth/commerce feature OFF, no production iam_v2 use, no cutover; legacy public-schema auth remains the sole production authority (iam_v2 49/0). Phase 3 (PMS Stay Domain, STRICT Multi-PMS Resolution, Room Movement, Checkout Grace and Reinstatement) is Product-Owner AUTHORIZED (decision D14, start transition T0015) and IMPLEMENTATION IN PROGRESS as one end-to-end Phase, DARK: all Phase-3 flags default OFF; additive migrations after 0009; a dedicated read-only PMS connector runtime; live PMS verification is READ-ONLY with disposable-test-DB persistence only; no financial posting, no PS sender, no Posting Engine, no IAM-v2 cutover, no Phase 4+. Phase 4 remains NOT_STARTED and unauthorized.",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -179,12 +179,12 @@
     "Central Control Plane changes; WAN/LAN/VLAN/DHCP changes; HA/appliance-topology changes",
     "Writing any Production Stay/Guest/Folio/Event/Auth-Context row to Production iam_v2 while dark (live PMS test persistence targets a disposable test DB only)"
   ],
-  "next_authorized_action": "AWAIT A SEPARATE PRODUCT-OWNER DECISION TO AUTHORIZE LIVE INCREMENT 9. The Phase-3 SOFTWARE candidate is complete: Option C (D15) executed with no scope reduction, the mixed Phase-2 direct-Entitlement writer eliminated, staged accountable-before-forwarding class provisioning in place, and one true full same-HEAD software gate (phase3-full-software-gate) green with a downloadable, independently-verified evidence artifact. Phase 3 is NOT accepted and NOT closed; PR #6 is open and unmerged; all Phase-3 flags are OFF; migration 0010 is undeployed. The next authorized action is NOT to \"execute Phase 3 implementation\" (that is done) and NOT to accept Phase 3: it is a distinct Product-Owner decision that would authorize Live Increment 9 (read-only live PMS verification, controlled live-dark deployment of the exact delivery HEAD, one reboot with post-reboot convergence, a rollback rehearsal, and flags-OFF confirmation on the running unit). No appliance/Production-DB/live-PMS contact, deployment, reboot, Gate-P grant, PS/PA, financial posting, or Phase 4 is authorized until then.",
+  "next_authorized_action": "Obtain a separate Product-Owner decision authorizing Live Increment 9 (read-only live PMS verification, controlled live-dark deployment of the exact delivery HEAD, one reboot with post-reboot convergence, a rollback rehearsal, and flags-OFF confirmation on the running unit) before any live execution -- the Phase-3 SOFTWARE candidate is complete, DARK, NOT accepted, NOT closed, PR #6 open and unmerged.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D14",
-  "latest_transition_id": "T0015",
-  "acceptance_candidate_head": "762909c1cb0c7d3e10871768170ef0014283bbdf",
+  "latest_accepted_po_decision": "D15",
+  "latest_transition_id": "T0016",
+  "acceptance_candidate_head": "4a9f6025eed2df97d57d72b8d0ea40bbf0c7c45b",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
   "inventory_head": "d68ec4da2226cfb361aff9525e8df7b208a9b015",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
