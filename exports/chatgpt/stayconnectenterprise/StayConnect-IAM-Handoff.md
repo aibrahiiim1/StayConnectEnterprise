@@ -1,14 +1,14 @@
 # StayConnect IAM — Context Handoff
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0015 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0016 -->
 **Current phase:** 3 — PMS Stay Domain, STRICT Multi-PMS Resolution, Room Movement, Checkout Grace and Reinstatement
-**Current activity:** `PHASE_3_IMPLEMENTATION_IN_PROGRESS`
+**Current activity:** `PHASE_3_SOFTWARE_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 IN_PROGRESS · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 49 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Execute the authorized Phase 3 end-to-end as one Phase, DARK, per docs/architecture/StayConnect-IAM-Phase3-Plan.md, then return one final Phase-3 acceptance report at verified DARK maturity. No Phase 4, no PMS financial posting, no IAM-v2 cutover.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D14`.
+**Single next authorized action:** Obtain a separate Product-Owner decision authorizing Live Increment 9 (read-only live PMS verification, controlled live-dark deployment of the exact delivery HEAD, one reboot with post-reboot convergence, a rollback rehearsal, and flags-OFF confirmation on the running unit) before any live execution -- the Phase-3 SOFTWARE candidate is complete, DARK, NOT accepted, NOT closed, PR #6 open and unmerged.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D15`.
 <!-- END GENERATED PROJECT STATE -->
 
 

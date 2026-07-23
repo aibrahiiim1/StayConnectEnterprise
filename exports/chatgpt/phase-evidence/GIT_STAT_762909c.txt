@@ -1,4 +1,0 @@
-commit 762909c1cb0c7d3e10871768170ef0014283bbdf
-Date:   Thu Jul 23 13:33:26 2026 +0300
-
-    Phase 3 Â§9: stop the Final Report Â§13 from citing a frozen (stale) HEAD

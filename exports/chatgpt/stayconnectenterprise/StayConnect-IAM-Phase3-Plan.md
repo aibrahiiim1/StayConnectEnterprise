@@ -19,9 +19,33 @@ This plan governs implementation, tests, live-dark deployment and rollback. It i
 
 ---
 
-## 1. AS-AUTHORIZED STATUS (governance)
+## 1. AS-BUILT STATUS (governance)
 
-`IMPLEMENTATION IN PROGRESS as one end-to-end Phase (D14 / T0015), DARK. Not accepted/closed.` Increment 1 (this delivery) = governance + planning + the read-only architecture/schema audit + the connector ADR + Phase-3 governance guards. Subsequent increments implement migration 0010, the pmsd connector runtime, the Stay/Event/Folio engine, the STRICT resolver, PMS Auth Context, Commerce integration, Checkout Grace + emergency fallback, Reinstatement, the two UIs, the full test matrix, live read-only PMS verification, and the live-dark deployment + reboot. Every increment commits, pushes, keeps PR #6 CI-green, and reports the exact next workstream (§46 of the authorization).
+> The original approved requirements below (§0 onward) are unchanged — this section records what has been
+> BUILT against them, not a change to them.
+
+`PHASE-3 SOFTWARE CANDIDATE COMPLETE — AWAITING LIVE INCREMENT-9 AUTHORIZATION (D14 authorized / T0015; D15 Option C executed), DARK. Not accepted, not closed.`
+
+The software increments in this plan are **execution history**, not future work:
+
+- **Migration 0010**, the pmsd connector runtime, the Stay/Event/Folio engine, the STRICT multi-PMS resolver,
+  PMS Auth Context, Phase-2 Commerce integration, Checkout Grace + emergency fallback, and Reinstatement —
+  **built and tested** against disposable PostgreSQL 16.
+- **Option C (D15)** — the Hotel-Admin scope-amendment proposal was **rejected with no scope reduction**; all
+  eight operator surfaces and the accounting/netd/scd/portal corrections were completed.
+- The **mixed Phase-2 direct-Entitlement writer is eliminated**, and the controlled-writer boundary now covers
+  every authoritative Phase-3 family.
+- **Accountable-before-forwarding** class provisioning is in force: netd stages prepare → register origin →
+  activate, so no managed class forwards before its counter series has a durable accounting origin.
+- One **true full same-HEAD software gate** (`phase3-full-software-gate`) is green, with a downloadable,
+  independently-verified evidence artifact.
+
+**Still PENDING (requires a separate Product-Owner decision — see `governance/project-state.json`
+`next_authorized_action`):** Live Increment 9 — read-only live PMS verification, controlled live-dark
+deployment of the exact delivery HEAD, one reboot with post-reboot convergence, a rollback rehearsal, and
+flags-OFF confirmation on the running unit. Until that decision: PR #6 stays open and unmerged, all Phase-3
+flags OFF, migration 0010 undeployed, zero runtime `iam_v2` privileges, no appliance/Production/live-PMS
+contact, no PS/PA, no financial posting, no Phase 4.
 
 ---
 
