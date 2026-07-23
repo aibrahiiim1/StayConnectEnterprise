@@ -1,4 +1,0 @@
-commit 5529f0809c75668a2037bc56c200ff6d709021b3
-Date:   Thu Jul 23 15:32:47 2026 +0300
-
-    Phase 3: governance activity transition T0016 (software candidate awaiting Increment 9), doc sync

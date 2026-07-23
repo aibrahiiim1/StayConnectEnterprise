@@ -1,0 +1,4 @@
+commit 0e1c7dde7ac7d5b7ae20a3498dde0549edcda6d5
+Date:   Thu Jul 23 15:46:01 2026 +0300
+
+    Phase 3: accept the Live-Increment-9 next-action phrasing in the zero-stale validator
