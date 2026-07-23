@@ -1,0 +1,218 @@
+name: Phase 3 Software CI
+
+# THE FULL Phase-3 software gate. One workflow run, one HEAD, every mandatory software test — backend AND
+# frontend — followed by an evidence artifact assembled from the real run and uploaded from inside this job.
+#
+# It is deliberately NOT the old pmsd-only gate. It runs: gofmt over the whole Phase-3 Go surface; go build;
+# full go vet; the entire Go unit suite; the race detector over every Phase-3 concurrency-sensitive package;
+# the Migration 0010 lifecycle + concurrency gate; all eleven disposable-PG16 integration suites; the offline
+# preflight; and — from the real hotel-admin directory under a locked Node install — TypeScript typecheck,
+# Vitest, the production build with Phase-3 flags OFF, and the Playwright browser suite (which builds and
+# exercises the guest-portal real template and the Hotel-Admin pages, with accessibility checks).
+#
+# A disposable-PG gate may retry ONCE on an exit-2 infrastructure failure; an exit-1 assertion failure is
+# final. No required integration is allowed to silently skip: the runner installs everything it needs, and a
+# missing tool fails the step. Test totals in the artifact come from each runner's own machine reporter on
+# this run — never hand-typed, never a workstation number.
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phase3-full-software-gate:
+    name: phase3-full-software-gate
+    runs-on: ubuntu-latest
+    env:
+      EVID: ${{ github.workspace }}/.phase3-evidence
+      ART: ${{ github.workspace }}/.phase3-artifact
+    steps:
+      # Check out the PR HEAD itself (not the merge commit), so the evidence artifact's embedded delivery
+      # HEAD equals the exact commit under test.
+      - name: Check out the PR HEAD
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: data-plane/go.sum
+
+      - name: Set up Node (locked)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: hotel-admin/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Initialise evidence staging
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVID/counts" "$EVID/logs"
+          export START_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          DELIVERY_HEAD="$(git rev-parse HEAD)"
+          INVENTORY_HEAD="$(python3 -c "import json;print(json.load(open('governance/project-state.json'))['acceptance_candidate_head'])")"
+          BASE_HEAD="$(grep -m1 'Base commit' docs/manifests/Phase3-change-manifest.md | grep -oE '[0-9a-f]{40}' || echo '')"
+          python3 - "$DELIVERY_HEAD" "$INVENTORY_HEAD" "$BASE_HEAD" <<'PY'
+          import json, os, sys
+          delivery, inventory, base = sys.argv[1], sys.argv[2], sys.argv[3]
+          meta = {
+            "delivery_head": delivery, "inventory_head": inventory, "base_head": base,
+            "branch": os.environ.get("GITHUB_HEAD_REF") or os.environ.get("GITHUB_REF_NAME"),
+            "pr_number": os.environ.get("PR_NUMBER") or "",
+            "repository": os.environ.get("GITHUB_REPOSITORY"),
+            "workflow": os.environ.get("GITHUB_WORKFLOW"),
+            "job": os.environ.get("GITHUB_JOB"),
+            "run_id": os.environ.get("GITHUB_RUN_ID"),
+            "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+            "start_utc": os.environ.get("START_UTC"),
+          }
+          with open(os.path.join(os.environ["EVID"], "env.json"), "w") as f:
+              json.dump(meta, f, indent=2)
+          PY
+          {
+            printf 'go\t%s\n' "$(go version)"
+            printf 'node\t%s\n' "$(node -v)"
+            printf 'npm\t%s\n' "$(npm -v)"
+            printf 'python\t%s\n' "$(python3 -V)"
+            printf 'postgres\t%s\n' "postgres:16-alpine (disposable, per gate)"
+          } > "$EVID/tool-versions.tsv"
+          cat > "$EVID/commands.txt" <<'CMDS'
+          Executed gate commands (in order):
+            gofmt:                bash scripts/ci/gofmt-check.sh                        (cwd data-plane)
+            go build:             go build ./...                                        (cwd data-plane)
+            go vet:               go vet ./...                                          (cwd data-plane)
+            go unit:              go test ./... -count=1                                (cwd data-plane, JSON-counted)
+            go race:              go test -race <phase-3 concurrency packages> -count=1 (cwd data-plane, JSON-counted)
+            migration lifecycle:  bash iam_v2_scratch/phase3_0010_lifecycle.sh
+            PG16 integration:     bash scripts/pmsd-pg-integration.sh                   (all eleven suites)
+            preflight:            bash scripts/phase3-preflight.sh --json
+            npm ci:               npm ci                                               (cwd hotel-admin)
+            typecheck:            npx tsc --noEmit                                      (cwd hotel-admin)
+            vitest:               npx vitest run --reporter=default --reporter=json     (cwd hotel-admin)
+            production build:     npx next build   (Phase-3 flags OFF)                  (cwd hotel-admin)
+            playwright browsers:  npx playwright install --with-deps chrome             (cwd hotel-admin)
+            playwright:           npx playwright test --reporter=list,json              (cwd hotel-admin)
+          CMDS
+
+      # ---------------------------------------------------------------- backend / runtime
+      - name: gofmt (whole Phase-3 Go surface)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh gofmt -- bash $GITHUB_WORKSPACE/scripts/ci/gofmt-check.sh"
+
+      - name: go build (./...)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-build -- go build ./..."
+
+      - name: go vet (./...)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet -- go vet ./..."
+
+      - name: go test (all packages)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-unit -- bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh go-unit ./... -count=1"
+
+      - name: go test -race (all Phase-3 concurrency-sensitive paths)
+        working-directory: data-plane
+        # pmsd, resolver, auth context, stay grant, checkout, scd, acctd, netd, and the controlled-writer guard.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-race --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh go-race
+          ./internal/pmsd/... ./internal/pms/... ./internal/stayengine/... ./internal/pmsresolve/...
+          ./internal/authctx/... ./internal/grace/... ./internal/checkout/... ./internal/staygrant/...
+          ./internal/enforce/... ./internal/writerguard/... ./internal/shape/... ./internal/shapeplan/...
+          ./cmd/scd/... ./cmd/acctd/... ./cmd/netd/... -count=1
+
+      - name: Migration 0010 lifecycle + concurrency gate (disposable PG16)
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh migration-lifecycle -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase3_0010_lifecycle.sh"
+
+      - name: PG16 integration — all eleven Phase-3 suites (disposable PG16)
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh pg16-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/pmsd-pg-integration.sh"
+
+      - name: Phase-3 offline preflight
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVID/counts"
+          start="$(date -u +%s)"
+          # --json emits the structured {pass,fail,checks}; capture it as the count, and gate on fail==0.
+          bash scripts/phase3-preflight.sh --json | tee "$EVID/counts/preflight.json"
+          rc="${PIPESTATUS[0]}"
+          end="$(date -u +%s)"
+          printf 'preflight\t%d\t%d\n' "$rc" "$((end-start))" >> "$EVID/steps.tsv"
+          exit "$rc"
+
+      - name: Staged-provisioning failure tests (accountable before forwarding)
+        working-directory: data-plane
+        # The adversarial provisioning suite (netd) and the command-level staged shape suite, counted on their
+        # own so the evidence artifact carries an explicit result for the accountable-before-forwarding work.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh provisioning --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh provisioning
+          ./cmd/netd/ ./internal/shape/
+          -run 'Provision|Prepare|Activate|ReRate|Abort|Deny|SessionForwarding' -count=1
+
+      # ---------------------------------------------------------------- Hotel Admin / Guest Portal
+      - name: npm ci (locked dependencies)
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh npm-ci -- npm ci"
+
+      - name: TypeScript typecheck
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh tsc -- npx tsc --noEmit"
+
+      - name: Vitest
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh vitest -- npx vitest run --reporter=default --reporter=json --outputFile=$EVID/counts/vitest.json"
+
+      - name: Production build (Phase-3 flags OFF)
+        working-directory: hotel-admin
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh next-build -- npx next build"
+
+      - name: Install Playwright browser
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome"
+
+      - name: Playwright (Hotel-Admin + guest-portal real template + a11y)
+        working-directory: hotel-admin
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/.phase3-evidence/counts/playwright.json
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright -- npx playwright test --reporter=list,json"
+
+      # ---------------------------------------------------------------- evidence
+      - name: Assemble the Phase-3 evidence artifact
+        id: evidence
+        run: python3 scripts/ci/phase3_evidence.py
+
+      - name: Record the delivery HEAD for the artifact name
+        id: head
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the Phase-3 evidence artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-software-evidence-${{ steps.head.outputs.sha }}
+          path: ${{ github.workspace }}/.phase3-artifact
+          # The staging dir is dot-prefixed, so upload-artifact v4 treats its contents as hidden and would
+          # otherwise skip them ("No files were found"). The files inside are the derived, PII-free evidence
+          # summaries — nothing secret — so including them is correct.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90

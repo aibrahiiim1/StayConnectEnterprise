@@ -372,9 +372,9 @@ type mewsReservationsResp struct {
 func (m *Mews) fetchReservations(ctx context.Context, spaceID string) (*mewsReservationsResp, error) {
 	now := time.Now().UTC()
 	body := map[string]any{
-		"ClientToken": m.clientToken,
-		"AccessToken": m.accessToken,
-		"Client":      m.clientName,
+		"ClientToken":         m.clientToken,
+		"AccessToken":         m.accessToken,
+		"Client":              m.clientName,
 		"AssignedResourceIds": []string{spaceID},
 		"CollidingUtc": map[string]string{
 			"StartUtc": now.Format(time.RFC3339),

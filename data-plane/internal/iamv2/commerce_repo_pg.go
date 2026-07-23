@@ -10,6 +10,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 // unmarshalNumberAware decodes JSON preserving numeric literals as json.Number so grant validation can
@@ -42,6 +44,16 @@ func (r *PgCommerceRepository) WithTx(ctx context.Context, fn func(CommerceTx) e
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	// Phase-2 Commerce writes across three capability-scoped Phase-3 families: it consumes an Auth Context,
+	// writes the Quote/Purchase pair, and terminates the superseded Entitlement through the controlled
+	// operation. The scopes are declared on the transaction because that is where they are read.
+	for _, cap := range []string{
+		writerguard.CapAuthContext, writerguard.CapCommerceIntent, writerguard.CapDeviceAuth,
+	} {
+		if err := writerguard.Open(ctx, tx, cap); err != nil {
+			return err
+		}
+	}
 	if err := fn(&pgCommerceTx{tx: tx}); err != nil {
 		return err
 	}
@@ -364,21 +376,45 @@ func (t *pgCommerceTx) InsertSettlement(ctx context.Context, tenantID, siteID, p
 	return err
 }
 
+// TerminateLiveEntitlementForSubject ends whatever access a subject currently holds, so a new grant can
+// supersede it.
+//
+// The termination is performed by the controlled writer, NOT by an UPDATE here. Two reasons, and the second
+// is the one that actually bites:
+//
+//	The Entitlement status column is controlled-writer-only. This path used to set it directly, which works
+//	only for as long as the service's database role happens to also own the controlled operations. Under the
+//	dedicated minimum-privilege owners Gate-P introduces, the guard would refuse it — and it would refuse it
+//	at the moment a guest was buying access, not at deploy time.
+//
+//	A raw UPDATE moves the status and writes NO history. An Entitlement that is TERMINATED with nothing in
+//	its transition chain saying when or why is unanswerable afterwards: "was this guest's access ended by an
+//	operator, by checkout, or by another purchase?" has no recorded answer. Routing through the controlled
+//	operation appends the transition as a matter of course.
+//
+// The row is selected FOR UPDATE first so the entitlement cannot be terminated by a concurrent path between
+// the read and the transition — the same lock the controlled operation takes, taken in the same order.
 func (t *pgCommerceTx) TerminateLiveEntitlementForSubject(ctx context.Context, tenantID, siteID string, subj CommerceSubject) (string, error) {
 	v, a, p := subjectCols(subj)
 	var id string
 	err := t.tx.QueryRow(ctx,
-		`UPDATE iam_v2.entitlements SET status='TERMINATED', terminal_reason='SUPERSEDED', terminated_at=now()
+		`SELECT id::text FROM iam_v2.entitlements
 		  WHERE tenant_id=$1 AND site_id=$2 AND status IN ('PENDING','ACTIVE','SUSPENDED')
 		    AND ( ($3::uuid IS NOT NULL AND voucher_id=$3::uuid)
 		       OR ($4::uuid IS NOT NULL AND guest_account_id=$4::uuid)
 		       OR ($5::uuid IS NOT NULL AND guest_principal_id=$5::uuid) )
-		  RETURNING id::text`,
+		  ORDER BY activated_at DESC NULLS LAST, id
+		  LIMIT 1
+		  FOR UPDATE`,
 		tenantID, siteID, v, a, p).Scan(&id)
 	if err == pgx.ErrNoRows {
 		return "", nil // no live entitlement to supersede
 	}
 	if err != nil {
+		return "", err
+	}
+	if _, err := t.tx.Exec(ctx,
+		`SELECT iam_v2.apply_entitlement_transition($1::uuid, 'TERMINATED', now(), 'SUPERSEDED')`, id); err != nil {
 		return "", err
 	}
 	return id, nil

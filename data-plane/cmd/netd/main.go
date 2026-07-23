@@ -30,7 +30,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 var version = "0.1.0-netd"
@@ -119,7 +121,60 @@ func main() {
 		dryRun:        dryRun,
 	}
 
-	srv := &server{st: st, ap: ap, kea: ap.kea, topo: topo, sn: sn}
+	// Phase 3 (ADR-0002): netd is the ONLY process that mutates Phase-3 shaping — and it decides for itself
+	// whether Phase 3 is live. Deriving the mode here, from the same flags, enrollment identity and signed
+	// assignment every other daemon uses, is what makes the kill switch real: a dark appliance refuses to
+	// mutate tc no matter what any other local process submits.
+	p3mode, p3err := loadPhase3Mode(rootCtx, os.Getenv)
+	if p3err != nil {
+		slog.Error("netd: phase3 config fail-closed", "err", p3err)
+		os.Exit(1)
+	}
+	p3authz := newShapingAuthz(os.Getenv)
+	if p3mode.Active && !p3authz.configured {
+		// Live enforcement with no way to tell the producer from any other local process is not a degraded
+		// mode, it is an unenforceable one. Refuse to start rather than accept plans from anyone.
+		slog.Error("netd: phase3 is live but NETD_PHASE3_PRODUCER_UID is unset — no producer can be authenticated")
+		os.Exit(1)
+	}
+	if p3mode.Active {
+		// netd writes no Phase-3 table directly, but it DOES perform two authoritative operations — allocating
+		// a class generation and registering a class origin — and both are only meaningful if the boundary
+		// they belong to is actually installed. On a schema whose guards were never applied, netd would go on
+		// allocating generations perfectly happily while nothing enforced that they were the only ones.
+		if err := writerguard.Verify(rootCtx, pool, writerguard.Phase3Requirements()); err != nil {
+			slog.Error("netd: refusing to run Phase-3 shaping", "err", err)
+			os.Exit(1)
+		}
+	}
+	p3shaping := &phase3Shaping{
+		shp:   shape.New(),
+		mode:  p3mode,
+		authz: p3authz,
+		store: &planStore{path: envOr("NETD_PHASE3_PLAN_STATE", "/var/lib/stayconnect/netd-phase3-plan.json")},
+		// The accounting origin is registered by the process that creates the class — the only one that can
+		// read its counters before a guest can use it (see phase3_origin.go).
+		origins:    &pgOrigins{pool: pool},
+		classStore: &classStore{path: envOr("NETD_PHASE3_CLASS_STATE", "/var/lib/stayconnect/netd-phase3-classes.json")},
+		// Generations come from a durable, appliance-scoped allocator that reconciles against the
+		// generations surviving accounting checkpoints actually pin — never from this process's memory and
+		// never from the clock.
+		generations: &pgGenerations{pool: pool},
+	}
+	// Continuity is PROVEN, not assumed: a persisted class is carried forward only when the kernel still has
+	// that exact slot under the same boot. A class that was flushed, recreated by hand, or whose minor now
+	// belongs to a different session is dropped so its successor allocates a fresh generation.
+	bootID := readBootID(envOr("NETD_BOOT_ID_FILE", "/proc/sys/kernel/random/boot_id"))
+	prevClasses, _ := p3shaping.classStore.load()
+	inv, verified := kernelInventory(rootCtx, p3shaping.shp, bridgesIn(prevClasses))
+	p3shaping.restore(prevClasses, bootID, inv, verified)
+	if p3mode.Active {
+		slog.Info("netd phase3 managed-class state restored",
+			"persisted", len(prevClasses.Classes), "carried_forward", len(p3shaping.classes),
+			"kernel_verified", verified, "note", p3shaping.restoreNote)
+	}
+	srv := &server{st: st, ap: ap, kea: ap.kea, topo: topo, sn: sn, phase3: p3shaping}
+	slog.Info("netd phase3 shaping writer", "active", p3mode.Active, "producer_authenticated", p3authz.configured)
 
 	// Watchdog: roll back any pending revision whose deadline has passed. Also
 	// runs once at boot to recover from a crash during pending_confirmation.
@@ -144,6 +199,11 @@ func main() {
 	r.Get("/v1/leases", srv.leases)
 	r.Get("/v1/pending", srv.pending)
 	// System (WAN/LAN) network management — the appliance's own base networking.
+	// Phase 3: the ONLY Phase-3 tc mutation entry point on this appliance (ADR-0002).
+	r.Post("/v1/phase3/shaping", srv.phase3ShapingHandler)
+	// the TC owner's per-class generations: the only trustworthy answer to "did this counter series restart?"
+	r.Get("/v1/phase3/shaping/epochs", srv.phase3EpochsHandler)
+
 	r.Get("/v1/system-network", srv.sysnetGet)
 	r.Post("/v1/system-network/validate", srv.sysnetValidate)
 	r.Post("/v1/system-network/apply", srv.sysnetApply)
@@ -166,10 +226,21 @@ func main() {
 		}
 	}
 
-	hs := &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second}
+	// Every accepted connection carries the kernel's statement of who is on the other end, so the Phase-3
+	// handler can authenticate its caller instead of believing a header.
+	hs := &http.Server{
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+			if pc, ok := c.(*peerConn); ok && pc.err == nil {
+				return context.WithValue(ctx, peerConnKey{}, pc.id)
+			}
+			return ctx
+		},
+	}
 	go func() {
 		slog.Info("netd listening", "socket", sock, "dry_run", dryRun, "version", version)
-		if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := hs.Serve(&peerListener{Listener: ln, authz: p3authz}); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("serve", "err", err)
 			stop()
 		}
@@ -187,6 +258,8 @@ type server struct {
 	kea  *keaClient
 	topo netcfg.Topology
 	sn   *sysNetMgr
+	// phase3 is the SINGLE Phase-3 shaping writer (ADR-0002). acctd derives the plan; netd applies it.
+	phase3 *phase3Shaping
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -199,6 +272,9 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{
 		"service": "netd", "version": version,
 		"kea_healthy": s.kea.Healthy(),
+		// Phase-3 shaping is reported here because netd is its only writer (ADR-0002): if a submitted plan
+		// could not be put in force, this is where it becomes visible.
+		"phase3_shaping": s.phase3.status(),
 	})
 }
 

@@ -34,8 +34,8 @@ type Registry struct {
 	SessionsClosed    *prometheus.CounterVec // labels: reason
 	SessionBytesTotal *prometheus.CounterVec // labels: direction (up|down)
 
-	OTPIssued  *prometheus.CounterVec // labels: channel (email|sms)
-	OTPVerify  *prometheus.CounterVec // labels: channel, result (ok|bad|expired|locked)
+	OTPIssued *prometheus.CounterVec // labels: channel (email|sms)
+	OTPVerify *prometheus.CounterVec // labels: channel, result (ok|bad|expired|locked)
 
 	PMSValidate         *prometheus.CounterVec   // labels: provider, result
 	PMSValidateDuration *prometheus.HistogramVec // labels: provider
@@ -79,44 +79,44 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 	}, func() float64 { return time.Since(started).Seconds() })
 
 	r.SessionsActive = prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: "scd_sessions_active",
-		Help: "Sessions currently in state=active per the local DB view.",
+		Name:        "scd_sessions_active",
+		Help:        "Sessions currently in state=active per the local DB view.",
 		ConstLabels: constLabels,
 	})
 
 	r.SessionsStarted = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "scd_sessions_started_total",
-		Help: "Sessions started, by auth method.",
+		Name:        "scd_sessions_started_total",
+		Help:        "Sessions started, by auth method.",
 		ConstLabels: constLabels,
 	}, []string{"method"})
 
 	r.SessionsClosed = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "scd_sessions_closed_total",
-		Help: "Sessions closed, by reason. Matches sessions.end_reason.",
+		Name:        "scd_sessions_closed_total",
+		Help:        "Sessions closed, by reason. Matches sessions.end_reason.",
 		ConstLabels: constLabels,
 	}, []string{"reason"})
 
 	r.SessionBytesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "scd_session_bytes_total",
-		Help: "Cumulative bytes attributed to closed sessions, by direction.",
+		Name:        "scd_session_bytes_total",
+		Help:        "Cumulative bytes attributed to closed sessions, by direction.",
 		ConstLabels: constLabels,
 	}, []string{"direction"})
 
 	r.OTPIssued = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "scd_otp_issued_total",
-		Help: "OTP codes issued, by channel.",
+		Name:        "scd_otp_issued_total",
+		Help:        "OTP codes issued, by channel.",
 		ConstLabels: constLabels,
 	}, []string{"channel"})
 
 	r.OTPVerify = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "scd_otp_verify_total",
-		Help: "OTP verification attempts, by channel and result.",
+		Name:        "scd_otp_verify_total",
+		Help:        "OTP verification attempts, by channel and result.",
 		ConstLabels: constLabels,
 	}, []string{"channel", "result"})
 
 	r.PMSValidate = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "scd_pms_validate_total",
-		Help: "PMS guest-validation calls, by provider and result.",
+		Name:        "scd_pms_validate_total",
+		Help:        "PMS guest-validation calls, by provider and result.",
 		ConstLabels: constLabels,
 	}, []string{"provider", "result"})
 
@@ -130,38 +130,38 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 	}, []string{"provider"})
 
 	r.PMSStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "scd_pms_provider_status",
-		Help: "Provider link state (0=down, 1=degraded, 2=connecting, 3=connected, 4=idle).",
+		Name:        "scd_pms_provider_status",
+		Help:        "Provider link state (0=down, 1=degraded, 2=connecting, 3=connected, 4=idle).",
 		ConstLabels: constLabels,
 	}, []string{"provider", "kind"})
 
 	r.PMSCacheSize = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "scd_pms_cache_size",
-		Help: "Reservations currently held in the provider's local cache.",
+		Name:        "scd_pms_cache_size",
+		Help:        "Reservations currently held in the provider's local cache.",
 		ConstLabels: constLabels,
 	}, []string{"provider", "kind"})
 
 	r.NFTOps = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "scd_nft_ops_total",
-		Help: "nft auth_ipv4 set mutations, by op and source.",
+		Name:        "scd_nft_ops_total",
+		Help:        "nft auth_ipv4 set mutations, by op and source.",
 		ConstLabels: constLabels,
 	}, []string{"op", "source"})
 
 	r.ReaperClosed = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "scd_reaper_closed_total",
-		Help: "Sessions closed by the background reaper, by reason.",
+		Name:        "scd_reaper_closed_total",
+		Help:        "Sessions closed by the background reaper, by reason.",
 		ConstLabels: constLabels,
 	}, []string{"reason"})
 
 	r.NATSReconnects = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "scd_nats_reconnects_total",
-		Help: "Times the NATS client reconnected after a drop.",
+		Name:        "scd_nats_reconnects_total",
+		Help:        "Times the NATS client reconnected after a drop.",
 		ConstLabels: constLabels,
 	})
 
 	r.NotifySendTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "scd_notification_send_total",
-		Help: "Outbound email/SMS sends, by channel, provider, and result.",
+		Name:        "scd_notification_send_total",
+		Help:        "Outbound email/SMS sends, by channel, provider, and result.",
 		ConstLabels: constLabels,
 	}, []string{"channel", "provider", "result"})
 
@@ -169,13 +169,13 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 		Name: "scd_notification_send_duration_seconds",
 		Help: "Latency of notification provider Send calls, by channel/provider.",
 		// 25ms .. 10s — covers cheap dev stubs through slow upstream APIs.
-		Buckets: []float64{0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+		Buckets:     []float64{0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		ConstLabels: constLabels,
 	}, []string{"channel", "provider"})
 
 	r.SocialLoginTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "scd_social_login_total",
-		Help: "Social-OAuth callbacks completed, by provider and result.",
+		Name:        "scd_social_login_total",
+		Help:        "Social-OAuth callbacks completed, by provider and result.",
 		ConstLabels: constLabels,
 	}, []string{"provider", "result"})
 
@@ -183,7 +183,7 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 		Name: "scd_social_login_duration_seconds",
 		Help: "Latency of the social Exchange (token swap + userinfo round-trip).",
 		// Token + userinfo round-trip; same shape as notify_send.
-		Buckets: []float64{0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
+		Buckets:     []float64{0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		ConstLabels: constLabels,
 	}, []string{"provider"})
 

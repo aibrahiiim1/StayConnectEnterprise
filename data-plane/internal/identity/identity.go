@@ -31,12 +31,12 @@ import (
 // Identity is the fully-resolved set of facts scd needs to operate against
 // the control plane. All fields are populated once Enroll returns.
 type Identity struct {
-	ApplianceID string             `json:"appliance_id"`
-	TenantID    string             `json:"tenant_id"`
-	SiteID      string             `json:"site_id"`
-	Serial      string             `json:"serial"`
-	PublicKeyB64 string            `json:"public_key"`      // base64-raw
-	privKey     ed25519.PrivateKey // not persisted in JSON; lives in key file
+	ApplianceID  string             `json:"appliance_id"`
+	TenantID     string             `json:"tenant_id"`
+	SiteID       string             `json:"site_id"`
+	Serial       string             `json:"serial"`
+	PublicKeyB64 string             `json:"public_key"` // base64-raw
+	privKey      ed25519.PrivateKey // not persisted in JSON; lives in key file
 }
 
 func (i *Identity) PrivateKey() ed25519.PrivateKey { return i.privKey }

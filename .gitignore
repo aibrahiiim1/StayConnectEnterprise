@@ -27,3 +27,12 @@ coverage/
 # Built Next standalone deploy tarballs
 *-deploy.tgz
 __pycache__/
+
+# Phase-3 evidence bundles are generated per run and carry a timestamp + source HEAD; they are produced by
+# scripts/phase3-evidence.sh at deployment time, not committed (a committed bundle is stale the moment the
+# next commit lands, and a stale bundle reads as current evidence).
+evidence/
+
+# Phase-3 software-gate staging + artifact (produced in CI, never committed)
+.phase3-evidence/
+.phase3-artifact/

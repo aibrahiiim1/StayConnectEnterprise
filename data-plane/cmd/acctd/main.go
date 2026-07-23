@@ -27,10 +27,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 	"github.com/stayconnect/enterprise/data-plane/internal/livez"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 type cfg struct {
@@ -82,6 +84,8 @@ type acctd struct {
 	applID       string
 	legacyBridge string
 	prev         snapshot
+	// p3 is the Phase-3 arm (nil while dark).
+	p3 *phase3
 }
 
 func main() {
@@ -108,8 +112,12 @@ func main() {
 		c.ApplianceID = ident.ApplianceID
 	}
 	asgStore := &assignment.Store{Dir: envOr("ACCTD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment")}
-	if aTen, _, _, _ := asgStore.Resolved(); aTen != "" {
+	assignedSite := ""
+	assignedGen := int64(0)
+	if aTen, aSite, _, aVer := asgStore.Resolved(); aTen != "" {
 		c.TenantID = aTen
+		assignedSite = aSite
+		assignedGen = aVer
 	} else {
 		c.TenantID = "" // unassigned appliance bills nobody
 	}
@@ -140,6 +148,41 @@ func main() {
 		prev:         snapshot{},
 	}
 
+	// Phase 3 (DARK): the enforcement arm is constructed only when the master + checkout-grace flags are on.
+	// While dark p3 is nil, every call on it is a no-op, and acctd issues zero Phase-3 queries.
+	pmsCfg, err := iamv2.LoadPMSConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("acctd: phase3 config fail-closed", "err", err)
+		os.Exit(1)
+	}
+	// The controlled-writer boundary must be REAL before this process writes anything Phase-3. A schema whose
+	// guards were never applied accepts raw writes silently, and a process connected as the operations' owner
+	// satisfies every guard trivially — both are "Phase 3 is running" with none of its guarantees.
+	if pmsCfg.Enabled() {
+		if err := writerguard.Verify(rootCtx, pool, writerguard.Phase3Requirements()); err != nil {
+			slog.Error("acctd: refusing to start", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	// The shaping contract is scoped to THIS appliance under THIS assignment: netd checks a submitted plan
+	// against its own copy of the same facts, so a plan derived for another site can never be applied here.
+	p3scope := planScope{TenantID: c.TenantID, SiteID: assignedSite, ApplianceID: c.ApplianceID,
+		AssignmentGe: assignedGen}
+	if rec, err := asgStore.Load(); err == nil && rec != nil && rec.Current != nil {
+		p3scope.AssignmentID = rec.Current.AssignmentID
+	}
+	// The plan generation is durable: a restarted producer that began again at 1 would have every plan
+	// correctly refused as stale, freezing enforcement at the pre-restart state with nothing looking broken.
+	p3plans := newPlanCounter(envOr("ACCTD_PHASE3_PLAN_STATE", "/var/lib/stayconnect/acctd-phase3-plan.json"))
+	p3plans.start()
+	a.p3 = newPhase3(pmsCfg, a, c.TenantID, assignedSite, p3scope, p3plans)
+	// ADR-0002: acctd derives the plan; netd is the ONLY process that mutates Phase-3 tc state.
+	netdShaping := newNetdShaper(envOr("ACCTD_NETD_SOCKET", "/run/stayconnect/netd.sock"))
+	p3 := a.p3
+	slog.Info("acctd phase3 arm", "flags", pmsCfg.SafeFlagSummary(), "active", p3 != nil,
+		"accounting_owner", map[bool]string{true: "phase3", false: "legacy"}[p3.ownsAccounting()])
+
 	tick := time.NewTicker(time.Duration(c.TickSeconds) * time.Second)
 	defer tick.Stop()
 
@@ -152,9 +195,20 @@ func main() {
 			if err := a.loop(rootCtx); err != nil {
 				slog.Error("loop", "err", err)
 			}
+			// Phase 3 runs on the same tick over its OWN session domain: measure first (so this tick's usage
+			// is attributed before anything is closed out), then enforce expiry at its true time, then submit
+			// the derived plan to netd — the single shaping writer. All three are no-ops while dark.
+			if n := p3.accountingPass(rootCtx, a.shp, netdShaping, c.LegacyBridge, time.Now()); n > 0 {
+				slog.Debug("phase3: accounting samples ingested", "count", n)
+			}
+			p3.enforceExpiries(rootCtx)
+			p3.reconcileShaping(rootCtx, netdShaping, c.LegacyBridge)
 			// Liveness heartbeat: proves the accounting loop is PROGRESSING (not
-			// just that the process is up) for the edged health supervisor.
+			// just that the process is up) for the edged health supervisor — together with WHY it is
+			// degraded, if it is. A ticking loop whose every observation is refused is not healthy, and
+			// the heartbeat alone cannot say so.
 			livez.Touch("acctd")
+			livez.Report("acctd", p3.degradedSummary())
 		}
 	}
 }
@@ -185,6 +239,14 @@ type activeSession struct {
 }
 
 func (a *acctd) loop(ctx context.Context) error {
+	// When Phase-3 owns enforcement, netd is the ONLY shaping writer (ADR-0002) and Phase-3 sessions are
+	// accounted by their own pass. The legacy loop stands down entirely rather than measuring and shaping a
+	// second, overlapping view of the same guests — two writers to one set of tc classes is a race with no
+	// owner, and that is precisely what the single-owner decision exists to remove.
+	if a.p3.ownsAccounting() {
+		a.prev = snapshot{}
+		return nil
+	}
 	sessions, err := a.loadActive(ctx)
 	if err != nil {
 		return err
@@ -250,6 +312,9 @@ func (a *acctd) loop(ctx context.Context) error {
 		}
 
 		if dUp != 0 || dDown != 0 {
+			// This is the LEGACY session domain (public.sessions). Phase-3 sessions live in iam_v2.sessions and
+			// are accounted by their own pass (phase3.accountingPass) — mixing the two here is what made an
+			// earlier attempt call the Phase-3 ingest with ids it could never resolve.
 			_, _ = a.db.Exec(ctx, `
 				INSERT INTO accounting_records (ts, session_id, tenant_id, appliance_id, bytes_up, bytes_down)
 				VALUES ($1, $2, $3, $4, $5, $6)

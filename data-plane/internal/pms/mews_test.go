@@ -13,17 +13,18 @@ import (
 )
 
 // fakeMews stands in for api.mews.com. It routes three endpoints:
-//   /spaces/getAll        → configurable space list
-//   /reservations/getAll  → configurable reservation list
-//   /customers/getAll     → responds with every customer the caller asks for
+//
+//	/spaces/getAll        → configurable space list
+//	/reservations/getAll  → configurable reservation list
+//	/customers/getAll     → responds with every customer the caller asks for
 //
 // It also verifies that every request body carries the expected auth
 // fields so contract drift shows up in tests, not in prod.
 type fakeMews struct {
 	mu            sync.Mutex
 	spaces        []fakeSpace
-	reservations  map[string][]fakeRes     // keyed by spaceID
-	customers     map[string]fakeCustomer  // keyed by customerID
+	reservations  map[string][]fakeRes    // keyed by spaceID
+	customers     map[string]fakeCustomer // keyed by customerID
 	lastSpacesReq map[string]any
 	srv           *httptest.Server
 }
@@ -134,7 +135,8 @@ func TestMewsConfigureRequiresTokens(t *testing.T) {
 }
 
 func TestMewsRefreshSpacesBuildsMap(t *testing.T) {
-	f := newFakeMews(t); defer f.Close()
+	f := newFakeMews(t)
+	defer f.Close()
 	f.mu.Lock()
 	f.spaces = []fakeSpace{{ID: "space-101", Number: "101"}, {ID: "space-102", Number: "102"}}
 	f.mu.Unlock()
@@ -156,7 +158,8 @@ func TestMewsRefreshSpacesBuildsMap(t *testing.T) {
 }
 
 func TestMewsValidateGuestSuccess(t *testing.T) {
-	f := newFakeMews(t); defer f.Close()
+	f := newFakeMews(t)
+	defer f.Close()
 	f.mu.Lock()
 	f.spaces = []fakeSpace{{ID: "space-101", Number: "101"}}
 	f.reservations["space-101"] = []fakeRes{{
@@ -186,7 +189,8 @@ func TestMewsValidateGuestSuccess(t *testing.T) {
 }
 
 func TestMewsValidateGuestNoMatch(t *testing.T) {
-	f := newFakeMews(t); defer f.Close()
+	f := newFakeMews(t)
+	defer f.Close()
 	f.mu.Lock()
 	f.spaces = []fakeSpace{{ID: "space-101", Number: "101"}}
 	f.reservations["space-101"] = []fakeRes{{
@@ -210,7 +214,8 @@ func TestMewsValidateGuestNoMatch(t *testing.T) {
 }
 
 func TestMewsValidateGuestRefetchesOnMiss(t *testing.T) {
-	f := newFakeMews(t); defer f.Close()
+	f := newFakeMews(t)
+	defer f.Close()
 	// Start with empty spaces — first ValidateGuest call will miss the map.
 	f.mu.Lock()
 	f.spaces = nil

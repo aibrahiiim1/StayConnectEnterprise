@@ -1,0 +1,41 @@
+[Unit]
+Description=StayConnect PMS Connector Daemon (pmsd) — dedicated read-only PMS connector (Phase 3, DARK)
+# Ordering only (pmsd uses a lazy pool and tolerates a slow DB): after network + the site DB container.
+After=network-online.target docker.service postgresql.service
+Wants=network-online.target docker.service
+# Bounded restart window: a genuine crash is retried a few times, then the unit backs off instead of
+# storming. A clean flags-OFF exit is success (Restart=on-failure below), so DARK never restart-loops.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/stayconnect/pmsd.env
+ExecStart=/opt/stayconnect/bin/pmsd
+# on-failure (NOT always): a clean exit (flags OFF / graceful SIGTERM) must not trigger a restart storm.
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+
+# --- least privilege: pmsd needs no root, no capabilities (outbound TCP to the PMS + DB only) ---
+User=stayconnect-pmsd
+Group=stayconnect-pmsd
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# no ReadWritePaths: pmsd persists only to the DB; it needs no writable filesystem path.
+RuntimeDirectory=stayconnect-pmsd
+RuntimeDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target
