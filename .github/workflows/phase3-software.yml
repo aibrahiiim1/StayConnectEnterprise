@@ -114,25 +114,25 @@ jobs:
       # ---------------------------------------------------------------- backend / runtime
       - name: gofmt (whole Phase-3 Go surface)
         working-directory: data-plane
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh gofmt -- bash $GITHUB_WORKSPACE/scripts/ci/gofmt-check.sh"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh gofmt -- bash $GITHUB_WORKSPACE/scripts/ci/gofmt-check.sh"
 
       - name: go build (./...)
         working-directory: data-plane
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh go-build -- go build ./..."
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-build -- go build ./..."
 
       - name: go vet (./...)
         working-directory: data-plane
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh go-vet -- go vet ./..."
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet -- go vet ./..."
 
       - name: go test (all packages)
         working-directory: data-plane
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh go-unit -- bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh go-unit ./... -count=1"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-unit -- bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh go-unit ./... -count=1"
 
       - name: go test -race (all Phase-3 concurrency-sensitive paths)
         working-directory: data-plane
         # pmsd, resolver, auth context, stay grant, checkout, scd, acctd, netd, and the controlled-writer guard.
         run: >
-          $GITHUB_WORKSPACE/scripts/ci/step.sh go-race --
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-race --
           bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh go-race
           ./internal/pmsd/... ./internal/pms/... ./internal/stayengine/... ./internal/pmsresolve/...
           ./internal/authctx/... ./internal/grace/... ./internal/checkout/... ./internal/staygrant/...
@@ -140,10 +140,10 @@ jobs:
           ./cmd/scd/... ./cmd/acctd/... ./cmd/netd/... -count=1
 
       - name: Migration 0010 lifecycle + concurrency gate (disposable PG16)
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh migration-lifecycle -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase3_0010_lifecycle.sh"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh migration-lifecycle -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase3_0010_lifecycle.sh"
 
       - name: PG16 integration — all eleven Phase-3 suites (disposable PG16)
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh pg16-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/pmsd-pg-integration.sh"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh pg16-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/pmsd-pg-integration.sh"
 
       - name: Phase-3 offline preflight
         run: |
@@ -160,31 +160,31 @@ jobs:
       # ---------------------------------------------------------------- Hotel Admin / Guest Portal
       - name: npm ci (locked dependencies)
         working-directory: hotel-admin
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh npm-ci -- npm ci"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh npm-ci -- npm ci"
 
       - name: TypeScript typecheck
         working-directory: hotel-admin
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh tsc -- npx tsc --noEmit"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh tsc -- npx tsc --noEmit"
 
       - name: Vitest
         working-directory: hotel-admin
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh vitest -- npx vitest run --reporter=default --reporter=json --outputFile=$EVID/counts/vitest.json"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh vitest -- npx vitest run --reporter=default --reporter=json --outputFile=$EVID/counts/vitest.json"
 
       - name: Production build (Phase-3 flags OFF)
         working-directory: hotel-admin
         env:
           NEXT_TELEMETRY_DISABLED: '1'
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh next-build -- npx next build"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh next-build -- npx next build"
 
       - name: Install Playwright browser
         working-directory: hotel-admin
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome"
 
       - name: Playwright (Hotel-Admin + guest-portal real template + a11y)
         working-directory: hotel-admin
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ github.workspace }}/.phase3-evidence/counts/playwright.json
-        run: "$GITHUB_WORKSPACE/scripts/ci/step.sh playwright -- npx playwright test --reporter=list,json"
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright -- npx playwright test --reporter=list,json"
 
       # ---------------------------------------------------------------- evidence
       - name: Assemble the Phase-3 evidence artifact
