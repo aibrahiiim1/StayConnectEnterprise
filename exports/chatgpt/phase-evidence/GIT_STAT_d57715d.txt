@@ -1,4 +1,0 @@
-commit d57715de146d349fbf0cb3dfa374665f292ec585
-Date:   Thu Jul 23 13:15:37 2026 +0300
-
-    Phase 3 Â§7: regenerate the hotel-admin lockfile on Linux so `npm ci` resolves on the runner

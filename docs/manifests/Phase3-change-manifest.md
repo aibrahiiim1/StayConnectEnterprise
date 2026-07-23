@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `d57715de146d349fbf0cb3dfa374665f292ec585`
-- **Provenance (generation HEAD = inventory_head):** `d57715de146d349fbf0cb3dfa374665f292ec585`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `36c9deb6df89c1253e823bfeaaec51149532c8ca`
+- **Provenance (generation HEAD = inventory_head):** `36c9deb6df89c1253e823bfeaaec51149532c8ca`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 220
@@ -12,7 +12,7 @@
 
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
-| `.github/workflows/phase3-software.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
+| `.github/workflows/phase3-software.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | Phase 3 Â§7: upload the evidence artifact from the dot-prefixed staging dir |
 | `.gitignore` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact |
 | `data-plane/cmd/acctd/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3: durable accounting, netd shaping control plane, controlled-writer boundary, guest vertical slice |
 | `data-plane/cmd/acctd/phase3.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3: fix the failed migration gate; real PMS eligibility, published-Revision pinning, offer-bound grants |
@@ -163,8 +163,8 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/GIT_STAT_36c9deb.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_d57715d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
@@ -235,7 +235,7 @@
 
 ## Total diff statistics (`git diff --stat`)
 ```text
- .github/workflows/phase3-software.yml              |  204 ++
+ .github/workflows/phase3-software.yml              |  208 ++
  .gitignore                                         |    9 +
  data-plane/cmd/acctd/main.go                       |   69 +-
  data-plane/cmd/acctd/phase3.go                     |  372 +++
@@ -380,14 +380,14 @@
  .../adr/ADR-0002-phase3-single-shaping-owner.md    |  156 ++
  docs/context/StayConnect-IAM-Handoff.md            |   16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           |  632 +++++
+ docs/manifests/Phase3-change-manifest.md           |  634 +++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |  871 ++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 282348 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 104097 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42001 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 282390 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 104083 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42000 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_36c9deb.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
- .../chatgpt/phase-evidence/GIT_STAT_d57715d.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -405,7 +405,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   12 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  632 +++++
+ .../Phase3-change-manifest.md                      |  634 +++++
  .../StayConnect-IAM-Handoff.md                     |   16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   16 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   12 +-
@@ -455,7 +455,7 @@
  tools/project-state.py                             |   49 +-
  .../tests/project_state_validator/run_mutations.py |   69 +-
  tools/validate-project-state.sh                    |    2 +-
- 220 files changed, 40033 insertions(+), 448 deletions(-)
+ 220 files changed, 40041 insertions(+), 448 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -464,8 +464,8 @@ M  docs/manifests/Phase3-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_d57715d.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_e42f1cd.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_36c9deb.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_d57715d.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -478,6 +478,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+36c9deb Phase 3 Â§7: upload the evidence artifact from the dot-prefixed staging dir
+66429e5 Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer
 d57715d Phase 3 Â§7: regenerate the hotel-admin lockfile on Linux so `npm ci` resolves on the runner
 7d7e4ea Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer
 e42f1cd Phase 3 Â§7: fix `npm ci` in the full gate â€” drop the unused, conflicting @vitejs/plugin-react

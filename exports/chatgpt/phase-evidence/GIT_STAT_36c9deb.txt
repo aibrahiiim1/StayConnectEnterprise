@@ -1,0 +1,4 @@
+commit 36c9deb6df89c1253e823bfeaaec51149532c8ca
+Date:   Thu Jul 23 13:23:31 2026 +0300
+
+    Phase 3 Â§7: upload the evidence artifact from the dot-prefixed staging dir
