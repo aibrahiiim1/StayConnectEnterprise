@@ -1,4 +1,0 @@
-commit 650f15857c0fa441415bba642f11ed2a5cc29f28
-Date:   Thu Jul 23 12:35:07 2026 +0300
-
-    Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact

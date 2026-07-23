@@ -1,0 +1,4 @@
+commit 4184bf3b6760f96e797b8c380d3691a1e1358ecd
+Date:   Thu Jul 23 12:40:07 2026 +0300
+
+    Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent

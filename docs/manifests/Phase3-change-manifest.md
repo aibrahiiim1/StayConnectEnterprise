@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `650f15857c0fa441415bba642f11ed2a5cc29f28`
-- **Provenance (generation HEAD = inventory_head):** `650f15857c0fa441415bba642f11ed2a5cc29f28`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `4184bf3b6760f96e797b8c380d3691a1e1358ecd`
+- **Provenance (generation HEAD = inventory_head):** `4184bf3b6760f96e797b8c380d3691a1e1358ecd`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 218
@@ -12,7 +12,7 @@
 
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
-| `.github/workflows/phase3-software.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact |
+| `.github/workflows/phase3-software.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
 | `.gitignore` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact |
 | `data-plane/cmd/acctd/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3: durable accounting, netd shaping control plane, controlled-writer boundary, guest vertical slice |
 | `data-plane/cmd/acctd/phase3.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3: fix the failed migration gate; real PMS eligibility, published-Revision pinning, offer-bound grants |
@@ -163,7 +163,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_650f158.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_4184bf3.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
@@ -192,7 +192,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 Increment-7 Checkout history-integrity corrections (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 3 (D15 / Option C): accounting attribution, source binding, temporal order, class origin, generation authority |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `hotel-admin/app/(app)/checkout-grace/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 1 (inventory_head): controlled alert lifecycle + governed grace publication + NOT VALID boundary CHECK; real API+PG contract tests: gate 310/310 |
 | `hotel-admin/app/(app)/operational-alerts/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 1 (inventory_head): controlled alert lifecycle + governed grace publication + NOT VALID boundary CHECK; real API+PG contract tests: gate 310/310 |
@@ -217,12 +217,12 @@
 | `hotel-admin/test/phase3-pages.test.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 3 items 1-5 (inventory_head): required exact policy version, whole reserved catalog excluded, selector on the authoritative validator, complete metadata, honest reconcile + two-process evidence |
 | `iam_v2_scratch/00_platform_fixture.sql` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Phase 3: durable accounting, netd shaping control plane, controlled-writer boundary, guest vertical slice |
 | `iam_v2_scratch/phase3_0010_lifecycle.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§5: extend the controlled-writer boundary over every authoritative family |
-| `scripts/ci/go-test-counted.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact |
-| `scripts/ci/gofmt-check.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact |
-| `scripts/ci/gojson_summary.py` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact |
-| `scripts/ci/pg-gate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact |
-| `scripts/ci/phase3_evidence.py` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact |
-| `scripts/ci/step.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact |
+| `scripts/ci/go-test-counted.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
+| `scripts/ci/gofmt-check.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
+| `scripts/ci/gojson_summary.py` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
+| `scripts/ci/pg-gate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
+| `scripts/ci/phase3_evidence.py` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
+| `scripts/ci/step.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
 | `scripts/edge-migrate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
 | `scripts/phase3-evidence.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: downloadable evidence artifact with a SHA-256 integrity manifest |
 | `scripts/phase3-preflight.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§8/Â§9: self-audit findings, and the authoritative state brought up to date |
@@ -378,13 +378,13 @@
  .../adr/ADR-0002-phase3-single-shaping-owner.md    |  156 ++
  docs/context/StayConnect-IAM-Handoff.md            |   16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           |  622 +++++
+ docs/manifests/Phase3-change-manifest.md           |  624 +++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |  871 ++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 282106 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 104111 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 282178 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 104105 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42002 bytes
- .../chatgpt/phase-evidence/GIT_STAT_650f158.txt    |    4 +
+ .../chatgpt/phase-evidence/GIT_STAT_4184bf3.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
@@ -403,7 +403,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   12 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  622 +++++
+ .../Phase3-change-manifest.md                      |  624 +++++
  .../StayConnect-IAM-Handoff.md                     |   16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   16 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   12 +-
@@ -451,7 +451,7 @@
  tools/project-state.py                             |   49 +-
  .../tests/project_state_validator/run_mutations.py |   69 +-
  tools/validate-project-state.sh                    |    2 +-
- 218 files changed, 39963 insertions(+), 400 deletions(-)
+ 218 files changed, 39967 insertions(+), 400 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -460,8 +460,8 @@ M  docs/manifests/Phase3-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_650f158.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_99e8a1c.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_4184bf3.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_650f158.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -474,6 +474,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+4184bf3 Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent
+3b39a6a Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer
 650f158 Phase 3 Â§7 correction: make the Software CI the TRUE full same-HEAD gate with an uploaded evidence artifact
 e836807 Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer
 99e8a1c Phase 3 Â§7: downloadable evidence artifact with a SHA-256 integrity manifest
