@@ -229,8 +229,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `0e1c7dde7ac7d5b7ae20a3498dde0549edcda6d5`
-- **Provenance (generation HEAD = inventory_head):** `0e1c7dde7ac7d5b7ae20a3498dde0549edcda6d5`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `d8c23b623d5a37a4df46337db791c4613b7e4493`
+- **Provenance (generation HEAD = inventory_head):** `d8c23b623d5a37a4df46337db791c4613b7e4493`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 225
@@ -394,7 +394,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_0e1c7dd.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_0e1c7dd.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
@@ -403,7 +403,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
@@ -463,7 +463,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `scripts/pmsd-pg-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 (D15 / Option C): accounting attribution, source binding, temporal order, class origin, generation authority |
 | `tools/embed-report-manifest.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3: accountable-before-forwarding class provisioning, and Zero-Stale documentation |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
+| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 3: update mutation-suite fixtures for the new project-state values |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 3: accept the Live-Increment-9 next-action phrasing in the zero-stale validator |
 
 ## Total diff statistics (`git diff --stat`)
@@ -616,10 +616,10 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../adr/ADR-0002-phase3-single-shaping-owner.md    |  156 ++
  docs/context/StayConnect-IAM-Handoff.md            |   16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           |  669 +++++
+ docs/manifests/Phase3-change-manifest.md           |  666 +++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1098 ++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 284165 bytes
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1093 ++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 284179 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 104127 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42082 bytes
  .../chatgpt/phase-evidence/GIT_STAT_0e1c7dd.txt    |    4 +
@@ -641,7 +641,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   12 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  669 +++++
+ .../Phase3-change-manifest.md                      |  664 +++++
  .../StayConnect-IAM-Handoff.md                     |   16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   16 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   12 +-
@@ -693,29 +693,19 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  tools/project-state.py                             |   49 +-
  .../tests/project_state_validator/run_mutations.py |   69 +-
  tools/validate-project-state.sh                    |    2 +-
- 225 files changed, 41815 insertions(+), 458 deletions(-)
+ 225 files changed, 41802 insertions(+), 458 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_0e1c7dd.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_5529f08.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/tools/validate-project-state.sh
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
+M  governance/decision-register.json
 M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+d8c23b6 Phase 3: update mutation-suite fixtures for the new project-state values
+1b818f7 Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 0e1c7dd Phase 3: accept the Live-Increment-9 next-action phrasing in the zero-stale validator
 c885f98 Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 5529f08 Phase 3: governance activity transition T0016 (software candidate awaiting Increment 9), doc sync
