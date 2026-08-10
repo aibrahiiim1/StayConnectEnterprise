@@ -202,13 +202,13 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 | Production build with Phase-3 flags OFF | **PASS** | `npx next build` (CI) |
 | Guest-portal uniform non-success contract (server) | **PASS** | `cmd/portald/pms_phase3_test.go`, `pms_phase3_handlers_test.go`, `pms_phase3_budget_test.go` |
 | Guest-portal Phase-3 flow + resilience (real browser, real template) | **PASS** | `hotel-admin/e2e/phase3-guest-portal*.spec.ts` |
-| Phase-3 network-enforcement system suite (nft + tc + Session together) | **PASS** | `cmd/netd/phase3_enforcement_test.go` |
-| Bounded-lease and fail-closed-activation suite | **PASS** | `cmd/netd/phase3_lease_test.go` |
+| Phase-3 network-enforcement system suite (nft + tc + Session together) | **PASS 58/58** | `cmd/netd/phase3_enforcement_test.go`, `phase3_lease_test.go`, `internal/nft` contracts |
+| Bounded-lease and fail-closed-activation suite | **PASS** (counted inside the 58 above) | `cmd/netd/phase3_lease_test.go` |
 | nft packet-authorization + lease command contract (Phase-3 set only; legacy never named) | **PASS** | `internal/nft/nft_phase3_test.go` |
-| Surgical live-dark nft foundation (install/rollback preserving a populated legacy set) | **PASS** | `internal/nftfoundation/foundation_test.go` |
+| Surgical live-dark nft foundation (install/rollback preserving a populated legacy set) | **PASS 11/11** | `internal/nftfoundation/foundation_test.go` |
 | Controlled-activation poison tests (fabricated / foreign / stale / contested accounting origin) | **PASS** | `cmd/scd/phase3_activation_integration_test.go` (PG16) |
 | Portal/enforcement timing composition (tick boundaries, derived wait, single uniform budget) | **PASS** | `cmd/portald/pms_phase3_budget_timing_test.go`, `cmd/scd/phase3_auth_timing_test.go` |
-| **REAL-KERNEL contract suite** — real `nft`, real `tc`, real packets, disposable Linux network namespaces | **PASS** | `internal/kerneltest` via `scripts/ci/kernel-netns-suite.sh`; **kernel evidence on a disposable CI machine, NOT live appliance evidence** |
+| **REAL-KERNEL contract suite** — real `nft`, real `tc`, real packets, disposable Linux network namespaces | **PASS 14/14** (kernel 6.17.0-1020-azure, nftables 1.0.9, iproute2 6.1.0; host ruleset proven unchanged) | `internal/kerneltest` via `scripts/ci/kernel-netns-suite.sh`; **kernel evidence on a disposable CI machine, NOT live appliance evidence** |
 | Full Phase-3 Software CI + Governance CI on the same pushed HEAD, evidence artifact uploaded | **PASS** | §12 |
 | Live read-only PMS protocol verification | **PENDING** | operator-executed; not simulated |
 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING** | operator-executed; runbook §2–§5 |
@@ -1228,14 +1228,14 @@ Software run and contains only Phase-3 evidence.
 
 **Its integrity is stated exactly**, because "N/N verified" is easy to write and easy to get wrong:
 
-- the artifact contains **16 files in total**;
-- `MANIFEST.sha256` holds **15 entries**, one for every other file — it cannot list itself, since a file
+- the artifact contains **18 files in total**;
+- `MANIFEST.sha256` holds **17 entries**, one for every other file — it cannot list itself, since a file
   cannot contain its own digest;
-- `sha256sum -c MANIFEST.sha256` therefore verifies **those 15 payload files**;
+- `sha256sum -c MANIFEST.sha256` therefore verifies **those 17 payload files**;
 - `MANIFEST.sha256` itself is identified separately, by the integrity-manifest SHA-256 recorded in the PR body
   and printed by the workflow.
 
-It is wrong to describe this as "16/16 entries passed `sha256sum -c`". The
+It is wrong to describe this as "18/18 entries passed `sha256sum -c`". The
 committed export packs above are the project/plan packs; **the older Phase-1A live-dark acceptance pack was
 NOT reused, renamed or repurposed as Phase-3 evidence** — the Phase-3 artifact is generated fresh, in CI, per
 run, and its `RUN_META.json` embeds this delivery HEAD.
