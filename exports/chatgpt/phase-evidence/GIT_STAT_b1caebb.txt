@@ -1,4 +1,0 @@
-commit b1caebbe037d6c6e6c6e5564751c5813bb546ed5
-Date:   Mon Aug 10 16:27:18 2026 +0300
-
-    Phase 3 pre-live (inventory_head): hard-boundary lease precision, durable activation bound, and a Zero-Stale check that had never run

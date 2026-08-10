@@ -219,23 +219,27 @@ while IFS= read -r line; do
 done < <(grep -rniE "(uniform|response-time|failure) budget[^.]{0,60}1200 ?ms" "${SCAN[@]}" --include=*.md 2>/dev/null \
           | grep -viE "historical|superseded|no longer|used to be|previous|old |not " | grep -v "validate-project-state.sh")
 
-# ---- the delivery evidence a reader treats as current must actually be current --------------------------
-# The Final Report cites the same-HEAD run ids and the artifact metadata. Those are exactly the values that go
-# stale in silence: the prose around them stays true-sounding while pointing at a previous round's run.
-ev="$($PY3 -c "import json,sys;d=json.load(open(sys.argv[1],encoding='utf-8')).get('phase3_delivery_evidence',{});print(d.get('software_run_id',''),d.get('governance_run_id',''),d.get('artifact_id',''),d.get('artifact_manifest_sha256',''))" "$REPO_ROOT/governance/project-state.json" 2>/dev/null)"
-set -- $ev
-sw_run="${1:-}"; gov_run="${2:-}"; art_id="${3:-}"; art_sha="${4:-}"
-if [ -f "$REPORT" ] && [ -n "$sw_run" ] && [ "$sw_run" != "PENDING" ]; then
-  for v in "$sw_run" "$gov_run" "$art_id" "$art_sha"; do
-    grep -q "$v" "$REPORT" || { echo "    HIT [stale delivery evidence]: the Final Report does not cite $v"; p3drift=$((p3drift+1)); }
-  done
-  for old_id in 31375632025 31375633132 9057917064 31383683837 31383683846 9060977983; do
-    case "$old_id" in "$sw_run"|"$gov_run"|"$art_id") continue;; esac
-    if grep -q "$old_id" "$REPORT"; then
-      echo "    HIT [stale delivery evidence]: the Final Report still cites superseded id $old_id"; p3drift=$((p3drift+1))
-    fi
-  done
+# ---- delivery evidence must not be baked into a committed document -------------------------------------
+# The Final Report deliberately carries NO numeric CI run id and NO artifact id: those describe the run that
+# the delivery commit itself triggers, so a committed document cannot cite them without being a round behind.
+# The report says exactly that and points the reader at the PR body.
+#
+# Enforcing the protocol is therefore the check that prevents stale delivery metadata, and unlike comparing
+# against a recorded value it has no self-reference problem: any numeric run/artifact id present in the report
+# is, by construction, from a previous round.
+if [ -f "$REPORT" ]; then
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    echo "    HIT [stale delivery evidence baked into the report]: $line"; p3drift=$((p3drift+1))
+  done < <(grep -niE "(run|artifact)[^0-9]{0,25}[0-9]{9,}" "$REPORT" 2>/dev/null \
+            | grep -viE "HISTORICAL|superseded|must not|deliberately|are in the PR|not recorded")
+  # and it must keep telling the reader where those numbers actually live
+  grep -q "PR #6 body" "$REPORT" || {
+    echo "    HIT [delivery-evidence pointer lost]: the report no longer says where the run ids and artifact metadata live"
+    p3drift=$((p3drift+1))
+  }
 fi
+
 [ "$p3drift" = "0" ] && ok "no Phase-3 enforcement/evidence phrase drift" || fail "$p3drift Phase-3 phrase drift hit(s)"
 
 echo "== 2. single current maturity + consistent next action =="
