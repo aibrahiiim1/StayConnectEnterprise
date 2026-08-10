@@ -67,6 +67,17 @@ public-schema rights**.
 | `bootstrap_emergency_grace` | **Deployment/System-admin capability only** | `scd`, `portald`, `acctd`, `pmsd`, **and all Hotel-Admin runtime roles** |
 | alert-action writer (when added) | Hotel-Admin alert-management capability (RBAC + step-up) | all service roles |
 | device authorization/deauthorization writer (when added) | the session/enforcement capability | Hotel-Admin UI roles |
+| `register_class_origin` | the **network-enforcement** capability (`netd` only — the single privileged enforcement owner) | `scd`, `portald`, `pmsd`, all Hotel-Admin roles, every read-only role |
+| `activate_session_enforcement` | the **network-enforcement** capability (`netd` only) | everything else, including `scd` — the grant path opens a Session as `PENDING_ENFORCEMENT` and must not be able to promote it |
+| `end_session_enforcement` | the **network-enforcement** capability (`netd` only) | Hotel-Admin UI roles; `pmsd`; every read-only role |
+
+The three network-enforcement operations are listed separately because they are the ones that make a Session
+say `active`, and `active` is read by everything downstream as "this guest is authorized AND their traffic is
+accounted". `activate_session_enforcement` enforces the second half itself — it verifies the accounting
+checkpoint for the session's own device, bridge, class minor and exact generation before it will promote
+anything — so the capability that may call it is the one that actually performs the kernel work, and nothing
+else. Granting it to the grant path would let a Session claim network access before any kernel state existed,
+which is precisely the state the `PENDING_ENFORCEMENT` lifecycle was introduced to remove.
 
 ## 4. Capability validation the final APIs must perform — BINDING PRE-GRANT REQUIREMENTS
 
