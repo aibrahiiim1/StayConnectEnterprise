@@ -1275,6 +1275,88 @@ BEGIN
 END $fn$;
 REVOKE EXECUTE ON FUNCTION iam_v2.register_class_origin(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz) FROM PUBLIC;
 
+-- ============================================================================
+-- (4u) SESSION ENFORCEMENT LIFECYCLE — PENDING_ENFORCEMENT -> active -> ended.
+--
+-- A Session row saying 'active' is a CLAIM ABOUT THE KERNEL: this guest is authorized at the packet gate and
+-- metered by an accountable class, right now. The grant path cannot honestly make that claim, because when it
+-- commits nothing has been enforced yet — no tc class exists and the guest is not authorized. Inserting
+-- 'active' there and hoping enforcement follows is precisely the "eventually should be active" lie this
+-- lifecycle exists to remove.
+--
+-- So the grant commits PENDING_ENFORCEMENT (durable, recoverable, and NOT a claim of network access), and the
+-- enforcement owner promotes it once both halves are proven in the kernel.
+--
+-- No CHECK constraint is added to sessions.state. The table is shared with the live legacy Phase-1/2 pipeline
+-- (which uses 'active'/'closed'/'ended'), and a CHECK would be a deploy-time landmine for any value this
+-- migration has not enumerated. The state machine is enforced where it can be enforced honestly: in these
+-- controlled writers, behind the controlled-writer boundary that already guards this table.
+CREATE OR REPLACE FUNCTION iam_v2.activate_session_enforcement(
+    p_tenant uuid, p_site uuid, p_session uuid, p_bridge text, p_class_minor int, p_epoch bigint) RETURNS text
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_state text; v_ended timestamptz; v_iface text; v_ip inet;
+BEGIN
+  SELECT state, ended, ingress_interface, ip INTO v_state, v_ended, v_iface, v_ip
+    FROM iam_v2.sessions
+   WHERE id = p_session AND tenant_id = p_tenant AND site_id = p_site
+     FOR UPDATE;
+  IF v_state IS NULL THEN
+    RAISE EXCEPTION 'ENFORCE_SESSION_OUT_OF_SCOPE: session % is not in this tenant/site', p_session;
+  END IF;
+  -- A session that has ENDED must never be promoted. Without this, a delayed or replayed plan could
+  -- resurrect access that a checkout or a revocation already removed.
+  IF v_ended IS NOT NULL OR v_state IN ('ended','closed') THEN
+    RAISE EXCEPTION 'ENFORCE_SESSION_ENDED: session % has ended and cannot be activated', p_session;
+  END IF;
+  -- The enforcement being reported must describe THIS session's source. The same coherence the accounting
+  -- operations require: an activation quoting another session's bridge or class is not evidence about this one.
+  IF v_iface IS DISTINCT FROM p_bridge OR iam_v2.p3_expected_class_minor(v_ip) IS DISTINCT FROM p_class_minor THEN
+    RAISE EXCEPTION 'ENFORCE_SOURCE_MISMATCH: the enforcement result does not describe session %', p_session;
+  END IF;
+  IF p_epoch IS NULL OR p_epoch < 1 THEN
+    RAISE EXCEPTION 'ENFORCE_INVALID: an activation needs the class generation it was enforced under';
+  END IF;
+
+  IF v_state = 'active' THEN
+    -- IDEMPOTENT. A retried plan, a lost acknowledgement or a restart mid-flight converge here rather than
+    -- creating a second anything.
+    RETURN 'ALREADY_ACTIVE';
+  END IF;
+  IF v_state <> 'PENDING_ENFORCEMENT' THEN
+    RAISE EXCEPTION 'ENFORCE_STATE_INVALID: session % is in state % and cannot be activated', p_session, v_state;
+  END IF;
+
+  UPDATE iam_v2.sessions SET state = 'active' WHERE id = p_session;
+  RETURN 'ACTIVATED';
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.activate_session_enforcement(uuid,uuid,uuid,text,int,bigint) FROM PUBLIC;
+
+-- The reverse: durable state stops claiming network access once enforcement is gone. Idempotent, and safe to
+-- call for a session that was never activated (a PENDING_ENFORCEMENT grant whose enforcement never succeeded
+-- must still be closable rather than lingering forever as a half-grant).
+CREATE OR REPLACE FUNCTION iam_v2.end_session_enforcement(
+    p_tenant uuid, p_site uuid, p_session uuid, p_reason text) RETURNS text
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
+DECLARE v_state text; v_ended timestamptz;
+BEGIN
+  IF p_reason IS NOT NULL AND p_reason !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+    RAISE EXCEPTION 'ENFORCE_INVALID: end reason must be a bounded machine code';
+  END IF;
+  SELECT state, ended INTO v_state, v_ended FROM iam_v2.sessions
+   WHERE id = p_session AND tenant_id = p_tenant AND site_id = p_site FOR UPDATE;
+  IF v_state IS NULL THEN
+    RAISE EXCEPTION 'ENFORCE_SESSION_OUT_OF_SCOPE: session % is not in this tenant/site', p_session;
+  END IF;
+  IF v_ended IS NOT NULL OR v_state IN ('ended','closed') THEN
+    RETURN 'ALREADY_ENDED';
+  END IF;
+  UPDATE iam_v2.sessions
+     SET state = 'ended', ended = GREATEST(now(), started), end_reason = COALESCE(p_reason,'ENFORCEMENT_TORN_DOWN')
+   WHERE id = p_session;
+  RETURN 'ENDED';
+END $fn$;
+REVOKE EXECUTE ON FUNCTION iam_v2.end_session_enforcement(uuid,uuid,uuid,text) FROM PUBLIC;
+
 -- THE controlled absolute-counter ingestion. One transaction decides everything: scope, binding, checkpoint,
 -- delta, accounting row, session totals, delayed classification and the new checkpoint.
 --
@@ -1737,8 +1819,14 @@ BEGIN
     --   * the ACCOUNTING IDENTITY (address and ingress interface), which the operation re-derives the
     --     counter source from. Rewriting either retroactively changes which physical counters a Session is
     --     measured against, which is a silent way to make one guest's traffic land on another's checkpoint.
+    -- ...and the ENFORCEMENT LIFECYCLE. A Session that says 'active' is a claim that the kernel is
+    -- authorizing and metering this guest right now. Only the enforcement owner can know that, so promoting
+    -- a Phase-3 session out of PENDING_ENFORCEMENT goes through activate_session_enforcement. Legacy
+    -- transitions between the pre-existing values are untouched: this only guards the new state.
     changed := (NEW.bytes_up IS DISTINCT FROM OLD.bytes_up OR NEW.bytes_down IS DISTINCT FROM OLD.bytes_down
-      OR NEW.ip IS DISTINCT FROM OLD.ip OR NEW.ingress_interface IS DISTINCT FROM OLD.ingress_interface);
+      OR NEW.ip IS DISTINCT FROM OLD.ip OR NEW.ingress_interface IS DISTINCT FROM OLD.ingress_interface
+      OR (OLD.state = 'PENDING_ENFORCEMENT' AND NEW.state IS DISTINCT FROM OLD.state)
+      OR NEW.state = 'PENDING_ENFORCEMENT');
   ELSIF TG_TABLE_NAME = 'entitlements' THEN
     changed := (NEW.status IS DISTINCT FROM OLD.status);   -- only status is controlled-writer-only
   ELSIF TG_TABLE_NAME = 'site_checkout_grace_config' AND TG_OP = 'UPDATE' THEN

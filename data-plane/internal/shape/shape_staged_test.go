@@ -145,15 +145,15 @@ func TestAbortFailsWhenClassSurvives(t *testing.T) {
 	}
 }
 
-// DenyForwarding strips the forwarding filters (the quarantine), so a class that will not delete is at least
-// provably non-forwarding.
-func TestDenyForwardingStripsFilters(t *testing.T) {
+// RemoveClassification strips the tc classification filters (the tc quarantine), so a class that will not
+// delete meters nothing. It does NOT deny internet access — only the nft gate does that.
+func TestRemoveClassificationStripsFilters(t *testing.T) {
 	c, rr := newTestClient()
-	if err := c.DenyForwarding(context.Background(), "br-guest", testIP); err != nil {
+	if err := c.RemoveClassification(context.Background(), "br-guest", testIP); err != nil {
 		t.Fatal(err)
 	}
 	if !rr.has("filter del dev br-guest") || !rr.has("filter del dev ifb-guest") {
-		t.Fatal("forwarding denial did not remove both filters")
+		t.Fatal("classification removal did not remove both filters")
 	}
 }
 

@@ -42,6 +42,19 @@ func RenderNftables(nets []GuestNetwork, topo Topology) []byte {
 
 	// --- sets ---
 	b.WriteString("\tset auth_ipv4 {\n\t\ttype ifname . ipv4_addr\n\t\tflags timeout\n\t\tcomment \"Authenticated guests: (ingress bridge, IP)\"\n\t}\n\n")
+	// PHASE-3 packet-authorization set — owned by netd, written by nothing else.
+	//
+	// It is separate from auth_ipv4 on purpose. Legacy scd reconciles auth_ipv4 from public.sessions; Phase 3
+	// authorizes from iam_v2.sessions through netd. Sharing one set would mean a Phase-3 full-state
+	// reconciliation (which must delete what no Phase-3 session claims) could remove a live legacy guest's
+	// authorization. Two sets make that impossible structurally rather than by careful filtering.
+	//
+	// It is emitted ALWAYS and starts EMPTY. An empty set matches nothing, so while Phase 3 is dark the
+	// appliance forwards exactly what it forwarded before. Emitting it from the start (rather than adding it
+	// at cutover) matters because this ruleset is applied as `delete table` + recreate: regenerating it later
+	// would flush auth_ipv4 and drop every live legacy guest. Present-but-empty makes Phase-3 activation a
+	// flag flip with no packet interruption and exactly one cutover boundary.
+	b.WriteString("\tset phase3_auth_ipv4 {\n\t\ttype ifname . ipv4_addr\n\t\tflags timeout\n\t\tcomment \"Phase-3 authorized guests (netd-owned): (ingress bridge, IP)\"\n\t}\n\n")
 	b.WriteString("\tset walled_garden_ip {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { 1.1.1.1, 8.8.8.8, 8.8.4.4 }\n\t}\n\n")
 	// dynamic descriptor sets (useful for generic rules + diagnostics)
 	b.WriteString("\tset guest_interfaces {\n\t\ttype ifname\n")
@@ -100,6 +113,8 @@ func RenderNftables(nets []GuestNetwork, topo Topology) []byte {
 	// authenticated guests -> WAN: single rule keyed on the concatenated
 	// (ingress bridge, source IP) auth set.
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @auth_ipv4 accept comment \"authenticated guests\"\n", topo.WANInterface)
+	// The Phase-3 gate. While the set is empty this rule can never match, so a dark appliance is unaffected.
+	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
 	// walled-garden pre-auth -> WAN for any guest interface
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr @walled_garden_ip accept\n", topo.WANInterface)
 	b.WriteString("\t}\n\n")
@@ -112,9 +127,12 @@ func RenderNftables(nets []GuestNetwork, topo Topology) []byte {
 		}
 		br := n.BridgeName
 		gw := n.GatewayIP
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 ip daddr != @walled_garden_ip tcp dport 80  dnat ip to %s:%d\n",
+		// A guest authorized in EITHER set must not be captive-redirected. Omitting the Phase-3 exclusion
+		// would leave an authorized Phase-3 guest's web traffic DNAT'd to the portal — internet "granted"
+		// but every page still the login screen.
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 80  dnat ip to %s:%d\n",
 			br, gw, topo.PortalHTTPPort)
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 ip daddr != @walled_garden_ip tcp dport 443 dnat ip to %s:%d\n",
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 443 dnat ip to %s:%d\n",
 			br, gw, topo.PortalTLSPort)
 	}
 	b.WriteString("\t}\n\n")

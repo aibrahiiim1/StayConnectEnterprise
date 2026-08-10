@@ -56,18 +56,26 @@ func New(pool *pgxpool.Pool) *Enforcer { return &Enforcer{pool: pool} }
 // without opening a second pool. The operations themselves remain the authority on what is allowed.
 func (e *Enforcer) Pool() *pgxpool.Pool { return e.pool }
 
-// PlanForSite derives the complete shaping plan for a site from durable state alone.
+// PlanForSite derives the complete enforcement plan for a site from durable state alone.
+//
+// PENDING_ENFORCEMENT sessions are included as DESIRED. That state means "the grant is durable and this guest
+// should be enforced, but the kernel has not confirmed it yet" — which is exactly the set the enforcement
+// owner must act on. Excluding them would deadlock the lifecycle: the grant would wait forever for an ACTIVE
+// that nothing was ever asked to produce. They are safe to include because being in the plan is not access:
+// netd still admits a guest only after the accountable class is proven, and promotes the Session only after
+// the nft gate is proven.
 func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, error) {
 	var p Plan
 	rows, err := e.pool.Query(ctx, `SELECT s.id::text, s.entitlement_id::text, s.device_id::text,
 			COALESCE(host(s.ip),''), COALESCE(s.mac::text,''), COALESCE(s.ingress_interface,''),
 			COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0),
-			(s.state='active' AND s.ended IS NULL AND e.status='ACTIVE'
+			(s.state IN ('active','PENDING_ENFORCEMENT') AND s.ended IS NULL AND e.status='ACTIVE'
 			 AND (e.window_ends_at IS NULL OR e.window_ends_at > now())) AS entitled
 		FROM iam_v2.sessions s
 		JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
 		LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
-		WHERE s.tenant_id=$1 AND s.site_id=$2 AND (s.state='active' OR s.ended > now() - interval '1 hour')
+		WHERE s.tenant_id=$1 AND s.site_id=$2
+		  AND (s.state IN ('active','PENDING_ENFORCEMENT') OR s.ended > now() - interval '1 hour')
 		ORDER BY s.started`, tenant, site)
 	if err != nil {
 		return p, err

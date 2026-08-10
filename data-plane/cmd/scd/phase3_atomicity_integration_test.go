@@ -152,6 +152,9 @@ func TestIntegration_Phase3Auth_GrantIsAllOrNothingAtEveryStage(t *testing.T) {
 // refused outright.
 func TestIntegration_Phase3Auth_RetryAfterAFailedGrantSucceeds(t *testing.T) {
 	f := newAuthFixture(t)
+	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
+	// and then refuses, because the guest would not actually be online.
+	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
@@ -223,6 +226,9 @@ func (f *authFixture) grantVia(t *testing.T, authContextID, ip, mac string) (*ht
 // it because the proof is spent.
 func TestIntegration_Phase3Auth_ARetryAfterALostReplyReturnsTheSameSession(t *testing.T) {
 	f := newAuthFixture(t)
+	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
+	// and then refuses, because the guest would not actually be online.
+	defer f.startEnforcementOwner(t)()
 
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
 		"0000fb01-0000-4000-8000-000000000000"))
@@ -257,6 +263,9 @@ func TestIntegration_Phase3Auth_ARetryAfterALostReplyReturnsTheSameSession(t *te
 // learned the id — a shared screen, a log, a guessed value — must not be handed the first device's session.
 func TestIntegration_Phase3Auth_AnotherDeviceCannotClaimTheGrantedSession(t *testing.T) {
 	f := newAuthFixture(t)
+	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
+	// and then refuses, because the guest would not actually be online.
+	defer f.startEnforcementOwner(t)()
 
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
 		"0000fb02-0000-4000-8000-000000000000"))
@@ -280,6 +289,9 @@ func TestIntegration_Phase3Auth_AnotherDeviceCannotClaimTheGrantedSession(t *tes
 // spent context, or the retry would become a way to undo an operator's decision.
 func TestIntegration_Phase3Auth_AClosedSessionIsNotReturnedToARetry(t *testing.T) {
 	f := newAuthFixture(t)
+	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
+	// and then refuses, because the guest would not actually be online.
+	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
@@ -315,6 +327,9 @@ func TestIntegration_Phase3Auth_AClosedSessionIsNotReturnedToARetry(t *testing.T
 // their session, and nothing in the approved guest contract needs the Entitlement.
 func TestIntegration_Phase3Auth_GuestResponseCarriesNoEntitlementIdentity(t *testing.T) {
 	f := newAuthFixture(t)
+	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
+	// and then refuses, because the guest would not actually be online.
+	defer f.startEnforcementOwner(t)()
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
 		"0000fa03-0000-4000-8000-000000000000"))
 	if res.Outcome != outcomeVerified {

@@ -56,7 +56,8 @@ type shaper interface {
 	PrepareSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error
 	ActivateSession(ctx context.Context, bridge string, ip net.IP) error
 	AbortSession(ctx context.Context, bridge string, ip net.IP) error
-	DenyForwarding(ctx context.Context, bridge string, ip net.IP) error
+	// RemoveClassification strips tc classification only. It does NOT deny access (see phase3_gate.go).
+	RemoveClassification(ctx context.Context, bridge string, ip net.IP) error
 	ReRateSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error
 	SessionForwarding(ctx context.Context, bridge string, ip net.IP) (bool, error)
 	DeleteSession(ctx context.Context, bridge string, ip net.IP) error
@@ -84,6 +85,12 @@ type phase3Shaping struct {
 	// origins records a newly created class's accounting starting point, through the controlled operation,
 	// before the guest can push traffic through it (see phase3_origin.go).
 	origins originRegistrar
+	// gate is the PACKET-AUTHORIZATION half of enforcement (see phase3_gate.go). netd owns both halves, so
+	// there is no schedule on which one daemon admits a guest while another is still preparing to meter it.
+	gate gate
+	// enforcement records the confirmed kernel result durably, so a Session is only ever reported ACTIVE
+	// after both halves are actually in force (see phase3_enforcement.go).
+	enforcement enforcementRecorder
 
 	lastApplied time.Time
 	lastDegrade string
@@ -292,13 +299,22 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			continue
 		}
 		p.endSeries(s.Bridge, s.SessionID) // the series ends here; a future class for this session is a new one
-		if err := p.shp.DeleteSession(ctx, s.Bridge, ip); err != nil {
-			// A teardown failure is the serious one: it means traffic may still be forwarded for access that
-			// has ended, so it is reported as degraded rather than swallowed.
+		// PACKET AUTHORIZATION FIRST. An entitlement that expired must stop reaching the internet even if tc
+		// teardown then fails; the reverse order would leave a guest online because a class delete failed.
+		if err := p.denyAccess(ctx, s.Bridge, ip); err != nil {
 			res.Failed++
-			res.Problems = append(res.Problems, "tear "+s.SessionID+": "+err.Error())
+			res.Problems = append(res.Problems,
+				"tear "+s.SessionID+": PACKET AUTHORIZATION NOT PROVEN REMOVED: "+err.Error())
 			continue
 		}
+		if err := p.shp.DeleteSession(ctx, s.Bridge, ip); err != nil {
+			// Access is already denied, so this is degraded CLEANUP, not continued guest access. It is still
+			// reported: a leftover class distorts later accounting and must be seen.
+			res.Failed++
+			res.Problems = append(res.Problems, "tear "+s.SessionID+": access denied but tc cleanup failed: "+err.Error())
+			continue
+		}
+		p.markEnded(ctx, s.SessionID)
 		if minor, ok := shape.MinorForIP(ip); ok {
 			delete(p.minorOwner, minorKey(s.Bridge, minor))
 		}
@@ -334,6 +350,43 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			}
 			delete(p.minorOwner, minorKey(bridge, minor))
 			res.StraysRemoved++
+		}
+	}
+
+	// 2b. REMOVE STRAY PACKET AUTHORIZATIONS — Phase-3 nft elements the plan does not claim.
+	//
+	// This is the nft half of the same argument that justifies tc stray removal, and it matters more: a stray
+	// tc class meters traffic for a session that ended, but a stray nft element KEEPS THAT GUEST ONLINE. After
+	// a crash, or a restart that lost the in-memory map, nothing else would ever mention it again.
+	//
+	// It enumerates ONLY the Phase-3 set. A legacy authorization lives in auth_ipv4, is never returned here,
+	// and therefore cannot be removed by this loop no matter what the plan says.
+	if p.gate != nil {
+		authorized, err := p.gate.List(ctx)
+		if err != nil {
+			res.Failed++
+			res.Problems = append(res.Problems, "phase-3 authorization scan failed: "+err.Error())
+		} else {
+			for _, el := range authorized {
+				if el.IP == nil {
+					continue
+				}
+				minor, ok := shape.MinorForIP(el.IP)
+				if !ok {
+					continue
+				}
+				if _, want := desired[el.Bridge][minor]; want {
+					continue
+				}
+				if err := p.denyAccess(ctx, el.Bridge, el.IP); err != nil {
+					res.Failed++
+					res.Problems = append(res.Problems,
+						"stray authorization "+el.IP.String()+" on "+el.Bridge+" NOT removed: "+err.Error())
+					continue
+				}
+				// Its tc class, if any, is removed by the tc stray loop above/below on the same pass.
+				res.StraysRemoved++
+			}
 		}
 	}
 
@@ -451,9 +504,30 @@ func (s *server) phase3ShapingHandler(w http.ResponseWriter, r *http.Request) {
 const (
 	shapingDark          = "DARK"                   // Phase 3 is off here; nothing is enforced and nothing should be
 	shapingNoPlan        = "ACTIVE_NO_PLAN"         // live, but no plan has ever been put in force
-	shapingConverged     = "ACTIVE_FRESH_CONVERGED" // live, current plan, kernel driven to it cleanly
+	shapingConverged     = "ACTIVE_FRESH_CONVERGED" // live, current plan, BOTH halves driven to it cleanly
 	shapingStale         = "ACTIVE_STALE"           // live, but the plan in force has expired without a replacement
 	shapingDegradedState = "ACTIVE_DEGRADED"        // live, but the kernel is not known to match the plan
+)
+
+// ACTIVE_FRESH_CONVERGED means BOTH ENFORCEMENT HALVES are proven, never just one.
+//
+// It is reached only when a reconciliation completed with nothing failing, and provisionSession does not
+// count a session as shaped until its accountable tc class is verified AND its nft authorization is verified.
+// A session that is metered but not authorized (or authorized but not metered) leaves res.Failed non-zero, so
+// this state is unreachable while either half is missing. That is deliberate: "converged" is the one word an
+// operator reads as "enforcement matches what we granted", and it must never be true of half the system.
+
+// enforcementStage is the per-session progress an operator needs to tell apart when a plan has NOT converged.
+// Reporting only "degraded" answers "something is wrong" but not "which half", and the two halves have
+// completely different causes and remedies.
+const (
+	stageRequested    = "REQUESTED"      // durable grant exists; nothing enforced yet
+	stageTCPrepared   = "TC_PREPARED"    // classes exist, not classifying, guest NOT authorized
+	stageOriginPinned = "ORIGIN_PINNED"  // accounting origin registered; still not classifying or authorized
+	stageTCActive     = "TC_ACTIVE"      // classifying and verified; guest still NOT authorized
+	stageAuthorized   = "NFT_AUTHORIZED" // packet authorization in force and verified
+	stageEnforced     = "ENFORCED"       // both halves proven and the Session promoted to active
+	stageDeniedFailed = "DENIED_FAILED"  // provisioning failed; access denied and cleanup attempted
 )
 
 // shapingState derives the single truthful state. Caller holds p.mu.

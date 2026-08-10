@@ -1,29 +1,38 @@
 package main
 
-// STAGED, ACCOUNTABLE-BEFORE-FORWARDING CLASS PROVISIONING.
+// STAGED, ACCOUNTABLE-BEFORE-AUTHORIZED SESSION PROVISIONING.
 //
 // The invariant this file exists to hold:
 //
-//	No managed Phase-3 traffic may be forwarded before its counter series has a durable, authoritative
-//	accounting origin.
+//	A guest is network-active only when durable authorization AND accountable traffic enforcement are both
+//	confirmed in the kernel.
 //
-// The old path installed the class AND its forwarding filter in one step, then allocated the generation and
-// registered the origin afterwards. So a guest could push traffic through the class before it was accountable,
-// and if the generation or origin failed the class was left forwarding unaccounted bytes. This stages it:
+// Three things must agree, and none of them substitutes for another:
 //
-//	allocate durable generation
-//	→ prepare download/upload classes WITHOUT guest forwarding filters   (no packet is classified into them)
+//	nft — PACKET AUTHORIZATION. The only thing that gives or denies internet access.
+//	tc  — ACCOUNTABLE METERING. Classifies an authorized guest's packets so they are shaped and counted.
+//	      Removing a tc filter does NOT deny access; the packets fall back to the bridge's DEFAULT class and
+//	      keep flowing, now unmetered.
+//	DB  — DURABLE RUNTIME STATE. A Session may only claim `active` once both kernel halves are proven.
+//
+// So provisioning is staged, and the order is the whole design:
+//
+//	allocate durable class generation
+//	→ prepare tc classes WITHOUT classification filters   (nothing is metered, and nft still denies access)
 //	→ read the prepared class's absolute counters
-//	→ register the class origin through the controlled PostgreSQL operation
-//	→ activate BOTH forwarding filters                                   (now, and only now, it forwards)
-//	→ verify the class is actually forwarding
+//	→ register the accounting origin through the controlled PostgreSQL operation
+//	→ activate BOTH tc classification filters             (now metered — still not authorized)
+//	→ verify the class is actually classifying
+//	→ AUTHORIZE the guest in the Phase-3 nft gate         (now, and only now, the guest reaches the internet)
+//	→ verify the authorization took
 //	→ persist managed inventory
-//	→ mark shaped
+//	→ promote the Session to active through the controlled writer
 //
-// Every failure fails closed: nothing is left forwarding, no state records the class as active, `Shaped` does
-// not advance, the plan is admitted (so anti-replay still cannot reinstate revoked access) but NOT converged
-// (health reports ACTIVE_DEGRADED), and a retry of the same plan can complete — reusing the pending generation
-// so the origin is not re-baselined.
+// Every failure fails closed, and fail-closed means the NFT GATE FIRST: packet authorization is removed and
+// proven gone before tc is touched, because until that element is gone the guest is online whatever tc says.
+// Nothing is left authorized, no epoch is exposed, no Session claims active, `Shaped` does not advance, the
+// plan is admitted (anti-replay) but NOT converged (health degrades), and a retry reuses the pending
+// generation so the accounting origin is not re-baselined.
 
 import (
 	"context"
@@ -60,7 +69,35 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 					return
 				}
 				p.minorOwner[minorKey(bridge, minor)] = s.SessionID
-				_ = epoch // unchanged, by design
+				// The class is in force and metering. Re-assert the PACKET AUTHORIZATION too: this path also
+				// runs on the retry after a lost admission, on the first pass after a restart, and whenever a
+				// stray sweep removed an element it should not have. Authorize is idempotent, so re-asserting
+				// costs nothing and closes the case where tc is correct but the gate is not.
+				if p.gate != nil {
+					authorized, aerr := p.gate.Authorized(ctx, bridge, ip)
+					if aerr != nil {
+						res.Failed++
+						res.Problems = append(res.Problems, "re-rate "+s.SessionID+": authorization unreadable: "+aerr.Error())
+						return
+					}
+					if !authorized {
+						if err := p.gate.Authorize(ctx, bridge, ip, 0); err != nil {
+							p.failClosed(ctx, bridge, ip, res, "re-authorize "+s.SessionID+": "+err.Error())
+							return
+						}
+						if ok, verr := p.gate.Authorized(ctx, bridge, ip); verr != nil || !ok {
+							p.failClosed(ctx, bridge, ip, res, "re-authorization verification failed for "+s.SessionID)
+							return
+						}
+					}
+				}
+				// Converge durable state as well. A Session whose activation acknowledgement was lost is
+				// enforced in the kernel but still says PENDING_ENFORCEMENT, and this is the pass that must
+				// finish the job — the promotion is idempotent, so a session already active is untouched.
+				if problem := p.markActive(ctx, s.SessionID, bridge, minor, epoch); problem != "" {
+					res.Failed++
+					res.Problems = append(res.Problems, problem)
+				}
 				res.Shaped++
 				return
 			}
@@ -110,13 +147,15 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		return
 	}
 
-	// ---- (e) ACTIVATE both forwarding filters ----------------------------------------------------------
+	// ---- (e) ACTIVATE both tc classification filters ---------------------------------------------------
+	// This makes the class METER the guest's packets. It does not admit them to the internet: that is the
+	// nft gate in step (h), which is still closed.
 	if err := p.shp.ActivateSession(ctx, bridge, ip); err != nil {
 		p.failClosed(ctx, bridge, ip, res, "activate "+s.SessionID+": "+err.Error())
 		return
 	}
 
-	// ---- (f) VERIFY the class is actually forwarding in both directions --------------------------------
+	// ---- (f) VERIFY the class is actually classifying in both directions -------------------------------
 	forwarding, ferr := p.shp.SessionForwarding(ctx, bridge, ip)
 	present, perr := p.classPresent(ctx, bridge, minor)
 	if ferr != nil || perr != nil || !forwarding || !present {
@@ -124,7 +163,27 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		return
 	}
 
-	// ---- (g) PERSIST managed state — the class is in force only now ------------------------------------
+	// ---- (g) AUTHORIZE the guest in the Phase-3 nft gate, and verify it took ---------------------------
+	//
+	// THE ORDER IS THE WHOLE POINT. Accountable metering is proven first, and only then is the guest given
+	// the internet. Reversing these two steps — or admitting before (f) — opens exactly the window this
+	// design exists to close: packets flowing through the bridge's DEFAULT class, forwarded but attributed
+	// to nobody, with no counter series to bill them against and nothing anywhere reporting a problem.
+	if p.gate != nil {
+		if err := p.gate.Authorize(ctx, bridge, ip, 0); err != nil {
+			p.failClosed(ctx, bridge, ip, res, "authorize "+s.SessionID+": "+err.Error())
+			return
+		}
+		authorized, aerr := p.gate.Authorized(ctx, bridge, ip)
+		if aerr != nil || !authorized {
+			// The gate did not take (or cannot be read). Fail closed: the guest must not be left in a state
+			// where nobody can tell whether they are online.
+			p.failClosed(ctx, bridge, ip, res, "authorization verification failed for "+s.SessionID)
+			return
+		}
+	}
+
+	// ---- (h) PERSIST managed state — the class is in force only now ------------------------------------
 	p.minorOwner[minorKey(bridge, minor)] = s.SessionID
 	p.epochs[key] = epoch
 	if p.classes == nil {
@@ -134,19 +193,41 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		SessionID: s.SessionID, DeviceID: s.DeviceID, Bridge: bridge, Minor: minor,
 		Epoch: epoch, BootID: p.bootID}
 	delete(p.pending, key) // the generation is now durable; it is no longer merely pending
+
+	// ---- (i) RECORD the confirmed kernel result, so durable state can honestly say ACTIVE --------------
+	// Only now is "this guest is authorized and metered" a true statement, so only now may the Session say so.
+	if problem := p.markActive(ctx, s.SessionID, bridge, minor, epoch); problem != "" {
+		// The kernel is correct and proven; only the status write failed. Report it (health degrades and the
+		// next pass retries) but do NOT tear down working, accountable enforcement over a bookkeeping lag.
+		res.Failed++
+		res.Problems = append(res.Problems, problem)
+	}
 	res.Shaped++
 }
 
-// failClosed removes anything a partial provisioning installed, so nothing is left forwarding, and records a
-// truthful degraded problem. If removal cannot be PROVEN, it escalates to the forwarding-denial quarantine
-// (strip the filters even if the class will not delete). It never records the class as active, never advances
-// Shaped, and deliberately keeps the pending generation so a retry reuses it.
+// failClosed is the ONE fail-closed path, and its order is deliberate.
+//
+//  1. DENY PACKET AUTHORIZATION FIRST, and prove it. Until the nft element is gone the guest is on the
+//     internet, whatever tc says. Cleaning up tc first would leave a window in which the guest is authorized
+//     but no longer metered — forwarding through the bridge's default class, unaccounted.
+//  2. Then abort tc. If the classes cannot be proven removed, strip their classification filters so the
+//     leftover cannot silently meter (or mis-meter) anything.
+//
+// It never records the class as active, never advances Shaped, and deliberately keeps the pending generation
+// so a retry reuses it rather than re-baselining the accounting origin.
 func (p *phase3Shaping) failClosed(ctx context.Context, bridge string, ip net.IP, res *shapingPlanResponse, problem string) {
+	// 1. packet authorization
+	if err := p.denyAccess(ctx, bridge, ip); err != nil {
+		// The guest may still be authorized. This is the most serious outcome available here, and it is
+		// reported as such rather than folded into a tc cleanup message.
+		problem += " (PACKET AUTHORIZATION NOT PROVEN REMOVED: " + err.Error() + ")"
+	}
+	// 2. tc
 	if err := p.shp.AbortSession(ctx, bridge, ip); err != nil {
-		if denyErr := p.shp.DenyForwarding(ctx, bridge, ip); denyErr != nil {
-			problem += " (cleanup failed AND forwarding denial failed: " + err.Error() + "; " + denyErr.Error() + ")"
+		if clsErr := p.shp.RemoveClassification(ctx, bridge, ip); clsErr != nil {
+			problem += " (tc cleanup failed AND classification removal failed: " + err.Error() + "; " + clsErr.Error() + ")"
 		} else {
-			problem += " (cleanup unproven; forwarding denied and class quarantined non-forwarding: " + err.Error() + ")"
+			problem += " (tc cleanup unproven; classification removed so the leftover class meters nothing: " + err.Error() + ")"
 		}
 	}
 	res.Failed++

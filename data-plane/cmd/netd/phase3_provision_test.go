@@ -220,8 +220,8 @@ func TestProvision_CleanupSucceedsNoQuarantine(t *testing.T) {
 	}
 	calls, _ := tc.snapshot()
 	for _, c := range calls {
-		if c.op == "deny" {
-			t.Fatal("forwarding denial ran even though cleanup succeeded")
+		if c.op == "declassify" {
+			t.Fatal("tc classification removal ran even though cleanup succeeded")
 		}
 	}
 }
@@ -239,12 +239,12 @@ func TestProvision_CleanupFailureTriggersForwardingDenial(t *testing.T) {
 	calls, _ := tc.snapshot()
 	denied := false
 	for _, c := range calls {
-		if c.op == "deny" {
+		if c.op == "declassify" {
 			denied = true
 		}
 	}
 	if !denied {
-		t.Fatal("cleanup failed but the forwarding-denial quarantine did not run")
+		t.Fatal("cleanup failed but the tc classification quarantine did not run")
 	}
 	// the class may remain installed (could not be removed) but it is provably NOT forwarding
 	if tc.countForwarding() != 0 {

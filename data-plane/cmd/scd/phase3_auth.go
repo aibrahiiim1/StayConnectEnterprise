@@ -449,6 +449,15 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 	// appliance's neighbour table (never from the body), so this cannot hand one guest's session to another
 	// device that happens to know a context id.
 	if sid, ent, ok := p.alreadyGranted(ctx, strings.TrimSpace(req.AuthContextID), dev); ok {
+		// The rows exist. Success still depends on the KERNEL, so this path waits exactly as the fresh one
+		// does: a retry arriving while enforcement is still converging must not be told it is connected.
+		enforced, werr := p.awaitEnforced(ctx, sid)
+		if werr != nil || !enforced {
+			slog.Warn("phase3 auth: retry found an existing grant whose enforcement is not confirmed",
+				"session", sid, "err", werr)
+			notVerified(w, "enforcement_not_confirmed")
+			return
+		}
 		slog.Info("phase3 auth: returning the session an earlier grant already created",
 			"session", sid, "entitlement", ent)
 		writeJSONScd(w, http.StatusOK, phase3GrantResp{Outcome: outcomeVerified, SessionID: sid, EntitlementID: ent})
@@ -524,7 +533,19 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 		notVerified(w, "commit: "+err.Error())
 		return
 	}
-	slog.Info("phase3 auth: access granted",
+	// The rows are durable, but the guest is NOT online yet: nothing has been enforced in the kernel. Wait for
+	// the enforcement owner to confirm both halves before telling the guest they are connected.
+	enforced, werr := p.awaitEnforced(ctx, sessionID)
+	if werr != nil || !enforced {
+		// Durable state is intact and the grant is recoverable — the guest's retry (same device, same
+		// context) returns this exact Session as soon as it is genuinely active. What must not happen is
+		// claiming success now: that is the "connected" screen on a network that carries no packets.
+		slog.Warn("phase3 auth: grant committed but enforcement not confirmed",
+			"session", sessionID, "entitlement", granted.EntitlementID, "err", werr)
+		notVerified(w, "enforcement_not_confirmed")
+		return
+	}
+	slog.Info("phase3 auth: access granted and enforced",
 		"stay", granted.Stay, "entitlement", granted.EntitlementID, "session", sessionID)
 	writeJSONScd(w, http.StatusOK, phase3GrantResp{
 		Outcome: outcomeVerified, SessionID: sessionID, EntitlementID: granted.EntitlementID})
@@ -538,8 +559,10 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 //	c.device_id = dev         — the context was issued TO this device, so a stolen context id is not enough;
 //	s.device_id = dev         — the session belongs to this device, not merely to the same Stay. Two devices
 //	                            in one room hold two contexts and must hold two sessions;
-//	s.state = 'active'        — a closed session is not access. A guest whose session was ended (checkout,
-//	                            revocation, an operator action) gets the uniform refusal, not a resurrection.
+//	s.state IN (active,        — a closed session is not access. A guest whose session was ended (checkout,
+//	  PENDING_ENFORCEMENT)        revocation, an operator action) gets the uniform refusal, not a resurrection.
+//	                            PENDING_ENFORCEMENT is included so a retry that arrives while enforcement is
+//	                            still converging recovers THAT session instead of minting a second grant.
 //
 // It reads outside the grant transaction on purpose: it is a read-only fast path, and taking locks to answer
 // "you already have this" would serialise retries behind the very grants they are duplicating.
@@ -557,7 +580,7 @@ func (p *phase3Auth) alreadyGranted(ctx context.Context, authContextID string, d
 		 WHERE c.id = $1::uuid AND c.tenant_id = $2 AND c.site_id = $3
 		   AND c.consumed_at IS NOT NULL
 		   AND c.device_id = $4 AND s.device_id = $4
-		   AND s.state = 'active'
+		   AND s.state IN ('active','PENDING_ENFORCEMENT') AND s.ended IS NULL
 		 ORDER BY s.started DESC
 		 LIMIT 1`,
 		authContextID, p.srv.tenID, p.srv.siteID, dev.DeviceID).Scan(&sid, &ent)
@@ -570,16 +593,71 @@ func (p *phase3Auth) alreadyGranted(ctx context.Context, authContextID string, d
 // openSessionTx creates the guest's session against an Entitlement that already exists in this transaction.
 // The Entitlement id is a parameter, not a lookup: there is no code path here that could create a session
 // without one.
+//
+// It opens the Session as PENDING_ENFORCEMENT, NOT 'active'.
+//
+// At this instant nothing has been enforced: no accountable class exists and the guest is not authorized at
+// the packet gate. Writing 'active' here would be a false statement about the kernel — and the one every
+// other component trusts. PENDING_ENFORCEMENT says exactly what is true: the grant is durable and recoverable,
+// and this guest SHOULD be enforced. netd, the enforcement owner, promotes it to 'active' through
+// iam_v2.activate_session_enforcement once the accountable tc class and the nft authorization are both proven.
 func (p *phase3Auth) openSessionTx(ctx context.Context, tx pgx.Tx, entitlement string, dev deviceIdentity) (string, error) {
 	var id string
 	err := tx.QueryRow(ctx, `
 		INSERT INTO iam_v2.sessions
 		  (tenant_id, site_id, entitlement_id, device_id, credential_method, state, started, ip, mac, ingress_interface)
-		VALUES ($1,$2,$3,$4,'PMS','active',now(),$5::inet,$6::macaddr,$7)
+		VALUES ($1,$2,$3,$4,'PMS','PENDING_ENFORCEMENT',now(),$5::inet,$6::macaddr,$7)
 		RETURNING id::text`,
 		p.srv.tenID, p.srv.siteID, entitlement, dev.DeviceID,
 		dev.IP.String(), dev.MAC.String(), p.bridgeFor(ctx, dev.IP)).Scan(&id)
 	return id, err
+}
+
+// enforcementDeadline bounds how long a guest's grant waits for the kernel to actually enforce it.
+//
+// It has to exceed one reconciliation cycle (the enforcement owner converges on its own schedule) but stay
+// well inside the guest's patience and portald's own response-time budget. A guest whose enforcement has not
+// landed in this window gets the uniform non-success and retries; the retry is idempotent and returns the
+// same Session the moment it is genuinely active, so waiting longer buys nothing.
+const enforcementDeadline = 8 * time.Second
+
+// awaitEnforced blocks until the Session is genuinely network-active, or the deadline passes.
+//
+// This is what makes guest-visible success truthful. Before this existed the handler returned VERIFIED as
+// soon as the rows committed, so the portal told the guest they were online while the kernel had not yet
+// authorized a single packet — the guest would tap "Connect", see success, and have no internet.
+//
+// It polls durable state rather than asking netd, deliberately: the Session row is the one place where the
+// enforcement owner's confirmed result is recorded, and reading it means scd needs no privileged channel and
+// no second opinion about what is in force.
+func (p *phase3Auth) awaitEnforced(ctx context.Context, sessionID string) (bool, error) {
+	deadline := time.Now().Add(enforcementDeadline)
+	for {
+		var state string
+		var ended *time.Time
+		err := p.srv.db.QueryRow(ctx,
+			`SELECT state, ended FROM iam_v2.sessions WHERE id=$1::uuid AND tenant_id=$2 AND site_id=$3`,
+			sessionID, p.srv.tenID, p.srv.siteID).Scan(&state, &ended)
+		if err != nil {
+			return false, err
+		}
+		if ended != nil || state == "ended" || state == "closed" {
+			// Enforcement failed and the session was closed, or it was revoked while we waited. Either way
+			// this guest is not online, and saying so is the only honest answer.
+			return false, nil
+		}
+		if state == "active" {
+			return true, nil
+		}
+		if !time.Now().Before(deadline) {
+			return false, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 func (p *phase3Auth) bridgeFor(ctx context.Context, ip net.IP) string {

@@ -91,6 +91,8 @@ DROP FUNCTION IF EXISTS iam_v2.p3_accounting_needs_binding();
 DROP FUNCTION IF EXISTS iam_v2.p3_detect_delayed_accounting();
 DROP FUNCTION IF EXISTS iam_v2.p3_entitlement_at(uuid,timestamptz);
 DROP FUNCTION IF EXISTS iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz);
+DROP FUNCTION IF EXISTS iam_v2.activate_session_enforcement(uuid,uuid,uuid,text,int,bigint);
+DROP FUNCTION IF EXISTS iam_v2.end_session_enforcement(uuid,uuid,uuid,text);
 DROP FUNCTION IF EXISTS iam_v2.register_class_origin(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz);
 DROP FUNCTION IF EXISTS iam_v2.allocate_class_generation(uuid,uuid,uuid);
 DROP FUNCTION IF EXISTS iam_v2.record_auth_context_offer(uuid,uuid,uuid,uuid,int,bigint,timestamptz);

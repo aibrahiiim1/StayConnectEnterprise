@@ -21,35 +21,75 @@ import (
 const (
 	Table  = "inet stayconnect"
 	AuthV4 = "auth_ipv4"
+	// Phase3AuthV4 is the SEPARATE packet-authorization set that Phase 3 owns.
+	//
+	// It is deliberately NOT auth_ipv4. Legacy scd authorizes guests by adding to auth_ipv4 and reconciles that
+	// set from public.sessions; Phase 3 authorizes through netd from iam_v2.sessions. If both wrote one set, a
+	// Phase-3 full-state reconciliation — which must remove entries no Phase-3 session claims — would delete
+	// live legacy authorizations, cutting off guests that Phase 3 knows nothing about. Two structurally
+	// distinct sets make that impossible by construction rather than by careful filtering: Phase-3
+	// reconciliation enumerates only this set, and legacy code never names it.
+	//
+	// The set exists in the ruleset from the start, EMPTY, whether or not Phase 3 is enabled. An empty set
+	// matches nothing, so a dark appliance behaves exactly as it did before. It is present-but-empty rather
+	// than added at cutover because installing it later would mean regenerating the ruleset, and the generated
+	// ruleset is applied as `delete table` + recreate — which would flush auth_ipv4 and drop every live legacy
+	// guest. Shipping the set from the start is what makes Phase-3 activation a flag flip with no packet
+	// interruption, and gives the cutover exactly one boundary.
+	Phase3AuthV4 = "phase3_auth_ipv4"
 )
 
 type Client struct {
 	NftPath string
 
-	mu     sync.Mutex
-	probed bool
-	concat bool // true when auth_ipv4 is `ifname . ipv4_addr`
+	// exec runs one nft invocation. It is a field so the exact command strings this package builds can be
+	// proven by contract tests without a kernel — which is the only honest way to test a packet-authorization
+	// gate in CI.
+	exec func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+	mu sync.Mutex
+	// concatBySet caches the probed key type PER SET. auth_ipv4 and phase3_auth_ipv4 are independent sets and
+	// a single shared flag would let one set's probe decide the other's element format.
+	concatBySet map[string]bool
+}
+
+func realExec(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
 func New() *Client {
-	return &Client{NftPath: "/usr/sbin/nft"}
+	return &Client{NftPath: "/usr/sbin/nft", exec: realExec, concatBySet: map[string]bool{}}
 }
 
-// probeConcat detects the auth_ipv4 key type once (cached). Best-effort: on any
-// error it assumes IP-only (the historical default).
-func (c *Client) probeConcat(ctx context.Context) bool {
+// probeConcatIn detects a set's key type once per set (cached). Best-effort: on any error it assumes IP-only
+// (the historical default).
+func (c *Client) probeConcatIn(ctx context.Context, set string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.probed {
-		return c.concat
+	if c.concatBySet == nil {
+		c.concatBySet = map[string]bool{}
 	}
-	c.probed = true
-	out, err := exec.CommandContext(ctx, c.NftPath, "list", "set", "inet", "stayconnect", AuthV4).Output()
+	if v, ok := c.concatBySet[set]; ok {
+		return v
+	}
+	concat := false
+	out, err := c.execOrReal(ctx, c.NftPath, "list", "set", "inet", "stayconnect", set)
 	if err == nil && containsConcatType(string(out)) {
-		c.concat = true
+		concat = true
 	}
-	return c.concat
+	c.concatBySet[set] = concat
+	return concat
 }
+
+// execOrReal tolerates a zero-value Client (callers that built one with &Client{NftPath: ...}).
+func (c *Client) execOrReal(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if c.exec != nil {
+		return c.exec(ctx, name, args...)
+	}
+	return realExec(ctx, name, args...)
+}
+
+func (c *Client) probeConcat(ctx context.Context) bool { return c.probeConcatIn(ctx, AuthV4) }
 
 func containsConcatType(s string) bool {
 	// "type ifname . ipv4_addr"
@@ -65,29 +105,43 @@ func indexOf(s, sub string) int {
 	return -1
 }
 
-// Allow adds (iface, ip) to auth_ipv4 with a timeout. Zero timeout = no timeout.
-// On an IP-only set, iface is ignored.
+// Allow adds (iface, ip) to the LEGACY auth_ipv4 set. Zero timeout = no timeout.
+// On an IP-only set, iface is ignored. Legacy scd's behaviour is unchanged.
 func (c *Client) Allow(ctx context.Context, iface string, ip net.IP, ttl time.Duration) error {
+	return c.AllowIn(ctx, AuthV4, iface, ip, ttl)
+}
+
+// Deny removes (iface, ip) from the LEGACY auth_ipv4 set (no-op if absent).
+func (c *Client) Deny(ctx context.Context, iface string, ip net.IP) error {
+	return c.DenyIn(ctx, AuthV4, iface, ip)
+}
+
+// AllowIn authorizes (iface, ip) for internet forwarding in the NAMED set.
+//
+// This is the real packet-authorization gate: the forward chain accepts a guest's traffic only when its
+// (bridge, IP) is in an authorization set, and the captive-portal DNAT rules redirect it when it is not.
+// Adding an element here is what actually gives a guest the internet.
+func (c *Client) AllowIn(ctx context.Context, set, iface string, ip net.IP, ttl time.Duration) error {
 	ip4 := ip.To4()
 	if ip4 == nil {
 		return fmt.Errorf("only IPv4 supported: %s", ip)
 	}
-	elem := c.element(ctx, iface, ip4, ttl)
-	return c.run(ctx, "add", "element", "inet", "stayconnect", AuthV4, "{", elem, "}")
+	elem := c.elementIn(ctx, set, iface, ip4, ttl)
+	return c.run(ctx, "add", "element", "inet", "stayconnect", set, "{", elem, "}")
 }
 
-// Deny removes (iface, ip) from auth_ipv4 (no-op if absent).
-func (c *Client) Deny(ctx context.Context, iface string, ip net.IP) error {
+// DenyIn removes (iface, ip) from the NAMED set (no-op if absent), revoking internet forwarding.
+func (c *Client) DenyIn(ctx context.Context, set, iface string, ip net.IP) error {
 	ip4 := ip.To4()
 	if ip4 == nil {
 		ip4 = ip
 	}
 	// delete fails if absent → probe membership first.
-	listed, err := c.List(ctx)
+	listed, err := c.ListIn(ctx, set)
 	if err != nil {
 		return err
 	}
-	concat := c.probeConcat(ctx)
+	concat := c.probeConcatIn(ctx, set)
 	for _, e := range listed {
 		if e.IP.Equal(ip4) && (!concat || iface == "" || e.Iface == iface) {
 			key := ip4.String()
@@ -98,15 +152,35 @@ func (c *Client) Deny(ctx context.Context, iface string, ip net.IP) error {
 				}
 				key = fmt.Sprintf("%q . %s", useIf, ip4.String())
 			}
-			return c.run(ctx, "delete", "element", "inet", "stayconnect", AuthV4, "{", key, "}")
+			return c.run(ctx, "delete", "element", "inet", "stayconnect", set, "{", key, "}")
 		}
 	}
 	return nil
 }
 
-func (c *Client) element(ctx context.Context, iface string, ip net.IP, ttl time.Duration) string {
+// AuthorizedIn reports whether (iface, ip) is CURRENTLY authorized in the named set. It is the verification
+// half of the gate: an Allow that returned nil but did not take is indistinguishable from success otherwise.
+func (c *Client) AuthorizedIn(ctx context.Context, set, iface string, ip net.IP) (bool, error) {
+	ip4 := ip.To4()
+	if ip4 == nil {
+		ip4 = ip
+	}
+	listed, err := c.ListIn(ctx, set)
+	if err != nil {
+		return false, err
+	}
+	concat := c.probeConcatIn(ctx, set)
+	for _, e := range listed {
+		if e.IP.Equal(ip4) && (!concat || iface == "" || e.Iface == "" || e.Iface == iface) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (c *Client) elementIn(ctx context.Context, set, iface string, ip net.IP, ttl time.Duration) string {
 	base := ip.String()
-	if c.probeConcat(ctx) && iface != "" {
+	if c.probeConcatIn(ctx, set) && iface != "" {
 		base = fmt.Sprintf("%q . %s", iface, ip.String())
 	}
 	if ttl > 0 {
@@ -121,17 +195,21 @@ type Element struct {
 	Timeout time.Duration
 }
 
-func (c *Client) List(ctx context.Context) ([]Element, error) {
-	out, err := exec.CommandContext(ctx, c.NftPath, "-j", "list", "set", "inet", "stayconnect", AuthV4).Output()
+func (c *Client) List(ctx context.Context) ([]Element, error) { return c.ListIn(ctx, AuthV4) }
+
+// ListIn enumerates the named authorization set. Phase-3 reconciliation uses it to find strays — entries the
+// desired state does not claim — and it only ever names the Phase-3 set, so it can never enumerate (and
+// therefore never remove) a legacy authorization.
+func (c *Client) ListIn(ctx context.Context, set string) ([]Element, error) {
+	out, err := c.execOrReal(ctx, c.NftPath, "-j", "list", "set", "inet", "stayconnect", set)
 	if err != nil {
-		return nil, fmt.Errorf("nft list: %w", err)
+		return nil, fmt.Errorf("nft list %s: %w", set, err)
 	}
 	return parseJSON(out)
 }
 
 func (c *Client) run(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, c.NftPath, args...)
-	out, err := cmd.CombinedOutput()
+	out, err := c.execOrReal(ctx, c.NftPath, args...)
 	if err != nil {
 		return fmt.Errorf("nft %v: %w — %s", args, err, string(out))
 	}

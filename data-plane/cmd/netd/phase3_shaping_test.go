@@ -144,11 +144,11 @@ func (f *fakeTC) AbortSession(ctx context.Context, bridge string, ip net.IP) err
 	return nil
 }
 
-func (f *fakeTC) DenyForwarding(ctx context.Context, bridge string, ip net.IP) error {
+func (f *fakeTC) RemoveClassification(ctx context.Context, bridge string, ip net.IP) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	minor, _ := shape.MinorForIP(ip)
-	f.calls = append(f.calls, tcCall{op: "deny", bridge: bridge, ip: ip.String(), minor: minor})
+	f.calls = append(f.calls, tcCall{op: "declassify", bridge: bridge, ip: ip.String(), minor: minor})
 	f.setFwd(bridge, minor, false)
 	f.setFwd(shape.IFBName(bridge), minor, false)
 	return nil
@@ -1354,4 +1354,12 @@ func TestRebootConvergesFromOneSubmission(t *testing.T) {
 // classState4 is an empty starting inventory, spelled out so the reboot test reads in order.
 func classState4() classState {
 	return classState{Classes: map[string]managedClass{}}
+}
+
+// hasForwarding reports whether a minor is CLASSIFYING on a bridge (its download filter is installed). The
+// system tests use it to assert the invariant that no authorized guest lacks an accountable class.
+func (f *fakeTC) hasForwarding(bridge string, minor int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forwarding[bridge][minor]
 }

@@ -160,6 +160,13 @@ func main() {
 		// generations surviving accounting checkpoints actually pin — never from this process's memory and
 		// never from the clock.
 		generations: &pgGenerations{pool: pool},
+		// THE PACKET-AUTHORIZATION GATE. netd owns both halves of Phase-3 enforcement — the nft admission and
+		// the accountable tc class — so no other daemon can admit a guest while this one is still preparing to
+		// meter them. It writes ONLY the Phase-3 set, never legacy auth_ipv4.
+		gate: newNFTGate(),
+		// The confirmed kernel result, recorded through the controlled writers, so a Session only ever claims
+		// `active` once both halves are actually in force.
+		enforcement: &pgEnforcement{pool: pool, tenant: p3mode.TenantID, site: p3mode.SiteID},
 	}
 	// Continuity is PROVEN, not assumed: a persisted class is carried forward only when the kernel still has
 	// that exact slot under the same boot. A class that was flushed, recreated by hand, or whose minor now

@@ -217,8 +217,9 @@ func (c *Client) AddSession(ctx context.Context, bridge string, ip net.IP, downK
 //	                 half-activated session never forwards in only one direction.
 //	AbortSession     removes filters and classes in both directions and PROVES they are gone, for the
 //	                 fail-closed path: anything that did not fully provision leaves nothing forwarding.
-//	DenyForwarding   the last-resort quarantine: strip the forwarding filters even if the classes cannot be
-//	                 removed, so a class that will not delete is left provably non-forwarding.
+//	RemoveClassification  the last-resort tc quarantine: strip the classification filters even if the classes
+//	                 cannot be removed, so a leftover class meters nothing. It does NOT deny internet access —
+//	                 only the nft authorization gate does that.
 //	ReRateSession    changes an already-active class's rate IN PLACE (`tc class change`, never delete+add), so
 //	                 an ordinary re-rate preserves the byte counters and the class keeps its generation.
 
@@ -278,7 +279,7 @@ func (c *Client) ActivateSession(ctx context.Context, bridge string, ip net.IP) 
 
 // AbortSession removes both classes and both filters and then PROVES the class is gone on both devices. It is
 // the fail-closed cleanup: after it returns nil, nothing for this ip forwards or is countable. If it cannot
-// prove removal it returns an error, so the caller can escalate to DenyForwarding.
+// prove removal it returns an error, so the caller can escalate to RemoveClassification.
 func (c *Client) AbortSession(ctx context.Context, bridge string, ip net.IP) error {
 	// Filters first, so forwarding stops even if a class delete later fails.
 	_ = c.removeFilter(ctx, bridge, ip)
@@ -301,10 +302,15 @@ func (c *Client) AbortSession(ctx context.Context, bridge string, ip net.IP) err
 	return nil
 }
 
-// DenyForwarding is the last-resort quarantine used when AbortSession could not prove the classes gone: strip
-// the forwarding filters in both directions so, whatever state the classes are in, no guest packet is
-// classified into them. A class with no filter forwards nothing.
-func (c *Client) DenyForwarding(ctx context.Context, bridge string, ip net.IP) error {
+// RemoveClassification strips the u32 classification filters in both directions, so no guest packet is
+// classified into this class.
+//
+// IT DOES NOT DENY INTERNET ACCESS, and its name says so. A guest whose classification filter is gone keeps
+// forwarding through the bridge's DEFAULT class — unshaped and uncounted, but still online. Denying access is
+// solely the nft authorization gate's job (see cmd/netd/phase3_gate.go). This is the last-resort tc quarantine
+// used when AbortSession cannot prove the classes gone: it guarantees the leftover class meters nothing, and
+// is only ever called AFTER packet authorization has already been removed.
+func (c *Client) RemoveClassification(ctx context.Context, bridge string, ip net.IP) error {
 	e1 := c.removeFilter(ctx, bridge, ip)
 	e2 := c.removeFilter(ctx, IFBName(bridge), ip)
 	if e1 != nil {

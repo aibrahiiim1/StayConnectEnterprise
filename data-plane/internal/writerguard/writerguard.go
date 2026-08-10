@@ -98,6 +98,14 @@ func Phase3Requirements() []Requirement {
 			Function: "iam_v2.record_auth_context_offer(uuid,uuid,uuid,uuid,int,bigint,timestamptz)",
 			Tables:   []string{"auth_context_offers"},
 		},
+		// The ENFORCEMENT LIFECYCLE. A Session that says `active` is a claim that the kernel is authorizing and
+		// metering this guest right now; only the enforcement owner can know that, and only through this
+		// operation. It shares the accounting family's table because sessions is guarded once, by one trigger.
+		{
+			Family:   "session_enforcement",
+			Function: "iam_v2.activate_session_enforcement(uuid,uuid,uuid,text,int,bigint)",
+			Tables:   []string{"sessions"},
+		},
 		// ---- capability-scoped: the operation is service logic, the scope is the boundary ----------------
 		// Every one of these is a family whose authoritative operation spans several statements with their own
 		// invariants — a Stay lifecycle transition, a checkout conversion, a quote/purchase pair, consuming an

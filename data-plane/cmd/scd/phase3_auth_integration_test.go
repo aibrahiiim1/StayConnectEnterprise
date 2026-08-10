@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,6 +24,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
@@ -203,6 +206,9 @@ func (f *authFixture) resolveBody(room, last, res, reqID string) map[string]any 
 // does, and both appear in the same commit.
 func TestIntegration_Phase3Auth_GuestGetsAccess(t *testing.T) {
 	f := newAuthFixture(t)
+	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
+	// and then refuses, because the guest would not actually be online.
+	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "00000004-0000-4000-8000-000000000000"))
@@ -291,6 +297,9 @@ func TestIntegration_Phase3Auth_GuestGetsAccess(t *testing.T) {
 //	                    TestIntegration_Phase3Auth_AnotherDeviceCannotClaimTheGrantedSession.
 func TestIntegration_Phase3Auth_ContextIsConsumedExactlyOnce(t *testing.T) {
 	f := newAuthFixture(t)
+	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
+	// and then refuses, because the guest would not actually be online.
+	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", "00000005-0000-4000-8000-000000000000"))
 	if res.Outcome != outcomeVerified {
@@ -670,6 +679,9 @@ func TestIntegration_Phase3Auth_PinsThePublishedRevisionNotTheHighest(t *testing
 // pile of independently redeemable credentials behind for one identity proof.
 func TestIntegration_Phase3Auth_OneResolutionYieldsOneLiveContext(t *testing.T) {
 	f := newAuthFixture(t)
+	// The enforcement owner is what makes a grant succeed now; without it the grant correctly waits
+	// and then refuses, because the guest would not actually be online.
+	defer f.startEnforcementOwner(t)()
 	ctx := context.Background()
 	const reqID = "0000ff04-0000-4000-8000-000000000000"
 
@@ -754,4 +766,61 @@ func TestIntegration_Phase3Auth_ConcurrentReplaysConvergeOnOneContext(t *testing
 	if live > 1 {
 		t.Fatalf("live contexts after concurrent replay = %d", live)
 	}
+}
+
+// ---- the enforcement owner, simulated ---------------------------------------
+//
+// The grant no longer returns success until the Session is genuinely network-active, because that is what
+// "connected" now means. In production the enforcement owner (netd) performs the kernel work and then promotes
+// the Session through iam_v2.activate_session_enforcement.
+//
+// These integration tests have no kernel, so they run that promotion themselves — through the REAL controlled
+// writer, against the real database. That is deliberate: it keeps the tests honest about the contract (a grant
+// only succeeds once something confirmed enforcement) AND exercises the activation operation's own rules
+// (source coherence, idempotency, refusal after end) on every grant path.
+
+// startEnforcementOwner promotes any PENDING_ENFORCEMENT session for this fixture, as netd would after both
+// kernel halves are proven. It stops when the returned function is called.
+func (f *authFixture) startEnforcementOwner(t *testing.T) func() {
+	t.Helper()
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		for {
+			select {
+			case <-done:
+				return
+			case <-time.After(20 * time.Millisecond):
+			}
+			rows, err := f.pool.Query(context.Background(), `
+				SELECT s.id::text, COALESCE(s.ingress_interface,''), host(s.ip)
+				  FROM iam_v2.sessions s
+				 WHERE s.tenant_id=$1 AND s.site_id=$2 AND s.state='PENDING_ENFORCEMENT' AND s.ended IS NULL`,
+				f.tenant, f.site)
+			if err != nil {
+				continue
+			}
+			type pend struct{ id, bridge, ip string }
+			var pending []pend
+			for rows.Next() {
+				var p pend
+				if rows.Scan(&p.id, &p.bridge, &p.ip) == nil {
+					pending = append(pending, p)
+				}
+			}
+			rows.Close()
+			for _, p := range pending {
+				minor, ok := shape.MinorForIP(net.ParseIP(p.ip))
+				if !ok {
+					continue
+				}
+				// The real controlled writer, with the real coherence rules.
+				_, _ = f.pool.Exec(context.Background(),
+					`SELECT iam_v2.activate_session_enforcement($1,$2,$3::uuid,$4,$5,$6)`,
+					f.tenant, f.site, p.id, p.bridge, minor, int64(1))
+			}
+		}
+	}()
+	return func() { close(done); <-stopped }
 }
