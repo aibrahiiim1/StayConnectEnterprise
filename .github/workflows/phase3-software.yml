@@ -103,6 +103,8 @@ jobs:
             migration lifecycle:  bash iam_v2_scratch/phase3_0010_lifecycle.sh
             PG16 integration:     bash scripts/pmsd-pg-integration.sh                   (all eleven suites)
             preflight:            bash scripts/phase3-preflight.sh --json
+            enforcement suite:    go test ./cmd/netd/ ./internal/nft/ -run 'System|...' (JSON-counted)
+            provisioning suite:   go test ./cmd/netd/ ./internal/shape/ -run 'Provision|...' (JSON-counted)
             npm ci:               npm ci                                               (cwd hotel-admin)
             typecheck:            npx tsc --noEmit                                      (cwd hotel-admin)
             vitest:               npx vitest run --reporter=default --reporter=json     (cwd hotel-admin)
@@ -156,6 +158,17 @@ jobs:
           end="$(date -u +%s)"
           printf 'preflight\t%d\t%d\n' "$rc" "$((end-start))" >> "$EVID/steps.tsv"
           exit "$rc"
+
+      - name: Network-enforcement system tests (nft authorization + accountable tc + Session)
+        working-directory: data-plane
+        # The system-boundary suite: nft and tc modelled as the separate mechanisms they are, plus the
+        # command contracts for the real nft/tc strings. Counted on its own so the evidence artifact carries
+        # an explicit total for the enforcement contract.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh enforcement --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh enforcement
+          ./cmd/netd/ ./internal/nft/
+          -run 'System|Phase3Allow|LegacyAllow|Phase3Deny|AuthorizedIn|ListIn|ConcatProbe|AllowInCarries' -count=1
 
       - name: Staged-provisioning failure tests (accountable before forwarding)
         working-directory: data-plane

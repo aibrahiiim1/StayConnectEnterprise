@@ -163,6 +163,7 @@ def main() -> int:
     playwright = read_json(os.path.join(counts_dir, "playwright.json"), {})
     preflight = read_json(os.path.join(counts_dir, "preflight.json"), {})
     provisioning = read_json(os.path.join(counts_dir, "provisioning.json"), {})
+    enforcement = read_json(os.path.join(counts_dir, "enforcement.json"), {})
 
     logs_dir = os.path.join(evid, "logs")
 
@@ -209,6 +210,8 @@ def main() -> int:
         "preflight": {"pass": preflight.get("pass"), "fail": preflight.get("fail")} if preflight else {},
         "provisioning": {"passed": provisioning.get("pass", 0), "failed": provisioning.get("fail", 0),
                          "skipped": provisioning.get("skip", 0)} if provisioning else {},
+        "network_enforcement": {"passed": enforcement.get("pass", 0), "failed": enforcement.get("fail", 0),
+                                "skipped": enforcement.get("skip", 0)} if enforcement else {},
     }
 
     # ---- the complete Phase-3 Acceptance Matrix (dimensional, ~35 rows) ----------------------------------
@@ -369,6 +372,10 @@ def main() -> int:
         pr = totals["provisioning"]
         m.append(f"- **Staged-provisioning failure tests** — {pr['passed']} passed, {pr['failed']} failed "
                  "(accountable-before-forwarding)")
+    if totals.get("network_enforcement"):
+        ne = totals["network_enforcement"]
+        m.append(f"- **Network-enforcement system tests** — {ne['passed']} passed, {ne['failed']} failed "
+                 "(nft authorization + accountable tc + Session)")
     m.append("")
     if migration_summary:
         m.append(f"## Migration 0010 lifecycle — {migration_summary['assertions_passed']} assertions passed, "
