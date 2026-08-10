@@ -452,8 +452,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `7bee19b`
-- **Provenance (generation HEAD = inventory_head):** `7bee19b5ed169018d737239ce83dbae51c6aa54c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `03f7a30`
+- **Provenance (generation HEAD = inventory_head):** `03f7a30e8d65569872486161ae99665881d7caf0`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 252
@@ -634,11 +634,11 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
 | `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
+| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_7bee19b.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_03f7a30.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
@@ -712,7 +712,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `tools/embed-report-manifest.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3: accountable-before-forwarding class provisioning, and Zero-Stale documentation |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `tools/validate-pr-metadata.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3 pre-live (inventory_head): write-ahead activation durability, monotonic security time, and true Zero-Stale state |
+| `tools/validate-pr-metadata.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3 pre-live (inventory_head): the PR-metadata check reported a successful match as a failure |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
 | `tools/validate-transition-times.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
 
@@ -887,13 +887,13 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../adr/ADR-0002-phase3-single-shaping-owner.md    |  303 ++
  docs/context/StayConnect-IAM-Handoff.md            |   16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           |  745 +++++
+ docs/manifests/Phase3-change-manifest.md           |  747 +++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1408 +++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 287254 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 107711 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42092 bytes
- .../chatgpt/phase-evidence/GIT_STAT_7bee19b.txt    |    4 +
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1410 +++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 287413 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 107699 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42091 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_03f7a30.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
@@ -912,7 +912,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   12 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  746 +++++
+ .../Phase3-change-manifest.md                      |  747 +++++
  .../StayConnect-IAM-Handoff.md                     |   16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   16 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   12 +-
@@ -967,10 +967,10 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  tools/embed-report-manifest.py                     |   49 +
  tools/project-state.py                             |   49 +-
  .../tests/project_state_validator/run_mutations.py |   69 +-
- tools/validate-pr-metadata.sh                      |  105 +
+ tools/validate-pr-metadata.sh                      |  116 +
  tools/validate-project-state.sh                    |  161 +-
  tools/validate-transition-times.sh                 |   86 +
- 252 files changed, 51069 insertions(+), 498 deletions(-)
+ 252 files changed, 51085 insertions(+), 498 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -980,8 +980,8 @@ M  docs/reports/StayConnect-IAM-Phase3-Final-Report.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_7bee19b.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_d9e9654.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_03f7a30.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_7bee19b.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -994,6 +994,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+03f7a30 Phase 3 pre-live (inventory_head): the PR-metadata check reported a successful match as a failure
+f1a998a Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 7bee19b Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity
 b346e6d Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 d9e9654 Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp

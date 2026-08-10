@@ -1,4 +1,0 @@
-commit 7bee19b5ed169018d737239ce83dbae51c6aa54c
-Date:   Mon Aug 10 19:34:05 2026 +0300
-
-    Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity
