@@ -185,11 +185,8 @@
   "latest_accepted_po_decision": "D15",
   "latest_transition_id": "T0018",
   "phase3_delivery_evidence": {
-    "note": "The metadata a reader must be able to trust as CURRENT: the same-HEAD Software and Governance runs and the evidence artifact the Software run uploaded. It lives here so the Zero-Stale validator can prove the Final Report cites the same values rather than a previous round's, which is the drift that reads as correct and is not.",
-    "software_run_id": "PENDING",
-    "governance_run_id": "PENDING",
-    "artifact_id": "PENDING",
-    "artifact_manifest_sha256": "PENDING"
+    "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
+    "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
   "acceptance_candidate_head": "b1caebbe037d6c6e6c6e5564751c5813bb546ed5",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
