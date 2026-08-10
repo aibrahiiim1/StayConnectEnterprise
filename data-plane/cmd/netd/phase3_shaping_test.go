@@ -817,9 +817,11 @@ func TestShapingEndpointContract(t *testing.T) {
 		t.Fatalf("a legacy delta body was accepted: %d %s", rec3.Code, rec3.Body.String())
 	}
 
-	// an unsupported contract version is a 400 (the caller must change), a scope/staleness refusal is a 409
+	// an unsupported contract version is a 400 (the caller must change), a scope/staleness refusal is a 409.
+	// The OLD contract is the one that matters here: a /1 producer states no access boundary, so an applier
+	// that accepted it would have to invent a lease length for a guest whose access may end in a minute.
 	badVersion := standardPlan(2)
-	badVersion.ContractVersion = "phase3-shaping/2"
+	badVersion.ContractVersion = "phase3-shaping/1"
 	bvRaw, _ := json.Marshal(badVersion)
 	if rec4 := post(bvRaw); rec4.Code != http.StatusBadRequest {
 		t.Fatalf("an unsupported contract version returned %d, want 400", rec4.Code)

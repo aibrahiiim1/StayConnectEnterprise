@@ -121,6 +121,9 @@ func (c *Client) Deny(ctx context.Context, iface string, ip net.IP) error {
 // This is the real packet-authorization gate: the forward chain accepts a guest's traffic only when its
 // (bridge, IP) is in an authorization set, and the captive-portal DNAT rules redirect it when it is not.
 // Adding an element here is what actually gives a guest the internet.
+//
+// Legacy scd calls this through Allow with ttl=0 (no timeout), which is its historical behaviour and is not
+// changed here. Phase 3 does NOT use it: see LeaseIn.
 func (c *Client) AllowIn(ctx context.Context, set, iface string, ip net.IP, ttl time.Duration) error {
 	ip4 := ip.To4()
 	if ip4 == nil {
@@ -128,6 +131,69 @@ func (c *Client) AllowIn(ctx context.Context, set, iface string, ip net.IP, ttl 
 	}
 	elem := c.elementIn(ctx, set, iface, ip4, ttl)
 	return c.run(ctx, "add", "element", "inet", "stayconnect", set, "{", elem, "}")
+}
+
+// ErrUnboundedLease is returned when a bounded authorization is asked to be permanent.
+var ErrUnboundedLease = fmt.Errorf("nft: packet authorization must be a bounded lease (ttl > 0)")
+
+// LeaseIn asserts a BOUNDED, RENEWABLE authorization for (iface, ip) in the named set.
+//
+// A permanent element is a promise no daemon can keep. If the process that maintains authorization dies, hangs
+// or is partitioned, a non-expiring element keeps forwarding that guest's traffic forever — past their
+// entitlement window, past checkout, past a revocation nobody was alive to apply. The kernel's own timeout is
+// the only mechanism that fails closed without anything running, so Phase-3 authorization is always a lease
+// and renewal is the ONLY thing that keeps a guest online.
+//
+// It is idempotent in the way that matters: calling it for an absent element creates the lease, and calling it
+// for a present one REFRESHES the remaining time.
+//
+// Refreshing is deliberately not `add element` again. nftables does not restart an existing element's timer on
+// a repeated add — the element is already in the set, so the add is a no-op and the original expiry stands. A
+// renewal loop built on `add` would look healthy and still drop every guest at the first lease boundary. The
+// refresh is therefore a delete+add issued as ONE nft command buffer, which nft commits as a single netlink
+// transaction: either both take or neither does, so there is no instant in which the guest is unauthorized.
+func (c *Client) LeaseIn(ctx context.Context, set, iface string, ip net.IP, ttl time.Duration) error {
+	if ttl <= 0 {
+		return ErrUnboundedLease
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return fmt.Errorf("only IPv4 supported: %s", ip)
+	}
+	key := c.keyIn(ctx, set, iface, ip4)
+	elem := fmt.Sprintf("%s timeout %ds", key, leaseSeconds(ttl))
+	present, err := c.AuthorizedIn(ctx, set, iface, ip4)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return c.run(ctx, "add", "element", "inet", "stayconnect", set, "{", elem, "}")
+	}
+	return c.run(ctx, fmt.Sprintf("delete element inet stayconnect %s { %s } ; add element inet stayconnect %s { %s }",
+		set, key, set, elem))
+}
+
+// leaseSeconds rounds a lease UP to whole seconds, because nft's element timeout granularity is seconds and
+// rounding down would hand back a lease shorter than the caller asked for — including, for a sub-second
+// remainder, a lease of zero, which nft reads as "no timeout": permanent access from a bound that was meant
+// to be about to expire.
+func leaseSeconds(ttl time.Duration) int {
+	s := int(ttl / time.Second)
+	if ttl%time.Second != 0 {
+		s++
+	}
+	if s < 1 {
+		s = 1
+	}
+	return s
+}
+
+// keyIn renders the element KEY (no timeout) for a set, in that set's own key format.
+func (c *Client) keyIn(ctx context.Context, set, iface string, ip net.IP) string {
+	if c.probeConcatIn(ctx, set) && iface != "" {
+		return fmt.Sprintf("%q . %s", iface, ip.String())
+	}
+	return ip.String()
 }
 
 // DenyIn removes (iface, ip) from the NAMED set (no-op if absent), revoking internet forwarding.
@@ -179,20 +245,21 @@ func (c *Client) AuthorizedIn(ctx context.Context, set, iface string, ip net.IP)
 }
 
 func (c *Client) elementIn(ctx context.Context, set, iface string, ip net.IP, ttl time.Duration) string {
-	base := ip.String()
-	if c.probeConcatIn(ctx, set) && iface != "" {
-		base = fmt.Sprintf("%q . %s", iface, ip.String())
-	}
+	base := c.keyIn(ctx, set, iface, ip)
 	if ttl > 0 {
-		return fmt.Sprintf("%s timeout %ds", base, int(ttl.Seconds()))
+		return fmt.Sprintf("%s timeout %ds", base, leaseSeconds(ttl))
 	}
 	return base
 }
 
 type Element struct {
-	Iface   string
-	IP      net.IP
+	Iface string
+	IP    net.IP
+	// Timeout is the lease the element was created with; Expires is how much of it is LEFT. Renewal decisions
+	// need the remainder, not the original: an element created with a 90s lease 89 seconds ago is one second
+	// from cutting its guest off, and only Expires says so.
 	Timeout time.Duration
+	Expires time.Duration
 }
 
 func (c *Client) List(ctx context.Context) ([]Element, error) { return c.ListIn(ctx, AuthV4) }

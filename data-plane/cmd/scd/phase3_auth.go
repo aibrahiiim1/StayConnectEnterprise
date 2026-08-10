@@ -613,13 +613,40 @@ func (p *phase3Auth) openSessionTx(ctx context.Context, tx pgx.Tx, entitlement s
 	return id, err
 }
 
-// enforcementDeadline bounds how long a guest's grant waits for the kernel to actually enforce it.
+// THE ENFORCEMENT WAIT, AND WHOSE CLOCK IT RUNS ON.
 //
-// It has to exceed one reconciliation cycle (the enforcement owner converges on its own schedule) but stay
-// well inside the guest's patience and portald's own response-time budget. A guest whose enforcement has not
-// landed in this window gets the uniform non-success and retries; the retry is idempotent and returns the
-// same Session the moment it is genuinely active, so waiting longer buys nothing.
-const enforcementDeadline = 8 * time.Second
+// This wait has to exceed one reconciliation cycle — the enforcement owner converges on its own schedule, so
+// a grant that commits just after a tick genuinely cannot be enforced for most of a second — while staying
+// inside the budget of whoever is waiting on the other end.
+//
+// It used to be a flat 8 seconds, which was wrong in a way that a fixed number cannot be right: the caller is
+// portald, portald runs every Phase-3 request under a uniform response-time budget, and it passes that budget
+// down as a context deadline. A wait longer than the caller's deadline is not a longer wait — the context is
+// already cancelled, so it is a wait that ends immediately, with an error, on the very requests it was meant
+// to protect. The 8 seconds were unreachable; the effective wait was whatever portald had left.
+//
+// So the deadline is DERIVED from the caller's, with a small reserve so scd answers before its caller stops
+// listening rather than at the same instant. enforcementDeadlineMax applies only when there is no deadline to
+// derive from (a direct operator call, a test), and bounds the wait so nothing can pin a request forever.
+const (
+	enforcementDeadlineMax = 8 * time.Second
+	enforcementReserve     = 150 * time.Millisecond
+	// enforcementPoll is the granularity at which durable state is re-read. It is short relative to the
+	// producer's one-second cadence, so the time between "the owner promoted this Session" and "the guest is
+	// told" is a small fraction of the budget rather than a quarter of it.
+	enforcementPoll = 100 * time.Millisecond
+)
+
+// enforcementDeadlineFor derives this request's wait from the caller's own budget.
+func enforcementDeadlineFor(ctx context.Context, now time.Time) time.Time {
+	deadline := now.Add(enforcementDeadlineMax)
+	if d, ok := ctx.Deadline(); ok {
+		if reserved := d.Add(-enforcementReserve); reserved.Before(deadline) {
+			deadline = reserved
+		}
+	}
+	return deadline
+}
 
 // awaitEnforced blocks until the Session is genuinely network-active, or the deadline passes.
 //
@@ -631,7 +658,7 @@ const enforcementDeadline = 8 * time.Second
 // enforcement owner's confirmed result is recorded, and reading it means scd needs no privileged channel and
 // no second opinion about what is in force.
 func (p *phase3Auth) awaitEnforced(ctx context.Context, sessionID string) (bool, error) {
-	deadline := time.Now().Add(enforcementDeadline)
+	deadline := enforcementDeadlineFor(ctx, time.Now())
 	for {
 		var state string
 		var ended *time.Time
@@ -655,7 +682,7 @@ func (p *phase3Auth) awaitEnforced(ctx context.Context, sessionID string) (bool,
 		select {
 		case <-ctx.Done():
 			return false, ctx.Err()
-		case <-time.After(250 * time.Millisecond):
+		case <-time.After(enforcementPoll):
 		}
 	}
 }

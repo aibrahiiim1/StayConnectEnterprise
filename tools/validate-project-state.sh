@@ -116,7 +116,10 @@ echo "== 1c. Phase-3 enforcement/evidence phrases must not drift =="
 # These are the exact phrases a previous round got wrong, each in a way that read as correct:
 #   - a stale preflight total in the Final Report (18/18 after the suite grew to 20);
 #   - "N/N entries passed sha256sum -c", which miscounts a manifest that cannot list itself;
-#   - any claim that removing a tc filter denies internet access, which it does not.
+#   - any claim that removing a tc filter denies internet access, which it does not;
+#   - any claim that the cutover is already flag-only before the surgical nft foundation is installed;
+#   - any description of a modelled (fake-kernel) suite as real-kernel or live evidence;
+#   - any description of a permanent authorization as fail-closed.
 # Catching them here means the next drift of this class fails a gate instead of being reviewed for.
 p3drift=0
 REPORT="$DOCS/reports/StayConnect-IAM-Phase3-Final-Report.md"
@@ -125,7 +128,7 @@ if [ -f "$REPORT" ]; then
   actual_pf="$(bash "$ROOT/scripts/phase3-preflight.sh" --json 2>/dev/null | sed -n 's/.*"pass":\([0-9]*\).*/\1/p')"
   if [ -n "$actual_pf" ]; then
     grep -qE "PASS $actual_pf/$actual_pf" "$REPORT" || { echo "    HIT [stale preflight total]: report does not state PASS $actual_pf/$actual_pf"; p3drift=$((p3drift+1)); }
-    for bad in 17 18 19; do
+    for bad in 17 18 19 20 21; do
       [ "$bad" = "$actual_pf" ] && continue
       grep -qE "Offline preflight[^|]*\| \*\*PASS $bad/$bad\*\*" "$REPORT" && { echo "    HIT [stale preflight total]: PASS $bad/$bad still claimed"; p3drift=$((p3drift+1)); }
     done
@@ -141,6 +144,23 @@ while IFS= read -r line; do
   [ -z "$line" ] && continue
   echo "    HIT [manifest self-count overclaim]: $line"; p3drift=$((p3drift+1))
 done < <(grep -rniE "([0-9]+)/\1 (entries|files) (passed|verified)[^.]{0,40}sha256sum" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -v "validate-project-state.sh" | grep -viE "wrong to describe|must not|never describe|do not call")
+# no document may claim the cutover is already "flag-only" without the surgical nft foundation having been
+# installed on the unit. The software makes it flag-only AFTERWARDS; saying so beforehand is the same class of
+# overclaim as calling a modelled test live evidence.
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [premature flag-only cutover claim]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "cutover is (a )?flag[- ]only|flag[- ]only cutover is (ready|prepared|complete)" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -viE "not .{0,20}flag-only|only after|is NOT|until|becomes flag-only|makes .{0,30}flag[- ]only|no document may|must not" | grep -v "validate-project-state.sh")
+# no document may present a modelled (fake-kernel) suite as real-kernel or live evidence
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [fake-kernel described as kernel/live evidence]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "fake[- ]kernel[^.]{0,60}(live evidence|real[- ]kernel evidence|proves the kernel)" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -viE "not |never |do not|must not" | grep -v "validate-project-state.sh")
+# and no document may describe a Phase-3 authorization as permanent/non-expiring while calling it fail-closed
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [permanent authorization described as fail-closed]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "(permanent|non-expiring|never expires)[^.]{0,60}authorization[^.]{0,40}fail[- ]closed" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -viE "not |never be|must not|cannot" | grep -v "validate-project-state.sh")
 [ "$p3drift" = "0" ] && ok "no Phase-3 enforcement/evidence phrase drift" || fail "$p3drift Phase-3 phrase drift hit(s)"
 
 echo "== 2. single current maturity + consistent next action =="

@@ -37,8 +37,34 @@ The software increments in this plan are **execution history**, not future work:
   every authoritative Phase-3 family.
 - **Accountable-before-forwarding** class provisioning is in force: netd stages prepare → register origin →
   activate, so no managed class forwards before its counter series has a durable accounting origin.
+- **The enforcement architecture is nft + tc + Session, not tc alone.** This is the material change to the
+  plan as originally written, and the older "accountable TC" wording no longer describes what is built:
+  - `netd` is the single privileged **network-enforcement** owner, holding both kernel halves. `nft` decides
+    packet authorization; `tc` decides accountable metering; `iam_v2.sessions.state` is durable runtime state.
+    Removing a tc classification filter denies **nothing** — those packets fall back to the bridge's default
+    class and keep flowing, unmetered.
+  - Phase 3 authorizes in the structurally separate `phase3_auth_ipv4`; legacy `auth_ipv4` is unreachable from
+    every Phase-3 code path.
+  - Admission order: allocate generation → prepare tc without filters → register the accounting origin →
+    activate filters → verify → **authorize** → verify → persist → prove the Session durably `active`.
+  - Fail-closed means **nft denial first, proven**, then tc. Teardown and expiry use the same order.
+- **Packet authorization is a bounded, renewable kernel lease** (90s, clamped by the session's hard access
+  boundary; 15s while durable `active` is unproven). A healthy reconciliation renews it; silence expires it.
+  If acctd and netd both die and nothing recovers, every Phase-3 guest loses access within the documented
+  bound — because the kernel enforces it with nothing running.
+- **"ACTIVE means authorized AND accountable" is a database invariant.** `activate_session_enforcement`
+  verifies the accounting checkpoint itself — session, device, bridge, class minor and exact generation —
+  before it will promote a Session, and refuses a fabricated, foreign, stale or contested origin.
+- An activation whose durable outcome **cannot be proven** holds only the provisional lease and is then failed
+  closed and quarantined with a doubling backoff. It can never become permanent Internet access.
+- A **surgical live-dark nft foundation** (`cmd/phase3-foundation`) installs the Phase-3 set and rules into a
+  running ruleset in one nft transaction, proving legacy-authorization parity on both sides and rolling itself
+  back if it cannot. The cutover becomes flag-only **only after that install is performed and verified on the
+  unit** — not on the strength of the software alone.
 - One **true full same-HEAD software gate** (`phase3-full-software-gate`) is green, with a downloadable,
-  independently-verified evidence artifact.
+  independently-verified evidence artifact — now including a **real-kernel contract suite** that runs the real
+  `nft` and `tc` binaries with real packets in disposable Linux network namespaces. That suite is kernel
+  evidence produced on a disposable CI machine; it is **not** live appliance evidence.
 
 **Still PENDING (requires a separate Product-Owner decision — see `governance/project-state.json`
 `next_authorized_action`):** Live Increment 9 — read-only live PMS verification, controlled live-dark

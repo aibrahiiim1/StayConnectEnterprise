@@ -40,12 +40,42 @@ import (
 
 // phase3FailureBudget is the fixed wall-clock every guest-visible non-success takes.
 //
-// It has to sit above the slowest HEALTHY resolve — otherwise ordinary guests get abandoned mid-flight on a
-// property whose PMS is merely unexciting — and below the point where a captive portal reads as broken. The
-// 5s upstream client timeout in main.go is the wrong scale for a page a guest is staring at; 1200ms covers a
-// healthy PMS round trip through scd with room to spare, and a property whose PMS cannot answer inside it has
-// an operational problem that the transport/continuity health surfaces name directly.
-const phase3FailureBudget = 1200 * time.Millisecond
+// It has to sit above the slowest HEALTHY connection attempt — otherwise ordinary guests get abandoned
+// mid-flight on a property that is merely unexciting — and below the point where a captive portal reads as
+// broken. The 5s upstream client timeout in main.go is the wrong scale for a page a guest is staring at.
+//
+// WHY IT IS 2500ms AND NOT 1200ms.
+//
+// It used to be 1200ms, sized against a PMS round trip through scd, which was the whole of the work at the
+// time. It is not any more. Guest-visible success now waits for the guest to be genuinely ENFORCED — a
+// Session is only reported connected once the kernel is actually authorizing and metering it — and that
+// convergence is produced by the enforcement owner's own reconciliation pass, not by the request. So a
+// healthy connect costs, in the worst ordinary case:
+//
+//	up to one full reconciliation interval waiting for the next pass (the producer ticks every second)
+//	+ the pass's own database and kernel work
+//	+ the polling granularity at which scd notices the promotion
+//	+ two local unix-socket hops.
+//
+// Against a 1200ms budget that arithmetic does not fit, and the failure mode is the ugly one: a guest whose
+// grant is perfectly healthy is abandoned mid-convergence and told, in the uniform non-success wording, that
+// they are not connected — reproducibly, for anyone unlucky enough to tap Connect just after a tick. 2500ms
+// clears the worst healthy case with margin while staying inside what a captive portal can spend.
+//
+// THE TIMING PROTECTION IS UNCHANGED IN FORM. This is still ONE budget for the whole endpoint, and every
+// guest-visible non-success still leaves at exactly this offset — a malformed body, an unknown device, a
+// wrong room, an unreachable PMS, a throttled attempt, and now an enforcement that did not converge in time.
+// Splitting it — a short budget for identity failures and a long one for connection failures — would have
+// been cheaper for the guest and would have handed an attacker the distinction the budget exists to remove:
+// "this room answers at 2.5s and every other room answers at 1.2s" enumerates the property just as neatly as
+// a distinguishing message would.
+const phase3FailureBudget = 2500 * time.Millisecond
+
+// phase3EnforcementReserve is how much of the budget is held back from the upstream hops so that a request
+// which spends the entire budget upstream can still write its uniform answer at the budget rather than after
+// it. Without it the ceiling would be "the budget, plus however long the response takes", which is a
+// measurable difference between an abandoned attempt and a fast local refusal.
+const phase3EnforcementReserve = 200 * time.Millisecond
 
 // phase3Clock is the seam the tests drive. Production uses the real one; a test can make the budget observable
 // without spending 1.2 real seconds per case, and — more importantly — can assert the DEADLINE arithmetic
@@ -93,7 +123,10 @@ func (h *handler) newPhase3Budget(r *http.Request) *phase3Budget {
 		clk = realClock{}
 	}
 	deadline := clk.Now().Add(phase3FailureBudget)
-	ctx, cancel := context.WithDeadline(r.Context(), deadline)
+	// The UPSTREAM deadline is deliberately earlier than the guest-visible one. scd derives its own
+	// enforcement wait from the deadline it is handed, so this is also what tells scd how long it may wait for
+	// the kernel — and reserving the difference is what keeps the answer landing AT the budget.
+	ctx, cancel := context.WithDeadline(r.Context(), deadline.Add(-phase3EnforcementReserve))
 	return &phase3Budget{clock: clk, deadline: deadline, ctx: ctx, cancel: cancel}
 }
 

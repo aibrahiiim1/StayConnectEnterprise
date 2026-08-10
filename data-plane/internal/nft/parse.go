@@ -69,6 +69,11 @@ func parseJSON(raw []byte) ([]Element, error) {
 				if t, ok := inner["timeout"].(float64); ok {
 					el.Timeout = time.Duration(t) * time.Second
 				}
+				// "expires" is the REMAINING lease. It is what a renewal decision must read: an element with a
+				// 90s timeout says nothing about whether it is about to disappear.
+				if x, ok := inner["expires"].(float64); ok {
+					el.Expires = time.Duration(x) * time.Second
+				}
 				if el.IP != nil {
 					out = append(out, el)
 				}
@@ -77,3 +82,7 @@ func parseJSON(raw []byte) ([]Element, error) {
 	}
 	return out, nil
 }
+
+// ParseSetJSON exposes the set-listing parser so other packages can read `nft -j list set` output without
+// duplicating the shape of it. One parser means one place where a change in nft's JSON has to be handled.
+func ParseSetJSON(raw []byte) ([]Element, error) { return parseJSON(raw) }

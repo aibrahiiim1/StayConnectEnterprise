@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type recordingNft struct {
@@ -235,5 +236,134 @@ func TestAllowInCarriesTheTimeout(t *testing.T) {
 	}
 	if !rr.has("timeout 90s") {
 		t.Fatalf("the element carries no timeout: %v", rr.all())
+	}
+}
+
+// ---- the bounded lease -----------------------------------------------------
+
+// A Phase-3 lease is always installed WITH a timeout. An element with no timeout survives every process that
+// maintains it, so the command that installs one is the command that has to be wrong for that to happen.
+func TestPhase3LeaseAlwaysCarriesATimeout(t *testing.T) {
+	c, rr := testClient()
+	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
+
+	if err := c.LeaseIn(context.Background(), Phase3AuthV4, "br-guest", gIP, 90*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if !rr.has(`add element inet stayconnect phase3_auth_ipv4 { "br-guest" . 10.0.0.5 timeout 90s }`) {
+		t.Fatalf("the lease was not installed with its timeout: %v", rr.all())
+	}
+}
+
+// A zero or negative lease is REFUSED rather than installed. nft reads "no timeout" as permanent, so a
+// rounding error or an uninitialised duration would otherwise become an authorization nobody can expire.
+func TestPhase3LeaseRefusesAnUnboundedAuthorization(t *testing.T) {
+	c, rr := testClient()
+	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
+
+	for _, ttl := range []time.Duration{0, -time.Second} {
+		if err := c.LeaseIn(context.Background(), Phase3AuthV4, "br-guest", gIP, ttl); err == nil {
+			t.Fatalf("a ttl of %v was accepted; that installs a PERMANENT authorization", ttl)
+		}
+	}
+	if len(rr.all()) != 0 {
+		t.Fatalf("a refused lease still issued commands: %v", rr.all())
+	}
+}
+
+// A sub-second lease rounds UP. Rounding down would produce `timeout 0s`, which nft treats as no timeout at
+// all — the one value that turns an expiring authorization into a permanent one.
+func TestPhase3LeaseRoundsUpRatherThanToZero(t *testing.T) {
+	c, rr := testClient()
+	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
+
+	if err := c.LeaseIn(context.Background(), Phase3AuthV4, "br-guest", gIP, 300*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if rr.has("timeout 0s") {
+		t.Fatalf("a sub-second lease became `timeout 0s`, which nft reads as permanent: %v", rr.all())
+	}
+	if !rr.has("timeout 1s") {
+		t.Fatalf("a 300ms lease did not round up to 1s: %v", rr.all())
+	}
+}
+
+// RENEWAL IS NOT A REPEATED ADD. nftables does not restart an existing element's timer on a second add, so a
+// renewal built on `add element` would look healthy and still drop every guest at the first lease boundary.
+// The refresh is a delete+add in ONE command buffer, which nft commits as a single transaction.
+func TestPhase3LeaseRenewalIsAnAtomicDeleteAndAdd(t *testing.T) {
+	c, rr := testClient()
+	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
+	rr.listJSON[Phase3AuthV4] = `{"nftables":[{"set":{"name":"phase3_auth_ipv4","elem":[
+		{"elem":{"val":{"concat":["br-guest","10.0.0.5"]},"timeout":90,"expires":12}}]}}]}`
+
+	if err := c.LeaseIn(context.Background(), Phase3AuthV4, "br-guest", gIP, 90*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	var refresh string
+	for _, cmd := range rr.all() {
+		if strings.Contains(cmd, "delete element") {
+			refresh = cmd
+		}
+	}
+	if refresh == "" {
+		t.Fatalf("renewing an existing element issued no delete: %v", rr.all())
+	}
+	if !strings.Contains(refresh, "delete element inet stayconnect phase3_auth_ipv4") ||
+		!strings.Contains(refresh, "add element inet stayconnect phase3_auth_ipv4") {
+		t.Fatalf("the refresh is not a delete+add: %q", refresh)
+	}
+	if strings.Count(refresh, ";") != 1 {
+		t.Fatalf("the refresh was not issued as ONE command buffer, so the guest is unauthorized between the "+
+			"two commands: %q", refresh)
+	}
+	if !strings.Contains(refresh, "timeout 90s") {
+		t.Fatalf("the refreshed element carries no new lease: %q", refresh)
+	}
+	// and it is still the Phase-3 set, on both halves of the buffer
+	if strings.Contains(refresh, " "+AuthV4+" ") {
+		t.Fatalf("a Phase-3 renewal named the LEGACY set: %q", refresh)
+	}
+}
+
+// The REMAINING lease is what a renewal decision reads. An element created with a 90s timeout says nothing
+// about whether it is one second from disappearing.
+func TestPhase3ListReportsRemainingLease(t *testing.T) {
+	c, rr := testClient()
+	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
+	rr.listJSON[Phase3AuthV4] = `{"nftables":[{"set":{"name":"phase3_auth_ipv4","elem":[
+		{"elem":{"val":{"concat":["br-guest","10.0.0.5"]},"timeout":90,"expires":7}}]}}]}`
+
+	els, err := c.ListIn(context.Background(), Phase3AuthV4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(els) != 1 {
+		t.Fatalf("want one element, got %d", len(els))
+	}
+	if els[0].Timeout != 90*time.Second {
+		t.Fatalf("timeout = %v, want 90s", els[0].Timeout)
+	}
+	if els[0].Expires != 7*time.Second {
+		t.Fatalf("expires = %v, want 7s — a renewal decision made on the timeout instead of the remainder "+
+			"would never refresh anything", els[0].Expires)
+	}
+}
+
+// Legacy behaviour is untouched: scd still installs permanent elements in auth_ipv4 through Allow.
+func TestLegacyAllowIsUnchangedByTheLeaseWork(t *testing.T) {
+	c, rr := testClient()
+	rr.typeOut[AuthV4] = "set auth_ipv4 { type ifname . ipv4_addr }"
+
+	if err := c.Allow(context.Background(), "br-lan", gIP, 0); err != nil {
+		t.Fatal(err)
+	}
+	if !rr.has("add element inet stayconnect "+AuthV4) || rr.has("timeout") {
+		t.Fatalf("legacy authorization changed shape: %v", rr.all())
+	}
+	for _, cmd := range rr.all() {
+		if strings.Contains(cmd, Phase3AuthV4) {
+			t.Fatalf("a legacy authorization named the Phase-3 set: %s", cmd)
+		}
 	}
 }

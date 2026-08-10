@@ -27,7 +27,11 @@ import (
 
 // ContractVersion is the wire contract. A producer speaking a different version is refused rather than
 // interpreted: a half-understood desired state is worse than none.
-const ContractVersion = "phase3-shaping/1"
+// It is /2 because a session now carries its hard access boundary (AccessEndsAt), which the applier uses to
+// bound the kernel authorization lease. A /1 producer states no boundary, and an applier that assumed "no
+// boundary stated" meant "no boundary exists" would issue a full-length lease to a guest whose access ends in
+// a minute. Refusing the older contract outright is the only reading of that omission that cannot overshoot.
+const ContractVersion = "phase3-shaping/2"
 
 // Session is one session's desired treatment. Entitled=false means "must not be forwarded".
 type Session struct {
@@ -42,6 +46,14 @@ type Session struct {
 	DownKbps int    `json:"down_kbps"`
 	UpKbps   int    `json:"up_kbps"`
 	Entitled bool   `json:"entitled"`
+	// AccessEndsAt is the EARLIEST HARD BOUNDARY after which this session must not be forwarded — the
+	// entitlement's validity window end (a Grace conversion moves it, a revocation ends the session outright).
+	//
+	// It travels in the plan because the applier holds the kernel lease, and a lease is only safe if it can
+	// never outlive the access it represents. Deriving it at the applier is not possible: netd has no view of
+	// entitlements. Nil means "no wall-clock end is currently known", which is NOT "unbounded" — the applier
+	// still leases, bounded by the producer's own cadence.
+	AccessEndsAt *time.Time `json:"access_ends_at,omitempty"`
 }
 
 // Envelope is a COMPLETE, scoped, versioned statement of the Phase-3 managed state.
@@ -110,9 +122,16 @@ func HashDesiredState(bridges []string, sessions []Session) string {
 		rows = append(rows, "B\x1f"+b)
 	}
 	for _, s := range sessions {
+		// The access boundary is INSIDE the hash. It decides how long the applier may lease packet
+		// authorization for, so a body that lost it in transit — or had it rewritten — would still look like a
+		// complete, valid plan while asking for a longer lease than the guest's access justifies.
+		ends := ""
+		if s.AccessEndsAt != nil {
+			ends = s.AccessEndsAt.UTC().Format(time.RFC3339Nano)
+		}
 		rows = append(rows, strings.Join([]string{
 			"S", s.SessionID, s.DeviceID, s.IP, s.Bridge,
-			strconv.Itoa(s.DownKbps), strconv.Itoa(s.UpKbps), strconv.FormatBool(s.Entitled),
+			strconv.Itoa(s.DownKbps), strconv.Itoa(s.UpKbps), strconv.FormatBool(s.Entitled), ends,
 		}, "\x1f"))
 	}
 	sort.Strings(rows)

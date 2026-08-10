@@ -168,7 +168,27 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh enforcement --
           bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh enforcement
           ./cmd/netd/ ./internal/nft/
-          -run 'System|Phase3Allow|LegacyAllow|Phase3Deny|AuthorizedIn|ListIn|ConcatProbe|AllowInCarries' -count=1
+          -run 'System|Lease|Activation|Phase3Allow|LegacyAllow|Phase3Deny|Phase3List|AuthorizedIn|ListIn|ConcatProbe|AllowInCarries' -count=1
+
+      - name: Surgical live-dark nft foundation tests
+        working-directory: data-plane
+        # The install/rollback that has to be safe on an appliance carrying live legacy guests. Counted on its
+        # own because it is the operation an operator will run during Increment 9, and its result is the thing
+        # they need to be able to point at.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh foundation --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh foundation
+          ./internal/nftfoundation/ -count=1
+
+      - name: REAL-KERNEL contract suite (disposable Linux network namespaces)
+        # Real nft, real tc, real packets, in namespaces created and destroyed by the step. This is where the
+        # kernel assumptions the whole design rests on are actually checked — that a lease expires with nothing
+        # running, that a repeated `add` does not refresh it, that removing a tc filter denies nobody, and that
+        # the surgical foundation preserves a populated legacy authorization set.
+        #
+        # It contacts no appliance, no production database and no PMS, and it verifies that the host's own
+        # ruleset is byte-identical afterwards.
+        run: "sudo -E env PATH=$PATH EVID=$EVID bash $GITHUB_WORKSPACE/scripts/ci/step.sh kernel-netns -- bash $GITHUB_WORKSPACE/scripts/ci/kernel-netns-suite.sh"
 
       - name: Staged-provisioning failure tests (accountable before forwarding)
         working-directory: data-plane

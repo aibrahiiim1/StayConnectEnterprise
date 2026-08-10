@@ -794,18 +794,18 @@ func (f *authFixture) startEnforcementOwner(t *testing.T) func() {
 			case <-time.After(20 * time.Millisecond):
 			}
 			rows, err := f.pool.Query(context.Background(), `
-				SELECT s.id::text, COALESCE(s.ingress_interface,''), host(s.ip)
+				SELECT s.id::text, COALESCE(s.ingress_interface,''), host(s.ip), s.device_id::text
 				  FROM iam_v2.sessions s
 				 WHERE s.tenant_id=$1 AND s.site_id=$2 AND s.state='PENDING_ENFORCEMENT' AND s.ended IS NULL`,
 				f.tenant, f.site)
 			if err != nil {
 				continue
 			}
-			type pend struct{ id, bridge, ip string }
+			type pend struct{ id, bridge, ip, device string }
 			var pending []pend
 			for rows.Next() {
 				var p pend
-				if rows.Scan(&p.id, &p.bridge, &p.ip) == nil {
+				if rows.Scan(&p.id, &p.bridge, &p.ip, &p.device) == nil {
 					pending = append(pending, p)
 				}
 			}
@@ -815,6 +815,12 @@ func (f *authFixture) startEnforcementOwner(t *testing.T) func() {
 				if !ok {
 					continue
 				}
+				// THE SAME ORDER netd uses, and it is not optional: the activation operation verifies the
+				// accounting origin itself, so a promotion attempted without one is refused by the database.
+				// Registering it here is what keeps this simulation an honest stand-in rather than a shortcut.
+				_, _ = f.pool.Exec(context.Background(), `
+					SELECT iam_v2.register_class_origin($1,$2,$3::uuid,$4::uuid,$5,$6,1,0,0,now())`,
+					f.tenant, f.site, p.id, p.device, p.bridge, minor)
 				// The real controlled writer, with the real coherence rules.
 				_, _ = f.pool.Exec(context.Background(),
 					`SELECT iam_v2.activate_session_enforcement($1,$2,$3::uuid,$4,$5,$6)`,

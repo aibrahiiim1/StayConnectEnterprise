@@ -44,12 +44,20 @@ type fakeGate struct {
 	// allowSilentlyIgnored models an Allow that returns success without taking effect.
 	allowSilentlyIgnored map[string]bool
 	listErr              error
+	// leases is the REMAINING lease per element, as the kernel would report it. The gate is a leasing gate,
+	// so a fake that only remembered membership could not tell a renewed authorization from one about to
+	// disappear — which is the whole property the lease exists to provide.
+	leases map[string]time.Duration
+	// ttls records every lease length ever requested per element, so a test can assert that a guest whose
+	// durable activation is unproven is only ever given the SHORT provisional lease.
+	ttls map[string][]time.Duration
 }
 
 func newFakeGate() *fakeGate {
 	return &fakeGate{authorized: map[string]bool{}, failAllow: map[string]error{},
 		failRevoke: map[string]bool{}, loseAllowResult: map[string]bool{},
-		allowSilentlyIgnored: map[string]bool{}}
+		allowSilentlyIgnored: map[string]bool{}, leases: map[string]time.Duration{},
+		ttls: map[string][]time.Duration{}}
 }
 
 func gk(bridge string, ip net.IP) string { return bridge + "|" + ip.String() }
@@ -58,13 +66,21 @@ func (g *fakeGate) Authorize(ctx context.Context, bridge string, ip net.IP, ttl 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.calls = append(g.calls, "authorize "+gk(bridge, ip))
+	// THE REAL GATE REFUSES A PERMANENT AUTHORIZATION, so the fake must too. An element with no timeout
+	// outlives every process that maintains it, and a fake that quietly accepted one would let a regression
+	// reintroducing unbounded access pass the entire suite.
+	if ttl <= 0 {
+		return errors.New("nft: packet authorization must be a bounded lease (ttl > 0)")
+	}
 	if err, ok := g.failAllow[ip.String()]; ok {
 		return err
 	}
+	g.ttls[gk(bridge, ip)] = append(g.ttls[gk(bridge, ip)], ttl)
 	if g.allowSilentlyIgnored[ip.String()] {
 		return nil // reports success, changes nothing
 	}
 	g.authorized[gk(bridge, ip)] = true
+	g.leases[gk(bridge, ip)] = ttl
 	if g.loseAllowResult[ip.String()] {
 		return errors.New("connection reset after the element was added")
 	}
@@ -79,6 +95,7 @@ func (g *fakeGate) Revoke(ctx context.Context, bridge string, ip net.IP) error {
 		return errors.New("nft delete element failed")
 	}
 	delete(g.authorized, gk(bridge, ip))
+	delete(g.leases, gk(bridge, ip))
 	return nil
 }
 
@@ -103,7 +120,7 @@ func (g *fakeGate) List(ctx context.Context) ([]gateElem, error) {
 				break
 			}
 		}
-		out = append(out, gateElem{Bridge: bridge, IP: net.ParseIP(ipStr)})
+		out = append(out, gateElem{Bridge: bridge, IP: net.ParseIP(ipStr), Expires: g.leases[k]})
 	}
 	return out, nil
 }
@@ -131,6 +148,38 @@ func (g *fakeGate) put(bridge, ip string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.authorized[bridge+"|"+ip] = true
+	g.leases[bridge+"|"+ip] = phase3LeaseTTL
+}
+
+// advance is THE KERNEL DOING ITS JOB WITH NOTHING ELSE RUNNING: every lease loses d, and anything that
+// reaches zero is removed by the kernel itself. It takes no lock ordering with the writer because that is
+// exactly the point — expiry does not need netd, acctd, the database or the network to happen.
+func (g *fakeGate) advance(d time.Duration) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for k, left := range g.leases {
+		left -= d
+		if left <= 0 {
+			delete(g.authorized, k)
+			delete(g.leases, k)
+			continue
+		}
+		g.leases[k] = left
+	}
+}
+
+// leaseOf reports the remaining lease, or 0 when the element is gone.
+func (g *fakeGate) leaseOf(bridge, ip string) time.Duration {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.leases[bridge+"|"+ip]
+}
+
+// requestedTTLs is every lease length asked for, in order.
+func (g *fakeGate) requestedTTLs(bridge, ip string) []time.Duration {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]time.Duration(nil), g.ttls[bridge+"|"+ip]...)
 }
 
 // ---- a fake enforcement recorder -------------------------------------------
@@ -140,18 +189,31 @@ type fakeEnforcement struct {
 	activated []string
 	ended     []string
 	err       error
+	// confirmErr makes the authoritative re-read fail too, which is the genuinely-unknown case: the promotion
+	// may or may not have committed and nothing can say which.
+	confirmErr error
+	// commitThenLoseAck models the ambiguity that matters most: the transaction COMMITS and the answer is
+	// lost. Activate reports failure; the re-read finds the session active.
+	commitThenLoseAck map[string]bool
 	// state models the durable Session lifecycle so a test can assert what a guest-facing reader would see.
-	state map[string]string
+	state    map[string]string
+	confirms int
 }
 
 func newFakeEnforcement() *fakeEnforcement {
-	return &fakeEnforcement{state: map[string]string{}}
+	return &fakeEnforcement{state: map[string]string{}, commitThenLoseAck: map[string]bool{}}
 }
 
 func (e *fakeEnforcement) Activate(ctx context.Context, sessionID, bridge string, minor int, epoch int64) (string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.activated = append(e.activated, sessionID)
+	if e.commitThenLoseAck[sessionID] {
+		if e.state[sessionID] != "ended" {
+			e.state[sessionID] = "active" // it COMMITTED
+		}
+		return "", errors.New("connection reset after commit")
+	}
 	if e.err != nil {
 		return "", e.err
 	}
@@ -171,6 +233,16 @@ func (e *fakeEnforcement) Ended(ctx context.Context, sessionID, reason string) e
 	e.ended = append(e.ended, sessionID)
 	e.state[sessionID] = "ended"
 	return nil
+}
+
+func (e *fakeEnforcement) Confirm(ctx context.Context, sessionID string) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.confirms++
+	if e.confirmErr != nil {
+		return false, e.confirmErr
+	}
+	return e.state[sessionID] == "active", nil
 }
 
 func (e *fakeEnforcement) sessionState(id string) string {

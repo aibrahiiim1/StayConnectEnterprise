@@ -9,7 +9,8 @@ package main
 //
 // Three things must agree, and none of them substitutes for another:
 //
-//	nft — PACKET AUTHORIZATION. The only thing that gives or denies internet access.
+//	nft — PACKET AUTHORIZATION. The only thing that gives or denies internet access. It is always a BOUNDED
+//	      LEASE (phase3_lease.go): a healthy pass renews it, silence expires it.
 //	tc  — ACCOUNTABLE METERING. Classifies an authorized guest's packets so they are shaped and counted.
 //	      Removing a tc filter does NOT deny access; the packets fall back to the bridge's DEFAULT class and
 //	      keep flowing, now unmetered.
@@ -23,10 +24,16 @@ package main
 //	→ register the accounting origin through the controlled PostgreSQL operation
 //	→ activate BOTH tc classification filters             (now metered — still not authorized)
 //	→ verify the class is actually classifying
-//	→ AUTHORIZE the guest in the Phase-3 nft gate         (now, and only now, the guest reaches the internet)
+//	→ AUTHORIZE the guest, on a SHORT PROVISIONAL LEASE   (now, and only now, the guest reaches the internet)
 //	→ verify the authorization took
 //	→ persist managed inventory
-//	→ promote the Session to active through the controlled writer
+//	→ prove the Session durably active through the controlled writer
+//	→ only then extend the lease to its full length
+//
+// The provisional lease closes the last window in the sequence. Between "the kernel is enforcing" and "durable
+// state says so" there is a real interval, and a crash or an unreadable database can make it permanent — a
+// guest online forever whose Session says PENDING_ENFORCEMENT. Authorizing provisionally means an activation
+// that is never confirmed expires by itself, in the kernel, with nothing running.
 //
 // Every failure fails closed, and fail-closed means the NFT GATE FIRST: packet authorization is removed and
 // proven gone before tc is touched, because until that element is gone the guest is online whatever tc says.
@@ -37,13 +44,14 @@ package main
 import (
 	"context"
 	"net"
+	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
 )
 
 // provisionSession puts ONE desired session's class in force. Caller holds p.mu.
-func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, minor int, s shapeplan.Session, res *shapingPlanResponse) {
+func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, minor int, s shapeplan.Session, view gateView, now time.Time, res *shapingPlanResponse) {
 	ip := net.ParseIP(s.IP)
 	key := classKey(bridge, s.SessionID)
 	if p.epochs == nil {
@@ -53,10 +61,60 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		p.pending = map[string]int64{}
 	}
 
+	// ---- THE HARD ACCESS BOUNDARY, before anything is installed ------------------------------------------
+	// A session whose entitlement window has already elapsed gets no lease at all, and no class. The plan may
+	// still list it — the producer derives from durable state and the expiry sweep runs on its own schedule —
+	// but "the plan still mentions them" is not authority to forward a guest past their own deadline.
+	lease, leasable := leaseFor(s, now)
+	if !leasable {
+		p.failClosed(ctx, bridge, ip, res,
+			"shape "+s.SessionID+": access boundary has already passed; not authorized")
+		return
+	}
+
+	// ---- QUARANTINE: a session whose activation could not be proven --------------------------------------
+	//
+	// Failing closed once is not enough on its own. The session is still in every plan, so the very next pass
+	// would prepare a fresh class and admit the guest provisionally all over again — and the pass after that,
+	// and the one after that. The outcome would be a guest online most of the time, disconnected for a moment
+	// every half minute, with durable state never once saying they are active. Bounded in the kernel, yes;
+	// fail-closed, no.
+	//
+	// So an attempt that exhausts the activation grace also DENIES RE-ADMISSION for a backoff that doubles
+	// with each strike, and even when that backoff elapses a fresh attempt is only made if durable state can
+	// be read at all. The two conditions cover the two different failures: a database that is simply down
+	// yields no access whatsoever after the first grace, and an activation that can never succeed yields a
+	// rapidly shrinking fraction of one.
+	if q := p.quarantined[key]; q != nil && !q.until.IsZero() {
+		hold := now.Before(q.until)
+		if !hold && p.enforcement != nil {
+			if _, err := p.enforcement.Confirm(ctx, s.SessionID); err != nil {
+				q.until = now.Add(quarantineBackoff(q.strikes))
+				hold = true
+			}
+		}
+		if hold {
+			// Nothing is prepared and nothing is authorized. denyAccess is still called because the quarantine
+			// may have been entered while an element was installed, and a fail-closed hold that leaves the
+			// element behind is not a hold at all.
+			if derr := p.denyAccess(ctx, bridge, ip); derr != nil {
+				res.Problems = append(res.Problems,
+					"quarantine "+s.SessionID+": PACKET AUTHORIZATION NOT PROVEN REMOVED: "+derr.Error())
+			}
+			res.Failed++
+			res.Problems = append(res.Problems, "shape "+s.SessionID+
+				": quarantined after "+itoa(q.strikes)+" unproven activation(s); not re-admitting before "+
+				q.until.UTC().Format(time.RFC3339))
+			return
+		}
+		q.until = time.Time{} // the backoff has elapsed and durable state is readable: one fresh attempt
+	}
+
 	// ---- ORDINARY RE-RATE of an already-active class ----------------------------------------------------
 	// Same session, same kernel class, same durable generation. It must not allocate a new generation, must
 	// not re-register the origin, and MUST NOT reset the counters — so it is a `tc class change` in place, not
-	// a delete+recreate. This is the path an entitled session takes when only its rate moved.
+	// a delete+recreate. This is the path an entitled session takes when only its rate moved, and it is also
+	// THE RENEWAL PATH: a healthy pass over an unchanged session is what refreshes its kernel lease.
 	if epoch, active := p.epochs[key]; active {
 		if _, held := p.classes[key]; held {
 			present, err := p.classPresent(ctx, bridge, minor)
@@ -69,36 +127,35 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 					return
 				}
 				p.minorOwner[minorKey(bridge, minor)] = s.SessionID
-				// The class is in force and metering. Re-assert the PACKET AUTHORIZATION too: this path also
-				// runs on the retry after a lost admission, on the first pass after a restart, and whenever a
-				// stray sweep removed an element it should not have. Authorize is idempotent, so re-asserting
-				// costs nothing and closes the case where tc is correct but the gate is not.
-				if p.gate != nil {
-					authorized, aerr := p.gate.Authorized(ctx, bridge, ip)
-					if aerr != nil {
-						res.Failed++
-						res.Problems = append(res.Problems, "re-rate "+s.SessionID+": authorization unreadable: "+aerr.Error())
-						return
-					}
-					if !authorized {
-						if err := p.gate.Authorize(ctx, bridge, ip, 0); err != nil {
-							p.failClosed(ctx, bridge, ip, res, "re-authorize "+s.SessionID+": "+err.Error())
-							return
-						}
-						if ok, verr := p.gate.Authorized(ctx, bridge, ip); verr != nil || !ok {
-							p.failClosed(ctx, bridge, ip, res, "re-authorization verification failed for "+s.SessionID)
-							return
-						}
-					}
-				}
-				// Converge durable state as well. A Session whose activation acknowledgement was lost is
-				// enforced in the kernel but still says PENDING_ENFORCEMENT, and this is the pass that must
-				// finish the job — the promotion is idempotent, so a session already active is untouched.
-				if problem := p.markActive(ctx, s.SessionID, bridge, minor, epoch); problem != "" {
+				// Converge durable state. A Session whose activation acknowledgement was lost is enforced in
+				// the kernel but still says PENDING_ENFORCEMENT, and this is the pass that must finish the job
+				// — the promotion is idempotent, so a session already active is untouched.
+				outcome, problem := p.proveActive(ctx, key, s.SessionID, bridge, minor, epoch, now)
+				if problem != "" {
 					res.Failed++
 					res.Problems = append(res.Problems, problem)
 				}
-				res.Shaped++
+				if outcome == activationFailed {
+					// The grace is spent: an unprovable activation may not keep being renewed into a permanent
+					// grant. Deny first, then tear the class down. proveActive has already recorded the strike
+					// and the backoff, and endSeries deliberately leaves that record alone.
+					p.failClosed(ctx, bridge, ip, res, "session "+s.SessionID+": activation never proven")
+					p.endSeries(bridge, s.SessionID)
+					return
+				}
+				// Re-assert the PACKET AUTHORIZATION at the lease length this outcome justifies. This path also
+				// runs on the retry after a lost admission, on the first pass after a restart, and whenever a
+				// stray sweep removed an element it should not have.
+				want := lease
+				if outcome != activationProven {
+					want = provisionalOrLess(lease)
+				}
+				if !p.assertLease(ctx, bridge, ip, want, view, res, s.SessionID) {
+					return
+				}
+				if outcome == activationProven {
+					res.Shaped++
+				}
 				return
 			}
 			// The kernel lost the class since restore (a mid-boot flush). That is a genuinely new class: end
@@ -142,6 +199,8 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// registerOrigin reads the class counters (which are the prepared baseline, since nothing is classified
 	// into the class yet) and records them through the controlled operation. Recording the origin BEFORE any
 	// forwarding filter exists is the whole point: the first guest packet is counted from a real baseline.
+	// It is also what makes the Session's later promotion possible at all: activate_session_enforcement
+	// verifies this exact checkpoint before it will move a Session to active.
 	if problem := p.registerOrigin(ctx, s, minor, epoch); problem != "" {
 		p.failClosed(ctx, bridge, ip, res, problem)
 		return
@@ -149,7 +208,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 
 	// ---- (e) ACTIVATE both tc classification filters ---------------------------------------------------
 	// This makes the class METER the guest's packets. It does not admit them to the internet: that is the
-	// nft gate in step (h), which is still closed.
+	// nft gate in step (g), which is still closed.
 	if err := p.shp.ActivateSession(ctx, bridge, ip); err != nil {
 		p.failClosed(ctx, bridge, ip, res, "activate "+s.SessionID+": "+err.Error())
 		return
@@ -163,14 +222,17 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		return
 	}
 
-	// ---- (g) AUTHORIZE the guest in the Phase-3 nft gate, and verify it took ---------------------------
+	// ---- (g) AUTHORIZE the guest, PROVISIONALLY, and verify it took ------------------------------------
 	//
 	// THE ORDER IS THE WHOLE POINT. Accountable metering is proven first, and only then is the guest given
 	// the internet. Reversing these two steps — or admitting before (f) — opens exactly the window this
 	// design exists to close: packets flowing through the bridge's DEFAULT class, forwarded but attributed
 	// to nobody, with no counter series to bill them against and nothing anywhere reporting a problem.
+	//
+	// The lease is the SHORT one until durable state is proven in step (i). If this process dies between here
+	// and there, the kernel drops the authorization on its own within that bound.
 	if p.gate != nil {
-		if err := p.gate.Authorize(ctx, bridge, ip, 0); err != nil {
+		if err := p.gate.Authorize(ctx, bridge, ip, provisionalOrLess(lease)); err != nil {
 			p.failClosed(ctx, bridge, ip, res, "authorize "+s.SessionID+": "+err.Error())
 			return
 		}
@@ -194,15 +256,76 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		Epoch: epoch, BootID: p.bootID}
 	delete(p.pending, key) // the generation is now durable; it is no longer merely pending
 
-	// ---- (i) RECORD the confirmed kernel result, so durable state can honestly say ACTIVE --------------
-	// Only now is "this guest is authorized and metered" a true statement, so only now may the Session say so.
-	if problem := p.markActive(ctx, s.SessionID, bridge, minor, epoch); problem != "" {
-		// The kernel is correct and proven; only the status write failed. Report it (health degrades and the
-		// next pass retries) but do NOT tear down working, accountable enforcement over a bookkeeping lag.
+	// ---- (i) PROVE durable ACTIVE, then extend the lease -----------------------------------------------
+	// Only now is "this guest is authorized and metered" a true statement, so only now may the Session say so
+	// — and only once the Session DOES say so may the guest hold a full-length lease.
+	outcome, problem := p.proveActive(ctx, key, s.SessionID, bridge, minor, epoch, now)
+	if problem != "" {
 		res.Failed++
 		res.Problems = append(res.Problems, problem)
 	}
-	res.Shaped++
+	switch outcome {
+	case activationProven:
+		if !p.assertLease(ctx, bridge, ip, lease, view, res, s.SessionID) {
+			return
+		}
+		res.Shaped++
+	case activationUnproven:
+		// The guest keeps the provisional lease already installed. Nothing further is asserted: the next pass
+		// retries the promotion, and if none ever succeeds the kernel expires the authorization by itself.
+	default:
+		p.failClosed(ctx, bridge, ip, res, "session "+s.SessionID+": activation never proven")
+		p.endSeries(bridge, s.SessionID)
+	}
+}
+
+// provisionalOrLess is the lease for a guest whose durable ACTIVE is not proven: the short provisional one, or
+// the remaining time to their hard boundary if that is shorter still. A provisional lease must never be an
+// excuse to overshoot a deadline the entitlement already states.
+func provisionalOrLess(lease time.Duration) time.Duration {
+	if lease < phase3ProvisionalLease {
+		return lease
+	}
+	return phase3ProvisionalLease
+}
+
+// assertLease installs or refreshes the kernel lease for a session that should be online, using this pass's
+// snapshot to decide whether a refresh is due. It returns false when the guest could not be left correctly
+// authorized, having already failed closed.
+//
+// The snapshot is what keeps the steady state cheap: an unchanged, healthy guest costs a map lookup on most
+// passes and one nft transaction roughly every thirty seconds, rather than a transaction every tick.
+func (p *phase3Shaping) assertLease(ctx context.Context, bridge string, ip net.IP, want time.Duration, view gateView, res *shapingPlanResponse, sessionID string) bool {
+	if p.gate == nil {
+		return true
+	}
+	el, present, known := view.lookup(bridge, ip)
+	if !known {
+		// The set could not be enumerated this pass. Refresh unconditionally: an unreadable set must never be
+		// read as "the lease is fine", which is how a whole property would quietly expire together.
+		if err := p.gate.Authorize(ctx, bridge, ip, want); err != nil {
+			p.failClosed(ctx, bridge, ip, res, "renew "+sessionID+": "+err.Error())
+			return false
+		}
+		return true
+	}
+	if present && !needsRenewal(el.Expires, want) {
+		return true
+	}
+	if err := p.gate.Authorize(ctx, bridge, ip, want); err != nil {
+		p.failClosed(ctx, bridge, ip, res, "authorize "+sessionID+": "+err.Error())
+		return false
+	}
+	if !present {
+		// The element was MISSING while the class was in force — a stray sweep, a manual flush, an expired
+		// lease that nothing renewed in time. Re-adding it is a genuine admission, so verify it as one.
+		ok, verr := p.gate.Authorized(ctx, bridge, ip)
+		if verr != nil || !ok {
+			p.failClosed(ctx, bridge, ip, res, "re-authorization verification failed for "+sessionID)
+			return false
+		}
+	}
+	return true
 }
 
 // failClosed is the ONE fail-closed path, and its order is deliberate.

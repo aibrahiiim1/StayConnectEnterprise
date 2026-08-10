@@ -233,6 +233,75 @@ else
 fi
 
 
+# ---------------------------------------------------------------- 10. bounded kernel authorization
+# The one property that survives every process dying. A Phase-3 authorization must never be installed without a
+# timeout: a permanent nft element keeps forwarding a guest past their entitlement window, past checkout and
+# past a revocation, for as long as the appliance stays up, and nothing that is merely NOT RUNNING can undo it.
+#
+# Checked in two places, because either alone can be defeated. The gate must refuse a non-positive lease, and
+# the provisioning path must never call Authorize with a literal zero.
+GATE="$ROOT/data-plane/cmd/netd/phase3_gate.go"
+LEASE="$ROOT/data-plane/cmd/netd/phase3_lease.go"
+NFTGO="$ROOT/data-plane/internal/nft/nft.go"
+if grep -q 'ErrUnboundedLease' "$NFTGO" && grep -q 'ttl <= 0' "$NFTGO" && grep -q 'LeaseIn' "$GATE"; then
+  ok "Phase-3 packet authorization refuses an unbounded lease (ttl must be > 0)"
+else
+  no "the Phase-3 gate can install a PERMANENT nft element; a dead daemon would leave guests online forever"
+fi
+if grep -nE 'gate\.Authorize\(ctx, bridge, ip, 0\)' "$ROOT/data-plane/cmd/netd/"*.go >/dev/null 2>&1; then
+  no "netd asks for a zero-timeout (permanent) Phase-3 authorization"
+else
+  ok "no Phase-3 code path requests a permanent authorization"
+fi
+# The lease must be clamped by the session's own hard boundary, or renewal would push a guest's deadline
+# further away every pass and a long-lived session would never reach it.
+if grep -q 'AccessEndsAt' "$LEASE" && grep -q 'AccessEndsAt' "$ROOT/data-plane/internal/shapeplan/plan.go"; then
+  ok "the kernel lease is clamped by the session's hard access boundary, carried in the shaping contract"
+else
+  no "the shaping contract carries no hard access boundary, so a lease cannot be clamped by one"
+fi
+# Renewal must not be a repeated `add element`: nftables does not restart an existing element's timer on a
+# second add, so a renewal built on it looks healthy and drops every guest at the first lease boundary.
+if grep -q 'delete element inet stayconnect %s { %s } ; add element' "$NFTGO"; then
+  ok "lease renewal is an atomic delete+add in one nft transaction, not a repeated add"
+else
+  no "lease renewal does not use the atomic refresh; a repeated add does not restart an element's timer"
+fi
+
+# ---------------------------------------------------------------- 11. accountability is DB-enforced
+# "ACTIVE means authorized AND accountable" must be a database invariant, not an ordering convention in Go.
+if grep -q 'ENFORCE_NOT_ACCOUNTABLE' "$UP_SQL" && grep -q 'ENFORCE_ORIGIN_EPOCH_MISMATCH' "$UP_SQL"; then
+  ok "activate_session_enforcement verifies the accounting origin itself before promoting a Session"
+else
+  no "the controlled activation trusts the caller's claim that an epoch is accountable"
+fi
+# An unproven durable activation must not become permanent access.
+if grep -q 'phase3ProvisionalLease' "$LEASE" && grep -q 'quarantine' "$ROOT/data-plane/cmd/netd/phase3_provision.go"; then
+  ok "an activation that cannot be proven holds only a provisional lease and is then quarantined"
+else
+  no "an unconfirmed durable activation can persist as ordinary internet access"
+fi
+
+# ---------------------------------------------------------------- 12. the surgical live-dark foundation
+# Installing the Phase-3 nft foundation on a live appliance must never flush or recreate the StayConnect table:
+# the authorization set is part of it, and recreating it means recreating it EMPTY, taking every live legacy
+# guest offline at once.
+FOUND="$ROOT/data-plane/internal/nftfoundation/foundation.go"
+if [ -f "$FOUND" ]; then
+  if grep -nE '"(flush|delete table|add table)' "$FOUND" >/dev/null 2>&1; then
+    no "the surgical foundation issues a flush/table command; it would disconnect every live legacy guest"
+  else
+    ok "the surgical foundation never flushes or recreates the StayConnect table"
+  fi
+  if grep -q 'sameElements' "$FOUND" && grep -q 'LegacyBefore' "$FOUND"; then
+    ok "the foundation proves legacy authorization parity before and after, and rolls back if it cannot"
+  else
+    no "the foundation does not prove legacy authorization parity"
+  fi
+else
+  no "the surgical Phase-3 nft foundation is missing; a flag-only cutover cannot be prepared safely"
+fi
+
 # ============================================================================== report
 # Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json
 # silently reported a smaller, all-passing suite.

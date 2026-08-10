@@ -35,6 +35,9 @@ type SessionShape struct {
 	Bridge   string
 	DownKbps int
 	UpKbps   int
+	// WindowEndsAt is the entitlement's hard validity boundary, carried to the edge so the applier can bound
+	// its kernel authorization lease by it. Nil means the entitlement states no wall-clock end.
+	WindowEndsAt *time.Time
 }
 
 // Plan is what the edge should be enforcing right now for a site.
@@ -68,7 +71,7 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 	var p Plan
 	rows, err := e.pool.Query(ctx, `SELECT s.id::text, s.entitlement_id::text, s.device_id::text,
 			COALESCE(host(s.ip),''), COALESCE(s.mac::text,''), COALESCE(s.ingress_interface,''),
-			COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0),
+			COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0), e.window_ends_at,
 			(s.state IN ('active','PENDING_ENFORCEMENT') AND s.ended IS NULL AND e.status='ACTIVE'
 			 AND (e.window_ends_at IS NULL OR e.window_ends_at > now())) AS entitled
 		FROM iam_v2.sessions s
@@ -85,7 +88,7 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 		var sh SessionShape
 		var entitled bool
 		if err := rows.Scan(&sh.SessionID, &sh.EntitlementID, &sh.DeviceID, &sh.IP, &sh.MAC, &sh.Bridge,
-			&sh.DownKbps, &sh.UpKbps, &entitled); err != nil {
+			&sh.DownKbps, &sh.UpKbps, &sh.WindowEndsAt, &entitled); err != nil {
 			return p, err
 		}
 		if entitled {
@@ -191,9 +194,12 @@ func revoke(ctx context.Context, tx pgx.Tx, ent string, at time.Time) (int, int,
 	if err != nil {
 		return 0, 0, err
 	}
+	// PENDING_ENFORCEMENT is ended here too. A grant whose enforcement was still converging when its
+	// entitlement expired is not exempt from the expiry: leaving it behind would let the enforcement owner
+	// promote it to active on the very next pass — access created by a revocation.
 	ct2, err := tx.Exec(ctx, `UPDATE iam_v2.sessions SET state='ended',
 			ended=GREATEST($2::timestamptz, started), end_reason='ENTITLEMENT_ENDED'
-		WHERE entitlement_id=$1 AND state='active'`, ent, at)
+		WHERE entitlement_id=$1 AND state IN ('active','PENDING_ENFORCEMENT')`, ent, at)
 	if err != nil {
 		return 0, 0, err
 	}

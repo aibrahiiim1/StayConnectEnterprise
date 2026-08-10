@@ -118,6 +118,12 @@ type phase3Shaping struct {
 	// minorOwner remembers which session a managed minor was installed for, so a stray removal can end that
 	// session's counter series precisely instead of guessing.
 	minorOwner map[string]string
+	// quarantined tracks, per managed class, an activation that could not be PROVEN durable. It carries the
+	// grace clock (a short provisional lease is tolerated while the promotion is retried), the strike count,
+	// and the instant before which the session must not be re-admitted at all. Without it, failing closed once
+	// would simply hand the next pass a clean slate to admit the same guest again, forever (see proveActive
+	// and the quarantine check in provisionSession).
+	quarantined map[string]*quarantineState
 	// classes/epochCeiling/bootID are the DURABLE half of the same state (see phase3_classstate.go). Without
 	// them a restart re-issues epoch 1 and accounting stalls; a reboot re-issues epoch 1 and a recreated
 	// class is mistaken for the series a checkpoint still remembers.
@@ -147,6 +153,9 @@ func (p *phase3Shaping) endSeries(bridge, sessionID string) {
 	// A generation half-allocated for a class that never came into force is void once the series ends: a
 	// session that returns later is a genuinely new class and must allocate a fresh generation.
 	delete(p.pending, classKey(bridge, sessionID))
+	// NOTE: the quarantine deliberately OUTLIVES the series. It is a fact about a session whose durable
+	// activation could not be proven, not about the tc class that was torn down because of it, and clearing it
+	// here would let the next pass re-admit the guest as though nothing had happened.
 }
 
 // Epochs returns the generation of every class this appliance CURRENTLY manages.
@@ -195,7 +204,7 @@ func (p *phase3Shaping) submit(ctx context.Context, env shapeplan.Envelope, now 
 		return shapingPlanResponse{Accepted: false, Reason: reason}, errPlanRefused{reason}
 	}
 
-	res := p.reconcileLocked(ctx, env)
+	res := p.reconcileLocked(ctx, env, now)
 	res.Accepted = true
 	res.PlanGeneration = env.PlanGeneration
 
@@ -226,7 +235,7 @@ func (p *phase3Shaping) noteRejection(reason string) {
 }
 
 // reconcileLocked drives the kernel to the envelope's desired state. The caller holds p.mu.
-func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envelope) shapingPlanResponse {
+func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envelope, now time.Time) shapingPlanResponse {
 	var res shapingPlanResponse
 	if p.minorOwner == nil {
 		p.minorOwner = map[string]string{}
@@ -361,12 +370,23 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	//
 	// It enumerates ONLY the Phase-3 set. A legacy authorization lives in auth_ipv4, is never returned here,
 	// and therefore cannot be removed by this loop no matter what the plan says.
+	//
+	// The set is enumerated ONCE per pass and the snapshot is reused for renewal decisions in step 3, so the
+	// two halves judge the same installed state and the steady cost is one nft transaction per pass rather
+	// than one per guest per tick.
+	view := p.snapshotGate(ctx)
 	if p.gate != nil {
-		authorized, err := p.gate.List(ctx)
-		if err != nil {
+		if !view.ok {
 			res.Failed++
-			res.Problems = append(res.Problems, "phase-3 authorization scan failed: "+err.Error())
+			res.Problems = append(res.Problems, "phase-3 authorization scan failed")
 		} else {
+			authorized := make([]gateElem, 0, len(view.byKey))
+			for _, el := range view.byKey {
+				authorized = append(authorized, el)
+			}
+			sort.Slice(authorized, func(i, j int) bool {
+				return gateKey(authorized[i].Bridge, authorized[i].IP) < gateKey(authorized[j].Bridge, authorized[j].IP)
+			})
 			for _, el := range authorized {
 				if el.IP == nil {
 					continue
@@ -385,6 +405,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 					continue
 				}
 				// Its tc class, if any, is removed by the tc stray loop above/below on the same pass.
+				delete(view.byKey, gateKey(el.Bridge, el.IP))
 				res.StraysRemoved++
 			}
 		}
@@ -402,7 +423,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			continue
 		}
 		for _, minor := range sortedIntKeys(byMinor) {
-			p.provisionSession(ctx, bridge, minor, byMinor[minor], &res)
+			p.provisionSession(ctx, bridge, minor, byMinor[minor], view, now, &res)
 		}
 	}
 
@@ -418,7 +439,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 	}
 
 	res.Degraded = res.Failed > 0
-	p.lastApplied = time.Now()
+	p.lastApplied = now
 	p.lastDegrade = ""
 	if res.Degraded {
 		p.lastDegrade = res.Problems[0]

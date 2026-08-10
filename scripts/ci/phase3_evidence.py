@@ -164,8 +164,20 @@ def main() -> int:
     preflight = read_json(os.path.join(counts_dir, "preflight.json"), {})
     provisioning = read_json(os.path.join(counts_dir, "provisioning.json"), {})
     enforcement = read_json(os.path.join(counts_dir, "enforcement.json"), {})
+    foundation = read_json(os.path.join(counts_dir, "foundation.json"), {})
 
     logs_dir = os.path.join(evid, "logs")
+
+    # ---- the real-kernel suite (disposable Linux network namespaces) -------------------------------------
+    # Written by scripts/ci/kernel-netns-suite.sh as key=value, including the kernel and tool versions it ran
+    # against and whether the host's own ruleset was proven unchanged.
+    kernel_netns = {}
+    for line in read_text(os.path.join(counts_dir, "kernel-netns.txt")).splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            kernel_netns[k.strip()] = v.strip()
+    if kernel_netns:
+        kernel_netns["evidence_class"] = "REAL KERNEL (disposable namespaces) — NOT live appliance evidence"
 
     # ---- migration lifecycle summary (parsed from the gate log — the truthful assertion total) ------------
     # The lifecycle gate prints "PHASE3_0010_LIFECYCLE: pass=N fail=M -> PASS". We extract the assertion
@@ -212,6 +224,12 @@ def main() -> int:
                          "skipped": provisioning.get("skip", 0)} if provisioning else {},
         "network_enforcement": {"passed": enforcement.get("pass", 0), "failed": enforcement.get("fail", 0),
                                 "skipped": enforcement.get("skip", 0)} if enforcement else {},
+        "nft_foundation": {"passed": foundation.get("pass", 0), "failed": foundation.get("fail", 0),
+                           "skipped": foundation.get("skip", 0)} if foundation else {},
+        # The REAL-KERNEL suite is reported separately and labelled as such everywhere it appears. It is the
+        # only entry in this artifact produced by running nft and tc against a kernel, and conflating it with
+        # the modelled suites would be the exact overclaim this evidence exists to avoid.
+        "kernel_netns": kernel_netns,
     }
 
     # ---- the complete Phase-3 Acceptance Matrix (dimensional, ~35 rows) ----------------------------------
@@ -314,7 +332,9 @@ def main() -> int:
         f.write("\n")
 
     # ---- copy the PII-free derived files into the artifact ------------------------
-    for name in ["steps.tsv", "tool-versions.tsv", "infra-retries.tsv", "commands.txt"]:
+    # kernel-limitations.txt is copied when it exists: a limitation that is not in the artifact is a
+    # limitation nobody reading the artifact knows about.
+    for name in ["steps.tsv", "tool-versions.tsv", "infra-retries.tsv", "commands.txt", "kernel-limitations.txt"]:
         src = os.path.join(evid, name)
         if os.path.isfile(src):
             shutil.copyfile(src, os.path.join(art, name))
@@ -375,7 +395,22 @@ def main() -> int:
     if totals.get("network_enforcement"):
         ne = totals["network_enforcement"]
         m.append(f"- **Network-enforcement system tests** — {ne['passed']} passed, {ne['failed']} failed "
-                 "(nft authorization + accountable tc + Session)")
+                 "(nft authorization + accountable tc + Session; FAKE-KERNEL orchestration + command contracts)")
+    if totals.get("nft_foundation"):
+        nf = totals["nft_foundation"]
+        m.append(f"- **Surgical live-dark nft foundation** — {nf['passed']} passed, {nf['failed']} failed "
+                 "(install/rollback preserving a populated legacy authorization set)")
+    if totals.get("kernel_netns"):
+        kn = totals["kernel_netns"]
+        m.append(f"- **REAL-KERNEL contract suite** — {kn.get('passed','?')} passed, {kn.get('failed','?')} failed, "
+                 f"{kn.get('skipped','0')} skipped, on kernel {kn.get('kernel','?')} with {kn.get('nft','?')} "
+                 f"(host ruleset unchanged: {kn.get('host_ruleset_unchanged','?')})")
+        m.append("  - This is the ONLY entry produced by running nft and tc against a kernel with real "
+                 "packets. It ran in disposable network namespaces on the CI runner; it contacted no "
+                 "appliance, no production database and no PMS, and it is NOT live appliance evidence.")
+        if kn.get("ifb_available") == "0":
+            m.append("  - LIMITATION: the ifb module was unavailable on this runner, so the tc half of the "
+                     "suite was skipped. See `kernel-limitations.txt`.")
     m.append("")
     if migration_summary:
         m.append(f"## Migration 0010 lifecycle — {migration_summary['assertions_passed']} assertions passed, "

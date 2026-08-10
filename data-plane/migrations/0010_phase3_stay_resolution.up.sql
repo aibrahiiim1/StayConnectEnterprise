@@ -1294,9 +1294,9 @@ REVOKE EXECUTE ON FUNCTION iam_v2.register_class_origin(uuid,uuid,uuid,uuid,text
 CREATE OR REPLACE FUNCTION iam_v2.activate_session_enforcement(
     p_tenant uuid, p_site uuid, p_session uuid, p_bridge text, p_class_minor int, p_epoch bigint) RETURNS text
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = iam_v2, pg_temp AS $fn$
-DECLARE v_state text; v_ended timestamptz; v_iface text; v_ip inet;
+DECLARE v_state text; v_ended timestamptz; v_iface text; v_ip inet; v_device uuid; v_other int; cp record;
 BEGIN
-  SELECT state, ended, ingress_interface, ip INTO v_state, v_ended, v_iface, v_ip
+  SELECT state, ended, ingress_interface, ip, device_id INTO v_state, v_ended, v_iface, v_ip, v_device
     FROM iam_v2.sessions
    WHERE id = p_session AND tenant_id = p_tenant AND site_id = p_site
      FOR UPDATE;
@@ -1315,6 +1315,47 @@ BEGIN
   END IF;
   IF p_epoch IS NULL OR p_epoch < 1 THEN
     RAISE EXCEPTION 'ENFORCE_INVALID: an activation needs the class generation it was enforced under';
+  END IF;
+
+  -- ACCOUNTABILITY IS VERIFIED HERE, NOT TAKEN ON TRUST.
+  --
+  -- "ACTIVE means authorized AND accountable" was, until this check existed, only an ordering convention in
+  -- the applier's Go code: register the origin, then activate the class, then call this operation. An
+  -- ordering convention is exactly as strong as the process that follows it, and this operation is reachable
+  -- by anything holding the controlled-writer capability — a future caller, a repaired daemon, a mistaken
+  -- retry with a stale epoch. Any of them could move a Session to 'active' while its traffic was metered by
+  -- nothing, and every downstream reader would believe the traffic was accounted.
+  --
+  -- So the database confirms the accounting origin ITSELF, from the checkpoint table, keyed by the source
+  -- tuple it derives from the Session row rather than from anything the caller stated: tenant, site,
+  -- session, the Session's own device, the bridge, the class minor implied by the Session's IP, and the
+  -- exact generation the applier says it enforced under.
+  SELECT * INTO cp FROM iam_v2.accounting_checkpoints
+   WHERE tenant_id = p_tenant AND site_id = p_site AND session_id = p_session
+     AND source_device_id = v_device AND bridge = p_bridge AND class_minor = p_class_minor;
+  IF cp.id IS NULL THEN
+    -- No origin for this source: the class is forwarding from an unknown baseline, so its first reading
+    -- would be billed as if every byte since the class was created had happened in one tick — or, worse,
+    -- silently dropped. A Session must not claim to be accountable when nothing can account for it.
+    RAISE EXCEPTION 'ENFORCE_NOT_ACCOUNTABLE: session % has no registered accounting origin for %/% (device %)',
+      p_session, p_bridge, p_class_minor, v_device;
+  END IF;
+  IF cp.source_epoch IS DISTINCT FROM p_epoch THEN
+    -- The origin describes a DIFFERENT generation of this class. Either the applier is quoting a stale epoch
+    -- (its class was replaced under it) or the origin was reset into a newer generation after this activation
+    -- was prepared. Either way the counters this Session would be billed from are not the ones it is running
+    -- on, and promoting it would pin an accounting series to the wrong baseline.
+    RAISE EXCEPTION 'ENFORCE_ORIGIN_EPOCH_MISMATCH: session % was enforced under generation % but its origin is generation %',
+      p_session, p_epoch, cp.source_epoch;
+  END IF;
+  -- And nobody else may hold that class at this generation or later. Two sessions on one minor means one of
+  -- them is being credited with the other's traffic, and the newer origin is the one that owns the series.
+  SELECT count(*) INTO v_other FROM iam_v2.accounting_checkpoints cp2
+   WHERE cp2.tenant_id = p_tenant AND cp2.site_id = p_site AND cp2.bridge = p_bridge
+     AND cp2.class_minor = p_class_minor AND cp2.session_id <> p_session
+     AND cp2.source_epoch >= p_epoch;
+  IF v_other > 0 THEN
+    RAISE EXCEPTION 'ENFORCE_CLASS_CONTESTED: another session holds %/% at generation % or later', p_bridge, p_class_minor, p_epoch;
   END IF;
 
   IF v_state = 'active' THEN

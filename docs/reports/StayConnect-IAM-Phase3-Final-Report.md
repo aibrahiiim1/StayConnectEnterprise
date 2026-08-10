@@ -77,6 +77,71 @@ they were built and are `PASS — SOFTWARE` in the matrix.
 - Hotel-Admin Phase-3 API + RBAC + four UI pages, dark-gated.
 - Increment-9 offline preflight, evidence collector and deployment/rollback/reboot runbook.
 
+**Network enforcement — the pre-live safety round**
+- **`netd` is the single privileged network-enforcement owner**, holding both kernel halves. `nft` decides
+  packet authorization; `tc` decides accountable metering; `iam_v2.sessions.state` is durable runtime state.
+  Removing a tc classification denies **nothing** — those packets fall back to the bridge's default class and
+  keep flowing, unmetered. Phase 3 authorizes only in `phase3_auth_ipv4`; legacy `auth_ipv4` is unreachable
+  from every Phase-3 path.
+- **Packet authorization is a bounded renewable kernel lease.** 90 seconds — equal to the producer's plan
+  validity, so forwarding stops at the same moment the appliance stops being able to vouch for it — clamped by
+  the session's own hard access boundary, and 15 seconds while durable `active` is not yet proven. A healthy
+  reconciliation renews it; silence expires it. Renewal is an atomic delete+add in one nft transaction,
+  because a repeated `add element` does not restart an existing element's timer.
+- **An unprovable durable activation fails closed.** The promotion is retried and, on an ambiguous failure,
+  authoritative state is re-read (a committed transaction whose acknowledgement was lost is not a failure).
+  Past the activation grace the session is denied, torn down and quarantined with a doubling backoff.
+- **"ACTIVE means authorized AND accountable" is enforced by the database.**
+  `iam_v2.activate_session_enforcement` verifies the accounting checkpoint itself — this session, its device,
+  the bridge, the class minor implied by its IP and the exact generation — and refuses a missing, foreign,
+  stale or contested origin.
+- **A surgical live-dark nft foundation** (`cmd/phase3-foundation`) installs the Phase-3 set and rules into a
+  RUNNING ruleset in one nft transaction, never flushing or recreating the table, proving legacy-authorization
+  parity on both sides and rolling itself back if it cannot. It has an explicit rollback that touches nothing
+  legacy. **The cutover is flag-only only after that install has been performed and verified on the unit.**
+- **Guest-visible timing now composes with enforcement.** The uniform non-success budget is derived from the
+  reconciliation cadence rather than a PMS round trip, and scd's enforcement wait is derived from the caller's
+  deadline instead of a flat maximum it could never reach. There is still exactly one budget for the endpoint,
+  so the occupancy-enumeration protection is unchanged in form.
+
+## 3a. Self-audit — four failure timelines, traced end to end
+
+**1. ACTIVE guest → acctd dies → netd dies → entitlement window expires.** The guest holds a lease of at most
+90 seconds, clamped to their window end. Nothing renews it: the producer is gone, the applier is gone, the
+database is irrelevant. The kernel removes the element on its own and the forward chain (policy `drop`) stops
+forwarding. The tc class is still installed — nothing was alive to remove it — and that is exactly the point:
+the class is not what ended the access. Proven modelled in `phase3_lease_test.go` and **in a real kernel** in
+`internal/kerneltest` (the lease elapses and the ping stops arriving).
+
+**2. tc + nft enforcement succeeds → the durable ACTIVE result is lost or unreadable.** The guest was admitted
+on the 15-second provisional lease, so this state is bounded before anything else happens. `proveActive`
+re-reads authoritative state: if the transaction actually committed, the session is proven active and the
+lease is extended to full length — a lost acknowledgement never disconnects a correct guest. If it genuinely
+did not commit, the provisional lease is re-issued while the promotion is retried, and past the 30-second
+grace the session is denied (nft first, proven), torn down and quarantined with a doubling backoff. If netd
+dies at any point in that window, the kernel drops the authorization within 15 seconds. **There is no path in
+which an unconfirmed activation becomes lasting internet access,** and exactly one Session exists throughout
+(the promotion is idempotent and the grant path recovers the same Session by device + Auth Context).
+
+**3. Populated legacy `auth_ipv4` → DARK foundation install → reboot → rollback.** The install is one nft
+transaction that adds a set, adds one rule and rewrites the captive rules in place; it snapshots the legacy
+elements before and re-reads them after, and rolls itself back if they differ. In the real-kernel suite a
+legacy guest is **pinging throughout** and never loses a packet across install, second install and rollback.
+The reboot is the one place where an honest statement has to replace an easy one: **nftables state is not
+persistent.** A reboot re-applies the generated ruleset as `delete table` + recreate, so *both* authorization
+sets come back empty — legacy included — and scd re-establishes legacy authorizations from `public.sessions`
+exactly as it does today. What the reboot must preserve is the FOUNDATION, and it does, because the current
+render emits the Phase-3 set and rules; a post-reboot install is a verified no-op. That is asserted against a
+real kernel, and the runbook says the same thing rather than implying elements survive.
+
+**4. A normal Portal request against the worst healthy reconciliation timing.** A guest who taps Connect one
+millisecond after a reconciliation tick waits out the rest of that second, the pass's own work, scd's 100ms
+polling granularity and two unix-socket hops — about 1.8 seconds in the worst healthy case. The uniform budget
+is 2500ms with a 200ms upstream reserve, leaving 2300ms of usable time, so that guest is told they are
+connected rather than reproducibly told they are not. The old composition could not do this: portald's 1200ms
+deadline was passed down as the context, so scd's nominal 8-second wait was unreachable and the effective wait
+was whatever was left of 1200ms. Pinned by boundary tests on both sides.
+
 ## 4. Practical effect
 
 Nothing changes for guests or operators today: every surface is dark. What now exists is a Stay/Checkout model
@@ -113,7 +178,7 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 
 | Test | Result | Evidence |
 |---|---|---|
-| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order) | **PASS 20/20** | `scripts/phase3-preflight.sh --json` |
+| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation) | **PASS 28/28** | `scripts/phase3-preflight.sh --json` |
 | Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 362/362** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
 | PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** (all eleven) | `scripts/pmsd-pg-integration.sh` |
 | Go unit tests, whole module | **PASS** | `go test ./... -count=1` (JSON-counted) |
@@ -127,7 +192,12 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 | Guest-portal uniform non-success contract (server) | **PASS** | `cmd/portald/pms_phase3_test.go`, `pms_phase3_handlers_test.go`, `pms_phase3_budget_test.go` |
 | Guest-portal Phase-3 flow + resilience (real browser, real template) | **PASS** | `hotel-admin/e2e/phase3-guest-portal*.spec.ts` |
 | Phase-3 network-enforcement system suite (nft + tc + Session together) | **PASS** | `cmd/netd/phase3_enforcement_test.go` |
-| nft packet-authorization command contract (Phase-3 set only; legacy never named) | **PASS** | `internal/nft/nft_phase3_test.go` |
+| Bounded-lease and fail-closed-activation suite | **PASS** | `cmd/netd/phase3_lease_test.go` |
+| nft packet-authorization + lease command contract (Phase-3 set only; legacy never named) | **PASS** | `internal/nft/nft_phase3_test.go` |
+| Surgical live-dark nft foundation (install/rollback preserving a populated legacy set) | **PASS** | `internal/nftfoundation/foundation_test.go` |
+| Controlled-activation poison tests (fabricated / foreign / stale / contested accounting origin) | **PASS** | `cmd/scd/phase3_activation_integration_test.go` (PG16) |
+| Portal/enforcement timing composition (tick boundaries, derived wait, single uniform budget) | **PASS** | `cmd/portald/pms_phase3_budget_timing_test.go`, `cmd/scd/phase3_auth_timing_test.go` |
+| **REAL-KERNEL contract suite** — real `nft`, real `tc`, real packets, disposable Linux network namespaces | **PASS** | `internal/kerneltest` via `scripts/ci/kernel-netns-suite.sh`; **kernel evidence on a disposable CI machine, NOT live appliance evidence** |
 | Full Phase-3 Software CI + Governance CI on the same pushed HEAD, evidence artifact uploaded | **PASS** | §12 |
 | Live read-only PMS protocol verification | **PENDING** | operator-executed; not simulated |
 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING** | operator-executed; runbook §2–§5 |
@@ -190,6 +260,16 @@ appears.
 | 30e | Fail-closed denies PACKET ACCESS first and proves it, then tears down tc; teardown/expiry use the same order | **PASS — SOFTWARE** | `cmd/netd/phase3_gate.go`; `phase3_enforcement_test.go` |
 | 30f | Session is PENDING_ENFORCEMENT until the kernel is confirmed; promotion is idempotent through the controlled writer; the guest grant waits for real ACTIVE | **PASS — SOFTWARE** | `iam_v2.activate_session_enforcement`; `cmd/scd/phase3_auth.go`; scd PG16 suite |
 | 30g | Phase-3 reconciliation removes stray Phase-3 authorizations and can never remove a legacy one (separate nft sets) | **PASS — SOFTWARE** | `internal/nft/nft_phase3_test.go`; `phase3_enforcement_test.go` |
+| 30h | Phase-3 packet authorization is a BOUNDED RENEWABLE LEASE: no code path installs a permanent nft element, and a healthy reconciliation is the only thing that renews one | **PASS — SOFTWARE** | `cmd/netd/phase3_lease.go`; `phase3_lease_test.go`; `internal/nft` lease contracts; preflight |
+| 30i | Producer/applier death fails closed by itself: with acctd and netd both gone and nothing recovering, the guest loses access within the documented bound — verified in the kernel, with nothing running | **PASS — SOFTWARE** | `phase3_lease_test.go`; `internal/kerneltest` (real nft timeout expiry) |
+| 30j | A lease is clamped by the session's hard access boundary and renewal re-derives the clamp, so crashes and restarts can never extend the fixed Entitlement deadline; an already-expired entitlement is never leased | **PASS — SOFTWARE** | `leaseFor`; `phase3_lease_test.go`; `shapeplan` contract `/2` |
+| 30k | Renewal refreshes exactly one element and does not rely on a repeated `add element` (which does NOT restart an nft timer) | **PASS — SOFTWARE** | `nft.LeaseIn` atomic delete+add; `internal/kerneltest` proves both halves against a real kernel |
+| 30l | An activation whose durable ACTIVE cannot be proven holds only the provisional lease, is re-read against authoritative state, and is failed closed and quarantined rather than renewed indefinitely | **PASS — SOFTWARE** | `proveActive`; quarantine in `phase3_provision.go`; `phase3_lease_test.go` |
+| 30m | The controlled activation VERIFIES THE ACCOUNTING ORIGIN ITSELF (session, device, bridge, class minor, exact generation) and refuses a missing, foreign, stale or contested one | **PASS — SOFTWARE** | migration §4u `activate_session_enforcement`; `cmd/scd/phase3_activation_integration_test.go` (PG16 poison tests) |
+| 30n | Surgical live-dark nft foundation: installs the Phase-3 set and rules into a RUNNING ruleset in one transaction, never flushes or recreates the table, proves legacy-authorization parity, is idempotent, and rolls itself back on failure | **PASS — SOFTWARE** | `internal/nftfoundation`; `cmd/phase3-foundation`; `foundation_test.go`; `internal/kerneltest` on a populated legacy set |
+| 30o | Foundation rollback removes ONLY the Phase-3 foundation and leaves every legacy authorization untouched | **PASS — SOFTWARE** | `foundation_test.go`; `internal/kerneltest` (legacy guest stays online across install and rollback) |
+| 30p | REAL-KERNEL execution: real `nft` and `tc`, real packets, disposable Linux network namespaces — including the proof that removing a tc classification denies NOTHING and that the nft element is what decides access | **PASS — SOFTWARE (real kernel, disposable CI machine — NOT live appliance evidence)** | `internal/kerneltest`; `scripts/ci/kernel-netns-suite.sh`; host ruleset proven unchanged |
+| 30q | Portal/enforcement timing composes: the guest-visible budget covers the worst healthy convergence at either side of a reconciliation tick, the enforcement wait is derived from the caller's deadline, and there is still exactly ONE uniform non-success budget | **PASS — SOFTWARE** | `cmd/portald/pms_phase3_budget_timing_test.go`; `cmd/scd/phase3_auth_timing_test.go`; existing uniform-budget suite |
 | 31 | Live read-only PMS protocol verification | **PENDING — LIVE INCREMENT 9** | operator-executed; never simulated |
 | 32 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING — LIVE INCREMENT 9** | runbook §2–§5 |
 | 33 | Gate-P per-service EXECUTE grants and role separation | **OUT OF SCOPE BY APPROVED CONTRACT** | separately gated; zero runtime grants while dark |

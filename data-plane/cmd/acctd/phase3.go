@@ -142,9 +142,11 @@ func (p *phase3) buildEnvelope(plan enforce.Plan, managedBridges []string, fallb
 			SessionID: s.SessionID, DeviceID: s.DeviceID, IP: s.IP, Bridge: bridgeOf(s.Bridge), Entitled: false})
 	}
 	for _, s := range plan.Shape {
+		// The entitlement's hard boundary travels with the session so the applier can bound its kernel lease by
+		// it. It is passed through unchanged — the producer does not get to soften a deadline it did not set.
 		sessions = append(sessions, shapeplan.Session{
 			SessionID: s.SessionID, DeviceID: s.DeviceID, IP: s.IP, Bridge: bridgeOf(s.Bridge),
-			DownKbps: s.DownKbps, UpKbps: s.UpKbps, Entitled: true})
+			DownKbps: s.DownKbps, UpKbps: s.UpKbps, Entitled: true, AccessEndsAt: s.WindowEndsAt})
 	}
 	// Every bridge a session is on must be declared, plus every guest bridge the site has — including ones
 	// with no sessions at all. Those are the ones that can quietly keep forwarding for access that ended.

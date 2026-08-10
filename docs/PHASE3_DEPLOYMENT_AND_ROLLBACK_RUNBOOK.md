@@ -121,6 +121,50 @@ to be turned on.
 
 4. **Restart the services** in the usual order and confirm they came up.
 
+5. **Install the Phase-3 nft foundation — surgically, and prove the legacy guests did not notice.**
+
+   The appliance you are deploying onto is running a ruleset that has **no** `phase3_auth_ipv4` set and whose
+   captive DNAT rules exclude only `auth_ipv4`. The Phase-3 cutover needs all of that present. Do **not** get
+   there by regenerating and re-applying the ruleset: the generated ruleset is applied as `delete table` +
+   recreate, the authorization set is part of the table, and recreating it means recreating it **empty** —
+   every live legacy guest loses their authorization in the same instant and drops off the internet until
+   scd's own reconciliation catches up. On a busy property that is a simultaneous, visible outage caused by a
+   change that is supposed to do nothing.
+
+   Use the surgical operation instead. It adds a set, adds one forward rule and rewrites the captive rules in
+   place, all in ONE nft transaction, and it verifies legacy parity itself.
+
+   ```bash
+   # Read-only first. Record the output: it lists exactly who is authorized right now.
+   /opt/stayconnect/bin/phase3-foundation inspect | tee /var/backups/stayconnect/phase3-foundation-before.json
+
+   # Then install. Idempotent, verified, and self-rolling-back if legacy parity cannot be proven.
+   /opt/stayconnect/bin/phase3-foundation install | tee /var/backups/stayconnect/phase3-foundation-install.json
+   ```
+
+   **Keep both files.** The install report contains `legacy_before` and `legacy_after` — the authorization
+   elements on either side of the mutation — and that is the legacy-parity evidence for this step. Confirm:
+
+   - `outcome` is `INSTALLED` (or `ALREADY_INSTALLED` if it was already done — a second run changes nothing);
+   - `legacy_before` and `legacy_after` are **identical, element for element**;
+   - the operation exited 0. A non-zero exit means it rolled itself back; do not proceed, and attach the
+     report.
+
+   Then confirm from the appliance's own side that nothing changed for anyone:
+
+   ```bash
+   nft list set inet stayconnect auth_ipv4 | head -40          # the same guests as in the "before" file
+   nft list set inet stayconnect phase3_auth_ipv4              # MUST be empty
+   ```
+
+   An empty `phase3_auth_ipv4` matches nothing, so the forward rule it feeds can never match and the captive
+   exclusion can never exclude. **The appliance forwards exactly what it forwarded before.** That is what
+   makes this safe to do while dark — and it is also what makes the later cutover a flag flip rather than a
+   ruleset regeneration.
+
+   > **Until this step has actually been performed and verified on the unit, the cutover is NOT "flag-only".**
+   > No document may describe it as flag-only on the strength of the software alone.
+
 ---
 
 ## 3. Prove it is dark
@@ -152,10 +196,22 @@ curl -s --unix-socket /run/stayconnect/netd.sock http://netd/v1/health |   pytho
 #    expect: active=false. A dark netd also returns 409 phase3_dark for the class-generation read.
 ```
 
+```bash
+# 7. the Phase-3 authorization set exists and authorizes NOBODY
+nft list set inet stayconnect phase3_auth_ipv4
+#    expect the set to be present (after §2.5) with NO elements. An empty set matches nothing, so the forward
+#    rule that reads it cannot match and the captive exclusion cannot exclude.
+
+# 8. legacy authorization is exactly as it was
+nft list set inet stayconnect auth_ipv4 | head -40
+#    expect the same guests as in phase3-foundation-before.json
+```
+
 A 404 rather than a "feature disabled" response is intentional: an unmounted route cannot leak the shape of a
 schema that is not live yet. Check 6 is the one worth doing even when you are confident: it is the only check
 that asks the process that would actually mutate the network whether it believes Phase 3 is live, rather than
-asking the process that would ask it to.
+asking the process that would ask it to. Checks 7 and 8 are the network half of the same question: "dark"
+must mean the packet path is unchanged, not merely that a flag reads false.
 
 ---
 
@@ -181,6 +237,23 @@ release is enough**: the schema is additive and inert while dark, so leaving it 
 **5a. Restore the previous release** (binaries + Hotel-Admin bundle) using the standard rollback path, then
 re-run §3.
 
+**5a-bis. Remove the Phase-3 nft foundation** — only if the previous ruleset shape must be restored exactly.
+It is safe to leave in place (the set is empty and matches nothing), so removing it is a tidiness decision,
+not a safety one.
+
+```bash
+/opt/stayconnect/bin/phase3-foundation rollback | tee /var/backups/stayconnect/phase3-foundation-rollback.json
+```
+
+It removes **only** the Phase-3 set, the Phase-3 forward rule and the Phase-3 half of the captive exclusions,
+and it verifies legacy parity on both sides exactly as the install does. Confirm the same two things:
+`outcome` is `REMOVED` (or `ALREADY_ABSENT`), and `legacy_before` equals `legacy_after`. Then:
+
+```bash
+nft list set inet stayconnect auth_ipv4 | head -40   # unchanged, same guests
+nft list set inet stayconnect phase3_auth_ipv4       # expect: No such file or directory
+```
+
 **5b. Remove the schema** — only if a clean slate is required:
 
 ```bash
@@ -204,7 +277,9 @@ psql -c "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase
 
 ## 6. What is deliberately NOT in this runbook
 
-- **Turning the flags on.** Cutover is a separate, explicitly authorized step with its own gate.
+- **Turning the flags on.** Cutover is a separate, explicitly authorized step with its own gate. It is a flag
+  flip *only after* §2.5 has been performed and verified on this unit; before that, the ruleset does not yet
+  contain the set and rules the flags would depend on.
 - **Per-service `iam_v2` privilege grants (Gate-P).** While dark, every runtime service role holds **zero**
   `iam_v2` table and function privileges, and the gate asserts it. The prepared grants live in
   `docs/architecture/Phase3-Controlled-Writer-Privilege-Manifest.md` and are **not applied**.

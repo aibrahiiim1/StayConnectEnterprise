@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -26,6 +27,13 @@ type enforcementRecorder interface {
 	Activate(ctx context.Context, sessionID, bridge string, minor int, epoch int64) (string, error)
 	// Ended records that enforcement for a Session is gone, so durable state stops claiming it is active.
 	Ended(ctx context.Context, sessionID, reason string) error
+	// Confirm re-reads AUTHORITATIVE durable state and answers whether the Session is active.
+	//
+	// It exists because a failed Activate is ambiguous in the one way that matters: the transaction may well
+	// have committed and only the acknowledgement been lost. Treating that as failure would tear down a guest
+	// whose state is already correct; treating it as success would leave an unproven claim standing. Asking
+	// the database is the only way to tell, and the promotion being idempotent is what makes asking safe.
+	Confirm(ctx context.Context, sessionID string) (bool, error)
 }
 
 // pgEnforcement is the database-backed recorder. Both operations go through controlled writers, so netd
@@ -52,23 +60,132 @@ func (e *pgEnforcement) Ended(ctx context.Context, sessionID, reason string) err
 		e.tenant, e.site, sessionID, reason).Scan(&outcome)
 }
 
-// markActive promotes a Session to active after both enforcement halves are confirmed. Caller holds p.mu.
+// Confirm reads the Session's own durable state. It is a plain read of the authoritative row — not a second
+// attempt at the promotion — so it can answer "did the commit land?" without changing anything if it did not.
+func (e *pgEnforcement) Confirm(ctx context.Context, sessionID string) (bool, error) {
+	var state string
+	var ended *time.Time
+	err := e.pool.QueryRow(ctx,
+		`SELECT state, ended FROM iam_v2.sessions WHERE id=$1::uuid AND tenant_id=$2 AND site_id=$3`,
+		sessionID, e.tenant, e.site).Scan(&state, &ended)
+	if err != nil {
+		return false, err
+	}
+	return ended == nil && state == "active", nil
+}
+
+// proveActive promotes a Session to active after both enforcement halves are confirmed, and reports whether
+// durable ACTIVE is PROVEN. Caller holds p.mu.
 //
-// A failure here is REPORTED, never swallowed, but it does not tear the guest down: the kernel state is
-// correct and proven, and durable state is merely behind. The next reconciliation retries the promotion, and
-// the guest's own retry sees ACTIVE as soon as it lands. Tearing down working, accountable enforcement
-// because a status write failed would turn a bookkeeping problem into an outage.
-func (p *phase3Shaping) markActive(ctx context.Context, sessionID, bridge string, minor int, epoch int64) string {
+// The earlier policy left the kernel enforcing whenever this write failed, reasoning that the kernel was right
+// and the bookkeeping merely behind. That reasoning has a hole with no floor under it: if the database stays
+// unreachable, "merely behind" never ends, and the outcome is a guest permanently on the internet whose
+// Session says PENDING_ENFORCEMENT — access that no durable record claims, that no audit can explain, and that
+// no revocation acting on Session state can ever remove.
+//
+// So the outcome is one of exactly three, and none of them is "leave it and hope":
+//
+//	PROVEN     — the promotion committed, or a re-read shows it had already committed. Full lease.
+//	UNPROVEN   — the outcome is genuinely unknown and still inside the activation grace. The guest keeps only
+//	             the SHORT provisional lease, so if nothing ever proves the promotion the kernel expires the
+//	             authorization on its own.
+//	FAILED     — the grace is spent. The caller fails closed: authorization revoked and proven gone first,
+//	             then the accountable class torn down.
+//
+// The re-read is what makes this safe rather than merely strict. A lost acknowledgement on a committed
+// transaction is indistinguishable from a failed one at the call site, and tearing a correct guest down over
+// it would be an outage manufactured out of a dropped packet.
+type activationOutcome int
+
+const (
+	activationProven activationOutcome = iota
+	activationUnproven
+	activationFailed
+)
+
+// quarantineState is what is remembered about a session whose durable activation could not be proven.
+type quarantineState struct {
+	// since is when the CURRENT attempt first failed to prove ACTIVE. Zero means the attempt has not failed
+	// yet — the grace has not started running.
+	since time.Time
+	// until is the instant before which this session must not be re-admitted at all.
+	until time.Time
+	// strikes counts how many attempts have exhausted the grace. It only ever grows, so a session that
+	// genuinely cannot be activated is re-attempted less and less often instead of cycling forever.
+	strikes int
+}
+
+// quarantineBackoff is how long a session stays denied after an attempt exhausts the activation grace.
+//
+// It doubles, and it is capped. The doubling is what makes the outcome converge: a session whose activation
+// is permanently impossible (a mismatched accounting origin, a source that no longer describes it) spends a
+// rapidly shrinking fraction of its life admitted, instead of flapping online and offline at a fixed period
+// forever. The cap is so that a property whose database was down for an hour recovers within minutes of it
+// coming back rather than hours.
+func quarantineBackoff(strikes int) time.Duration {
+	if strikes < 1 {
+		strikes = 1
+	}
+	d := time.Minute
+	for i := 1; i < strikes && d < 15*time.Minute; i++ {
+		d *= 2
+	}
+	if d > 15*time.Minute {
+		d = 15 * time.Minute
+	}
+	return d
+}
+
+// quarantineFor returns this class's quarantine record, creating it on demand. Caller holds p.mu.
+func (p *phase3Shaping) quarantineFor(key string) *quarantineState {
+	if p.quarantined == nil {
+		p.quarantined = map[string]*quarantineState{}
+	}
+	q, ok := p.quarantined[key]
+	if !ok {
+		q = &quarantineState{}
+		p.quarantined[key] = q
+	}
+	return q
+}
+
+func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge string, minor int, epoch int64, now time.Time) (activationOutcome, string) {
 	if p.enforcement == nil {
-		return "" // no recorder wired (unit tests drive the kernel halves directly)
+		return activationProven, "" // no recorder wired (unit tests drive the kernel halves directly)
 	}
 	outcome, err := p.enforcement.Activate(ctx, sessionID, bridge, minor, epoch)
-	if err != nil {
-		return "session " + sessionID + ": enforcement is in force but durable state was not promoted to active: " + err.Error()
+	if err == nil {
+		delete(p.quarantined, key)
+		slog.Info("phase3: session enforcement confirmed", "session", sessionID, "bridge", bridge,
+			"minor", minor, "epoch", epoch, "outcome", outcome)
+		return activationProven, ""
 	}
-	slog.Info("phase3: session enforcement confirmed", "session", sessionID, "bridge", bridge,
-		"minor", minor, "epoch", epoch, "outcome", outcome)
-	return ""
+	// AMBIGUOUS. Ask authoritative state whether the promotion actually landed.
+	active, cerr := p.enforcement.Confirm(ctx, sessionID)
+	if cerr == nil && active {
+		delete(p.quarantined, key)
+		slog.Info("phase3: session enforcement confirmed by re-read after an unacknowledged promotion",
+			"session", sessionID, "bridge", bridge, "minor", minor, "epoch", epoch)
+		return activationProven, ""
+	}
+	q := p.quarantineFor(key)
+	if q.since.IsZero() {
+		q.since = now
+	}
+	problem := "session " + sessionID + ": enforcement is in force but durable ACTIVE could not be proven: " + err.Error()
+	if cerr != nil {
+		problem += " (state unreadable: " + cerr.Error() + ")"
+	}
+	if now.Sub(q.since) <= phase3ActivationGrace {
+		return activationUnproven, problem + " — holding a provisional lease only"
+	}
+	// The grace is spent. Record the strike, deny re-admission for the backoff, and restart the grace clock so
+	// the next attempt (if one is ever permitted) gets its own full chance rather than an already-spent one.
+	q.strikes++
+	q.until = now.Add(quarantineBackoff(q.strikes))
+	q.since = time.Time{}
+	return activationFailed, problem + " — activation grace exhausted; failing closed and quarantining until " +
+		q.until.UTC().Format(time.RFC3339)
 }
 
 // markEnded converges durable state after access has been denied and torn down. Caller holds p.mu.

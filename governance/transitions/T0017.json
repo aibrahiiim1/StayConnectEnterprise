@@ -1,0 +1,30 @@
+{
+  "transition_id": "T0017",
+  "seq": 17,
+  "timestamp": "2026-08-10T12:00:00Z",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_SOFTWARE_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_PRE_LIVE_SAFETY_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "3",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-10 (PRE-LIVE SAFETY CLOSURE), issued against reviewed delivery HEAD 9a1158af8ad6518348234cfbc504bca5c806eeef. It accepted the network-enforcement architecture as the correct direction, required it not to be weakened, and directed one continuous software round closing the pre-live safety gaps before live authorization is requested. It explicitly does NOT authorize Live Increment 9. Preserves D15/T0016 and all prior transitions.",
+  "scope_allowed": "Repository and disposable-environment software work only: bounded renewable Phase-3 nft authorization lease; fail-closed handling of an unprovable durable Session activation; database-verified accounting origin inside iam_v2.activate_session_enforcement; a surgical, idempotent, self-verifying live-dark nft foundation install/rollback tool; a real-kernel contract suite in disposable Linux network namespaces; correction of the Portal/enforcement timing composition; and the documentation, acceptance-matrix, Zero-Stale, pack and manifest synchronization those changes require.",
+  "scope_prohibited": "No Live Increment 9 (read-only live PMS verification, live-dark deployment, reboot, rollback rehearsal, flags-OFF confirmation) until a separate Product-Owner decision; no appliance, Production-database or live-PMS contact; no deployment, reboot or live rollback; no PMS financial posting or FIAS PS/PA; no payments, settlement, implicit FX or programmatic reversal; no guest paid access; no IAM-v2 cutover or production iam_v2 runtime reads/writes; no Gate-P grants; no Phase 4. PR #6 remains open and unmerged; migration 0010 undeployed; all Phase-3 flags OFF.",
+  "evidence_files": [
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+    "docs/architecture/adr/ADR-0002-phase3-single-shaping-owner.md",
+    "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
+    "docs/manifests/Phase3-change-manifest.md",
+    "scripts/ci/kernel-netns-suite.sh",
+    ".github/workflows/phase3-software.yml"
+  ],
+  "source_commit": "9a1158a",
+  "acceptance_verdict": "IN_PROGRESS -- Phase-3 PRE-LIVE SAFETY candidate COMPLETE, DARK, NOT accepted, NOT closed. Live Increment-9 authorization is now REQUESTED and remains ungranted.",
+  "next_action": "Obtain a separate Product-Owner decision authorizing Live Increment 9 before any live execution."
+}
