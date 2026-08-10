@@ -159,16 +159,17 @@ jobs:
           printf 'preflight\t%d\t%d\n' "$rc" "$((end-start))" >> "$EVID/steps.tsv"
           exit "$rc"
 
-      - name: Network-enforcement system tests (nft authorization + accountable tc + Session)
+      - name: Network-enforcement system tests (nft authorization + accountable tc + Session + durable bounds)
         working-directory: data-plane
         # The system-boundary suite: nft and tc modelled as the separate mechanisms they are, plus the
-        # command contracts for the real nft/tc strings. Counted on its own so the evidence artifact carries
-        # an explicit total for the enforcement contract.
+        # command contracts for the real nft/tc strings, the hard-boundary lease precision matrix, and the
+        # durable restart/reboot bound on an unproven activation. Counted on its own so the evidence artifact
+        # carries an explicit total for the enforcement contract rather than burying it inside the unit total.
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh enforcement --
           bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh enforcement
           ./cmd/netd/ ./internal/nft/
-          -run 'System|Lease|Activation|Phase3Allow|LegacyAllow|Phase3Deny|Phase3List|AuthorizedIn|ListIn|ConcatProbe|AllowInCarries' -count=1
+          -run 'System|Lease|Activation|Durable|Phase3Allow|LegacyAllow|Phase3Deny|Phase3List|PermanentConcat|AuthorizedIn|ListIn|ConcatProbe|AllowInCarries' -count=1
 
       - name: Surgical live-dark nft foundation tests
         working-directory: data-plane
