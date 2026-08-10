@@ -1,4 +1,0 @@
-commit fd9dc375641b4f0ba4eeb0e32fc1e1acc7f71b20
-Date:   Mon Aug 10 16:44:33 2026 +0300
-
-    Phase 3 pre-live (inventory_head): count the durability and parser suites in the enforcement gate step
