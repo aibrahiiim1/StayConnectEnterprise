@@ -1,4 +1,0 @@
-commit 4a37c4b1090314ee1ac2293e1e5c3dffdcf9d419
-Date:   Mon Aug 10 14:21:59 2026 +0300
-
-    Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest

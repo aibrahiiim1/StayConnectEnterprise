@@ -1,0 +1,4 @@
+commit ee55f894ec060686002b19835c6e84040cfbdc5d
+Date:   Mon Aug 10 14:34:15 2026 +0300
+
+    Phase 3 pre-live safety (inventory_head): state the artifact's real file counts and suite totals
