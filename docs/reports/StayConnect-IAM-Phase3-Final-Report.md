@@ -227,16 +227,22 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 | Production build with Phase-3 flags OFF | **PASS** | `npx next build` (CI) |
 | Guest-portal uniform non-success contract (server) | **PASS** | `cmd/portald/pms_phase3_test.go`, `pms_phase3_handlers_test.go`, `pms_phase3_budget_test.go` |
 | Guest-portal Phase-3 flow + resilience (real browser, real template) | **PASS** | `hotel-admin/e2e/phase3-guest-portal*.spec.ts` |
-| Phase-3 network-enforcement system suite (nft + tc + Session together) | **PASS 58/58** | `cmd/netd/phase3_enforcement_test.go`, `phase3_lease_test.go`, `internal/nft` contracts |
-| Bounded-lease and fail-closed-activation suite | **PASS** (counted inside the 58 above) | `cmd/netd/phase3_lease_test.go` |
+| Phase-3 network-enforcement system suite (nft + tc + Session, bounded lease, hard-boundary precision, durable restart/reboot bound) | **PASS** — exact count in the artifact (`counts/enforcement.json`) | `cmd/netd/phase3_enforcement_test.go`, `phase3_lease_test.go`, `phase3_durability_test.go`, `internal/nft` contracts |
+| Bounded-lease, hard-boundary-precision and durable-activation suites | **PASS** (counted inside the network-enforcement step above) | `cmd/netd/phase3_lease_test.go`, `cmd/netd/phase3_durability_test.go` |
 | nft packet-authorization + lease command contract (Phase-3 set only; legacy never named) | **PASS** | `internal/nft/nft_phase3_test.go` |
-| Surgical live-dark nft foundation (install/rollback preserving a populated legacy set) | **PASS 11/11** | `internal/nftfoundation/foundation_test.go` |
+| Surgical live-dark nft foundation (install/rollback preserving a populated legacy set) | **PASS** — exact count in the artifact (`counts/foundation.json`) | `internal/nftfoundation/foundation_test.go` |
 | Controlled-activation poison tests (fabricated / foreign / stale / contested accounting origin) | **PASS** | `cmd/scd/phase3_activation_integration_test.go` (PG16) |
 | Portal/enforcement timing composition (tick boundaries, derived wait, single uniform budget) | **PASS** | `cmd/portald/pms_phase3_budget_timing_test.go`, `cmd/scd/phase3_auth_timing_test.go` |
-| **REAL-KERNEL contract suite** — real `nft`, real `tc`, real packets, disposable Linux network namespaces | **PASS 14/14** (kernel 6.17.0-1020-azure, nftables 1.0.9, iproute2 6.1.0; host ruleset proven unchanged) | `internal/kerneltest` via `scripts/ci/kernel-netns-suite.sh`; **kernel evidence on a disposable CI machine, NOT live appliance evidence** |
+| **REAL-KERNEL contract suite** — real `nft`, real `tc`, real packets, disposable Linux network namespaces | **PASS** — exact count, kernel and tool versions, and the host-ruleset-unchanged proof in the artifact (`counts/kernel-netns.txt`) | `internal/kerneltest` via `scripts/ci/kernel-netns-suite.sh`; **kernel evidence on a disposable CI machine, NOT live appliance evidence** |
 | Full Phase-3 Software CI + Governance CI on the same pushed HEAD, evidence artifact uploaded | **PASS** | §12 |
 | Live read-only PMS protocol verification | **PENDING** | operator-executed; not simulated |
 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING** | operator-executed; runbook §2–§5 |
+
+**Per-suite counts are deliberately not hard-coded here.** They describe the CI run that this delivery commit
+triggers, so a committed document could only ever carry a previous run's numbers — the same reason the run ids
+and artifact metadata live in the PR body rather than in this file. The artifact's `counts/` directory carries
+the exact totals for the run that produced it, and the Zero-Stale validator fails if numbers that belong to a
+run are pasted back in here.
 
 ### On retries
 
