@@ -1,4 +1,0 @@
-commit 41aa0b8762f98aadcfeeca89d45c45afc9e8331c
-Date:   Mon Aug 10 18:02:33 2026 +0300
-
-    Phase 3 pre-live (inventory_head): write-ahead activation durability, monotonic security time, and true Zero-Stale state
