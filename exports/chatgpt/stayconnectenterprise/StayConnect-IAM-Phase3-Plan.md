@@ -24,7 +24,7 @@ This plan governs implementation, tests, live-dark deployment and rollback. It i
 > The original approved requirements below (§0 onward) are unchanged — this section records what has been
 > BUILT against them, not a change to them.
 
-`PHASE-3 PRE-LIVE SAFETY CANDIDATE COMPLETE — LIVE INCREMENT-9 AUTHORIZATION REQUESTED (D14 authorized / T0015; D15 Option C executed; software candidate T0016; pre-live safety closure T0017), DARK. Not accepted, not closed.`
+`PHASE-3 PRE-LIVE SAFETY CANDIDATE COMPLETE — LIVE INCREMENT-9 AUTHORIZATION REQUESTED (D14 authorized / T0015; D15 Option C executed; software candidate T0016; pre-live safety closure T0017; hard-boundary and durability correction T0018; write-ahead durability and monotonic security time T0019), DARK. Phase 3 is IN_PROGRESS: not accepted, not closed.`
 
 The software increments in this plan are **execution history**, not future work:
 
@@ -49,7 +49,15 @@ The software increments in this plan are **execution history**, not future work:
     activate filters → verify → **authorize** → verify → persist → prove the Session durably `active`.
   - Fail-closed means **nft denial first, proven**, then tc. Teardown and expiry use the same order.
 - **Packet authorization is a bounded, renewable kernel lease** (90s, clamped by the session's hard access
-  boundary; 15s while durable `active` is unproven). A healthy reconciliation renews it; silence expires it.
+  boundary — the clamp TRUNCATES to whole seconds and refuses an unrepresentable sub-second remainder, so it
+  can never expire past the boundary; 15s while durable `active` is unproven). A healthy reconciliation renews
+  it; silence expires it.
+- **The bound on an unproven activation is WRITE-AHEAD durable and measured in monotonic time.** It is fsynced
+  (file and directory) BEFORE the guest is provisionally authorized, so a crash between admission and the
+  end-of-pass inventory write cannot lose it; a write that cannot be proven durable denies admission outright.
+  It is measured against boot-relative monotonic time (`/proc/uptime`), never the wall clock, so an NTP
+  correction or a wrong RTC cannot lengthen it — and a reboot, whose monotonic timeline cannot be bridged
+  honestly, never yields a fresh grace: the session stays denied until durable state proves it ACTIVE.
   If acctd and netd both die and nothing recovers, every Phase-3 guest loses access within the documented
   bound — because the kernel enforces it with nothing running.
 - **"ACTIVE means authorized AND accountable" is a database invariant.** `activate_session_enforcement`

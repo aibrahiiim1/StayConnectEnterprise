@@ -57,7 +57,7 @@ MUTATIONS = [
  ("M07 modified generated block", "docs/context/StayConnect-IAM-Handoff.md",
    ("replace", [("**Current phase:** 3", "**Current phase:** 9Z")])),
  ("M08 stale source commit / snapshot mismatch", "governance/project-state.json",
-   ("replace", [('"latest_transition_id": "T0018"', '"latest_transition_id": "T0008"')])),
+   ("replace", [('"latest_transition_id": "T0019"', '"latest_transition_id": "T0008"')])),
  ("M09 missing acceptance record", "governance/project-state.json",
    ("replace", [('"path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"',
                  '"path": "docs/acceptance/MISSING.md"')])),

@@ -1,4 +1,0 @@
-commit bc347afb4fc5d903cb4dd9182c23eab7debd1294
-Date:   Mon Aug 10 16:48:10 2026 +0300
-
-    Phase 3 pre-live (inventory_head): stop hard-coding CI suite counts in the Final Report
