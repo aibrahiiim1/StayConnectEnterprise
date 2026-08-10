@@ -326,8 +326,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `ee55f89`
-- **Provenance (generation HEAD = inventory_head):** `ee55f894ec060686002b19835c6e84040cfbdc5d`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `1520492`
+- **Provenance (generation HEAD = inventory_head):** `15204928acfed66ac8fe18ab1cc047e0f446719f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 243
@@ -490,7 +490,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
 | `docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 (D15 / Option C): accounting attribution, source binding, temporal order, class origin, generation authority |
 | `docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/architecture/Phase3-Controlled-Writer-Privilege-Manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 controlled-writer manifest documentation sync (inventory_head): doc-only |
+| `docs/architecture/Phase3-Controlled-Writer-Privilege-Manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): record the network-enforcement writers in the privilege inventory |
 | `docs/architecture/Phase3-Privilege-Matrix.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
@@ -503,12 +503,12 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
 | `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): state the artifact's real file counts and suite totals |
+| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase-evidence/GIT_STAT_1520492.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_ee55f89.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
@@ -736,7 +736,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md     |  299 ++
  docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md            |  114 +
  .../StayConnect-IAM-Phase2-Live-Dark-Acceptance.md |    2 +-
- .../Phase3-Controlled-Writer-Privilege-Manifest.md |   92 +
+ .../Phase3-Controlled-Writer-Privilege-Manifest.md |  103 +
  docs/architecture/Phase3-Privilege-Matrix.md       |   34 +
  .../StayConnect-IAM-Phase0-Contract.md             |   16 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   12 +-
@@ -747,14 +747,14 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../adr/ADR-0002-phase3-single-shaping-owner.md    |  278 ++
  docs/context/StayConnect-IAM-Handoff.md            |   16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           |  711 +++++
+ docs/manifests/Phase3-change-manifest.md           |  713 +++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1248 ++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 285999 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 105384 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42089 bytes
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1250 ++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 286058 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 105390 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42092 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_1520492.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
- .../chatgpt/phase-evidence/GIT_STAT_ee55f89.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -826,7 +826,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  tools/project-state.py                             |   49 +-
  .../tests/project_state_validator/run_mutations.py |   69 +-
  tools/validate-project-state.sh                    |   53 +-
- 243 files changed, 48021 insertions(+), 497 deletions(-)
+ 243 files changed, 48036 insertions(+), 497 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -836,8 +836,8 @@ M  docs/reports/StayConnect-IAM-Phase3-Final-Report.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_4a37c4b.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_ee55f89.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_1520492.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_ee55f89.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -850,6 +850,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+1520492 Phase 3 pre-live safety (inventory_head): record the network-enforcement writers in the privilege inventory
+7bd8acd Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 ee55f89 Phase 3 pre-live safety (inventory_head): state the artifact's real file counts and suite totals
 92391db Phase 3 pre-live safety (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 64f5c1a Phase 3 pre-live safety (inventory_head): permanent concat elements were invisible to the nft parser
