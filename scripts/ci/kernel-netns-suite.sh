@@ -58,8 +58,18 @@ for b in ip nft tc ping; do
 done
 
 # ---- host fingerprint: nothing this suite does may change it -------------------
-host_ruleset() { nft list ruleset 2>/dev/null | sha256sum | cut -d' ' -f1; }
+#
+# Counters are stripped before hashing. The runner has Docker running, its nft rules carry packet/byte
+# counters, and those tick the whole time this suite is running — so a raw digest of `nft list ruleset` reports
+# "the host changed" on every run regardless of what this suite did, which is a check that cannot fail
+# usefully. What must be true is that the RULES are identical and that the host never acquires a stayconnect
+# table of its own, and both of those are asserted.
+host_ruleset() {
+  nft list ruleset 2>/dev/null | sed -E 's/counter packets [0-9]+ bytes [0-9]+//g' | sha256sum | cut -d' ' -f1
+}
+host_has_stayconnect() { nft list table inet stayconnect >/dev/null 2>&1 && echo yes || echo no; }
 HOST_BEFORE="$(host_ruleset)"
+HOST_TABLE_BEFORE="$(host_has_stayconnect)"
 
 # ---- topology ------------------------------------------------------------------
 build() {
@@ -166,6 +176,30 @@ else
   log "kernel gate: ifb unavailable; tc-dependent cases will be skipped and the limitation recorded"
 fi
 
+# ---- topology precondition ------------------------------------------------------
+# Before any assertion is trusted, prove the harness itself is sound: an UNAUTHORIZED guest must not reach the
+# WAN, and an AUTHORIZED one must. A suite whose topology silently forwards everything would report the most
+# alarming failures possible for reasons that have nothing to do with the code under test — so a broken
+# harness exits 2 (infrastructure) rather than 1 (assertion).
+precheck_fail() {
+  log "kernel gate: TOPOLOGY PRECONDITION FAILED — $1"
+  log "--- router ruleset ---"; ip netns exec "$RTR" nft list ruleset >&2
+  log "--- router links ---";   ip -n "$RTR" addr >&2
+  exit 2
+}
+if ip netns exec "$GUEST" ping -c 1 -W 1 "$WAN_IP" >/dev/null 2>&1; then
+  precheck_fail "an unauthorized guest already reaches the WAN; the forward chain is not gating"
+fi
+ip netns exec "$RTR" nft add element inet stayconnect auth_ipv4 "{ \"$GUEST_IF\" . $GUEST_IP }"   || precheck_fail "the legacy authorization set would not accept a concatenated element"
+if ! ip netns exec "$GUEST" ping -c 2 -W 1 -i 0.2 "$WAN_IP" >/dev/null 2>&1; then
+  precheck_fail "an AUTHORIZED guest cannot reach the WAN; routing or forwarding is broken"
+fi
+ip netns exec "$RTR" nft delete element inet stayconnect auth_ipv4 "{ \"$GUEST_IF\" . $GUEST_IP }"   || precheck_fail "the legacy element could not be removed"
+if ip netns exec "$GUEST" ping -c 1 -W 1 "$WAN_IP" >/dev/null 2>&1; then
+  precheck_fail "the guest still reaches the WAN after their authorization was removed"
+fi
+log "kernel gate: topology precondition OK (deny -> allow -> deny, with real packets)"
+
 # ---- build the suite OUTSIDE the namespace, run it against it --------------------
 BIN="$WORK/kernelgate.test"
 if ! (cd data-plane && go test -tags kernelgate -c -o "$BIN" ./internal/kerneltest/); then
@@ -186,8 +220,16 @@ SKIPPED=$(grep -c '^--- SKIP' "$WORK/kernel.log" || true)
 
 # ---- the host must be exactly as it was ------------------------------------------
 HOST_AFTER="$(host_ruleset)"
+HOST_TABLE_AFTER="$(host_has_stayconnect)"
+HOST_CLEAN=true
+if [ "$HOST_TABLE_BEFORE" != "$HOST_TABLE_AFTER" ] || [ "$HOST_TABLE_AFTER" = "yes" ]; then
+  log "kernel gate: THE HOST ACQUIRED A stayconnect TABLE. The suite escaped its namespaces."
+  HOST_CLEAN=false
+  RC=1
+fi
 if [ "$HOST_BEFORE" != "$HOST_AFTER" ]; then
-  log "kernel gate: THE HOST RULESET CHANGED. The suite mutated state outside its disposable namespaces."
+  log "kernel gate: THE HOST RULESET CHANGED (rules, counters excluded). The suite mutated state outside its disposable namespaces."
+  HOST_CLEAN=false
   RC=1
 fi
 
@@ -199,7 +241,8 @@ if [ -n "$EVID" ]; then
     echo "failed=$FAILED"
     echo "skipped=$SKIPPED"
     echo "ifb_available=$KG_IFB"
-    echo "host_ruleset_unchanged=$([ "$HOST_BEFORE" = "$HOST_AFTER" ] && echo true || echo false)"
+    echo "host_ruleset_unchanged=$HOST_CLEAN"
+    echo "host_acquired_stayconnect_table=$HOST_TABLE_AFTER"
     echo "kernel=$(uname -r)"
     echo "nft=$(nft --version 2>/dev/null | head -1)"
     echo "tc=$(tc -V 2>/dev/null | head -1)"

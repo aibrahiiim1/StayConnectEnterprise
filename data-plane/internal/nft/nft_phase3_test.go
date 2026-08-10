@@ -367,3 +367,40 @@ func TestLegacyAllowIsUnchangedByTheLeaseWork(t *testing.T) {
 		}
 	}
 }
+
+// A PERMANENT concatenated element carries no `val` wrapper in nft's JSON, because it has no stateful
+// attributes to wrap. Reading only the wrapped shape made every legacy (permanent) authorization invisible to
+// List — and therefore to Authorized, and therefore to Deny, which then silently deleted nothing.
+//
+// The whole legacy-parity proof of the surgical foundation rests on being able to enumerate exactly those
+// elements, so this is the shape that had to be got right.
+func TestListReadsPermanentConcatElementsWithNoValWrapper(t *testing.T) {
+	c, rr := testClient()
+	rr.typeOut[AuthV4] = "set auth_ipv4 { type ifname . ipv4_addr }"
+	rr.listJSON[AuthV4] = `{"nftables":[{"set":{"name":"auth_ipv4","elem":[
+		{"concat":["br-guest","10.20.0.14"]},
+		{"elem":{"val":{"concat":["br-guest","10.20.0.7"]},"timeout":3600,"expires":1200}}]}}]}`
+
+	els, err := c.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(els) != 2 {
+		t.Fatalf("read %d of 2 elements; a permanent element with no `val` wrapper was dropped: %+v", len(els), els)
+	}
+	byIP := map[string]Element{}
+	for _, e := range els {
+		byIP[e.IP.String()] = e
+	}
+	perm, ok := byIP["10.20.0.14"]
+	if !ok || perm.Iface != "br-guest" {
+		t.Fatalf("the permanent element did not round-trip: %+v", byIP)
+	}
+	if perm.Timeout != 0 || perm.Expires != 0 {
+		t.Fatalf("a permanent element reported a lease: %+v", perm)
+	}
+	// and it can therefore be revoked, which is what silently failed before
+	if ok, err := c.AuthorizedIn(context.Background(), AuthV4, "br-guest", net.ParseIP("10.20.0.14")); err != nil || !ok {
+		t.Fatalf("a permanent element is not visible to Authorized (ok=%v err=%v)", ok, err)
+	}
+}

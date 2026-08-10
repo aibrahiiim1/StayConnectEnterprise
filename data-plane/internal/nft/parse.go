@@ -49,9 +49,23 @@ func parseJSON(raw []byte) ([]Element, error) {
 					inner = v
 				}
 				el := Element{}
-				// "val" may be a plain IP string, or a concatenation
-				// {"concat": ["br-g20", "10.20.0.100"]}.
-				switch val := inner["val"].(type) {
+				// THE TWO SHAPES nft ACTUALLY EMITS.
+				//
+				// An element with stateful attributes (a timeout, an expiry, a counter) is wrapped:
+				//   {"elem": {"val": {"concat": ["br-g20","10.20.0.100"]}, "timeout": 90, "expires": 47}}
+				// An element with NONE — which is what a permanent authorization is — carries no wrapper and
+				// no "val" at all:
+				//   {"concat": ["br-g20","10.20.0.100"]}
+				//
+				// Reading only the first shape made every permanent concatenated element INVISIBLE to List and
+				// therefore to Authorized and Deny: a legacy guest could not be enumerated, and a Deny for one
+				// silently did nothing. The real-kernel suite is what surfaced it — the modelled tests all fed
+				// the wrapped shape, because that is the shape the code already understood.
+				value, hasVal := inner["val"]
+				if !hasVal {
+					value = inner
+				}
+				switch val := value.(type) {
 				case string:
 					el.IP = net.ParseIP(val)
 				case map[string]any:
