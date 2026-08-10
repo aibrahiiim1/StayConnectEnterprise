@@ -452,8 +452,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `d9e9654`
-- **Provenance (generation HEAD = inventory_head):** `d9e965431f1149d752c7d18f34ad8216ec424f52`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `7bee19b`
+- **Provenance (generation HEAD = inventory_head):** `7bee19b5ed169018d737239ce83dbae51c6aa54c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 252
@@ -486,15 +486,15 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `data-plane/cmd/edged/resources_phase3.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 3 items 1-5 (inventory_head): required exact policy version, whole reserved catalog excluded, selector on the authoritative validator, complete metadata, honest reconcile + two-process evidence |
 | `data-plane/cmd/edged/resources_phase3_interfaces.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 Â§6 (backend): the PMS interface admin surface |
 | `data-plane/cmd/edged/resources_phase3_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 Hotel-Admin surface (inventory_head): dark-gated stays/events/resolutions/grace/alerts API + RBAC + four UI pages: tsc clean, Vitest 48/48 |
-| `data-plane/cmd/netd/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 pre-live (inventory_head): write-ahead activation durability, monotonic security time, and true Zero-Stale state |
-| `data-plane/cmd/netd/phase3_bootid_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
+| `data-plane/cmd/netd/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
+| `data-plane/cmd/netd/phase3_bootid_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
 | `data-plane/cmd/netd/phase3_classstate.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): write-ahead activation durability, monotonic security time, and true Zero-Stale state |
 | `data-plane/cmd/netd/phase3_control.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3: durable accounting, netd shaping control plane, controlled-writer boundary, guest vertical slice |
-| `data-plane/cmd/netd/phase3_durability_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
+| `data-plane/cmd/netd/phase3_durability_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
 | `data-plane/cmd/netd/phase3_enforcement.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
 | `data-plane/cmd/netd/phase3_enforcement_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): hard-boundary lease precision, durable activation bound, and a Zero-Stale check that had never run |
 | `data-plane/cmd/netd/phase3_gate.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
-| `data-plane/cmd/netd/phase3_journal.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
+| `data-plane/cmd/netd/phase3_journal.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
 | `data-plane/cmd/netd/phase3_lease.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): hard-boundary lease precision, durable activation bound, and a Zero-Stale check that had never run |
 | `data-plane/cmd/netd/phase3_lease_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): write-ahead activation durability, monotonic security time, and true Zero-Stale state |
 | `data-plane/cmd/netd/phase3_mode.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3: durable accounting, netd shaping control plane, controlled-writer boundary, guest vertical slice |
@@ -504,9 +504,9 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `data-plane/cmd/netd/phase3_peer_other.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3: durable accounting, netd shaping control plane, controlled-writer boundary, guest vertical slice |
 | `data-plane/cmd/netd/phase3_provision.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
 | `data-plane/cmd/netd/phase3_provision_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3: make packet authorization, accountable metering and Session state one enforcement contract |
-| `data-plane/cmd/netd/phase3_securitytime.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
+| `data-plane/cmd/netd/phase3_securitytime.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
 | `data-plane/cmd/netd/phase3_shaping.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): write-ahead activation durability, monotonic security time, and true Zero-Stale state |
-| `data-plane/cmd/netd/phase3_shaping_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
+| `data-plane/cmd/netd/phase3_shaping_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
 | `data-plane/cmd/phase3-foundation/main.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
 | `data-plane/cmd/pmsd/main.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3: durable accounting, netd shaping control plane, controlled-writer boundary, guest vertical slice |
 | `data-plane/cmd/portald/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 Â§4: bound the guest portal's failure response time, and make a lost reply recoverable |
@@ -629,35 +629,35 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `docs/architecture/StayConnect-IAM-Phase2-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/StayConnect-IAM-Phase3-Plan.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (inventory_head): write-ahead activation durability, monotonic security time, and true Zero-Stale state |
 | `docs/architecture/adr/ADR-0001-pmsd-connector-ownership.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/architecture/adr/ADR-0002-phase3-single-shaping-owner.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
+| `docs/architecture/adr/ADR-0002-phase3-single-shaping-owner.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
-| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase-evidence/GIT_STAT_7bee19b.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_d9e9654.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
@@ -667,7 +667,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 3 (D15 / Option C): accounting attribution, source binding, temporal order, class origin, generation authority |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `governance/transitions/T0016.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3: governance activity transition T0016 (software candidate awaiting Increment 9), doc sync |
 | `governance/transitions/T0017.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
@@ -707,7 +707,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `scripts/ci/step.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
 | `scripts/edge-migrate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
 | `scripts/phase3-evidence.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: downloadable evidence artifact with a SHA-256 integrity manifest |
-| `scripts/phase3-preflight.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
+| `scripts/phase3-preflight.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
 | `scripts/pmsd-pg-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 (D15 / Option C): accounting attribution, source binding, temporal order, class origin, generation authority |
 | `tools/embed-report-manifest.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3: accountable-before-forwarding class provisioning, and Zero-Stale documentation |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
@@ -742,14 +742,14 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../cmd/edged/resources_phase3_interfaces.go       |  742 +++++
  data-plane/cmd/edged/resources_phase3_test.go      |   74 +
  data-plane/cmd/netd/main.go                        |  100 +-
- data-plane/cmd/netd/phase3_bootid_test.go          |  264 ++
+ data-plane/cmd/netd/phase3_bootid_test.go          |  443 +++
  data-plane/cmd/netd/phase3_classstate.go           |  299 ++
  data-plane/cmd/netd/phase3_control.go              |  141 +
- data-plane/cmd/netd/phase3_durability_test.go      |  541 ++++
+ data-plane/cmd/netd/phase3_durability_test.go      |  549 ++++
  data-plane/cmd/netd/phase3_enforcement.go          |  262 ++
  data-plane/cmd/netd/phase3_enforcement_test.go     |  863 ++++++
  data-plane/cmd/netd/phase3_gate.go                 |  167 ++
- data-plane/cmd/netd/phase3_journal.go              |  409 +++
+ data-plane/cmd/netd/phase3_journal.go              |  481 ++++
  data-plane/cmd/netd/phase3_lease.go                |  142 +
  data-plane/cmd/netd/phase3_lease_test.go           |  620 ++++
  data-plane/cmd/netd/phase3_mode.go                 |   67 +
@@ -759,7 +759,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  data-plane/cmd/netd/phase3_peer_other.go           |   16 +
  data-plane/cmd/netd/phase3_provision.go            |  455 +++
  data-plane/cmd/netd/phase3_provision_test.go       |  481 ++++
- data-plane/cmd/netd/phase3_securitytime.go         |  172 ++
+ data-plane/cmd/netd/phase3_securitytime.go         |  190 ++
  data-plane/cmd/netd/phase3_shaping.go              |  659 +++++
  data-plane/cmd/netd/phase3_shaping_test.go         | 1371 +++++++++
  data-plane/cmd/phase3-foundation/main.go           |   71 +
@@ -884,17 +884,17 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  docs/architecture/StayConnect-IAM-Phase2-Plan.md   |    2 +-
  docs/architecture/StayConnect-IAM-Phase3-Plan.md   |  219 ++
  .../adr/ADR-0001-pmsd-connector-ownership.md       |   53 +
- .../adr/ADR-0002-phase3-single-shaping-owner.md    |  298 ++
+ .../adr/ADR-0002-phase3-single-shaping-owner.md    |  303 ++
  docs/context/StayConnect-IAM-Handoff.md            |   16 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           |  744 +++++
+ docs/manifests/Phase3-change-manifest.md           |  745 +++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1381 +++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 287215 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 107723 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42095 bytes
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1408 +++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 287254 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 107711 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42092 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_7bee19b.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
- .../chatgpt/phase-evidence/GIT_STAT_d9e9654.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -912,7 +912,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   12 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  754 +++++
+ .../Phase3-change-manifest.md                      |  746 +++++
  .../StayConnect-IAM-Handoff.md                     |   16 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   16 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   12 +-
@@ -962,7 +962,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  scripts/ci/step.sh                                 |   26 +
  scripts/edge-migrate.sh                            |  251 ++
  scripts/phase3-evidence.sh                         |  127 +
- scripts/phase3-preflight.sh                        |  414 +++
+ scripts/phase3-preflight.sh                        |  435 +++
  scripts/pmsd-pg-integration.sh                     |   59 +
  tools/embed-report-manifest.py                     |   49 +
  tools/project-state.py                             |   49 +-
@@ -970,7 +970,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  tools/validate-pr-metadata.sh                      |  105 +
  tools/validate-project-state.sh                    |  161 +-
  tools/validate-transition-times.sh                 |   86 +
- 252 files changed, 50746 insertions(+), 498 deletions(-)
+ 252 files changed, 51069 insertions(+), 498 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -980,11 +980,10 @@ M  docs/reports/StayConnect-IAM-Phase3-Final-Report.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_41aa0b8.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_d9e9654.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_7bee19b.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_d9e9654.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/tools/validate-project-state.sh
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
@@ -995,6 +994,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+7bee19b Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity
+b346e6d Phase 3 pre-live (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 d9e9654 Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp
 9c09cd6 Phase 3 pre-live (delivery_head): T0019 + complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 41aa0b8 Phase 3 pre-live (inventory_head): write-ahead activation durability, monotonic security time, and true Zero-Stale state

@@ -1,4 +1,0 @@
-commit d9e965431f1149d752c7d18f34ad8216ec424f52
-Date:   Mon Aug 10 18:45:37 2026 +0300
-
-    Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp
