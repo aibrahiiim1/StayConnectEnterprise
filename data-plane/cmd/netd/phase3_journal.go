@@ -92,7 +92,11 @@ type journalLoad struct {
 	Unreadable bool
 }
 
-func (j *activationJournal) load() journalLoad {
+// load reads the journal for ONE appliance scope. The scope is a parameter, not a field, because the only
+// scope that may ever be read is the one currently derived from enrollment and the signed assignment — the
+// same value save() writes. Passing it in makes it impossible to read the file without stating whose it must
+// be.
+func (j *activationJournal) load(tenant, site, appliance string) journalLoad {
 	if j == nil || j.path == "" {
 		return journalLoad{}
 	}
@@ -101,12 +105,29 @@ func (j *activationJournal) load() journalLoad {
 	raw, err := os.ReadFile(j.path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return journalLoad{} // never written: no attempt has ever been begun
+			// THE ONLY legitimate clean first run: the file truly does not exist. Every other outcome below
+			// is UNKNOWN, because an appliance that cannot read its own security history does not have one.
+			return journalLoad{}
 		}
 		return journalLoad{Unreadable: true}
 	}
 	var st journalState
 	if json.Unmarshal(raw, &st) != nil {
+		return journalLoad{Unreadable: true}
+	}
+	// THE ENVELOPE MUST BE OURS.
+	//
+	// A journal carrying another Tenant, Site or Appliance is not this appliance's security history, and it
+	// is not an empty one either — it says nothing at all about the sessions here. Reading it as "no attempts
+	// outstanding" would award every guest a fresh grace on the strength of a file that describes a different
+	// property. It reaches this appliance by the ordinary means: a restored image, a cloned VM, a copied
+	// /var/lib directory, a re-homed unit after a tenancy change.
+	//
+	// It is classified UNKNOWN and never silently re-scoped: rewriting the envelope to match would be
+	// adopting another appliance's history as our own, which is worse than having none.
+	if err := validateScope(st, tenant, site, appliance); err != nil {
+		slog.Warn("phase3: the activation journal does not belong to this appliance; treating it as unknown",
+			"err", err)
 		return journalLoad{Unreadable: true}
 	}
 	// SYNTAX IS NOT TRUST. This file is security authority now, and a document that parses is not the same as
@@ -125,6 +146,50 @@ func (j *activationJournal) load() journalLoad {
 	return journalLoad{Attempts: st.Attempts}
 }
 
+// validateScope proves the journal envelope is this appliance's own, under the assignment it is running.
+//
+// Exact equality, and every value must be present on both sides: a journal with an empty Tenant is not
+// "unscoped and therefore harmless", it is a document whose ownership cannot be established.
+func validateScope(st journalState, tenant, site, appliance string) error {
+	want := map[string]string{"tenant": tenant, "site": site, "appliance": appliance}
+	got := map[string]string{"tenant": st.TenantID, "site": st.SiteID, "appliance": st.ApplianceID}
+	for _, field := range []string{"tenant", "site", "appliance"} {
+		w, g := strings.TrimSpace(want[field]), strings.TrimSpace(got[field])
+		if w == "" {
+			return fmt.Errorf("this appliance has no assigned %s id, so no journal can be proven to belong to it", field)
+		}
+		if g == "" {
+			return fmt.Errorf("the journal carries no %s id", field)
+		}
+		if g != w {
+			return fmt.Errorf("the journal belongs to %s %s, not %s", field, g, w)
+		}
+	}
+	return nil
+}
+
+// ---- canonical class-key identity -------------------------------------------------------------------------
+
+// parseClassKey is THE canonical reader of a class key, and the inverse of classKey(bridge, sessionID).
+//
+// The key is `bridge|sessionID` with exactly one separator. Accepting anything looser — "contains a pipe" —
+// lets `br-guest|a|b` be read two ways, and a record whose identity can be read two ways is a record that can
+// be made to describe a different session than the one it was written for.
+func parseClassKey(key string) (bridge, session string, ok bool) {
+	i := strings.Index(key, "|")
+	if i <= 0 {
+		return "", "", false // no separator, or an empty bridge
+	}
+	if strings.Contains(key[i+1:], "|") {
+		return "", "", false // ambiguous: the canonical form has exactly one separator
+	}
+	bridge, session = key[:i], key[i+1:]
+	if strings.TrimSpace(bridge) == "" || strings.TrimSpace(session) == "" {
+		return "", "", false
+	}
+	return bridge, session, true
+}
+
 // maxPlausibleBootMs bounds a boot-relative reading. /proc/uptime on a machine that has been up for ten years
 // is about 3.2e11 ms; anything past this is not an uptime, it is a value chosen to push a deadline out of
 // reach. Bounding it also removes any arithmetic that could overflow into a negative comparison.
@@ -137,11 +202,20 @@ func validateAttempts(attempts []activationAttempt) error {
 		if strings.TrimSpace(a.Key) == "" {
 			return fmt.Errorf("a record has no activation key")
 		}
-		if !strings.Contains(a.Key, "|") {
-			return fmt.Errorf("record %q: the activation key is not a bridge|session identity", a.Key)
+		bridge, keySession, ok := parseClassKey(a.Key)
+		if !ok {
+			return fmt.Errorf("record %q: the activation key is not a canonical bridge|session identity", a.Key)
 		}
+		_ = bridge
 		if strings.TrimSpace(a.SessionID) == "" {
 			return fmt.Errorf("record %q: no session identity", a.Key)
+		}
+		if keySession != a.SessionID {
+			// The record carries two identities and they disagree. Whichever one a reader happens to use, the
+			// other is wrong — so a bound written for one session could be enforced against another, or a
+			// session could be looked up and found to have no bound at all.
+			return fmt.Errorf("record %q: the key names session %q but the record names %q",
+				a.Key, keySession, a.SessionID)
 		}
 		if seen[a.Key] {
 			// Two records for one activation would let a reader pick whichever bound it preferred.
@@ -318,10 +392,8 @@ func (p *phase3Shaping) sessionForKey(key string) string {
 	if c, ok := p.classes[key]; ok {
 		return c.SessionID
 	}
-	for i := 0; i < len(key); i++ {
-		if key[i] == '|' {
-			return key[i+1:]
-		}
+	if _, session, ok := parseClassKey(key); ok {
+		return session
 	}
 	return ""
 }

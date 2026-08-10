@@ -104,7 +104,29 @@ they were built and are `PASS — SOFTWARE` in the matrix.
   deadline instead of a flat maximum it could never reach. There is still exactly one budget for the endpoint,
   so the occupancy-enumeration protection is unchanged in form.
 
-**The final pre-live blockers.** Three more, and the first two were failures of *trust* rather than of logic:
+**The identity-binding correction.** Three narrow gaps, all in what the security journal was allowed to be
+trusted about:
+
+- **The journal envelope was never checked against this appliance.** It carries a tenant, site and appliance
+  id, and `load()` validated only the records inside it. A journal from another property — arriving by an
+  entirely ordinary route: a restored image, a cloned VM, a copied `/var/lib`, a re-homed unit after a tenancy
+  change — would have been read as a valid document with no attempts outstanding, and every guest here would
+  have been given a fresh grace on the strength of a file describing somewhere else. The scope is now a
+  parameter of `load()`, so the file cannot be read without stating whose it must be; a foreign, partial or
+  empty scope is UNKNOWN, and it is never silently re-scoped into ours. The only clean first run is a file
+  that genuinely does not exist.
+- **A record carried two identities that were never compared.** `Key = bridge|sessionID` and `SessionID` were
+  both present, and validation checked only that the key contained a pipe — so a record whose key named
+  `session-B` beside a `SessionID` of `session-A` passed, and whichever identity a reader used, the other was
+  wrong. There is now one canonical parser: exactly one separator, non-empty bridge and session, and the key's
+  session must equal `SessionID`. `br-guest|a|b` is rejected outright rather than read two ways.
+- **"Boot identity" was validated as an opaque token.** Eight or more printable characters was far too
+  generous for a value whose entire job is to be equal to itself across a restart and unequal across a reboot.
+  `/proc/sys/kernel/random/boot_id` is a canonical lowercase 8-4-4-4-12 UUID and nothing else, so the check is
+  now exact — a truncated read, a partially written file or an error message copied into place is refused
+  rather than compared.
+
+**The previous pre-live blockers.** Three more, and the first two were failures of *trust* rather than of logic:
 
 - **Boot identity could fail open.** The cross-reboot guarantee rests on two readings — a monotonic uptime and
   the identity of the boot it belongs to — but the identity was a bare string, empty on any read error. So
@@ -264,7 +286,7 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 
 | Test | Result | Evidence |
 |---|---|---|
-| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, write-ahead durable activation bound, monotonic security time, trusted boot identity, semantic journal validation) | **PASS 40/40** | `scripts/phase3-preflight.sh --json` |
+| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, write-ahead durable activation bound, monotonic security time, trusted boot identity, semantic journal validation, assignment-scope binding, canonical key identity) | **PASS 43/43** | `scripts/phase3-preflight.sh --json` |
 | Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 362/362** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
 | PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** (all eleven) | `scripts/pmsd-pg-integration.sh` |
 | Go unit tests, whole module | **PASS** | `go test ./... -count=1` (JSON-counted) |
@@ -381,6 +403,10 @@ appears.
 | 30ah | The security journal is validated SEMANTICALLY, not merely as JSON: identity, boot anchoring, non-negative and bounded monotonic readings, began/deadline ordering, a grace no longer than policy, coherent strike/backoff state and no duplicate keys | **PASS — SOFTWARE** | `validateAttempts`; `phase3_bootid_test.go` poison matrix (17 valid-JSON records, each rejected) |
 | 30ai | An incoherent security record becomes UNKNOWN and fail-closed — never silently normalised into a fresh grace — while a coherent one is still honoured and enforces its own recorded deadline | **PASS — SOFTWARE** | `journalLoad.Unreadable`; `phase3_bootid_test.go` |
 | 30aj | A transition receipt cannot be dated after the commit that introduced it; the four pre-rule receipts are listed and grandfathered rather than rewritten | **PASS — GOVERNANCE** | `tools/validate-transition-times.sh`; Zero-Stale check 1d; Project Governance workflow |
+| 30ak | The activation journal is bound to the ASSIGNED scope: it cannot be read without stating the tenant, site and appliance, and a foreign, partial or empty scope is UNKNOWN — never an empty journal and never a clean first run | **PASS — SOFTWARE** | `validateScope`; `journal.load(tenant, site, appliance)`; `phase3_bootid_test.go` (8 foreign-scope cases, including a foreign envelope carrying an otherwise coherent attempt) |
+| 30al | A foreign-scope journal is never silently re-scoped into this appliance's own, and the ONLY clean first run is a file that truly does not exist | **PASS — SOFTWARE** | `phase3_bootid_test.go` (re-read after the refusal; absent-file case) |
+| 30am | A record's activation key and session identity are parsed CANONICALLY and proven to describe the same session: exactly one separator, non-empty bridge and session, and key-session == SessionID | **PASS — SOFTWARE** | `parseClassKey` (the single canonical reader, also used by `sessionForKey`); poison cases for mismatch, empty bridge, missing session and an ambiguous two-separator key |
+| 30an | Boot identity is validated against the ACTUAL Linux contract — a canonical lowercase 8-4-4-4-12 UUID — so a truncated or corrupted read cannot pass and cannot hide a real reboot | **PASS — SOFTWARE** | `plausibleBootID`; `phase3_bootid_test.go` (3 valid forms, 13 malformed including truncation at a group boundary and an error message copied into place) |
 | 31 | Live read-only PMS protocol verification | **PENDING — LIVE INCREMENT 9** | operator-executed; never simulated |
 | 32 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING — LIVE INCREMENT 9** | runbook §2–§5 |
 | 33 | Gate-P per-service EXECUTE grants and role separation | **OUT OF SCOPE BY APPROVED CONTRACT** | separately gated; zero runtime grants while dark |

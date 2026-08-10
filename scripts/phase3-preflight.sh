@@ -352,6 +352,13 @@ if grep -q 'BootID() (string, error)' "$SECTIME" && grep -q 'plausibleBootID' "$
 else
   no "an unreadable or empty boot identity is indistinguishable from a trustworthy one"
 fi
+# The boot identity must be validated against the ACTUAL kernel contract (a canonical lowercase 8-4-4-4-12
+# UUID), not merely "some opaque token": a truncated read would otherwise pass and could hide a real reboot.
+if grep -q 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' "$SECTIME"; then
+  ok "boot identity is validated against the canonical Linux boot-id form"
+else
+  no "a truncated or malformed boot identity would be accepted as trustworthy"
+fi
 if grep -q 'q.BootID == "" || currentBootID == ""' "$JOURNAL"; then
   ok "an untrusted boot identity on either side is treated as a boot CHANGE, not as the same boot"
 else
@@ -363,6 +370,20 @@ if grep -q 'func validateAttempts' "$JOURNAL" && grep -q 'longer than the' "$JOU
   ok "every persisted security record is validated for coherent, bounded state before it is trusted"
 else
   no "a syntactically valid but incoherent security record would be trusted"
+fi
+# THE JOURNAL IS BOUND TO THIS APPLIANCE. A security history from another Tenant, Site or Appliance -- a
+# restored image, a cloned VM, a copied /var/lib -- must never be read as "no attempts outstanding".
+if grep -q 'func validateScope' "$JOURNAL" && grep -q 'load(tenant, site, appliance string)' "$JOURNAL"; then
+  ok "the activation journal is bound to the assigned tenant/site/appliance scope and cannot be read without it"
+else
+  no "a journal from another appliance scope could be read as this appliance's security history"
+fi
+# AND THE TWO IDENTITIES IN A RECORD MUST AGREE. A key naming one session beside a SessionID naming another is
+# a record that can be enforced against the wrong guest.
+if grep -q 'func parseClassKey' "$JOURNAL" && grep -q 'the key names session' "$JOURNAL"; then
+  ok "a record's activation key and session identity are parsed canonically and proven to agree"
+else
+  no "a security record's two identities can disagree"
 fi
 
 # ---------------------------------------------------------------- 12. the surgical live-dark foundation

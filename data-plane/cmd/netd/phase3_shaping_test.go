@@ -322,7 +322,7 @@ func liveWriter(tc shaper) *phase3Shaping {
 		// Every writer needs a MONOTONIC security clock: the activation bound is measured against it, and a
 		// writer without one cannot measure the bound and therefore (correctly) refuses to authorize anyone.
 		// The durability suite replaces this with a clock it drives.
-		secClock: &fixedSecurityClock{ms: 60_000, bootID: "5y5b0017-0000-4000-8000-000000000001"}}
+		secClock: &fixedSecurityClock{ms: 60_000, bootID: "f81d4fae-7dec-11d0-a765-00a0c91e6bf6"}}
 }
 
 // envelope builds a well-formed plan for the live scope, declaring the bridges its sessions use plus the

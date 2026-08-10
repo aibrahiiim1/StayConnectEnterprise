@@ -102,16 +102,34 @@ func (c *procSecurityClock) BootID() (string, error) {
 	return id, nil
 }
 
-// plausibleBootID rejects anything that is not a single opaque token. It is deliberately loose about FORM —
-// this is an identity, not a schema — and strict about the two properties that matter: it is one token, and it
-// is long enough to actually distinguish two boots. A short or whitespace-bearing value is far more likely to
-// be a truncated read or an error message than a kernel boot id.
+// plausibleBootID validates the ACTUAL Linux boot-identity contract.
+//
+// /proc/sys/kernel/random/boot_id is a canonical RFC-4122 UUID in lowercase hexadecimal, 8-4-4-4-12 with
+// hyphens — the kernel formats it with %pUb and never produces anything else. Accepting "any opaque token of
+// at least eight characters" was too generous by a wide margin: a truncated read ("f81d4fae-7dec-11d0"), a
+// partially-written file, or an error string copied into place would all have passed, and each of them would
+// then be compared for equality against a later, complete read and reported as a DIFFERENT boot — or, worse,
+// two different truncations of the same id would compare equal to each other and hide a real reboot.
+//
+// The length is fixed and the alphabet is fixed, so the check can be exact. Being exact is the point: this
+// value's only job is to be equal to itself across a restart and unequal across a reboot, and anything that is
+// not the canonical form cannot be trusted to do either.
 func plausibleBootID(id string) bool {
-	if len(id) < 8 || len(id) > 128 {
+	const canonical = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+	if len(id) != len(canonical) {
 		return false
 	}
-	for _, r := range id {
-		if r <= ' ' || r == 0x7f {
+	for i := 0; i < len(canonical); i++ {
+		c := id[i]
+		if canonical[i] == '-' {
+			if c != '-' {
+				return false
+			}
+			continue
+		}
+		isDigit := c >= '0' && c <= '9'
+		isLowerHex := c >= 'a' && c <= 'f'
+		if !isDigit && !isLowerHex {
 			return false
 		}
 	}

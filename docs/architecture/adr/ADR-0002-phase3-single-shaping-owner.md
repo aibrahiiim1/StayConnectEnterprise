@@ -292,7 +292,12 @@ runbook or the report.
     bound. The durable record is validated **semantically** before it is trusted: valid JSON carrying an
     over-long grace, a negative reading, boot-relative numbers with no boot, or duplicate keys is treated as
     UNKNOWN and fail-closed, and is never normalised into a fresh grace.
-21. That bound is measured against **boot-relative monotonic time**, never the wall clock. An NTP correction,
+21. The durable record is **bound to the assigned scope and to one session**. It cannot be read without
+    stating the tenant, site and appliance it must belong to; a foreign, partial or empty scope is UNKNOWN and
+    is never re-scoped. Within a record, the activation key and the session id are parsed by one canonical
+    reader and must name the same session. The boot identity is validated against the actual kernel contract —
+    a canonical lowercase 8-4-4-4-12 UUID — so a truncated read cannot pass as a boot.
+22. That bound is measured against **boot-relative monotonic time**, never the wall clock. An NTP correction,
     a wrong RTC or a resumed snapshot cannot lengthen it. Across a reboot the monotonic timeline restarts and
     is not bridged: the session stays denied until durable state proves it ACTIVE, because the only available
     estimate of the downtime comes from the clock this design refuses to trust.

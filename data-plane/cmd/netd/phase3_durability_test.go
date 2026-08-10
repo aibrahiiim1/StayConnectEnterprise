@@ -26,10 +26,18 @@ import (
 	"time"
 )
 
-// bootIDFor builds a realistic boot identity. Real kernels report a UUID, and the security clock refuses a
-// value too short to distinguish two boots — so the fakes use the real shape rather than a token that would
-// only pass because the fake was lenient.
-func bootIDFor(tag string) string { return "b00" + tag + "1de-0000-4000-8000-00000000000" + tag }
+// bootIDFor builds a distinct, CANONICAL boot identity per tag.
+func bootIDFor(tag string) string {
+	// A CANONICAL Linux boot id: lowercase hex, 8-4-4-4-12. The security clock validates the real kernel
+	// contract, so a fake producing a looser token would only pass because the fake was lenient. The tag's
+	// first byte varies the last two nibbles, so different tags are genuinely different boots.
+	hex := "0123456789abcdef"
+	var b byte
+	if tag != "" {
+		b = tag[0]
+	}
+	return "f81d4fae-7dec-11d0-a765-00a0c91e6b" + string(hex[(b>>4)&0x0f]) + string(hex[b&0x0f])
+}
 
 // ---- harness ----------------------------------------------------------------
 
@@ -82,7 +90,7 @@ func (h *durHarness) restart(t *testing.T) {
 	st, _, _ := p.classStore.load()
 	inv, verified := kernelInventory(t.Context(), p.shp, bridgesIn(st))
 	p.restore(st, h.clk.bootID, inv, verified)
-	p.restoreAttempts(p.journal.load())
+	p.restoreAttempts(p.journal.load(p.mode.TenantID, p.mode.SiteID, p.mode.ApplianceID))
 	h.p = p
 }
 
@@ -121,7 +129,7 @@ func (h *durHarness) authorized() bool { return h.g.isAuthorized("br-guest", pro
 
 func (h *durHarness) attempts(t *testing.T) []activationAttempt {
 	t.Helper()
-	return h.p.journal.load().Attempts
+	return h.p.journal.load(h.p.mode.TenantID, h.p.mode.SiteID, h.p.mode.ApplianceID).Attempts
 }
 
 func brokenDB(h *durHarness) {

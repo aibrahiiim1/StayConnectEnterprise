@@ -61,17 +61,41 @@ func TestBootID_EmptyOrWhitespaceBootIdentityDeniesAdmission(t *testing.T) {
 	}
 }
 
-// A SHORT OR MALFORMED identity is rejected by the clock itself: a value too short to distinguish two boots,
-// or one carrying whitespace or control characters, is far more likely to be a truncated read or an error
-// message than a kernel boot id.
-func TestBootID_MalformedBootIdentityIsRefusedByTheClock(t *testing.T) {
-	for _, id := range []string{"abc", "1234567", "has space here", "x\x00y", "line\nbreak"} {
-		if plausibleBootID(id) {
-			t.Fatalf("%q was accepted as a boot identity", id)
+// THE ACTUAL LINUX CONTRACT. /proc/sys/kernel/random/boot_id is a canonical RFC-4122 UUID in lowercase hex,
+// 8-4-4-4-12 — the kernel formats it with %pUb and produces nothing else. Accepting "any opaque token of at
+// least eight characters" was far too generous: a truncated read would pass, and two different truncations of
+// one id could compare equal to each other and hide a real reboot.
+func TestBootID_OnlyACanonicalLinuxBootIDIsAccepted(t *testing.T) {
+	valid := []string{
+		"f81d4fae-7dec-11d0-a765-00a0c91e6bf6", // the RFC-4122 example, as the kernel would render it
+		"00000000-0000-0000-0000-000000000000",
+		"ffffffff-ffff-ffff-ffff-ffffffffffff",
+	}
+	for _, id := range valid {
+		if !plausibleBootID(id) {
+			t.Fatalf("a canonical Linux boot id was rejected: %q", id)
 		}
 	}
-	if !plausibleBootID("b00a1de-0000-4000-8000-00000000000a") {
-		t.Fatal("a realistic boot identity was rejected")
+
+	invalid := []struct{ id, why string }{
+		{"", "empty"},
+		{"abc", "far too short"},
+		{"1234567", "too short"},
+		{"f81d4fae-7dec-11d0", "TRUNCATED at a group boundary"},
+		{"f81d4fae-7dec-11d0-a765-00a0c91e6bf", "truncated by one character"},
+		{"f81d4fae-7dec-11d0-a765-00a0c91e6bf67", "one character too long"},
+		{"F81D4FAE-7DEC-11D0-A765-00A0C91E6BF6", "uppercase; the kernel emits lowercase"},
+		{"f81d4fae7dec11d0a76500a0c91e6bf6", "no hyphens"},
+		{"f81d4fae-7dec-11d0-a765_00a0c91e6bf6", "wrong separator"},
+		{"g81d4fae-7dec-11d0-a765-00a0c91e6bf6", "non-hex character"},
+		{"f81d4fae 7dec 11d0 a765 00a0c91e6bf6", "spaces instead of hyphens"},
+		{"f81d4fae-7dec-11d0-a765-00a0c91e6bf6\n", "a trailing newline left in place"},
+		{"cat: /proc/.../boot_id: No such file", "an error message copied into place"},
+	}
+	for _, tc := range invalid {
+		if plausibleBootID(tc.id) {
+			t.Fatalf("%q was accepted as a boot identity (%s)", tc.id, tc.why)
+		}
 	}
 }
 
@@ -158,17 +182,157 @@ func TestBootID_AProvenActiveSessionSurvivesAnUnreadableBootIdentity(t *testing.
 
 // ---- 2. the journal must cohere, not merely parse ----------------------------
 
-// writeJournal puts an arbitrary — valid JSON — document in the journal's place.
+// writeJournal puts an arbitrary — valid JSON — document in the journal's place, under THIS appliance's scope.
 func writeJournal(t *testing.T, h *durHarness, attempts []activationAttempt) {
 	t.Helper()
+	writeJournalScoped(t, h, h.p.mode.TenantID, h.p.mode.SiteID, h.p.mode.ApplianceID, attempts)
+}
+
+// writeJournalScoped writes the envelope with an arbitrary scope, so a test can present the appliance with
+// another property's security history.
+func writeJournalScoped(t *testing.T, h *durHarness, tenant, site, appliance string, attempts []activationAttempt) {
+	t.Helper()
 	raw, err := json.Marshal(journalState{
-		TenantID: h.p.mode.TenantID, SiteID: h.p.mode.SiteID, ApplianceID: h.p.mode.ApplianceID,
-		Attempts: attempts})
+		TenantID: tenant, SiteID: site, ApplianceID: appliance, Attempts: attempts})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(h.journalPath(), raw, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// ---- the envelope must belong to THIS appliance ------------------------------
+
+// A JOURNAL FROM ANOTHER TENANT, SITE OR APPLIANCE is not this appliance's security history — and it is not an
+// empty one either. It arrives by ordinary means: a restored image, a cloned VM, a copied /var/lib, a re-homed
+// unit after a tenancy change. Reading it as "no attempts outstanding" would award every guest here a fresh
+// grace on the strength of a file describing somewhere else.
+func TestJournal_AForeignScopeIsUnknownNotAFreshStart(t *testing.T) {
+	const otherID = "99999999-9999-4999-8999-999999999999"
+	coherent := func(h *durHarness) []activationAttempt {
+		return []activationAttempt{{
+			Key: "br-guest|live-1", SessionID: "live-1", BootID: bootIDFor("A"),
+			BeganBootMs: h.clk.ms, DeadlineBootMs: h.clk.ms + phase3ActivationGrace.Milliseconds(),
+		}}
+	}
+	cases := []struct {
+		name        string
+		scope       func(h *durHarness) (string, string, string)
+		withAttempt bool
+	}{
+		{"wrong tenant", func(h *durHarness) (string, string, string) {
+			return otherID, h.p.mode.SiteID, h.p.mode.ApplianceID
+		}, false},
+		{"wrong site", func(h *durHarness) (string, string, string) {
+			return h.p.mode.TenantID, otherID, h.p.mode.ApplianceID
+		}, false},
+		{"wrong appliance", func(h *durHarness) (string, string, string) {
+			return h.p.mode.TenantID, h.p.mode.SiteID, otherID
+		}, false},
+		{"empty tenant", func(h *durHarness) (string, string, string) {
+			return "", h.p.mode.SiteID, h.p.mode.ApplianceID
+		}, false},
+		{"empty site", func(h *durHarness) (string, string, string) {
+			return h.p.mode.TenantID, "", h.p.mode.ApplianceID
+		}, false},
+		{"empty appliance", func(h *durHarness) (string, string, string) {
+			return h.p.mode.TenantID, h.p.mode.SiteID, ""
+		}, false},
+		{"foreign scope with ZERO attempts", func(h *durHarness) (string, string, string) {
+			return otherID, otherID, otherID
+		}, false},
+		{"foreign scope with an otherwise COHERENT attempt", func(h *durHarness) (string, string, string) {
+			return otherID, otherID, otherID
+		}, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(strings.ReplaceAll(tc.name, " ", "_"), func(t *testing.T) {
+			h := newDurHarness(t)
+			brokenDB(h)
+			tenant, site, appliance := tc.scope(h)
+			var attempts []activationAttempt
+			if tc.withAttempt {
+				attempts = coherent(h)
+			}
+			writeJournalScoped(t, h, tenant, site, appliance, attempts)
+			h.restart(t)
+
+			if !h.p.unprovenUnknown {
+				t.Fatal("a journal from another scope was accepted as this appliance's history")
+			}
+			h.pass(t, nil)
+			if h.authorized() {
+				t.Fatal("a foreign-scope journal was read as a clean first run and awarded a fresh grace")
+			}
+			// and it is never silently re-scoped into ours
+			after := h.p.journal.load(h.p.mode.TenantID, h.p.mode.SiteID, h.p.mode.ApplianceID)
+			if !after.Unreadable {
+				t.Fatal("the foreign journal was adopted into this appliance's scope")
+			}
+		})
+	}
+}
+
+// THE CORRECT SCOPE IS STILL ACCEPTED — otherwise the check above would be indistinguishable from refusing
+// every journal, and the whole mechanism would be dead weight.
+func TestJournal_TheCorrectScopeIsAccepted(t *testing.T) {
+	h := newDurHarness(t)
+	brokenDB(h)
+	writeJournal(t, h, []activationAttempt{{
+		Key: "br-guest|live-1", SessionID: "live-1", BootID: bootIDFor("A"),
+		BeganBootMs: h.clk.ms, DeadlineBootMs: h.clk.ms + phase3ActivationGrace.Milliseconds(),
+	}})
+	h.restart(t)
+	if h.p.unprovenUnknown {
+		t.Fatal("this appliance's own journal was rejected")
+	}
+	if len(h.attempts(t)) != 1 {
+		t.Fatalf("the record was not restored: %+v", h.attempts(t))
+	}
+}
+
+// AND A TRULY ABSENT FILE remains the one legitimate clean first run.
+func TestJournal_OnlyAnAbsentFileIsACleanFirstRun(t *testing.T) {
+	h := newDurHarness(t)
+	if err := os.Remove(h.journalPath()); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	h.restart(t)
+	if h.p.unprovenUnknown {
+		t.Fatal("an absent journal was treated as unknown; every new appliance would fail closed")
+	}
+	h.pass(t, nil)
+	if !h.authorized() {
+		t.Fatal("a healthy first run was denied")
+	}
+}
+
+// ---- the two identities in a record must be the same session -----------------
+
+// parseClassKey is the canonical reader, and it is the only one. "Contains a pipe" would let br-guest|a|b be
+// read two ways, and a record whose identity can be read two ways can be made to describe a different session
+// than the one it was written for.
+func TestJournal_CanonicalKeyParsing(t *testing.T) {
+	bridge, session, ok := parseClassKey("br-guest|live-1")
+	if !ok || bridge != "br-guest" || session != "live-1" {
+		t.Fatalf("the canonical form did not parse: %q %q %v", bridge, session, ok)
+	}
+	for _, bad := range []string{
+		"",                 // empty
+		"live-1",           // no separator
+		"|live-1",          // empty bridge
+		"br-guest|",        // empty session
+		"br-guest|a|b",     // AMBIGUOUS: two separators, two readings
+		"br-guest|live-1|", // trailing separator
+		"|",                // both empty
+		"   |live-1",       // whitespace bridge
+		"br-guest|   ",     // whitespace session
+	} {
+		if _, _, ok := parseClassKey(bad); ok {
+			t.Fatalf("%q was accepted as a canonical class key", bad)
+		}
 	}
 }
 
@@ -217,6 +381,21 @@ func TestJournal_SemanticallyIncoherentRecordsAreTreatedAsUnknown(t *testing.T) 
 			a.Strikes = 4
 		})},
 		{"duplicate records for one key", []activationAttempt{good, good}},
+		{"KEY AND SESSION NAME DIFFERENT SESSIONS", mutate(func(a *activationAttempt) {
+			a.Key, a.SessionID = "br-guest|session-B", "session-A"
+		})},
+		{"key session differs by one character", mutate(func(a *activationAttempt) {
+			a.SessionID = "live-2"
+		})},
+		{"empty bridge in the key", mutate(func(a *activationAttempt) {
+			a.Key, a.SessionID = "|live-1", "live-1"
+		})},
+		{"no session suffix in the key", mutate(func(a *activationAttempt) {
+			a.Key = "br-guest|"
+		})},
+		{"ambiguous key with two separators", mutate(func(a *activationAttempt) {
+			a.Key, a.SessionID = "br-guest|live|1", "live|1"
+		})},
 	}
 
 	for _, tc := range cases {

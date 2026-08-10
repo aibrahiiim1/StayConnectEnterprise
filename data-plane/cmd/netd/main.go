@@ -185,7 +185,7 @@ func main() {
 	// The activation journal is restored SEPARATELY from the class inventory, and unconditionally. A reboot
 	// legitimately drops every class — the kernel is empty — but it must not drop the fact that a session's
 	// activation has been unprovable, or rebooting would be a way to buy a fresh grace period.
-	p3shaping.restoreAttempts(p3shaping.journal.load())
+	p3shaping.restoreAttempts(p3shaping.journal.load(p3mode.TenantID, p3mode.SiteID, p3mode.ApplianceID))
 	if p3mode.Active {
 		slog.Info("netd phase3 managed-class state restored",
 			"persisted", len(prevClasses.Classes), "carried_forward", len(p3shaping.classes),
