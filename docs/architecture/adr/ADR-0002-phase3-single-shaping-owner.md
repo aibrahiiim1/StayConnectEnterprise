@@ -68,6 +68,8 @@ The lease lengths are the design, not a tuning knob:
 | | Length | Why |
 |---|---|---|
 | Full lease | 90s, clamped by the session's hard access boundary | equal to the producer's plan validity, so packet forwarding stops at the same moment the appliance stops being able to vouch for what it is forwarding |
+| Where the bound lives | a write-ahead journal, fsynced before admission | recorded with the rest of the inventory at the end of a pass, a crash in between loses it and the next process awards a fresh grace |
+| What measures it | boot-relative monotonic time (`/proc/uptime`) | the wall clock can move backwards, and a bound measured against it grows by exactly the jump |
 | The clamp | **truncated** to whole seconds, never rounded up | nft's timeout granularity is whole seconds. Rounding up a boundary 200ms away to `timeout 1s` puts the expiry 800ms PAST the deadline — on almost every boundary, since they do not land on whole seconds. Below one representable second no lease is issued at all. |
 | Provisional lease | 15s | the guest is enforced but durable `active` is not yet proven; if nothing ever proves it, the kernel drops the authorization by itself |
 | Activation grace | 30s | a transient database blip must not disconnect a correctly enforced guest — but past this the session is failed closed and quarantined with a doubling backoff, so an unprovable activation can never become permanent access |
@@ -279,7 +281,12 @@ runbook or the report.
     element, and that is proven by snapshot comparison on both sides of the mutation, not asserted.
 18. A lease clamped to a hard access boundary never expires later than that boundary, at any timestamp
     precision. Quantization resolves downward, and a remainder too short to represent yields no lease.
-19. The maximum authorization time allowed for an activation that cannot be proven is **durable**. A restart
-    or a reboot continues the same countdown; it can never reset or extend it. If the durable record cannot be
-    read or written, an unprovable activation is treated as having already spent its grace — losing a file is
-    not a way to buy provisional authorization.
+19. The maximum authorization time allowed for an activation that cannot be proven is **durable, and durable
+    BEFORE the access begins**. The attempt and its bound are fsynced — file and directory — before the first
+    provisional element is installed, so a crash anywhere after admission recovers the same bound and a crash
+    before it granted nothing. A write that cannot be proven durable denies admission; a failed *clear* leaves
+    the record in place, because a stale marker is harmless to a session that can be proven active.
+20. That bound is measured against **boot-relative monotonic time**, never the wall clock. An NTP correction,
+    a wrong RTC or a resumed snapshot cannot lengthen it. Across a reboot the monotonic timeline restarts and
+    is not bridged: the session stays denied until durable state proves it ACTIVE, because the only available
+    estimate of the downtime comes from the clock this design refuses to trust.

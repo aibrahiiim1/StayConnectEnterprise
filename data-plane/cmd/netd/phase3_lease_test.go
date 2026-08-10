@@ -387,11 +387,13 @@ func TestActivation_ProvisionalStateIsNotRenewedForever(t *testing.T) {
 		t.Fatalf("plan refused: %v", err)
 	}
 
-	// Passes keep arriving and the database stays down.
+	// Passes keep arriving and the database stays down. The MONOTONIC security clock advances with them —
+	// that clock, not the wall clock, is what the activation bound is measured against.
 	at := start
 	for i := int64(2); i <= 8; i++ {
 		at = at.Add(10 * time.Second)
 		g.advance(10 * time.Second)
+		advanceSecurityClock(p, 10*time.Second)
 		if _, err := p.submit(t.Context(), leasePlanAt(i, nil, at), at); err != nil {
 			t.Fatalf("plan refused: %v", err)
 		}
@@ -489,6 +491,14 @@ func assertDenyBeforeTeardown(t *testing.T, g *fakeGate) {
 }
 
 func mustIP(s string) net.IP { return net.ParseIP(s) }
+
+// advanceSecurityClock moves the MONOTONIC clock the activation bound is measured against. Tests that let
+// wall time pass must move this too, because the bound deliberately ignores the wall clock.
+func advanceSecurityClock(p *phase3Shaping, d time.Duration) {
+	if c, ok := p.secClock.(*fixedSecurityClock); ok {
+		c.ms += d.Milliseconds()
+	}
+}
 
 // ---- A. the hard boundary, at every timestamp precision ---------------------
 //

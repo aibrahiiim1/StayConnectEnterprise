@@ -318,7 +318,11 @@ func liveWriter(tc shaper) *phase3Shaping {
 	// A live writer always has generation authority — without it no class can be made accountable, which is
 	// its own test (TestNoGenerationAuthorityMeansNoAccountableClass) rather than the default condition.
 	return &phase3Shaping{shp: tc, mode: liveMode(), authz: shapingAuthz{allowedUID: testUID, configured: true},
-		generations: &fakeGenerations{}}
+		generations: &fakeGenerations{},
+		// Every writer needs a MONOTONIC security clock: the activation bound is measured against it, and a
+		// writer without one cannot measure the bound and therefore (correctly) refuses to authorize anyone.
+		// The durability suite replaces this with a clock it drives.
+		secClock: &fixedSecurityClock{ms: 60_000, bootID: "boot-sys"}}
 }
 
 // envelope builds a well-formed plan for the live scope, declaring the bridges its sessions use plus the

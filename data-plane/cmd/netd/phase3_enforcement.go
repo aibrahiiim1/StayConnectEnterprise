@@ -103,21 +103,6 @@ const (
 	activationFailed
 )
 
-// quarantineState is what is remembered about a session whose durable activation could not be proven.
-// The fields are exported because this state is PERSISTED: it is written into the durable class-state file
-// (see unprovenRecord) and restored on start, so that a restart or a reboot continues the same countdown
-// rather than granting the session a fresh grace period.
-type quarantineState struct {
-	// Since is when the CURRENT attempt first failed to prove ACTIVE. Zero means the attempt has not failed
-	// yet — the grace has not started running.
-	Since time.Time
-	// Until is the instant before which this session must not be re-admitted at all.
-	Until time.Time
-	// Strikes counts how many attempts have exhausted the grace. It only ever grows, so a session that
-	// genuinely cannot be activated is re-attempted less and less often instead of cycling forever.
-	Strikes int
-}
-
 // quarantineBackoff is how long a session stays denied after an attempt exhausts the activation grace.
 //
 // It doubles, and it is capped. The doubling is what makes the outcome converge: a session whose activation
@@ -139,16 +124,7 @@ func quarantineBackoff(strikes int) time.Duration {
 	return d
 }
 
-// problemFor renders the one message both unproven paths report.
-func problemFor(sessionID string, err, cerr error) string {
-	problem := "session " + sessionID + ": enforcement is in force but durable ACTIVE could not be proven: " + err.Error()
-	if cerr != nil {
-		problem += " (state unreadable: " + cerr.Error() + ")"
-	}
-	return problem
-}
-
-// quarantineFor returns this class's quarantine record, creating it on demand. Caller holds p.mu.
+// quarantineFor returns this class's record, creating it on demand. Caller holds p.mu.
 func (p *phase3Shaping) quarantineFor(key string) *quarantineState {
 	if p.quarantined == nil {
 		p.quarantined = map[string]*quarantineState{}
@@ -161,13 +137,30 @@ func (p *phase3Shaping) quarantineFor(key string) *quarantineState {
 	return q
 }
 
-func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge string, minor int, epoch int64, now time.Time) (activationOutcome, string) {
+// proveActive promotes a Session to active after both enforcement halves are confirmed, and reports whether
+// durable ACTIVE is PROVEN. Caller holds p.mu.
+//
+// The outcome is one of exactly three, and none of them is "leave it and hope":
+//
+//	PROVEN     — the promotion committed, or a re-read shows it had already committed. Full lease.
+//	UNPROVEN   — genuinely unknown and still inside the activation grace. The guest keeps only the SHORT
+//	             provisional lease, so if nothing ever proves the promotion the kernel expires it unaided.
+//	FAILED     — the grace is spent. The caller fails closed: authorization revoked and proven gone first,
+//	             then the accountable class torn down, and the session quarantined with a doubling backoff.
+//
+// The re-read is what makes this safe rather than merely strict. A lost acknowledgement on a committed
+// transaction is indistinguishable from a failed one at the call site, and tearing a correct guest down over
+// it would be an outage manufactured out of a dropped packet.
+//
+// EVERY DURATION HERE IS BOOT-RELATIVE MONOTONIC TIME. nowBoot comes from /proc/uptime, not the wall clock,
+// so an NTP correction or a wrong RTC cannot lengthen the grace (see phase3_securitytime.go).
+func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge string, minor int, epoch int64, nowBoot int64) (activationOutcome, string) {
 	if p.enforcement == nil {
 		return activationProven, "" // no recorder wired (unit tests drive the kernel halves directly)
 	}
 	outcome, err := p.enforcement.Activate(ctx, sessionID, bridge, minor, epoch)
 	if err == nil {
-		delete(p.quarantined, key)
+		p.clearAttempt(key)
 		slog.Info("phase3: session enforcement confirmed", "session", sessionID, "bridge", bridge,
 			"minor", minor, "epoch", epoch, "outcome", outcome)
 		return activationProven, ""
@@ -175,37 +168,77 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 	// AMBIGUOUS. Ask authoritative state whether the promotion actually landed.
 	active, cerr := p.enforcement.Confirm(ctx, sessionID)
 	if cerr == nil && active {
-		delete(p.quarantined, key)
+		p.clearAttempt(key)
 		slog.Info("phase3: session enforcement confirmed by re-read after an unacknowledged promotion",
 			"session", sessionID, "bridge", bridge, "minor", minor, "epoch", epoch)
 		return activationProven, ""
 	}
+
 	q := p.quarantineFor(key)
-	if q.Since.IsZero() {
-		if p.unprovenUnknown {
-			// The durable clock is unreadable or unwritable, so this session's history is UNKNOWN. It might
-			// have been failing for hours. Awarding a fresh grace here would mean that losing one file buys a
-			// guest unbounded provisional authorization, so the grace is treated as already spent.
-			q.Strikes++
-			q.Until = now.Add(quarantineBackoff(q.Strikes))
-			return activationFailed, problemFor(sessionID, err, cerr) +
-				" — the durable activation clock is unavailable, so no grace period can be granted; failing closed until " +
-				q.Until.UTC().Format(time.RFC3339)
-		}
-		q.Since = now
-	}
 	problem := problemFor(sessionID, err, cerr)
-	if now.Sub(q.Since) <= phase3ActivationGrace {
+
+	if q.BeganBootMs == 0 || q.crossBoot(p.currentBootID()) {
+		// The first failure of this attempt. The write-ahead record already exists (admission could not have
+		// happened otherwise), so this only sharpens it with the moment the grace actually started.
+		q.BootID = p.currentBootID()
+		q.BeganBootMs = nowBoot
+		q.DeadlineBootMs = nowBoot + phase3ActivationGrace.Milliseconds()
+		q.BeganWall = p.wallStamp()
+		if perr := p.persistAttempts(); perr != nil {
+			// The bound could not be made durable. A restart would not know this grace had started, so the
+			// only safe answer is to stop granting it.
+			q.Strikes++
+			q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
+			return activationFailed, problem +
+				" — and the activation bound could not be made durable (" + perr.Error() + "); failing closed"
+		}
+	}
+
+	if nowBoot <= q.DeadlineBootMs {
 		return activationUnproven, problem + " — holding a provisional lease only"
 	}
-	// The grace is spent. Record the strike, deny re-admission for the backoff, and restart the grace clock so
-	// the next attempt (if one is ever permitted) gets its own full chance rather than an already-spent one.
+	// The grace is spent. Record the strike, deny re-admission for the backoff, and clear the start so the
+	// next permitted attempt gets its own full chance rather than an already-spent one.
 	q.Strikes++
-	q.Until = now.Add(quarantineBackoff(q.Strikes))
-	q.Since = time.Time{}
-	return activationFailed, problem + " — activation grace exhausted; failing closed and quarantining until " +
-		q.Until.UTC().Format(time.RFC3339)
+	q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
+	q.BeganBootMs = 0
+	q.DeadlineBootMs = 0
+	if perr := p.persistAttempts(); perr != nil {
+		// Failing to persist a HARDER state is safe: the in-memory record already denies, and the older
+		// durable record still says an attempt is outstanding. It is reported, never swallowed.
+		problem += " (the strike could not be persisted: " + perr.Error() + ")"
+	}
+	return activationFailed, problem + " — activation grace exhausted; failing closed and quarantining"
 }
+
+// clearAttempt removes a durable activation record once the Session is PROVEN active. Caller holds p.mu.
+//
+// A failure to clear is deliberately NOT an error the caller acts on. The record is a fail-closed marker: a
+// stale one is harmless to a session that can be proven active — the next pass proves it again and clears it
+// again — and protective for one that cannot. Leaving it behind is always the safe direction, so this reports
+// and moves on rather than turning a cleanup problem into a disconnection.
+func (p *phase3Shaping) clearAttempt(key string) {
+	if _, held := p.quarantined[key]; !held {
+		return
+	}
+	delete(p.quarantined, key)
+	if err := p.persistAttempts(); err != nil {
+		slog.Warn("phase3: an activation record could not be cleared; it is left in place, which is the safe direction",
+			"key", key, "err", err)
+	}
+}
+
+// problemFor renders the one message both unproven paths report.
+func problemFor(sessionID string, err, cerr error) string {
+	problem := "session " + sessionID + ": enforcement is in force but durable ACTIVE could not be proven: " + err.Error()
+	if cerr != nil {
+		problem += " (state unreadable: " + cerr.Error() + ")"
+	}
+	return problem
+}
+
+// wallStamp is the AUDIT-ONLY timestamp recorded beside the monotonic readings.
+func (p *phase3Shaping) wallStamp() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // markEnded converges durable state after access has been denied and torn down. Caller holds p.mu.
 func (p *phase3Shaping) markEnded(ctx context.Context, sessionID string) {

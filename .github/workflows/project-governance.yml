@@ -36,6 +36,15 @@ jobs:
       - name: Generated-block consistency
         run: python tools/project-state.py check-generated
 
+      - name: PR-metadata Zero-Stale (the one authoritative surface that is not committed)
+        # Every other check stops at the repository boundary, so a PR whose top-level Status still announced a
+        # superseded candidate state passed every gate while being the most visible wrong statement in the
+        # delivery. This reads the PR body through the API IN THIS RUN and compares it with
+        # governance/project-state.json. It hard-codes no run ids and no future values.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash tools/validate-pr-metadata.sh
+
       - name: Adversarial mutation suite
         run: python tools/tests/project_state_validator/run_mutations.py
 

@@ -124,10 +124,18 @@ type phase3Shaping struct {
 	// would simply hand the next pass a clean slate to admit the same guest again, forever (see proveActive
 	// and the quarantine check in provisionSession).
 	quarantined map[string]*quarantineState
-	// unprovenUnknown records that the durable activation clock could not be read at startup, or can no
-	// longer be written. Either way the appliance cannot bound an unproven activation durably, so it must not
-	// hand out a fresh grace period: an activation that cannot be proven is treated as having already spent
-	// one. Losing a file is not a way to buy unbounded provisional authorization.
+	// journal is the WRITE-AHEAD durability boundary for those records (phase3_journal.go). An attempt is
+	// fsynced to disk BEFORE the guest is provisionally authorized, so a crash in the window between
+	// admission and the end-of-pass inventory write cannot lose the bound.
+	journal *activationJournal
+	// secClock is the MONOTONIC, boot-relative security clock the activation bound is measured against
+	// (phase3_securitytime.go). It is not the wall clock, deliberately: a wall clock that moves backwards
+	// lengthens the bound.
+	secClock securityClock
+	// unprovenUnknown records that the durable activation journal could not be READ at startup. It is not a
+	// substitute for the durable record — a write failure denies admission outright rather than being
+	// remembered in memory — but an unreadable journal means the history of every session is unknown, and an
+	// activation that cannot be proven must then be treated as having already spent its grace.
 	unprovenUnknown bool
 	// classes/epochCeiling/bootID are the DURABLE half of the same state (see phase3_classstate.go). Without
 	// them a restart re-issues epoch 1 and accounting stalls; a reboot re-issues epoch 1 and a recreated

@@ -191,6 +191,7 @@ if [ -z "$PY3" ] || [ -z "$act" ]; then
   p3drift=$((p3drift+1))
 fi
 p3mat="$($PY3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8')).get('phases',{}).get('3',{}).get('maturity',''))" "$REPO_ROOT/governance/project-state.json" 2>/dev/null)"
+p3stage="$($PY3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8')).get('phase3_execution',{}).get('stage',''))" "$REPO_ROOT/governance/project-state.json" 2>/dev/null)"
 case "$act" in
   *PRE_LIVE_SAFETY*)
     case "$p3mat" in
@@ -200,6 +201,24 @@ case "$act" in
     case "$p3mat" in
       *"IMPLEMENTATION IN PROGRESS"*)
         echo "    HIT [stage disagreement]: the Phase-3 stage still claims IMPLEMENTATION IN PROGRESS"; p3drift=$((p3drift+1));;
+    esac
+    # phase3_execution.stage is a SECOND current-state field, read by different documents, and it is where
+    # the previous overclaim survived: current_activity said PRE-LIVE while this still opened with the
+    # superseded SOFTWARE-candidate token. Both must agree, and the check must look at both.
+    case "$p3stage" in
+      PHASE_3_PRE_LIVE_SAFETY_CANDIDATE*) : ;;
+      *) echo "    HIT [stage disagreement]: phase3_execution.stage opens with: $(printf '%.70s' "$p3stage")"; p3drift=$((p3drift+1));;
+    esac
+    # The CURRENT portion of that narrative must not quote the superseded Portal budget. Everything after the
+    # explicit historical marker is history and is allowed to.
+    p3head="$(printf '%s' "$p3stage" | head -c 1200)"
+    case "$p3head" in
+      *"1200ms"*)
+        case "$p3head" in
+          *HISTORICAL*|*superseded*|*SUPERSEDED*) : ;;
+          *) echo "    HIT [stale Portal budget in the current stage narrative]: phase3_execution.stage quotes 1200ms as current"; p3drift=$((p3drift+1));;
+        esac
+        ;;
     esac
     if [ -f "$REPORT" ] && grep -q "Status: DARK ACCEPTANCE CANDIDATE" "$REPORT"; then
       echo "    HIT [superseded candidate state]: the Final Report still declares DARK ACCEPTANCE CANDIDATE"; p3drift=$((p3drift+1))

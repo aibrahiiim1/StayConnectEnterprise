@@ -311,21 +311,70 @@ if grep -q 'remaining.Truncate(time.Second)' "$LEASE" && grep -q 'ErrLeaseTooSho
 else
   no "a boundary-clamped lease can be rounded up past the hard access boundary"
 fi
-# The activation-uncertainty clock must be DURABLE. Held only in memory, a netd restart hands the same guest a
-# brand-new grace, so a process restarting every few seconds renews a provisional authorization forever.
-CLASSSTATE="$ROOT/data-plane/cmd/netd/phase3_classstate.go"
-if grep -q 'unprovenRecord' "$CLASSSTATE" && grep -q 'Unproven' "$CLASSSTATE"; then
-  ok "the activation-uncertainty clock is persisted with the durable class inventory"
+# The activation-uncertainty bound must be WRITE-AHEAD DURABLE: fsynced BEFORE the guest is provisionally
+# authorized. Recorded at the end of the pass instead, a crash in between loses the bound entirely and the next
+# process awards a brand-new grace — so a crash loop renews provisional access forever.
+JOURNAL="$ROOT/data-plane/cmd/netd/phase3_journal.go"
+if [ -f "$JOURNAL" ] && grep -q 'beginAttempt' "$JOURNAL" && grep -q 'd.Sync()' "$JOURNAL"; then
+  ok "the activation bound is journalled and fsynced (file + directory) through an explicit durability boundary"
 else
-  no "the activation-uncertainty bound is process-local; a restart would reset it"
+  no "there is no write-ahead durability boundary for the activation bound"
 fi
-if grep -q 'unprovenUnknown' "$ROOT/data-plane/cmd/netd/phase3_shaping.go" \
-   && grep -q 'unprovenUnknown' "$ROOT/data-plane/cmd/netd/phase3_enforcement.go"; then
-  ok "an unreadable or unwritable activation clock fails closed instead of granting a fresh grace"
+# ORDERING: the write-ahead record must come BEFORE the first provisional authorization, in that one function.
+begin_line="$(grep -n 'beginAttempt(' "$PROV" | head -1 | cut -d: -f1)"
+prov_auth_line="$(grep -n 'gate.Authorize(ctx, bridge, ip, provisionalOrLess' "$PROV" | head -1 | cut -d: -f1)"
+if [ -n "$begin_line" ] && [ -n "$prov_auth_line" ] && [ "$begin_line" -lt "$prov_auth_line" ]; then
+  ok "the activation bound is made durable BEFORE the first provisional packet authorization"
 else
-  no "losing the durable activation clock would award a fresh grace period"
+  no "a guest can be provisionally authorized before the bound on that attempt is durable"
+fi
+if grep -q 'unprovenUnknown' "$ROOT/data-plane/cmd/netd/phase3_shaping.go" && grep -q 'unprovenUnknown' "$JOURNAL"; then
+  ok "an unreadable activation journal fails closed instead of granting a fresh grace"
+else
+  no "losing the durable activation journal would award a fresh grace period"
+fi
+# SECURITY TIME: the bound must be measured against a monotonic clock, never the wall clock.
+SECTIME="$ROOT/data-plane/cmd/netd/phase3_securitytime.go"
+if [ -f "$SECTIME" ] && grep -q 'BootMillis' "$SECTIME" && grep -q 'proc/uptime' "$SECTIME"; then
+  ok "the activation bound is measured against boot-relative monotonic time, not the wall clock"
+else
+  no "the activation bound is measured against a clock that NTP or a wrong RTC can move backwards"
+fi
+if grep -q 'crossBoot' "$JOURNAL" && grep -q 'crossBoot' "$PROV"; then
+  ok "an unproven activation that survives a reboot is not granted a fresh grace"
+else
+  no "a reboot can manufacture a fresh unproven-activation grace"
 fi
 
+# ---------------------------------------------------------------- 12. the surgical live-dark foundation
+# Installing the Phase-3 nft foundation on a live appliance must never flush or recreate the StayConnect table:
+# the authorization set is part of it, and recreating it means recreating it EMPTY, taking every live legacy
+# guest offline at once.
+FOUND="$ROOT/data-plane/internal/nftfoundation/foundation.go"
+if [ -f "$FOUND" ]; then
+  if grep -nE '"(flush|delete table|add table)' "$FOUND" >/dev/null 2>&1; then
+    no "the surgical foundation issues a flush/table command; it would disconnect every live legacy guest"
+  else
+    ok "the surgical foundation never flushes or recreates the StayConnect table"
+  fi
+  if grep -q 'sameElements' "$FOUND" && grep -q 'LegacyBefore' "$FOUND"; then
+    ok "the foundation proves legacy authorization parity before and after, and rolls back if it cannot"
+  else
+    no "the foundation does not prove legacy authorization parity"
+  fi
+else
+  no "the surgical Phase-3 nft foundation is missing; a flag-only cutover cannot be prepared safely"
+fi
+
+# ---------------------------------------------------------------- 13. hard-boundary + durable bound
+# A lease clamped to a guest's hard access boundary must never be rounded UP: nft's timeout granularity is
+# whole seconds, so rounding up expires the authorization PAST the deadline the business stated, by up to
+# 999ms, on almost every boundary that does not land on a whole second.
+if grep -q 'remaining.Truncate(time.Second)' "$LEASE" && grep -q 'ErrLeaseTooShort' "$NFTGO"; then
+  ok "a boundary-clamped lease is truncated, never rounded up, and a sub-second lease is refused"
+else
+  no "a boundary-clamped lease can be rounded up past the hard access boundary"
+fi
 # ============================================================================== report
 # Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json
 # silently reported a smaller, all-passing suite.

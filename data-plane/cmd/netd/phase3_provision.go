@@ -71,6 +71,21 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		return
 	}
 
+	// ---- SECURITY TIME: the bound is measured against a clock nobody can move ---------------------------
+	//
+	// Everything below compares BOOT-RELATIVE MONOTONIC milliseconds, never the wall clock. A wall clock that
+	// moves backwards — an NTP correction, a wrong RTC after a power cut, a resumed snapshot — makes
+	// `now - began` smaller or negative, and a 30-second grace becomes as long as the jump. If the clock
+	// cannot be read at all, the bound cannot be measured, and a bound that cannot be measured must not be
+	// assumed unspent.
+	nowBoot, clockErr := p.bootNow()
+	if clockErr != nil {
+		p.failClosed(ctx, bridge, ip, res,
+			"shape "+s.SessionID+": the monotonic security clock is unreadable ("+clockErr.Error()+
+				"); the activation bound cannot be measured, so no provisional access is granted")
+		return
+	}
+
 	// ---- QUARANTINE: a session whose activation could not be proven --------------------------------------
 	//
 	// Failing closed once is not enough on its own. The session is still in every plan, so the very next pass
@@ -84,11 +99,45 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// be read at all. The two conditions cover the two different failures: a database that is simply down
 	// yields no access whatsoever after the first grace, and an activation that can never succeed yields a
 	// rapidly shrinking fraction of one.
-	if q := p.quarantined[key]; q != nil && !q.Until.IsZero() {
-		hold := now.Before(q.Until)
+	//
+	// A CROSS-BOOT record is handled separately and more strictly. Its readings belong to a monotonic timeline
+	// that no longer exists, so they are not old — they are incomparable. The only honest way to bridge them
+	// would be to ask the RTC how long the unit was down, which is the very clock this design refuses to
+	// trust. So a boot change never yields a fresh grace: the session stays denied until AUTHORITATIVE durable
+	// state resolves it, and the one thing that resolves it is proof that the Session is already active.
+	if q := p.quarantined[key]; q != nil {
+		if q.crossBoot(p.currentBootID()) {
+			resolved := false
+			if p.enforcement != nil {
+				if active, cerr := p.enforcement.Confirm(ctx, s.SessionID); cerr == nil && active {
+					// Durable state proves the guest really is active. The attempt is over; enforcement can be
+					// rebuilt normally, and the stale record is cleared.
+					resolved = true
+					p.clearAttempt(key)
+				}
+			}
+			if !resolved {
+				if derr := p.denyAccess(ctx, bridge, ip); derr != nil {
+					res.Problems = append(res.Problems,
+						"cross-boot hold "+s.SessionID+": PACKET AUTHORIZATION NOT PROVEN REMOVED: "+derr.Error())
+				}
+				res.Failed++
+				res.Problems = append(res.Problems, "shape "+s.SessionID+
+					": an unproven activation survived a reboot; its monotonic bound cannot be carried across "+
+					"boots and durable ACTIVE is not proven, so the session stays denied")
+				return
+			}
+		}
+	}
+	if q := p.quarantined[key]; q != nil && q.BackoffUntilBootMs != 0 {
+		hold := nowBoot < q.BackoffUntilBootMs
 		if !hold && p.enforcement != nil {
 			if _, err := p.enforcement.Confirm(ctx, s.SessionID); err != nil {
-				q.Until = now.Add(quarantineBackoff(q.Strikes))
+				q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
+				if perr := p.persistAttempts(); perr != nil {
+					res.Problems = append(res.Problems,
+						"quarantine "+s.SessionID+": the extended backoff could not be persisted: "+perr.Error())
+				}
 				hold = true
 			}
 		}
@@ -102,11 +151,11 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 			}
 			res.Failed++
 			res.Problems = append(res.Problems, "shape "+s.SessionID+
-				": quarantined after "+itoa(q.Strikes)+" unproven activation(s); not re-admitting before "+
-				q.Until.UTC().Format(time.RFC3339))
+				": quarantined after "+itoa(q.Strikes)+" unproven activation(s); not re-admitting for another "+
+				itoa(int((q.BackoffUntilBootMs-nowBoot)/1000))+"s")
 			return
 		}
-		q.Until = time.Time{} // the backoff has elapsed and durable state is readable: one fresh attempt
+		q.BackoffUntilBootMs = 0 // the backoff has elapsed and durable state is readable: one fresh attempt
 	}
 
 	// ---- ORDINARY RE-RATE of an already-active class ----------------------------------------------------
@@ -129,7 +178,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 				// Converge durable state. A Session whose activation acknowledgement was lost is enforced in
 				// the kernel but still says PENDING_ENFORCEMENT, and this is the pass that must finish the job
 				// — the promotion is idempotent, so a session already active is untouched.
-				outcome, problem := p.proveActive(ctx, key, s.SessionID, bridge, minor, epoch, now)
+				outcome, problem := p.proveActive(ctx, key, s.SessionID, bridge, minor, epoch, nowBoot)
 				if problem != "" {
 					res.Failed++
 					res.Problems = append(res.Problems, problem)
@@ -231,6 +280,18 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// The lease is the SHORT one until durable state is proven in step (i). If this process dies between here
 	// and there, the kernel drops the authorization on its own within that bound.
 	if p.gate != nil {
+		// WRITE-AHEAD. The attempt and its deadline are fsynced — file AND directory — before the element goes
+		// in. Recording it afterwards, with the rest of the inventory at the end of the pass, leaves a window
+		// in which a crash loses the bound entirely: the next process finds a valid older file, or none at
+		// all, which looks exactly like a clean first run, and awards a brand-new grace. Repeat the crash and
+		// the guest holds provisional access forever with every individual bound still correct.
+		//
+		// If the record cannot be proven durable, the guest is not authorized. There is nothing to recover
+		// from that, because nothing was granted.
+		if problem := p.beginAttempt(ctx, key, s.SessionID, nowBoot); problem != "" {
+			p.failClosed(ctx, bridge, ip, res, "authorize "+s.SessionID+": "+problem)
+			return
+		}
 		if err := p.gate.Authorize(ctx, bridge, ip, provisionalOrLess(lease)); err != nil {
 			p.failClosed(ctx, bridge, ip, res, "authorize "+s.SessionID+": "+err.Error())
 			return
@@ -258,7 +319,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// ---- (i) PROVE durable ACTIVE, then extend the lease -----------------------------------------------
 	// Only now is "this guest is authorized and metered" a true statement, so only now may the Session say so
 	// — and only once the Session DOES say so may the guest hold a full-length lease.
-	outcome, problem := p.proveActive(ctx, key, s.SessionID, bridge, minor, epoch, now)
+	outcome, problem := p.proveActive(ctx, key, s.SessionID, bridge, minor, epoch, nowBoot)
 	if problem != "" {
 		res.Failed++
 		res.Problems = append(res.Problems, problem)

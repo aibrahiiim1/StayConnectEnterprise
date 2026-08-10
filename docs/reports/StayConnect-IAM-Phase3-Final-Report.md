@@ -104,7 +104,32 @@ they were built and are `PASS — SOFTWARE` in the matrix.
   deadline instead of a flat maximum it could never reach. There is still exactly one budget for the endpoint,
   so the occupancy-enumeration protection is unchanged in form.
 
-**The final pre-live corrections.** Three things were still wrong in ways that read as correct:
+**The final durability closure.** Three more things were wrong in ways that read as correct:
+
+- **The security timer was not durable at the instant access began.** The attempt was recorded with the rest
+  of the class inventory at the END of a reconciliation pass, but the guest was authorized in the middle of
+  one. A crash in between lost the bound entirely, and the next process found either a perfectly valid older
+  file or none at all — which is indistinguishable from a clean first run — and awarded a brand-new grace.
+  Repeat the crash and the guest holds provisional access indefinitely with every individual bound still
+  correct. The record is now WRITE-AHEAD: fsynced, file and directory, in its own journal, before the first
+  provisional element goes in. A write that cannot be proven durable denies admission — there is nothing to
+  recover, because nothing was granted. A failed CLEAR is the opposite asymmetry and leaves the record in
+  place, which is harmless to a session that can be proven active and protective for one that cannot.
+- **The bound was measured against a clock anyone could move.** It compared Unix wall-clock timestamps, so an
+  NTP correction, a wrong RTC after a power cut or a resumed snapshot made `now − began` smaller (or negative)
+  and stretched a 30-second grace to the size of the jump. It is now measured against boot-relative monotonic
+  time from `/proc/uptime`, which no clock adjustment can move; the wall-clock stamp survives only as an
+  audit field, explicitly labelled. Across a reboot the monotonic timeline restarts and cannot be bridged
+  honestly — the only available estimate of the downtime comes from the very RTC that is not trusted — so a
+  boot change never yields a fresh grace: the session stays denied until durable state proves it ACTIVE.
+- **The repository was not actually Zero-Stale.** `current_activity` read PRE-LIVE SAFETY while
+  `phase3_execution.stage` still opened with the superseded SOFTWARE-candidate token and still quoted the old
+  1200ms Portal budget as current, and PR #6's Status line still announced `DARK ACCEPTANCE CANDIDATE`. The
+  first two are now checked against each other; the third is checked at the CI boundary, because the PR body
+  is the one authoritative surface that is not committed content and every previous check stopped at the
+  repository edge.
+
+**The previous pre-live corrections.** Three things were wrong in ways that read as correct:
 
 - **A clamped lease could overshoot its own deadline.** `leaseFor` computed the exact remaining time to
   `AccessEndsAt`, and then the nft layer rounded it UP to whole seconds — so a boundary 1.9 seconds away
@@ -214,7 +239,7 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 
 | Test | Result | Evidence |
 |---|---|---|
-| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, durable activation clock) | **PASS 31/31** | `scripts/phase3-preflight.sh --json` |
+| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, write-ahead durable activation bound, monotonic security time) | **PASS 37/37** | `scripts/phase3-preflight.sh --json` |
 | Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 362/362** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
 | PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** (all eleven) | `scripts/pmsd-pg-integration.sh` |
 | Go unit tests, whole module | **PASS** | `go test ./... -count=1` (JSON-counted) |
@@ -318,6 +343,13 @@ appears.
 | 30u | An unreadable, missing-as-corrupt or unwritable durable activation clock FAILS CLOSED rather than awarding a fresh grace; a legitimately absent file on a first run does not | **PASS — SOFTWARE** | `classStore.load` (absent vs corrupt); `unprovenUnknown`; `phase3_durability_test.go`; preflight |
 | 30v | Recovery still works: a promotion that really committed is recovered by authoritative re-read across a restart and the guest is never disconnected — while a readable-but-PENDING database does not silently reset an exhausted grace | **PASS — SOFTWARE** | `proveActive` re-read; `phase3_durability_test.go` |
 | 30w | A session with no wall-clock `AccessEndsAt` still has a finite unproven-activation bound | **PASS — SOFTWARE** | `phase3_durability_test.go` |
+| 30x | Activation uncertainty is WRITE-AHEAD durable: the attempt and its bound are fsynced (file AND directory) BEFORE the first provisional nft authorization, and a write that cannot be proven durable denies admission outright | **PASS — SOFTWARE** | `cmd/netd/phase3_journal.go` `beginAttempt`; ordering asserted by preflight; `phase3_durability_test.go` |
+| 30y | A class-state / journal write failure remains fail-closed ACROSS A RESTART: an older valid file on disk does not become a clean first run, and the earlier bound continues | **PASS — SOFTWARE** | `phase3_durability_test.go` (write failure with an older valid file; corrupt journal; absent journal) |
+| 30z | A crash between nft admission and the end-of-pass persistence cannot reset the grace: 24 crash-restart cycles over two minutes keep the same attempt start and the same total authorized time | **PASS — SOFTWARE** | `phase3_durability_test.go` (repeated crashes just after admission) |
+| 30aa | Wall-clock rollback cannot extend provisional access: the bound is boot-relative monotonic (`/proc/uptime`), and −1h, −24h, +24h and NTP-style corrections change nothing, including across a restart | **PASS — SOFTWARE** | `cmd/netd/phase3_securitytime.go`; `phase3_durability_test.go` security-time suite; preflight |
+| 30ab | A reboot cannot create a fresh unproven grace: a prior boot's monotonic timeline is not bridged, so the session stays denied until durable state proves it ACTIVE — with the RTC behind, ahead, or the database unreadable | **PASS — SOFTWARE** | `crossBoot` handling in `phase3_provision.go`; `phase3_durability_test.go` reboot cases |
+| 30ac | An unreadable monotonic security clock denies admission rather than assuming the bound unspent; quarantine records are pruned by durable resolution, never by wall-clock age | **PASS — SOFTWARE** | `bootNow` fail-closed path; `phase3_durability_test.go` (unreadable clock; pruning across ±1 year of wall jumps) |
+| 30ad | PR metadata — the one authoritative surface that is not committed — is Zero-Stale-validated at the CI boundary against `project-state.json`, in the same run, with no hard-coded run identifiers | **PASS — SOFTWARE** | `tools/validate-pr-metadata.sh`; Project Governance workflow |
 | 31 | Live read-only PMS protocol verification | **PENDING — LIVE INCREMENT 9** | operator-executed; never simulated |
 | 32 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING — LIVE INCREMENT 9** | runbook §2–§5 |
 | 33 | Gate-P per-service EXECUTE grants and role separation | **OUT OF SCOPE BY APPROVED CONTRACT** | separately gated; zero runtime grants while dark |

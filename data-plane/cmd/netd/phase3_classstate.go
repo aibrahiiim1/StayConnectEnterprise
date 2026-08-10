@@ -37,7 +37,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -56,28 +55,6 @@ type managedClass struct {
 	BootID string `json:"boot_id"`
 }
 
-// unprovenRecord is the DURABLE half of the activation-uncertainty bound.
-//
-// A guest whose kernel enforcement is in force but whose Session cannot be proven `active` holds only a short
-// provisional lease, and after a bounded grace is denied and quarantined with a doubling backoff. All of that
-// used to live in memory — which meant a netd restart handed the same guest a brand-new grace, and a process
-// that restarted every twenty seconds could renew a provisional authorization forever while durable state
-// never once said the guest was active. The bound was real but it was measured against process uptime, and
-// process uptime is not a security property.
-//
-// So the clock is persisted beside the class inventory, in the same atomically-written, fsynced file, and
-// restored on start. Restart and reboot then continue the SAME countdown rather than starting a new one.
-type unprovenRecord struct {
-	// Key is classKey(bridge, sessionID) — stable across restarts and reboots.
-	Key string `json:"key"`
-	// SinceUnixMs is when the CURRENT attempt first failed to prove ACTIVE. Zero means no attempt has failed.
-	SinceUnixMs int64 `json:"since_unix_ms,omitempty"`
-	// UntilUnixMs is the instant before which this session must not be re-admitted at all.
-	UntilUnixMs int64 `json:"until_unix_ms,omitempty"`
-	// Strikes counts attempts that exhausted the grace. It only grows.
-	Strikes int `json:"strikes"`
-}
-
 // classState is the durable managed-class inventory, scoped to one appliance under one assignment.
 type classState struct {
 	TenantID    string                  `json:"tenant_id"`
@@ -85,11 +62,11 @@ type classState struct {
 	ApplianceID string                  `json:"appliance_id"`
 	BootID      string                  `json:"boot_id"`
 	Classes     map[string]managedClass `json:"classes"`
-	// Unproven survives independently of Classes. A reboot legitimately drops every class (the kernel is
-	// empty), but it must NOT drop the fact that a session's activation has been unprovable for two minutes —
-	// otherwise rebooting would be a way to buy a fresh grace period.
-	Unproven []unprovenRecord `json:"unproven,omitempty"`
 }
+
+// NOTE: the activation-uncertainty clock deliberately does NOT live here any more. It is written WRITE-AHEAD,
+// before a guest is provisionally authorized, and this file is written once at the end of a reconciliation
+// pass — far too late to bound access that has already begun. See phase3_journal.go.
 
 // classStore persists the inventory. Writes are atomic and fsynced: a torn file after a power cut would be
 // indistinguishable from corruption, and this file's whole purpose is to be trustworthy after exactly that.
@@ -243,27 +220,6 @@ func (p *phase3Shaping) restore(st classState, bootID string, installed map[stri
 	p.bootID = bootID
 	p.restoreNote = ""
 
-	// THE ACTIVATION-UNCERTAINTY CLOCK IS RESTORED FIRST, AND UNCONDITIONALLY.
-	//
-	// It is deliberately not subject to any of the checks below. Scope mismatch, an unreadable kernel and a
-	// changed boot id are all reasons to distrust a CLASS — its generation may no longer describe anything —
-	// but none of them is a reason to forget that a session's activation has been unprovable for two minutes.
-	// Forgetting that is precisely how a restart becomes a way to buy a fresh grace period.
-	p.quarantined = map[string]*quarantineState{}
-	for _, r := range st.Unproven {
-		if r.Key == "" {
-			continue
-		}
-		q := &quarantineState{Strikes: r.Strikes}
-		if r.SinceUnixMs > 0 {
-			q.Since = time.UnixMilli(r.SinceUnixMs)
-		}
-		if r.UntilUnixMs > 0 {
-			q.Until = time.UnixMilli(r.UntilUnixMs)
-		}
-		p.quarantined[r.Key] = q
-	}
-
 	// Scope: an inventory written under a different tenant/site/appliance describes someone else's classes.
 	if st.TenantID != "" && (st.TenantID != p.mode.TenantID || st.SiteID != p.mode.SiteID ||
 		st.ApplianceID != p.mode.ApplianceID) {
@@ -339,26 +295,5 @@ func (p *phase3Shaping) snapshot() classState {
 	for k, c := range p.classes {
 		st.Classes[k] = c
 	}
-	for k, q := range p.quarantined {
-		if q == nil || (q.Since.IsZero() && q.Until.IsZero() && q.Strikes == 0) {
-			continue
-		}
-		// A record whose backoff elapsed long ago describes a session nothing has mentioned since. Keeping it
-		// forever would grow the file without bound; the horizon is far longer than any backoff, so a session
-		// that is still being retried is never pruned out from under its own countdown.
-		if q.Since.IsZero() && !q.Until.IsZero() && p.lastApplied.Sub(q.Until) > unprovenRecordHorizon {
-			continue
-		}
-		r := unprovenRecord{Key: k, Strikes: q.Strikes}
-		if !q.Since.IsZero() {
-			r.SinceUnixMs = q.Since.UnixMilli()
-		}
-		if !q.Until.IsZero() {
-			r.UntilUnixMs = q.Until.UnixMilli()
-		}
-		st.Unproven = append(st.Unproven, r)
-	}
-	// Deterministic order: the file is compared byte-for-byte by operators and by the durability tests.
-	sort.Slice(st.Unproven, func(i, j int) bool { return st.Unproven[i].Key < st.Unproven[j].Key })
 	return st
 }

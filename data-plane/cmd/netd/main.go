@@ -156,6 +156,13 @@ func main() {
 		// read its counters before a guest can use it (see phase3_origin.go).
 		origins:    &pgOrigins{pool: pool},
 		classStore: &classStore{path: envOr("NETD_PHASE3_CLASS_STATE", "/var/lib/stayconnect/netd-phase3-classes.json")},
+		// The WRITE-AHEAD activation journal, in its own file. It is fsynced before a guest is provisionally
+		// authorized, which the once-per-pass class inventory above cannot be (see phase3_journal.go).
+		journal: &activationJournal{path: envOr("NETD_PHASE3_ACTIVATION_JOURNAL",
+			"/var/lib/stayconnect/netd-phase3-activation-journal.json")},
+		// The MONOTONIC security clock the activation bound is measured against — never the wall clock, which
+		// an NTP correction or a wrong RTC can move backwards and thereby lengthen the bound.
+		secClock: newSecurityClock(),
 		// Generations come from a durable, appliance-scoped allocator that reconciles against the
 		// generations surviving accounting checkpoints actually pin — never from this process's memory and
 		// never from the clock.
@@ -172,13 +179,13 @@ func main() {
 	// that exact slot under the same boot. A class that was flushed, recreated by hand, or whose minor now
 	// belongs to a different session is dropped so its successor allocates a fresh generation.
 	bootID := readBootID(envOr("NETD_BOOT_ID_FILE", "/proc/sys/kernel/random/boot_id"))
-	prevClasses, _, unreadable := p3shaping.classStore.load()
+	prevClasses, _, _ := p3shaping.classStore.load()
 	inv, verified := kernelInventory(rootCtx, p3shaping.shp, bridgesIn(prevClasses))
 	p3shaping.restore(prevClasses, bootID, inv, verified)
-	// If the durable state could not be read, the ACTIVATION-UNCERTAINTY CLOCK is unknown — not empty. A
-	// session whose activation cannot be proven must then be treated as having already spent its grace,
-	// because the alternative is that losing one file awards every guest a fresh one.
-	p3shaping.unprovenUnknown = unreadable
+	// The activation journal is restored SEPARATELY from the class inventory, and unconditionally. A reboot
+	// legitimately drops every class — the kernel is empty — but it must not drop the fact that a session's
+	// activation has been unprovable, or rebooting would be a way to buy a fresh grace period.
+	p3shaping.restoreAttempts(p3shaping.journal.load())
 	if p3mode.Active {
 		slog.Info("netd phase3 managed-class state restored",
 			"persisted", len(prevClasses.Classes), "carried_forward", len(p3shaping.classes),
