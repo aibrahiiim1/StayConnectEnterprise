@@ -67,6 +67,16 @@ if [ -z "$body" ]; then
   printf 'PR_METADATA_ZERO_STALE = PASS (no PR)\n'; exit 0
 fi
 
+# The body is written to a FILE and every check greps the file.
+#
+# `printf '%s' "$body" | grep -q ...` looks equivalent and is not: grep -q exits the moment it matches, printf
+# then takes SIGPIPE, and under `set -o pipefail` the pipeline reports THAT failure — so a successful match is
+# reported as a failed check. It is how this script first ran red in CI while passing locally, where the body
+# was small enough for printf to finish before grep exited. A file removes the pipeline, and with it the race.
+BODYFILE="$(mktemp)"
+trap 'rm -f "$BODYFILE" "$BODYFILE.status"' EXIT
+printf '%s' "$body" > "$BODYFILE"
+
 # ---- the current candidate state, derived rather than hard-coded ------------------------------------------
 case "$activity" in
   *PRE_LIVE_SAFETY*) want="PRE-LIVE SAFETY CANDIDATE"; superseded="DARK ACCEPTANCE CANDIDATE";;
@@ -75,14 +85,15 @@ case "$activity" in
 esac
 
 if [ -n "$want" ]; then
-  if printf '%s' "$body" | grep -qF "$want"; then
+  if grep -qF -- "$want" "$BODYFILE"; then
     note "PR body states the current candidate state: $want"
   else
     bad "the PR body does not state the current candidate state ($want); it is the most visible authoritative surface in the delivery"
   fi
-  if [ -n "$superseded" ] && printf '%s' "$body" | grep -qF "$superseded"; then
+  if [ -n "$superseded" ] && grep -qF -- "$superseded" "$BODYFILE"; then
     # Historical mentions are legitimate; a STATUS line is not.
-    if printf '%s' "$body" | grep -iE "^[[:space:]]*(\*\*)?status" | grep -qF "$superseded"; then
+    grep -iE "^[[:space:]]*(\*\*)?status" "$BODYFILE" > "$BODYFILE.status" 2>/dev/null || true
+    if grep -qF -- "$superseded" "$BODYFILE.status"; then
       bad "the PR body's Status still announces the superseded state: $superseded"
     else
       note "the superseded state appears only outside the Status line (historical); allowed"
@@ -93,7 +104,7 @@ fi
 # Phase 3 is not accepted and not closed while this activity holds; the PR must not say otherwise.
 case "$activity" in
   *PHASE_3*)
-    if printf '%s' "$body" | grep -qiE "phase 3 (is )?(accepted|closed|complete and accepted)"; then
+    if grep -qiE "phase 3 (is )?(accepted|closed|complete and accepted)" "$BODYFILE"; then
       bad "the PR body claims Phase 3 is accepted or closed; the repository says it is IN_PROGRESS"
     fi
     ;;
