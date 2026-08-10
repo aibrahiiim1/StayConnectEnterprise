@@ -74,9 +74,12 @@ def extract_acceptance_matrix(report_path):
             continue
         md_lines.append(s)
         cells = [c.strip() for c in s.strip("|").split("|")]
-        # data rows have a leading integer id; header/separator rows do not
-        if len(cells) >= 3 and cells[0].isdigit():
-            rows.append({"num": int(cells[0]), "dimension": cells[1], "verdict": cells[2]})
+        # Data rows have a leading dimension id; header/separator rows do not. The id may be a plain number
+        # (`7`) OR a SUB-DIMENSION (`30a`, `30b`, …). An earlier version tested `cells[0].isdigit()`, which
+        # silently dropped every sub-dimension: the artifact reported "35 dimensions" while the report showed
+        # more rows, and nothing flagged the difference. Sub-dimensions are real verdicts and are counted.
+        if len(cells) >= 3 and re.match(r"^\d+[a-z]?$", cells[0]):
+            rows.append({"id": cells[0], "dimension": cells[1], "verdict": cells[2]})
     return "\n".join(md_lines) + "\n", rows
 
 
@@ -386,7 +389,7 @@ def main() -> int:
         m.append(f"- {k}: **{v['verdict']}**")
     m.append("")
     m.append(f"## Complete Phase-3 Acceptance Matrix — {len(accept_matrix_rows)} dimensions "
-             "(see `PHASE3_ACCEPTANCE_MATRIX.md`)")
+             "(including sub-dimensions; see `PHASE3_ACCEPTANCE_MATRIX.md`)")
     m.append("")
     verdict_counts = {}
     for rrow in accept_matrix_rows:

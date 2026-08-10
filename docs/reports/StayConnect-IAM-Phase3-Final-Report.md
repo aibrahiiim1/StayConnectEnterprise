@@ -113,7 +113,7 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 
 | Test | Result | Evidence |
 |---|---|---|
-| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering) | **PASS 18/18** | `scripts/phase3-preflight.sh --json` |
+| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order) | **PASS 20/20** | `scripts/phase3-preflight.sh --json` |
 | Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 362/362** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
 | PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** (all eleven) | `scripts/pmsd-pg-integration.sh` |
 | Go unit tests, whole module | **PASS** | `go test ./... -count=1` (JSON-counted) |
@@ -126,6 +126,8 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 | Production build with Phase-3 flags OFF | **PASS** | `npx next build` (CI) |
 | Guest-portal uniform non-success contract (server) | **PASS** | `cmd/portald/pms_phase3_test.go`, `pms_phase3_handlers_test.go`, `pms_phase3_budget_test.go` |
 | Guest-portal Phase-3 flow + resilience (real browser, real template) | **PASS** | `hotel-admin/e2e/phase3-guest-portal*.spec.ts` |
+| Phase-3 network-enforcement system suite (nft + tc + Session together) | **PASS** | `cmd/netd/phase3_enforcement_test.go` |
+| nft packet-authorization command contract (Phase-3 set only; legacy never named) | **PASS** | `internal/nft/nft_phase3_test.go` |
 | Full Phase-3 Software CI + Governance CI on the same pushed HEAD, evidence artifact uploaded | **PASS** | §12 |
 | Live read-only PMS protocol verification | **PENDING** | operator-executed; not simulated |
 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING** | operator-executed; runbook §2–§5 |
@@ -184,6 +186,10 @@ appears.
 | 30a | Accountable before forwarding: a managed class carries no guest packet before its origin is registered (staged prepare → register → activate) | **PASS — SOFTWARE** | `cmd/netd/phase3_provision.go`; `phase3_provision_test.go`; `internal/shape/shape_staged_test.go`; preflight |
 | 30b | Every provisioning failure fails closed: nothing forwards, no epoch exposed, `Shaped` stays 0, plan admitted-not-converged, retry reuses the generation (no duplicate origin) | **PASS — SOFTWARE** | `phase3_provision_test.go` (15 adversarial paths) |
 | 30c | An ordinary re-rate preserves counters and the generation (`tc class change`, never delete+add) | **PASS — SOFTWARE** | `internal/shape/shape_staged_test.go`; `phase3_provision_test.go` |
+| 30d | A guest is network-active only when packet authorization AND accountable metering are both confirmed (nft admitted only after verified tc) | **PASS — SOFTWARE** | `cmd/netd/phase3_provision.go`; `phase3_enforcement_test.go`; preflight |
+| 30e | Fail-closed denies PACKET ACCESS first and proves it, then tears down tc; teardown/expiry use the same order | **PASS — SOFTWARE** | `cmd/netd/phase3_gate.go`; `phase3_enforcement_test.go` |
+| 30f | Session is PENDING_ENFORCEMENT until the kernel is confirmed; promotion is idempotent through the controlled writer; the guest grant waits for real ACTIVE | **PASS — SOFTWARE** | `iam_v2.activate_session_enforcement`; `cmd/scd/phase3_auth.go`; scd PG16 suite |
+| 30g | Phase-3 reconciliation removes stray Phase-3 authorizations and can never remove a legacy one (separate nft sets) | **PASS — SOFTWARE** | `internal/nft/nft_phase3_test.go`; `phase3_enforcement_test.go` |
 | 31 | Live read-only PMS protocol verification | **PENDING — LIVE INCREMENT 9** | operator-executed; never simulated |
 | 32 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING — LIVE INCREMENT 9** | runbook §2–§5 |
 | 33 | Gate-P per-service EXECUTE grants and role separation | **OUT OF SCOPE BY APPROVED CONTRACT** | separately gated; zero runtime grants while dark |
@@ -1068,7 +1074,18 @@ SHA-256 values are recorded in `exports/chatgpt/*/PACK_SHA256SUMS.txt`, regenera
 
 **The authoritative Phase-3 software evidence is the artifact the Software CI uploads on the delivery HEAD**
 (`phase3-software-evidence-<HEAD>`), not a repository ZIP. It is downloadable from the exact successful
-Software run, contains only Phase-3 evidence, and carries a `MANIFEST.sha256` over all of its files. The
+Software run and contains only Phase-3 evidence.
+
+**Its integrity is stated exactly**, because "N/N verified" is easy to write and easy to get wrong:
+
+- the artifact contains **16 files in total**;
+- `MANIFEST.sha256` holds **15 entries**, one for every other file — it cannot list itself, since a file
+  cannot contain its own digest;
+- `sha256sum -c MANIFEST.sha256` therefore verifies **those 15 payload files**;
+- `MANIFEST.sha256` itself is identified separately, by the integrity-manifest SHA-256 recorded in the PR body
+  and printed by the workflow.
+
+It is wrong to describe this as "16/16 entries passed `sha256sum -c`". The
 committed export packs above are the project/plan packs; **the older Phase-1A live-dark acceptance pack was
 NOT reused, renamed or repurposed as Phase-3 evidence** — the Phase-3 artifact is generated fresh, in CI, per
 run, and its `RUN_META.json` embeds this delivery HEAD.

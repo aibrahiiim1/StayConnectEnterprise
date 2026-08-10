@@ -1,14 +1,19 @@
-# ADR-0002 — One shaping owner for Phase-3 enforcement
+# ADR-0002 — One privileged network-enforcement owner for Phase 3
 
 **Status:** Accepted (Phase 3, DARK)
 **Supersedes:** nothing
-**Context date:** 2026-07-22
+**Context date:** 2026-07-22 · **Amended:** 2026-07-23 (extended from single *shaping* owner to single *network-enforcement* owner: nft authorization + accountable tc)
 
 ## The problem
 
-Phase 3 introduced a derived shaping plan: given durable Entitlement state, the edge should be rate-limiting
-exactly this set of sessions at exactly these rates, and forwarding nothing for anyone else. Something has to
-apply that plan to `tc`.
+Phase 3 introduced a derived enforcement plan: given durable Entitlement state, the edge should be admitting
+exactly this set of guests to the internet, metering each of them at exactly these rates, and admitting nobody
+else. Something has to apply that plan to the kernel.
+
+**Note the wording.** An earlier revision of this ADR said the plan left the edge "forwarding nothing for
+anyone else", and described `tc` as if applying it decided access. That was wrong, and the wrongness mattered:
+it is the assumption that produced a Phase-3 grant which never authorized anything. See §"Three mechanisms,
+three different jobs" below.
 
 The obvious shortcut was to let `acctd` apply it directly — it already holds a `tc` client for legacy
 per-session shaping, and it already computes the plan. That shortcut is what this ADR rejects.
@@ -26,9 +31,53 @@ mutate the same kernel state on their own schedules**. The failure is not theore
 Two writers to one piece of kernel state is a race with no owner, and it degrades exactly when the appliance
 is busiest.
 
+## Three mechanisms, three different jobs
+
+These are not interchangeable, and conflating any two of them produces a specific, silent failure:
+
+| Mechanism | What it actually decides | What it does NOT decide |
+|---|---|---|
+| **nft** authorization set | **Packet authorization.** The forward chain accepts a guest's traffic only when its `(bridge, IP)` is in an authorization set, and the captive-portal DNAT rules redirect it when it is not. Adding an element is what gives a guest the internet; removing it is what takes it away. | Nothing about rates or accounting. |
+| **tc** HTB class + u32 filter | **Accountable shaping/metering.** Classifies an authorized guest's packets into a managed class so they are rate-limited and counted against a durable generation. | **It does not grant or deny access.** A guest with no classification filter keeps forwarding through the bridge's DEFAULT class — unshaped and uncounted, but *still online*. |
+| **`iam_v2.sessions.state`** | **Durable runtime authorization state.** What the appliance believes it granted, and the only record that survives a restart. | It is not evidence of kernel state unless something confirmed it. |
+
+The two failure modes this table exists to prevent:
+
+- **Deleting a tc filter is not a denial.** Any code, comment or runbook that implies it is will eventually be
+  relied upon to cut a guest off, and it will not.
+- **A `Session` row saying `active` is a claim about the kernel.** Writing it before enforcement exists makes
+  every consumer of that row wrong at once.
+
+### How the three converge
+
+```
+grant commits (durable, recoverable)     → Session = PENDING_ENFORCEMENT   [no access, no metering]
+netd allocates a durable class generation
+netd prepares tc classes, no filters      → [no access, no metering]
+netd reads counters, registers the origin  → [no access, not yet metering]
+netd activates tc classification filters   → [no access, METERED]
+netd verifies classification
+netd authorizes in phase3_auth_ipv4        → [ACCESS, METERED]
+netd verifies authorization
+netd promotes via the controlled writer    → Session = active  (now a true statement)
+```
+
+Teardown runs the same list backwards, and the order is not cosmetic:
+
+```
+nft DENY first → verify removed → tc filters/classes down → converge Session = ended → accounting preserved
+```
+
+An expired entitlement must stop reaching the internet even if tc teardown then fails. A tc deletion failure
+*after* denial is degraded cleanup; the reverse order would be continued guest access.
+
 ## Decision
 
-**`netd` is the only process that mutates Phase-3 shaping state.**
+**`netd` is the only process that mutates Phase-3 network-enforcement state — BOTH halves.**
+
+It owns the Phase-3 nft authorization set *and* the accountable tc classes. One owner for both is what makes
+the ordering above enforceable at all: if one daemon admitted guests and another metered them, no amount of
+care in either could prevent a window where a guest is admitted but unmetered.
 
 - `acctd` owns MEASUREMENT and DERIVATION: it reads counters, ingests accounting through the controlled
   Phase-3 operation, enforces true-time expiry, and derives the desired shaping plan from durable state.
@@ -131,6 +180,35 @@ turns that assumption into a structural property: `acctd` cannot race `netd` bec
   path installed before cutover. This is the intended consequence of single ownership — `acctd`'s legacy
   accounting/shaping loop stands down whenever the Phase-3 arm owns accounting — but it does mean enabling the
   flags on a site with live legacy sessions must be treated as a maintenance action, not a silent toggle.
+
+## Legacy coexistence and the cutover boundary
+
+Phase 3 authorizes in **`phase3_auth_ipv4`**, never in the legacy **`auth_ipv4`**.
+
+They are separate nft sets in the same table, with separate `accept` rules in the forward chain and both
+excluded from the captive DNAT rules. The separation is a safety property, not tidiness:
+
+- Legacy `scd` authorizes from **`public.sessions`** into `auth_ipv4`, and reconciles that set from the same
+  table. Phase 3 authorizes from **`iam_v2.sessions`** into `phase3_auth_ipv4`.
+- Phase-3 reconciliation must delete authorizations that no live Phase-3 session claims. If both wrote one
+  set, that sweep would delete live legacy guests — an outage caused by a feature that is supposed to be dark.
+- Because the Phase-3 gate can only ever name its own set, a legacy authorization is not merely *skipped* by
+  Phase-3 reconciliation; it is **unreachable**. That is proven by contract tests over the command strings,
+  not by review.
+
+**The set is rendered always, and starts empty.** An empty set matches nothing, so a dark appliance forwards
+exactly what it forwarded before. It is emitted from the start rather than added at cutover because this
+ruleset is applied as `table …; delete table …; table … { … }` — regenerating it later would flush `auth_ipv4`
+and drop every live legacy guest. Present-but-empty makes Phase-3 activation a **flag flip with no packet
+interruption**, and gives the cutover exactly one boundary:
+
+| | Phase-3 flags OFF (today) | Phase-3 flags ON |
+|---|---|---|
+| `auth_ipv4` | scd writes, scd reconciles | unchanged |
+| `phase3_auth_ipv4` | exists, **empty**, nothing writes it | netd writes and reconciles it |
+| Guest experience | unchanged | Phase-3 guests admitted only after accountable metering is proven |
+
+There is no dual-writer window at any point: no process ever writes both sets.
 
 ## Invariants this decision must keep
 
