@@ -57,7 +57,7 @@ MUTATIONS = [
  ("M07 modified generated block", "docs/context/StayConnect-IAM-Handoff.md",
    ("replace", [("**Current phase:** 3", "**Current phase:** 9Z")])),
  ("M08 stale source commit / snapshot mismatch", "governance/project-state.json",
-   ("replace", [('"latest_transition_id": "T0016"', '"latest_transition_id": "T0008"')])),
+   ("replace", [('"latest_transition_id": "T0017"', '"latest_transition_id": "T0008"')])),
  ("M09 missing acceptance record", "governance/project-state.json",
    ("replace", [('"path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"',
                  '"path": "docs/acceptance/MISSING.md"')])),
@@ -103,7 +103,7 @@ MUTATIONS = [
    ("append", "\n\n- `svc_scd` iam_v2 grants prepared for cutover: USAGE + SELECT/INSERT/UPDATE.\n")),
  # --- live-dark / acceptance stale-state contradictions (must be caught by project-state.py) ---
  ("M29 current_activity disagrees with the latest transition new_state.activity", "governance/project-state.json",
-   ("replace", [('"current_activity": "PHASE_3_SOFTWARE_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION"',
+   ("replace", [('"current_activity": "PHASE_3_PRE_LIVE_SAFETY_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION"',
                  '"current_activity": "PHASE_2_ACCEPTED_AND_CLOSED"')])),
  ("M30 gate_p cutover done but blocker says superuser", "governance/project-state.json",
    ("replace", [("No governance blocker: Phase 3 (PMS Stay Domain",

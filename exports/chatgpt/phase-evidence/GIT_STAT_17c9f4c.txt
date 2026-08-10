@@ -1,4 +1,0 @@
-commit 17c9f4c2c8827551b0a99b5316eb7b58b6cddf29
-Date:   Mon Aug 10 12:37:24 2026 +0300
-
-    Phase 3: count the network-enforcement suite as its own gate step
