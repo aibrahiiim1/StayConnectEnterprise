@@ -24,7 +24,7 @@ This plan governs implementation, tests, live-dark deployment and rollback. It i
 > The original approved requirements below (§0 onward) are unchanged — this section records what has been
 > BUILT against them, not a change to them.
 
-`PHASE-3 SOFTWARE CANDIDATE COMPLETE — AWAITING LIVE INCREMENT-9 AUTHORIZATION (D14 authorized / T0015; D15 Option C executed), DARK. Not accepted, not closed.`
+`PHASE-3 PRE-LIVE SAFETY CANDIDATE COMPLETE — LIVE INCREMENT-9 AUTHORIZATION REQUESTED (D14 authorized / T0015; D15 Option C executed; software candidate T0016; pre-live safety closure T0017), DARK. Not accepted, not closed.`
 
 The software increments in this plan are **execution history**, not future work:
 

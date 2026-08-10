@@ -183,7 +183,7 @@
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D15",
-  "latest_transition_id": "T0017",
+  "latest_transition_id": "T0018",
   "phase3_delivery_evidence": {
     "note": "The metadata a reader must be able to trust as CURRENT: the same-HEAD Software and Governance runs and the evidence artifact the Software run uploaded. It lives here so the Zero-Stale validator can prove the Final Report cites the same values rather than a previous round's, which is the drift that reads as correct and is not.",
     "software_run_id": "PENDING",
@@ -191,8 +191,8 @@
     "artifact_id": "PENDING",
     "artifact_manifest_sha256": "PENDING"
   },
-  "acceptance_candidate_head": "15204928acfed66ac8fe18ab1cc047e0f446719f",
+  "acceptance_candidate_head": "b1caebbe037d6c6e6c6e5564751c5813bb546ed5",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "15204928acfed66ac8fe18ab1cc047e0f446719f",
+  "inventory_head": "b1caebbe037d6c6e6c6e5564751c5813bb546ed5",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }

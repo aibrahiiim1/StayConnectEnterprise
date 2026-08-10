@@ -119,13 +119,25 @@ echo "== 1c. Phase-3 enforcement/evidence phrases must not drift =="
 #   - any claim that removing a tc filter denies internet access, which it does not;
 #   - any claim that the cutover is already flag-only before the surgical nft foundation is installed;
 #   - any description of a modelled (fake-kernel) suite as real-kernel or live evidence;
-#   - any description of a permanent authorization as fail-closed.
+#   - any description of a permanent authorization as fail-closed;
+#   - current_activity and the Phase-3 stage narrative describing different stages;
+#   - a superseded candidate-state declaration left in the Report or the Plan;
+#   - the previous Portal budget (1200ms) quoted as the current one;
+#   - Final-Report delivery evidence (run ids, artifact id, integrity hash) that is not the current run.
 # Catching them here means the next drift of this class fails a gate instead of being reviewed for.
 p3drift=0
 REPORT="$DOCS/reports/StayConnect-IAM-Phase3-Final-Report.md"
 if [ -f "$REPORT" ]; then
   # the preflight total in the report must match what the preflight actually reports
-  actual_pf="$(bash "$ROOT/scripts/phase3-preflight.sh" --json 2>/dev/null | sed -n 's/.*"pass":\([0-9]*\).*/\1/p')"
+  actual_pf="$(bash "$REPO_ROOT/scripts/phase3-preflight.sh" --json 2>/dev/null | sed -n 's/.*"pass":\([0-9]*\).*/\1/p')"
+  # NOTE: this used to read "$ROOT/..." — a variable this script never defines. Under `set -u` the unbound
+  # expansion killed only the COMMAND SUBSTITUTION's subshell, so actual_pf came back empty and the guard
+  # below skipped the entire check in silence. A Zero-Stale check that never runs is exactly the failure
+  # this file exists to catch, so an unreadable total is now a HIT rather than a quiet pass.
+  if [ -z "$actual_pf" ]; then
+    echo "    HIT [preflight total unreadable]: the preflight could not be run, so the report's total cannot be checked"
+    p3drift=$((p3drift+1))
+  fi
   if [ -n "$actual_pf" ]; then
     grep -qE "PASS $actual_pf/$actual_pf" "$REPORT" || { echo "    HIT [stale preflight total]: report does not state PASS $actual_pf/$actual_pf"; p3drift=$((p3drift+1)); }
     for bad in 17 18 19 20 21; do
@@ -161,6 +173,69 @@ while IFS= read -r line; do
   [ -z "$line" ] && continue
   echo "    HIT [permanent authorization described as fail-closed]: $line"; p3drift=$((p3drift+1))
 done < <(grep -rniE "(permanent|non-expiring|never expires)[^.]{0,60}authorization[^.]{0,40}fail[- ]closed" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -viE "not |never be|must not|cannot" | grep -v "validate-project-state.sh")
+# ---- current-state agreement ---------------------------------------------------------------------------
+# current_activity and the Phase-3 stage narrative are written by different hands at different times. A
+# snapshot that says PRE_LIVE while the phase entry still says IMPLEMENTATION IN PROGRESS reads as
+# authoritative in both places and is wrong in one, which is the whole failure mode this file exists for.
+# PY is whichever interpreter this host actually has. A check that cannot read the state must FAIL, never
+# silently pass — a validator that quietly does nothing is worse than no validator, because it is trusted.
+# Probe that the interpreter RUNS, not merely that a file of that name is on PATH: on Windows hosts
+# `python3` is often an App-Store stub that exits silently, which would make every check below no-op.
+PY3=""
+for cand in python3 python; do
+  if [ "$("$cand" -c 'print(42)' 2>/dev/null)" = "42" ]; then PY3="$cand"; break; fi
+done
+act="$($PY3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8')).get('current_activity',''))" "$REPO_ROOT/governance/project-state.json" 2>/dev/null)"
+if [ -z "$PY3" ] || [ -z "$act" ]; then
+  echo "    HIT [state unreadable]: current_activity could not be read; the current-state agreement checks cannot run"
+  p3drift=$((p3drift+1))
+fi
+p3mat="$($PY3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8')).get('phases',{}).get('3',{}).get('maturity',''))" "$REPO_ROOT/governance/project-state.json" 2>/dev/null)"
+case "$act" in
+  *PRE_LIVE_SAFETY*)
+    case "$p3mat" in
+      *"PRE-LIVE SAFETY"*) : ;;
+      *) echo "    HIT [stage disagreement]: current_activity is PRE_LIVE_SAFETY but the Phase-3 stage reads: $(printf '%.90s' "$p3mat")"; p3drift=$((p3drift+1));;
+    esac
+    case "$p3mat" in
+      *"IMPLEMENTATION IN PROGRESS"*)
+        echo "    HIT [stage disagreement]: the Phase-3 stage still claims IMPLEMENTATION IN PROGRESS"; p3drift=$((p3drift+1));;
+    esac
+    if [ -f "$REPORT" ] && grep -q "Status: DARK ACCEPTANCE CANDIDATE" "$REPORT"; then
+      echo "    HIT [superseded candidate state]: the Final Report still declares DARK ACCEPTANCE CANDIDATE"; p3drift=$((p3drift+1))
+    fi
+    if grep -q "PHASE-3 SOFTWARE CANDIDATE COMPLETE" "$DOCS/architecture/StayConnect-IAM-Phase3-Plan.md" 2>/dev/null; then
+      echo "    HIT [superseded candidate state]: the Plan still declares the SOFTWARE CANDIDATE state"; p3drift=$((p3drift+1))
+    fi
+    ;;
+esac
+
+# ---- the Portal budget quoted as CURRENT must be the one in the software --------------------------------
+# 1200ms was the budget before enforcement convergence was part of a guest-visible success. Quoting it as
+# current describes software that no longer exists; quoting it as history is fine and is excused.
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [stale Portal budget quoted as current]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "(uniform|response-time|failure) budget[^.]{0,60}1200 ?ms" "${SCAN[@]}" --include=*.md 2>/dev/null \
+          | grep -viE "historical|superseded|no longer|used to be|previous|old |not " | grep -v "validate-project-state.sh")
+
+# ---- the delivery evidence a reader treats as current must actually be current --------------------------
+# The Final Report cites the same-HEAD run ids and the artifact metadata. Those are exactly the values that go
+# stale in silence: the prose around them stays true-sounding while pointing at a previous round's run.
+ev="$($PY3 -c "import json,sys;d=json.load(open(sys.argv[1],encoding='utf-8')).get('phase3_delivery_evidence',{});print(d.get('software_run_id',''),d.get('governance_run_id',''),d.get('artifact_id',''),d.get('artifact_manifest_sha256',''))" "$REPO_ROOT/governance/project-state.json" 2>/dev/null)"
+set -- $ev
+sw_run="${1:-}"; gov_run="${2:-}"; art_id="${3:-}"; art_sha="${4:-}"
+if [ -f "$REPORT" ] && [ -n "$sw_run" ] && [ "$sw_run" != "PENDING" ]; then
+  for v in "$sw_run" "$gov_run" "$art_id" "$art_sha"; do
+    grep -q "$v" "$REPORT" || { echo "    HIT [stale delivery evidence]: the Final Report does not cite $v"; p3drift=$((p3drift+1)); }
+  done
+  for old_id in 31375632025 31375633132 9057917064 31383683837 31383683846 9060977983; do
+    case "$old_id" in "$sw_run"|"$gov_run"|"$art_id") continue;; esac
+    if grep -q "$old_id" "$REPORT"; then
+      echo "    HIT [stale delivery evidence]: the Final Report still cites superseded id $old_id"; p3drift=$((p3drift+1))
+    fi
+  done
+fi
 [ "$p3drift" = "0" ] && ok "no Phase-3 enforcement/evidence phrase drift" || fail "$p3drift Phase-3 phrase drift hit(s)"
 
 echo "== 2. single current maturity + consistent next action =="

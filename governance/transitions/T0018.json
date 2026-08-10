@@ -1,0 +1,29 @@
+{
+  "transition_id": "T0018",
+  "seq": 18,
+  "timestamp": "2026-08-10T13:00:00Z",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_PRE_LIVE_SAFETY_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_PRE_LIVE_SAFETY_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "3",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-10 (FINAL PRE-LIVE CORRECTION), issued against reviewed HEAD 75fb848a2632d2fe4163847cf73491b50803515a. It accepted the Pre-Live Safety round as verified progress, required the delivered architecture not to be redesigned or weakened, and directed three final corrections: exact hard-boundary lease precision, a restart- and reboot-durable bound on unproven durable activation, and Zero-Stale governance parity. It explicitly does NOT authorize Live Increment 9. Preserves T0017 and all prior transitions. The activity is unchanged because the stage is unchanged: this is a correction within the PRE-LIVE SAFETY candidate, not a new stage.",
+  "scope_allowed": "Repository and disposable-environment software work only: truncating (never rounding up) a lease clamped to a hard access boundary and refusing an unrepresentable sub-second lease; persisting the activation-uncertainty clock with the durable class inventory so a restart or reboot cannot reset it; failing closed when that durable record is unreadable or unwritable; the corresponding boundary, durability and real-kernel tests; four additional Zero-Stale checks plus repair of a check that had never executed; and the documentation, acceptance-matrix, pack and manifest synchronization those changes require.",
+  "scope_prohibited": "No Live Increment 9 (read-only live PMS verification, live-dark deployment, reboot, rollback rehearsal, flags-OFF confirmation) until a separate Product-Owner decision; no appliance, Production-database or live-PMS contact; no deployment, reboot of a live appliance or live rollback; no PMS financial posting or FIAS PS/PA; no payments, settlement, implicit FX or programmatic reversal; no guest paid access; no IAM-v2 cutover or production iam_v2 runtime reads/writes; no Gate-P grants; no Phase 4. PR #6 remains open and unmerged; migration 0010 undeployed; all Phase-3 flags OFF.",
+  "evidence_files": [
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+    "docs/architecture/adr/ADR-0002-phase3-single-shaping-owner.md",
+    "docs/manifests/Phase3-change-manifest.md",
+    "tools/validate-project-state.sh",
+    "scripts/phase3-preflight.sh"
+  ],
+  "source_commit": "b1caebb",
+  "acceptance_verdict": "IN_PROGRESS -- Phase-3 PRE-LIVE SAFETY candidate COMPLETE and corrected, DARK, NOT accepted, NOT closed. Live Increment-9 authorization is REQUESTED and remains ungranted.",
+  "next_action": "Obtain a separate Product-Owner decision authorizing Live Increment 9 before any live execution."
+}
