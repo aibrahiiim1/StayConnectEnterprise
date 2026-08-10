@@ -624,3 +624,82 @@ func TestKernel_RebootRestoresTheFoundationEmptyAndKeepsInstallIdempotent(t *tes
 		t.Fatalf("a post-reboot install was not a no-op: %+v", rep)
 	}
 }
+
+// ---- 6. the timeout REPRESENTATION, in the kernel ----------------------------
+
+// THE QUANTIZATION PROOF. A lease clamped to a guest's hard access boundary is only safe if the timeout the
+// kernel actually installs is never LATER than the lease that was asked for. nft's element timeout granularity
+// is whole seconds, so this is the test that says what the kernel really does with the values this design
+// produces — rather than what the Go code believes it does.
+func TestKernel_InstalledTimeoutNeverExceedsTheRequestedLease(t *testing.T) {
+	c := nftClient()
+	ip := mustIP(t, guestIP)
+	t.Cleanup(func() { _ = c.DenyIn(context.Background(), nft.Phase3AuthV4, guestIface, ip) })
+
+	for _, ttl := range []time.Duration{90 * time.Second, 15 * time.Second, 1900 * time.Millisecond, time.Second} {
+		_ = c.DenyIn(ctx(t), nft.Phase3AuthV4, guestIface, ip)
+		if err := c.LeaseIn(ctx(t), nft.Phase3AuthV4, guestIface, ip, ttl); err != nil {
+			t.Fatalf("%v: %v", ttl, err)
+		}
+		els, err := c.ListIn(ctx(t), nft.Phase3AuthV4)
+		if err != nil || len(els) != 1 {
+			t.Fatalf("%v: list returned %d element(s): %v", ttl, len(els), err)
+		}
+		if els[0].Timeout > ttl {
+			t.Fatalf("a %v lease was installed with a %v kernel timeout — %v PAST the caller's bound; a "+
+				"boundary-clamped lease would outlive the boundary", ttl, els[0].Timeout, els[0].Timeout-ttl)
+		}
+		if els[0].Timeout <= 0 {
+			t.Fatalf("a %v lease produced a kernel timeout of %v; nft reads no timeout as PERMANENT",
+				ttl, els[0].Timeout)
+		}
+	}
+}
+
+// A sub-second lease is REFUSED before it reaches the kernel. There is no representable form of it that does
+// not overshoot, and `timeout 0s` — the other thing a naive conversion produces — is read by nft as no
+// timeout at all.
+func TestKernel_SubSecondLeaseIsRefusedAndInstallsNothing(t *testing.T) {
+	c := nftClient()
+	ip := mustIP(t, guestIP)
+	_ = c.DenyIn(ctx(t), nft.Phase3AuthV4, guestIface, ip)
+
+	if err := c.LeaseIn(ctx(t), nft.Phase3AuthV4, guestIface, ip, 200*time.Millisecond); err == nil {
+		t.Fatal("a 200ms lease was accepted")
+	}
+	els, err := c.ListIn(ctx(t), nft.Phase3AuthV4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(els) != 0 {
+		t.Fatalf("a refused lease installed %d element(s): %+v", len(els), els)
+	}
+}
+
+// AND THE CLAMPED LEASE REALLY EXPIRES BEFORE THE BOUNDARY. A 1.9s boundary becomes a 1s lease; a guest
+// leased that way is gone from the set well before 1.9 seconds have passed. This is the end-to-end form of
+// the invariant: not "the number is smaller" but "the kernel stopped forwarding in time".
+func TestKernel_ClampedLeaseExpiresBeforeItsBoundary(t *testing.T) {
+	c := nftClient()
+	ip := mustIP(t, guestIP)
+	t.Cleanup(func() { _ = c.DenyIn(context.Background(), nft.Phase3AuthV4, guestIface, ip) })
+
+	boundary := 1900 * time.Millisecond
+	lease := time.Duration(int(boundary/time.Second)) * time.Second // what leaseFor would derive: 1s
+	start := time.Now()
+	if err := c.LeaseIn(ctx(t), nft.Phase3AuthV4, guestIface, ip, lease); err != nil {
+		t.Fatal(err)
+	}
+	if !reaches(t) {
+		t.Fatal("the leased guest could not reach the WAN, so this proves nothing about expiry")
+	}
+	// Sleep to just inside the boundary. The element must already be gone.
+	time.Sleep(boundary - time.Since(start) - 100*time.Millisecond)
+	ok, err := c.AuthorizedIn(ctx(t), nft.Phase3AuthV4, guestIface, ip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatalf("the authorization survived to %v, inside its %v boundary", time.Since(start), boundary)
+	}
+}

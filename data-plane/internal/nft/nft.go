@@ -160,8 +160,12 @@ func (c *Client) LeaseIn(ctx context.Context, set, iface string, ip net.IP, ttl 
 	if ip4 == nil {
 		return fmt.Errorf("only IPv4 supported: %s", ip)
 	}
+	secs, ok := leaseSeconds(ttl)
+	if !ok {
+		return ErrLeaseTooShort
+	}
 	key := c.keyIn(ctx, set, iface, ip4)
-	elem := fmt.Sprintf("%s timeout %ds", key, leaseSeconds(ttl))
+	elem := fmt.Sprintf("%s timeout %ds", key, secs)
 	present, err := c.AuthorizedIn(ctx, set, iface, ip4)
 	if err != nil {
 		return err
@@ -173,19 +177,33 @@ func (c *Client) LeaseIn(ctx context.Context, set, iface string, ip net.IP, ttl 
 		set, key, set, elem))
 }
 
-// leaseSeconds rounds a lease UP to whole seconds, because nft's element timeout granularity is seconds and
-// rounding down would hand back a lease shorter than the caller asked for — including, for a sub-second
-// remainder, a lease of zero, which nft reads as "no timeout": permanent access from a bound that was meant
-// to be about to expire.
-func leaseSeconds(ttl time.Duration) int {
-	s := int(ttl / time.Second)
-	if ttl%time.Second != 0 {
-		s++
-	}
+// ErrLeaseTooShort is returned when a lease is shorter than the kernel can represent.
+//
+// It is an ERROR and not a rounded-up lease. nft's element timeout granularity is whole seconds, so a 200ms
+// lease can only be installed as 1s — which is 800ms LONGER than asked for. For an ordinary lease that
+// overshoot is harmless; for a lease clamped to a guest's hard access boundary it is the boundary being
+// exceeded, which is the one thing the clamp exists to prevent. So a lease that cannot be represented without
+// overshooting is refused, and the caller (which knows whether a boundary is involved) decides what that
+// means — for Phase 3 it means the guest is not authorized at all.
+var ErrLeaseTooShort = fmt.Errorf("nft: lease is shorter than the kernel's one-second timeout granularity")
+
+// leaseSeconds converts a lease to whole seconds WITHOUT EVER ROUNDING UP.
+//
+// The invariant it exists to hold is:
+//
+//	the installed kernel expiry is never later than the lease the caller asked for.
+//
+// Rounding up breaks that by up to a second. Rounding down cannot: a guest whose access ends at 11:00:00.9
+// loses at most the last 900ms of it, which is invisible, while rounding up would have kept them forwarding
+// for 100ms past a deadline the business stated. Below one second there is no representable lease at all, and
+// the second return value says so rather than silently becoming `timeout 1s` — or, worse, `timeout 0s`, which
+// nft reads as NO timeout and would turn an about-to-expire authorization into a permanent one.
+func leaseSeconds(ttl time.Duration) (int, bool) {
+	s := int(ttl / time.Second) // integer division truncates toward zero: floor for a positive ttl
 	if s < 1 {
-		s = 1
+		return 0, false
 	}
-	return s
+	return s, true
 }
 
 // keyIn renders the element KEY (no timeout) for a set, in that set's own key format.
@@ -246,9 +264,12 @@ func (c *Client) AuthorizedIn(ctx context.Context, set, iface string, ip net.IP)
 
 func (c *Client) elementIn(ctx context.Context, set, iface string, ip net.IP, ttl time.Duration) string {
 	base := c.keyIn(ctx, set, iface, ip)
-	if ttl > 0 {
-		return fmt.Sprintf("%s timeout %ds", base, leaseSeconds(ttl))
+	if secs, ok := leaseSeconds(ttl); ok {
+		return fmt.Sprintf("%s timeout %ds", base, secs)
 	}
+	// ttl <= 0 (legacy scd's permanent element) or a sub-second ttl that cannot be represented. AllowIn is the
+	// legacy surface and keeps its historical "no timeout" behaviour here; the bounded Phase-3 surface is
+	// LeaseIn, which refuses an unrepresentable lease outright.
 	return base
 }
 

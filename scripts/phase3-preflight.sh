@@ -302,6 +302,30 @@ else
   no "the surgical Phase-3 nft foundation is missing; a flag-only cutover cannot be prepared safely"
 fi
 
+# ---------------------------------------------------------------- 13. hard-boundary + durable bound
+# A lease clamped to a guest's hard access boundary must never be rounded UP: nft's timeout granularity is
+# whole seconds, so rounding up expires the authorization PAST the deadline the business stated, by up to
+# 999ms, on almost every boundary that does not land on a whole second.
+if grep -q 'remaining.Truncate(time.Second)' "$LEASE" && grep -q 'ErrLeaseTooShort' "$NFTGO"; then
+  ok "a boundary-clamped lease is truncated, never rounded up, and a sub-second lease is refused"
+else
+  no "a boundary-clamped lease can be rounded up past the hard access boundary"
+fi
+# The activation-uncertainty clock must be DURABLE. Held only in memory, a netd restart hands the same guest a
+# brand-new grace, so a process restarting every few seconds renews a provisional authorization forever.
+CLASSSTATE="$ROOT/data-plane/cmd/netd/phase3_classstate.go"
+if grep -q 'unprovenRecord' "$CLASSSTATE" && grep -q 'Unproven' "$CLASSSTATE"; then
+  ok "the activation-uncertainty clock is persisted with the durable class inventory"
+else
+  no "the activation-uncertainty bound is process-local; a restart would reset it"
+fi
+if grep -q 'unprovenUnknown' "$ROOT/data-plane/cmd/netd/phase3_shaping.go" \
+   && grep -q 'unprovenUnknown' "$ROOT/data-plane/cmd/netd/phase3_enforcement.go"; then
+  ok "an unreadable or unwritable activation clock fails closed instead of granting a fresh grace"
+else
+  no "losing the durable activation clock would award a fresh grace period"
+fi
+
 # ============================================================================== report
 # Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json
 # silently reported a smaller, all-passing suite.

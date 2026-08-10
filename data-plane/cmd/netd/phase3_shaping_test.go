@@ -978,7 +978,7 @@ func writerWithState(tc *fakeTC, gens generationAllocator, path, bootID string) 
 	p := liveWriter(tc)
 	p.classStore = &classStore{path: path}
 	p.generations = gens
-	prev, _ := p.classStore.load()
+	prev, _, _ := p.classStore.load()
 	inv, verified := kernelInventory(context.Background(), tc, bridgesIn(prev))
 	p.restore(prev, bootID, inv, verified)
 	return p
@@ -1298,7 +1298,7 @@ func TestRebootConvergesFromOneSubmission(t *testing.T) {
 	after.classStore = &classStore{path: classState}
 	after.store = &planStore{path: planState}
 	after.generations = gens
-	prev, _ := after.classStore.load()
+	prev, _, _ := after.classStore.load()
 	inv, verified := kernelInventory(context.Background(), tc, bridgesIn(prev))
 	after.restore(prev, "boot-bbbb", inv, verified)
 

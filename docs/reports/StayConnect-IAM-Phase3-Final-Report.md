@@ -1,6 +1,6 @@
 # StayConnect IAM — Phase 3 Final Report (Stay Resolution, PMS Auth Context, Checkout Grace)
 
-> **Status: DARK ACCEPTANCE CANDIDATE.** The complete Phase-3 software scope is implemented, tested and
+> **Status: PRE-LIVE SAFETY CANDIDATE (DARK).** The complete Phase-3 software scope is implemented, tested and
 > delivered green. Every Phase-3 flag is OFF, PR #6 is open and unmerged, and **live Increment-9 evidence
 > remains PENDING** — it can only be produced by an authorized operator on the target appliance and is
 > deliberately absent from this report rather than inferred.
@@ -104,6 +104,30 @@ they were built and are `PASS — SOFTWARE` in the matrix.
   deadline instead of a flat maximum it could never reach. There is still exactly one budget for the endpoint,
   so the occupancy-enumeration protection is unchanged in form.
 
+**The final pre-live corrections.** Three things were still wrong in ways that read as correct:
+
+- **A clamped lease could overshoot its own deadline.** `leaseFor` computed the exact remaining time to
+  `AccessEndsAt`, and then the nft layer rounded it UP to whole seconds — so a boundary 1.9 seconds away
+  became a `timeout 1s`… but a boundary 200ms away became `timeout 1s` too, which is 800ms **past** the
+  deadline. On almost every real boundary (they do not land on whole seconds) the clamp permitted exactly
+  what it existed to forbid. The clamp now truncates, and a remainder too short to represent is refused
+  outright rather than rounded into existence — the guest loses at most the last 999ms of a stay, which
+  nobody can perceive, instead of gaining up to 999ms past a contract.
+- **The unproven-activation bound was measured against process uptime.** The grace clock and the quarantine
+  lived only in memory, so restarting netd handed the same guest a brand-new grace: a process restarting
+  every few seconds could renew a provisional authorization indefinitely while durable state never once said
+  the guest was active. Every individual bound in the code was correct; the thing they were measured against
+  was not durable. The clock is now persisted beside the class inventory and restored on start, so a restart
+  and a reboot continue the same countdown — and if that record cannot be read or written, an unprovable
+  activation is treated as having already spent its grace, because losing a file must not buy access.
+- **A Zero-Stale check had never actually run.** The "stale preflight total" check referenced `$ROOT`, a
+  variable this validator does not define. Under `set -u` the unbound expansion killed only the command
+  substitution's subshell, so the value came back empty and the guard below skipped the whole check in
+  silence — for two rounds. It was found by making a *new* check fail loudly when it cannot read state
+  instead of passing quietly, and the moment it was fixed it immediately caught a genuinely stale preflight
+  total in this very report. A governance check that silently does nothing is worse than none, because it is
+  trusted; both now fail rather than skip.
+
 **What the real-kernel suite found that nothing else could.** `nft -j` emits set elements in two shapes: an
 element with stateful attributes (a timeout, an expiry) is wrapped as `{"elem":{"val":{"concat":[…]},…}}`,
 while an element with **none** — which is exactly what a permanent legacy authorization is — carries no
@@ -149,9 +173,10 @@ real kernel, and the runbook says the same thing rather than implying elements s
 millisecond after a reconciliation tick waits out the rest of that second, the pass's own work, scd's 100ms
 polling granularity and two unix-socket hops — about 1.8 seconds in the worst healthy case. The uniform budget
 is 2500ms with a 200ms upstream reserve, leaving 2300ms of usable time, so that guest is told they are
-connected rather than reproducibly told they are not. The old composition could not do this: portald's 1200ms
-deadline was passed down as the context, so scd's nominal 8-second wait was unreachable and the effective wait
-was whatever was left of 1200ms. Pinned by boundary tests on both sides.
+connected rather than reproducibly told they are not. *(HISTORICAL, superseded: the previous composition could
+not do this — portald's old 1200ms deadline was passed down as the context, so scd's nominal 8-second wait was
+unreachable and the effective wait was whatever was left of that 1200ms. Those values are no longer in the
+software; the current budget is 2500ms with a 200ms reserve.)* Pinned by boundary tests on both sides.
 
 ## 4. Practical effect
 
@@ -189,7 +214,7 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 
 | Test | Result | Evidence |
 |---|---|---|
-| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation) | **PASS 28/28** | `scripts/phase3-preflight.sh --json` |
+| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, durable activation clock) | **PASS 31/31** | `scripts/phase3-preflight.sh --json` |
 | Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 362/362** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
 | PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** (all eleven) | `scripts/pmsd-pg-integration.sh` |
 | Go unit tests, whole module | **PASS** | `go test ./... -count=1` (JSON-counted) |
@@ -281,6 +306,12 @@ appears.
 | 30o | Foundation rollback removes ONLY the Phase-3 foundation and leaves every legacy authorization untouched | **PASS — SOFTWARE** | `foundation_test.go`; `internal/kerneltest` (legacy guest stays online across install and rollback) |
 | 30p | REAL-KERNEL execution: real `nft` and `tc`, real packets, disposable Linux network namespaces — including the proof that removing a tc classification denies NOTHING and that the nft element is what decides access | **PASS — SOFTWARE (real kernel, disposable CI machine — NOT live appliance evidence)** | `internal/kerneltest`; `scripts/ci/kernel-netns-suite.sh`; host ruleset proven unchanged |
 | 30q | Portal/enforcement timing composes: the guest-visible budget covers the worst healthy convergence at either side of a reconciliation tick, the enforcement wait is derived from the caller's deadline, and there is still exactly ONE uniform non-success budget | **PASS — SOFTWARE** | `cmd/portald/pms_phase3_budget_timing_test.go`; `cmd/scd/phase3_auth_timing_test.go`; existing uniform-budget suite |
+| 30r | A boundary-clamped kernel lease can NEVER exceed the exact hard access boundary, at any timestamp precision: the clamp truncates to whole seconds and a sub-second remainder is refused rather than rounded up into `timeout 1s` | **PASS — SOFTWARE** | `leaseFor` (truncate); `nft.ErrLeaseTooShort`; `phase3_lease_test.go` boundary matrix (90s / 1.9s / 1.1s / 1s / 999ms / 100ms / expired / repeated renewal / restart); preflight |
+| 30s | The kernel's own timeout REPRESENTATION is proven, not assumed: the installed expiry is never later than the lease requested, and a clamped lease really expires before its boundary | **PASS — SOFTWARE (real kernel, disposable CI machine — NOT live appliance evidence)** | `internal/kerneltest` (installed-timeout, sub-second refusal, clamped-expiry-before-boundary) |
+| 30t | The unproven-activation bound is DURABLE: a netd restart or a reboot can never reset or extend the maximum authorization time allowed for an activation that cannot be proven | **PASS — SOFTWARE** | `unprovenRecord` in the durable class state; `restore`/`snapshot`; `phase3_durability_test.go` (restarts every 6s for 3 minutes; reboot with an empty kernel) |
+| 30u | An unreadable, missing-as-corrupt or unwritable durable activation clock FAILS CLOSED rather than awarding a fresh grace; a legitimately absent file on a first run does not | **PASS — SOFTWARE** | `classStore.load` (absent vs corrupt); `unprovenUnknown`; `phase3_durability_test.go`; preflight |
+| 30v | Recovery still works: a promotion that really committed is recovered by authoritative re-read across a restart and the guest is never disconnected — while a readable-but-PENDING database does not silently reset an exhausted grace | **PASS — SOFTWARE** | `proveActive` re-read; `phase3_durability_test.go` |
+| 30w | A session with no wall-clock `AccessEndsAt` still has a finite unproven-activation bound | **PASS — SOFTWARE** | `phase3_durability_test.go` |
 | 31 | Live read-only PMS protocol verification | **PENDING — LIVE INCREMENT 9** | operator-executed; never simulated |
 | 32 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING — LIVE INCREMENT 9** | runbook §2–§5 |
 | 33 | Gate-P per-service EXECUTE grants and role separation | **OUT OF SCOPE BY APPROVED CONTRACT** | separately gated; zero runtime grants while dark |

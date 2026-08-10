@@ -104,15 +104,18 @@ const (
 )
 
 // quarantineState is what is remembered about a session whose durable activation could not be proven.
+// The fields are exported because this state is PERSISTED: it is written into the durable class-state file
+// (see unprovenRecord) and restored on start, so that a restart or a reboot continues the same countdown
+// rather than granting the session a fresh grace period.
 type quarantineState struct {
-	// since is when the CURRENT attempt first failed to prove ACTIVE. Zero means the attempt has not failed
+	// Since is when the CURRENT attempt first failed to prove ACTIVE. Zero means the attempt has not failed
 	// yet — the grace has not started running.
-	since time.Time
-	// until is the instant before which this session must not be re-admitted at all.
-	until time.Time
-	// strikes counts how many attempts have exhausted the grace. It only ever grows, so a session that
+	Since time.Time
+	// Until is the instant before which this session must not be re-admitted at all.
+	Until time.Time
+	// Strikes counts how many attempts have exhausted the grace. It only ever grows, so a session that
 	// genuinely cannot be activated is re-attempted less and less often instead of cycling forever.
-	strikes int
+	Strikes int
 }
 
 // quarantineBackoff is how long a session stays denied after an attempt exhausts the activation grace.
@@ -134,6 +137,15 @@ func quarantineBackoff(strikes int) time.Duration {
 		d = 15 * time.Minute
 	}
 	return d
+}
+
+// problemFor renders the one message both unproven paths report.
+func problemFor(sessionID string, err, cerr error) string {
+	problem := "session " + sessionID + ": enforcement is in force but durable ACTIVE could not be proven: " + err.Error()
+	if cerr != nil {
+		problem += " (state unreadable: " + cerr.Error() + ")"
+	}
+	return problem
 }
 
 // quarantineFor returns this class's quarantine record, creating it on demand. Caller holds p.mu.
@@ -169,23 +181,30 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 		return activationProven, ""
 	}
 	q := p.quarantineFor(key)
-	if q.since.IsZero() {
-		q.since = now
+	if q.Since.IsZero() {
+		if p.unprovenUnknown {
+			// The durable clock is unreadable or unwritable, so this session's history is UNKNOWN. It might
+			// have been failing for hours. Awarding a fresh grace here would mean that losing one file buys a
+			// guest unbounded provisional authorization, so the grace is treated as already spent.
+			q.Strikes++
+			q.Until = now.Add(quarantineBackoff(q.Strikes))
+			return activationFailed, problemFor(sessionID, err, cerr) +
+				" — the durable activation clock is unavailable, so no grace period can be granted; failing closed until " +
+				q.Until.UTC().Format(time.RFC3339)
+		}
+		q.Since = now
 	}
-	problem := "session " + sessionID + ": enforcement is in force but durable ACTIVE could not be proven: " + err.Error()
-	if cerr != nil {
-		problem += " (state unreadable: " + cerr.Error() + ")"
-	}
-	if now.Sub(q.since) <= phase3ActivationGrace {
+	problem := problemFor(sessionID, err, cerr)
+	if now.Sub(q.Since) <= phase3ActivationGrace {
 		return activationUnproven, problem + " — holding a provisional lease only"
 	}
 	// The grace is spent. Record the strike, deny re-admission for the backoff, and restart the grace clock so
 	// the next attempt (if one is ever permitted) gets its own full chance rather than an already-spent one.
-	q.strikes++
-	q.until = now.Add(quarantineBackoff(q.strikes))
-	q.since = time.Time{}
+	q.Strikes++
+	q.Until = now.Add(quarantineBackoff(q.Strikes))
+	q.Since = time.Time{}
 	return activationFailed, problem + " — activation grace exhausted; failing closed and quarantining until " +
-		q.until.UTC().Format(time.RFC3339)
+		q.Until.UTC().Format(time.RFC3339)
 }
 
 // markEnded converges durable state after access has been denied and torn down. Caller holds p.mu.

@@ -124,6 +124,11 @@ type phase3Shaping struct {
 	// would simply hand the next pass a clean slate to admit the same guest again, forever (see proveActive
 	// and the quarantine check in provisionSession).
 	quarantined map[string]*quarantineState
+	// unprovenUnknown records that the durable activation clock could not be read at startup, or can no
+	// longer be written. Either way the appliance cannot bound an unproven activation durably, so it must not
+	// hand out a fresh grace period: an activation that cannot be proven is treated as having already spent
+	// one. Losing a file is not a way to buy unbounded provisional authorization.
+	unprovenUnknown bool
 	// classes/epochCeiling/bootID are the DURABLE half of the same state (see phase3_classstate.go). Without
 	// them a restart re-issues epoch 1 and accounting stalls; a reboot re-issues epoch 1 and a recreated
 	// class is mistaken for the series a checkpoint still remembers.
@@ -435,6 +440,9 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 		if err := p.classStore.save(p.snapshot()); err != nil {
 			res.Failed++
 			res.Problems = append(res.Problems, "durable class state not written: "+err.Error())
+			// The activation clock is part of that file. If it cannot be written, a restart would come back
+			// with a stale or absent countdown, so from here on an unprovable activation gets no fresh grace.
+			p.unprovenUnknown = true
 		}
 	}
 

@@ -68,6 +68,7 @@ The lease lengths are the design, not a tuning knob:
 | | Length | Why |
 |---|---|---|
 | Full lease | 90s, clamped by the session's hard access boundary | equal to the producer's plan validity, so packet forwarding stops at the same moment the appliance stops being able to vouch for what it is forwarding |
+| The clamp | **truncated** to whole seconds, never rounded up | nft's timeout granularity is whole seconds. Rounding up a boundary 200ms away to `timeout 1s` puts the expiry 800ms PAST the deadline — on almost every boundary, since they do not land on whole seconds. Below one representable second no lease is issued at all. |
 | Provisional lease | 15s | the guest is enforced but durable `active` is not yet proven; if nothing ever proves it, the kernel drops the authorization by itself |
 | Activation grace | 30s | a transient database blip must not disconnect a correctly enforced guest — but past this the session is failed closed and quarantined with a doubling backoff, so an unprovable activation can never become permanent access |
 
@@ -276,3 +277,9 @@ runbook or the report.
     activation grace the session is failed closed and quarantined. It can never become permanent access.
 17. Installing or rolling back the Phase-3 nft foundation on a live appliance changes no legacy authorization
     element, and that is proven by snapshot comparison on both sides of the mutation, not asserted.
+18. A lease clamped to a hard access boundary never expires later than that boundary, at any timestamp
+    precision. Quantization resolves downward, and a remainder too short to represent yields no lease.
+19. The maximum authorization time allowed for an activation that cannot be proven is **durable**. A restart
+    or a reboot continues the same countdown; it can never reset or extend it. If the durable record cannot be
+    read or written, an unprovable activation is treated as having already spent its grace — losing a file is
+    not a way to buy provisional authorization.

@@ -11,6 +11,8 @@ package nft
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -271,20 +273,67 @@ func TestPhase3LeaseRefusesAnUnboundedAuthorization(t *testing.T) {
 	}
 }
 
-// A sub-second lease rounds UP. Rounding down would produce `timeout 0s`, which nft treats as no timeout at
-// all — the one value that turns an expiring authorization into a permanent one.
-func TestPhase3LeaseRoundsUpRatherThanToZero(t *testing.T) {
+// A SUB-SECOND LEASE IS REFUSED, NOT ROUNDED UP.
+//
+// nft's element timeout granularity is whole seconds, so a 300ms lease can only be installed as `timeout 1s`
+// — 700ms LONGER than asked for. For a lease clamped to a guest's hard access boundary that overshoot IS the
+// boundary being exceeded, which is the one thing the clamp exists to prevent. So the unrepresentable lease is
+// an error the caller has to handle, not a number quietly made bigger.
+//
+// (`timeout 0s` is not an option either: nft reads it as NO timeout, which would turn an about-to-expire
+// authorization into a permanent one — the exact failure the lease design removes.)
+func TestPhase3LeaseRefusesAnUnrepresentableSubSecondLease(t *testing.T) {
 	c, rr := testClient()
 	rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
 
-	if err := c.LeaseIn(context.Background(), Phase3AuthV4, "br-guest", gIP, 300*time.Millisecond); err != nil {
-		t.Fatal(err)
+	for _, ttl := range []time.Duration{999 * time.Millisecond, 300 * time.Millisecond, time.Millisecond} {
+		err := c.LeaseIn(context.Background(), Phase3AuthV4, "br-guest", gIP, ttl)
+		if err == nil {
+			t.Fatalf("a %v lease was accepted; the only representable form overshoots the caller's bound", ttl)
+		}
+		if !errors.Is(err, ErrLeaseTooShort) {
+			t.Fatalf("a %v lease failed for the wrong reason: %v", ttl, err)
+		}
 	}
-	if rr.has("timeout 0s") {
-		t.Fatalf("a sub-second lease became `timeout 0s`, which nft reads as permanent: %v", rr.all())
+	if len(rr.all()) != 0 {
+		t.Fatalf("a refused lease still issued commands: %v", rr.all())
 	}
-	if !rr.has("timeout 1s") {
-		t.Fatalf("a 300ms lease did not round up to 1s: %v", rr.all())
+}
+
+// AND A LEASE IS NEVER ROUNDED UP. The installed timeout must never be later than what the caller asked for,
+// at any timestamp precision — that is the whole invariant behind clamping a lease to a hard deadline.
+func TestPhase3LeaseNeverInstallsATimeoutLongerThanRequested(t *testing.T) {
+	cases := []struct {
+		ttl  time.Duration
+		want string
+	}{
+		{90 * time.Second, "timeout 90s"},
+		{15 * time.Second, "timeout 15s"},
+		{1900 * time.Millisecond, "timeout 1s"},
+		{1100 * time.Millisecond, "timeout 1s"},
+		{time.Second, "timeout 1s"},
+		{59900 * time.Millisecond, "timeout 59s"},
+	}
+	for _, tc := range cases {
+		c, rr := testClient()
+		rr.typeOut[Phase3AuthV4] = "set phase3_auth_ipv4 { type ifname . ipv4_addr }"
+		if err := c.LeaseIn(context.Background(), Phase3AuthV4, "br-guest", gIP, tc.ttl); err != nil {
+			t.Fatalf("%v: %v", tc.ttl, err)
+		}
+		if !rr.has(tc.want) {
+			t.Fatalf("a %v lease was not installed as %q: %v", tc.ttl, tc.want, rr.all())
+		}
+		// and the installed seconds must never exceed the requested duration
+		var secs int
+		for _, cmd := range rr.all() {
+			if i := strings.Index(cmd, "timeout "); i >= 0 {
+				fmt.Sscanf(cmd[i:], "timeout %ds", &secs)
+			}
+		}
+		if time.Duration(secs)*time.Second > tc.ttl {
+			t.Fatalf("a %v lease installed timeout %ds — %v PAST the caller's bound", tc.ttl, secs,
+				time.Duration(secs)*time.Second-tc.ttl)
+		}
 	}
 }
 

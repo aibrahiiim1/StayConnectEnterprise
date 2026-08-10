@@ -489,3 +489,122 @@ func assertDenyBeforeTeardown(t *testing.T, g *fakeGate) {
 }
 
 func mustIP(s string) net.IP { return net.ParseIP(s) }
+
+// ---- A. the hard boundary, at every timestamp precision ---------------------
+//
+// nft's element timeout granularity is whole seconds, so every boundary that does not land exactly on a
+// second has to be resolved somehow, and only one direction is safe. Rounding up would let a lease clamped to
+// a business deadline expire PAST that deadline — by up to 999ms, on almost every real boundary, silently.
+//
+// These pin the resolution at each precision the instruction named.
+
+func TestLease_BoundaryIsNeverExceededAtAnyPrecision(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		name      string
+		remaining time.Duration
+		wantLease time.Duration
+		wantOK    bool
+	}{
+		{"exactly the full lease", phase3LeaseTTL, phase3LeaseTTL, true},
+		{"1.9s", 1900 * time.Millisecond, time.Second, true},
+		{"1.1s", 1100 * time.Millisecond, time.Second, true},
+		{"exactly 1s", time.Second, time.Second, true},
+		{"999ms", 999 * time.Millisecond, 0, false},
+		{"100ms", 100 * time.Millisecond, 0, false},
+		{"already expired", -time.Millisecond, 0, false},
+		{"long past expiry", -time.Hour, 0, false},
+		{"just under the full lease", phase3LeaseTTL - time.Millisecond, phase3LeaseTTL - time.Second, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ends := now.Add(tc.remaining)
+			got, ok, why := leaseFor(shapeplan.Session{AccessEndsAt: &ends}, now)
+			if ok != tc.wantOK {
+				t.Fatalf("leasable = %v (%s), want %v", ok, why, tc.wantOK)
+			}
+			if !ok {
+				if why == "" {
+					t.Fatal("a refusal carried no reason")
+				}
+				return
+			}
+			if got != tc.wantLease {
+				t.Fatalf("lease = %v, want %v", got, tc.wantLease)
+			}
+			// THE INVARIANT, stated directly: the kernel expiry may never be later than the boundary.
+			if now.Add(got).After(ends) {
+				t.Fatalf("a %v lease against %v remaining expires %v PAST the hard boundary",
+					got, tc.remaining, now.Add(got).Sub(ends))
+			}
+		})
+	}
+}
+
+// A session with NO wall-clock boundary keeps the ordinary 90-second lease. None of the clamping applies to
+// it, and this is here so a future change to the clamp cannot quietly shorten every ordinary guest's lease.
+func TestLease_NoBoundaryKeepsTheOrdinaryLease(t *testing.T) {
+	got, ok, _ := leaseFor(shapeplan.Session{}, time.Now())
+	if !ok || got != phase3LeaseTTL {
+		t.Fatalf("lease = %v (ok=%v), want the ordinary %v", got, ok, phase3LeaseTTL)
+	}
+}
+
+// REPEATED RENEWAL APPROACHING THE BOUNDARY. Every pass re-derives the clamp, so the installed expiry walks
+// down to the boundary and stops there — it never steps over it, and the guest is denied for the final
+// sub-second remainder rather than being given one more whole second.
+func TestLease_RepeatedRenewalWalksDownToTheBoundaryAndStops(t *testing.T) {
+	_, g, _, _, _, p := sysSetup()
+	start := time.Now()
+	// A deliberately "awkward" boundary: not a whole number of seconds from any pass.
+	ends := start.Add(6300 * time.Millisecond)
+	mustConverge(t, p, leasePlanAt(1, &ends, start), start)
+
+	for i := int64(2); i <= 8; i++ {
+		at := start.Add(time.Duration(i-1) * time.Second)
+		g.advance(time.Second)
+		res, err := p.submit(t.Context(), leasePlanAt(i, &ends, at), at)
+		if err != nil {
+			t.Fatalf("plan refused: %v", err)
+		}
+		if lease := g.leaseOf("br-guest", provIP); lease > 0 {
+			expiry := at.Add(lease)
+			if expiry.After(ends) {
+				t.Fatalf("pass %d installed a lease expiring %v past the boundary", i, expiry.Sub(ends))
+			}
+		}
+		// past the boundary the session must be refused outright
+		if !at.Before(ends) && !res.Degraded {
+			t.Fatalf("pass %d past the boundary reported a clean convergence", i)
+		}
+	}
+	g.advance(time.Second)
+	if g.isAuthorized("br-guest", provIP) {
+		t.Fatal("the guest is still authorized past their boundary")
+	}
+}
+
+// RESTART IMMEDIATELY BEFORE THE BOUNDARY. A fresh netd must not treat a nearly-expired entitlement as a new
+// full-length grant: it re-derives the clamp from the same durable boundary the plan carries.
+func TestLease_RestartImmediatelyBeforeTheBoundaryDoesNotExtendIt(t *testing.T) {
+	_, _, gens, origins, enf, p := sysSetup()
+	start := time.Now()
+	ends := start.Add(30 * time.Second)
+	mustConverge(t, p, leasePlanAt(1, &ends, start), start)
+
+	// RESTART, 1.4 seconds before the boundary. The kernel kept its state; netd lost its memory of it.
+	at := ends.Add(-1400 * time.Millisecond)
+	tc2, g2 := newFakeTC(), newFakeGate()
+	p2 := sysWriter(tc2, g2, gens, origins, enf)
+	p2.bootID = "boot-restart"
+	if _, err := p2.submit(t.Context(), leasePlanAt(2, &ends, at), at); err != nil {
+		t.Fatalf("plan refused after restart: %v", err)
+	}
+	if lease := g2.leaseOf("br-guest", provIP); lease > 0 && at.Add(lease).After(ends) {
+		t.Fatalf("a restart %v before the boundary installed a lease expiring %v past it",
+			ends.Sub(at), at.Add(lease).Sub(ends))
+	}
+	if lease := g2.leaseOf("br-guest", provIP); lease > time.Second {
+		t.Fatalf("a restart 1.4s before the boundary issued a %v lease", lease)
+	}
+}

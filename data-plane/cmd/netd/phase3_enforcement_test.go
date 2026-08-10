@@ -245,6 +245,13 @@ func (e *fakeEnforcement) Confirm(ctx context.Context, sessionID string) (bool, 
 	return e.state[sessionID] == "active", nil
 }
 
+// setState forces durable state, modelling a commit whose acknowledgement never arrived.
+func (e *fakeEnforcement) setState(id, st string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.state[id] = st
+}
+
 func (e *fakeEnforcement) sessionState(id string) string {
 	e.mu.Lock()
 	defer e.mu.Unlock()

@@ -65,10 +65,9 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// A session whose entitlement window has already elapsed gets no lease at all, and no class. The plan may
 	// still list it — the producer derives from durable state and the expiry sweep runs on its own schedule —
 	// but "the plan still mentions them" is not authority to forward a guest past their own deadline.
-	lease, leasable := leaseFor(s, now)
+	lease, leasable, why := leaseFor(s, now)
 	if !leasable {
-		p.failClosed(ctx, bridge, ip, res,
-			"shape "+s.SessionID+": access boundary has already passed; not authorized")
+		p.failClosed(ctx, bridge, ip, res, "shape "+s.SessionID+": "+why+"; not authorized")
 		return
 	}
 
@@ -85,11 +84,11 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// be read at all. The two conditions cover the two different failures: a database that is simply down
 	// yields no access whatsoever after the first grace, and an activation that can never succeed yields a
 	// rapidly shrinking fraction of one.
-	if q := p.quarantined[key]; q != nil && !q.until.IsZero() {
-		hold := now.Before(q.until)
+	if q := p.quarantined[key]; q != nil && !q.Until.IsZero() {
+		hold := now.Before(q.Until)
 		if !hold && p.enforcement != nil {
 			if _, err := p.enforcement.Confirm(ctx, s.SessionID); err != nil {
-				q.until = now.Add(quarantineBackoff(q.strikes))
+				q.Until = now.Add(quarantineBackoff(q.Strikes))
 				hold = true
 			}
 		}
@@ -103,11 +102,11 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 			}
 			res.Failed++
 			res.Problems = append(res.Problems, "shape "+s.SessionID+
-				": quarantined after "+itoa(q.strikes)+" unproven activation(s); not re-admitting before "+
-				q.until.UTC().Format(time.RFC3339))
+				": quarantined after "+itoa(q.Strikes)+" unproven activation(s); not re-admitting before "+
+				q.Until.UTC().Format(time.RFC3339))
 			return
 		}
-		q.until = time.Time{} // the backoff has elapsed and durable state is readable: one fresh attempt
+		q.Until = time.Time{} // the backoff has elapsed and durable state is readable: one fresh attempt
 	}
 
 	// ---- ORDINARY RE-RATE of an already-active class ----------------------------------------------------

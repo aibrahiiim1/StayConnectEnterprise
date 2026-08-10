@@ -172,9 +172,13 @@ func main() {
 	// that exact slot under the same boot. A class that was flushed, recreated by hand, or whose minor now
 	// belongs to a different session is dropped so its successor allocates a fresh generation.
 	bootID := readBootID(envOr("NETD_BOOT_ID_FILE", "/proc/sys/kernel/random/boot_id"))
-	prevClasses, _ := p3shaping.classStore.load()
+	prevClasses, _, unreadable := p3shaping.classStore.load()
 	inv, verified := kernelInventory(rootCtx, p3shaping.shp, bridgesIn(prevClasses))
 	p3shaping.restore(prevClasses, bootID, inv, verified)
+	// If the durable state could not be read, the ACTIVATION-UNCERTAINTY CLOCK is unknown — not empty. A
+	// session whose activation cannot be proven must then be treated as having already spent its grace,
+	// because the alternative is that losing one file awards every guest a fresh one.
+	p3shaping.unprovenUnknown = unreadable
 	if p3mode.Active {
 		slog.Info("netd phase3 managed-class state restored",
 			"persisted", len(prevClasses.Classes), "carried_forward", len(p3shaping.classes),
