@@ -286,7 +286,13 @@ runbook or the report.
     provisional element is installed, so a crash anywhere after admission recovers the same bound and a crash
     before it granted nothing. A write that cannot be proven durable denies admission; a failed *clear* leaves
     the record in place, because a stale marker is harmless to a session that can be proven active.
-20. That bound is measured against **boot-relative monotonic time**, never the wall clock. An NTP correction,
+20. That bound requires BOTH a trustworthy monotonic reading AND a trustworthy, non-empty boot identity.
+    An unreadable, empty or malformed identity means a reboot cannot be detected, so no provisional access is
+    granted or renewed — while a session already proven durably `active` is left alone, because it needs no
+    bound. The durable record is validated **semantically** before it is trusted: valid JSON carrying an
+    over-long grace, a negative reading, boot-relative numbers with no boot, or duplicate keys is treated as
+    UNKNOWN and fail-closed, and is never normalised into a fresh grace.
+21. That bound is measured against **boot-relative monotonic time**, never the wall clock. An NTP correction,
     a wrong RTC or a resumed snapshot cannot lengthen it. Across a reboot the monotonic timeline restarts and
     is not bridged: the session stays denied until durable state proves it ACTIVE, because the only available
     estimate of the downtime comes from the clock this design refuses to trust.

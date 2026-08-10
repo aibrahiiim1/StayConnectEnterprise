@@ -261,6 +261,16 @@ fi
 
 [ "$p3drift" = "0" ] && ok "no Phase-3 enforcement/evidence phrase drift" || fail "$p3drift Phase-3 phrase drift hit(s)"
 
+echo "== 1d. transition receipts cannot be dated after the commit that introduced them =="
+if have_repo; then
+  if bash "$REPO_ROOT/tools/validate-transition-times.sh" >/dev/null 2>&1; then
+    ok "no transition receipt is dated after its introducing commit"
+  else
+    bash "$REPO_ROOT/tools/validate-transition-times.sh" 2>&1 | grep -E "^  (FAIL|grandfathered)" | sed 's/^/  /'
+    fail "a transition receipt describes its own future"
+  fi
+else skipped "transition timestamps (no repository)"; fi
+
 echo "== 2. single current maturity + consistent next action =="
 for f in "$PACK/StayConnect-IAM-Phase1A-Plan.md" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" "$PACK/MANIFEST.md"; do
   [ -f "$f" ] && grep -q "$MAT" "$f" && ok "maturity present in $(basename "$f")" || fail "maturity string missing in $(basename "$f")"

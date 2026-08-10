@@ -1,7 +1,7 @@
 {
   "transition_id": "T0019",
   "seq": 19,
-  "timestamp": "2026-08-10T15:30:00Z",
+  "timestamp": "2026-08-10T15:02:33Z",
   "previous_state": {
     "phase": "3",
     "activity": "PHASE_3_PRE_LIVE_SAFETY_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION",
@@ -24,6 +24,7 @@
     "tools/validate-project-state.sh",
     "scripts/phase3-preflight.sh"
   ],
+  "timestamp_evidence": "The committer timestamp of this transition's own source_commit 41aa0b8762f98aadcfeeca89d45c45afc9e8331c (2026-08-10T18:02:33+03:00 = 2026-08-10T15:02:33Z), read from the repository with `git show -s --format=%cI`. The value recorded when this file was first written (2026-08-10T15:30:00Z) was future-dated: it was 26 minutes AFTER the commit 9c09cd6 that introduced the file, which is impossible. It was an approximation rather than a measured time, and it is corrected here from evidence rather than replaced with another estimate.",
   "source_commit": "41aa0b8",
   "acceptance_verdict": "IN_PROGRESS -- Phase-3 PRE-LIVE SAFETY candidate COMPLETE and corrected, DARK, NOT accepted, NOT closed. Live Increment-9 authorization is REQUESTED and remains ungranted.",
   "next_action": "Obtain a separate Product-Owner decision authorizing Live Increment 9 before any live execution."

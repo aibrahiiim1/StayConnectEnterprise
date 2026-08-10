@@ -104,7 +104,32 @@ they were built and are `PASS — SOFTWARE` in the matrix.
   deadline instead of a flat maximum it could never reach. There is still exactly one budget for the endpoint,
   so the occupancy-enumeration protection is unchanged in form.
 
-**The final durability closure.** Three more things were wrong in ways that read as correct:
+**The final pre-live blockers.** Three more, and the first two were failures of *trust* rather than of logic:
+
+- **Boot identity could fail open.** The cross-reboot guarantee rests on two readings — a monotonic uptime and
+  the identity of the boot it belongs to — but the identity was a bare string, empty on any read error. So
+  `crossBoot()` compared `""` with `""`, concluded the boot was unchanged, and a previous boot's deadline
+  could be measured against the new boot's uptime. The bound was silently gone with nothing in the logs. The
+  identity is now read with an error and validated for shape; an unreadable, empty or malformed value denies
+  new *and renewed* provisional authorization, and `crossBoot` treats an untrusted identity on either side as
+  a boot change. It deliberately does **not** disconnect a session already proven durably `ACTIVE`: that
+  session needs no bound, and manufacturing an outage for it would be the wrong direction.
+- **The security journal was trusted because it parsed.** It is authority now, and valid JSON is not coherent
+  security state: a deadline an hour past its start, a negative reading, boot-relative numbers with no boot,
+  two records for one key — all parse perfectly and all widen or erase the bound. Every persisted record is
+  now validated for coherent, bounded state, and anything incoherent becomes UNKNOWN and fail-closed, exactly
+  like an unreadable file. Nothing is normalised: repairing a corrupt record into a plausible one is how a
+  destroyed bound becomes an ordinary-looking fresh grace.
+- **A transition receipt described its own future.** T0019 recorded `2026-08-10T15:30:00Z` in a file first
+  committed at `15:03:39Z` — twenty-six minutes before the moment it claimed. It is corrected to
+  `2026-08-10T15:02:33Z`, the committer timestamp of its own `source_commit` `41aa0b8`, read from the
+  repository rather than estimated again. An audit of all nineteen receipts found four more (T0007, T0008,
+  T0016, T0017) future-dated against their introducing commits; those are historical evidence and are **not**
+  rewritten — they are listed explicitly by the new check and grandfathered, with the rule enforced from T0018
+  onward. Rewriting an old receipt to satisfy a new rule would manufacture exactly what the rule exists to
+  prevent.
+
+**The previous durability closure.** Three more things were wrong in ways that read as correct:
 
 - **The security timer was not durable at the instant access began.** The attempt was recorded with the rest
   of the class inventory at the END of a reconciliation pass, but the guest was authorized in the middle of
@@ -239,7 +264,7 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 
 | Test | Result | Evidence |
 |---|---|---|
-| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, write-ahead durable activation bound, monotonic security time) | **PASS 37/37** | `scripts/phase3-preflight.sh --json` |
+| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, write-ahead durable activation bound, monotonic security time, trusted boot identity, semantic journal validation) | **PASS 40/40** | `scripts/phase3-preflight.sh --json` |
 | Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 362/362** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
 | PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** (all eleven) | `scripts/pmsd-pg-integration.sh` |
 | Go unit tests, whole module | **PASS** | `go test ./... -count=1` (JSON-counted) |
@@ -350,6 +375,12 @@ appears.
 | 30ab | A reboot cannot create a fresh unproven grace: a prior boot's monotonic timeline is not bridged, so the session stays denied until durable state proves it ACTIVE — with the RTC behind, ahead, or the database unreadable | **PASS — SOFTWARE** | `crossBoot` handling in `phase3_provision.go`; `phase3_durability_test.go` reboot cases |
 | 30ac | An unreadable monotonic security clock denies admission rather than assuming the bound unspent; quarantine records are pruned by durable resolution, never by wall-clock age | **PASS — SOFTWARE** | `bootNow` fail-closed path; `phase3_durability_test.go` (unreadable clock; pruning across ±1 year of wall jumps) |
 | 30ad | PR metadata — the one authoritative surface that is not committed — is Zero-Stale-validated at the CI boundary against `project-state.json`, in the same run, with no hard-coded run identifiers | **PASS — SOFTWARE** | `tools/validate-pr-metadata.sh`; Project Governance workflow |
+| 30ae | Boot identity is a fail-closed part of the security clock: it is read with an error, validated for shape, and an unreadable, empty or malformed value denies new or renewed provisional authorization | **PASS — SOFTWARE** | `phase3_securitytime.go` `BootID() (string, error)` + `plausibleBootID`; `phase3_bootid_test.go`; preflight |
+| 30af | A reboot cannot be HIDDEN by an untrustworthy boot identity: `crossBoot` treats an empty identity on either side as a boot change, so a prior boot's deadline is never compared with a new boot's uptime | **PASS — SOFTWARE** | `crossBoot`; `phase3_bootid_test.go` (reboot + unreadable id; large prior-boot deadline + small new uptime) |
+| 30ag | An untrustworthy boot identity does NOT disconnect a session already proven durably ACTIVE — it withholds provisional access without manufacturing an outage | **PASS — SOFTWARE** | `phase3_provision.go` (untrusted identity carried, not failed closed globally); `phase3_bootid_test.go` |
+| 30ah | The security journal is validated SEMANTICALLY, not merely as JSON: identity, boot anchoring, non-negative and bounded monotonic readings, began/deadline ordering, a grace no longer than policy, coherent strike/backoff state and no duplicate keys | **PASS — SOFTWARE** | `validateAttempts`; `phase3_bootid_test.go` poison matrix (17 valid-JSON records, each rejected) |
+| 30ai | An incoherent security record becomes UNKNOWN and fail-closed — never silently normalised into a fresh grace — while a coherent one is still honoured and enforces its own recorded deadline | **PASS — SOFTWARE** | `journalLoad.Unreadable`; `phase3_bootid_test.go` |
+| 30aj | A transition receipt cannot be dated after the commit that introduced it; the four pre-rule receipts are listed and grandfathered rather than rewritten | **PASS — GOVERNANCE** | `tools/validate-transition-times.sh`; Zero-Stale check 1d; Project Governance workflow |
 | 31 | Live read-only PMS protocol verification | **PENDING — LIVE INCREMENT 9** | operator-executed; never simulated |
 | 32 | Live-dark deployment, reboot drill, rollback rehearsal, flags-OFF confirmation | **PENDING — LIVE INCREMENT 9** | runbook §2–§5 |
 | 33 | Gate-P per-service EXECUTE grants and role separation | **OUT OF SCOPE BY APPROVED CONTRACT** | separately gated; zero runtime grants while dark |

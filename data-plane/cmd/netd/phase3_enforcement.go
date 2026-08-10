@@ -177,10 +177,19 @@ func (p *phase3Shaping) proveActive(ctx context.Context, key, sessionID, bridge 
 	q := p.quarantineFor(key)
 	problem := problemFor(sessionID, err, cerr)
 
-	if q.BeganBootMs == 0 || q.crossBoot(p.currentBootID()) {
+	bootID, bootErr := p.currentBootID()
+	if bootErr != nil {
+		// The bound cannot be anchored to a boot, so it cannot be trusted after one. Treat it exactly as an
+		// exhausted grace rather than recording a deadline nothing can later interpret.
+		q.Strikes++
+		q.BackoffUntilBootMs = nowBoot + quarantineBackoff(q.Strikes).Milliseconds()
+		return activationFailed, problem +
+			" — and the boot identity is not trustworthy (" + bootErr.Error() + "); failing closed"
+	}
+	if q.BeganBootMs == 0 || q.crossBoot(bootID) {
 		// The first failure of this attempt. The write-ahead record already exists (admission could not have
 		// happened otherwise), so this only sharpens it with the moment the grace actually started.
-		q.BootID = p.currentBootID()
+		q.BootID = bootID
 		q.BeganBootMs = nowBoot
 		q.DeadlineBootMs = nowBoot + phase3ActivationGrace.Milliseconds()
 		q.BeganWall = p.wallStamp()

@@ -26,6 +26,11 @@ import (
 	"time"
 )
 
+// bootIDFor builds a realistic boot identity. Real kernels report a UUID, and the security clock refuses a
+// value too short to distinguish two boots — so the fakes use the real shape rather than a token that would
+// only pass because the fake was lenient.
+func bootIDFor(tag string) string { return "b00" + tag + "1de-0000-4000-8000-00000000000" + tag }
+
 // ---- harness ----------------------------------------------------------------
 
 // durHarness is one appliance: its two durable files, its kernel, and a clock the test controls.
@@ -50,7 +55,7 @@ func newDurHarness(t *testing.T) *durHarness {
 	h := &durHarness{
 		dir: t.TempDir(), tc: newFakeTC(), g: newFakeGate(),
 		gens: &fakeGenerations{}, origins: &fakeOrigins{}, enf: newFakeEnforcement(),
-		clk:  &fixedSecurityClock{ms: 60_000, bootID: "boot-A"},
+		clk:  &fixedSecurityClock{ms: 60_000, bootID: bootIDFor("A")},
 		wall: time.Now(), gen: 0,
 	}
 	h.p = h.build()
@@ -143,7 +148,7 @@ func TestDurable_TheAttemptIsRecordedBeforeTheGuestIsAuthorized(t *testing.T) {
 	if at[0].BeganBootMs == 0 || at[0].DeadlineBootMs <= at[0].BeganBootMs {
 		t.Fatalf("the journalled attempt carries no usable bound: %+v", at[0])
 	}
-	if at[0].BootID != "boot-A" {
+	if at[0].BootID != bootIDFor("A") {
 		t.Fatalf("the attempt does not name the boot its readings belong to: %+v", at[0])
 	}
 }
@@ -427,7 +432,7 @@ func TestSecurityTime_ARebootDoesNotCreateAFreshGrace(t *testing.T) {
 
 			h.advance(5 * time.Second)
 			h.moveWall(tc.rtc)
-			h.reboot(t, "boot-B")
+			h.reboot(t, bootIDFor("B"))
 			h.pass(t, nil)
 
 			if h.authorized() {
@@ -450,7 +455,7 @@ func TestSecurityTime_ARebootWhereTheDatabaseProvesActiveRebuildsEnforcement(t *
 	// The promotion had in fact committed before the crash; the database says so once it is reachable.
 	h.enf.err, h.enf.confirmErr = nil, nil
 	h.enf.setState("live-1", "active")
-	h.reboot(t, "boot-C")
+	h.reboot(t, bootIDFor("C"))
 	h.pass(t, nil)
 
 	if !h.authorized() {
@@ -468,7 +473,7 @@ func TestSecurityTime_ARebootWithAnUnreadableDatabaseStaysDenied(t *testing.T) {
 	brokenDB(h)
 	h.pass(t, nil)
 	h.advance(5 * time.Second)
-	h.reboot(t, "boot-D")
+	h.reboot(t, bootIDFor("D"))
 
 	for i := 0; i < 6; i++ {
 		h.advance(20 * time.Second)
@@ -494,7 +499,7 @@ func TestSecurityTime_NoAccessBoundarySessionIsStillBoundedAcrossJumpsAndReboot(
 	if h.authorized() {
 		t.Fatal("a session with no wall-clock boundary outlived its activation grace after a clock jump")
 	}
-	h.reboot(t, "boot-E")
+	h.reboot(t, bootIDFor("E"))
 	h.advance(time.Minute)
 	h.pass(t, nil)
 	if h.authorized() {

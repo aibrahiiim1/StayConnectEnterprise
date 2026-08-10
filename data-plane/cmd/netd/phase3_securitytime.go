@@ -41,7 +41,12 @@ type securityClock interface {
 	BootMillis() (int64, error)
 	// BootID identifies THIS boot. A change means the monotonic timeline restarted and prior readings from it
 	// are meaningless — not merely old.
-	BootID() string
+	//
+	// It returns an ERROR rather than an empty string, because an empty identity is not "no reboot detected" —
+	// it is "reboot detection is not working". Represented as a bare string, an unreadable boot id made
+	// crossBoot() compare "" against "" and conclude the boot was unchanged, so a prior boot's deadline could
+	// be measured against the new boot's uptime. The bound was silently gone and every log line looked normal.
+	BootID() (string, error)
 }
 
 // procSecurityClock is the production clock: /proc/uptime for the monotonic reading, /proc/sys/kernel/random/
@@ -82,7 +87,43 @@ func (c *procSecurityClock) BootMillis() (int64, error) {
 	return int64(secs * 1000), nil
 }
 
-func (c *procSecurityClock) BootID() string { return readBootID(c.bootIDPath) }
+func (c *procSecurityClock) BootID() (string, error) {
+	raw, err := os.ReadFile(c.bootIDPath)
+	if err != nil {
+		return "", fmt.Errorf("boot identity unreadable: %w", err)
+	}
+	id := strings.TrimSpace(string(raw))
+	if id == "" {
+		return "", fmt.Errorf("boot identity is empty")
+	}
+	if !plausibleBootID(id) {
+		return "", fmt.Errorf("boot identity is malformed: %q", trimForLog(id))
+	}
+	return id, nil
+}
+
+// plausibleBootID rejects anything that is not a single opaque token. It is deliberately loose about FORM —
+// this is an identity, not a schema — and strict about the two properties that matter: it is one token, and it
+// is long enough to actually distinguish two boots. A short or whitespace-bearing value is far more likely to
+// be a truncated read or an error message than a kernel boot id.
+func plausibleBootID(id string) bool {
+	if len(id) < 8 || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if r <= ' ' || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func trimForLog(s string) string {
+	if len(s) > 40 {
+		return s[:40] + "..."
+	}
+	return s
+}
 
 // fixedSecurityClock is the test seam. It is in the production file deliberately: a clock this important
 // should have exactly one implementation to fake, and it should be obvious what faking it means.
@@ -90,6 +131,9 @@ type fixedSecurityClock struct {
 	ms     int64
 	bootID string
 	err    error
+	// bootErr fails the BOOT-IDENTITY read specifically, independently of the monotonic reading, because those
+	// are two different files and two different failures.
+	bootErr error
 }
 
 func (c *fixedSecurityClock) BootMillis() (int64, error) {
@@ -99,7 +143,15 @@ func (c *fixedSecurityClock) BootMillis() (int64, error) {
 	return c.ms, nil
 }
 
-func (c *fixedSecurityClock) BootID() string { return c.bootID }
+func (c *fixedSecurityClock) BootID() (string, error) {
+	if c.bootErr != nil {
+		return "", c.bootErr
+	}
+	if strings.TrimSpace(c.bootID) == "" {
+		return "", fmt.Errorf("boot identity is empty")
+	}
+	return c.bootID, nil
+}
 
 // bootNow reads the security clock, or reports why it could not be read. Callers must treat an error as
 // "this bound cannot be measured" and fail closed — never as zero elapsed.
@@ -110,9 +162,11 @@ func (p *phase3Shaping) bootNow() (int64, error) {
 	return p.secClock.BootMillis()
 }
 
-func (p *phase3Shaping) currentBootID() string {
+// currentBootID returns the trustworthy boot identity, or an error. There is no third answer: a caller that
+// received "" and carried on would be doing reboot detection with a value that cannot detect a reboot.
+func (p *phase3Shaping) currentBootID() (string, error) {
 	if p.secClock == nil {
-		return ""
+		return "", fmt.Errorf("no security clock configured")
 	}
 	return p.secClock.BootID()
 }

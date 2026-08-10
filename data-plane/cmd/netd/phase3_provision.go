@@ -85,6 +85,27 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 				"); the activation bound cannot be measured, so no provisional access is granted")
 		return
 	}
+	// AND THE BOOT IDENTITY. The monotonic reading alone is not enough: it only means anything relative to a
+	// known boot. Without a trustworthy identity a reboot cannot be detected, and a previous boot's deadline
+	// would be compared against this boot's uptime — the bound silently gone, with nothing in the logs.
+	//
+	// An untrustworthy identity is NOT failed closed here, for one specific reason: it would disconnect
+	// sessions that are already proven durably active and need no bound at all. It is instead carried as an
+	// empty identity, which every consumer treats as untrusted:
+	//
+	//	beginAttempt REFUSES, so no new provisional access is granted;
+	//	crossBoot() is TRUE for any record, so an outstanding attempt is held until durable ACTIVE proves it;
+	//	proveActive fails closed, so an unproven attempt is not renewed.
+	//
+	// The result is exactly the required behaviour — no provisional access while reboot detection is broken,
+	// and no manufactured outage for a guest whose access is already durably justified.
+	curBootID, bootErr := p.currentBootID()
+	if bootErr != nil {
+		curBootID = ""
+		res.Problems = append(res.Problems, "shape "+s.SessionID+
+			": the boot identity is not trustworthy ("+bootErr.Error()+
+			"); no provisional access will be granted or renewed until it is")
+	}
 
 	// ---- QUARANTINE: a session whose activation could not be proven --------------------------------------
 	//
@@ -106,7 +127,7 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// trust. So a boot change never yields a fresh grace: the session stays denied until AUTHORITATIVE durable
 	// state resolves it, and the one thing that resolves it is proof that the Session is already active.
 	if q := p.quarantined[key]; q != nil {
-		if q.crossBoot(p.currentBootID()) {
+		if q.crossBoot(curBootID) {
 			resolved := false
 			if p.enforcement != nil {
 				if active, cerr := p.enforcement.Confirm(ctx, s.SessionID); cerr == nil && active {

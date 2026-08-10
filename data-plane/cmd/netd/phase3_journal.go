@@ -34,10 +34,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -107,7 +109,83 @@ func (j *activationJournal) load() journalLoad {
 	if json.Unmarshal(raw, &st) != nil {
 		return journalLoad{Unreadable: true}
 	}
+	// SYNTAX IS NOT TRUST. This file is security authority now, and a document that parses is not the same as
+	// a document that means something. Every field below can be edited into a shape that is valid JSON and
+	// silently widens the grace — a deadline far in the future, a negative start, an absent boot identity
+	// beside boot-relative readings, two records fighting over one key. Any of those is treated exactly like
+	// an unreadable file: UNKNOWN, and therefore fail-closed.
+	//
+	// The one thing NOT done here is normalisation. Repairing an incoherent record into a plausible one is how
+	// a corrupted security bound becomes a fresh grace period that looks entirely ordinary afterwards.
+	if err := validateAttempts(st.Attempts); err != nil {
+		slog.Warn("phase3: the activation journal parsed but is not coherent; treating it as unknown",
+			"err", err)
+		return journalLoad{Unreadable: true}
+	}
 	return journalLoad{Attempts: st.Attempts}
+}
+
+// maxPlausibleBootMs bounds a boot-relative reading. /proc/uptime on a machine that has been up for ten years
+// is about 3.2e11 ms; anything past this is not an uptime, it is a value chosen to push a deadline out of
+// reach. Bounding it also removes any arithmetic that could overflow into a negative comparison.
+const maxPlausibleBootMs int64 = 100 * 365 * 24 * 60 * 60 * 1000 // one century
+
+// validateAttempts checks the whole set for coherent, bounded security state.
+func validateAttempts(attempts []activationAttempt) error {
+	seen := map[string]bool{}
+	for _, a := range attempts {
+		if strings.TrimSpace(a.Key) == "" {
+			return fmt.Errorf("a record has no activation key")
+		}
+		if !strings.Contains(a.Key, "|") {
+			return fmt.Errorf("record %q: the activation key is not a bridge|session identity", a.Key)
+		}
+		if strings.TrimSpace(a.SessionID) == "" {
+			return fmt.Errorf("record %q: no session identity", a.Key)
+		}
+		if seen[a.Key] {
+			// Two records for one activation would let a reader pick whichever bound it preferred.
+			return fmt.Errorf("record %q: duplicate activation key", a.Key)
+		}
+		seen[a.Key] = true
+
+		hasBootRelative := a.BeganBootMs != 0 || a.DeadlineBootMs != 0 || a.BackoffUntilBootMs != 0
+		if hasBootRelative && !plausibleBootID(strings.TrimSpace(a.BootID)) {
+			// Boot-relative numbers without a trustworthy boot they belong to cannot be compared with
+			// anything. This is the shape that let a prior boot's deadline be measured against a new uptime.
+			return fmt.Errorf("record %q: boot-relative readings with no trustworthy boot identity", a.Key)
+		}
+		for name, v := range map[string]int64{
+			"began": a.BeganBootMs, "deadline": a.DeadlineBootMs, "backoff": a.BackoffUntilBootMs} {
+			if v < 0 {
+				return fmt.Errorf("record %q: negative %s reading (%d)", a.Key, name, v)
+			}
+			if v > maxPlausibleBootMs {
+				return fmt.Errorf("record %q: implausible %s reading (%d)", a.Key, name, v)
+			}
+		}
+		if a.BeganBootMs != 0 || a.DeadlineBootMs != 0 {
+			if a.DeadlineBootMs <= a.BeganBootMs {
+				return fmt.Errorf("record %q: deadline %d does not follow start %d", a.Key, a.DeadlineBootMs, a.BeganBootMs)
+			}
+			if a.DeadlineBootMs-a.BeganBootMs > phase3ActivationGrace.Milliseconds() {
+				// THE WIDENED GRACE, caught directly: a record may not claim more grace than the policy grants.
+				return fmt.Errorf("record %q: claims a %dms grace, longer than the %dms policy",
+					a.Key, a.DeadlineBootMs-a.BeganBootMs, phase3ActivationGrace.Milliseconds())
+			}
+		}
+		if a.Strikes < 0 {
+			return fmt.Errorf("record %q: negative strike count (%d)", a.Key, a.Strikes)
+		}
+		if a.BackoffUntilBootMs != 0 && a.Strikes < 1 {
+			return fmt.Errorf("record %q: a backoff is in force with no strike to justify it", a.Key)
+		}
+		if a.Strikes > 0 && a.BackoffUntilBootMs == 0 && a.BeganBootMs == 0 {
+			return fmt.Errorf("record %q: %d strike(s) recorded with neither a backoff nor an attempt in progress",
+				a.Key, a.Strikes)
+		}
+	}
+	return nil
 }
 
 // save writes the whole attempt set and returns only after the bytes AND the directory entry are fsynced.
@@ -204,10 +282,17 @@ type quarantineState struct {
 	BeganWall string
 }
 
-// crossBoot reports that this record belongs to a previous boot, so its monotonic readings cannot be compared
-// with the current clock at all.
+// crossBoot reports that this record's monotonic readings cannot be compared with the current clock.
+//
+// It is deliberately TRUE for an empty identity on either side. The earlier form required both to be non-empty
+// before it would report a boot change, so an unreadable boot id made it compare "" against "" and answer
+// "same boot" — and a prior boot's deadline was then measured against the new boot's uptime. Reboot detection
+// that fails open is not reboot detection.
+//
+// The caller never passes an untrusted identity anyway (currentBootID is now an error-returning read), but the
+// predicate is written so that it could not be wrong even if one day it were.
 func (q *quarantineState) crossBoot(currentBootID string) bool {
-	return q.BootID != "" && currentBootID != "" && q.BootID != currentBootID
+	return q.BootID == "" || currentBootID == "" || q.BootID != currentBootID
 }
 
 // journalAttempts renders the in-memory records for persistence. Caller holds p.mu.
@@ -276,11 +361,17 @@ func (p *phase3Shaping) beginAttempt(ctx context.Context, key, sessionID string,
 		}
 		return "the durable activation journal is unreadable, so no grace period can be granted; not authorizing"
 	}
+	bootID, bootErr := p.currentBootID()
+	if bootErr != nil {
+		// Without a trustworthy boot identity a reboot cannot be detected, so a deadline recorded now could
+		// later be compared against a different boot's uptime. Nothing is recorded and nobody is authorized.
+		return "the boot identity is not trustworthy (" + bootErr.Error() + "); not authorizing"
+	}
 	q := p.quarantineFor(key)
-	if q.BeganBootMs != 0 && !q.crossBoot(p.currentBootID()) {
+	if q.BeganBootMs != 0 && !q.crossBoot(bootID) {
 		return "" // already begun on this boot's timeline; the existing deadline stands
 	}
-	q.BootID = p.currentBootID()
+	q.BootID = bootID
 	q.BeganBootMs = nowBoot
 	q.DeadlineBootMs = nowBoot + phase3ActivationGrace.Milliseconds()
 	q.BeganWall = p.wallStamp()

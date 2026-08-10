@@ -170,7 +170,7 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh enforcement --
           bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh enforcement
           ./cmd/netd/ ./internal/nft/
-          -run 'System|Lease|Activation|Durable|SecurityTime|Phase3Allow|LegacyAllow|Phase3Deny|Phase3List|PermanentConcat|AuthorizedIn|ListIn|ConcatProbe|AllowInCarries' -count=1
+          -run 'System|Lease|Activation|Durable|SecurityTime|BootID|Journal|Phase3Allow|LegacyAllow|Phase3Deny|Phase3List|PermanentConcat|AuthorizedIn|ListIn|ConcatProbe|AllowInCarries' -count=1
 
       - name: Surgical live-dark nft foundation tests
         working-directory: data-plane

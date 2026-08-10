@@ -345,6 +345,25 @@ if grep -q 'crossBoot' "$JOURNAL" && grep -q 'crossBoot' "$PROV"; then
 else
   no "a reboot can manufacture a fresh unproven-activation grace"
 fi
+# BOOT IDENTITY IS PART OF THE CLOCK. An unreadable boot id represented as "" made crossBoot() compare "" with
+# "" and answer "same boot", so a prior boot's deadline could be measured against a new boot's uptime.
+if grep -q 'BootID() (string, error)' "$SECTIME" && grep -q 'plausibleBootID' "$SECTIME"; then
+  ok "boot identity is an error-returning, validated part of the security clock"
+else
+  no "an unreadable or empty boot identity is indistinguishable from a trustworthy one"
+fi
+if grep -q 'q.BootID == "" || currentBootID == ""' "$JOURNAL"; then
+  ok "an untrusted boot identity on either side is treated as a boot CHANGE, not as the same boot"
+else
+  no "reboot detection fails open when a boot identity cannot be read"
+fi
+# THE SECURITY JOURNAL IS VALIDATED SEMANTICALLY. It is authority now, and valid JSON is not the same as
+# coherent security state: a deadline far in the future parses perfectly and silently widens the grace.
+if grep -q 'func validateAttempts' "$JOURNAL" && grep -q 'longer than the' "$JOURNAL"; then
+  ok "every persisted security record is validated for coherent, bounded state before it is trusted"
+else
+  no "a syntactically valid but incoherent security record would be trusted"
+fi
 
 # ---------------------------------------------------------------- 12. the surgical live-dark foundation
 # Installing the Phase-3 nft foundation on a live appliance must never flush or recreate the StayConnect table:

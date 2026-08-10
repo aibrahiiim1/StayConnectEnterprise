@@ -36,6 +36,12 @@ jobs:
       - name: Generated-block consistency
         run: python tools/project-state.py check-generated
 
+      - name: Transition-receipt timestamps
+        # A receipt that claims a moment AFTER the commit that introduced it is describing its own future.
+        # Checked here as well as in the Zero-Stale validator because it needs git history, which the
+        # extracted-pack mode of that validator deliberately does not have.
+        run: bash tools/validate-transition-times.sh
+
       - name: PR-metadata Zero-Stale (the one authoritative surface that is not committed)
         # Every other check stops at the repository boundary, so a PR whose top-level Status still announced a
         # superseded candidate state passed every gate while being the most visible wrong statement in the
