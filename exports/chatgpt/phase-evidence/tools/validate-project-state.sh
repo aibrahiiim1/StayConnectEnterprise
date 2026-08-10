@@ -112,6 +112,37 @@ while IFS= read -r line; do
 done < <(grep -rniE "$ARCH" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -v "validate-project-state.sh")
 [ "$a1" = "0" ] && ok "no stale architecture terms presented as current values" || fail "$a1 stale architecture-term line(s)"
 
+echo "== 1c. Phase-3 enforcement/evidence phrases must not drift =="
+# These are the exact phrases a previous round got wrong, each in a way that read as correct:
+#   - a stale preflight total in the Final Report (18/18 after the suite grew to 20);
+#   - "N/N entries passed sha256sum -c", which miscounts a manifest that cannot list itself;
+#   - any claim that removing a tc filter denies internet access, which it does not.
+# Catching them here means the next drift of this class fails a gate instead of being reviewed for.
+p3drift=0
+REPORT="$DOCS/reports/StayConnect-IAM-Phase3-Final-Report.md"
+if [ -f "$REPORT" ]; then
+  # the preflight total in the report must match what the preflight actually reports
+  actual_pf="$(bash "$ROOT/scripts/phase3-preflight.sh" --json 2>/dev/null | sed -n 's/.*"pass":\([0-9]*\).*/\1/p')"
+  if [ -n "$actual_pf" ]; then
+    grep -qE "PASS $actual_pf/$actual_pf" "$REPORT" || { echo "    HIT [stale preflight total]: report does not state PASS $actual_pf/$actual_pf"; p3drift=$((p3drift+1)); }
+    for bad in 17 18 19; do
+      [ "$bad" = "$actual_pf" ] && continue
+      grep -qE "Offline preflight[^|]*\| \*\*PASS $bad/$bad\*\*" "$REPORT" && { echo "    HIT [stale preflight total]: PASS $bad/$bad still claimed"; p3drift=$((p3drift+1)); }
+    done
+  fi
+fi
+# no document may claim a tc-only action denies internet access
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [tc-denies-access overclaim]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "(deleting|removing|stripping) (a )?(tc )?(filter|class)[^.]{0,60}(denies|denying|blocks|cuts off)[^.]{0,30}(internet|access|forwarding)" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -viE "does not|never|cannot|not equivalent|is not" | grep -v "validate-project-state.sh")
+# the manifest-integrity wording must not claim the manifest verifies itself
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [manifest self-count overclaim]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "([0-9]+)/\1 (entries|files) (passed|verified)[^.]{0,40}sha256sum" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -v "validate-project-state.sh" | grep -viE "wrong to describe|must not|never describe|do not call")
+[ "$p3drift" = "0" ] && ok "no Phase-3 enforcement/evidence phrase drift" || fail "$p3drift Phase-3 phrase drift hit(s)"
+
 echo "== 2. single current maturity + consistent next action =="
 for f in "$PACK/StayConnect-IAM-Phase1A-Plan.md" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" "$PACK/MANIFEST.md"; do
   [ -f "$f" ] && grep -q "$MAT" "$f" && ok "maturity present in $(basename "$f")" || fail "maturity string missing in $(basename "$f")"
