@@ -1,4 +1,0 @@
-commit d62a16d806140d6274af41d410ad302bbcfaa41c
-Date:   Tue Aug 11 23:12:59 2026 +0300
-
-    Pre-Phase-4 baseline pass + Phase-4 authorization (D18 / T0029)
