@@ -112,3 +112,7 @@ with its write path reviewed before implementation rather than deferred.
 stands and is not overridden — it is *satisfied* by holding them to the full standard, which is what Option C
 requires. The Acceptance Matrix no longer carries a `PENDING — PO SCOPE DECISION` verdict; every row is
 `PASS — SOFTWARE`, `PENDING — LIVE INCREMENT 9`, or `OUT OF SCOPE BY APPROVED CONTRACT`.
+
+> **Historical (as written for decision D15).** Live Increment 9 has since been executed (2026-08-10) and the
+> `PENDING — LIVE INCREMENT 9` rows now carry real verdicts. This document is preserved as the record of the
+> D15 decision; the Phase-3 report §6a/§6b is authoritative for current verdicts.

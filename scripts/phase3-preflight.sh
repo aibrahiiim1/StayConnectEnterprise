@@ -450,7 +450,7 @@ fi
 # (b) a matching fingerprint must return BEFORE anything is executed.
 if [ -f "$RECON" ]; then
   ensure_fn="$(awk '/^func \(e \*Engine\) Ensure/,/^}/' "$RECON")"
-  skip_line="$(printf '%s' "$ensure_fn" | grep -n 'tableExists && live == out.DesiredFP' | cut -d: -f1 | head -1)"
+  skip_line="$(printf '%s' "$ensure_fn" | grep -n 'live.TableExists && live.Fingerprint == out.DesiredFP' | cut -d: -f1 | head -1)"
   run_line="$(printf '%s' "$ensure_fn" | grep -n 'e.R.Run(' | cut -d: -f1 | head -1)"
   if [ -n "$skip_line" ] && [ -n "$run_line" ] && [ "$skip_line" -lt "$run_line" ]; then
     ok "a live ruleset that already matches the current render short-circuits before any command is executed"
@@ -508,6 +508,103 @@ if [ -f "$ROLLBACK" ]; then
   fi
 else
   no "scripts/binary-rollback.sh not found"
+fi
+
+# ============================================== 10. network lifecycle: draft vs confirmed, and safe rollback
+#
+# (a) BOOT MUST RECONSTRUCT THE CONFIRMED REVISION, NOT AN UNAPPLIED DRAFT. Reconciling from the mutable
+#     guest_networks rows would let an edit nobody applied take effect at the next reboot, with no apply
+#     record, no health check, no confirmation and no watchdog — and would resurrect a change that was rolled
+#     back precisely because it broke connectivity.
+if [ -f "$BOOT" ]; then
+  boot_fn2="$(awk '/^func \(a \*applier\) ReconcileActiveOnBoot/,/^}/' "$BOOT")"
+  if printf '%s' "$boot_fn2" | grep -q 'LoadIntent'; then
+    no "boot reconciliation still reads the mutable guest_networks intent (an unapplied draft could become the runtime)"
+  else
+    ok "boot reconciliation never reads the mutable guest_networks intent"
+  fi
+  if printf '%s' "$boot_fn2" | grep -qE 'currentActiveIntent|CurrentActiveIntent'; then
+    ok "boot reconciliation reconstructs the CONFIRMED active revision's own intent snapshot"
+  else
+    no "boot reconciliation does not use the confirmed active revision's intent snapshot"
+  fi
+else
+  no "netd apply_ops.go not found; network-lifecycle checks cannot run"
+fi
+
+# (b) ROLLBACK MUST NOT DEGRADE INTO EXECUTING A STORED RULESET FILE. That file begins with `delete table` and
+#     is rendered by whatever binary was current when the revision was applied; running it at the worst moment
+#     is how a rollback turns into a silent property-wide deauthorization.
+if [ -f "$BOOT" ]; then
+  rb_fn="$(awk '/^func \(a \*applier\) rollback\(/,/^}/' "$BOOT")"
+  if printf '%s' "$rb_fn" | grep -E '"nft", *"-f"' | grep -qv '\-c'; then
+    no "rollback still executes a stored ruleset file"
+  else
+    ok "rollback never executes a stored ruleset file"
+  fi
+  if printf '%s' "$rb_fn" | grep -q 'ensureNftStructure'; then
+    ok "rollback restores structure by rendering the previous confirmed intent"
+  else
+    no "rollback does not render the previous confirmed intent"
+  fi
+  if printf '%s' "$rb_fn" | grep -q 'blocker'; then
+    ok "a rollback that cannot be completed safely reports a blocker instead of degrading"
+  else
+    no "a failed nft rollback does not report a blocker"
+  fi
+fi
+
+# (c) AN UNREADABLE LIVE STATE IS NOT AN EMPTY ONE. Absence must be decided by enumeration; any read or parse
+#     failure must abort before nft -f.
+if [ -f "$RECON" ]; then
+  if grep -q 'ErrLiveStateUntrusted' "$RECON"; then
+    ok "an unreadable live nft state is a distinct, named refusal rather than an assumed-empty one"
+  else
+    no "an unreadable live nft state is not distinguished from an empty one"
+  fi
+  if awk '/^func \(e \*Engine\) ReadLive/,/^}/' "$RECON" | grep -q 'list tables'; then
+    ok "set absence is decided by enumerating the table, not by a failed read"
+  else
+    no "set absence is still inferred from a failed read"
+  fi
+  if awk '/^func \(e \*Engine\) readSet/,/^}/' "$RECON" | grep -q 'return nil, nil'; then
+    no "a failed set read still degrades to an empty set"
+  else
+    ok "a failed set read never degrades to an empty set"
+  fi
+fi
+
+# (d) THE RENDER MARKER MUST NOT SURVIVE A STRUCTURAL CHANGE MADE BY THE OPERATOR TOOL. netd skips
+#     reconciliation whenever the marker matches, so a stale marker after a foundation rollback would leave the
+#     appliance without the Phase-3 structure indefinitely.
+FOUND="$ROOT/data-plane/internal/nftfoundation/foundation.go"
+if [ -f "$FOUND" ]; then
+  if grep -q 'func invalidateMarker' "$FOUND" && [ "$(grep -c 'invalidateMarker(st)' "$FOUND")" -ge 2 ]; then
+    ok "the operator foundation tool invalidates the render marker on both install and rollback"
+  else
+    no "the operator foundation tool can change structure while leaving the render marker claiming it is current"
+  fi
+else
+  no "nftfoundation/foundation.go not found"
+fi
+
+# (e) NO OTHER PACKAGE MAY EMIT STRUCTURAL nft COMMANDS. The renderer and the operator tool are the only two
+#     writers of structure; anything else would be a third path that can desynchronise the marker.
+# COMMENTS ARE NOT COMMANDS. The rollback path documents the destructive artifact it refuses to execute, and
+# an earlier version of this check read that prose as a violation — a check that cannot tell an explanation
+# from an instruction trains people to ignore it.
+stray=""
+while IFS= read -r f; do
+  case "$f" in *_test.go) continue;; esac
+  case "$f" in */internal/netcfg/*|*/internal/nftconverge/*|*/internal/nftfoundation/*) continue;; esac
+  if sed -E 's#//.*##' "$f" | grep -qE '"(add|delete|replace|create)", *"(set|rule|chain|table)"|(add|delete|replace) (set|rule|chain) inet stayconnect|delete table inet stayconnect'; then
+    stray="$stray $f"
+  fi
+done < <(find "$ROOT/data-plane" -name '*.go' 2>/dev/null)
+if [ -z "$stray" ]; then
+  ok "only the renderer and the operator foundation tool emit structural nft commands"
+else
+  no "a package outside the renderer/foundation emits structural nft commands: $stray"
 fi
 
 # ============================================================================== report

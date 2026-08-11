@@ -33,6 +33,7 @@ package nftconverge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -68,6 +69,10 @@ type Outcome struct {
 // whose elements are runtime state rather than rendered structure.
 var AuthSets = []string{nft.AuthV4, nft.Phase3AuthV4}
 
+// tableName is the single StayConnect nft table. It is named once so that no read path can drift from the
+// table the render actually replaces.
+const tableName = "stayconnect"
+
 // Engine reconciles one appliance's ruleset.
 type Engine struct {
 	Topo    netcfg.Topology
@@ -87,23 +92,34 @@ func (e *Engine) nftBin() string {
 func (e *Engine) Ensure(ctx context.Context, intent []netcfg.GuestNetwork, trigger string) (Outcome, error) {
 	out := Outcome{Trigger: trigger, DesiredFP: netcfg.RenderFingerprint(intent, e.Topo)}
 
-	live, tableExists := e.LiveFingerprint(ctx)
-	out.LiveFP, out.TableWas = live, tableExists
+	live, err := e.ReadLive(ctx)
+	if err != nil {
+		// THE LIVE STATE COULD NOT BE ESTABLISHED. Converging from here would mean deciding what to delete
+		// and what to re-authorize on the strength of a reading we know is unreliable, and the render begins
+		// with `delete table`. Nothing is executed and the live ruleset is left exactly as it is.
+		return out, fmt.Errorf("%w: %v", ErrLiveStateUntrusted, err)
+	}
+	out.LiveFP, out.TableWas = live.Fingerprint, live.TableExists
 
-	if tableExists && live == out.DesiredFP {
+	if live.TableExists && live.Fingerprint == out.DesiredFP {
 		// STEADY STATE. Return without executing anything.
 		return out, nil
 	}
 
 	// UPGRADE / RECONSTRUCTION. Carry the live authorization across the atomic replace.
 	var carried []string
-	if tableExists {
+	if live.TableExists {
 		for _, set := range AuthSets {
-			els, err := e.liveSetElements(ctx, set)
+			if !live.Sets[set] {
+				// GENUINELY ABSENT, on the authority of the table listing itself — there is nothing to
+				// carry. This is the normal case for phase3_auth_ipv4 on a pre-Phase-3 appliance.
+				continue
+			}
+			els, err := e.readSet(ctx, set)
 			if err != nil {
-				// A set we cannot read is a set we cannot preserve. Converging anyway would silently
-				// deauthorize its guests, so refuse and leave the live ruleset exactly as it is.
-				return out, fmt.Errorf("read live set %s: %w", set, err)
+				// The set EXISTS and we could not read it. That is not the same as empty: converging
+				// would silently deauthorize whoever is in it. Refuse before touching anything.
+				return out, fmt.Errorf("%w: read live set %s: %v", ErrLiveStateUntrusted, set, err)
 			}
 			carried = append(carried, CarryOverCommands(set, els)...)
 		}
@@ -140,12 +156,61 @@ func (e *Engine) Ensure(ctx context.Context, intent []netcfg.GuestNetwork, trigg
 	return out, nil
 }
 
-// LiveFingerprint reads the marker set out of the live kernel. The second return is whether the table exists at
-// all; a missing table is not an error, it is a fresh boot.
-func (e *Engine) LiveFingerprint(ctx context.Context) (string, bool) {
-	raw, err := e.R.Output(ctx, e.nftBin(), "-j", "list", "table", "inet", "stayconnect")
+// ErrLiveStateUntrusted is returned when the live ruleset could not be established well enough to converge
+// from. It is deliberately distinct from "the structure differs": one means act, the other means stop.
+var ErrLiveStateUntrusted = errors.New("live nft state could not be read reliably")
+
+// LiveState is what the kernel says it is holding right now.
+type LiveState struct {
+	TableExists bool
+	Fingerprint string
+	Sets        map[string]bool // names of the sets the table declares
+}
+
+// ReadLive establishes the live state, and returns an error rather than a guess whenever it cannot.
+//
+// ABSENCE IS DECIDED BY ENUMERATION, NEVER BY A FAILED READ. The obvious implementation asks nft for the set
+// and treats a non-zero exit as "not there" — but `nft list set` exits non-zero for a missing set, a missing
+// binary, a denied permission, a busy netlink socket and a malformed ruleset alike, and only the first of those
+// means empty. Every other one would have been read as "no authorization to preserve" immediately before a
+// `delete table`, which is precisely how a converge could deauthorize a whole property and report success.
+//
+// So the table listing — one command, which either works or fails as a whole — is the authority on which sets
+// exist, and a set that IS listed must then be readable or the converge is abandoned.
+func (e *Engine) ReadLive(ctx context.Context) (LiveState, error) {
+	// 1. Is nft usable at all, and does our table exist? `list tables` answers both: if it fails we know
+	//    nothing, and if it succeeds its enumeration is trustworthy.
+	raw, err := e.R.Output(ctx, e.nftBin(), "-j", "list", "tables", "inet")
 	if err != nil {
-		return "", false
+		return LiveState{}, fmt.Errorf("list tables: %w", err)
+	}
+	var tdoc struct {
+		Nftables []struct {
+			Table *struct {
+				Family string `json:"family"`
+				Name   string `json:"name"`
+			} `json:"table"`
+		} `json:"nftables"`
+	}
+	if err := json.Unmarshal(raw, &tdoc); err != nil {
+		return LiveState{}, fmt.Errorf("list tables: unparseable output: %w", err)
+	}
+	present := false
+	for _, o := range tdoc.Nftables {
+		if o.Table != nil && o.Table.Name == tableName && (o.Table.Family == "" || o.Table.Family == "inet") {
+			present = true
+			break
+		}
+	}
+	if !present {
+		// GENUINELY ABSENT — a fresh boot, or an appliance that has never been configured. Not an error.
+		return LiveState{TableExists: false, Sets: map[string]bool{}}, nil
+	}
+
+	// 2. The table exists, so it must be readable.
+	raw, err = e.R.Output(ctx, e.nftBin(), "-j", "list", "table", "inet", tableName)
+	if err != nil {
+		return LiveState{}, fmt.Errorf("list table %s: %w", tableName, err)
 	}
 	var doc struct {
 		Nftables []struct {
@@ -155,32 +220,47 @@ func (e *Engine) LiveFingerprint(ctx context.Context) (string, bool) {
 			} `json:"set"`
 		} `json:"nftables"`
 	}
-	if json.Unmarshal(raw, &doc) != nil {
-		return "", false
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return LiveState{}, fmt.Errorf("list table %s: unparseable output: %w", tableName, err)
 	}
-	found := false
+	st := LiveState{TableExists: true, Sets: map[string]bool{}}
 	for _, o := range doc.Nftables {
 		if o.Set == nil {
 			continue
 		}
-		found = true
+		st.Sets[o.Set.Name] = true
 		if o.Set.Name == netcfg.RenderMarkerSet {
-			return netcfg.FingerprintFromSetComment(o.Set.Comment), true
+			// An unreadable marker comment yields "", which compares unequal to every fingerprint — a
+			// marker we cannot parse must never be read as "already current".
+			st.Fingerprint = netcfg.FingerprintFromSetComment(o.Set.Comment)
 		}
 	}
-	// The table is there (it has sets) but carries no marker: a pre-fingerprint ruleset. Unequal to every
-	// fingerprint, so it converges.
-	return "", found
+	return st, nil
 }
 
-// liveSetElements reads one authorization set. A set that does not exist yet has no elements and is not an
-// error — that is the normal case for phase3_auth_ipv4 on a pre-Phase-3 appliance.
-func (e *Engine) liveSetElements(ctx context.Context, set string) ([]nft.Element, error) {
-	raw, err := e.R.Output(ctx, e.nftBin(), "-j", "list", "set", "inet", "stayconnect", set)
+// LiveFingerprint is the convenience form used by callers that only need the comparison. It reports no
+// fingerprint and no table when the live state cannot be trusted, which is safe for those callers because they
+// use it to decide whether to LOOK further, never to decide what to delete.
+func (e *Engine) LiveFingerprint(ctx context.Context) (string, bool) {
+	st, err := e.ReadLive(ctx)
 	if err != nil {
-		return nil, nil
+		return "", false
 	}
-	return nft.ParseSetJSON(raw)
+	return st.Fingerprint, st.TableExists
+}
+
+// readSet reads one authorization set that the table listing says EXISTS. Every failure is an error; there is
+// no longer any path by which an unreadable set becomes an empty one.
+func (e *Engine) readSet(ctx context.Context, set string) ([]nft.Element, error) {
+	raw, err := e.R.Output(ctx, e.nftBin(), "-j", "list", "set", "inet", tableName, set)
+	if err != nil {
+		return nil, err
+	}
+	els, err := nft.ParseSetJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	return els, nil
 }
 
 // CarryOverCommands turns live elements into the `add element` lines that re-authorize them inside the same

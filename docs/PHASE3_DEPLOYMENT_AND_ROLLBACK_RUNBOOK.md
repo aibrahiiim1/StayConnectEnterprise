@@ -100,8 +100,16 @@ to be turned on.
 
 ## 2. Deploy (dark)
 
-1. **Take a backup first.** Use the existing appliance backup path; a Phase-3 deployment is not special, and
-   the rollback in §5 assumes a restorable point exists.
+1. **Take a backup first, and record who is authorized right now.** Use the existing appliance backup path;
+   a Phase-3 deployment is not special, and the rollback in §5 assumes a restorable point exists.
+
+   Capture the legacy authorization set *before* anything is deployed. This is the "before" half of the
+   legacy-parity evidence, and it is the only moment it can be taken honestly:
+
+   ```bash
+   nft -j list set inet stayconnect auth_ipv4 > /var/backups/stayconnect/legacy-before.json
+   nft list ruleset > /var/backups/stayconnect/ruleset-before.txt
+   ```
 
 2. **Ship the binaries and the Hotel-Admin bundle.** Build the Hotel-Admin bundle with
    `NEXT_PUBLIC_PHASE3_ADMIN` **absent**. The nav items and pages are then not in the bundle at all — the
@@ -121,33 +129,44 @@ to be turned on.
 
 4. **Restart the services** in the usual order and confirm they came up.
 
-5. **Install the Phase-3 nft foundation — surgically, and prove the legacy guests did not notice.**
+5. **Confirm netd converged the ruleset by itself — there is no foundation step to run any more.**
 
-   The appliance you are deploying onto is running a ruleset that has **no** `phase3_auth_ipv4` set and whose
-   captive DNAT rules exclude only `auth_ipv4`. The Phase-3 cutover needs all of that present. Do **not** get
-   there by regenerating and re-applying the ruleset: the generated ruleset is applied as `delete table` +
-   recreate, the authorization set is part of the table, and recreating it means recreating it **empty** —
-   every live legacy guest loses their authorization in the same instant and drops off the internet until
-   scd's own reconciliation catches up. On a busy property that is a simultaneous, visible outage caused by a
-   change that is supposed to do nothing.
+   `netd` reconciles the live ruleset against a **fresh render of the running binary** on every start
+   (ADR-0003). The Phase-3 set, its forward rule and the captive exclusions are part of that render, so they
+   arrive with the service and survive every subsequent restart and reboot. Nothing needs to be installed by
+   hand, and the appliance's stored bundle is no longer the authority for structure.
 
-   Use the surgical operation instead. It adds a set, adds one forward rule and rewrites the captive rules in
-   place, all in ONE nft transaction, and it verifies legacy parity itself.
+   Two outcomes, and both are correct:
+
+   - **the live ruleset already matched** — netd executed *no* nft command at all. This is the steady state,
+     and it is what makes a routine restart incapable of disturbing guest authorization;
+   - **the live ruleset differed** (the usual case for the first deployment onto a pre-Phase-3 appliance) —
+     netd applied the current render as ONE atomic transaction, carrying every live authorization across
+     inside that same transaction, with the remaining lease on each timed element and no lease invented for
+     the permanent ones legacy `scd` writes.
+
+   Confirm it, rather than assuming it:
 
    ```bash
-   # Read-only first. Record the output: it lists exactly who is authorized right now.
-   /opt/stayconnect/bin/phase3-foundation inspect | tee /var/backups/stayconnect/phase3-foundation-before.json
+   # what netd decided, and whether it had to change anything
+   journalctl -u stayconnect-netd -b | grep -E 'nft structure converged|boot_reconcile' | tail -5
 
-   # Then install. Idempotent, verified, and self-rolling-back if legacy parity cannot be proven.
-   /opt/stayconnect/bin/phase3-foundation install | tee /var/backups/stayconnect/phase3-foundation-install.json
+   # the Phase-3 set exists and authorizes nobody
+   nft list set inet stayconnect phase3_auth_ipv4
+
+   # legacy authorization is exactly as it was
+   nft -j list set inet stayconnect auth_ipv4 > /var/backups/stayconnect/legacy-after.json
    ```
 
-   **Keep both files.** The install report contains `legacy_before` and `legacy_after` — the authorization
-   elements on either side of the mutation — and that is the legacy-parity evidence for this step. Confirm:
+   Record `legacy-before.json` (taken in step 1) and `legacy-after.json`. Element-for-element equality across
+   the deployment is the legacy-parity evidence for this step.
 
-   - `outcome` is `INSTALLED` (or `ALREADY_INSTALLED` if it was already done — a second run changes nothing);
-   - `legacy_before` and `legacy_after` are **identical, element for element**;
-   - the operation exited 0. A non-zero exit means it rolled itself back; do not proceed, and attach the
+   > **`phase3-foundation` is retired from this runbook.** It still exists as a diagnostic — `inspect` is
+   > read-only and useful for reading a live ruleset — but `install` and `rollback` are no longer part of any
+   > deployment or rollback procedure, because the renderer now owns this structure. If you do run a
+   > structural `install`/`rollback`, it deliberately **invalidates netd's render marker**, so the next netd
+   > start rebuilds the ruleset from the current render. Do not use it to "fix" a ruleset: restart `netd`.
+
      report.
 
    Then confirm from the appliance's own side that nothing changed for anyone:
@@ -204,7 +223,7 @@ nft list set inet stayconnect phase3_auth_ipv4
 
 # 8. legacy authorization is exactly as it was
 nft list set inet stayconnect auth_ipv4 | head -40
-#    expect the same guests as in phase3-foundation-before.json
+#    expect the same guests as in legacy-before.json (captured in §2 step 1)
 ```
 
 A 404 rather than a "feature disabled" response is intentional: an unmounted route cannot leak the shape of a
@@ -217,15 +236,36 @@ must mean the packet path is unchanged, not merely that a flag reads false.
 
 ## 4. Reboot drill
 
-Phase 3 adds no boot-time behaviour, so the drill is a confirmation, not a migration:
+**Phase 3 DOES add boot-time behaviour, and the drill exists to exercise it.** An earlier version of this
+runbook said the opposite; that statement was wrong, and Live Increment 9 failed its reboot check because of
+the behaviour it denied. On every start `netd` reconciles the live ruleset against a fresh render of the
+running binary, and reconstructs it if the kernel is holding something else — which is exactly the state a
+reboot leaves behind, since nftables loads only the static `/etc/nftables.conf`.
+
+What it reconstructs is the **confirmed active network revision's own intent snapshot**, never the editable
+`guest_networks` rows. An unapplied Hotel-Admin draft therefore cannot become the running network at a reboot;
+only an explicit Apply that is then Confirmed changes what the appliance runs.
 
 1. `reboot` the appliance.
-2. After it comes back, re-run **all four** checks in §3. They must produce identical results.
-3. Confirm guest service is unaffected: an existing guest session survives, and a new guest can authenticate
+2. After it comes back, re-run **all four** checks in §3. They must produce identical results, and
+   `phase3_auth_ipv4` must be **present and empty**.
+3. Confirm the reconstruction happened and settled:
+
+   ```bash
+   journalctl -u stayconnect-netd -b | grep 'nft structure converged'   # expect ONE line for this boot
+   systemctl restart stayconnect-netd
+   journalctl -u stayconnect-netd -b | grep 'nft structure converged'   # expect NO new line: steady state
+   ```
+
+   The second command is the important one. A correct appliance issues **no nft command at all** on an
+   ordinary restart; a second "converged" line means the render and the live ruleset disagree every time,
+   which must be investigated before the appliance is left in service.
+
+4. Reboot once more and repeat step 2. Idempotence across two cycles is the property being drilled.
+5. Confirm guest service is unaffected: an existing guest session survives, and a new guest can authenticate
    through the *existing* (non-Phase-3) methods exactly as before.
 
-If anything in §3 differs after the reboot, stop and roll back — a difference means something is reading
-Phase-3 state that should not be.
+If anything in §3 differs after the reboot, stop and roll back.
 
 ---
 
@@ -237,17 +277,24 @@ release is enough**: the schema is additive and inert while dark, so leaving it 
 **5a. Restore the previous release** (binaries + Hotel-Admin bundle) using the standard rollback path, then
 re-run §3.
 
-**5a-bis. Remove the Phase-3 nft foundation** — only if the previous ruleset shape must be restored exactly.
-It is safe to leave in place (the set is empty and matches nothing), so removing it is a tidiness decision,
-not a safety one.
+**5a-bis. There is no separate nft rollback step, and that is deliberate.**
+
+Restoring the previous release restores the previous renderer, and the next `netd` start reconciles the live
+ruleset to whatever that renderer produces — carrying live authorization across the change. The ruleset
+follows the binaries automatically; there is nothing to undo by hand.
+
+Do **not** run `phase3-foundation rollback` as part of a release rollback. It is a diagnostic tool, not a
+deployment step, and running it on a converged appliance removes structure the running renderer will simply
+rebuild on the next restart.
+
+If a **network configuration** apply fails, netd's own rollback restores the previous *confirmed* revision by
+rendering its stored intent. If that cannot be done safely, it **stops and records a blocker** rather than
+falling back to executing an old stored `stayconnect.nft` — that file begins with `delete table` and would
+deauthorize every guest on the appliance. An unfinished rollback needs operator attention; look for:
 
 ```bash
-/opt/stayconnect/bin/phase3-foundation rollback | tee /var/backups/stayconnect/phase3-foundation-rollback.json
+journalctl -u stayconnect-netd | grep rollback_nft
 ```
-
-It removes **only** the Phase-3 set, the Phase-3 forward rule and the Phase-3 half of the captive exclusions,
-and it verifies legacy parity on both sides exactly as the install does. Confirm the same two things:
-`outcome` is `REMOVED` (or `ALREADY_ABSENT`), and `legacy_before` equals `legacy_after`. Then:
 
 ```bash
 nft list set inet stayconnect auth_ipv4 | head -40   # unchanged, same guests

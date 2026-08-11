@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -173,18 +175,24 @@ func (a *applier) destroyBridge(ctx context.Context, bridge string) error {
 // in nft_reconcile.go for why replaying the bundle silently deleted structure the current software requires.
 // When the live ruleset already matches this binary's render, no nft command is issued at all.
 func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
-	id, bundle, err := a.st.CurrentActive(ctx)
-	if err != nil || id == "" {
-		return
-	}
 	if a.dryRun {
 		return
 	}
-	intent, intentErr := a.st.LoadIntent(ctx)
-	if intentErr != nil {
-		// Without intent there is no defensible desired structure. Doing nothing keeps whatever is live —
-		// which is strictly safer than reconstructing from a stale artifact.
-		a.st.Event(ctx, id, "boot_reconcile", false, map[string]any{"intent": intentErr.Error()})
+	// THE CONFIRMED ACTIVE REVISION'S OWN INTENT SNAPSHOT — never the live guest_networks rows, which the
+	// Hotel-Admin UI edits directly and which may hold a draft nobody has applied or confirmed. See
+	// store.CurrentActiveIntent for why reconciling from those rows would let an unapplied edit take effect on
+	// the next reboot with no apply record, no health check and no watchdog.
+	id, bundle, intent, err := a.currentActiveIntent(ctx)
+	if err != nil {
+		if !errors.Is(err, ErrNoConfirmedActiveRevision) {
+			// An active revision exists but its intent could not be read. Reconstructing from anything else
+			// would be a guess about what this appliance is supposed to be forwarding.
+			a.event(ctx, id, "boot_reconcile", false, map[string]any{"intent": err.Error()})
+			slog.Error("netd boot reconcile: active revision intent unusable; live state left untouched", "err", err)
+		}
+		return
+	}
+	if id == "" {
 		return
 	}
 	// Ensure managed bridges/VLANs exist (netplan should recreate them on boot,
@@ -197,7 +205,7 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 	// nftables: converge to what THIS binary renders.
 	res, nftErr := a.ensureNftStructure(ctx, intent, "boot_reconcile")
 	if nftErr != nil {
-		a.st.Event(ctx, id, "boot_reconcile", false, map[string]any{"nft": nftErr.Error()})
+		a.event(ctx, id, "boot_reconcile", false, map[string]any{"nft": nftErr.Error()})
 		return
 	}
 	// Keep the stored bundle honest: once the live ruleset has been rebuilt by the current renderer, the
@@ -220,7 +228,7 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 			}
 		}
 	}
-	a.st.Event(ctx, id, "boot_reconcile", true, map[string]any{
+	a.event(ctx, id, "boot_reconcile", true, map[string]any{
 		"bundle": bundle, "nft_changed": res.Changed, "carried_elements": res.Carried,
 		"desired_fp": res.DesiredFP, "live_fp_before": res.LiveFP,
 	})
@@ -230,8 +238,8 @@ func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 // none, removes everything netd added. Management connectivity is preserved
 // throughout (mgmt/legacy interfaces are never touched here).
 func (a *applier) rollback(ctx context.Context, failedID, reason string) {
-	a.st.Event(ctx, failedID, "rollback", true, map[string]any{"reason": reason})
-	prevBundle, _ := a.st.ActiveBundlePath(ctx, failedID)
+	a.event(ctx, failedID, "rollback", true, map[string]any{"reason": reason})
+	prevBundle, _ := a.previousBundle(ctx, failedID)
 
 	if prevBundle == "" {
 		// No prior good revision: tear down everything managed and clear.
@@ -240,7 +248,7 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		}
 		_ = os.Remove(a.netplanFile)
 		_ = os.Remove(a.unboundFrag)
-		_ = a.st.MarkRolledBack(ctx, failedID, reason)
+		_ = a.markRolledBack(ctx, failedID, reason)
 		return
 	}
 	// Reconcile bridges to the previous good revision's managed set: destroy any
@@ -256,17 +264,46 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		}
 	}
 	// Restore the previous good revision's nft structure by RENDERING ITS STORED INTENT with the current
-	// renderer, falling back to its bundle file only if the intent cannot be read. Replaying the file
-	// unconditionally would reinstate whatever structure the binary of that era produced — the same staleness
-	// that made a routine restart delete phase3_auth_ipv4.
+	// renderer.
+	//
+	// THERE IS NO FALLBACK TO THE STORED FILE, DELIBERATELY. An earlier version dropped back to
+	// `nft -f <prevBundle>/stayconnect.nft` whenever the safe path could not be completed, which meant the
+	// worst moment — a failed apply, on a live appliance, with the operator already in trouble — was the one
+	// moment the code chose to execute a full-table replacement rendered by some earlier binary. That file
+	// begins with `delete table inet stayconnect`: it deletes every authorization set and every structure the
+	// current software requires, and it is exactly the artifact that caused the Live Increment-9 blocker.
+	//
+	// A rollback that cannot be done safely must stay unfinished and say so. An unfinished rollback leaves the
+	// operator with the live ruleset they already had and a recorded blocker; a "successful" one that ran the
+	// legacy path leaves them with a silently deauthorized property.
 	if !a.dryRun {
-		if prevIntent, ierr := a.st.ActiveIntent(ctx, failedID); ierr == nil && prevIntent != nil {
+		nftRolledBack := false
+		prevIntent, ierr := a.previousActiveIntent(ctx, failedID)
+		switch {
+		case ierr != nil:
+			a.event(ctx, failedID, "rollback_nft", false, map[string]any{
+				"blocker": "the previous active revision's intent could not be read: " + ierr.Error(),
+				"action":  "nft structure was NOT rolled back; the live ruleset is unchanged and needs operator attention",
+			})
+			slog.Error("netd rollback: previous intent unreadable; nft structure left as-is", "err", ierr)
+		case prevIntent == nil:
+			a.event(ctx, failedID, "rollback_nft", false, map[string]any{
+				"blocker": "there is no previous confirmed revision to render",
+				"action":  "nft structure was NOT rolled back; the live ruleset is unchanged and needs operator attention",
+			})
+			slog.Error("netd rollback: no previous confirmed revision; nft structure left as-is")
+		default:
 			if _, nerr := a.ensureNftStructure(ctx, prevIntent, "rollback"); nerr != nil {
-				_ = a.run(ctx, "nft", "-f", filepath.Join(prevBundle, "stayconnect.nft"))
+				a.event(ctx, failedID, "rollback_nft", false, map[string]any{
+					"blocker": "safe reconciliation to the previous revision failed: " + nerr.Error(),
+					"action":  "nft structure was NOT rolled back; the live ruleset is unchanged and needs operator attention",
+				})
+				slog.Error("netd rollback: safe nft reconciliation failed; NOT falling back to the stored ruleset file", "err", nerr)
+			} else {
+				nftRolledBack = true
 			}
-		} else {
-			_ = a.run(ctx, "nft", "-f", filepath.Join(prevBundle, "stayconnect.nft"))
 		}
+		a.event(ctx, failedID, "rollback_nft", nftRolledBack, nil)
 		if raw, err := os.ReadFile(filepath.Join(prevBundle, "kea-dhcp4.json")); err == nil {
 			_ = a.pushKeaFile(raw)
 		}
@@ -278,7 +315,7 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 	if raw, err := os.ReadFile(filepath.Join(prevBundle, "50-stayconnect-guest.yaml")); err == nil {
 		_ = os.WriteFile(a.netplanFile, raw, 0o600)
 	}
-	_ = a.st.MarkRolledBack(ctx, failedID, reason)
+	_ = a.markRolledBack(ctx, failedID, reason)
 }
 
 func (a *applier) pushKeaFile(raw []byte) error {

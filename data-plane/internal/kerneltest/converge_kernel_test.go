@@ -278,3 +278,56 @@ func TestKernel_CarryOverPreservesATimedAuthorization(t *testing.T) {
 		t.Fatalf("the carried element lost its lease: %s", out)
 	}
 }
+
+// AN UNREADABLE LIVE STATE MUST ABORT BEFORE ANY MUTATION — PROVEN AGAINST A REAL RULESET.
+//
+// The modelled suite injects the failure into a fake. This injects it into the REAL path: nft is replaced by a
+// wrapper that behaves exactly like the real one except that one read fails, and the assertion is made against
+// the actual kernel ruleset afterwards. If the engine treated an unreadable set as an empty one it would run
+// `delete table` + recreate here, and the authorized guest below would lose access.
+func TestKernel_AnUnreadableSetAbortsWithoutTouchingTheRuleset(t *testing.T) {
+	e := newEngine(t)
+	nets := convergeIntent()
+	c := context.Background()
+
+	// a converged appliance with a live authorization
+	if _, err := e.Ensure(c, nets, "install"); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	run(t, nftWrapper, "add", "element", "inet", "stayconnect", "auth_ipv4",
+		`{ "`+guestIface+`" . `+guestIP+` timeout 600s }`)
+	if !reaches(t) {
+		t.Fatal("precondition: the authorized guest cannot reach the WAN")
+	}
+	before := run(t, nftWrapper, "list", "table", "inet", "stayconnect")
+
+	// a wrapper that is the real nft for everything EXCEPT reading a set
+	broken := filepath.Join(t.TempDir(), "nft-broken")
+	script := "#!/usr/bin/env bash\n" +
+		"for a in \"$@\"; do if [ \"$a\" = \"set\" ]; then echo 'nft: netlink: Device or resource busy' >&2; exit 1; fi; done\n" +
+		"exec " + nftWrapper + " \"$@\"\n"
+	if err := os.WriteFile(broken, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	e.NftPath = broken
+
+	// force a structural change so the converge would otherwise proceed
+	changed := convergeIntent()
+	second := changed[0]
+	second.Name, second.BridgeName = "kg3", "kg-br3"
+	second.GatewayIP, second.SubnetCIDR = "10.81.0.1", "10.81.0.0/24"
+	changed = append(changed, second)
+
+	if _, err := e.Ensure(c, changed, "upgrade"); err == nil {
+		t.Fatal("converged against a real ruleset it could not read")
+	}
+
+	e.NftPath = nftWrapper
+	after := run(t, nftWrapper, "list", "table", "inet", "stayconnect")
+	if before != after {
+		t.Fatalf("the live ruleset changed after refusing to converge:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+	if !reaches(t) {
+		t.Fatal("the authorized guest lost access even though the converge was refused")
+	}
+}

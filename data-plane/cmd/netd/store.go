@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -288,6 +289,53 @@ func (s *store) CurrentActive(ctx context.Context) (id, bundlePath string, err e
 		bundlePath = *p
 	}
 	return id, bundlePath, err
+}
+
+// ErrNoConfirmedActiveRevision means no revision has ever been applied AND confirmed. There is no network
+// configuration this appliance has committed to, so there is nothing to reconcile the OS back to.
+var ErrNoConfirmedActiveRevision = errors.New("no confirmed active network revision")
+
+// CurrentActiveIntent returns the CONFIRMED active revision's id, bundle path and its own immutable intent
+// snapshot.
+//
+// THE INTENT MUST COME FROM THE REVISION, NOT FROM guest_networks.
+//
+// `LoadIntent` reads the live `guest_networks` rows, which the Hotel-Admin UI edits directly. Those edits are
+// drafts: they become the appliance's configuration only when an operator Applies them and then Confirms
+// inside the watchdog window — that is the entire point of the validate → apply → pending_confirmation →
+// active pipeline, and of the automatic rollback when confirmation never arrives.
+//
+// Reconciling on boot from `guest_networks` would quietly bypass all of it. An operator who edited a VLAN and
+// walked away without applying would have that edit take effect on the next reboot, with no apply record, no
+// health check, no confirmation and no watchdog — and a change that was rolled back precisely because it broke
+// connectivity would come back by itself the next time the appliance restarted.
+//
+// The revision row already stores the exact intent it was applied with, as jsonb. That snapshot is immutable
+// and is what "the active network configuration" means, so it is what a restart reconstructs.
+func (s *store) CurrentActiveIntent(ctx context.Context) (id, bundlePath string, intent []netcfg.GuestNetwork, err error) {
+	var p *string
+	var raw []byte
+	err = s.db.QueryRow(ctx, `
+        SELECT id::text, bundle_path, intent FROM network_config_revisions
+         WHERE state='active' ORDER BY seq DESC LIMIT 1`).Scan(&id, &p, &raw)
+	if err == pgx.ErrNoRows {
+		return "", "", nil, ErrNoConfirmedActiveRevision
+	}
+	if err != nil {
+		return "", "", nil, err
+	}
+	if p != nil {
+		bundlePath = *p
+	}
+	if len(raw) == 0 {
+		// An active revision with no recorded intent cannot be reconstructed. Guessing from the mutable
+		// tables is exactly what this function exists to avoid, so it is an error.
+		return id, bundlePath, nil, fmt.Errorf("active revision %s has no stored intent", id)
+	}
+	if err := json.Unmarshal(raw, &intent); err != nil {
+		return id, bundlePath, nil, fmt.Errorf("active revision %s has unreadable intent: %w", id, err)
+	}
+	return id, bundlePath, intent, nil
 }
 
 // ActiveBundlePath returns the bundle path of the current active revision (the

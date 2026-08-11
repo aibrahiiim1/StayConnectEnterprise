@@ -74,12 +74,19 @@ The software increments in this plan are **execution history**, not future work:
   `nft` and `tc` binaries with real packets in disposable Linux network namespaces. That suite is kernel
   evidence produced on a disposable CI machine; it is **not** live appliance evidence.
 
-**Still PENDING (requires a separate Product-Owner decision — see `governance/project-state.json`
-`next_authorized_action`):** Live Increment 9 — read-only live PMS verification, controlled live-dark
-deployment of the exact delivery HEAD, one reboot with post-reboot convergence, a rollback rehearsal, and
-flags-OFF confirmation on the running unit. Until that decision: PR #6 stays open and unmerged, all Phase-3
-flags OFF, migration 0010 undeployed, zero runtime `iam_v2` privileges, no appliance/Production/live-PMS
-contact, no PS/PA, no financial posting, no Phase 4.
+**Live Increment 9 WAS EXECUTED on 2026-08-10** under a separate Product-Owner decision. Its verdicts are
+recorded in the Phase-3 report §6b: Item 1 (read-only PMS) PASS, Item 2 (live-dark deployment) BLOCKED/PARTIAL,
+Item 3 (reboot) FAIL for the required post-reboot persistence, Item 4 (rollback rehearsal) PASS with a
+false-PASS tooling defect since corrected, Item 5 (flags-OFF) PASS. Legacy live-session continuity is
+**NOT PROVEN** — no legacy guest was online during the window.
+
+As a result: **migration 0010 IS applied** on the production site database (63 iam_v2 tables, **0 rows**), the
+appliance and the live PMS **were** contacted under that authorization, and the corrected software is **not
+yet deployed**. Standing restrictions that remain true: PR #6 open and unmerged, all Phase-3 flags OFF, zero
+runtime `iam_v2` privileges, no PS/PA, no financial posting, no cutover, no Phase 4.
+
+**Still PENDING:** re-running the BLOCKED subset of Increment 9 against the corrected HEAD — see
+`governance/project-state.json` `next_authorized_action`.
 
 ---
 

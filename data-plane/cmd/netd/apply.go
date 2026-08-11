@@ -39,6 +39,53 @@ type applier struct {
 	// "rewrote it to the same thing", and those differ by whether a live guest keeps their authorization.
 	runFn func(ctx context.Context, name string, args ...string) error
 	outFn func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+	// activeIntentFn / prevIntentFn / eventFn are the database seams the lifecycle paths use. They exist so a
+	// test can state, without a database, exactly what the CONFIRMED active revision holds and what the
+	// mutable guest_networks rows hold — which is the whole question item 2 is about: a restart must
+	// reconstruct the confirmed revision, never an unapplied draft.
+	activeIntentFn func(ctx context.Context) (string, string, []netcfg.GuestNetwork, error)
+	prevIntentFn   func(ctx context.Context, exceptID string) ([]netcfg.GuestNetwork, error)
+	eventFn        func(ctx context.Context, revID, kind string, ok bool, detail map[string]any)
+	prevBundleFn   func(ctx context.Context, exceptID string) (string, error)
+	markRolledFn   func(ctx context.Context, id, reason string) error
+}
+
+// currentActiveIntent returns the confirmed active revision's id, bundle and immutable intent snapshot.
+func (a *applier) currentActiveIntent(ctx context.Context) (string, string, []netcfg.GuestNetwork, error) {
+	if a.activeIntentFn != nil {
+		return a.activeIntentFn(ctx)
+	}
+	return a.st.CurrentActiveIntent(ctx)
+}
+
+func (a *applier) previousActiveIntent(ctx context.Context, exceptID string) ([]netcfg.GuestNetwork, error) {
+	if a.prevIntentFn != nil {
+		return a.prevIntentFn(ctx, exceptID)
+	}
+	return a.st.ActiveIntent(ctx, exceptID)
+}
+
+func (a *applier) previousBundle(ctx context.Context, exceptID string) (string, error) {
+	if a.prevBundleFn != nil {
+		return a.prevBundleFn(ctx, exceptID)
+	}
+	return a.st.ActiveBundlePath(ctx, exceptID)
+}
+
+func (a *applier) markRolledBack(ctx context.Context, id, reason string) error {
+	if a.markRolledFn != nil {
+		return a.markRolledFn(ctx, id, reason)
+	}
+	return a.st.MarkRolledBack(ctx, id, reason)
+}
+
+func (a *applier) event(ctx context.Context, revID, kind string, ok bool, detail map[string]any) {
+	if a.eventFn != nil {
+		a.eventFn(ctx, revID, kind, ok, detail)
+		return
+	}
+	a.st.Event(ctx, revID, kind, ok, detail)
 }
 
 type applyResult struct {

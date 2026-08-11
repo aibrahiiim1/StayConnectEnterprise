@@ -114,8 +114,13 @@ func (f *fakeRuleset) apply(buf string) error {
 		switch {
 		case strings.HasPrefix(cmd, "add set inet stayconnect "+phase3Set):
 			staged = append(staged, func() { f.sets[phase3Set] = nil })
-		case strings.HasPrefix(cmd, "delete set inet stayconnect "+phase3Set):
-			staged = append(staged, func() { delete(f.sets, phase3Set) })
+		case strings.HasPrefix(cmd, "delete set inet stayconnect "):
+			name := strings.TrimSpace(strings.TrimPrefix(cmd, "delete set inet stayconnect "))
+			if _, ok := f.sets[name]; !ok {
+				// real nft aborts the whole transaction when asked to delete a set that is not there
+				return errors.New("nft: No such file or directory: delete set " + name)
+			}
+			staged = append(staged, func() { delete(f.sets, name) })
 		case strings.HasPrefix(cmd, "add rule inet stayconnect forward"):
 			body := cmd
 			if i := strings.Index(cmd, " handle "); i >= 0 {
@@ -200,7 +205,7 @@ func (f *fakeRuleset) replaceCaptive(anchor, text string) {
 func (f *fakeRuleset) render() string {
 	var b strings.Builder
 	b.WriteString("table inet stayconnect {\n")
-	for _, name := range []string{legacySet, phase3Set} {
+	for _, name := range []string{legacySet, phase3Set, "sc_render_fp"} {
 		if _, ok := f.sets[name]; ok {
 			b.WriteString("\tset " + name + " {\n\t\ttype ifname . ipv4_addr\n\t}\n")
 		}
@@ -468,6 +473,113 @@ func TestInspectMutatesNothing(t *testing.T) {
 	for _, c := range rs.cmds {
 		if !strings.Contains(c, "list") {
 			t.Fatalf("inspect issued a non-listing command: %s", c)
+		}
+	}
+}
+
+// ---- THE RENDER MARKER MUST NOT SURVIVE A STRUCTURAL CHANGE MADE HERE ------------------------------------
+//
+// netd reconciles by comparing the fingerprint in the live table against the one it renders, and does NOTHING
+// when they match. That is what makes a routine restart non-destructive. It also means this tool must never
+// leave the marker claiming "the structure is the current render" after changing the structure: netd would
+// then skip the reconciliation that would put it back.
+//
+// The concrete case is rollback on a CONVERGED appliance — the phase-3 set is removed while the marker still
+// says the table is current, so without invalidation netd leaves the appliance without the Phase-3 structure
+// indefinitely, which is the Increment-9 blocker arriving by a different road.
+
+func markedRuleset() *fakeRuleset {
+	f := newFakeRuleset()
+	f.sets["sc_render_fp"] = nil
+	return f
+}
+
+func TestRollbackInvalidatesTheRenderMarker(t *testing.T) {
+	// A CONVERGED appliance: the phase-3 structure is present AND the marker is present, because netd's own
+	// renderer emitted both. Install is used to build the structure and then the marker is restored, since a
+	// converged appliance is exactly the state netd leaves behind after rendering.
+	f := newFakeRuleset()
+	fo := &Foundation{NftPath: "nft", Run: f.run}
+	if _, err := fo.Install(context.Background()); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	f.sets["sc_render_fp"] = nil
+	f.cmds = nil
+
+	rep, err := fo.Rollback(context.Background())
+	if err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if rep.Outcome != "REMOVED" {
+		t.Fatalf("outcome = %q", rep.Outcome)
+	}
+	joined := strings.Join(f.cmds, " ; ")
+	if !strings.Contains(joined, "delete set inet stayconnect sc_render_fp") {
+		t.Fatalf("rollback changed the structure but left the render marker intact: %s", joined)
+	}
+	if _, ok := f.sets["sc_render_fp"]; ok {
+		t.Fatal("the marker set still exists after a structural rollback")
+	}
+	// and legacy authorization is still untouched, which is the standing property of this operation
+	if len(f.sets[legacySet]) != 3 {
+		t.Fatalf("legacy authorization changed: %v", f.sets[legacySet])
+	}
+}
+
+func TestInstallInvalidatesTheRenderMarkerWhenItChangesStructure(t *testing.T) {
+	f := markedRuleset() // marker present, phase-3 structure absent (hand-edited table)
+	fo := &Foundation{NftPath: "nft", Run: f.run}
+
+	if _, err := fo.Install(context.Background()); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	joined := strings.Join(f.cmds, " ; ")
+	if !strings.Contains(joined, "delete set inet stayconnect sc_render_fp") {
+		t.Fatalf("install changed the structure but left the render marker intact: %s", joined)
+	}
+}
+
+// A NO-OP MUST NOT TOUCH THE MARKER. On a converged appliance the marker is TRUE — the renderer itself emits
+// the Phase-3 structure — so an install that finds nothing to do must leave it exactly where it is. Dropping
+// it would force a pointless full-table replacement on the next restart.
+func TestAlreadyInstalledLeavesTheRenderMarkerAlone(t *testing.T) {
+	f := markedRuleset()
+	fo := &Foundation{NftPath: "nft", Run: f.run}
+	if _, err := fo.Install(context.Background()); err != nil {
+		t.Fatalf("first install: %v", err)
+	}
+	// re-mark, as a real converged appliance would be after netd rendered
+	f.sets["sc_render_fp"] = nil
+	f.cmds = nil
+
+	rep, err := fo.Install(context.Background())
+	if err != nil {
+		t.Fatalf("second install: %v", err)
+	}
+	if rep.Outcome != "ALREADY_INSTALLED" {
+		t.Fatalf("outcome = %q, want ALREADY_INSTALLED", rep.Outcome)
+	}
+	for _, c := range f.cmds {
+		if strings.Contains(c, "delete set") {
+			t.Fatalf("a no-op install issued a structural command: %s", c)
+		}
+	}
+	if _, ok := f.sets["sc_render_fp"]; !ok {
+		t.Fatal("a no-op install invalidated a truthful marker")
+	}
+}
+
+// An UNMARKED table (a pre-fingerprint appliance) has no marker to invalidate, and the tool must not invent a
+// delete for a set that is not there — that would abort the whole transaction.
+func TestUnmarkedRulesetIssuesNoMarkerDelete(t *testing.T) {
+	f := newFakeRuleset() // no marker
+	fo := &Foundation{NftPath: "nft", Run: f.run}
+	if _, err := fo.Install(context.Background()); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	for _, c := range f.cmds {
+		if strings.Contains(c, "sc_render_fp") {
+			t.Fatalf("issued a marker command against a table with no marker: %s", c)
 		}
 	}
 }

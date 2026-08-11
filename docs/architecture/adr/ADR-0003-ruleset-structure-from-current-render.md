@@ -79,6 +79,63 @@ NoMutation` fails if a single `nft` mutation is issued.
 | `Timeout > 0, Expires <= 0` | **dropped.** The kernel was about to remove it; carrying it would resurrect an expired authorization. |
 | `Timeout == 0, Expires == 0` | **permanent, with no timeout clause.** This is what legacy `scd` writes into `auth_ipv4`; treating it as expired would knock every legacy guest offline during the upgrade. |
 
+## What "the intent" means, and why it is the confirmed revision
+
+Reconciliation renders from **the confirmed active revision's own immutable intent snapshot**, not from the
+live `guest_networks` rows the Hotel-Admin UI edits.
+
+Those rows are drafts. They become the appliance's configuration only when an operator Applies them and then
+Confirms inside the watchdog window — that is the entire point of the validate → apply → pending_confirmation
+→ active pipeline, and of the automatic rollback when confirmation never arrives. Reconciling from them on boot
+would quietly bypass all of it: an operator who edited a VLAN and walked away would have that edit take effect
+at the next reboot with no apply record, no health check, no confirmation and no watchdog, and a change that
+was rolled back *because it broke connectivity* would come back by itself the next time the appliance
+restarted.
+
+Every revision already stores the exact intent it was applied with as `jsonb`. That snapshot is immutable, and
+it is what "the active network configuration" means.
+
+## Failing closed, and the difference between absent and unreadable
+
+A converge decides what to delete and what to re-authorize, and it begins with `delete table`. It may only do
+that from a live state it actually established.
+
+Absence is therefore decided by **enumeration**: one `list tables` call, which either works or fails as a
+whole, says whether our table exists; the table listing says which sets exist; and a set the listing names
+must then be readable or the converge is abandoned. The tempting shortcut — read the set, treat a non-zero
+exit as "not there" — conflates a missing set with a missing binary, a denied permission, a busy netlink
+socket and a malformed ruleset, and only the first of those means empty. Every other one would have been read
+as "no authorization to preserve" immediately before a full-table replacement.
+
+`ErrLiveStateUntrusted` is that refusal, and it is deliberately a different thing from "the structure differs":
+one means act, the other means stop and leave everything alone.
+
+## Rollback has no fallback
+
+Restoring a failed apply renders the **previous confirmed revision's** stored intent. If that cannot be done
+safely, the rollback stops and records an operator-visible blocker.
+
+It does **not** drop back to executing that revision's stored `stayconnect.nft`. An earlier version did, which
+meant the worst moment — a failed apply, on a live appliance, with the operator already in trouble — was the
+one moment the code chose to run a full-table replacement rendered by some earlier binary. An unfinished
+rollback leaves the operator with the ruleset they already had and a recorded blocker; a "successful" one that
+ran the legacy path leaves them with a silently deauthorized property.
+
+## Keeping the marker truthful
+
+netd skips reconciliation whenever the live fingerprint matches, so any *other* supported way of changing the
+structure must not leave the marker claiming the structure is current.
+
+The audit result is that there are exactly two structural writers: this renderer, and the operator tool
+`cmd/phase3-foundation`. (`internal/nft` writes set *elements* — authorizations and the walled garden — which
+is runtime state, not structure.) The operator tool now deletes the marker whenever it issues a structural
+command, and leaves it alone when it has nothing to do. A preflight gate asserts that no third writer appears.
+
+The concrete failure this prevents: `phase3-foundation rollback` on a converged appliance removes
+`phase3_auth_ipv4` while the marker still says the table is current — so netd would skip the reconciliation
+that would rebuild it, and the appliance would sit without the Phase-3 structure indefinitely. That is the
+Increment-9 blocker arriving by a different road.
+
 ## Consequences
 
 - An appliance whose active revision predates the current renderer **converges by itself on the next start**.
@@ -86,8 +143,8 @@ NoMutation` fails if a single `nft` mutation is issued.
 - `phase3_auth_ipv4` is durable because it is part of the render, not because someone ran an install tool. The
   standalone `cmd/phase3-foundation` remains useful for inspecting a running appliance and for a surgical
   install/rollback with legacy-parity evidence, but the steady state no longer depends on it.
-- Rollback of a failed network apply also renders — from the previous revision's stored **intent**, which every
-  revision already carries as `jsonb` — rather than replaying that revision's file. Same defect, same fix.
+- Rollback of a failed network apply also renders — from the previous revision's stored **intent** — rather
+  than replaying that revision's file, and refuses rather than falling back. Same defect, same fix.
 - A converge that cannot be done safely **refuses**: an authorization set that cannot be read, a load that
   fails, or a post-apply fingerprint that does not match are all errors, and the live ruleset is left untouched.
 - The marker is a real object in the ruleset. It is empty, matches nothing, and costs one set.

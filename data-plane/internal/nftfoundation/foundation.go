@@ -38,6 +38,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
 	"github.com/stayconnect/enterprise/data-plane/internal/nft"
 )
 
@@ -100,6 +101,11 @@ type State struct {
 	// WANInterface is read back out of that rule rather than configured here: the foundation must match the
 	// ruleset it finds, and a second source for the WAN name is a second thing that can be wrong.
 	WANInterface string
+
+	// RenderMarker is whether the live table carries netd's render fingerprint. If it does, netd will skip
+	// reconciliation whenever that fingerprint matches what it renders — so any structural change made HERE
+	// must invalidate it, or netd would go on believing the structure is current after this tool changed it.
+	RenderMarker bool
 }
 
 // CaptiveRule is one captive-portal DNAT rule in the live chain.
@@ -137,6 +143,9 @@ func (f *Foundation) Inspect(ctx context.Context) (State, error) {
 			}
 			if name == phase3Set {
 				st.Phase3Set = true
+			}
+			if name == netcfg.RenderMarkerSet {
+				st.RenderMarker = true
 			}
 		case strings.HasPrefix(line, "chain "):
 			chain = strings.Fields(line)[1]
@@ -296,7 +305,29 @@ func (f *Foundation) installCommands(st State) []string {
 		}
 		cmds = append(cmds, fmt.Sprintf("replace rule inet stayconnect %s handle %s %s", captiveChn, r.Handle, addPhase3Exclusion(r.Text)))
 	}
+	if len(cmds) > 0 {
+		cmds = append(cmds, invalidateMarker(st)...)
+	}
 	return cmds
+}
+
+// invalidateMarker returns the command that removes netd's render fingerprint, or nothing if the live table
+// carries none.
+//
+// WHY ANY STRUCTURAL CHANGE HERE MUST DROP IT. netd reconciles by comparing the fingerprint in the live table
+// against the one it would render, and does NOTHING when they match. That is what makes a routine restart
+// non-destructive — and it means a marker left claiming "this structure is the current render" after this tool
+// has changed the structure would make netd skip the very reconciliation that would put it back. The concrete
+// case is `rollback` on a converged appliance: it removes phase3_auth_ipv4 while the marker still says the
+// table is current, so netd would leave the appliance without the Phase-3 structure indefinitely.
+//
+// Dropping the marker states the truth — the structure is no longer the render — and the next reconciliation
+// rebuilds it.
+func invalidateMarker(st State) []string {
+	if !st.RenderMarker {
+		return nil
+	}
+	return []string{fmt.Sprintf("delete set inet stayconnect %s", netcfg.RenderMarkerSet)}
 }
 
 // addPhase3Exclusion inserts the Phase-3 exclusion immediately after the legacy one, so the rewritten rule
@@ -369,6 +400,9 @@ func (f *Foundation) Rollback(ctx context.Context) (Report, error) {
 		// The set is deleted LAST within the buffer; nft resolves the whole batch before committing, so the
 		// rules referencing it are gone in the same transaction.
 		cmds = append(cmds, fmt.Sprintf("delete set inet stayconnect %s", phase3Set))
+	}
+	if len(cmds) > 0 {
+		cmds = append(cmds, invalidateMarker(st)...)
 	}
 	if len(cmds) == 0 {
 		rep.Outcome = "ALREADY_ABSENT"

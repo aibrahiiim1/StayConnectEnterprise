@@ -1,0 +1,37 @@
+{
+  "transition_id": "T0021",
+  "seq": 21,
+  "timestamp": "2026-08-11T06:47:48Z",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_INCREMENT9_DURABILITY_CORRECTION_CANDIDATE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_INCREMENT9_DURABILITY_CORRECTION_CANDIDATE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "3",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-11, 'PHASE 3 -- FINAL NETWORK-LIFECYCLE CORRECTION BEFORE LIVE RE-VALIDATION', issued against reviewed HEAD be135f2145879e246da83e5e2a17d4f064a51d91. It ACCEPTS the current-render / nftconverge architecture as the correct direction and forbids redesigning it, forbids any live action in this instruction, and directs five production-correctness closures: fail closed when live authorization cannot be read; boot reconciliation must use the confirmed ACTIVE revision intent rather than editable Hotel-Admin state; remove the destructive nft fallback from rollback; keep the renderer marker truthful across every supported structural mutation; and synchronize operator and governance truth with the already-executed Increment-9 state. The activity is unchanged because the stage is unchanged: this is a correction within the same Increment-9 correction candidate.",
+  "scope_allowed": "Repository and disposable-environment correction only. (1) nftconverge decides set absence by ENUMERATING the table and returns a named ErrLiveStateUntrusted for any read or parse failure -- nft unusable, unparseable enumeration, unreadable table, unreadable or garbled authorization set -- aborting before nft -f with the live ruleset and every authorization untouched, with six modelled failure modes plus a real-kernel error-seam test that byte-compares the live ruleset and re-checks packet reachability. (2) store.CurrentActiveIntent returns the confirmed active revision's own immutable intent snapshot and ReconcileActiveOnBoot renders from it, never from the mutable guest_networks rows, so an unapplied Hotel-Admin draft cannot become the running network and only an explicit Apply that is then Confirmed changes the active network; an unreadable snapshot leaves the live ruleset alone and an appliance with no confirmed revision does nothing. (3) applier.rollback renders the previous confirmed revision's intent and, when that cannot be done safely, records an operator-visible blocker instead of executing a stored stayconnect.nft containing a full-table replacement. (4) nftfoundation invalidates netd's render marker on any structural install or rollback while leaving a truthful marker untouched on a no-op, and a preflight audit asserts that only the renderer and that tool emit structural nft commands. (5) The deployment/reboot/rollback runbook is rewritten to the nftconverge architecture, retiring the surgical foundation workflow from it and removing the false statement that Phase 3 adds no boot-time behaviour; the Phase-3 report, Acceptance Matrix (row 30as corrected and backed by real tests, rows 30av-30ay added), Phase-3 Plan, scope-amendment proposal, project state, packs and manifest are synchronized with the executed Increment-9 state.",
+  "scope_prohibited": "No appliance change of any kind in this round: no deployment, no migration, no reboot, no rollback execution, no nft change, no Production-database change and no live PMS traffic. No Phase-3 flag enablement, no Gate-P grants, no IAM-v2 cutover, no guest paid access, no PMS financial posting, no FIAS PS or PA, no settlement, no implicit FX, no programmatic reversal, no Phase 4. PR #6 remains open and unmerged. The already-verified binary-rollback and migration-runner corrections are preserved unchanged. The appliance enrollment/signed-assignment identity, licence identity, secrets and keys were not reset and must not be.",
+  "evidence_files": [
+    "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
+    "docs/architecture/adr/ADR-0003-ruleset-structure-from-current-render.md",
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+    "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+    "data-plane/internal/nftconverge/converge.go",
+    "data-plane/cmd/netd/store.go",
+    "data-plane/cmd/netd/apply_ops.go",
+    "data-plane/cmd/netd/network_lifecycle_test.go",
+    "data-plane/cmd/netd/nft_reconcile_test.go",
+    "data-plane/internal/nftfoundation/foundation.go",
+    "data-plane/internal/kerneltest/converge_kernel_test.go",
+    "scripts/phase3-preflight.sh"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC at the moment this receipt was written, immediately before the inventory_head commit that introduces it. tools/validate-transition-times.sh checks that it is not later than that commit.",
+  "source_commit": "be135f2145879e246da83e5e2a17d4f064a51d91",
+  "acceptance_verdict": "IN_PROGRESS -- Phase 3 remains DARK, NOT accepted and NOT closed. The Increment-9 restart/reboot blocker and the four network-lifecycle gaps found on review of that correction are closed in software. The corrected software is NOT deployed: the appliance still runs the binaries from 83449200a8aca7018fac5b38a96b3a1aafc66ba2, migration 0010 IS applied there with 0 rows, and the Phase-3 nft structure is absent after each restart until the correction is deployed.",
+  "next_action": "Obtain a Product-Owner decision on this correction, then re-run only the BLOCKED subset of Live Increment 9 on the appliance. Items 1 and 5 already passed live and need not be repeated. Legacy live-session continuity remains NOT PROVEN."
+}

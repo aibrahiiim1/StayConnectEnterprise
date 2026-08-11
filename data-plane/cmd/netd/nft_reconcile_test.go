@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/netcfg"
+	"github.com/stayconnect/enterprise/data-plane/internal/nftconverge"
 )
 
 // ---- a simulated kernel ------------------------------------------------------------------------------------
@@ -26,6 +28,13 @@ type fakeKernel struct {
 	timeouts    map[string]int      // element key -> remaining seconds
 	cmds        []string            // every command executed, in order
 	failNftF    bool
+
+	// read-failure seams: each is a way nft can fail that does NOT mean "the object is absent"
+	failListTables   bool   // nft unusable / permission denied
+	garbleListTables bool   // output that cannot be parsed
+	failListTable    bool   // the table exists but the read failed
+	failReadSet      string // set name whose read fails
+	garbleReadSet    string // set name whose read returns unparseable output
 }
 
 func newFakeKernel(t *testing.T) *fakeKernel {
@@ -113,9 +122,41 @@ func parseElemBody(body string) (string, int) {
 func (k *fakeKernel) output(_ context.Context, name string, args ...string) ([]byte, error) {
 	k.cmds = append(k.cmds, name+" "+strings.Join(args, " "))
 	joined := strings.Join(args, " ")
+
+	// Failure injection, one seam per read. Each models a DIFFERENT reason nft can fail that is not "the
+	// object is absent", and every one of them must abort the converge rather than be read as "empty".
+	if k.failListTables {
+		if strings.HasPrefix(joined, "-j list tables") {
+			return nil, fmt.Errorf("nft: netlink: Operation not permitted")
+		}
+	}
+	if k.garbleListTables && strings.HasPrefix(joined, "-j list tables") {
+		return []byte("{not json"), nil
+	}
+	if strings.HasPrefix(joined, "-j list tables") {
+		// `list tables` works whether or not OUR table is there; that is the whole point of using it as the
+		// authority on absence.
+		var objs []any
+		if k.tableExists {
+			objs = append(objs, map[string]any{"table": map[string]any{"family": "inet", "name": "stayconnect"}})
+		}
+		objs = append(objs, map[string]any{"table": map[string]any{"family": "inet", "name": "someone-else"}})
+		return json.Marshal(map[string]any{"nftables": objs})
+	}
+
 	if !k.tableExists {
 		return nil, fmt.Errorf("No such file or directory")
 	}
+	if k.failListTable && strings.HasPrefix(joined, "-j list table inet stayconnect") {
+		return nil, fmt.Errorf("nft: netlink: Interrupted system call")
+	}
+	if k.failReadSet != "" && strings.HasSuffix(joined, k.failReadSet) && strings.Contains(joined, "list set") {
+		return nil, fmt.Errorf("nft: netlink: Device or resource busy")
+	}
+	if k.garbleReadSet != "" && strings.HasSuffix(joined, k.garbleReadSet) && strings.Contains(joined, "list set") {
+		return []byte("{ truncated json"), nil
+	}
+
 	switch {
 	case strings.HasPrefix(joined, "-j list table inet stayconnect"):
 		var objs []map[string]any
@@ -124,6 +165,11 @@ func (k *fakeKernel) output(_ context.Context, name string, args ...string) ([]b
 				"name": netcfg.RenderMarkerSet, "comment": "netd-render-fp=" + k.fp}})
 		}
 		for name := range k.sets {
+			// real nft lists each set exactly once; emitting the marker again here (with no comment) would
+			// be a fake-only artefact that hides whether the reader handles the real listing correctly
+			if name == netcfg.RenderMarkerSet {
+				continue
+			}
 			objs = append(objs, map[string]any{"set": map[string]any{"name": name, "comment": ""}})
 		}
 		if len(objs) == 0 {
@@ -430,23 +476,104 @@ func TestReconcile_ApplyFailurePropagates(t *testing.T) {
 	}
 }
 
-// If a set that holds live authorization cannot be read, converging would silently deauthorize it. Refusing is
-// the only safe answer, and the live ruleset must be left untouched.
-func TestReconcile_UnreadableAuthSetRefusesToConverge(t *testing.T) {
+// ---- 8b. AN UNREADABLE LIVE STATE IS NOT AN EMPTY ONE ----------------------------------------------------
+//
+// THE FAILURE THIS PREVENTS. The obvious way to ask "does this set exist" is to read it and treat a non-zero
+// exit as no. But `nft list set` exits non-zero for a missing set, a missing binary, a denied permission, a
+// busy netlink socket and a malformed ruleset alike, and only the FIRST of those means empty. Every other one
+// would have been read as "there is no authorization to preserve" immediately before a `delete table` — which
+// is exactly how a converge could deauthorize an entire property and then report success.
+//
+// So absence is decided by ENUMERATION (the table listing), and anything the enumeration says exists must be
+// readable or the converge is abandoned before a single mutation is issued.
+func TestReconcile_AnUnreadableLiveStateAbortsBeforeAnyMutation(t *testing.T) {
+	cases := []struct {
+		name   string
+		break_ func(k *fakeKernel)
+	}{
+		{"nft itself is unusable", func(k *fakeKernel) { k.failListTables = true }},
+		{"table enumeration is unparseable", func(k *fakeKernel) { k.garbleListTables = true }},
+		{"the table exists but cannot be read", func(k *fakeKernel) { k.failListTable = true }},
+		{"a listed auth set cannot be read", func(k *fakeKernel) { k.failReadSet = "auth_ipv4" }},
+		{"a listed auth set returns unparseable output", func(k *fakeKernel) { k.garbleReadSet = "auth_ipv4" }},
+		{"the PHASE-3 set cannot be read", func(k *fakeKernel) { k.failReadSet = "phase3_auth_ipv4" }},
+	}
+	for _, tc := range cases {
+		t.Run(strings.ReplaceAll(tc.name, " ", "_"), func(t *testing.T) {
+			k := newFakeKernel(t)
+			// a live, populated, pre-Phase-3 table — i.e. something a converge would otherwise rewrite
+			k.legacyJulyTable("br-g90|10.20.0.55", "br-g90|10.20.0.56")
+			k.sets["phase3_auth_ipv4"] = []string{}
+			before := len(k.sets["auth_ipv4"])
+			a := newTestApplier(t, k)
+			tc.break_(k)
+
+			_, err := a.ensureNftStructure(context.Background(), testIntent(), "boot_reconcile")
+			if err == nil {
+				t.Fatal("converged from a live state it could not read")
+			}
+			if !errors.Is(err, nftconverge.ErrLiveStateUntrusted) {
+				t.Fatalf("error does not identify itself as an untrusted live state: %v", err)
+			}
+			if m := k.mutations(); len(m) != 0 {
+				t.Fatalf("the live ruleset was mutated after failing to read it: %v", m)
+			}
+			if len(k.sets["auth_ipv4"]) != before {
+				t.Fatal("live authorization changed despite the refusal")
+			}
+			if k.fp != "" {
+				t.Fatal("the marker was written for a converge that never happened")
+			}
+		})
+	}
+}
+
+// AND THE LEGITIMATE CASE STILL WORKS: a set that the enumeration does not list is genuinely absent, has
+// nothing to carry, and must not block the converge. Otherwise every pre-Phase-3 appliance — which by
+// definition has no phase3_auth_ipv4 — would fail closed forever and never converge at all.
+func TestReconcile_AGenuinelyAbsentSetIsEmptyNotAnError(t *testing.T) {
+	k := newFakeKernel(t)
+	k.legacyJulyTable("br-g90|10.20.0.55") // no phase3_auth_ipv4 at all
+	if _, ok := k.sets["phase3_auth_ipv4"]; ok {
+		t.Fatal("precondition: the phase-3 set should not be present")
+	}
+	a := newTestApplier(t, k)
+
+	res, err := a.ensureNftStructure(context.Background(), testIntent(), "boot_reconcile")
+	if err != nil {
+		t.Fatalf("a genuinely absent set blocked the converge: %v", err)
+	}
+	if !res.Changed {
+		t.Fatal("the converge did not happen")
+	}
+	if res.Carried != 1 {
+		t.Fatalf("carried %d; the one legacy element should have been carried", res.Carried)
+	}
+	// the absent set was never read — absence came from the enumeration, not from a failed read
+	for _, c := range k.cmds {
+		if strings.Contains(c, "list set inet stayconnect phase3_auth_ipv4") {
+			t.Fatal("the absent set was probed by reading it; absence must come from the table listing")
+		}
+	}
+}
+
+// A read failure must not be silently retried into success either: the refusal is reported, not swallowed.
+func TestReconcile_ReadFailureIsReportedNotSwallowed(t *testing.T) {
 	k := newFakeKernel(t)
 	k.legacyJulyTable("br-g90|10.20.0.55")
 	a := newTestApplier(t, k)
-	a.outFn = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		if strings.Contains(strings.Join(args, " "), "list set inet stayconnect auth_ipv4") {
-			return []byte("{ this is not json"), nil
-		}
-		return k.output(ctx, name, args...)
+	k.failReadSet = "auth_ipv4"
+
+	_, err := a.ensureNftStructure(context.Background(), testIntent(), "boot")
+	if err == nil || !strings.Contains(err.Error(), "auth_ipv4") {
+		t.Fatalf("the refusal does not name the set that could not be read: %v", err)
 	}
-	if _, err := a.ensureNftStructure(context.Background(), testIntent(), "boot"); err == nil {
-		t.Fatal("converged despite being unable to read a live authorization set")
-	}
-	if len(k.mutations()) != 0 {
-		t.Fatal("the live ruleset was mutated after refusing to converge")
+
+	// once the read works again, the same appliance converges normally
+	k.failReadSet = ""
+	res, err := a.ensureNftStructure(context.Background(), testIntent(), "boot-retry")
+	if err != nil || !res.Changed || res.Carried != 1 {
+		t.Fatalf("recovery converge failed: changed=%v carried=%d err=%v", res.Changed, res.Carried, err)
 	}
 }
 
