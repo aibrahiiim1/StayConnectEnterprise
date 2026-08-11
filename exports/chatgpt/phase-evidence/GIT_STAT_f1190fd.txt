@@ -1,4 +1,0 @@
-commit f1190fdf81e4ed63197ce00fa02eac73b04fd0a0
-Date:   Tue Aug 11 17:47:30 2026 +0300
-
-    Evidence hygiene: stop shipping Playwright's embedded repository diff in the artifact

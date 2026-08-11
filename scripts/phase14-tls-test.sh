@@ -21,7 +21,9 @@ set -euo pipefail
 
 CADDY_BIN=${CADDY_BIN:-/usr/bin/caddy}
 DEV_CONF=${DEV_CONF:-/opt/stayconnect/deploy/caddy/Caddyfile.dev}
-PROD_CONF=${PROD_CONF:-/opt/stayconnect/deploy/caddy/Caddyfile}
+# The combined single-box Caddyfile is gone: Edge and Central are separate roles with separate
+# configs. Default to the Edge file, which is what this appliance-side test actually exercises.
+PROD_CONF=${PROD_CONF:-/opt/stayconnect/deploy/caddy/Caddyfile.edge}
 RUN_DIR=/tmp/stayconnect-caddy-test
 HTTPS_PORT=9443
 HTTP_PORT=9080

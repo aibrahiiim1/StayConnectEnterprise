@@ -1,0 +1,57 @@
+# StayConnect - CENTRAL CONTROL PLANE Caddyfile.
+#
+# ROLE BOUNDARY - read this before adding a site block.
+#
+# Central terminates ONE site serving two upstreams by path:
+#
+#   /v1/* /cloud/* /healthz /readyz /metrics -> ctrlapi      127.0.0.1:8080
+#   everything else                          -> cloud-admin  127.0.0.1:3000
+#
+# It does NOT run portald or hotel-admin. Those are EDGE appliance surfaces
+# (deploy/caddy/Caddyfile.edge) and must not be added here.
+#
+# The site address deliberately does NOT include the machine's bare hostname. It used to read
+# `radius`, inherited from the appliance image this host was cloned from: that both duplicated the
+# appliance's identity and served a name nothing connects by. Central is addressed by IP and by
+# admin.stayconnect.local.
+#
+# `admin off` in the global block disables Caddy's admin API, so `caddy reload` CANNOT work here -
+# apply configuration with `systemctl restart stayconnect-caddy` after validating. The unit's
+# ExecReload is validate-only for exactly that reason.
+#
+# To deploy:
+#   install -m 0644 deploy/caddy/Caddyfile.central /etc/caddy/Caddyfile
+#   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+#   systemctl restart stayconnect-caddy
+#
+{
+	admin off
+	auto_https disable_redirects
+}
+150.0.0.252, admin.stayconnect.local {
+	tls /etc/caddy/tls/server.crt /etc/caddy/tls/server.key
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		-Server
+	}
+	@api path /v1/* /cloud/* /healthz /readyz /metrics
+	handle @api {
+		reverse_proxy 127.0.0.1:8080 {
+			header_up X-Forwarded-Proto https
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000 {
+			header_down Location "^https?://localhost:3000(/.*)$" "$1"
+			header_up X-Forwarded-Proto https
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	log {
+		output file /var/log/caddy/central.log
+	}
+}
