@@ -1,0 +1,4 @@
+commit 50c92d0ba0ebfa4a66a606e3806bd04918ea1bc7
+Date:   Tue Aug 11 15:53:36 2026 +0300
+
+    Phase 3 (inventory_head): merge-readiness corrections â€” a cited evidence file that was silently gitignored, and four stale current-state claims

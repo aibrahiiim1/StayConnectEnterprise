@@ -1,4 +1,0 @@
-commit 541004e712c35deccf8bc8c94fdb0a1f70d7705e
-Date:   Tue Aug 11 14:57:19 2026 +0300
-
-    Phase 3 (inventory_head): authorization provenance must outlive the phase it authorized
