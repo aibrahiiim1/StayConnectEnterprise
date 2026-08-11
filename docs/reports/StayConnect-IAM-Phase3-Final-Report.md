@@ -20,8 +20,13 @@
 >
 > **PR #6 IS MERGED AND CLOSED** — merged into `master` on 2026-08-11 as merge commit `8a7230a7220e4c773bfb6399ce7774f31f20c906` under the
 > separate Product-Owner merge authorization (decision **D17**, transition **T0025**). The merge introduced
-> no content: `master`'s tree equals the merged head's, and the runtime tree is byte-for-byte identical to
-> the accepted candidate. It deployed nothing and enabled nothing. Post-merge gates: Phase 3 Software CI
+> no content: at the merge, `master`'s tree equalled the merged head's and the whole runtime tree was
+> byte-for-byte identical to the accepted candidate. It deployed nothing and enabled nothing. *That
+> whole-tree statement describes the merge, not today* — post-closure remediation (T0026, T0027) has since
+> changed Caddy deployment material and operational tooling under `deploy/` and `scripts/`. The accepted
+> **application/runtime binaries** are unchanged: `data-plane/`, `hotel-admin/`, `control-plane/` and every
+> migration path still differ by zero files, and the six appliance binaries still hash-match the accepted
+> build. Post-merge gates: Phase 3 Software CI
 > **31497023194** and Project Governance **31497023118**, both SUCCESS on the merge commit.
 
 ---

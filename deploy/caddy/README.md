@@ -18,10 +18,35 @@ cannot reintroduce them.
 **Rule:** if a route 502s because its upstream "does not run on this box", the route does not belong on
 this box. Add it to the other role's file instead.
 
-**Applying config.** The Edge runs Caddy with the admin API enabled, so `systemctl reload` works. Central
-runs with `admin off`, so `caddy reload` cannot work there and configuration is applied with
-`systemctl restart stayconnect-caddy`; its unit's `ExecReload` only validates. Always run
-`caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` before either.
+**One systemd unit per role, too.**
+
+| Unit source | Install as | Reload |
+|---|---|---|
+| `stayconnect-caddy.edge.service` | `/etc/systemd/system/stayconnect-caddy.service` on the appliance | **supported** — the Edge Caddyfile leaves the admin API on `127.0.0.1:2019`, so `systemctl reload` genuinely applies the new config |
+| `stayconnect-caddy.central.service` | `/etc/systemd/system/stayconnect-caddy.service` on Central | **not supported, deliberately** — no `ExecReload` at all |
+
+**The Central reload contract.** Central runs Caddy with `admin off`, which disables the API `caddy reload`
+drives. Three options exist and two of them lie to the operator:
+
+- `ExecReload=caddy reload …` — fails every time, and fails *quietly*: the old config keeps serving and the
+  endpoint still answers 200, so "reload then curl" looks like success.
+- `ExecReload=caddy validate …` — worse. `systemctl reload` reports **success** while the running
+  configuration is untouched. A green result for a no-op is the most dangerous of the three.
+- **no `ExecReload`** — what Central ships. `systemctl reload stayconnect-caddy` fails immediately with
+  *"Job type reload is not applicable"*, which is the truth.
+
+To apply a config change on Central:
+
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+    systemctl restart stayconnect-caddy
+
+Then verify the **active** configuration (an HTTP check, or `caddy adapt`) rather than assuming the restart
+applied it. On the Edge, `caddy validate` followed by `systemctl reload` is correct and sufficient.
+
+**Central-only names on the Edge return 404.** `api.stayconnect.local` and `admin.stayconnect.local` are
+declared in `Caddyfile.edge` purely to be refused with a 404 and a short explanation. They are not proxied
+anywhere. Without those blocks Caddy has no matching route and its default is an **empty HTTP 200**, which an
+uptime check reads as "this host serves that name and it is healthy" — worse than the 502 it replaced.
 
 ## What this gives you
 

@@ -267,6 +267,26 @@ def _(d):
                "## Merge status\n\nPR #6 was merged and the branch is gone.")
 
 
+# ---- runtime identity: the claim that outlived the state it described ------------------------------------
+
+@case("a current surface reinstates the unscoped whole-tree identity claim", "runtime-identity-parity")
+def _(d):
+    # The exact sentence that was true at the merge and false a round later.
+    append_doc(d, "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+               "## Runtime identity" + chr(10) + chr(10) +
+               "The runtime tree is byte-for-byte identical to the accepted runtime candidate.")
+
+
+@case("post-closure changes are recorded but the accepted-binaries fact is dropped", "runtime-identity-parity")
+def _(d):
+    patch_facts(d, "accepted_runtime_binaries_unchanged", False)
+
+
+@case("the accepted-binaries head disagrees with the accepted runtime head", "runtime-identity-parity")
+def _(d):
+    patch_facts(d, "accepted_runtime_binaries_head", "0" * 40)
+
+
 @case("a transition receipt cites evidence that is not in the repository", "evidence-reference")
 def _(d):
     # The sandbox is a copy, so "not tracked in git" is asserted against the REAL repo index; citing a path

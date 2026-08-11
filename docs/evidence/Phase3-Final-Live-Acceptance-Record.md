@@ -20,8 +20,10 @@ they are the complete picture; read separately, each is honest about what it cov
 
 **`7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4`** — the build the appliance runs.
 
-Governance/closure work recorded after acceptance lives on a later HEAD; the runtime tree is byte-for-byte
-identical between them, and that is proven in §6.
+Governance/closure work recorded after acceptance lives on a later HEAD; the runtime tree was byte-for-byte
+identical between them at the time of acceptance, and that is proven in §6. *Later* post-closure remediation
+(T0026, T0027) changed Caddy deployment material and operational tooling under `deploy/` and `scripts/` —
+the accepted application/runtime binaries remain unchanged.
 
 ## 2. The order things actually happened
 

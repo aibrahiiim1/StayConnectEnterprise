@@ -336,6 +336,56 @@ def main():
         if not [f for f in failures if f[0] == "merge-parity"]:
             ok("no current surface claims a merge that has not happened")
 
+    # ---- 8f. RUNTIME-IDENTITY PARITY --------------------------------------------------------------------------------
+    #
+    # "the runtime tree is byte-for-byte identical to the accepted runtime candidate" was exactly true when the
+    # merge happened and false the moment post-closure remediation touched deploy/ and scripts/. It survived in
+    # four documents because it reads like an invariant, and invariants are the sentences nobody re-checks.
+    #
+    # The distinction that actually matters to acceptance is narrower and still holds: the accepted APPLICATION
+    # binaries and their behaviour are unchanged. So the two claims are separated here - the narrow one may be
+    # stated freely; the whole-tree one may only appear scoped to the moment it described.
+    if facts.get("post_closure_operational_changes"):
+        whole_tree = re.compile(
+            r"(runtime tree|deploy/ and scripts/|deploy/, scripts/)[^.]{0,80}byte[- ]for[- ]byte identical|"
+            r"byte[- ]for[- ]byte identical[^.]{0,80}(runtime tree|whole tree)",
+            re.I)
+        # A statement tied to when it was true is a record, not a claim about now.
+        scoped = re.compile(
+            r"at the merge|as at the merge|at that moment|at the time of|describes the merge|"
+            r"was byte|were byte|not today|since changed|historical|superseded",
+            re.I)
+        offenders = []
+        for rel in DOC_SURFACES:
+            text = load_surface(rel)
+            if text is None:
+                continue
+            for para, _ in paragraphs(text):
+                if not whole_tree.search(para):
+                    continue
+                if HISTORY_MARKERS.search(para) or scoped.search(para):
+                    continue
+                offenders.append((rel, " ".join(para.split())[:180]))
+        for rel, hit in offenders:
+            bad("runtime-identity-parity",
+                "claims the whole runtime tree is byte-for-byte identical to the accepted candidate, "
+                "unscoped, while post-closure operational changes are recorded: %s" % hit, rel)
+        if not offenders:
+            ok("no current surface claims an unscoped whole-tree identity with the accepted candidate")
+
+        # The narrow claim must be RECORDED, not merely absent: dropping both statements would also pass the
+        # check above while telling the reader nothing about what acceptance still rests on.
+        if not facts.get("accepted_runtime_binaries_unchanged"):
+            bad("runtime-identity-parity",
+                "post-closure operational changes are recorded but accepted_runtime_binaries_unchanged is not "
+                "asserted; the fact acceptance rests on must be stated, not merely implied", STATE)
+        elif facts.get("accepted_runtime_binaries_head") != facts.get("accepted_runtime_head"):
+            bad("runtime-identity-parity",
+                "accepted_runtime_binaries_head %r disagrees with accepted_runtime_head %r"
+                % (facts.get("accepted_runtime_binaries_head"), facts.get("accepted_runtime_head")), STATE)
+        else:
+            ok("the accepted-binaries invariant is recorded and agrees with the accepted runtime head")
+
     # ---- 9. the rollback runbook must not promise authorization it cannot preserve -----------------------------------
     #
     # The boundary section says a pre-convergence target may not preserve authorization. A later generic paragraph

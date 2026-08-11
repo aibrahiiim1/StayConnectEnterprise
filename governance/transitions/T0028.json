@@ -1,0 +1,120 @@
+{
+  "transition_id": "T0028",
+  "seq": 28,
+  "timestamp": "2026-08-11T18:23:07Z",
+  "record_type": "POST_CLOSURE_RATIFICATION_AND_LICENCE_RENEWAL",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_maturity_change": "NONE. Phase 3 remains ACCEPTED_AND_CLOSED at verified DARK maturity (D16/T0024), MERGED (D17/T0025), with post-closure hygiene (T0026) and residual remediation (T0027). This receipt creates NO acceptance decision and does not reopen or re-accept Phase 3.",
+  "decision": null,
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-11, 'FINAL RESIDUAL CLOSURE + LICENCE RENEWAL + OPERATIONAL RECONCILIATION', carrying seven explicit decisions: ratify retaining the T0027 operational state while correcting its provenance truthfully; renew the appliance licence for one year; correct the runtime-identity wording; permanently fix the Central Caddy reload contract; correct unsupported Edge-host behaviour; leave the Central certificate SAN untouched; treat the artifact audit as complete.",
+  "provenance_correction_T0027": {
+    "what_happened": "T0027 performed live changes on the Central Control Plane and the Edge appliance: Central was renamed to sc-central, its /etc/machine-id was regenerated, its Caddy site address and systemd unit were edited, the host was rebooted, the Edge Caddyfile lost its two Central-only vhosts and two orphaned Caddy certificate directories were archived and removed. The resulting state was then verified healthy.",
+    "product_owner_position": "The Product Owner's instruction of 2026-08-11 opening this round states that the preceding instruction was read-only and did not authorize those live changes before they occurred, that execution therefore exceeded the documented authorization, and that THIS instruction explicitly ratifies RETAINING the resulting state without pretending the earlier execution was pre-authorized.",
+    "what_the_record_shows": "Recorded for completeness, because this receipt must not manufacture history in either direction. The instruction under which T0027 executed was 'CLOSE ALL CURRENTLY IDENTIFIED RESIDUAL FINDINGS', which stated 'For the CURRENT known findings, I explicitly authorize the following remediation work', listed '1. Duplicate host identity - FINAL remediation' and '2. Stale Edge Caddy vhosts - FINAL remediation', and enumerated the permitted actions including 'assigning a unique hostname', 'safely regenerating the selected host's /etc/machine-id', 'restarting only the services/system components actually required for the identity change' and 'rebooting the affected host if that is the correct supported way to finalize the machine identity'. The READ-ONLY instruction was the one BEFORE it, whose Part A ordered a read-only artifact audit and whose Part B authorized only deployment/service-readiness verification; the duplicate host identity was DISCOVERED and REPORTED there, not remediated there. T0027 was written and merged under the later instruction.",
+    "resolution": "Both statements are preserved here rather than reconciled by editing either. Nothing in T0027 is rewritten, no prior authorization is manufactured, and no claim is made that the Product Owner authorized something they say they did not. What this receipt establishes is the operative fact going forward: the Product Owner has now explicitly RATIFIED RETAINING the resulting operational state.",
+    "ratified_state_retained": [
+      "Central hostname sc-central",
+      "Central regenerated machine-id 476149613e924ea08fe83a78592ab8b3",
+      "the current healthy rebooted Central state",
+      "the Edge/Central Caddy role separation",
+      "removal of the Central-only Edge vhosts",
+      "all other verified safe operational corrections applied in T0027"
+    ],
+    "rolled_back": "NOTHING. The Product Owner directed that none of it be reverted.",
+    "t0027_preserved": "T0027 is NOT rewritten, edited or deleted. This receipt is append-only, as T0023 and T0024 were before it."
+  },
+  "licence_renewal": {
+    "authorization": "Product-Owner Decision 2: renew/extend licence 2fed04b9-6c44-4727-97d6-e86faffddc9e for appliance SC-BEN1-JS4A-0D9C by one year, to 2027-08-08T23:59:59Z.",
+    "workflow_used": "The existing authoritative Central workflow: POST /cloud/v1/licenses/{id}/renew on ctrlapi, which the code documents as 'renew = supersede with a fresh signed doc'. The route requires the platform_admin role AND a step-up re-authentication (POST /v1/auth/reauth), both of which were satisfied with operator credentials. No parallel licensing mechanism was created and no database row was hand-edited.",
+    "before": {
+      "id": "2fed04b9-6c44-4727-97d6-e86faffddc9e",
+      "tenant_id": "cad348b7-4e43-4dc4-8ea3-40ba5b3ec866",
+      "site_id": "7acf26a7-5ad2-4c65-aef7-651107484636",
+      "status": "active",
+      "license_version": 1,
+      "max_concurrent_online_guests": 500,
+      "valid_from": "2026-07-14T17:23:27Z",
+      "valid_until": "2026-08-08T23:59:59Z",
+      "grace_period_days": 30,
+      "appliance_ids": [
+        "ef78219b-0d47-4465-9f77-3d0c702c815c"
+      ],
+      "appliance_evaluated_state": "GracePeriod"
+    },
+    "after": {
+      "id": "c03b5aa5-ee04-41c1-afce-53961484d80f",
+      "tenant_id": "cad348b7-4e43-4dc4-8ea3-40ba5b3ec866",
+      "site_id": "7acf26a7-5ad2-4c65-aef7-651107484636",
+      "status": "active",
+      "license_version": 2,
+      "max_concurrent_online_guests": 500,
+      "valid_from": "2026-08-11T18:21:34Z",
+      "valid_until": "2027-08-08T23:59:59Z",
+      "grace_period_days": 30,
+      "appliance_ids": [
+        "ef78219b-0d47-4465-9f77-3d0c702c815c"
+      ],
+      "appliance_evaluated_state": "Active",
+      "previous_license_status": "superseded",
+      "cloud_stale": false,
+      "clock_rollback": false,
+      "consumed_via": "POST /v1/license/refresh on the scd local socket (supported cloud fetch); NO service restart or reboot was required",
+      "persisted_across_scheduled_reevaluation": true
+    },
+    "identity_preserved": "Tenant, site and appliance binding unchanged. The licensing model issues a NEW signed document with a higher license_version on renewal by design - the active document is never silently mutated, and the appliance's anti-rollback rejects the older one. That is the supported behaviour, not a deviation.",
+    "unchanged_identity": "Appliance serial SC-BEN1-JS4A-0D9C, appliance_id ef78219b-0d47-4465-9f77-3d0c702c815c, signed assignment, WAN MAC 00:0c:29:d3:27:44, tenant/site assignment and enrollment identity were NOT altered."
+  },
+  "runtime_identity_wording_correction": {
+    "defect": "Authoritative surfaces claimed the runtime tree - explicitly including deploy/ and scripts/ - is byte-for-byte identical to the accepted candidate 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4. That was exactly true when the merge happened and stopped being true when T0026 and T0027 changed Caddy deployment material and operational tooling. It survived because it reads like an invariant, and invariants are the sentences nobody re-checks.",
+    "still_true": "The accepted Phase-3 APPLICATION/RUNTIME BINARIES and their functional behaviour are unchanged from 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4: data-plane/, hotel-admin/, control-plane/ and every migration path differ by ZERO files, and all six binaries on the appliance still hash-match the accepted build. No Phase-3 feature enablement, schema change, migration, IAM-v2 authority change, PMS behaviour change or financial behaviour change occurred.",
+    "changed_after_closure": [
+      "deploy/caddy/Caddyfile (deleted, T0027)",
+      "deploy/caddy/Caddyfile.edge (added, T0027; extended this round)",
+      "deploy/caddy/Caddyfile.central (added, T0027)",
+      "deploy/caddy/README.md (modified, T0027 and this round)",
+      "deploy/caddy/stayconnect-caddy.service (renamed to stayconnect-caddy.edge.service this round)",
+      "deploy/caddy/stayconnect-caddy.central.service (added this round)",
+      "scripts/phase14-tls-test.sh (modified, T0027)",
+      "scripts/ci/phase3_evidence.py (modified, T0026)"
+    ],
+    "enforcement": "tools/validate-current-state-parity.py gains rule 8f, RUNTIME-IDENTITY PARITY. When current_state_facts.post_closure_operational_changes is true, no current surface may state an UNSCOPED whole-tree byte-for-byte identity with the accepted candidate; a statement tied to the moment it described is a record and is allowed. The rule also fails if the narrow accepted-binaries fact is dropped or disagrees with the accepted runtime head, so the correction cannot be 'fixed' by deleting both claims. Three negative cases cover it (26 total)."
+  },
+  "central_caddy_reload_contract": {
+    "source_of_truth_before": "deploy/caddy/stayconnect-caddy.service was a SINGLE unit shared by both roles, carrying 'ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force' and 'Description=StayConnect edge proxy (Caddy)'. Central's live unit was hand-written and had NO repository source at all, so a redeploy from the repository would have installed the Edge unit - and its impossible ExecReload - onto Central.",
+    "interim_state_from_T0027": "T0027 changed the LIVE Central unit to 'ExecReload=/usr/bin/caddy validate ...'. That removed the failure but introduced a worse contract: systemctl reload then reports SUCCESS while the running configuration is untouched. A green result for a no-op is more dangerous than a red one for an impossible operation.",
+    "source_of_truth_after": "Two role-specific units exist in the repository. deploy/caddy/stayconnect-caddy.edge.service (renamed from the shared file) keeps a working ExecReload, because the Edge Caddyfile leaves the admin API on 127.0.0.1:2019 and reload genuinely applies configuration there. deploy/caddy/stayconnect-caddy.central.service has NO ExecReload at all, so 'systemctl reload' fails immediately with 'Job type reload is not applicable' - the truth, rather than either a quiet failure or a false success. Both units carry the reasoning in their headers, and deploy/caddy/README.md states the contract.",
+    "operator_contract": "Central: 'caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile' then 'systemctl restart stayconnect-caddy', then verify the ACTIVE configuration rather than assuming the restart applied it. Edge: validate then 'systemctl reload'."
+  },
+  "edge_unsupported_host_behaviour": {
+    "before": "After T0027 removed the two Central-only vhosts, the Edge had no route for api.stayconnect.local or admin.stayconnect.local, and Caddy's no-route default is an EMPTY HTTP 200. An uptime check reads that as 'this host serves that name and it is healthy' - misleading in a way the 502 it replaced was not.",
+    "after": "Both names are declared in deploy/caddy/Caddyfile.edge purely to be refused: a handle block responding 404 with a short explanation, security headers applied, logged to /var/log/caddy/unsupported-host.log. There is NO reverse_proxy in that block and no route to any absent Central service."
+  },
+  "scope_prohibited": "No Phase-3 reopening or re-acceptance, no feature enablement, no IAM-v2 cutover, no production authentication routed to iam_v2, no PMS financial posting, no PMS functional testing, no PS/PA, no paid access, no financial or data or schema migration, no programmatic reversal, no FX change, no network topology or WAN/LAN/VLAN/DHCP change, no appliance identity or signed-assignment change, no certificate trust-anchor redesign, no Phase-4 implementation, no unrelated cleanup. None was performed.",
+  "b2_pki_san": "Product-Owner Decision 6: the vestigial DNS:radius SAN on Central's browser certificate is deliberately NOT re-issued in this round, and no CA or trust-anchor change was made. It remains a known non-operational PKI cleanup item. Central continues to serve on its valid IP SAN and admin.stayconnect.local.",
+  "artifact_audit": "Product-Owner Decision 7: the historical CI artifact audit is complete and its evidence file, docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md, is preserved unchanged. Not repeated; no artifact deleted; no credential rotated.",
+  "evidence_files": [
+    "governance/project-state.json",
+    "deploy/caddy/Caddyfile.edge",
+    "deploy/caddy/stayconnect-caddy.central.service",
+    "deploy/caddy/stayconnect-caddy.edge.service",
+    "deploy/caddy/README.md",
+    "docs/SYSTEM_OVERVIEW.md",
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+    "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+    "docs/evidence/Phase3-Final-Live-Acceptance-Record.md",
+    "tools/validate-current-state-parity.py",
+    "tools/tests/current_state_parity/run_negative.py"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC when this receipt was written, after the licence renewal and both Caddy corrections were applied and verified live.",
+  "acceptance_verdict": "NO CHANGE to Phase-3 acceptance. Phase 3 remains ACCEPTED_AND_CLOSED at verified DARK maturity, MERGED, DARK and NOT CUT OVER. This round ratified retaining the T0027 operational state, renewed the appliance licence to 2027-08-08T23:59:59Z through the supported Central workflow, corrected the runtime-identity wording, made the Central Caddy reload contract honest in the canonical source, and stopped the Edge presenting Central-only names as healthy.",
+  "next_action": "None authorized in this stream. Phase 4 remains NOT_STARTED and unauthorized. The Central certificate SAN cleanup (B2) is recorded and deliberately deferred by Product-Owner decision."
+}

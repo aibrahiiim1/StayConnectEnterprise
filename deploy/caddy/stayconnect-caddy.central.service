@@ -1,0 +1,46 @@
+# CENTRAL CONTROL PLANE unit. Install as /etc/systemd/system/stayconnect-caddy.service on Central.
+#
+# ROLE: Central only. The Edge appliance uses deploy/caddy/stayconnect-caddy.edge.service.
+#
+# THERE IS DELIBERATELY NO ExecReload, AND THAT IS THE WHOLE POINT.
+#
+# Central runs Caddy with `admin off` (see deploy/caddy/Caddyfile.central), which disables the admin
+# API that `caddy reload` drives. Three things were tried here and two of them are wrong:
+#
+#   ExecReload=caddy reload ...      - what this unit used to say. It FAILS every time, and it fails
+#                                      quietly: the previously loaded configuration keeps serving and
+#                                      the endpoint still answers 200, so an operator who reloads and
+#                                      then curls the site concludes the change is live when it is not.
+#   ExecReload=caddy validate ...    - worse. `systemctl reload` then reports SUCCESS while the running
+#                                      configuration is untouched. A green result for a no-op is the
+#                                      most dangerous of the three.
+#   (no ExecReload)                  - what this unit does. `systemctl reload stayconnect-caddy` fails
+#                                      immediately with "Job type reload is not applicable", which is
+#                                      the truth: reload is not a supported operation on Central.
+#
+# To apply a configuration change on Central:
+#
+#   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+#   systemctl restart stayconnect-caddy
+#
+# The restart is brief and Central serves operator traffic only. Verify the ACTIVE configuration
+# afterwards (`caddy adapt` or an HTTP check) rather than assuming the restart applied it.
+
+[Unit]
+Description=StayConnect Central Caddy (TLS ingress)
+Documentation=https://caddyserver.com/docs/
+After=network-online.target stayconnect-ctrlapi.service stayconnect-cloud-admin.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=caddy
+Group=caddy
+ExecStart=/usr/bin/caddy run --config /etc/caddy/Caddyfile
+# No ExecReload: see the header. Configuration is applied with `systemctl restart`.
+Restart=on-failure
+RestartSec=3
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target
