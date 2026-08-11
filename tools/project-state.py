@@ -342,7 +342,16 @@ def cmd_validate(deep=True, manifest_equality=True):
     # apart between the final report / PR and the generated manifest).
     ach = st.get("acceptance_candidate_head")
     # the CURRENT delivery's change-manifest is phase-scoped: docs/manifests/Phase{N}-change-manifest.md
+    # The delivery manifest belongs to the phase that PRODUCED it. Deriving the path from current_phase meant
+    # that advancing to Phase 4 pointed at a Phase4 manifest that does not exist yet, so every manifest
+    # equality check silently skipped. Prefer the current phase's manifest, else fall back to the newest one
+    # that actually exists — never to "no file, no checks".
     man_path = os.path.join(ROOT, f"docs/manifests/Phase{cp}-change-manifest.md")
+    if not os.path.isfile(man_path):
+        import glob as _glob
+        cands = sorted(_glob.glob(os.path.join(ROOT, "docs/manifests/Phase*-change-manifest.md")))
+        if cands:
+            man_path = cands[-1]
     if manifest_equality and ach and os.path.isfile(man_path):
         mtext = open(man_path, encoding="utf-8").read()
         m = re.search(r"HEAD commit:\*\*\s*`([0-9a-f]{7,40})`", mtext)
@@ -402,7 +411,13 @@ def cmd_validate(deep=True, manifest_equality=True):
             fail("Phase 2 plan missing sentinel 'PHASE_2_PRODUCTION_RUNTIME: DARK'")
 
     # ---- Phase-3 governance guards (D14/T0015; DARK; no financial posting; Phase 4 gated) ----
-    if cp == "3":
+    #
+    # Gated on the PHASE-3 RECORD, not on `cp == "3"`. Keying it to the current phase meant that moving the
+    # project on to Phase 4 silently switched the whole block off, and four mutation cases that had always
+    # been caught (D14 removed, authorization repointed away from T0015, the plan's DARK/F8-F9 sentinels
+    # flipped) started surviving. Authorization provenance outlives the phase: the question "who authorized
+    # Phase 3, under which transition, and did its plan still say DARK" must stay answerable forever.
+    if cp == "3" or st["phases"].get("3", {}).get("status") != "NOT_STARTED":
         p3 = st["phases"].get("3", {}).get("status")
         p3x = st.get("phase3_execution", {}) or {}
         # AUTHORIZATION PROVENANCE OUTLIVES THE PHASE.
@@ -452,8 +467,11 @@ def cmd_validate(deep=True, manifest_equality=True):
         if re.search(r"phase\s*3[^.]{0,40}(not[_\s]started[^.]{0,20}unauthoriz|is\s+not\s+authoriz|awaiting\s+authoriz)", cur3, re.I):
             fail("stale-state contradiction: Phase 3 is authorized (D14/T0015) but a current-state field still says Phase 3 is not-started/unauthorized")
         # plan sentinels: DARK runtime + no-financial-posting + F8/F9 not claimed.
-        if plan and os.path.isfile(os.path.join(ROOT, plan)):
-            p3t = open(os.path.join(ROOT, plan), encoding="utf-8").read()
+        # Explicitly the PHASE-3 plan. `current_phase_plan` now points at Phase 4, and reading it here would
+        # silently stop checking the Phase-3 sentinels the moment the project moved on.
+        p3_plan = "docs/architecture/StayConnect-IAM-Phase3-Plan.md"
+        if os.path.isfile(os.path.join(ROOT, p3_plan)):
+            p3t = open(os.path.join(ROOT, p3_plan), encoding="utf-8").read()
             if "PHASE_3_PRODUCTION_RUNTIME: DARK" not in p3t:
                 fail("Phase 3 plan missing sentinel 'PHASE_3_PRODUCTION_RUNTIME: DARK'")
             if "PHASE_3_NO_FINANCIAL_POSTING: TRUE" not in p3t:
