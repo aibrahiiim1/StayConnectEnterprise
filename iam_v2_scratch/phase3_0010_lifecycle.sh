@@ -989,6 +989,25 @@ Q "DROP TABLE public.schema_migrations; ALTER TABLE public.schema_migrations_ok 
 # unexpected ledger owner -> refused
 Q "DROP ROLE IF EXISTS rogue_owner; CREATE ROLE rogue_owner NOLOGIN; ALTER TABLE public.schema_migrations OWNER TO rogue_owner;" >/dev/null
 o="$(RUN "${APPLY_ARGS[@]}" 2>&1 || true)"; echo "$o" | grep -q "ledger owner 'rogue_owner' not in allowlist" && ok "unexpected ledger owner refused (§3)" || no "bad ledger owner accepted"
+# A CLUSTER SUPERUSER IS AN ACCEPTABLE LEDGER OWNER whatever it is named, and that is not a loosening: the rule
+# the allowlist expresses is "the ledger is not owned by an ordinary role that could tamper with it", which
+# superuser ownership satisfies more strongly than a hard-coded name does. The site appliance is exactly this
+# case — its ledger is owned by `stayconnect`, which IS that cluster's superuser, and there is no role named
+# `postgres` at all — so a correct deployment was being refused and operators overrode the allowlist by hand.
+Q "DROP ROLE IF EXISTS rogue_super; CREATE ROLE rogue_super NOLOGIN SUPERUSER; ALTER TABLE public.schema_migrations OWNER TO rogue_super;" >/dev/null
+o="$(RUN "${APPLY_ARGS[@]}" 2>&1 || true)"
+echo "$o" | grep -q "IS a cluster superuser; accepted" && ok "superuser-owned ledger accepted on its own merits (§3)" || no "superuser-owned ledger refused"
+echo "$o" | grep -q "REFUSED: ledger owner" && no "a superuser-owned ledger was still refused" || ok "no ledger-owner refusal for a superuser owner"
+Q "ALTER TABLE public.schema_migrations OWNER TO postgres; DROP ROLE IF EXISTS rogue_super;" >/dev/null
+# --apply-role must execute the migration AS that role, so object ownership follows the schema owner rather
+# than whoever happened to connect. Discovering this by hand cost live time during Live Increment 9.
+o="$(RUN --apply-role 'not a role' "${APPLY_ARGS[@]}" 2>&1 || true)"
+echo "$o" | grep -q "is not a plain role name" && ok "--apply-role rejects a non-identifier (§3)" || no "--apply-role accepted a non-identifier"
+# and a real role is honoured: the run executes as it, so current_user inside the run is that role.
+Q "DROP ROLE IF EXISTS mig_exec; CREATE ROLE mig_exec NOLOGIN; GRANT mig_exec TO postgres; GRANT SELECT, INSERT ON public.schema_migrations TO mig_exec;" >/dev/null
+o="$(RUN --apply-role mig_exec "${APPLY_ARGS[@]}" 2>&1 || true)"
+echo "$o" | grep -qE "skip-after-lock 0010|apply 0010" && ok "--apply-role executes the run as the named role (§3)" || no "--apply-role run did not proceed: $(echo "$o" | tail -2 | tr '\n' ' ')"
+Q "DROP ROLE IF EXISTS mig_exec;" >/dev/null
 Q "ALTER TABLE public.schema_migrations OWNER TO postgres;" >/dev/null
 # missing 0009 baseline before 0010 -> refused
 Q "DELETE FROM public.schema_migrations WHERE version='0009_phase2_commerce';" >/dev/null

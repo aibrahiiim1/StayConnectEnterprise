@@ -161,9 +161,9 @@ verify_ledger_structural(){ # read-only, BEFORE lock; fail closed
     *" $owner "*) : ;;
     *)
       if [ "$owner_super" = "t" ]; then
-        echo "  ledger owner '$owner' is a cluster superuser; accepted (allowlist: $LEDGER_OWNER_ALLOWLIST)"
+        echo "  ledger owner '$owner' not in allowlist ($LEDGER_OWNER_ALLOWLIST) but IS a cluster superuser; accepted"
       else
-        echo "REFUSED: ledger owner '$owner' is neither in the allowlist ($LEDGER_OWNER_ALLOWLIST) nor a cluster superuser" >&2; exit 3
+        echo "REFUSED: ledger owner '$owner' not in allowlist ($LEDGER_OWNER_ALLOWLIST) and is not a cluster superuser" >&2; exit 3
       fi
       ;;
   esac
