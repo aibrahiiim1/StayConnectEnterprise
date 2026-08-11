@@ -1,0 +1,4 @@
+commit 46a07aa3e4ab4a6402f2ad8a58514c810f160d3c
+Date:   Tue Aug 11 16:57:25 2026 +0300
+
+    Phase 3 closure: record the merge of PR #6 into master (D17 / T0025)

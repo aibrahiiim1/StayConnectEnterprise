@@ -1,4 +1,0 @@
-commit 8a7230a7220e4c773bfb6399ce7774f31f20c906
-Date:   Tue Aug 11 16:35:58 2026 +0300
-
-    Merge PR #6: Phase 3 (Stay Resolution & Grace) â€” Product-Owner ACCEPTED_AND_CLOSED at DARK maturity (D16/T0024)
