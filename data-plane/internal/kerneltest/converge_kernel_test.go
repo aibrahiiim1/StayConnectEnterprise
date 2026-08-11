@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -324,10 +325,29 @@ func TestKernel_AnUnreadableSetAbortsWithoutTouchingTheRuleset(t *testing.T) {
 
 	e.NftPath = nftWrapper
 	after := run(t, nftWrapper, "list", "table", "inet", "stayconnect")
-	if before != after {
-		t.Fatalf("the live ruleset changed after refusing to converge:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	if stableRuleset(before) != stableRuleset(after) {
+		t.Fatalf("the live ruleset changed after refusing to converge:\n--- before ---\n%s\n--- after ---\n%s",
+			stableRuleset(before), stableRuleset(after))
 	}
 	if !reaches(t) {
 		t.Fatal("the authorized guest lost access even though the converge was refused")
 	}
 }
+
+// stableRuleset removes the parts of an nft listing that change on their own while nothing is being written:
+// a timed element's remaining `expires`, and rule counters. Everything else — sets, elements, rules, comments,
+// the fingerprint — is structure and authorization, which is exactly what must be identical after a refusal.
+//
+// Comparing raw text failed here for the right reason and the wrong cause: the guest's lease had ticked down
+// between the two reads. A test that cannot tell "the kernel counted down" from "the code changed something"
+// gets silenced rather than fixed.
+func stableRuleset(s string) string {
+	s = expiresRe.ReplaceAllString(s, "expires <ticking>")
+	s = counterRe.ReplaceAllString(s, "counter packets N bytes N")
+	return s
+}
+
+var (
+	expiresRe = regexp.MustCompile(`expires [0-9hmsd]+`)
+	counterRe = regexp.MustCompile(`counter packets \d+ bytes \d+`)
+)
