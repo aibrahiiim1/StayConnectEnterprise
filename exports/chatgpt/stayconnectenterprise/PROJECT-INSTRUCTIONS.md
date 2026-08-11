@@ -1,14 +1,14 @@
 # StayConnect Enterprise — ChatGPT Project Instructions
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0028 -->
-**Current phase:** 3 — PMS Stay Domain, STRICT Multi-PMS Resolution, Room Movement, Checkout Grace and Reinstatement
-**Current activity:** `PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER`
-**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0029 -->
+**Current phase:** 4 — Financial: settlements, postings + outbox, payments, recovery, manual review
+**Current activity:** `PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED__PHASE_4_AUTHORIZED_PLANNING`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 PLANNING · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 63 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** None for Phase 3, which is accepted, closed and merged to master. No further Phase-3 action is authorized, and any Phase-4 work, IAM-v2 cutover, Phase-3 flag enablement, financial posting or paid access requires a separate explicit Product-Owner authorization.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D17`.
+**Single next authorized action:** Execute the authorized Phase-4 implementation (decision D18, transition T0029) DARK on a single Phase-4 branch per docs/architecture/StayConnect-IAM-Phase4-Plan.md. Phase-4 feature flags remain OFF and no real financial traffic is authorized.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D18`.
 <!-- END GENERATED PROJECT STATE -->
 
 
