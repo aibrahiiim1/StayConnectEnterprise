@@ -1,0 +1,4 @@
+commit 8b8018404bf172859221236b55d1f1560962aa3c
+Date:   Tue Aug 11 20:12:49 2026 +0300
+
+    Close five residual findings: cloned host identity, Central-only Edge vhosts, artifact-audit record (T0027)

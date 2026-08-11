@@ -1,4 +1,0 @@
-commit df55a093c124df97f1e4d7af9b0f2c486dcb6dd2
-Date:   Tue Aug 11 18:31:12 2026 +0300
-
-    Merge PR #7: post-closure governance hygiene â€” merged-PR metadata and evidence-artifact staleness (T0026)
