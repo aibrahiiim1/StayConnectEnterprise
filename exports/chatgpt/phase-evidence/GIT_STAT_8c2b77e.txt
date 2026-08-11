@@ -1,0 +1,4 @@
+commit 8c2b77ec368508e8596915bed909e6369ff43188
+Date:   Tue Aug 11 03:28:11 2026 +0300
+
+    Phase 3 Increment-9 correction (inventory_head): keep the ledger-owner refusal message assertable, and gate the new acceptance path

@@ -460,8 +460,8 @@
  docs/manifests/Phase3-change-manifest.md           |  786 +++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
  .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1515 ++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 289207 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 107717 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 289199 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 107764 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42243 bytes
  .../chatgpt/phase-evidence/GIT_STAT_12b43a8.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
@@ -561,6 +561,7 @@ D  exports/chatgpt/phase-evidence/GIT_STAT_03f7a30.txt
 A  exports/chatgpt/phase-evidence/GIT_STAT_12b43a8.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/tools/validate-project-state.sh
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
@@ -574,6 +575,7 @@ M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
 M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
 M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 M  governance/project-state.json
+M  tools/validate-project-state.sh
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
