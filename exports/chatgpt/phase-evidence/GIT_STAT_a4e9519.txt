@@ -1,4 +1,0 @@
-commit a4e951972d8087f00a40d8b39eb1b87ea03144b6
-Date:   Tue Aug 11 22:16:20 2026 +0300
-
-    Merge PR #10: Edge 404 block must not declare its own log file
