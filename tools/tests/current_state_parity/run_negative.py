@@ -181,8 +181,12 @@ def _(d):
 
 @case("current_activity disagrees with the recorded facts", "activity-parity")
 def _(d):
+    # Derived, not hard-coded: this anchor broke on T0025, T0028 and T0029 in turn. A fixture that reads the
+    # value it mutates cannot drift out of step with the file.
+    cur = json.load(io.open(os.path.join(ROOT, "governance", "project-state.json"),
+                            encoding="utf-8"))["current_activity"]
     patch_state(d, lambda s: s.replace(
-        '"current_activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER",',
+        '"current_activity": "%s",' % cur,
         '"current_activity": "PHASE_3_SOMETHING_ELSE_ENTIRELY",', 1))
 
 

@@ -1,0 +1,86 @@
+{
+  "transition_id": "T0029",
+  "seq": 29,
+  "timestamp": "2026-08-11T20:06:03Z",
+  "record_type": "PHASE_4_AUTHORIZATION_AND_BASELINE_READINESS",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED__PHASE_4_AUTHORIZED_PLANNING",
+    "phase_status": "PLANNING"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "phase3_maturity_change": "NONE. Phase 3 remains ACCEPTED_AND_CLOSED at verified DARK maturity (D16/T0024) and MERGED (D17/T0025). Authorizing Phase 4 does not reopen, re-accept or alter Phase 3.",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-11, 'PRE-PHASE-4 CLEAN BASELINE + COMPLETE PHASE-4 DARK DELIVERY', which required a complete pre-Phase-4 baseline readiness pass and then explicitly authorized Phase-4 implementation, to be delivered DARK.",
+  "part_a_baseline_verdict": "READY",
+  "part_a_findings": [
+    {
+      "id": "A1",
+      "area": "current-state and documentation consistency",
+      "result": "PASS - no stale current-looking statement found. Every probed stale phrase ('Phase 1B is next', 'Phase 3 unmerged', 'PR #6 remains OPEN', 'no live PMS contact', 'Phase 4 is next') returns zero unlabelled hits outside historical evidence files. All six governance validators green: project-state PASS, parity 16/16, negative 26/26, artifact-staleness 10/10, zero-stale PASS, transition-times PASS."
+    },
+    {
+      "id": "A2",
+      "area": "repository hygiene",
+      "result": "PASS - master a4e951972d8087f00a40d8b39eb1b87ea03144b6, 0 uncommitted, 0 open PRs, no stray implementation branch, manifests and pack hashes reproduce, generated blocks agree with governance/project-state.json."
+    },
+    {
+      "id": "A3",
+      "area": "deployment vs source-of-truth parity",
+      "result": "TWO DRIFTS FOUND AND CORRECTED. The Edge systemd unit and the Central Caddyfile on the hosts lagged the repository by the documentation headers added in T0027/T0028 - live was BEHIND the source, so the running hosts were the stale side and a rebuild would already have been correct. The directive-level diff was empty in both cases (comments only). The repository versions were installed on both hosts; all four artefacts now md5-match the repository exactly. No feature behaviour changed."
+    },
+    {
+      "id": "A4",
+      "area": "operational health",
+      "result": "PASS - Edge 7 services running / 0 failed; Central 4 services and 4 containers healthy / 0 failed; Hotel Admin and Central Admin login pages 200 from the real workstation network path; static assets 200; authenticated API boundaries return 401; licence Active. No reboot was performed."
+    },
+    {
+      "id": "A5",
+      "area": "database baseline",
+      "result": "PASS - 7 migrations applied, latest 0010_phase3_stay_resolution; iam_v2 63 tables / 0 rows; zero svc_* grants on iam_v2; every financial table empty (pms_postings, posting_attempts, posting_outbox, posting_review_actions, payment_transactions, settlements, purchases and financial_epoch all 0); no PMS interface, interface revision or P# sequence row pre-seeded; legacy public-schema IAM remains the sole production authority."
+    },
+    {
+      "id": "A6",
+      "area": "security and secrets readiness",
+      "result": "PASS - secret-generation and key-hierarchy tables present from Phase 1A/1B; operator RBAC and password step-up proven working in this round by the licence renewal, which required and passed POST /v1/auth/reauth; no healthy credential was rotated."
+    },
+    {
+      "id": "A7",
+      "area": "backup and rollback readiness",
+      "result": "PASS - automated backup and rollback artifact retention in place on both hosts; binary rollback tooling with the pre-nftconverge compatibility boundary; per-host configuration rollback copies retained from this and prior rounds; migration 0010 has a proven down path."
+    },
+    {
+      "id": "A8",
+      "area": "Phase-4 prerequisite matrix",
+      "result": "PRODUCED - docs/architecture/Phase4-Readiness-Matrix.md. Rows R1-R14 and P1-P9 PASS. P10, the posting execution runtime, is the Phase-4 build itself. B1-B5 are external or business items and none of them blocks building Phase 4 DARK."
+    }
+  ],
+  "measured_implementation_gap": "All seven Phase-4 financial tables - pms_postings, posting_attempts, posting_attempt_events, posting_outbox, posting_review_actions, pms_interface_pnumber_seq and payment_transactions - have ZERO Go references anywhere in data-plane/. The FIAS wire layer, the commerce layer, the stay/folio domain and the DARK pmsd service host all exist; the financial EXECUTION RUNTIME does not. Phase 4 is therefore a greenfield runtime build on an existing, verified, empty schema, decomposed into workstreams WS-A through WS-L in docs/architecture/StayConnect-IAM-Phase4-Plan.md.",
+  "traceability_checklist": "38 contract requirements (C1-C38) are mapped in the Phase-4 Plan to workstream owner, database enforcement, automated test, operator surface and status. C25 (programmatic reversal) is NOT_APPLICABLE by contract - capability=false in v1. C38 (real-financial acceptance, Contract 9c Tier-3 3C) is BLOCKED_BY_PRODUCT_OWNER_DECISION because real financial traffic is prohibited in this round. The remaining 36 rows are NOT_IMPLEMENTED at authorization time and constitute the delivery scope.",
+  "scope_allowed": "Phase-4 implementation DARK: migration 0011, posting engine, P# allocator, fail-closed gates, per-interface outbox lanes, PS/PA state machine, UNKNOWN handling, Manual Review, payment and settlement execution, restore/FINANCIAL_RECOVERY_MODE, observability, operator UI, the full test matrix, and controlled LIVE-DARK deployment with all flags OFF and no financial egress.",
+  "scope_prohibited": "No real PMS PS transaction, no real guest folio debit, no real PA acceptance test caused by StayConnect, no PMS financial onboarding for Hotel ID 2, no real payment-provider CHARGE or REFUND, no real paid guest access, no programmatic reversal, no IAM-v2 cutover, no production authentication routed to iam_v2, no Phase-3 or Phase-4 guest-facing flag enablement, no data migration from legacy IAM, no legacy IAM deletion, no WAN/LAN/VLAN/DHCP or topology change, no certificate trust-anchor redesign, no Phase 5/6/7 work.",
+  "live_actions_performed_this_round": [
+    "Installed the repository Edge systemd unit on 172.21.60.23 (comment-only delta; systemctl daemon-reload; no Caddy restart required; hotel-admin verified HTTP 200 afterwards).",
+    "Installed the repository Central Caddyfile on 150.0.0.252 (comment-only delta; caddy validate then systemctl restart, because Central has no reload contract by design; central /login verified HTTP 200 afterwards).",
+    "Read-only inspection of both hosts, the site database and the licence state. No financial action, no PMS traffic, no migration, no reboot."
+  ],
+  "rollback": {
+    "edge_unit": "/root/stayconnect-caddy.service.pre-parity-<timestamp> on 172.21.60.23",
+    "central_caddyfile": "/root/Caddyfile.central.pre-parity-<timestamp> on 150.0.0.252",
+    "repository": "git revert of this branch's merge commit"
+  },
+  "evidence_files": [
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "docs/architecture/Phase4-Readiness-Matrix.md",
+    "governance/decision-register.json",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the Part-A baseline pass completed.",
+  "acceptance_verdict": "Part A COMPLETE - baseline READY, with two comment-only deployment drifts found and corrected. Phase 4 is AUTHORIZED and PLANNED under D18. Phase-4 implementation is NOT delivered by this receipt: the execution runtime is greenfield and its delivery is the next execution work.",
+  "next_action": "Execute the Phase-4 implementation workstreams WS-A through WS-L on a single Phase-4 branch, per docs/architecture/StayConnect-IAM-Phase4-Plan.md."
+}

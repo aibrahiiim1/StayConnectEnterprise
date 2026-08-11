@@ -16,6 +16,12 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")
 # The latest transition id changes every governance round, and M08 anchors on it. Hard-coding it meant the
 # suite broke -- in CI, after the work was already done -- on T0024, T0025, T0026 and T0027 in turn. Read it
 # instead: a fixture that tracks the file it mutates cannot drift out of step with it.
+_STATE_DOC = json.load(_io.open(
+    os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))
+CUR_ACTIVITY = _STATE_DOC["current_activity"]
+CUR_PHASE = _STATE_DOC["current_phase"]
+# First 60 chars are enough to anchor uniquely without pinning the whole sentence.
+CUR_NEXT_ACTION_PREFIX = _STATE_DOC["next_authorized_action"][:60]
 CUR_TRANSITION = json.load(_io.open(
     os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))["latest_transition_id"]
 
@@ -52,16 +58,16 @@ MUTATIONS = [
  ("M02 Phase 1A pending/planning", "governance/project-state.json",
    ("replace", [('"1A": { "status": "ACCEPTED_AND_CLOSED"', '"1A": { "status": "PLANNING"')])),
  ("M03 two current phases", "governance/project-state.json",
-   ("replace", [('"4":  { "status": "NOT_STARTED"', '"4":  { "status": "IN_PROGRESS"')])),
+   ("replace", [('"5":  { "status": "NOT_STARTED"', '"5":  { "status": "IN_PROGRESS"')])),
  ("M04 two next authorized actions", "governance/project-state.json",
-   ("replace", [('"next_authorized_action": "None for Phase 3, which is accepted, closed and merged to master',
-                 '"next_authorized_action": "Also start Phase 4 now. Obtain a Product-Owner decision on the Increment-9 durability correction. None for Phase 3, which is accepted, closed and merged to master')])),
+   ("replace", [(f'"next_authorized_action": "{CUR_NEXT_ACTION_PREFIX}',
+                 f'"next_authorized_action": "Also start Phase 9 now. Obtain a Product-Owner decision on the Increment-9 durability correction. {CUR_NEXT_ACTION_PREFIX}')])),
  ("M05 Phase 1B production iam_v2 grant", "docs/architecture/Phase1B-Privilege-Matrix.md",
    ("replace", [("PRODUCTION_IAM_V2_DML: NONE", "PRODUCTION_IAM_V2_DML: GRANTED")])),
  ("M06 Phase 1B rolled-back production write allowed", "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
    ("replace", [("rolled-back", "committed")])),
  ("M07 modified generated block", "docs/context/StayConnect-IAM-Handoff.md",
-   ("replace", [("**Current phase:** 3", "**Current phase:** 9Z")])),
+   ("replace", [(f"**Current phase:** {CUR_PHASE}", "**Current phase:** 9Z")])),
  ("M08 stale source commit / snapshot mismatch", "governance/project-state.json",
    ("replace", [(f'"latest_transition_id": "{CUR_TRANSITION}"', '"latest_transition_id": "T0008"')])),
  ("M09 missing acceptance record", "governance/project-state.json",
@@ -109,7 +115,7 @@ MUTATIONS = [
    ("append", "\n\n- `svc_scd` iam_v2 grants prepared for cutover: USAGE + SELECT/INSERT/UPDATE.\n")),
  # --- live-dark / acceptance stale-state contradictions (must be caught by project-state.py) ---
  ("M29 current_activity disagrees with the latest transition new_state.activity", "governance/project-state.json",
-   ("replace", [('"current_activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER"',
+   ("replace", [(f'"current_activity": "{CUR_ACTIVITY}"',
                  '"current_activity": "PHASE_2_ACCEPTED_AND_CLOSED"')])),
  ("M30 gate_p cutover done but blocker says superuser", "governance/project-state.json",
    ("replace", [("No governance blocker. Phase 3 is ACCEPTED and CLOSED",

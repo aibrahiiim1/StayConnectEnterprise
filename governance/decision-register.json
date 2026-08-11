@@ -89,6 +89,22 @@
         "tools/",
         "exports/"
       ]
+    },
+    {
+      "id": "D18",
+      "title": "PHASE 4 IMPLEMENTATION AUTHORIZED (2026-08-11), to be delivered DARK. The Product Owner authorized the financial execution layer -- PMS Posting Engine and financial execution foundations -- derived from the FINAL Phase-0 Contract (SS4.5, 9, 9a, 9c Tier-3 3C, 10, 11, 12, 13, 14, 15) and the verified Gate 3A production evidence, against baseline master a4e951972d8087f00a40d8b39eb1b87ea03144b6 with accepted Phase-3 runtime 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4. Target maturity: IMPLEMENTED + VERIFIED AT DARK / NO-FINANCIAL-TRAFFIC. All Phase-4 feature flags remain OFF, no production service may be routed to financial execution because the tables and code exist, and no financial outbox worker may emit external traffic. EXPLICITLY NOT AUTHORIZED: any real PMS PS transaction, any real guest folio debit, any real PA acceptance test caused by StayConnect, PMS financial onboarding for Hotel ID 2, any real payment-provider CHARGE or REFUND, real paid guest access, programmatic reversal, IAM-v2 cutover, routing production authentication to iam_v2, enabling Phase-3 or Phase-4 guest-facing flags, data migration from legacy IAM, legacy IAM deletion, WAN/LAN/VLAN/DHCP or topology change, certificate trust-anchor redesign, or Phase 5/6/7 work. Real-financial acceptance (Contract 9c Tier-3 3C) is deliberately excluded and remains PENDING EXPLICIT PRODUCT-OWNER LIVE-FINANCIAL AUTHORIZATION. Phase 3 is NOT reopened by this decision and its acceptance maturity is unchanged: ACCEPTED_AND_CLOSED at verified DARK maturity (D16/T0024), MERGED (D17/T0025).",
+      "status": "ACTIVE",
+      "effective": "2026-08-11",
+      "supersedes": [],
+      "authoritative_document": "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+      "affected": [
+        "data-plane/",
+        "hotel-admin/",
+        "governance/",
+        "docs/",
+        "deploy/",
+        "scripts/"
+      ]
     }
   ]
 }
