@@ -301,30 +301,59 @@ def main() -> int:
             "playwright": totals["playwright"].get("skipped", 0) if totals["playwright"] else 0,
         },
         "infrastructure_retries": infra_list,
-        "restrictions_confirmed": [
+        # THIS RUN's restrictions, and they are scoped to this run on purpose.
+        #
+        # The list used to read as a project-wide claim and included "Migration 0010 undeployed" and "no
+        # appliance access". Both stopped being true on 2026-08-10, when Live Increment 9 deliberately applied
+        # 0010 to the site database and deployed to the appliance under Product-Owner authorization — and the
+        # evidence artifact, which is the most authoritative surface a reviewer opens, went on asserting them.
+        # What a CI run can honestly certify is what the CI run itself did.
+        "run_restrictions_confirmed": [
+            "this run contacted no appliance",
+            "this run contacted no Production database",
+            "this run contacted no live PMS",
+            "this run deployed nothing and rebooted nothing",
+            "this run enabled no Phase-3 flag",
+            "every database used by this run was a disposable container",
+            "every nft/tc operation in this run was inside a disposable network namespace",
+            "the host ruleset was proven unchanged by the kernel gate",
+        ],
+        # PROJECT-LEVEL standing restrictions: still true, and each one is a thing this delivery must not do.
+        "standing_restrictions_confirmed": [
             "all Phase-3 flags OFF",
             "PR open and unmerged",
-            "Migration 0010 undeployed",
             "zero persistent runtime iam_v2 privileges",
-            "no appliance access",
-            "no Production DB access",
-            "no live PMS contact",
-            "no deployment or reboot",
             "no Gate-P grants",
             "no PS/PA",
             "no financial posting",
             "no paid access",
             "no implicit FX",
             "no programmatic reversal",
+            "no IAM-v2 cutover",
             "no Phase 4",
         ],
-        "live_increment9_pending": [
-            "read-only live PMS protocol verification against the live interface",
-            "controlled live-dark deployment of this exact HEAD",
-            "one full reboot with post-reboot convergence evidence",
-            "rollback rehearsal (migration down + previous release restored)",
-            "flags-OFF confirmation on the running unit (zero Phase-3 SQL, no PMS socket)",
-        ],
+        # Live Increment 9 has been EXECUTED. Recording it as "pending" would be the exact staleness this
+        # project treats as a delivery defect, so the artifact carries the verdicts instead of a wish list.
+        "live_increment9": {
+            "executed_on": "2026-08-10",
+            "executed_against_head": "83449200a8aca7018fac5b38a96b3a1aafc66ba2",
+            "appliance": "172.21.60.23",
+            "item_1_read_only_pms": "PASS",
+            "item_2_live_dark_deployment": "BLOCKED/PARTIAL - migration 0010 applied cleanly and the nft foundation installed surgically with byte-identical legacy parity, but it did not survive the next netd start",
+            "item_3_reboot": "FAIL for the required post-reboot persistence - phase3_auth_ipv4 absent, table structurally identical to the pre-install baseline",
+            "item_4_rollback_rehearsal": "PASS functionally, with a confirmed false-PASS defect in the binary-rollback tooling (corrected; see scripts/binary-rollback.sh)",
+            "item_5_flags_off": "PASS",
+            "legacy_live_session_continuity": "NOT PROVEN - zero legacy guests were online during the window; no guest or session state was fabricated",
+            "migration_0010_state": "APPLIED to the production site database with 0 rows; reversible, and its down/up round-trip was rehearsed live",
+            "corrected_software_deployed": False,
+            "remaining_live_work": [
+                "deploy the corrected HEAD",
+                "prove phase3_auth_ipv4 is present and empty while DARK",
+                "prove a netd restart issues NO nft mutation and preserves the structure",
+                "prove reboot reconstruction, then repeat once for idempotence",
+                "re-run the binary rollback rehearsal with scripts/binary-rollback.sh",
+            ],
+        },
     }
 
     with open(os.path.join(art, "RUN_META.json"), "w", encoding="utf-8", newline="\n") as f:
@@ -457,15 +486,20 @@ test logs are deliberately excluded — they can carry test-fixture names and ro
 and this artifact must contain no such data; the full logs remain in the workflow's own
 job log.
 
-It contains NO live evidence. No appliance, Production database or live PMS was contacted.
-See `RUN_META.json` → `live_increment9_pending` for exactly what still requires a separate,
-Product-Owner-authorized live run.
+This run contains NO live evidence: it contacted no appliance, no Production database and no
+live PMS, and every database and network namespace it used was disposable.
+
+That is a statement about THIS RUN, not about the project. Live Increment 9 was executed on
+2026-08-10 under a separate Product-Owner authorization: it applied migration 0010 to the
+production site database and deployed to the appliance, and it returned one blocker. See
+`RUN_META.json` → `live_increment9` for each item's verdict as observed, and for the subset
+of live work that remains.
 
 ## Files
 
 - `RUN_META.json` — HEADs, run id, UTC window, tool versions, lock/migration hashes, every
   step's exit code and duration, per-suite test totals and skip totals, infrastructure
-  retries, restrictions confirmed, and the live-Increment-9 pending list.
+  retries, this run's restrictions, the standing restrictions, and the Live Increment-9 verdicts.
 - `ACCEPTANCE_MATRIX.md` — one row per gate, derived from the recorded results.
 - `steps.tsv` — the raw step ledger (slug, exit code, seconds).
 - `counts/` — the per-suite machine counts, as emitted by each test runner's own reporter.
