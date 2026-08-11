@@ -1,0 +1,4 @@
+commit ea8867395c276c96ded1c40e2a48e70cbe422b3f
+Date:   Tue Aug 11 17:05:08 2026 +0300
+
+    Phase 3 (delivery_head): regenerate the manifest from the STAGED tree, correcting a generation-order defect

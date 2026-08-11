@@ -38,6 +38,58 @@ if [ -z "$activity" ]; then
 fi
 note "repository current_activity: $activity"
 
+# ---- A MERGED PR MUST NOT STILL ADVERTISE THAT IT IS UNMERGED --------------------------------------------
+#
+# Everything below this block looks for an OPEN PR and, finding none, passes: "there is no PR metadata that
+# could be stale". That was true only while an unmerged PR was the only PR worth checking. After PR #6 was
+# merged its page still carried MERGE_DECISION_PENDING in the title and "PR #6 remains OPEN and UNMERGED" in
+# the body, and this script passed every time — because the merge is precisely what removed the PR from the
+# query it was looking at. The PR page is the first thing a reviewer opens and the last thing anyone
+# remembers to update, so the merged PR is now checked BY NUMBER, from the recorded facts.
+merged_pr="$($PY3 -c "
+import json,sys
+try: f=json.load(open(sys.argv[1],encoding='utf-8')).get('current_state_facts') or {}
+except Exception: f={}
+print(f.get('merged_pr') or f.get('pr_number') or '' if f.get('merged') else '')
+" "$STATE" 2>/dev/null)"
+
+if [ -n "$merged_pr" ]; then
+  if [ -z "${GITHUB_TOKEN:-}" ]; then
+    note "PR #$merged_pr is recorded as merged; no GITHUB_TOKEN here, so its page could not be read (CI always can)"
+  else
+    MPR="$(mktemp)"
+    curl -sS -H "Authorization: Bearer $GITHUB_TOKEN"       "https://api.github.com/repos/$REPO/pulls/$merged_pr" 2>/dev/null       | $PY3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d={}
+sys.stdout.write(((d.get('title') or '') + chr(10) + (d.get('body') or '')))
+" > "$MPR" 2>/dev/null
+    if [ ! -s "$MPR" ]; then
+      bad "PR #$merged_pr is recorded as merged but its metadata could not be read; an unreadable surface is not a passing one"
+    else
+      # Same labelling contract as every other zero-stale check: a line that admits to being history is history.
+      mstale() { grep -inE "$1" "$MPR" | grep -viE "historical|superseded|no longer|was then|at the time|until the merge|before the merge"; }
+      if mstale "merge_decision_pending" >/dev/null; then
+        bad "merged PR #$merged_pr still presents MERGE_DECISION_PENDING as its current state"
+      else
+        note "merged PR #$merged_pr does not present MERGE_DECISION_PENDING as current"
+      fi
+      if mstale "(remains |is )?open and unmerged|do not merge|not authorized to merge|merge is a separate product-owner decision" >/dev/null; then
+        bad "merged PR #$merged_pr still says it is open/unmerged or must not be merged"
+      else
+        note "merged PR #$merged_pr does not claim to be open or unmerged"
+      fi
+      # The positive half: the page must actually record the merge, or it is merely silent about it.
+      if grep -qiE "merged" "$MPR"; then
+        note "merged PR #$merged_pr records the merge on its own page"
+      else
+        bad "merged PR #$merged_pr never states that it was merged; its page is silent on the fact that matters most"
+      fi
+    fi
+    rm -f "$MPR"
+  fi
+fi
+
 # ---- find the PR body, in this run, without guessing -----------------------------------------------------
 body=""
 if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
@@ -64,7 +116,13 @@ fi
 
 if [ -z "$body" ]; then
   note "no open PR body reachable for this ref; there is no PR metadata that could be stale"
-  printf 'PR_METADATA_ZERO_STALE = PASS (no PR)\n'; exit 0
+  # ...but "no OPEN PR" says nothing about the merged-PR checks above, and this exit used to report PASS
+  # unconditionally. A merged PR advertising MERGE_DECISION_PENDING therefore printed two FAIL lines and a
+  # green verdict. An early exit must still honour what has already failed.
+  if [ "$fail" -eq 0 ]; then
+    printf 'PR_METADATA_ZERO_STALE = PASS (no open PR)\n'; exit 0
+  fi
+  printf 'PR_METADATA_ZERO_STALE = FAIL (%d)\n' "$fail"; exit 1
 fi
 
 # The body is written to a FILE and every check greps the file.

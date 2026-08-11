@@ -26,8 +26,6 @@ VALIDATOR = os.path.join("tools", "validate-current-state-parity.py")
 COPY = [
     "tools/validate-current-state-parity.py",
     "governance/project-state.json",
-    "governance/transitions/T0024.json",
-    "governance/transitions/T0025.json",
     "governance/decision-register.json",
     "docs/evidence/Phase3-Final-Live-Acceptance-Record.md",
     "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
@@ -35,6 +33,15 @@ COPY = [
     "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
     "docs/context/StayConnect-IAM-Handoff.md",
 ]
+
+
+# Every transition receipt, not a hand-listed subset: a new receipt must not silently drop out of the
+# sandbox the evidence-reference rule reads.
+COPY += sorted(
+    "governance/transitions/" + n
+    for n in os.listdir(os.path.join(ROOT, "governance", "transitions"))
+    if n.endswith(".json")
+)
 
 
 def sandbox():

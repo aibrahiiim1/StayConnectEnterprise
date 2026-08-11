@@ -270,7 +270,7 @@
     "surgical_foundation_retired_from_procedure": true,
     "next_step": "None for Phase 3: it is accepted, closed and merged to master. Phase 4 and every enablement action require a separate explicit Product-Owner authorization."
   },
-  "latest_transition_id": "T0025",
+  "latest_transition_id": "T0026",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
