@@ -57,6 +57,18 @@ jobs:
       - name: Zero-stale keyword validation
         run: bash tools/validate-project-state.sh
 
+      - name: Current-state semantic parity (every current surface vs the recorded facts)
+        # Keyword checks stop at vocabulary. This one compares MEANING: current_maturity said an authorization
+        # was still awaited while current_activity said that authorization had been executed, and iam_v2 was
+        # recorded as both 49 and 63 in the same file. Neither sentence contains a forbidden word; they are
+        # only wrong about each other.
+        run: python tools/validate-current-state-parity.py
+
+      - name: Current-state parity — negative tests (the validator must catch what shipped before)
+        # A validator that has only ever seen a passing repository is indistinguishable from one that returns
+        # PASS unconditionally. Each case reintroduces a contradiction that actually shipped green.
+        run: python tools/tests/current_state_parity/run_negative.py
+
       - name: Working tree must remain clean
         run: |
           status="$(git status --porcelain --untracked-files=all)"

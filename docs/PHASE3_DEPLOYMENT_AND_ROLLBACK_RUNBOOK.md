@@ -218,7 +218,7 @@ curl -s --unix-socket /run/stayconnect/netd.sock http://netd/v1/health |   pytho
 ```bash
 # 7. the Phase-3 authorization set exists and authorizes NOBODY
 nft list set inet stayconnect phase3_auth_ipv4
-#    expect the set to be present (after §2.5) with NO elements. An empty set matches nothing, so the forward
+#    expect the set to be present (netd renders it; see §2 step 5) with NO elements. An empty set matches nothing, so the forward
 #    rule that reads it cannot match and the captive exclusion cannot exclude.
 
 # 8. legacy authorization is exactly as it was
@@ -324,14 +324,19 @@ psql -c "SELECT count(*) FROM public.schema_migrations WHERE version='0010_phase
 
 ## 6. What is deliberately NOT in this runbook
 
-- **Turning the flags on.** Cutover is a separate, explicitly authorized step with its own gate. It is a flag
-  flip *only after* §2.5 has been performed and verified on this unit; before that, the ruleset does not yet
-  contain the set and rules the flags would depend on.
+- **Turning the flags on.** Cutover is a separate, explicitly authorized step with its own gate. The ruleset
+  the flags depend on is produced by `netd`'s own render (ADR-0003), so it is present as soon as the corrected
+  software is deployed and `netd` has started — there is no manual installation step to perform first. Confirm
+  it with §2 step 5 before treating cutover as a flag flip.
 - **Per-service `iam_v2` privilege grants (Gate-P).** While dark, every runtime service role holds **zero**
   `iam_v2` table and function privileges, and the gate asserts it. The prepared grants live in
   `docs/architecture/Phase3-Controlled-Writer-Privilege-Manifest.md` and are **not applied**.
-- **Live PMS verification.** Read-only protocol verification against a real interface is operator-executed
-  and its evidence is recorded separately. Nothing in this repository may claim it happened.
+- **Further live PMS traffic.** Read-only protocol verification against the approved live interface is
+  operator-executed under explicit authorization. It **has been performed**: on 2026-08-10, against Hotel ID 3
+  (`150.0.0.18:5003`), 149 frames were parsed with zero parse errors across two byte-identical runs, using the
+  reviewed read-only builders behind an outbound allowlist. That result is recorded truthfully in the Phase-3
+  report §6b and in `governance/project-state.json`. What remains outside this runbook is any *further* PMS
+  contact, and any write of any kind — no `PS`, no `PA`, no posting, no folio change, ever, from here.
 
 ---
 

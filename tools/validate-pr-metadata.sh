@@ -118,6 +118,64 @@ case "$activity" in
     ;;
 esac
 
+# ---- the PR must not contradict the recorded current state -------------------------------------------------
+#
+# The PR body is one document, and a reader scrolls it. It shipped with an accurate Increment-9 verdict table at
+# the top and, a hundred lines lower, a "Restrictions still in force" block calling migration 0010 undeployed
+# and a heading reading "Live Increment-9 evidence - PENDING". Both halves were once true. Only the top still
+# was, and nothing compared them.
+#
+# These checks are semantic rather than lexical: each is derived from current_state_facts, and each excuses a
+# hit whose own line admits to being history.
+FACTS="$($PY3 -c "
+import json,sys
+try: d=json.load(open(sys.argv[1],encoding='utf-8')).get('current_state_facts') or {}
+except Exception: d={}
+keys=('live_increment9_executed','migration_0010_applied_production','guest_portal_uniform_budget_ms','surgical_foundation_retired_from_procedure')
+print(json.dumps({k:d.get(k) for k in keys}))
+" "$STATE" 2>/dev/null)"
+
+fact_true() { printf '%s' "$FACTS" | grep -q "\"$1\": true"; }
+stale_lines() { grep -inE "$1" "$BODYFILE" | grep -viE "historical|superseded|no longer|was then|already (happened|occurred)|have (occurred|already)|as at|executed"; }
+
+if fact_true live_increment9_executed; then
+  if stale_lines "live[- ]increment-?9 evidence[^a-z]{0,4}pending|increment-?9 evidence: pending" >/dev/null; then
+    bad "the PR body still presents Live Increment-9 evidence as PENDING; it was executed on 2026-08-10"
+  else
+    note "the PR body does not present Increment-9 evidence as pending"
+  fi
+  if stale_lines "no appliance (access|contact)|no live[- ]?pms contact|no production (db|database) (access|contact)" >/dev/null; then
+    bad "the PR body denies appliance/Production-DB/live-PMS contact that has already occurred"
+  else
+    note "the PR body does not deny live contact that has already occurred"
+  fi
+fi
+
+if fact_true migration_0010_applied_production; then
+  if stale_lines "migration 0010[^.]{0,30}undeployed|0010[^.]{0,20}undeployed" >/dev/null; then
+    bad "the PR body calls migration 0010 undeployed; it is applied on the site database"
+  else
+    note "the PR body does not call migration 0010 undeployed"
+  fi
+fi
+
+budget="$(printf '%s' "$FACTS" | $PY3 -c "import json,sys;print(json.load(sys.stdin).get('guest_portal_uniform_budget_ms') or '')" 2>/dev/null)"
+if [ -n "$budget" ] && [ "$budget" != "1200" ]; then
+  if stale_lines "1200 ?ms" >/dev/null; then
+    bad "the PR body presents 1200ms as a current Guest-Portal budget; the recorded budget is ${budget}ms"
+  else
+    note "the PR body carries no unlabelled superseded Guest-Portal budget"
+  fi
+fi
+
+if fact_true surgical_foundation_retired_from_procedure; then
+  if grep -inE "phase3-foundation (install|rollback)" "$BODYFILE" | grep -viE "retired|diagnostic|do not run|historical|superseded" >/dev/null; then
+    bad "the PR body still presents the retired surgical foundation install/rollback as a procedure step"
+  else
+    note "the PR body does not require the retired surgical-foundation step"
+  fi
+fi
+
 if [ "$fail" -eq 0 ]; then
   printf 'PR_METADATA_ZERO_STALE = PASS\n'; exit 0
 fi

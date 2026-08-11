@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0022",
+  "seq": 22,
+  "timestamp": "2026-08-11T08:49:22Z",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_INCREMENT9_DURABILITY_CORRECTION_CANDIDATE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_INCREMENT9_DURABILITY_CORRECTION_CANDIDATE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "3",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-11, 'PHASE 3 -- FINAL ZERO-STALE TRUTH SYNC BEFORE LIVE RE-VALIDATION', issued against reviewed HEAD 436d2cc8a3e440c3e3bcfc4bfccb047345c903a7. It ACCEPTS the network-lifecycle software correction as technically verified, forbids any change to runtime code, database migrations, networking implementation, frontend behaviour or tests except where a governance validator itself must be tightened, and forbids any live action. It directs a governance/documentation truth-sync of every current-state surface to the executed Increment-9 facts, plus focused negative tests so the enumerated contradictions cannot pass a green gate again. The activity is unchanged because the stage is unchanged: this is a truth-sync within the same Increment-9 correction candidate.",
+  "scope_allowed": "Governance, documentation and governance-validator changes only. (1) governance/project-state.json gains a machine-readable current_state_facts block and its current_maturity, phases.3.maturity and phase3_execution.stage narrative are corrected so no current-sounding text still claims that PRE-LIVE authorization is awaited, that iam_v2 is 49/0, that migration 0010 is undeployed, that no appliance/Production-DB/live-PMS contact has occurred, that no live evidence exists, or that Increment 9 remains wholly pending; era-specific 49/0 statements in phases.1B.maturity and completed_milestones are labelled historical rather than rewritten. (2) The PR #6 body's stale 'Restrictions still in force' and 'Live Increment-9 evidence -- PENDING' sections are replaced with the current state, a superseded 1200ms budget mention is labelled historical, and the marker-truthfulness row names the foundation tool as retired-from-procedure, so the top and bottom of the PR describe the same state. (3) The Phase-3 Plan AS-BUILT status no longer reads PRE-LIVE SAFETY CANDIDATE -- LIVE INCREMENT-9 AUTHORIZATION REQUESTED, and the surgical foundation is preserved only as labelled implementation history rather than as the required live-dark deployment mechanism. (4) The deployment runbook's statement that nothing in this repository may claim live PMS verification happened is replaced with the truthful record of the authorized read-only verification, and the remaining cutover precondition that referenced the retired manual install is corrected. (5) New governance validators: tools/validate-current-state-parity.py (semantic parity of every current surface against current_state_facts, with paragraph-level historical labelling honoured) and tools/tests/current_state_parity/run_negative.py (12 negative cases, each asserting the right rule fires), plus semantic PR-body parity checks in tools/validate-pr-metadata.sh; all three wired into the Project Governance workflow.",
+  "scope_prohibited": "No runtime code, migration, networking-implementation, frontend or test change of any kind: the runtime implementation is byte-for-byte identical to 436d2cc8a3e440c3e3bcfc4bfccb047345c903a7. No appliance action, no Production-database action, no live PMS contact, no deployment, no reboot, no rollback execution, no Phase-3 flag enablement, no Gate-P, no PS or PA, no financial posting, no IAM-v2 cutover, no Phase 4. PR #6 remains open and unmerged. The blocked Live Increment-9 re-validation subset is NOT performed in this round.",
+  "evidence_files": [
+    "governance/project-state.json",
+    "tools/validate-current-state-parity.py",
+    "tools/tests/current_state_parity/run_negative.py",
+    "tools/validate-pr-metadata.sh",
+    ".github/workflows/project-governance.yml",
+    "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+    "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC at the moment this receipt was written, immediately before the inventory_head commit that introduces it. tools/validate-transition-times.sh checks that it is not later than that commit.",
+  "source_commit": "436d2cc8a3e440c3e3bcfc4bfccb047345c903a7",
+  "acceptance_verdict": "IN_PROGRESS -- Phase 3 remains DARK, NOT accepted and NOT closed. Every current-state surface now agrees with the executed Increment-9 facts, and the contradictions that previously survived a green gate are covered by negative tests. The corrected software is still NOT deployed.",
+  "next_action": "Product-Owner authorization to re-run ONLY the blocked Live Increment-9 subset against the corrected candidate."
+}
