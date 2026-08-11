@@ -1,4 +1,0 @@
-commit 8e4a45bd723de2e3abded89b6c4d442058701d0a
-Date:   Tue Aug 11 12:00:00 2026 +0300
-
-    Phase 3 (inventory_head): re-anchor the M32 mutation to the corrected current_maturity wording

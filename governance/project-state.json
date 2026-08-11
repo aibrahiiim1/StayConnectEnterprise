@@ -216,7 +216,8 @@
     "reboot_occurred": true,
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
-    "deployed_head_on_appliance": "PLACEHOLDER_FINAL_HEAD",
+    "deployed_head_on_appliance": "11411b9f44dda65250e9f1ac89f1c8946c7e95ed",
+    "deployed_head_note": "The appliance runs binaries built from this inventory_head. The delivery_head commit that follows it changes only documentation, packs and the manifest, so the runtime artifacts are identical.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -243,8 +244,8 @@
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "8e4a45bd723de2e3abded89b6c4d442058701d0a",
+  "acceptance_candidate_head": "11411b9f44dda65250e9f1ac89f1c8946c7e95ed",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "8e4a45bd723de2e3abded89b6c4d442058701d0a",
+  "inventory_head": "11411b9f44dda65250e9f1ac89f1c8946c7e95ed",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }
