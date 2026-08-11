@@ -69,6 +69,15 @@ jobs:
         # PASS unconditionally. Each case reintroduces a contradiction that actually shipped green.
         run: python tools/tests/current_state_parity/run_negative.py
 
+      - name: Evidence-artifact staleness (a post-closure artifact must not describe finished work as pending)
+        # The software artifact is the most authoritative file a reviewer opens, and it kept emitting the
+        # 2026-08-10 Increment-9 snapshot — corrected_software_deployed=false and a five-item remaining-work
+        # list — into artifacts generated after that work was finished, accepted and merged. This runs the real
+        # generator and asserts that history is labelled history and current state comes from the recorded
+        # facts, in BOTH directions: patched facts that say work remains must still produce an artifact that
+        # says so, or "nothing remains" would just be hard-coded.
+        run: python tools/tests/evidence_artifact/run_artifact_staleness.py
+
       - name: Working tree must remain clean
         run: |
           status="$(git status --porcelain --untracked-files=all)"

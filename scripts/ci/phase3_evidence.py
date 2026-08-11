@@ -269,6 +269,72 @@ def main() -> int:
     infra_retries = read_text(os.path.join(evid, "infra-retries.tsv")).strip()
     infra_list = [ln for ln in infra_retries.splitlines() if ln.strip()]
 
+    # ---- current project state, read from the repository rather than restated ---------------------------
+    #
+    # governance/project-state.json -> current_state_facts is the single machine-readable record of where the
+    # project actually is. Reading it here is what stops this generator from becoming another surface that has
+    # to be remembered and updated by hand after every decision.
+    facts = (read_json(os.path.join(root, "governance", "project-state.json"), {}) or {}).get(
+        "current_state_facts") or {}
+
+    increment9_historical = {
+        "executed_on": "2026-08-10",
+        "executed_against_head": "83449200a8aca7018fac5b38a96b3a1aafc66ba2",
+        "appliance": "172.21.60.23",
+        "item_1_read_only_pms": "PASS",
+        "item_2_live_dark_deployment": "BLOCKED/PARTIAL - migration 0010 applied cleanly and the nft foundation installed surgically with byte-identical legacy parity, but it did not survive the next netd start",
+        "item_3_reboot": "FAIL for the required post-reboot persistence - phase3_auth_ipv4 absent, table structurally identical to the pre-install baseline",
+        "item_4_rollback_rehearsal": "PASS functionally, with a confirmed false-PASS defect in the binary-rollback tooling (corrected; see scripts/binary-rollback.sh)",
+        "item_5_flags_off": "PASS",
+        "legacy_live_session_continuity": "NOT PROVEN - zero legacy guests were online during the window; no guest or session state was fabricated",
+        "migration_0010_state": "APPLIED to the production site database with 0 rows; reversible, and its down/up round-trip was rehearsed live",
+        "corrected_software_deployed_as_at_2026_08_10": False,
+        "remaining_live_work_as_at_2026_08_10": [
+            "deploy the corrected HEAD",
+            "prove phase3_auth_ipv4 is present and empty while DARK",
+            "prove a netd restart issues NO nft mutation and preserves the structure",
+            "prove reboot reconstruction, then repeat once for idempotence",
+            "re-run the binary rollback rehearsal with scripts/binary-rollback.sh",
+        ],
+    }
+
+    if facts.get("live_increment9_revalidated"):
+        increment9_superseded_note = (
+            "SUPERSEDED. The blocked subset above was re-validated live on %s and every item PASSED. The "
+            "verdicts are kept as observed; the fields ending _as_at_2026_08_10 describe that date only and "
+            "are NOT the current state. See project_state_at_generation."
+            % facts.get("live_increment9_revalidated_on", "2026-08-11"))
+    else:
+        increment9_superseded_note = (
+            "NOT YET SUPERSEDED as at generation: the recorded facts do not show a completed re-validation.")
+
+    # Work still outstanding is DERIVED. A closed, accepted phase has none, and saying so with an empty list is
+    # what makes "nothing remains" checkable instead of merely absent.
+    if facts.get("accepted") and facts.get("closed"):
+        remaining_live_work = []
+    elif facts.get("live_increment9_revalidated"):
+        remaining_live_work = []
+    else:
+        remaining_live_work = list(increment9_historical["remaining_live_work_as_at_2026_08_10"])
+
+    project_state_block = {
+        "read_from": "governance/project-state.json -> current_state_facts",
+        "phase": facts.get("phase"),
+        "phase_status": facts.get("phase_status"),
+        "accepted": facts.get("accepted"),
+        "closed": facts.get("closed"),
+        "accepted_at_maturity": facts.get("accepted_at_maturity"),
+        "accepted_runtime_head": facts.get("accepted_runtime_head"),
+        "merged": facts.get("merged"),
+        "merge_commit": facts.get("merge_commit"),
+        "cut_over": facts.get("cut_over"),
+        "dark": facts.get("dark"),
+        "corrected_software_deployed": facts.get("corrected_software_deployed"),
+        "live_increment9_revalidated": facts.get("live_increment9_revalidated"),
+        "legacy_live_session_continuity": facts.get("legacy_live_session_continuity"),
+        "remaining_live_work": remaining_live_work,
+    }
+
     run_meta = {
         "artifact_kind": "phase3-software-gate-evidence",
         "note": "Phase 3 software gate ONLY. Contains no live-appliance, Production-DB or live-PMS evidence.",
@@ -331,28 +397,29 @@ def main() -> int:
             "no IAM-v2 cutover",
             "no Phase 4",
         ],
-        # Live Increment 9 has been EXECUTED. Recording it as "pending" would be the exact staleness this
-        # project treats as a delivery defect, so the artifact carries the verdicts instead of a wish list.
-        "live_increment9": {
-            "executed_on": "2026-08-10",
-            "executed_against_head": "83449200a8aca7018fac5b38a96b3a1aafc66ba2",
-            "appliance": "172.21.60.23",
-            "item_1_read_only_pms": "PASS",
-            "item_2_live_dark_deployment": "BLOCKED/PARTIAL - migration 0010 applied cleanly and the nft foundation installed surgically with byte-identical legacy parity, but it did not survive the next netd start",
-            "item_3_reboot": "FAIL for the required post-reboot persistence - phase3_auth_ipv4 absent, table structurally identical to the pre-install baseline",
-            "item_4_rollback_rehearsal": "PASS functionally, with a confirmed false-PASS defect in the binary-rollback tooling (corrected; see scripts/binary-rollback.sh)",
-            "item_5_flags_off": "PASS",
-            "legacy_live_session_continuity": "NOT PROVEN - zero legacy guests were online during the window; no guest or session state was fabricated",
-            "migration_0010_state": "APPLIED to the production site database with 0 rows; reversible, and its down/up round-trip was rehearsed live",
-            "corrected_software_deployed": False,
-            "remaining_live_work": [
-                "deploy the corrected HEAD",
-                "prove phase3_auth_ipv4 is present and empty while DARK",
-                "prove a netd restart issues NO nft mutation and preserves the structure",
-                "prove reboot reconstruction, then repeat once for idempotence",
-                "re-run the binary rollback rehearsal with scripts/binary-rollback.sh",
-            ],
-        },
+        # LIVE INCREMENT 9, AS OBSERVED ON 2026-08-10 — A HISTORICAL RECORD, NOT CURRENT STATE.
+        #
+        # The verdicts below are preserved exactly as observed, including the two that failed. That is the
+        # project's evidence model and it does not change. What DID change is everything around them: the
+        # blocked subset was re-validated live on 2026-08-11 with every item PASS, Phase 3 was accepted and
+        # closed, and PR #6 was merged. This block used to carry `corrected_software_deployed: false` and a
+        # five-item `remaining_live_work` list, and it went on emitting them into every new artifact — so an
+        # artifact generated after closure described finished work as outstanding, in the most authoritative
+        # file a reviewer opens.
+        #
+        # The fix is not to delete the history. It is to label it, and to derive the CURRENT state from
+        # governance/project-state.json -> current_state_facts rather than restating it in a literal here.
+        # A fact recorded in one place can be diffed; a fact copied into a generator drifts silently.
+        "live_increment9_historical": dict(
+            increment9_historical,
+            _record_type="HISTORICAL",
+            _as_observed_on="2026-08-10",
+            _superseded_note=increment9_superseded_note,
+        ),
+        # CURRENT project state at the moment this artifact was generated, read from the repository's
+        # machine-readable facts. `remaining_live_work` is [] once the phase is closed — an empty list is the
+        # honest answer, and it is computed rather than asserted.
+        "project_state_at_generation": project_state_block,
     }
 
     with open(os.path.join(art, "RUN_META.json"), "w", encoding="utf-8", newline="\n") as f:
@@ -368,6 +435,78 @@ def main() -> int:
             shutil.copyfile(src, os.path.join(art, name))
     for name in os.listdir(counts_dir) if os.path.isdir(counts_dir) else []:
         shutil.copyfile(os.path.join(counts_dir, name), os.path.join(art, "counts", name))
+
+    # ---- strip the raw repository diff Playwright embeds in its JSON report ------------------------------
+    #
+    # On a pull_request event Playwright's git-info capture writes `config.metadata.gitDiff` — the PR's ENTIRE
+    # diff, truncated at 100,000 characters — into playwright.json, and that file is copied into the artifact
+    # verbatim. So the artifact has been shipping up to 100 KB of raw repository content while its own README
+    # promises "derived summaries only". It went unnoticed because the diff is truncated in path order: every
+    # earlier PR's 100 KB was used up long before it reached anything the hygiene gate objects to. A small PR
+    # is what finally let the whole diff through, and the gate refused it — correctly, and for the second-order
+    # reason rather than the first.
+    #
+    # Provenance is kept: the commit hash, subject and CI links stay. What is dropped is the unbounded blob,
+    # which is not evidence about this gate and cannot be bounded by review.
+    # Dropping `gitDiff` by name is a blocklist, and a blocklist is the wrong shape here: the reporter decides
+    # what it puts in `metadata`, a version bump can add another unbounded field, and the artifact would carry
+    # it until something happened to notice. So `metadata` is reduced to an ALLOWLIST of the provenance this
+    # artifact actually needs — which run, which commit — and everything else goes, named or not.
+    PW_METADATA_KEEP = {
+        "ci": ("commitHref", "commitHash", "prHref", "prBaseHash", "buildHref"),
+        "gitCommit": ("shortHash", "hash", "subject"),
+        "actualWorkers": None,   # a scalar; kept whole
+    }
+    pw_path = os.path.join(art, "counts", "playwright.json")
+    if os.path.isfile(pw_path):
+        try:
+            with io.open(pw_path, encoding="utf-8") as f:
+                pw = json.load(f)
+            def allowlist(meta):
+                kept, dropped = {}, []
+                for key, value in meta.items():
+                    if key not in PW_METADATA_KEEP:
+                        dropped.append(key)
+                        continue
+                    fields = PW_METADATA_KEEP[key]
+                    if fields is None or not isinstance(value, dict):
+                        kept[key] = value
+                    else:
+                        kept[key] = {k: v for k, v in value.items() if k in fields}
+                        extra = [k for k in value if k not in fields]
+                        if extra:
+                            dropped.append("%s.{%s}" % (key, ",".join(sorted(extra))))
+                return kept, dropped
+
+            # Playwright does not store `metadata` once. It stores it on the config AND copies it onto every
+            # configured project, so the same 100 KB diff appears twice in a one-project run and N+1 times
+            # otherwise. Sanitising only `config.metadata` looked like it worked -- the log even reported the
+            # dropped bytes -- while `config.projects[0].metadata.gitDiff` sat untouched a few lines below.
+            # Every metadata dict in the document is filtered, not the one that was easiest to find.
+            cfg = pw.get("config") or {}
+            targets = []
+            if isinstance(cfg.get("metadata"), dict):
+                targets.append(("config.metadata", cfg, "metadata"))
+            for i, proj in enumerate(cfg.get("projects") or []):
+                if isinstance(proj, dict) and isinstance(proj.get("metadata"), dict):
+                    targets.append(("config.projects[%d].metadata" % i, proj, "metadata"))
+
+            all_dropped = []
+            for label, holder, key in targets:
+                kept, dropped = allowlist(holder[key])
+                holder[key] = kept
+                all_dropped.extend("%s -> %s" % (label, d) for d in dropped)
+            if targets:
+                with io.open(pw_path, "w", encoding="utf-8", newline="\n") as f:
+                    json.dump(pw, f, indent=2)
+                    f.write("\n")
+            if all_dropped:
+                print("counts/playwright.json: kept only allowlisted metadata in %d location(s); dropped %s"
+                      % (len(targets), ", ".join(sorted(all_dropped))))
+        except Exception as exc:  # noqa: BLE001
+            # A report we cannot parse is a report we cannot certify as clean. Fail rather than ship it.
+            sys.stderr.write("could not sanitise counts/playwright.json: %s\n" % exc)
+            return 2
 
     # The complete dimensional acceptance matrix, as its own artifact file.
     if accept_matrix_md:
@@ -471,6 +610,22 @@ def main() -> int:
     with open(os.path.join(art, "ACCEPTANCE_MATRIX.md"), "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(m) + "\n")
 
+    # The one sentence in this README that speaks about the PROJECT rather than the run. It said "the subset
+    # of live work that remains" in every artifact ever generated, including the ones generated after that
+    # work was finished, accepted and merged. It is now derived from the same facts the metadata is.
+    if project_state_block.get("remaining_live_work"):
+        project_state_sentence = (
+            "CURRENT project state, read from `governance/project-state.json` at generation time and recorded "
+            "in `RUN_META.json` → `project_state_at_generation`: %d item(s) of live work remain."
+            % len(project_state_block["remaining_live_work"]))
+    else:
+        closed = project_state_block.get("accepted") and project_state_block.get("closed")
+        project_state_sentence = (
+            "CURRENT project state, read from `governance/project-state.json` at generation time and recorded "
+            "in `RUN_META.json` → `project_state_at_generation`: %s NO live work remains outstanding. "
+            "Nothing in the historical block above describes work that is still to be done."
+            % ("Phase 3 is ACCEPTED and CLOSED, and" if closed else "the blocked subset was re-validated, and"))
+
     # ---- the human README --------------------------------------------------------
     readme = f"""# Phase 3 software-gate evidence
 
@@ -490,15 +645,18 @@ live PMS, and every database and network namespace it used was disposable.
 
 That is a statement about THIS RUN, not about the project. Live Increment 9 was executed on
 2026-08-10 under a separate Product-Owner authorization: it applied migration 0010 to the
-production site database and deployed to the appliance, and it returned one blocker. See
-`RUN_META.json` → `live_increment9` for each item's verdict as observed, and for the subset
-of live work that remains.
+production site database and deployed to the appliance, and it returned one blocker. Those
+verdicts are preserved exactly as observed in `RUN_META.json` → `live_increment9_historical`,
+which describes 2026-08-10 and no later date.
+
+{project_state_sentence}
 
 ## Files
 
 - `RUN_META.json` — HEADs, run id, UTC window, tool versions, lock/migration hashes, every
   step's exit code and duration, per-suite test totals and skip totals, infrastructure
-  retries, this run's restrictions, the standing restrictions, and the Live Increment-9 verdicts.
+  retries, this run's restrictions, the standing restrictions, the CURRENT project state read from
+  `governance/project-state.json`, and the HISTORICAL Live Increment-9 verdicts as observed on 2026-08-10.
 - `ACCEPTANCE_MATRIX.md` — one row per gate, derived from the recorded results.
 - `steps.tsv` — the raw step ledger (slug, exit code, seconds).
 - `counts/` — the per-suite machine counts, as emitted by each test runner's own reporter.
@@ -532,8 +690,17 @@ manifest is checked against, and it is recorded in the final report.
             fp = os.path.join(dirpath, fn)
             text = read_text(fp)
             for pat in forbidden:
-                if pat.search(text):
-                    offenders.append(f"{os.path.relpath(fp, art)} :: {pat.pattern}")
+                m = pat.search(text)
+                if not m:
+                    continue
+                # Name the offending TEXT, not just the file. "counts/playwright.json :: Phase-?1A" says a
+                # 700 KB machine-generated report contains something, somewhere — which is a fact, not a lead.
+                # The surrounding characters are what turn it into one, and the pattern that fired here is
+                # about document names rather than secrets, so a short window is safe to print.
+                lo, hi = max(0, m.start() - 60), min(len(text), m.end() + 60)
+                window = " ".join(text[lo:hi].split())
+                offenders.append("%s :: %s\n      ...%s..."
+                                 % (os.path.relpath(fp, art), pat.pattern, window))
     if offenders:
         sys.stderr.write("EVIDENCE HYGIENE FAILED — forbidden content in the artifact:\n")
         sys.stderr.write("\n".join("  " + o for o in offenders) + "\n")

@@ -1,0 +1,47 @@
+{
+  "transition_id": "T0026",
+  "seq": 26,
+  "timestamp": "2026-08-11T14:27:58Z",
+  "record_type": "POST_CLOSURE_HYGIENE",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "state_change": "NONE. Phase 3 is FINAL for this repository lifecycle. This receipt records presentation hygiene only and creates no decision, no maturity change and no re-acceptance.",
+  "phase_affected": "3",
+  "decision": null,
+  "decision_note": "Deliberately NO new decision. D16 remains the acceptance decision and D17/T0025 remains the merge decision. The Product Owner's instruction was explicit that this pass must not create another Phase-3 decision that changes acceptance maturity, so the decision register is untouched.",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-11, 'FINAL POST-CLOSURE GOVERNANCE HYGIENE -- DO NOT REOPEN PHASE 3', authorizing a governance-only correction of two residual stale presentation issues identified independently after closure, on a governance-only branch and PR.",
+  "defects_corrected": [
+    {
+      "defect": "PR #6 was merged and closed, but its GitHub page still advertised the pre-merge state: the title carried MERGE_DECISION_PENDING, the body opened with 'merging this PR is a separate Product-Owner decision that has not been given. Do not merge until it is', and a later section read 'PR #6 remains OPEN and UNMERGED ... the only next authorized action'.",
+      "why_it_survived": "tools/validate-pr-metadata.sh looked for an OPEN pull request and, finding none, printed 'no open PR body reachable ... PASS'. Merging is exactly what removed the PR from the query the validator was using, so the act that made the metadata stale is the act that stopped it being checked.",
+      "correction": "The PR title and body now record MERGED_AND_CLOSED, decision D17 / transition T0025, merge commit 8a7230a7220e4c773bfb6399ce7774f31f20c906, the post-merge gate run ids and the deleted branch. The PR body is not committed repository content, so it was updated through the API.",
+      "coverage": "validate-pr-metadata.sh now reads current_state_facts.merged and, when true, fetches the MERGED PR BY NUMBER and fails if its title or body still presents MERGE_DECISION_PENDING or open/unmerged status, or never states that it was merged. Its early 'no open PR' exit also no longer reports PASS while failures are already recorded -- that exit previously printed two FAIL lines and a green verdict in the same run."
+    },
+    {
+      "defect": "scripts/ci/phase3_evidence.py carried the Live Increment-9 verdicts as a literal, including corrected_software_deployed=false and a five-item remaining_live_work list, and the artifact README told readers to see 'the subset of live work that remains'. Those were true on 2026-08-10. They were still being emitted after the blocked subset was re-validated, after Phase 3 was accepted and closed and after PR #6 was merged, so the artifact generated on final master described finished work as outstanding.",
+      "correction": "The verdicts are PRESERVED, unchanged, under live_increment9_historical with _record_type HISTORICAL, _as_observed_on 2026-08-10 and a note recording that the blocked subset was superseded by the re-validation; the two date-bound fields are renamed to carry their own date (corrected_software_deployed_as_at_2026_08_10, remaining_live_work_as_at_2026_08_10). CURRENT state is now read from governance/project-state.json -> current_state_facts into project_state_at_generation, whose remaining_live_work is DERIVED and is [] for a closed phase. The README sentence is generated from the same block instead of being a fixed string.",
+      "coverage": "tools/tests/evidence_artifact/run_artifact_staleness.py runs the real generator in a disposable workspace and asserts the contract in both directions: history labelled and date-qualified, current state equal to the recorded facts, an empty remaining_live_work for a closed phase, a README that states it -- and a negative case with patched facts saying work DOES remain, which must produce an artifact that says so. Without that last case a generator hard-coding 'nothing remains' would pass. Verified against the pre-fix generator: 5 failures, 1 pass. Wired into the Project Governance workflow."
+    }
+  ],
+  "scope_allowed": "Governance, CI-evidence and validator changes only, on a governance-only branch and pull request, plus the GitHub PR-page metadata for the already-merged PR #6.",
+  "scope_prohibited": "NO reopening of Phase 3, NO repeat of acceptance, NO new decision affecting acceptance maturity, NO runtime implementation change (data-plane/, hotel-admin/, control-plane/, runtime deploy/, migrations, runtime-affecting scripts), NO appliance action, NO Production database action, NO PMS contact, NO feature enablement, NO cutover, NO financial activity and NO Phase-4 work. None was performed.",
+  "runtime_diff_vs_accepted_head": "ZERO against 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4 across data-plane/, hotel-admin/, control-plane/, deploy/, migrations and every runtime-affecting script. The only scripts/ change is scripts/ci/phase3_evidence.py, which runs solely inside CI and never on an appliance.",
+  "evidence_files": [
+    "governance/project-state.json",
+    "scripts/ci/phase3_evidence.py",
+    "tools/validate-pr-metadata.sh",
+    "tools/tests/evidence_artifact/run_artifact_staleness.py",
+    ".github/workflows/project-governance.yml"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC at the moment this receipt was written.",
+  "acceptance_verdict": "NO CHANGE. Phase 3 remains ACCEPTED_AND_CLOSED at verified DARK maturity (D16/T0024) and MERGED to master (D17/T0025). This receipt records post-closure presentation hygiene and nothing else.",
+  "next_action": "None for Phase 3, which is accepted, closed and merged to master. No further Phase-3 action is authorized."
+}

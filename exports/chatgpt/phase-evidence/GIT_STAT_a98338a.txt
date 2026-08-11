@@ -1,4 +1,0 @@
-commit a98338a6cb033f19a0de6461b2aa69e508c1dc1f
-Date:   Tue Aug 11 17:02:52 2026 +0300
-
-    Phase 3 (delivery_head): post-merge manifest + rebuilt packs + pointer + report-embedded manifest
