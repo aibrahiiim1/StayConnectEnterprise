@@ -1,0 +1,4 @@
+commit 0eddcecca2ff91498949de7125ed5ea8287fd8a5
+Date:   Tue Aug 11 20:22:32 2026 +0300
+
+    Stop the mutation fixture drifting on every governance round
