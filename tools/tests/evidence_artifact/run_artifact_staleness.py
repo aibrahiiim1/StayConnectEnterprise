@@ -183,13 +183,21 @@ def main():
     # larger PRs used up the 100 KB long before reaching anything the PII gate objects to.
     print("\n== the artifact must not ship the raw repository diff Playwright embeds ==")
     leak = "diff --git a/fixture.md b/fixture.md\n" + ("+leaked line\n" * 50)
+    meta_fixture = {"gitDiff": leak,
+                    "somethingNewAndUnbounded": leak,
+                    "gitCommit": {"hash": "0" * 40, "subject": "provenance must survive", "body": leak},
+                    "ci": {"buildHref": "https://example.invalid/run/1"}}
     _, _, pw = generate(playwright_counts={
-        "config": {"metadata": {"gitDiff": leak,
-                                "somethingNewAndUnbounded": leak,
-                                "gitCommit": {"hash": "0" * 40, "subject": "provenance must survive",
-                                              "body": leak},
-                                "ci": {"buildHref": "https://example.invalid/run/1"}}},
+        # Playwright hangs `metadata` on the config AND copies it onto every project. A fixture that models
+        # only the first passes against a generator that sanitises only the first — which is exactly what
+        # happened: the log reported the dropped bytes while config.projects[0].metadata.gitDiff sat untouched.
+        "config": {"metadata": dict(meta_fixture),
+                   "projects": [{"name": "chromium", "metadata": dict(meta_fixture)}]},
         "stats": {"expected": 1, "unexpected": 0}})
+    if pw is not None and "diff --git" in json.dumps(pw):
+        bad("a copy of the repository diff survives somewhere in counts/playwright.json")
+    elif pw is not None:
+        ok("no copy of the repository diff survives anywhere in counts/playwright.json")
     if pw is None:
         bad("the generator did not copy counts/playwright.json into the artifact at all")
     elif "gitDiff" in ((pw.get("config") or {}).get("metadata") or {}):

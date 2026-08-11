@@ -462,8 +462,7 @@ def main() -> int:
         try:
             with io.open(pw_path, encoding="utf-8") as f:
                 pw = json.load(f)
-            meta = (pw.get("config") or {}).get("metadata")
-            if isinstance(meta, dict):
+            def allowlist(meta):
                 kept, dropped = {}, []
                 for key, value in meta.items():
                     if key not in PW_METADATA_KEEP:
@@ -477,13 +476,33 @@ def main() -> int:
                         extra = [k for k in value if k not in fields]
                         if extra:
                             dropped.append("%s.{%s}" % (key, ",".join(sorted(extra))))
-                pw["config"]["metadata"] = kept
+                return kept, dropped
+
+            # Playwright does not store `metadata` once. It stores it on the config AND copies it onto every
+            # configured project, so the same 100 KB diff appears twice in a one-project run and N+1 times
+            # otherwise. Sanitising only `config.metadata` looked like it worked -- the log even reported the
+            # dropped bytes -- while `config.projects[0].metadata.gitDiff` sat untouched a few lines below.
+            # Every metadata dict in the document is filtered, not the one that was easiest to find.
+            cfg = pw.get("config") or {}
+            targets = []
+            if isinstance(cfg.get("metadata"), dict):
+                targets.append(("config.metadata", cfg, "metadata"))
+            for i, proj in enumerate(cfg.get("projects") or []):
+                if isinstance(proj, dict) and isinstance(proj.get("metadata"), dict):
+                    targets.append(("config.projects[%d].metadata" % i, proj, "metadata"))
+
+            all_dropped = []
+            for label, holder, key in targets:
+                kept, dropped = allowlist(holder[key])
+                holder[key] = kept
+                all_dropped.extend("%s -> %s" % (label, d) for d in dropped)
+            if targets:
                 with io.open(pw_path, "w", encoding="utf-8", newline="\n") as f:
                     json.dump(pw, f, indent=2)
                     f.write("\n")
-                if dropped:
-                    print("counts/playwright.json: kept only allowlisted metadata; dropped %s"
-                          % ", ".join(sorted(dropped)))
+            if all_dropped:
+                print("counts/playwright.json: kept only allowlisted metadata in %d location(s); dropped %s"
+                      % (len(targets), ", ".join(sorted(all_dropped))))
         except Exception as exc:  # noqa: BLE001
             # A report we cannot parse is a report we cannot certify as clean. Fail rather than ship it.
             sys.stderr.write("could not sanitise counts/playwright.json: %s\n" % exc)
