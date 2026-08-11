@@ -1,0 +1,4 @@
+commit db856cc4f22378b63b1abade365f030fa77c0548
+Date:   Wed Aug 12 00:04:29 2026 +0300
+
+    Correct the Phase-4 current-state contradiction, and repair two silently-broken validator regexes

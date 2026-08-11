@@ -183,13 +183,13 @@
     "No governance blocker. Phase 3 is ACCEPTED and CLOSED at verified DARK maturity (decision D16, transition T0024) and MERGED to master (decision D17, transition T0025, merge commit 8a7230a7220e4c773bfb6399ce7774f31f20c906). Phases 0, 1A, 1B, 2 and 3 are all closed. Phase 4 is AUTHORIZED and in PLANNING (D18/T0029), to be delivered DARK; no IAM-v2 cutover, Phase-3 flag enablement, PMS financial posting, paid access or Gate-P runtime grant is authorized. The one open item is a recorded ACCEPTED LIMITATION rather than a blocker -- legacy live-session continuity is NOT PROVEN because no real legacy guest was online during the authorized live windows; it may be observed opportunistically and does not by itself reopen Phase 3."
   ],
   "allowed_actions": [
-    "Execute the authorized Phase 3 (PMS Stay Domain, STRICT resolution, Room Move, Checkout Grace, Reinstatement) end-to-end as one Phase, DARK, per docs/architecture/StayConnect-IAM-Phase3-Plan.md (additive migrations after 0009, dedicated read-only PMS connector, Stay/Event/Folio engine, STRICT resolver, PMS Auth Context, Commerce integration in test mode, Room Move, Checkout Grace + emergency fallback, Reinstatement, Guest Portal + Hotel Admin UI, automated tests)",
+    "Execute the authorized Phase 4 (Financial Execution Layer: PMS Posting Engine, per-interface outbox lanes, UNKNOWN handling, Manual Review, payment/settlement foundations, restore Financial-Recovery) end-to-end as one Phase, DARK at NO-FINANCIAL-TRAFFIC maturity, per docs/architecture/StayConnect-IAM-Phase4-Plan.md under D18/T0029. Phase 3 is closed; its historical scope was (PMS Stay Domain, STRICT resolution, Room Move, Checkout Grace, Reinstatement) per docs/architecture/StayConnect-IAM-Phase3-Plan.md (additive migrations after 0009, dedicated read-only PMS connector, Stay/Event/Folio engine, STRICT resolver, PMS Auth Context, Commerce integration in test mode, Room Move, Checkout Grace + emergency fallback, Reinstatement, Guest Portal + Hotel Admin UI, automated tests)",
     "Live READ-ONLY PMS protocol verification against already-configured Interfaces, with persistence to an isolated disposable test DB only (never Production iam_v2); no financial posting, no PS transaction",
     "Controlled live-dark deployment of Phase-3 artifacts to the development appliance: additive iam_v2 migration application, systemd unit changes, deploying changed binaries/UI, controlled service restarts, and one final reboot, with post-reboot read-only verification -- all Phase-3 flags remaining OFF",
-    "Governance and documentation maintenance for Phase 3"
+    "Governance and documentation maintenance for Phase 3 (closed) and Phase 4 (current)"
   ],
   "prohibited_actions": [
-    "Implementing any Phase beyond the authorized Phase 3 scope (Phase 4 or any later Phase)",
+    "Implementing any Phase beyond the authorized Phase 4 scope (Phase 5, 6 or 7)",
     "Any PMS financial posting, FIAS PS transaction, Posting Engine, posting outbox/worker, charge retry, financial UNKNOWN handling, or any executable PS sender / dormant financial worker / hidden Posting path",
     "Payments/Stripe/refunds/programmatic reversal/settlement execution; guest paid access",
     "IAM-v2 production authentication cutover; production iam_v2 runtime reads/writes; granting any iam_v2 DML privilege to a runtime service role; DSN/search_path routing to iam_v2",
@@ -198,12 +198,19 @@
     "Writing any Production Stay/Guest/Folio/Event/Auth-Context row to Production iam_v2 while dark (live PMS test persistence targets a disposable test DB only)"
   ],
   "next_authorized_action": "Execute the authorized Phase-4 implementation (decision D18, transition T0029) DARK on a single Phase-4 branch per docs/architecture/StayConnect-IAM-Phase4-Plan.md. Phase-4 feature flags remain OFF and no real financial traffic is authorized.",
-  "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+  "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D18",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
-    "phase": "3",
+    "phase": "4",
+    "phase3_status": "ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase4_status": "AUTHORIZED_PLANNING_NOT_IMPLEMENTED",
+    "phase4_decision": "D18",
+    "phase4_transition": "T0029",
+    "phase4_target_maturity": "DARK_NO_FINANCIAL_TRAFFIC",
+    "phase4_flags_off": true,
+    "phases_5_to_7_authorized": false,
     "phase_status": "ACCEPTED_AND_CLOSED",
     "dark": true,
     "accepted": true,
@@ -274,7 +281,7 @@
     "guest_portal_upstream_reserve_ms": 200,
     "nft_deployment_architecture": "nftconverge",
     "surgical_foundation_retired_from_procedure": true,
-    "next_step": "None for Phase 3: it is accepted, closed and merged to master. Phase 4 and every enablement action require a separate explicit Product-Owner authorization."
+    "next_step": "Implement the authorized Phase 4 Financial Execution Layer DARK per docs/architecture/StayConnect-IAM-Phase4-Plan.md (D18/T0029). Phase 3 is closed and merged. Phase-4 feature flags stay OFF, no real financial traffic is authorized, and every guest-facing enablement still requires a separate explicit Product-Owner authorization."
   },
   "latest_transition_id": "T0029",
   "phase3_delivery_evidence": {
