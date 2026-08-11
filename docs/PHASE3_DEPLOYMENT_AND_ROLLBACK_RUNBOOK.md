@@ -129,6 +129,29 @@ to be turned on.
 
 4. **Restart the services** in the usual order and confirm they came up.
 
+4a. **Install the DARK `pmsd` service.** Shipping the binary is not deploying the daemon — Live Increment 9
+   found `/opt/stayconnect/bin/pmsd` present with no unit, which is a daemon that exists as a file and is
+   absent as a service.
+
+   ```bash
+   sudo bash scripts/install-pmsd-dark.sh
+   ```
+
+   It creates the dedicated `stayconnect-pmsd` system account (the unit is **never** weakened to run as root),
+   installs `/etc/stayconnect/pmsd.env` from the reviewed `deploy/env/pmsd.env.dark` — which deliberately sets
+   **no** Phase-3 flag, so every flag resolves OFF — installs and enables the reviewed unit, and then verifies
+   the dark contract it just installed.
+
+   **DARK does not mean "stopped".** The unit is installed and enabled; on start it discovers every flag it
+   owns is OFF, opens no PMS socket, touches no database, logs `connector and ingest flags OFF` and exits 0.
+   `Restart=on-failure` (not `always`) means a clean exit stays a clean exit, so it cannot restart-loop.
+   Expect `active=inactive`, `result=success`, `ExecMainStatus=0`, `NRestarts` at 0 or 1, and no `pmsd`
+   process or socket. Re-verify at any time with:
+
+   ```bash
+   bash scripts/install-pmsd-dark.sh --verify-only
+   ```
+
 5. **Confirm netd converged the ruleset by itself — there is no foundation step to run any more.**
 
    `netd` reconciles the live ruleset against a **fresh render of the running binary** on every start
@@ -274,8 +297,34 @@ If anything in §3 differs after the reboot, stop and roll back.
 Rollback is two independent steps, and they can be done separately. In most cases **restoring the previous
 release is enough**: the schema is additive and inert while dark, so leaving it in place is harmless.
 
-**5a. Restore the previous release** (binaries + Hotel-Admin bundle) using the standard rollback path, then
+**5a. Restore the previous release** (binaries + Hotel-Admin bundle) using `scripts/binary-rollback.sh`, then
 re-run §3.
+
+> **THE PRE-`nftconverge` COMPATIBILITY BOUNDARY — read this before rolling back.**
+>
+> It is **not** true that every previous release carries live authorization across the transition. A `netd`
+> built before ADR-0003 does not reconcile: it re-asserts the stored bundle, and that bundle begins with
+> `delete table inet stayconnect`. Starting one therefore recreates the authorization sets **EMPTY**, and every
+> guest currently online loses access in the same instant.
+>
+> Whether that matters depends entirely on who is authorized at that moment, so the tool reads the live set and
+> decides:
+>
+> | rollback target | live `auth_ipv4` | result |
+> | --- | --- | --- |
+> | convergence-capable (carries the render marker) | anything | proceeds — authorization is carried across |
+> | predates convergence | **empty** | proceeds — there is nothing to lose |
+> | predates convergence | **populated** | **REFUSED.** Nothing is replaced, nothing is restarted |
+> | predates convergence | unreadable | **REFUSED.** "Cannot prove empty" is not "is empty" |
+>
+> There is deliberately **no `--force`**. Deauthorizing a whole property is a separate, deliberate decision, so
+> the refusal names the operator action instead of offering a way past itself:
+> roll back to a convergence-capable release instead; or schedule a window, let the sessions end, confirm
+> `nft list set inet stayconnect auth_ipv4` is empty and re-run; or deauthorize deliberately and visibly first.
+>
+> The Increment-9 rehearsal ran in the empty-set case, which is why it was safe. The populated case is proven in
+> the disposable real-kernel suite (`internal/kerneltest/rollback_boundary_kernel_test.go`) with real packets —
+> it is never rehearsed against a live property.
 
 **5a-bis. There is no separate nft rollback step, and that is deliberate.**
 

@@ -113,7 +113,7 @@ def main():
         bad("activity-parity",
             "current_activity is %r but current_state_facts.current_activity is %r" % (activity, facts.get("current_activity")),
             STATE)
-    if "INCREMENT9" in activity.upper() and facts.get("live_increment9_executed"):
+    if facts.get("live_increment9_executed"):
         awaiting = re.compile(
             r"await(?:s|ing)?[^.]{0,120}(?:authoriz|decision)[^.]{0,60}(?:live )?increment[- ]?9|"
             r"increment[- ]?9 authorization requested|"

@@ -84,6 +84,7 @@ printf '%s' "$body" > "$BODYFILE"
 # would have turned the check off rather than making it fail, and the PR body could then say anything. An
 # activity this script does not know about is now a FAILURE that names itself.
 case "$activity" in
+  *DARK_ACCEPTANCE_CANDIDATE*) want="DARK ACCEPTANCE CANDIDATE"; superseded="INCREMENT-9 DURABILITY CORRECTION CANDIDATE";;
   *INCREMENT9_DURABILITY_CORRECTION*) want="INCREMENT-9 DURABILITY CORRECTION CANDIDATE"; superseded="PRE-LIVE SAFETY CANDIDATE";;
   *PRE_LIVE_SAFETY*) want="PRE-LIVE SAFETY CANDIDATE"; superseded="DARK ACCEPTANCE CANDIDATE";;
   *SOFTWARE_CANDIDATE*) want="DARK ACCEPTANCE CANDIDATE"; superseded="";;

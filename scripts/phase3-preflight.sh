@@ -607,6 +607,70 @@ else
   no "a package outside the renderer/foundation emits structural nft commands: $stray"
 fi
 
+# ============================================== 11. the DARK pmsd deployment contract
+#
+# Live Increment 9 found the pmsd BINARY on the appliance and no unit. A daemon that is "deployed" as a file
+# and never installed as a service is not deployed, and nothing noticed. These checks hold the reviewed
+# contract in place: the unit exists, runs as a dedicated non-root account, and the dark env carries no flag.
+PMSD_UNIT="$ROOT/deploy/systemd/stayconnect-pmsd.service"
+PMSD_ENV="$ROOT/deploy/env/pmsd.env.dark"
+PMSD_INSTALL="$ROOT/scripts/install-pmsd-dark.sh"
+if [ -f "$PMSD_UNIT" ]; then
+  if grep -qE '^User=stayconnect-pmsd' "$PMSD_UNIT" && ! grep -qE '^User=root' "$PMSD_UNIT"; then
+    ok "the pmsd unit runs as a dedicated non-root account"
+  else
+    no "the pmsd unit does not run as the dedicated stayconnect-pmsd account"
+  fi
+  if grep -qE '^Restart=on-failure' "$PMSD_UNIT"; then
+    ok "pmsd restarts only on FAILURE, so a clean flags-OFF exit cannot restart-loop"
+  else
+    no "the pmsd unit would restart a clean dark exit (restart storm while dark)"
+  fi
+  for h in NoNewPrivileges=yes 'CapabilityBoundingSet=$' ProtectSystem=strict PrivateTmp=yes; do
+    grep -qE "^$h" "$PMSD_UNIT" || no "the pmsd unit is missing hardening: $h"
+  done
+  grep -qE '^NoNewPrivileges=yes' "$PMSD_UNIT" && ok "pmsd unit hardening is present (no new privileges, no capabilities, strict system protection)"
+else
+  no "deploy/systemd/stayconnect-pmsd.service is missing"
+fi
+if [ -f "$PMSD_ENV" ]; then
+  if grep -qE '^[[:space:]]*STAYCONNECT_PHASE3_' "$PMSD_ENV"; then
+    no "the reviewed dark pmsd env sets a Phase-3 flag"
+  else
+    ok "the reviewed dark pmsd env sets no Phase-3 flag (every flag resolves OFF)"
+  fi
+else
+  no "deploy/env/pmsd.env.dark is missing; the unit EnvironmentFile has no reviewed source"
+fi
+if [ -f "$PMSD_INSTALL" ]; then
+  if grep -q 'useradd --system' "$PMSD_INSTALL" && ! grep -qE 'User=root|--uid 0' "$PMSD_INSTALL"; then
+    ok "the pmsd installer establishes the least-privilege account rather than weakening the unit"
+  else
+    no "the pmsd installer does not establish the reviewed least-privilege account"
+  fi
+  grep -q 'PMSD_DARK_CONTRACT' "$PMSD_INSTALL"     && ok "the pmsd installer verifies the dark contract it just installed"     || no "the pmsd installer does not verify the dark contract"
+else
+  no "scripts/install-pmsd-dark.sh is missing"
+fi
+
+# ============================================== 12. the pre-nftconverge rollback boundary
+#
+# A netd built before ADR-0003 re-asserts the stored bundle, which begins with `delete table` — starting one
+# recreates the authorization sets EMPTY. Harmless with nobody authorized; a property-wide outage otherwise.
+ROLLBACK="$ROOT/scripts/binary-rollback.sh"
+if [ -f "$ROLLBACK" ]; then
+  grep -q 'check_compat_boundary' "$ROLLBACK"     && ok "rollback evaluates the pre-convergence compatibility boundary before replacing anything"     || no "rollback has no pre-convergence compatibility boundary"
+  grep -q "netd-render-fp=" "$ROLLBACK"     && ok "convergence capability is read from the target ARTIFACT, not a version string"     || no "rollback does not determine convergence capability from the target binary"
+  if grep -qiE -- '--force|SC_ROLLBACK_FORCE|--yes-i-know' "$ROLLBACK"; then
+    no "the ordinary rollback command exposes a force/override path past the boundary"
+  else
+    ok "no force/override path exists on the ordinary rollback command"
+  fi
+  awk '/^check_compat_boundary/,/^}/' "$ROLLBACK" | grep -q 'legacy_auth_count'     && ok "the boundary decides from the LIVE authorization set, not from assumptions"     || no "the boundary does not read the live authorization set"
+else
+  no "scripts/binary-rollback.sh is missing"
+fi
+
 # ============================================================================== report
 # Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json
 # silently reported a smaller, all-passing suite.

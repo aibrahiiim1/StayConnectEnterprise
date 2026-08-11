@@ -65,10 +65,17 @@ def patch_facts(d, key, value):
 
 
 def patch_state(d, fn):
+    """Apply a textual mutation, and REFUSE to be a no-op.
+
+    A case whose anchor has drifted mutates nothing, the validator legitimately passes, and the case reports
+    itself as a pass — the exact silent-disable this suite exists to prevent. So a mutation that changes
+    nothing is a hard error."""
     p = os.path.join(d, "governance/project-state.json")
     s = io.open(p, encoding="utf-8", newline="").read()
-    s = fn(s)
-    io.open(p, "w", encoding="utf-8", newline="").write(s)
+    out = fn(s)
+    if out == s:
+        raise AssertionError("mutation changed nothing: the fixture anchor has drifted")
+    io.open(p, "w", encoding="utf-8", newline="").write(out)
 
 
 def append_doc(d, rel, text):
@@ -141,7 +148,7 @@ def _(d):
 @case("current_activity disagrees with the recorded facts", "activity-parity")
 def _(d):
     patch_state(d, lambda s: s.replace(
-        '"current_activity": "PHASE_3_INCREMENT9_DURABILITY_CORRECTION_CANDIDATE",',
+        '"current_activity": "PHASE_3_DARK_ACCEPTANCE_CANDIDATE",',
         '"current_activity": "PHASE_3_SOMETHING_ELSE_ENTIRELY",', 1))
 
 

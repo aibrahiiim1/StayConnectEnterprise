@@ -1,14 +1,16 @@
 # StayConnect IAM — Phase 3 Final Report (Stay Resolution, PMS Auth Context, Checkout Grace)
 
-> **Status: INCREMENT-9 DURABILITY CORRECTION CANDIDATE (DARK).** The complete Phase-3 software scope is
+> **Status: DARK ACCEPTANCE CANDIDATE.** The complete Phase-3 software scope is
 > implemented, tested and delivered green. Every Phase-3 flag is OFF and PR #6 is open and unmerged.
 >
-> **Live Increment 9 was executed on 2026-08-10** against appliance `172.21.60.23` under a separate
-> Product-Owner authorization. It produced a real blocker: the Phase-3 nft foundation did not survive a `netd`
-> restart or a reboot, because boot reconciliation replayed a stored bundle rendered by an older binary. That
-> blocker is **corrected in this candidate** (Acceptance Matrix rows 30ao–30as) and the corrected software is
-> **not yet deployed**. §6b records each Increment-9 item's verdict exactly as observed, including one item that
-> FAILED and one dimension that is **NOT PROVEN**.
+> **Live Increment 9 was executed on 2026-08-10** and produced a real blocker: the Phase-3 nft structure did not
+> survive a `netd` restart or a reboot, because boot reconciliation replayed a stored bundle rendered by an older
+> binary. That blocker was corrected (rows 30ao–30as) and **RE-VALIDATED LIVE on 2026-08-11** — §6c records the
+> blocked subset re-run on the corrected candidate, every item PASS. §6b keeps the original run's verdicts,
+> including the item that FAILED then, exactly as observed.
+>
+> **One dimension remains NOT PROVEN:** legacy live-session continuity, because no real legacy guest was online.
+> Nothing was fabricated to close it.
 
 ---
 
@@ -297,7 +299,7 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 
 | Test | Result | Evidence |
 |---|---|---|
-| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, write-ahead durable activation bound, monotonic security time, trusted boot identity, semantic journal validation, assignment-scope binding, canonical key identity, ruleset durability across restart/reboot, verified binary rollback, network lifecycle: confirmed-revision boot + safe rollback + marker truthfulness) | **PASS 63/63** | `scripts/phase3-preflight.sh --json` |
+| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, write-ahead durable activation bound, monotonic security time, trusted boot identity, semantic journal validation, assignment-scope binding, canonical key identity, ruleset durability across restart/reboot, verified binary rollback, network lifecycle: confirmed-revision boot + safe rollback + marker truthfulness, pre-convergence rollback boundary, DARK pmsd deployment contract) | **PASS 73/73** | `scripts/phase3-preflight.sh --json` |
 | Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 362/362** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
 | PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** (all eleven) | `scripts/pmsd-pg-integration.sh` |
 | Go unit tests, whole module | **PASS** | `go test ./... -count=1` (JSON-counted) |
@@ -431,11 +433,15 @@ appears.
 | 30at | Binary rollback cannot report success without having changed the RUNNING process image: replacement uses `install(1)`, a failed replacement is immediately fatal, and verification compares the expected hash on disk AND in `/proc/<pid>/exe` | **PASS — SOFTWARE** | `scripts/binary-rollback.sh`; `scripts/ci/binary-rollback-tests.sh` (16 checks incl. the exact Increment-9 false-PASS) |
 | 30au | The authoritative migration runner works on this appliance without ad-hoc operator discovery: `--apply-role` executes as the least-privileged schema owner, a superuser-owned ledger is accepted on its own merits, and a missing grant names the exact `GRANT` | **PASS — SOFTWARE** | `scripts/edge-migrate.sh` (`--apply-role`, superuser-owner acceptance, actionable grant message); live-site least-privilege checks unchanged |
 | 31 | Live read-only PMS protocol verification (Increment 9, Item 1) | **PASS — LIVE (2026-08-10)** | Hotel ID 3 `150.0.0.18:5003`, reviewed builders only; 149 frames parsed, 0 parse errors, byte-identical across two runs; record/field IDs only, no guest data |
-| 32 | Live-dark deployment: migration 0010 + surgical nft foundation (Increment 9, Item 2) | **BLOCKED / PARTIAL — restart durability** | 0010 applied cleanly (49→63 tables, 4 functions, 0 rows, ownership preserved) and the foundation installed surgically with byte-identical legacy parity — but the foundation did NOT survive a netd restart. Corrected in this round (rows 30ao–30as); the corrected software is NOT yet deployed |
-| 32a | Post-reboot persistence of the required Phase-3 structure (Increment 9, Item 3) | **FAIL — required persistence not achieved** | after the controlled reboot the `inet stayconnect` table was structurally identical to the PRE-install baseline (0 diff lines) and `phase3_auth_ipv4` was absent; services, schema and flags-OFF all converged correctly |
-| 32b | Rollback rehearsal (Increment 9, Item 4) | **PASS — LIVE (function)**, with a tooling defect found and corrected | foundation install→rollback returned the ruleset exactly to baseline; 0010 down→up round-tripped (63→49→63, ownership preserved). The binary rehearsal initially reported a FALSE PASS (`cp` failed "Text file busy" while services were reported healthy); re-run correctly, and the tool defect is fixed in this round (row 30at) |
+| 32 | Live-dark deployment: migration 0010 + current-render convergence (Increment 9, Item 2) | **PASS — LIVE (re-validated 2026-08-11)** | Originally BLOCKED/PARTIAL on the old deployed HEAD. On the corrected candidate the first start converged once — `from_fp="" → aa3d99d18590b220689cfceab197da0c`, `carried_elements=0` — leaving `phase3_auth_ipv4` present and EMPTY with the legacy `auth_ipv4` digest unchanged, 7 services running / 0 failed. 0010 was already applied and was NOT re-applied |
+| 32a | Post-reboot persistence of the required Phase-3 structure (Increment 9, Item 3) | **PASS — LIVE (re-validated 2026-08-11)** | Originally FAIL on the old deployed HEAD. Three controlled reboots (boot ids `4215e610…`, `14189f3e…`, `bad37249…`): each reconstructed the CONFIRMED active revision `0cb0028c…`, fingerprint `aa3d99d1…`, `phase3_auth_ipv4` present and empty, legacy digest unchanged, 0 failed units. The `inet stayconnect` table is byte-identical across cycles |
+| 32b | Rollback rehearsal (Increment 9, Item 4) | **PASS — LIVE (re-validated 2026-08-11)** | The corrected `scripts/binary-rollback.sh` rolled all five services back to the previous release and verified each on disk AND in `/proc/<pid>/exe` (5/5), then redeployed the candidate and verified again (5/5). An injected "Text file busy" was FATAL: exit 1, nothing restarted, binaries untouched |
 | 32c | Flags-OFF DARK safety on the running unit (Increment 9, Item 5) | **PASS — LIVE (2026-08-10)** | none of the six flags in any env file or unit; `STAYCONNECT_PHASE3_*` count 0 in all five running process environments; netd logs `active=false`; `phase3_auth_ipv4` 0 elements; iam_v2 0 rows across 63 tables |
 | 32d | Legacy live-session continuity across the live-dark deployment | **NOT PROVEN** | there were ZERO authorized guests and ZERO active legacy sessions throughout the window, so parity was proven structurally (byte-identical `auth_ipv4`, unchanged rule and DNAT counts) but never with a live guest. No guest or session state was fabricated to satisfy a test |
+| 32e | A STEADY-STATE `netd` restart issues NO structural nft mutation on the live appliance — proven on the command log and the recorded event, not on ruleset equality | **PASS — LIVE (2026-08-11)** | three restarts (initial boot and inside each of the first two reboots): no new `nft structure converged` line, and the recorded `boot_reconcile` event reads `nft_changed: false, live_fp_before == desired_fp`. The contrasting converges read `nft_changed: true, live_fp_before: ""` |
+| 32f | An UNAPPLIED Hotel-Admin draft cannot become the running network across a reboot | **PASS — LIVE (2026-08-11)** | `guest_networks` was edited (captive flag) without Apply or Confirm and the appliance rebooted: active revision unchanged `0cb0028c…`, fingerprint still `aa3d99d1…`, still 6 captive DNAT rules (the draft would have removed two), max seq still 56, 0 apply/confirm events. The draft was then restored and verified identical to the confirmed intent |
+| 32g | ROLLBACK ACROSS THE PRE-`nftconverge` BOUNDARY is automatically permitted only when legacy authorization is EMPTY; with guests online it fails safe, changes nothing, and names the operator action — with no force/override path on the ordinary command | **PASS — SOFTWARE (real kernel, disposable) + LIVE (empty-set case)** | `scripts/binary-rollback.sh` `check_compat_boundary`, capability read from the target ARTIFACT (`netd-render-fp=`); `scripts/ci/binary-rollback-tests.sh` (29 checks); `internal/kerneltest/rollback_boundary_kernel_test.go` — real populated `auth_ipv4`, real packets, refusal proven with the guest still online. The empty-set case is the one exercised live |
+| 32h | The DARK `pmsd` deployment contract is COMPLETE: the reviewed unit is installed and enabled, runs as a dedicated non-root account, opens no PMS socket, performs no Phase-3 SQL, does not restart-loop, and survives a reboot in that state | **PASS — LIVE (2026-08-11)** | `deploy/systemd/stayconnect-pmsd.service` + `deploy/env/pmsd.env.dark` + `scripts/install-pmsd-dark.sh` (installs the least-privilege account rather than weakening the unit, then verifies the contract); preflight §11 |
 | 33 | Gate-P per-service EXECUTE grants and role separation | **OUT OF SCOPE BY APPROVED CONTRACT** | separately gated; zero runtime grants while dark |
 | 34 | Paid access, financial posting, `PS`/`PA`, implicit FX, programmatic reversal | **OUT OF SCOPE BY APPROVED CONTRACT** | refused in code (`ErrSettlementRequired`) |
 | 35 | Phase 4 | **OUT OF SCOPE BY APPROVED CONTRACT** | not started |
@@ -461,6 +467,28 @@ pre-Phase-3 binary**: it contains `delete table inet stayconnect` and **zero** o
 `phase3_auth_ipv4`. The database was correct and the bundle was intact; the structure was still wrong, because
 the renderer version is the one input to ruleset structure that lives only in the running binary. Corrected in
 this candidate — see rows 30ao–30as and `internal/nftconverge`.
+
+## 6c. Live Increment-9 RE-VALIDATION (2026-08-11) — the blocked subset, on the corrected candidate
+
+Executed against the same authorized appliance under a separate Product-Owner authorization, on candidate
+`7318ac239b5bbbe5ca210fce94089d528e82306f`. Identity was re-proven first (appliance `ef78219b…`, serial
+`SC-BEN1-JS4A-0D9C`, signed assignment `assigned`, licence `active` with `wan_mac` equal to the live `ens160`
+MAC). Migration 0010 was **not** re-applied and live PMS Item 1 was **not** repeated.
+
+| Item | Verdict | Evidence |
+|---|---|---|
+| First current-render convergence | **PASS** | one converge: `from_fp="" → aa3d99d1…`, `carried_elements=0`; `phase3_auth_ipv4` present and EMPTY; legacy digest unchanged |
+| Steady-state `netd` restart — NO MUTATION | **PASS** (×3) | no new `converged` log line; recorded event `nft_changed: false`, `live_fp_before == desired_fp`; ruleset byte-identical |
+| Reboot reconstruction | **PASS** | boots `4215e610…`, `14189f3e…`, `bad37249…` each rebuilt the confirmed revision `0cb0028c…` |
+| Repeated reboot / idempotence | **PASS** | the `inet stayconnect` table is byte-identical across cycles; the only ruleset difference anywhere was Docker reordering two of its own rules |
+| Unapplied Hotel-Admin draft isolation | **PASS** | draft never became runtime; no Apply/Confirm; no new revision; draft restored afterwards |
+| Binary rollback identity verification | **PASS** | 5/5 verified on disk and in `/proc/<pid>/exe`; injected "Text file busy" was fatal |
+| Corrected-candidate redeployment | **PASS** | 5/5 verified again after redeploy |
+| Final DARK proof | **PASS** | flags OFF everywhere, `phase3_auth_ipv4` empty, 0 rows across 63 iam_v2 tables, no `pmsd` process/unit/socket at that time |
+| Legacy live-session continuity | **NOT PROVEN — no real legacy guest available** | `auth_ipv4` held 0 elements at every checkpoint; nothing was fabricated |
+
+Two findings were carried out of that run and are closed in this candidate: the previous release predates
+`nftconverge` (row 32g), and the `pmsd` unit had never been installed (row 32h).
 
 **NOT PROVEN — legacy live-session continuity.** Throughout the window there were **zero authorized guests and
 zero active legacy sessions**: `auth_ipv4` was empty the entire time. Legacy parity is therefore proven

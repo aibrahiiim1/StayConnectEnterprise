@@ -18,6 +18,9 @@
 # Exit codes follow the CI contract: 0 pass, 1 assertion failure, 2 infrastructure (retried once).
 set -uo pipefail
 
+# repository root, so the suite can hand the Go tests the operator scripts they exercise
+HERE="$(cd "$(dirname "$0")/../.." && pwd -P)"
+
 RTR=p3-rtr
 GUEST=p3-guest
 WAN=p3-wan
@@ -210,7 +213,7 @@ fi
 set -o pipefail
 KG_NFT="$WORK/nft" KG_TC="$WORK/tc" KG_IP="$WORK/ip" \
 KG_GUEST_NS="$GUEST" KG_GUEST_IP="$GUEST_IP" KG_WAN_IP="$WAN_IP" KG_GUEST_IF="$GUEST_IF" KG_IFB="$KG_IFB" \
-KG_WAN_IF="$WAN_IF" \
+KG_WAN_IF="$WAN_IF" KG_ROLLBACK_TOOL="$HERE/scripts/binary-rollback.sh" \
 KG_RULESET="$WORK/ruleset.nft" \
   "$BIN" -test.v -test.timeout 10m 2>&1 | tee "$WORK/kernel.log"
 RC=${PIPESTATUS[0]}
