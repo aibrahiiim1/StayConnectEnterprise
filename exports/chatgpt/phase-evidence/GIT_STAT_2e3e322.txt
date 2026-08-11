@@ -1,4 +1,0 @@
-commit 2e3e32240724d0cce383668ca4b4950722a3a46b
-Date:   Tue Aug 11 03:46:46 2026 +0300
-
-    Phase 3 Increment-9 correction (inventory_head): re-anchor the mutation fixtures and give the --apply-role test role the schema it migrates

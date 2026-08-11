@@ -1,0 +1,4 @@
+commit 5433a264b798b3fbd9e7076704d568428b80302d
+Date:   Tue Aug 11 03:59:17 2026 +0300
+
+    Phase 3 Increment-9 correction (inventory_head): force the kernel carry-over test's converge with a change the renderer actually emits
