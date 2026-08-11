@@ -251,9 +251,19 @@ func TestKernel_CarryOverPreservesATimedAuthorization(t *testing.T) {
 		t.Fatal("precondition: the timed-authorized guest cannot reach the WAN")
 	}
 
-	// force a converge by changing the rendered structure
+	// Force a converge by changing the rendered structure. A SECOND network is used rather than editing this
+	// one: it moves the fingerprint (new bridge, subnet, captive DNAT and masquerade rules) while leaving every
+	// rule that governs the authorized guest exactly as it was, so the packet assertion below is measuring
+	// carry-over and not some unrelated rule change.
+	//
+	// An earlier version toggled ClientIsolation, which does not appear in the render at all — inter-guest
+	// isolation is emitted unconditionally from guest_subnets — so the fingerprint never moved, no converge
+	// happened, and the test failed for the right reason.
 	changed := convergeIntent()
-	changed[0].ClientIsolation = !nets[0].ClientIsolation
+	second := changed[0]
+	second.Name, second.BridgeName = "kg2", "kg-br2"
+	second.GatewayIP, second.SubnetCIDR = "10.79.0.1", "10.79.0.0/24"
+	changed = append(changed, second)
 	res, err := e.Ensure(c, changed, "upgrade")
 	if err != nil {
 		t.Fatalf("converge: %v", err)
