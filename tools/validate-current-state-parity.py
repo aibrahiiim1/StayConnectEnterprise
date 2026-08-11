@@ -242,7 +242,7 @@ def main():
         # (a) nothing current may still call Phase 3 a candidate / in progress / not accepted
         not_accepted = re.compile(
             r"phase[- ]?3 is (not accepted|in_progress|a candidate)|"
-            r"NOT accepted|not yet accepted|"
+            r"\bNOT accepted\b|\bnot yet accepted\b|"
             r"dark acceptance candidate|increment-9 durability correction candidate|"
             r"pending the product owner'?s? final",
             re.I)
@@ -385,6 +385,61 @@ def main():
                 % (facts.get("accepted_runtime_binaries_head"), facts.get("accepted_runtime_head")), STATE)
         else:
             ok("the accepted-binaries invariant is recorded and agrees with the accepted runtime head")
+
+    # ---- 8g. PHASE-STATUS PARITY ------------------------------------------------------------------------------------
+    #
+    # project-state.json recorded Phase 4 as the current AUTHORIZED PLANNING phase while the same file's
+    # current_maturity narrative still ended "Phase 4 remains NOT_STARTED and unauthorized". Both sentences
+    # were written in the same round; nothing compared them, because every existing rule was about Phase 3.
+    #
+    # Generic over phases, not another Phase-N special case: for EVERY phase whose recorded status is not
+    # NOT_STARTED, no current surface may still call that phase not-started or unauthorized. It therefore
+    # catches the same mistake at Phase 5, 6 and 7 with no new rule.
+    #
+    # The state FILE is checked field-by-field rather than as text. Paragraph-based history exclusion is
+    # meaningless for a single-line JSON document: the whole file is one "paragraph" and it contains the word
+    # "historical" somewhere, so a text scan silently excuses every contradiction in it. That is exactly how
+    # the first version of this rule passed the very contradiction it was written for.
+    phases = state.get("phases") or {}
+    started = sorted(n for n, ph in phases.items()
+                     if isinstance(ph, dict) and ph.get("status") not in (None, "NOT_STARTED"))
+    stale_phase_hits = []
+    for n in started:
+        pat = re.compile(
+            r"phase[\s-]*" + re.escape(n) + r"\b[^.]{0,60}?"
+            r"(remains?|is|are)\s+(still\s+)?(not[_\s]started|unauthoriz|not\s+authoriz)",
+            re.I)
+        # (a) narrative FIELDS of the state file, examined individually
+        fields = {"current_maturity": state.get("current_maturity", ""),
+                  "next_authorized_action": state.get("next_authorized_action", "")}
+        for i, b in enumerate(state.get("blockers") or []):
+            fields["blockers[%d]" % i] = str(b)
+        for i, a in enumerate(state.get("allowed_actions") or []):
+            fields["allowed_actions[%d]" % i] = str(a)
+        for pn, ph in phases.items():
+            if isinstance(ph, dict) and ph.get("maturity"):
+                fields["phases.%s.maturity" % pn] = str(ph["maturity"])
+        for fname, val in fields.items():
+            m = pat.search(val)
+            if m and not HISTORY_MARKERS.search(val[max(0, m.start() - 160):m.end() + 60]):
+                stale_phase_hits.append((n, "governance/project-state.json -> " + fname,
+                                         " ".join(val[max(0, m.start() - 60):m.end() + 40].split())))
+        # (b) the markdown surfaces, where paragraph labelling is meaningful
+        for rel in DOC_SURFACES:
+            if rel.endswith(".json"):
+                continue
+            text = load_surface(rel)
+            if text is None:
+                continue
+            for hit in scan(text, pat):
+                stale_phase_hits.append((n, rel, hit))
+    for n, where, hit in stale_phase_hits:
+        bad("phase-status-parity",
+            "phase %s is recorded as %s but a current surface still calls it not-started/unauthorized: %s"
+            % (n, phases[n].get("status"), hit), where)
+    if not stale_phase_hits:
+        ok("no current surface calls a started phase not-started or unauthorized (checked %s)"
+           % (", ".join(started) or "none"))
 
     # ---- 9. the rollback runbook must not promise authorization it cannot preserve -----------------------------------
     #

@@ -1,0 +1,4 @@
+commit a835b18ed16e364bbcd1ec2552752f61fb428204
+Date:   Tue Aug 11 23:45:46 2026 +0300
+
+    Merge PR #11: pre-Phase-4 baseline READY + Phase-4 authorization (D18/T0029)

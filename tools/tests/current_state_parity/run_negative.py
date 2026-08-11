@@ -291,6 +291,27 @@ def _(d):
     patch_facts(d, "accepted_runtime_binaries_head", "0" * 40)
 
 
+# ---- phase status: the contradiction that shipped inside one file ------------------------------------------
+
+@case("a started phase is still called NOT_STARTED in the state narrative", "phase-status-parity")
+def _(d):
+    # Exactly what shipped after PR #11: phases.4 recorded as PLANNING while current_maturity still ended
+    # "Phase 4 remains NOT_STARTED and unauthorized". Both sentences were written in the same round.
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    doc["current_maturity"] = doc["current_maturity"] + " Phase 4 remains NOT_STARTED and unauthorized."
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("a started phase is called unauthorized in a blocker", "phase-status-parity")
+def _(d):
+    # The SECOND instance, which the first (broken) version of the rule missed entirely.
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    doc["blockers"] = list(doc.get("blockers") or []) + ["Phase 4 is not authorized."]
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
 @case("a transition receipt cites evidence that is not in the repository", "evidence-reference")
 def _(d):
     # The sandbox is a copy, so "not tracked in git" is asserted against the REAL repo index; citing a path

@@ -78,6 +78,12 @@ jobs:
         # says so, or "nothing remains" would just be hard-coded.
         run: python tools/tests/evidence_artifact/run_artifact_staleness.py
 
+      - name: Tooling must carry no control characters
+        # A heredoc turned an escape into a literal 0x08 inside two validator regexes. The file looked
+        # correct, both regexes still compiled, the suite still reported PASS - and the alternatives they
+        # guarded could never match. Only the bytes give that away, so the bytes are checked.
+        run: python tools/tests/tooling/run_control_chars.py
+
       - name: Working tree must remain clean
         run: |
           status="$(git status --porcelain --untracked-files=all)"
