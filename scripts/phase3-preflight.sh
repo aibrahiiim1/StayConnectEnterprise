@@ -639,6 +639,14 @@ if [ -f "$PMSD_ENV" ]; then
   else
     ok "the reviewed dark pmsd env sets no Phase-3 flag (every flag resolves OFF)"
   fi
+  # AND IT MUST NOT MENTION ONE EITHER, even in a comment. The darkness proof used on the appliance is a plain
+  # name search across /etc/stayconnect; a flag name in a comment turns that clean signal into a false alarm on
+  # a security-critical surface, and a check that cries wolf is a check people learn to skip.
+  if grep -q 'STAYCONNECT_PHASE3' "$PMSD_ENV"; then
+    no "the dark pmsd env mentions a Phase-3 flag name (it would trip the appliance darkness grep)"
+  else
+    ok "the dark pmsd env mentions no Phase-3 flag name at all, so the appliance darkness grep stays clean"
+  fi
 else
   no "deploy/env/pmsd.env.dark is missing; the unit EnvironmentFile has no reviewed source"
 fi
