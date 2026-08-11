@@ -1,9 +1,27 @@
-# StayConnect — production exposure (Caddy + TLS)
+# StayConnect - production exposure (Caddy + TLS)
 
-Phase 14 puts Caddy in front of portald/ctrlapi/web-admin so the system
-is reachable from the public internet over real HTTPS. Caddy handles
-ACME HTTP-01 against Let's Encrypt automatically — no certbot cron,
-no manual renewals.
+Caddy terminates TLS in front of the StayConnect services. There is **one Caddyfile per ROLE**, and the
+roles do not overlap:
+
+| File | Deployed on | Sites it terminates |
+|---|---|---|
+| `Caddyfile.edge` | Hotel Appliance (Edge) | `portal.stayconnect.local` -> portald `127.0.0.1:8380`; `hotel.stayconnect.local` + management IP -> hotel-admin `127.0.0.1:3100` (imported from `/etc/caddy/hotel-admin/vhost.caddy`) |
+| `Caddyfile.central` | Central Control Plane | one site -> ctrlapi `127.0.0.1:8080` for `/v1/* /cloud/* /healthz /readyz /metrics`, cloud-admin `127.0.0.1:3000` for everything else |
+| `Caddyfile.dev` | single-box dev VM only | all three sites on one host - **never deploy this to a real Edge or Central** |
+
+**Why the split exists.** A single all-in-one template used to serve all three sites, written when Central
+and the Edge ran on the same box. When Central moved to its own server the Edge kept the template, so the
+appliance advertised `api.stayconnect.local` and `admin.stayconnect.local` and returned 502 on both - routes
+pointing at services that deliberately do not run there. The combined file has been removed so a redeploy
+cannot reintroduce them.
+
+**Rule:** if a route 502s because its upstream "does not run on this box", the route does not belong on
+this box. Add it to the other role's file instead.
+
+**Applying config.** The Edge runs Caddy with the admin API enabled, so `systemctl reload` works. Central
+runs with `admin off`, so `caddy reload` cannot work there and configuration is applied with
+`systemctl restart stayconnect-caddy`; its unit's `ExecReload` only validates. Always run
+`caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile` before either.
 
 ## What this gives you
 
@@ -51,7 +69,8 @@ Then drop the config in:
 
 ```sh
 install -o caddy -g caddy -m 0644 \
-    deploy/caddy/Caddyfile /etc/caddy/Caddyfile
+    deploy/caddy/Caddyfile.edge /etc/caddy/Caddyfile      # on the appliance
+    deploy/caddy/Caddyfile.central /etc/caddy/Caddyfile   # on Central
 sed -i "s/example.com/yourdomain.com/g" /etc/caddy/Caddyfile
 sed -i "s/ops@example.com/you@yourdomain.com/" /etc/caddy/Caddyfile
 mkdir -p /var/log/caddy && chown caddy:caddy /var/log/caddy

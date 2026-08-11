@@ -9,9 +9,15 @@ and asserts that AT LEAST ONE reports failure (non-zero). The original bytes are
 A validator that only passes the good state without failing these negative cases is NOT accepted.
 Run from anywhere:  python tools/tests/project_state_validator/run_mutations.py
 """
-import subprocess, os, sys, shutil
+import subprocess, os, sys, shutil, json, io as _io
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+# The latest transition id changes every governance round, and M08 anchors on it. Hard-coding it meant the
+# suite broke -- in CI, after the work was already done -- on T0024, T0025, T0026 and T0027 in turn. Read it
+# instead: a fixture that tracks the file it mutates cannot drift out of step with it.
+CUR_TRANSITION = json.load(_io.open(
+    os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))["latest_transition_id"]
 
 def _find_bash():
     # Prefer Git Bash on Windows (Python's PATH 'bash' may resolve to WSL bash, which fails on Windows paths).
@@ -57,7 +63,7 @@ MUTATIONS = [
  ("M07 modified generated block", "docs/context/StayConnect-IAM-Handoff.md",
    ("replace", [("**Current phase:** 3", "**Current phase:** 9Z")])),
  ("M08 stale source commit / snapshot mismatch", "governance/project-state.json",
-   ("replace", [('"latest_transition_id": "T0026"', '"latest_transition_id": "T0008"')])),
+   ("replace", [(f'"latest_transition_id": "{CUR_TRANSITION}"', '"latest_transition_id": "T0008"')])),
  ("M09 missing acceptance record", "governance/project-state.json",
    ("replace", [('"path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"',
                  '"path": "docs/acceptance/MISSING.md"')])),

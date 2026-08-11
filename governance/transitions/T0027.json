@@ -1,0 +1,93 @@
+{
+  "transition_id": "T0027",
+  "seq": 27,
+  "timestamp": "2026-08-11T17:08:26Z",
+  "record_type": "POST_CLOSURE_RESIDUAL_DEFECT_REMEDIATION",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_maturity_change": "NONE. Phase 3 remains ACCEPTED_AND_CLOSED at verified DARK maturity (D16/T0024), MERGED (D17/T0025), post-closure hygiene (T0026). This receipt records remediation of residual operational and documentation defects discovered after closure. It creates NO decision and changes NO acceptance maturity.",
+  "decision": null,
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-11, 'CLOSE ALL CURRENTLY IDENTIFIED RESIDUAL FINDINGS', establishing the standing rule that any defect found during an authorized round is taken to a final verified resolution in the same stream rather than deferred.",
+  "findings_closed": [
+    {
+      "id": "F1",
+      "title": "Duplicate host identity between the Hotel Appliance and the Central Control Plane",
+      "root_cause": "Central was provisioned by cloning the appliance image. Both hosts report an identical rootfs birth time (2026-01-30 20:41:20) and inherited the image's /etc/machine-id 9b1e4e3578164bd094b11d96fc08ed8a and hostname 'radius'.",
+      "dependency_assessment": "Both hosts expose DISTINCT DMI product_uuid values, and data-plane/internal/hwid resolves the hardware anchor from product_uuid, using /etc/machine-id only as a fallback when every DMI source is unusable. The StayConnect serial and hardware fingerprint therefore do NOT depend on machine-id on either host. Central's appliance-facing mTLS certificate carries IP SANs only; NATS runs in containers with their own hostnames; no configuration on either host uses the name 'radius' as a connection target; /var/lib/dbus/machine-id is a symlink to /etc/machine-id so D-Bus identity follows automatically.",
+      "action": "Central, the non-authoritative clone, was renamed to 'sc-central', its /etc/hosts 127.0.1.1 entry updated, its /etc/machine-id regenerated with systemd-machine-id-setup, the bare hostname removed from its Caddy site address, and the host rebooted to finalise the machine identity. The Hotel Appliance was NOT touched: it keeps hostname 'radius', machine-id 9b1e4e35..., serial SC-BEN1-JS4A-0D9C and appliance_id ef78219b-0d47-4465-9f77-3d0c702c815c.",
+      "verification": "After reboot Central reports hostname sc-central and machine-id 476149613e924ea08fe83a78592ab8b3, with systemd and D-Bus agreeing; 0 failed units; ctrlapi, cloud-admin, Caddy and nats-authz active; all four containers healthy; /login 200, /healthz 200, /readyz 200, /cloud/v1/backup-health 401. The appliance re-adopted the signed trust registry at version 57 with zero scd errors and reaches Central on 443, 9443 and 4223. Historical journals under the previous machine-id directory are preserved.",
+      "invariant_respected": "Factory/host OS identity is not the authoritative tenant/site identity source. Enrollment, claim and signed assignment remain authoritative and were not modified."
+    },
+    {
+      "id": "F2",
+      "title": "Central-only Caddy vhosts present on the Edge appliance",
+      "root_cause": "deploy/caddy/Caddyfile was a single all-in-one 'phase 14' template written when Central and Edge shared one box. When Central moved to its own server on 2026-07-13, ctrlapi and web-admin were disabled on the appliance but their vhosts remained in the deployed config, so the Edge advertised api.stayconnect.local and admin.stayconnect.local and returned 502 on both.",
+      "action": "Live Edge Caddyfile: both vhosts removed, validated, reloaded. Source of truth: the combined deploy/caddy/Caddyfile was DELETED and replaced by role-specific deploy/caddy/Caddyfile.edge and deploy/caddy/Caddyfile.central, each carrying an explicit role boundary, so a redeploy cannot reintroduce them. Orphaned Caddy-managed certificates for the two removed names were archived and removed from the appliance.",
+      "verification": "Effective host matchers on the Edge are now hotel.stayconnect.local plus the management IP, and portal.stayconnect.local. Hotel Admin /login 200, Edge API /api/edge/v1/vouchers 401 which proves the rewrite reaches edged, guest portal 200. The two removed names return an empty 200 with no route rather than 502. Central verified independently and unaffected."
+    },
+    {
+      "id": "F3",
+      "title": "Historical CI artifact exposure audit had no permanent record",
+      "root_cause": "The audit produced an authoritative security conclusion that existed only in conversation, while every artifact it covers expires within 90 days.",
+      "action": "Recorded permanently in docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md: scope, the 36-artifact population, 31 affected and 5 clean, full artifact and run IDs, bounded methodology, what was and was not proven, residual risk, and the rationale for no containment action.",
+      "verification": "No artifact deleted, no credential rotated, no discovered content reproduced. The defect itself is already fixed by T0026."
+    },
+    {
+      "id": "F4",
+      "title": "Central's stayconnect-caddy unit advertised a reload that could never succeed",
+      "root_cause": "Found while applying F1. Central's Caddyfile sets 'admin off', which disables the admin API that 'caddy reload' drives, so ExecReload failed every time it ran. The failure was easy to miss because the previous configuration kept serving and the endpoint still answered 200.",
+      "action": "ExecReload replaced with a validate-only command, and both the Central config header and deploy/caddy/README.md now state that Central applies configuration by systemctl restart.",
+      "verification": "Configuration applied by restart; Caddy active with NRestarts=0 and the new site address in effect."
+    },
+    {
+      "id": "F5",
+      "title": "docs/SYSTEM_OVERVIEW.md described /etc/caddy/Caddyfile as a symlink into the deploy tree",
+      "root_cause": "Stale documentation. On the appliance it is a real file, and a stale April copy of the combined template also sits at /opt/stayconnect/deploy/caddy/Caddyfile.",
+      "action": "Corrected in docs/SYSTEM_OVERVIEW.md, which now records the role split and that the file is installed rather than linked. scripts/phase14-tls-test.sh no longer defaults PROD_CONF at the deleted combined template."
+    }
+  ],
+  "blockers_raised": [
+    {
+      "id": "B1",
+      "title": "Appliance licence is in its post-expiry grace period",
+      "detail": "scd has evaluated the licence as GracePeriod since the 2026-08-11 11:06 boot, about six hours before this round began, so it is pre-existing and was not caused by any action here. The root cause is not a fault: licence 2fed04b9-6c44-4727-97d6-e86faffddc9e has valid_until 2026-08-08T23:59:59Z with grace_period_days 30, and Central records it as status 'active'. cloud_stale and clock_rollback are both false, so this is neither a connectivity nor a clock problem: the term simply elapsed on 8 August. Roughly 27 of the 30 grace days remain, ending on or about 2026-09-07. Nothing is degraded today.",
+      "why_not_executed": "Extending or renewing a commercial licence term is a business decision about what is sold, for how long and to whom. It is not a defect an operator may correct unilaterally, and issuing licence material is exactly the class of action this closure must not improvise.",
+      "decision_required": "Product-Owner decision on the licence term for appliance SC-BEN1-JS4A-0D9C: renew or extend licence 2fed04b9 and for how long, or explicitly accept expiry at the end of the grace window. Once decided, the renewal is an existing Central operation in cloud-admin, not new development."
+    },
+    {
+      "id": "B2",
+      "title": "Central's web certificate still carries a vestigial DNS:radius SAN",
+      "detail": "The operational half is CLOSED: the name is gone from Central's Caddy site address, so no route serves it. A request with that SNI now receives an empty 200 with no content, and an unrelated SNI fails the handshake outright. What remains is the certificate's SAN list, which still names the old hostname.",
+      "why_not_executed": "Re-issuing requires the private key of the issuer 'StayConnect Internal CA'. That key is present on neither host: /etc, /var/lib and /root were searched on Central and on the appliance. The only CA whose key IS available is the StayConnect Appliance Intermediate CA, and re-issuing an operator-facing browser certificate under a different trust anchor changes the trust story for that surface.",
+      "decision_required": "Product-Owner decision on Central's web PKI: supply or locate the StayConnect Internal CA key for a like-for-like re-issue, or authorise re-issuing Central's browser certificate under a different named CA. Neither is required for correct operation today."
+    }
+  ],
+  "scope_prohibited": "No Phase-3 reopening, no re-acceptance, no new acceptance decision, no feature enablement, no IAM-v2 cutover, no change to tenant/site assignment, enrollment identity, appliance serial, licence ownership, WAN MAC identity, PMS Interface assignment or network topology, no schema or data migration, no PMS traffic, no financial action, no Phase-4 work. None was performed.",
+  "rollback": {
+    "central_identity": "/root/identity-rollback-20260811-165909/ on Central: hostname.orig, hosts.orig, machine-id.orig, Caddyfile.orig, server.crt.orig, stayconnect-caddy.service.orig and an executable RESTORE.sh that reinstates all of them; a reboot finalises.",
+    "central_caddy_config": "/etc/caddy/Caddyfile.pre-identity-20260811-165909 on Central.",
+    "edge_caddy_config": "/etc/caddy/Caddyfile.pre-edge-cleanup-20260811-170404 on the appliance.",
+    "edge_orphaned_certs": "/root/edge-caddy-cert-rollback-20260811-170439.tar.gz on the appliance.",
+    "repository": "git revert of this branch's merge commit restores every repository-side change."
+  },
+  "evidence_files": [
+    "docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md",
+    "deploy/caddy/Caddyfile.edge",
+    "deploy/caddy/Caddyfile.central",
+    "deploy/caddy/README.md",
+    "docs/SYSTEM_OVERVIEW.md",
+    "scripts/phase14-tls-test.sh",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC when this receipt was written, after all live verification completed.",
+  "acceptance_verdict": "NO CHANGE to Phase-3 acceptance. Phase 3 remains ACCEPTED_AND_CLOSED at verified DARK maturity, MERGED, DARK and NOT CUT OVER. Five residual findings closed; two blockers raised that require Product-Owner business or architecture decisions and cannot be safely executed under this authorization.",
+  "next_action": "Product-Owner decisions on B1 (licence term) and B2 (Central web PKI). No Phase-3 or Phase-4 implementation is authorized."
+}
