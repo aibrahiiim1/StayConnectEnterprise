@@ -84,6 +84,7 @@ printf '%s' "$body" > "$BODYFILE"
 # would have turned the check off rather than making it fail, and the PR body could then say anything. An
 # activity this script does not know about is now a FAILURE that names itself.
 case "$activity" in
+  *ACCEPTED_AND_CLOSED*) want="ACCEPTED_AND_CLOSED AT DARK MATURITY"; superseded="DARK ACCEPTANCE CANDIDATE";;
   *DARK_ACCEPTANCE_CANDIDATE*) want="DARK ACCEPTANCE CANDIDATE"; superseded="INCREMENT-9 DURABILITY CORRECTION CANDIDATE";;
   *INCREMENT9_DURABILITY_CORRECTION*) want="INCREMENT-9 DURABILITY CORRECTION CANDIDATE"; superseded="PRE-LIVE SAFETY CANDIDATE";;
   *PRE_LIVE_SAFETY*) want="PRE-LIVE SAFETY CANDIDATE"; superseded="DARK ACCEPTANCE CANDIDATE";;
@@ -110,11 +111,29 @@ if [ -n "$want" ]; then
   fi
 fi
 
-# Phase 3 is not accepted and not closed while this activity holds; the PR must not say otherwise.
+# The PR body and the repository must agree about acceptance, in BOTH directions.
+#
+# This check used to say only "the PR must not claim Phase 3 is accepted", which was correct for as long as
+# acceptance had not happened — and would have become wrong the moment it did, forbidding the PR from stating
+# the true final state. The direction is now taken from the recorded fact rather than assumed.
+accepted="$($PY3 -c "
+import json,sys
+try: f=json.load(open(sys.argv[1],encoding='utf-8')).get('current_state_facts') or {}
+except Exception: f={}
+print('yes' if (f.get('accepted') and f.get('closed')) else 'no')
+" "$STATE" 2>/dev/null)"
 case "$activity" in
   *PHASE_3*)
-    if grep -qiE "phase 3 (is )?(accepted|closed|complete and accepted)" "$BODYFILE"; then
-      bad "the PR body claims Phase 3 is accepted or closed; the repository says it is IN_PROGRESS"
+    if [ "$accepted" = "yes" ]; then
+      if grep -qiE "phase 3 (is )?accepted and closed|ACCEPTED_AND_CLOSED" "$BODYFILE"; then
+        note "the PR body states the accepted-and-closed state, matching the repository"
+      else
+        bad "the repository records Phase 3 as ACCEPTED AND CLOSED but the PR body does not say so"
+      fi
+    else
+      if grep -qiE "phase 3 (is )?(accepted|closed|complete and accepted)" "$BODYFILE"; then
+        bad "the PR body claims Phase 3 is accepted or closed; the repository says it is not"
+      fi
     fi
     ;;
 esac
