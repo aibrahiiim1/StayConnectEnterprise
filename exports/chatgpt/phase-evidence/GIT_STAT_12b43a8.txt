@@ -1,0 +1,4 @@
+commit 12b43a8053009e5489cc5e4d944069d1a754a4f8
+Date:   Tue Aug 11 03:13:49 2026 +0300
+
+    Phase 3 Increment-9 correction (inventory_head): ruleset structure is reconciled from the current render, not a stored bundle

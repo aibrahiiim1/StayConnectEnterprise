@@ -182,7 +182,7 @@
     "Central Control Plane changes; WAN/LAN/VLAN/DHCP changes; HA/appliance-topology changes",
     "Writing any Production Stay/Guest/Folio/Event/Auth-Context row to Production iam_v2 while dark (live PMS test persistence targets a disposable test DB only)"
   ],
-  "next_authorized_action": "Obtain a Product-Owner decision on the Increment-9 durability correction, then re-run the BLOCKED subset of Live Increment 9 on the appliance: deploy the corrected HEAD, verify that phase3_auth_ipv4 is present and empty after deployment, restart netd and prove the structure survives with NO nft mutation issued, reboot and prove reconstruction, repeat once for idempotence, and re-run the binary rollback rehearsal with scripts/binary-rollback.sh. Items 1 (read-only PMS) and 5 (flags-OFF DARK safety) already PASSED live on 2026-08-10 and do not need repeating. Legacy live-session continuity remains NOT PROVEN and can only be proven with a real legacy guest online. Phase 3 is IN_PROGRESS, DARK, NOT accepted, NOT closed; PR #6 open and unmerged.",
+  "next_authorized_action": "Obtain a Product-Owner decision on the Increment-9 durability correction before re-running the BLOCKED subset of Live Increment 9 on the appliance (deploy the corrected HEAD, prove phase3_auth_ipv4 is present and empty while DARK, prove a netd restart issues NO nft mutation and preserves the structure, prove reboot reconstruction, repeat once for idempotence, and re-run the binary rollback rehearsal with scripts/binary-rollback.sh). Increment-9 Items 1 (read-only PMS) and 5 (flags-OFF DARK safety) already PASSED live on 2026-08-10 and need not be repeated, and legacy live-session continuity remains NOT PROVEN because it requires a real legacy guest online. Phase 3 is IN_PROGRESS, DARK, NOT accepted, NOT closed, PR #6 open and unmerged.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D15",
@@ -191,8 +191,8 @@
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "03f7a30e8d65569872486161ae99665881d7caf0",
+  "acceptance_candidate_head": "12b43a8053009e5489cc5e4d944069d1a754a4f8",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "03f7a30e8d65569872486161ae99665881d7caf0",
+  "inventory_head": "12b43a8053009e5489cc5e4d944069d1a754a4f8",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }
