@@ -49,7 +49,7 @@ def ok(msg):
     notes.append(msg)
 
 
-def generate(facts_override=None):
+def generate(facts_override=None, playwright_counts=None):
     """Run the real generator against a disposable workspace, optionally with patched facts.
 
     The workspace is a copy so that a patched project-state cannot touch the repository, and the generator is
@@ -77,6 +77,9 @@ def generate(facts_override=None):
         "run_id": "STALENESS-SUITE", "run_attempt": "1", "start_utc": "2026-01-01T00:00:00Z",
         "delivery_head": "0" * 40}))
     io.open(evid + os.sep + "steps.tsv", "w", encoding="utf-8", newline="\n").write("go-unit\t0\t1\n")
+    if playwright_counts is not None:
+        io.open(os.path.join(evid, "counts", "playwright.json"), "w", encoding="utf-8", newline="\n").write(
+            json.dumps(playwright_counts))
 
     env = dict(os.environ, EVID=evid, ART=art, GITHUB_WORKSPACE=ws, PYTHONIOENCODING="utf-8")
     r = subprocess.run([sys.executable, os.path.join(ws, GEN)], capture_output=True, env=env, cwd=ws)
@@ -85,8 +88,12 @@ def generate(facts_override=None):
         raise AssertionError("the evidence generator failed: %s" % r.stderr.decode("utf-8", "replace")[:400])
     meta = json.load(io.open(os.path.join(art, "RUN_META.json"), encoding="utf-8"))
     readme = io.open(os.path.join(art, "README.md"), encoding="utf-8").read()
+    pw_out = None
+    pw_path = os.path.join(art, "counts", "playwright.json")
+    if os.path.isfile(pw_path):
+        pw_out = json.load(io.open(pw_path, encoding="utf-8"))
     shutil.rmtree(d, ignore_errors=True)
-    return meta, readme
+    return meta, readme, pw_out
 
 
 def main():
@@ -94,7 +101,7 @@ def main():
                                     encoding="utf-8")).get("current_state_facts") or {})
 
     print("== the artifact as CI would generate it now ==")
-    meta, readme = generate()
+    meta, readme, _ = generate()
 
     # ---- 1. history must be labelled as history -------------------------------------------------------------
     hist = meta.get("live_increment9_historical")
@@ -154,7 +161,7 @@ def main():
 
     # ---- 5. the negative case: it must still be able to say work DOES remain --------------------------------
     print("\n== negative case: facts that say the work is NOT finished ==")
-    meta2, readme2 = generate({"accepted": False, "closed": False, "live_increment9_revalidated": False,
+    meta2, readme2, _ = generate({"accepted": False, "closed": False, "live_increment9_revalidated": False,
                                "corrected_software_deployed": False})
     rem2 = (meta2.get("project_state_at_generation") or {}).get("remaining_live_work")
     if not rem2:
@@ -166,6 +173,32 @@ def main():
         bad("with unfinished facts the README still claims no live work remains")
     else:
         ok("the README tracks the facts in both directions")
+
+    # ---- 6. the artifact must not ship raw repository content -----------------------------------------------
+    #
+    # Playwright embeds `config.metadata.gitDiff` — the whole PR diff, truncated at 100,000 characters — into
+    # its JSON report on pull_request events, and that report is copied into the artifact. The artifact's own
+    # README promises "derived summaries only", so this is content it must not carry, and unlike a test count
+    # it cannot be bounded by review. It survived unnoticed because the truncation is in path order: earlier,
+    # larger PRs used up the 100 KB long before reaching anything the PII gate objects to.
+    print("\n== the artifact must not ship the raw repository diff Playwright embeds ==")
+    leak = "diff --git a/fixture.md b/fixture.md\n" + ("+leaked line\n" * 50)
+    _, _, pw = generate(playwright_counts={
+        "config": {"metadata": {"gitDiff": leak,
+                                "gitCommit": {"hash": "0" * 40, "subject": "provenance must survive"},
+                                "ci": {"buildHref": "https://example.invalid/run/1"}}},
+        "stats": {"expected": 1, "unexpected": 0}})
+    if pw is None:
+        bad("the generator did not copy counts/playwright.json into the artifact at all")
+    elif "gitDiff" in ((pw.get("config") or {}).get("metadata") or {}):
+        bad("the artifact still carries Playwright's embedded repository diff (gitDiff)")
+    else:
+        ok("the embedded repository diff is stripped from counts/playwright.json")
+        prov = ((pw.get("config") or {}).get("metadata") or {}).get("gitCommit") or {}
+        if prov.get("subject") == "provenance must survive":
+            ok("commit provenance survives the strip; only the unbounded blob is dropped")
+        else:
+            bad("stripping the diff also removed the commit provenance that makes the report traceable")
 
     print()
     for n in notes:

@@ -436,6 +436,35 @@ def main() -> int:
     for name in os.listdir(counts_dir) if os.path.isdir(counts_dir) else []:
         shutil.copyfile(os.path.join(counts_dir, name), os.path.join(art, "counts", name))
 
+    # ---- strip the raw repository diff Playwright embeds in its JSON report ------------------------------
+    #
+    # On a pull_request event Playwright's git-info capture writes `config.metadata.gitDiff` — the PR's ENTIRE
+    # diff, truncated at 100,000 characters — into playwright.json, and that file is copied into the artifact
+    # verbatim. So the artifact has been shipping up to 100 KB of raw repository content while its own README
+    # promises "derived summaries only". It went unnoticed because the diff is truncated in path order: every
+    # earlier PR's 100 KB was used up long before it reached anything the hygiene gate objects to. A small PR
+    # is what finally let the whole diff through, and the gate refused it — correctly, and for the second-order
+    # reason rather than the first.
+    #
+    # Provenance is kept: the commit hash, subject and CI links stay. What is dropped is the unbounded blob,
+    # which is not evidence about this gate and cannot be bounded by review.
+    pw_path = os.path.join(art, "counts", "playwright.json")
+    if os.path.isfile(pw_path):
+        try:
+            with io.open(pw_path, encoding="utf-8") as f:
+                pw = json.load(f)
+            meta = (pw.get("config") or {}).get("metadata") or {}
+            if "gitDiff" in meta:
+                dropped = len(meta.pop("gitDiff") or "")
+                with io.open(pw_path, "w", encoding="utf-8", newline="\n") as f:
+                    json.dump(pw, f, indent=2)
+                    f.write("\n")
+                print("stripped %d chars of embedded repository diff from counts/playwright.json" % dropped)
+        except Exception as exc:  # noqa: BLE001
+            # A report we cannot parse is a report we cannot certify as clean. Fail rather than ship it.
+            sys.stderr.write("could not sanitise counts/playwright.json: %s\n" % exc)
+            return 2
+
     # The complete dimensional acceptance matrix, as its own artifact file.
     if accept_matrix_md:
         with open(os.path.join(art, "PHASE3_ACCEPTANCE_MATRIX.md"), "w", encoding="utf-8", newline="\n") as f:
