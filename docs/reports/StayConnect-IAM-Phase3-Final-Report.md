@@ -33,13 +33,24 @@
 
 ## 2. Current Phase and authorized scope
 
-- **Phase:** 3 — Stay Resolution / PMS Auth Context / Checkout Grace (DARK).
-- **Authorized scope:** the complete Phase-3 DARK software scope as one continuous execution stream on PR #6,
-  under the standing constraints: all Phase-3 flags OFF; PR #6 open and unmerged; zero persistent runtime
-  `iam_v2` privileges; no appliance, Production DB or live PMS contact; no `PS`/`PA`; no financial posting; no
-  paid-access implementation; both CIs green on the same pushed HEAD; never fabricate live evidence.
+- **Phase:** 3 — Stay Resolution / PMS Auth Context / Checkout Grace. **ACCEPTED AND CLOSED at verified DARK
+  maturity** (D16 / T0024). DARK and **not cut over**.
+- **Constraints that still stand:** all Phase-3 flags OFF; zero persistent runtime `iam_v2` privileges; no
+  `PS`/`PA`; no financial posting; no paid-access implementation; no Gate-P runtime grants; no IAM-v2 cutover;
+  no Phase 4; both CIs green on the same pushed HEAD; never fabricate live evidence.
+- **Live contact HAS occurred, under explicit Product-Owner authorization.** The appliance, the production site
+  database and the live PMS were contacted during Phase-3 live-dark execution and acceptance: Live Increment 9
+  on 2026-08-10 (§6b), its re-validation on 2026-08-11 (§6c), and the final closure. Migration 0010 is applied
+  and the accepted runtime candidate is deployed. Those results are recorded in §6b/§6c and in
+  `docs/evidence/Phase3-Final-Live-Acceptance-Record.md`.
+  > *Historical (superseded 2026-08-10).* Throughout the Phase-3 SOFTWARE-development period, up to and
+  > including the pre-live safety candidate, the standing constraints additionally included **"PR #6 open and
+  > unmerged"** and **"no appliance, Production DB or live PMS contact"**. Both were true for that period and
+  > were enforced by the gates of the day. The first ended with the authorized merge of PR #6; the second ended
+  > when Live Increment 9 was authorized and executed.
 - **PO authorization reference:** the Phase-3 execution directive and the eleven successive correction
-  directives against the Increment-7 Checkout subsystem, followed by the closing scorecard.
+  directives against the Increment-7 Checkout subsystem, the closing scorecard, the Live Increment-9
+  authorization and its re-validation, and the final acceptance decision **D16**.
 
 ## 2a. Where Phase 3 stands
 
