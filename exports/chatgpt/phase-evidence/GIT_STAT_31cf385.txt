@@ -1,0 +1,4 @@
+commit 31cf385c1230e0a345fa1ed3515f9919b51c1b3f
+Date:   Tue Aug 11 11:50:23 2026 +0300
+
+    Phase 3 (inventory_head): zero-stale truth sync â€” record current state as DATA, and make contradictions fail the gate

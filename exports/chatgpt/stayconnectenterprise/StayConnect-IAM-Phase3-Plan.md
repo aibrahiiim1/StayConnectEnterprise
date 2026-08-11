@@ -24,7 +24,9 @@ This plan governs implementation, tests, live-dark deployment and rollback. It i
 > The original approved requirements below (§0 onward) are unchanged — this section records what has been
 > BUILT against them, not a change to them.
 
-`PHASE-3 PRE-LIVE SAFETY CANDIDATE COMPLETE — LIVE INCREMENT-9 AUTHORIZATION REQUESTED (D14 authorized / T0015; D15 Option C executed; software candidate T0016; pre-live safety closure T0017; hard-boundary and durability correction T0018; write-ahead durability and monotonic security time T0019), DARK. Phase 3 is IN_PROGRESS: not accepted, not closed.`
+`PHASE-3 INCREMENT-9 DURABILITY CORRECTION CANDIDATE (D14 authorized / T0015; D15 Option C executed; software candidate T0016; pre-live safety closure T0017; hard-boundary and durability correction T0018; write-ahead durability and monotonic security time T0019; Increment-9 durability correction T0020; network-lifecycle correction T0021), DARK. Phase 3 is IN_PROGRESS: not accepted, not closed.`
+
+**Live Increment 9 was EXECUTED on 2026-08-10** against the authorized appliance: Item 1 read-only PMS verification **PASS**, Item 2 live-dark deployment **BLOCKED/PARTIAL** on the old deployed HEAD, Item 3 reboot persistence **FAIL** on the old deployed HEAD, Item 4 rollback rehearsal **functional PASS** with a false-PASS tooling defect since corrected, Item 5 flags-OFF DARK safety **PASS**, legacy live-session continuity **NOT PROVEN**. Migration 0010 **IS applied** on the site database (iam_v2 **63 tables / 0 rows**) and the corrected software is **not yet deployed**. The next step is Product-Owner authorization to re-run only the blocked Increment-9 subset against the corrected candidate.
 
 The software increments in this plan are **execution history**, not future work:
 
@@ -65,10 +67,19 @@ The software increments in this plan are **execution history**, not future work:
   before it will promote a Session, and refuses a fabricated, foreign, stale or contested origin.
 - An activation whose durable outcome **cannot be proven** holds only the provisional lease and is then failed
   closed and quarantined with a doubling backoff. It can never become permanent Internet access.
-- A **surgical live-dark nft foundation** (`cmd/phase3-foundation`) installs the Phase-3 set and rules into a
-  running ruleset in one nft transaction, proving legacy-authorization parity on both sides and rolling itself
-  back if it cannot. The cutover becomes flag-only **only after that install is performed and verified on the
-  unit** — not on the strength of the software alone.
+- **The current deployment architecture is `nftconverge` (ADR-0003).** `netd` reconciles the live ruleset
+  against a fresh render of the running binary on every start: when the live fingerprint matches, it executes
+  **no nft command at all**; when it differs, it applies the current render as one atomic transaction and
+  carries live authorization across inside it. The Phase-3 set and rules are part of that render, so they
+  arrive with the service and survive every restart and reboot. **No manual installation step is required or
+  permitted in the deployment or rollback procedure.**
+  > *Historical (implementation history, superseded).* A **surgical live-dark nft foundation**
+  > (`cmd/phase3-foundation`) was built to install the Phase-3 set and rules into a running ruleset in one nft
+  > transaction, proving legacy-authorization parity on both sides. Live Increment 9 showed that what it
+  > installed did not survive the next `netd` start, because boot reconciliation replayed a stored bundle
+  > rendered by an older binary. The tool remains as a **read-only diagnostic** (`inspect`) and invalidates
+  > netd's render marker if a structural `install`/`rollback` is ever run by hand; it is **retired from the
+  > deployment and rollback procedure**.
 - One **true full same-HEAD software gate** (`phase3-full-software-gate`) is green, with a downloadable,
   independently-verified evidence artifact — now including a **real-kernel contract suite** that runs the real
   `nft` and `tc` binaries with real packets in disposable Linux network namespaces. That suite is kernel
