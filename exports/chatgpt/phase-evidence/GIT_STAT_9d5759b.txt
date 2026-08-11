@@ -1,0 +1,4 @@
+commit 9d5759baee535f1669beea88c837c900ca738582
+Date:   Tue Aug 11 16:21:44 2026 +0300
+
+    Phase 3 (inventory_head): Â§2 no longer lists "no appliance, Production DB or live PMS contact" as a standing constraint
