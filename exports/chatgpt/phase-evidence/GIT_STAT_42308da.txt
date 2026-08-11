@@ -1,0 +1,4 @@
+commit 42308da5466d70e1821fee71920c60b80c12f47f
+Date:   Tue Aug 11 09:58:02 2026 +0300
+
+    Phase 3 network lifecycle (inventory_head): normalise the kernel ruleset comparison and re-anchor the mutation fixtures
