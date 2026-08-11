@@ -44,7 +44,10 @@ is covered by the disposable real-kernel suite.
 **PR #6 IS MERGED AND CLOSED.** The Product Owner authorized the merge on 2026-08-11 (decision **D17**,
 transition **T0025**) and PR #6 was merged into `master` as merge commit **`8a7230a7220e4c773bfb6399ce7774f31f20c906`**, whose second parent is
 the accepted delivery head `fb25fd43bb83478c7b56d0ed18593ea89faaa4e5`. The merge introduced no content — `master`'s tree is identical to the
-merged head's, and the runtime tree is byte-for-byte identical to the accepted candidate the appliance runs.
+merged head's, and at that moment the whole runtime tree was byte-for-byte identical to the accepted
+candidate the appliance runs. Post-closure remediation (T0026, T0027) has since changed Caddy deployment
+material and operational tooling under `deploy/` and `scripts/`; the accepted application/runtime binaries
+are unchanged.
 Merging changed the repository only: nothing was deployed, enabled or contacted. **No further Phase-3
 action is authorized.**
 

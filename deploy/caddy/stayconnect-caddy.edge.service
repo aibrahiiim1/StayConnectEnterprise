@@ -1,3 +1,14 @@
+# EDGE (Hotel Appliance) unit. Install as /etc/systemd/system/stayconnect-caddy.service.
+#
+# ROLE: this unit is for the EDGE only. Central Control Plane uses
+# deploy/caddy/stayconnect-caddy.central.service, which deliberately has NO ExecReload -
+# see the reload contract in deploy/caddy/README.md. Installing this Edge unit on Central
+# would restore an ExecReload that cannot work there, because Central runs Caddy with
+# `admin off` and `caddy reload` drives the admin API.
+#
+# Reload IS supported here: the Edge Caddyfile leaves the admin API on 127.0.0.1:2019, so
+# `systemctl reload` genuinely applies the new configuration.
+#
 # Drop into /etc/systemd/system/stayconnect-caddy.service and
 #   systemctl enable --now stayconnect-caddy
 #

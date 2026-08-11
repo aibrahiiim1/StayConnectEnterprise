@@ -89,4 +89,29 @@ portal.stayconnect.local {
 # network only. In production this vhost binds the appliance management IP
 # (e.g. https://172.21.15.30) — never a WAN or guest-LAN address. The UI
 # (Next.js :3100) proxies its own /api calls to edged (:8090) internally.
+# -------------------------------------------------------------------------
+# Central-only names: answer 404, do not proxy, do not look healthy.
+# -------------------------------------------------------------------------
+# These two names belong to the Central Control Plane and are NOT served by
+# this appliance. Removing their vhosts was correct, but it left Caddy with no
+# matching route, and Caddy's no-route default is an EMPTY HTTP 200 - which any
+# uptime check reads as "this host serves that name and it is healthy". A 200
+# for a surface that does not exist here is worse than the 502 it replaced,
+# because 502 at least looks like a fault.
+#
+# So the names are declared explicitly and refused explicitly. There is no
+# reverse_proxy here and there must never be one: the upstreams live on
+# Central, and a route whose upstream is not on this box does not belong on
+# this box.
+api.stayconnect.local, admin.stayconnect.local {
+	import security_headers
+	handle {
+		respond "Not served by this appliance. api./admin. are Central Control Plane surfaces." 404
+	}
+	log {
+		output file /var/log/caddy/unsupported-host.log
+		format json
+	}
+}
+
 import /etc/caddy/hotel-admin/vhost.caddy
