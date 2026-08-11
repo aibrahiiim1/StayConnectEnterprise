@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `5433a26`
-- **Provenance (generation HEAD = inventory_head):** `5433a264b798b3fbd9e7076704d568428b80302d`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `5b89c19`
+- **Provenance (generation HEAD = inventory_head):** `5b89c199d4462cc8e2d8ce7ec4574e8750d4d5fa`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 264
@@ -196,7 +196,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 Increment-9 correction (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 Increment-9 correction (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 Increment-9 correction (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_5433a26.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_5b89c19.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 Increment-9 correction (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
@@ -264,7 +264,7 @@
 | `scripts/ci/gojson_summary.py` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
 | `scripts/ci/kernel-netns-suite.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Increment-9 correction (inventory_head): ruleset structure is reconciled from the current render, not a stored bundle |
 | `scripts/ci/pg-gate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
-| `scripts/ci/phase3_evidence.py` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
+| `scripts/ci/phase3_evidence.py` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Increment-9 correction (inventory_head): the evidence artifact was still asserting restrictions that stopped being true |
 | `scripts/ci/step.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: fix the full-gate CI â€” make the step recorder exec-bit-independent |
 | `scripts/edge-migrate.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Increment-9 correction (inventory_head): keep the ledger-owner refusal message assertable, and gate the new acceptance path |
 | `scripts/phase3-evidence.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 Â§7: downloadable evidence artifact with a SHA-256 integrity manifest |
@@ -457,13 +457,13 @@
  ...R-0003-ruleset-structure-from-current-render.md |  101 +
  docs/context/StayConnect-IAM-Handoff.md            |   18 +-
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           |  779 +++++
+ docs/manifests/Phase3-change-manifest.md           |  781 +++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1508 ++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 289289 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 107770 bytes
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1510 ++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 289389 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 107766 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42244 bytes
- .../chatgpt/phase-evidence/GIT_STAT_5433a26.txt    |    4 +
+ .../chatgpt/phase-evidence/GIT_STAT_5b89c19.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
@@ -482,7 +482,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  779 +++++
+ .../Phase3-change-manifest.md                      |  781 +++++
  .../StayConnect-IAM-Handoff.md                     |   18 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   18 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   14 +-
@@ -531,7 +531,7 @@
  scripts/ci/gojson_summary.py                       |   58 +
  scripts/ci/kernel-netns-suite.sh                   |  262 ++
  scripts/ci/pg-gate.sh                              |   22 +
- scripts/ci/phase3_evidence.py                      |  541 ++++
+ scripts/ci/phase3_evidence.py                      |  575 ++++
  scripts/ci/step.sh                                 |   26 +
  scripts/edge-migrate.sh                            |  299 ++
  scripts/phase3-evidence.sh                         |  127 +
@@ -543,7 +543,7 @@
  tools/validate-pr-metadata.sh                      |  124 +
  tools/validate-project-state.sh                    |  161 +-
  tools/validate-transition-times.sh                 |   86 +
- 264 files changed, 53256 insertions(+), 547 deletions(-)
+ 264 files changed, 53296 insertions(+), 547 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -553,8 +553,8 @@ M  docs/reports/StayConnect-IAM-Phase3-Final-Report.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_2e3e322.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_5433a26.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_5433a26.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_5b89c19.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -567,6 +567,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+5b89c19 Phase 3 Increment-9 correction (inventory_head): the evidence artifact was still asserting restrictions that stopped being true
+5a245a3 Phase 3 Increment-9 correction (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 5433a26 Phase 3 Increment-9 correction (inventory_head): force the kernel carry-over test's converge with a change the renderer actually emits
 15f11b6 Phase 3 Increment-9 correction (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 2e3e322 Phase 3 Increment-9 correction (inventory_head): re-anchor the mutation fixtures and give the --apply-role test role the schema it migrates
