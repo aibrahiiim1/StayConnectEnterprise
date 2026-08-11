@@ -148,16 +148,37 @@ q "UPDATE iam_v2.stays SET posting_allowed=false WHERE id='$STAY';" >/dev/null
 rejects "C32" "posting_allowed=false blocks CHARGE" \
   "$(mkposting 'c3c30000-0000-0000-0000-000000000001' "$REV_OK" 'inv-noallow')" "POSTING_NOT_ALLOWED"
 q "UPDATE iam_v2.stays SET posting_allowed=true WHERE id='$STAY';" >/dev/null
-# The Phase-3 lifecycle guard may refuse a direct status edit. If it does, the stay never leaves IN_HOUSE and
-# a "blocked" assertion would be proving nothing — so the setup is VERIFIED before it is trusted.
-q "UPDATE iam_v2.stays SET status='CHECKED_OUT' WHERE id='$STAY';" >/dev/null
+# ---- Phase-3 lifecycle boundary (a SEPARATE claim from the financial gate) ----------------------------------
+# A raw status edit is refused because IN_HOUSE->CHECKED_OUT must SET effective_checkout_at in the same
+# statement. This proves the lifecycle guard; it proves NOTHING about charge_gate, so it is scored on its own.
+# Two independent structural refusals, scored separately because they prove different things.
+rejects "P3-LC" "checkout leaving posting_allowed=true refused (posting_only_in_house)" \
+  "UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id='$STAY';" "posting_only_in_house"
+rejects "P3-LC" "checkout without effective_checkout_at refused (checkedout_needs_boundary CHECK)" \
+  "UPDATE iam_v2.stays SET status='CHECKED_OUT', posting_allowed=false WHERE id='$STAY';" "checkedout_needs_boundary"
+
+# ---- C32 non-IN_HOUSE blocks CHARGE — via the APPROVED lifecycle transition ---------------------------------
+# The stay is checked out the way the Phase-3 contract says a checkout happens: status and
+# effective_checkout_at move together, guard enabled, nothing bypassed. Only then is the CHARGE attempted, so a
+# rejection is genuine evidence about charge_gate rather than a side effect of a refused fixture edit.
+# A real checkout moves all three together: status, effective_checkout_at and posting_allowed. The
+# posting_only_in_house CHECK makes posting_allowed=true with a non-IN_HOUSE status structurally
+# impossible, so the fixture must satisfy it exactly as production would.
+q "UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now(), posting_allowed=false WHERE id='$STAY';" >/dev/null
 NOWST="$(q "SELECT status FROM iam_v2.stays WHERE id='$STAY';")"
 if [ "$NOWST" = "CHECKED_OUT" ]; then
-  rejects "C32" "non-IN_HOUSE stay blocks CHARGE" \
+  ok "P3-LC" "approved checkout applied (status=CHECKED_OUT, effective_checkout_at set)"
+  rejects "C32" "genuinely non-IN_HOUSE stay blocks CHARGE" \
     "$(mkposting 'c3c30000-0000-0000-0000-000000000002' "$REV_OK" 'inv-notinhouse')" "POSTING_NOT_ALLOWED"
-  q "UPDATE iam_v2.stays SET status='IN_HOUSE' WHERE id='$STAY';" >/dev/null
+  # Reinstate through the approved path: CHECKED_OUT->IN_HOUSE must CLEAR effective_checkout_at and increment
+  # lifecycle_version exactly once. Restoring the fixture by any other route would itself be a bypass.
+  q "UPDATE iam_v2.stays SET status='IN_HOUSE', effective_checkout_at=NULL, posting_allowed=true, lifecycle_version=lifecycle_version+1 WHERE id='$STAY';" >/dev/null
+  BACK="$(q "SELECT status FROM iam_v2.stays WHERE id='$STAY';")"
+  if [ "$BACK" = "IN_HOUSE" ]; then ok "P3-LC" "approved reinstatement restored the fixture (CHECKED_OUT->IN_HOUSE)"
+  else no "P3-LC" "approved reinstatement" "stay left in $BACK"; fi
 else
-  ok "C32" "direct stay-status edit refused by the Phase-3 lifecycle guard (status stayed $NOWST); the CHARGE gate cannot be reached this way"
+  no "C32" "genuinely non-IN_HOUSE stay blocks CHARGE" \
+     "could not reach CHECKED_OUT through the approved transition (status=$NOWST) - the financial gate was NOT exercised"
 fi
 
 # ---- guards are still ENABLED (not silently disabled by this suite) -----------------------------------------
