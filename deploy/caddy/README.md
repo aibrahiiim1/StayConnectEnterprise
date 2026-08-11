@@ -48,6 +48,12 @@ declared in `Caddyfile.edge` purely to be refused with a 404 and a short explana
 anywhere. Without those blocks Caddy has no matching route and its default is an **empty HTTP 200**, which an
 uptime check reads as "this host serves that name and it is healthy" — worse than the 502 it replaced.
 
+That block deliberately declares **no `log { output file … }`**. Caddy runs as the `caddy` user, and a
+`caddy validate` run as **root** instantiates the log writer and leaves the new file root-owned; the
+service then cannot open it and *every* start fails with `setting up custom log …: opening log writer`.
+If you add a site that does need its own log file, create it first with
+`install -o caddy -g caddy -m 0640 /dev/null /var/log/caddy/<name>.log`.
+
 ## What this gives you
 
 | Public host           | Terminates at Caddy → forwards to |

@@ -1,4 +1,0 @@
-commit 4ec2a8dee8a55601fa94ab582cd2f9db872c6917
-Date:   Tue Aug 11 21:24:34 2026 +0300
-
-    Ratify T0027 state, renew the appliance licence to 2027-08-08, make the Central reload contract honest (T0028)
