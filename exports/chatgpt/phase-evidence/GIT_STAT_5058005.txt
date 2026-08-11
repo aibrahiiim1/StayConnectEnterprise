@@ -1,4 +1,0 @@
-commit 5058005b314be9b21b8131000bafc9676333ee1c
-Date:   Wed Aug 12 00:55:24 2026 +0300
-
-    Phase-4 reconciliation checkpoint: measured schema baseline + current-state correction

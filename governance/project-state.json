@@ -190,8 +190,8 @@
   ],
   "prohibited_actions": [
     "Implementing any Phase beyond the authorized Phase 4 scope (Phase 5, 6 or 7)",
-    "Any PMS financial posting, FIAS PS transaction, Posting Engine, posting outbox/worker, charge retry, financial UNKNOWN handling, or any executable PS sender / dormant financial worker / hidden Posting path",
-    "Payments/Stripe/refunds/programmatic reversal/settlement execution; guest paid access",
+    "Any REAL PMS financial posting or FIAS PS transmission to a live PMS; any StayConnect-caused real PA financial acceptance; any real guest Folio debit; any financial egress from a DARK worker; any Phase-4 feature-flag enablement; any charge retry that reaches a live PMS; any automatic retry out of UNKNOWN; any hidden or second Posting path outside the single audited engine. NOTE: implementing and DARK-testing the Phase-4 Posting Engine, posting outbox/worker and financial UNKNOWN handling IS AUTHORIZED under D18/T0029 -- what is prohibited is real financial egress and enablement, not the existence of the authorized software. A DARK worker must carry a positive fail-closed proof that it cannot emit PMS or payment-provider traffic while flags are OFF.",
+    "Any REAL payment-provider CHARGE or REFUND (Stripe or otherwise); real settlement execution that moves money; programmatic reversal in any form (capability remains false in v1); implicit FX conversion; real paid guest access; PMS financial onboarding for Hotel ID 2. NOTE: implementing and DARK-testing the Phase-4 payment/settlement boundary with no provider egress IS AUTHORIZED under D18/T0029.",
     "IAM-v2 production authentication cutover; production iam_v2 runtime reads/writes; granting any iam_v2 DML privilege to a runtime service role; DSN/search_path routing to iam_v2",
     "Data migration into iam_v2; dual-read/dual-write; legacy IAM removal; enabling any Phase-3 feature flag on the appliance",
     "Central Control Plane changes; WAN/LAN/VLAN/DHCP changes; HA/appliance-topology changes",

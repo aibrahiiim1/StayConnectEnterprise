@@ -29,6 +29,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE = os.path.join(ROOT, "governance", "project-state.json")
+TRANSITIONS_DIR = os.path.join(ROOT, "governance", "transitions")
 
 # Surfaces that speak in the present tense about the project. Packs and exports are generated from these and
 # are checked by the pack validators; transition receipts are dated records and are deliberately excluded.
@@ -440,6 +441,98 @@ def main():
     if not stale_phase_hits:
         ok("no current surface calls a started phase not-started or unauthorized (checked %s)"
            % (", ".join(started) or "none"))
+
+    # ---- 8h. AUTHORIZATION-MODEL PARITY -----------------------------------------------------------------------------
+    #
+    # allowed_actions said "Execute the authorized Phase 4 ... Posting Engine, outbox lanes, UNKNOWN handling"
+    # while prohibited_actions two entries later still said "Posting Engine, posting outbox/worker, financial
+    # UNKNOWN handling" were forbidden. Both were true of their own phase and the file authorized and forbade
+    # the same software at once. Rule 8g did not see it: neither sentence calls a phase not-started.
+    #
+    # The distinction that matters is EGRESS and ENABLEMENT, not the existence of authorized software, so this
+    # rule refuses a prohibition that names the current phase's own deliverables WITHOUT qualifying itself as
+    # being about real traffic, enablement or a later phase.
+    cur_phase = str(state.get("current_phase", ""))
+    allowed = [str(a) for a in (state.get("allowed_actions") or [])]
+    prohibited = [str(a) for a in (state.get("prohibited_actions") or [])]
+
+    # (a) the current phase must not be forbidden outright.
+    # "beyond the authorized Phase N" is the CORRECT idiom — it forbids the phases AFTER N, not N itself —
+    # so only a prohibition on implementing N counts as a contradiction.
+    cur_forbidden = re.compile(r"(?<!beyond the authorized )implement\w*\s+(any\s+)?phase\s*"
+                               + re.escape(cur_phase) + r"\b", re.I)
+    for i, pa in enumerate(prohibited):
+        if cur_forbidden.search(pa):
+            bad("authorization-model-parity",
+                "prohibited_actions[%d] forbids implementing the CURRENT authorized phase %s: %s"
+                % (i, cur_phase, " ".join(pa.split())[:150]), STATE)
+
+    # (b) a prohibition naming this phase's own deliverables must say it is about REAL traffic/enablement
+    deliverables = re.compile(r"posting engine|posting outbox|outbox/worker|outbox worker|"
+                              r"financial unknown handling|settlement execution", re.I)
+    qualifier = re.compile(r"\breal\b|egress|enablement|enabl\w+|live pms|guest folio|provider|"
+                           r"authorized under|is authorized|note:", re.I)
+    for i, pa in enumerate(prohibited):
+        if deliverables.search(pa) and not qualifier.search(pa):
+            bad("authorization-model-parity",
+                "prohibited_actions[%d] forbids this phase's own authorized deliverables without limiting "
+                "itself to real traffic or enablement: %s" % (i, " ".join(pa.split())[:150]), STATE)
+
+    # (c) an unauthorized future phase must not appear in allowed_actions
+    unauth = sorted(n for n, ph in (state.get("phases") or {}).items()
+                    if isinstance(ph, dict) and ph.get("status") == "NOT_STARTED")
+    for n in unauth:
+        pat = re.compile(r"(execute|implement)\w*\s+(the\s+)?(authorized\s+)?phase\s*" + re.escape(n) + r"\b", re.I)
+        for i, aa in enumerate(allowed):
+            if pat.search(aa):
+                bad("authorization-model-parity",
+                    "allowed_actions[%d] permits executing phase %s, which is NOT_STARTED/unauthorized: %s"
+                    % (i, n, " ".join(aa.split())[:150]), STATE)
+
+    # (d) current_phase_plan must belong to the current phase
+    plan_rel = str(state.get("current_phase_plan") or "")
+    if plan_rel:
+        m = re.search(r"Phase(\d+[AB]?)-", plan_rel) or re.search(r"Phase(\d+[AB]?)\b", plan_rel)
+        if m and m.group(1).upper() != cur_phase.upper():
+            bad("authorization-model-parity",
+                "current_phase_plan %r belongs to phase %s but current_phase is %s"
+                % (plan_rel, m.group(1), cur_phase), STATE)
+        elif not os.path.isfile(os.path.join(ROOT, plan_rel)):
+            bad("authorization-model-parity", "current_phase_plan %r does not exist" % plan_rel, STATE)
+
+    # (e) facts.phase must agree with current_phase
+    if facts.get("phase") and str(facts["phase"]) != cur_phase:
+        bad("authorization-model-parity",
+            "current_state_facts.phase=%r disagrees with current_phase=%r" % (facts["phase"], cur_phase), STATE)
+
+    # (f) a recorded phase authorization must name the decision and transition that granted it
+    dec, tr = facts.get("phase4_decision"), facts.get("phase4_transition")
+    if facts.get("phase4_status"):
+        if dec != "D18" or tr != "T0029":
+            bad("authorization-model-parity",
+                "Phase-4 authorization facts say decision=%r transition=%r; D18/T0029 granted it" % (dec, tr),
+                STATE)
+        elif not os.path.isfile(os.path.join(TRANSITIONS_DIR, "%s.json" % tr)):
+            bad("authorization-model-parity", "Phase-4 authorization cites %s but no receipt exists" % tr, STATE)
+
+    # (g) no current next-step may demand an authorization that already exists
+    needs_auth = re.compile(r"phase\s*4[^.]{0,80}(require|await|need)\w*[^.]{0,40}"
+                            r"(separate|explicit|product-owner)\s+authoriz", re.I)
+    for fname in ("next_authorized_action",):
+        val = str(state.get(fname) or "")
+        if needs_auth.search(val) and not HISTORY_MARKERS.search(val):
+            bad("authorization-model-parity",
+                "%s says Phase 4 still requires an authorization that D18/T0029 already granted: %s"
+                % (fname, " ".join(val.split())[:150]), STATE)
+    ns = str(facts.get("next_step") or "")
+    if needs_auth.search(ns) and not HISTORY_MARKERS.search(ns):
+        bad("authorization-model-parity",
+            "current_state_facts.next_step says Phase 4 still requires an authorization it already has: %s"
+            % " ".join(ns.split())[:150], STATE)
+
+    if not [f for f in failures if f[0] == "authorization-model-parity"]:
+        ok("the authorization model is self-consistent (phase %s authorized, its deliverables not forbidden, "
+           "no unauthorized phase permitted)" % cur_phase)
 
     # ---- 9. the rollback runbook must not promise authorization it cannot preserve -----------------------------------
     #

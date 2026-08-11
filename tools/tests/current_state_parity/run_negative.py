@@ -312,6 +312,54 @@ def _(d):
     io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
 
 
+# ---- authorization model: allowed and prohibited must agree ------------------------------------------------
+
+def _patch_list(d, key, value, front=True):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    lst = list(doc.get(key) or [])
+    lst.insert(0, value) if front else lst.append(value)
+    doc[key] = lst
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("the Posting Engine is authorized and prohibited at the same time", "authorization-model-parity")
+def _(d):
+    # The exact contradiction that shipped: allowed_actions authorized the Phase-4 Posting Engine while
+    # prohibited_actions, written for Phase 3, still forbade it by name.
+    _patch_list(d, "prohibited_actions",
+                "Any PMS financial posting, FIAS PS transaction, Posting Engine, posting outbox/worker, "
+                "charge retry, financial UNKNOWN handling")
+
+
+@case("an unauthorized future phase appears in allowed_actions", "authorization-model-parity")
+def _(d):
+    _patch_list(d, "allowed_actions", "Execute the authorized Phase 5 end-to-end")
+
+
+@case("current_phase_plan belongs to a different phase", "authorization-model-parity")
+def _(d):
+    patch_state(d, lambda s: s.replace(
+        '"current_phase_plan": "docs/architecture/StayConnect-IAM-Phase4-Plan.md"',
+        '"current_phase_plan": "docs/architecture/StayConnect-IAM-Phase3-Plan.md"', 1))
+
+
+@case("current_state_facts.phase disagrees with current_phase", "authorization-model-parity")
+def _(d):
+    patch_facts(d, "phase", "3")
+
+
+@case("the phase-4 authorization cites the wrong decision", "authorization-model-parity")
+def _(d):
+    patch_facts(d, "phase4_decision", "D99")
+
+
+@case("a next-step demands an authorization that already exists", "authorization-model-parity")
+def _(d):
+    patch_facts(d, "next_step",
+                "Phase 4 requires a separate explicit Product-Owner authorization before implementation.")
+
+
 @case("a transition receipt cites evidence that is not in the repository", "evidence-reference")
 def _(d):
     # The sandbox is a copy, so "not tracked in git" is asserted against the REAL repo index; citing a path
