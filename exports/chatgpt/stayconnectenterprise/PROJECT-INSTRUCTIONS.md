@@ -1,13 +1,13 @@
 # StayConnect Enterprise — ChatGPT Project Instructions
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0023 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0024 -->
 **Current phase:** 3 — PMS Stay Domain, STRICT Multi-PMS Resolution, Room Movement, Checkout Grace and Reinstatement
-**Current activity:** `PHASE_3_DARK_ACCEPTANCE_CANDIDATE`
-**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 IN_PROGRESS · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
+**Current activity:** `PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 NOT_STARTED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 63 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Obtain the Product-Owner FINAL ACCEPTANCE decision for Phase 3 at DARK maturity and the separate decision on merging PR #6, which remains open and unmerged. The blocked Live Increment-9 subset was re-validated on 2026-08-11 and the two findings it produced (the pre-nftconverge rollback boundary and the missing pmsd DARK service) are closed and live-verified. Legacy live-session continuity remains NOT PROVEN because it requires a real legacy guest online and nothing was fabricated to close it. Phase 3 is IN_PROGRESS, DARK, NOT accepted and NOT closed until that decision.
+**Single next authorized action:** Product-Owner decision on merging PR #6.
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D15`.
 <!-- END GENERATED PROJECT STATE -->
 

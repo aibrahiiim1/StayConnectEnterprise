@@ -1,16 +1,24 @@
 # StayConnect IAM — Phase 3 Final Report (Stay Resolution, PMS Auth Context, Checkout Grace)
 
-> **Status: DARK ACCEPTANCE CANDIDATE.** The complete Phase-3 software scope is
-> implemented, tested and delivered green. Every Phase-3 flag is OFF and PR #6 is open and unmerged.
+> **Status: ACCEPTED AND CLOSED AT VERIFIED DARK MATURITY.** Product-Owner decision **D16**, transition
+> **T0024**, 2026-08-11. Accepted runtime candidate **`7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4`** — the build
+> the appliance runs. Both CI gates were SUCCESS on that HEAD and its evidence artifact was independently
+> verified; the run and artifact identifiers are deliberately **not recorded here** — they are in the PR #6 body
+> and in `docs/evidence/Phase3-Final-Live-Acceptance-Record.md`, because a committed report that cites the run
+> its own commit triggers is always a round behind.
 >
-> **Live Increment 9 was executed on 2026-08-10** and produced a real blocker: the Phase-3 nft structure did not
-> survive a `netd` restart or a reboot, because boot reconciliation replayed a stored bundle rendered by an older
-> binary. That blocker was corrected (rows 30ao–30as) and **RE-VALIDATED LIVE on 2026-08-11** — §6c records the
-> blocked subset re-run on the corrected candidate, every item PASS. §6b keeps the original run's verdicts,
-> including the item that FAILED then, exactly as observed.
+> **DARK and NOT CUT OVER.** All Phase-3 flags OFF, legacy public-schema IAM remains the sole production
+> authority, iam_v2 dark at 63 tables / 0 rows, zero runtime `iam_v2` grants, no financial posting, no paid
+> access. Acceptance is at DARK maturity **only**.
 >
-> **One dimension remains NOT PROVEN:** legacy live-session continuity, because no real legacy guest was online.
-> Nothing was fabricated to close it.
+> **Accepted limitation, NOT promoted to PASS:** legacy live-session continuity is **NOT PROVEN** — no real
+> legacy guest was available during the authorized live windows. Nothing was fabricated to close it.
+>
+> §6b preserves the ORIGINAL Increment-9 run exactly as observed, including the item that FAILED then. §6c
+> records the blocked subset re-validated live on 2026-08-11, every item PASS. Historical failures stay in the
+> record; only their current interpretation changes.
+>
+> **PR #6 remains OPEN and UNMERGED** — its merge is a separate Product-Owner decision.
 
 ---
 
@@ -33,23 +41,16 @@
 - **PO authorization reference:** the Phase-3 execution directive and the eleven successive correction
   directives against the Increment-7 Checkout subsystem, followed by the closing scorecard.
 
-## 2a. Where this candidate stands
+## 2a. Where Phase 3 stands
 
-**Software evidence: complete for every dimension marked `PASS — SOFTWARE` in the Acceptance Matrix (§6a).**
+**ACCEPTED AND CLOSED at verified DARK maturity** (D16 / T0024, 2026-08-11). The complete Phase-3 software
+scope is implemented and every dimension in the Acceptance Matrix (§6a) carries a verdict.
 
-**Live Increment-9 evidence: PRODUCED 2026-08-10, and it is mixed.** Item 1 (read-only PMS) and Item 5
-(flags-OFF DARK safety) passed. Item 2 is BLOCKED/PARTIAL and Item 3 FAILED, both for the same single cause —
-ruleset structure was reconstructed from a stored artifact instead of from the current binary. Item 4 passed
-functionally but exposed a false-PASS in the rollback tooling. Legacy live-session continuity is **NOT PROVEN**,
-because no legacy guest was online during the window; no guest or session state was fabricated to close that
-gap. Every live result in §6b was observed on the appliance; every other result in this report is software or
-disposable-environment evidence and is labelled as such.
-
-The Hotel-Admin operator surfaces once listed in `docs/PHASE3_SCOPE_AMENDMENT_PROPOSAL.md` are no longer
-pending a decision: the Product Owner **rejected the proposal (D15, Option C) with no scope reduction**, and
-they were built and are `PASS — SOFTWARE` in the matrix.
-
-**Phase 3 is NOT marked accepted or closed by this report.**
+The accepted runtime candidate `7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4` is deployed and running on the
+appliance. Live Increment 9 (§6b) and its re-validation (§6c) are complete; the two findings the re-validation
+produced are closed and live-verified. One dimension remains **NOT PROVEN** and is accepted as such: legacy
+live-session continuity, because no real legacy guest was available. No guest, session or authorization was
+ever fabricated to close it.
 
 ## 3. What was implemented
 
@@ -498,24 +499,33 @@ that gap.
 
 ## 7. Production and guest impact
 
-**No guest was affected, and no financial or PMS state was changed.** This is no longer a claim of zero
-contact: Live Increment 9 (§6b) deliberately contacted the appliance and its site database under Product-Owner
-authorization.
+**No guest was affected, and no financial or PMS state was changed.**
 
-What that means precisely, as of this candidate:
+What is true at acceptance:
 
-- **The appliance was changed.** Migration 0010 is **applied** on `stayconnect_site` (63 iam_v2 tables, 0 rows),
-  the delivery-HEAD binaries are installed and running, and `pmsd` / `phase3-foundation` are present with no
-  systemd unit. The pre-Phase-3 binaries are retained as `*.bak-inc9` and a pre-migration dump
-  (`pre-phase3-inc9-20260810-222054.dump`, 4.87 MB, 735 TOC entries) is on the appliance.
-- **The PMS was read, never written.** One read-only FIAS session (twice), link-management and read-only
-  subscription records only. No `PS`, no `PA`, no posting, no folio change.
-- **No guest lost or gained access.** `auth_ipv4` was empty before, during and after; the captive DNAT rules and
-  rule counts are unchanged.
-- **Phase 3 remains DARK.** All six flags OFF, `phase3_auth_ipv4` empty (and, until the correction in this
-  candidate is deployed, absent after each restart), iam_v2 0 rows, PR #6 open and unmerged.
-- **The correction in this candidate is NOT deployed.** The appliance still runs the binaries from
-  `83449200a8aca7018fac5b38a96b3a1aafc66ba2`.
+- **The appliance runs the accepted candidate** `7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4`, verified on disk and
+  in `/proc/<pid>/exe` for all five runtime services, after a controlled reboot.
+- **Migration 0010 is applied**; iam_v2 is dark at **63 tables / 0 rows** with 4 controlled functions and
+  **zero** grants to any `svc_*` role. `pms_postings`, `posting_outbox` and `payment_transactions` are all 0.
+- **The nft deployment/reboot architecture is `nftconverge`** (ADR-0003): `netd` reconciles the live ruleset
+  against a fresh render of the running binary, executing nothing when it already matches. The manual surgical
+  `phase3-foundation` install is **retired** from deployment and rollback and survives only as a read-only
+  diagnostic. `phase3_auth_ipv4` is present and empty; legacy `auth_ipv4` is present and empty.
+- **The DARK `pmsd` service is installed** under a dedicated least-privilege account, enabled, reboot-verified:
+  it starts, finds every flag OFF, opens no PMS socket, performs no Phase-3 SQL, exits 0 and does not
+  restart-loop.
+- **Rollback across the pre-`nftconverge` boundary** is automatically permitted only when live legacy
+  authorization is empty; a populated or unreadable set fails safe, changes nothing, and names the operator
+  action. There is no force path.
+- **The PMS was read, never written** — one authorized read-only FIAS session on 2026-08-10. No `PS`, no `PA`,
+  no posting, no folio change.
+- **No guest lost or gained access.** `auth_ipv4` was empty before, during and after every authorized window.
+- **Phase 3 is DARK and NOT CUT OVER.** All six flags OFF; legacy public-schema IAM remains the sole production
+  authority. PR #6 open and unmerged.
+
+The appliance WAS deliberately contacted under Product-Owner authorization during Increment 9 and its
+re-validation — that is recorded in §6b and §6c rather than denied here. The acceptance/closure round itself
+required and performed **no appliance action at all**.
 
 ## 8. Rollback status
 

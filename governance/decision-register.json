@@ -56,6 +56,23 @@
         "docs/",
         ".github/"
       ]
+    },
+    {
+      "id": "D16",
+      "title": "PHASE 3 ACCEPTED AND CLOSED AT VERIFIED DARK MATURITY by the Product Owner (2026-08-11). Accepted live/runtime candidate 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4, which is the build the appliance runs. Accepted evidence: complete Phase-3 software scope implemented; Phase 3 Software CI 31484446685 SUCCESS and Project Governance CI 31484446661 SUCCESS on that HEAD; evidence artifact 9098688283 independently verified (18/18 files, integrity root f97c51654628a469ba53e8bc7555224446ee9d50562943dea8a533944040b3f8); migration 0010 applied with iam_v2 at 63 tables / 0 rows; all six Phase-3 flags OFF; zero runtime iam_v2 grants to any svc_ role; current-render nft convergence live-verified; a normal netd restart live-verified to issue NO structural nft mutation; reboot reconstruction and idempotence live-verified; unapplied Hotel-Admin draft isolation live-verified; binary rollback and corrected-candidate redeployment verified on disk and in /proc/<pid>/exe; the pre-nftconverge rollback compatibility boundary fail-safe with no force path; the DARK pmsd service installed under a dedicated least-privilege account, reboot-verified, opening no PMS socket and performing no Phase-3 SQL while flags are OFF; and the final DARK safety proof PASS. ACCEPTED LIMITATION, recorded permanently and NOT promoted to PASS: legacy live-session continuity = NOT PROVEN -- no real legacy guest was available during the authorized live windows. It is accepted for DARK maturity because no test state was fabricated and the populated-session behaviour is covered by the disposable real-kernel suite; it may be observed opportunistically later, and that observation does not by itself reopen Phase 3 unless it reveals a real defect. ACCEPTANCE IS AT DARK MATURITY ONLY: it does not authorize IAM-v2 cutover, Phase-3 feature enablement, PMS financial posting, paid access, Gate-P runtime grants, or Phase 4. PR #6 remains OPEN and UNMERGED; its merge is a separate Product-Owner decision and is the only next authorized action.",
+      "status": "ACTIVE",
+      "effective": "2026-08-11",
+      "supersedes": [],
+      "authoritative_document": "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+      "affected": [
+        "data-plane/",
+        "hotel-admin/",
+        "governance/",
+        "docs/",
+        "scripts/",
+        "deploy/",
+        ".github/"
+      ]
     }
   ]
 }

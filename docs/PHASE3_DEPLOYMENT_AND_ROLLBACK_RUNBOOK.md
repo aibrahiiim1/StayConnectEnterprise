@@ -328,9 +328,21 @@ re-run §3.
 
 **5a-bis. There is no separate nft rollback step, and that is deliberate.**
 
-Restoring the previous release restores the previous renderer, and the next `netd` start reconciles the live
-ruleset to whatever that renderer produces — carrying live authorization across the change. The ruleset
-follows the binaries automatically; there is nothing to undo by hand.
+Restoring the previous release restores the previous renderer, and the next `netd` start brings the live
+ruleset in line with whatever that renderer produces. The ruleset follows the binaries automatically; there is
+nothing to undo by hand.
+
+**Whether live authorization survives that change depends entirely on the target**, and the boundary above is
+what decides it — this paragraph does not override it:
+
+- a **convergence-capable** target reconciles, so authorization is carried across;
+- a **pre-`nftconverge`** target does not reconcile: it re-asserts the stored bundle, which begins with
+  `delete table`, so it can only be started when the live authorization set is **empty** — and
+  `scripts/binary-rollback.sh` refuses it otherwise, before replacing anything.
+
+An earlier version of this paragraph said the ruleset simply follows the binaries and left it there, which read
+as a promise that every rollback preserves authorization. It does not, and the boundary exists precisely
+because it does not.
 
 Do **not** run `phase3-foundation rollback` as part of a release rollback. It is a diagnostic tool, not a
 deployment step, and running it on a converged appliance removes structure the running renderer will simply

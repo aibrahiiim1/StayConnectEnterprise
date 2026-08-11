@@ -102,8 +102,22 @@ def main():
                 bad("facts-coherence", "live_increment9_executed is true but %s is false" % k, STATE)
     if facts.get("migration_0010_applied_production") and facts.get("iam_v2_tables") == 49:
         bad("facts-coherence", "migration 0010 recorded as applied while iam_v2_tables is still 49", STATE)
-    if facts.get("accepted") or facts.get("closed"):
-        bad("facts-coherence", "Phase 3 is recorded as accepted/closed; every other surface says IN_PROGRESS", STATE)
+    # accepted/closed is a real state, not an impossible one — but it must agree with the phase record it
+    # describes. This rule used to reject acceptance outright, which was correct only while acceptance could not
+    # have happened; leaving it that way would have made the true final state unrepresentable.
+    if facts.get("accepted") != facts.get("closed"):
+        bad("facts-coherence", "accepted=%r and closed=%r disagree" % (facts.get("accepted"), facts.get("closed")), STATE)
+    if facts.get("accepted") and facts.get("closed"):
+        ph = (state.get("phases") or {}).get("3") or {}
+        if ph.get("status") != "ACCEPTED_AND_CLOSED":
+            bad("facts-coherence",
+                "facts say Phase 3 is accepted and closed but phases.3.status is %r" % ph.get("status"), STATE)
+        if "ACCEPTED_AND_CLOSED" not in state.get("current_activity", ""):
+            bad("facts-coherence",
+                "facts say Phase 3 is accepted and closed but current_activity is %r" % state.get("current_activity"), STATE)
+        for k in ("accepted_decision", "accepted_transition", "accepted_runtime_head", "accepted_at_maturity"):
+            if not facts.get(k):
+                bad("facts-coherence", "acceptance is recorded without %s" % k, STATE)
     if not failures:
         ok("the recorded facts are internally coherent")
 
@@ -217,6 +231,86 @@ def main():
         if not [f for f in failures if f[0] == "nft-architecture-parity"]:
             ok("no current surface requires the retired surgical-foundation step (architecture: %s)"
                % facts.get("nft_deployment_architecture"))
+
+    # ---- 8. ACCEPTANCE PARITY ---------------------------------------------------------------------------------------
+    #
+    # The Governance gate went green while current_maturity said an authorization was awaited, phase3_execution.stage
+    # said migration 0010 was undeployed, the Final Report described the surgical foundation as the deployment
+    # mechanism, the lower PR body said evidence was pending, and the rollback runbook promised that every previous
+    # release carries authorization across. Each was a superseded statement wearing the present tense.
+    if facts.get("accepted") and facts.get("closed"):
+        # (a) nothing current may still call Phase 3 a candidate / in progress / not accepted
+        not_accepted = re.compile(
+            r"phase[- ]?3 is (not accepted|in_progress|a candidate)|"
+            r"NOT accepted|not yet accepted|"
+            r"dark acceptance candidate|increment-9 durability correction candidate|"
+            r"pending the product owner'?s? final",
+            re.I)
+        for rel in DOC_SURFACES:
+            text = load_surface(rel)
+            if text is None:
+                continue
+            for hit in scan(text, not_accepted):
+                bad("acceptance-parity", "still presents Phase 3 as unaccepted/in-progress: %s" % hit, rel)
+        if not [f for f in failures if f[0] == "acceptance-parity"]:
+            ok("no current surface still presents Phase 3 as unaccepted or in progress")
+
+        # (b) the corrected software IS deployed; nothing current may say otherwise
+        undeployed = re.compile(
+            r"corrected software is \*{0,2}not( yet)? deployed|"
+            r"is NOT deployed|still runs the binaries from|blocked subset (is |remains )?(still )?pending",
+            re.I)
+        for rel in DOC_SURFACES:
+            text = load_surface(rel)
+            if text is None:
+                continue
+            for hit in scan(text, undeployed):
+                bad("deployment-parity", "says the corrected software is not deployed: %s" % hit, rel)
+        if not [f for f in failures if f[0] == "deployment-parity"]:
+            ok("no current surface claims the corrected software is undeployed or work is still pending")
+
+        # (c) the accepted runtime head must be recorded and agree with itself
+        head = facts.get("accepted_runtime_head") or ""
+        if not re.fullmatch(r"[0-9a-f]{40}", head):
+            bad("acceptance-parity", "accepted_runtime_head is not a full commit id: %r" % head, STATE)
+        elif state.get("current_activity", "").endswith("ACCEPTED_AND_CLOSED_AT_DARK_MATURITY"):
+            ok("the accepted runtime head is recorded (%s)" % head[:12])
+
+        # (d) the accepted limitation must NOT have been promoted
+        promoted = re.compile("legacy live[- ]session continuity[^.]{0,40}" + chr(92) + "bPASS" + chr(92) + "b", re.I)
+        for rel in DOC_SURFACES:
+            text = load_surface(rel)
+            if text is None:
+                continue
+            for hit in scan(text, promoted):
+                bad("limitation-parity", "promotes the accepted NOT-PROVEN limitation to PASS: %s" % hit, rel)
+        if not [f for f in failures if f[0] == "limitation-parity"]:
+            ok("the accepted NOT-PROVEN limitation is not promoted to PASS anywhere")
+
+    # ---- 9. the rollback runbook must not promise authorization it cannot preserve -----------------------------------
+    #
+    # The boundary section says a pre-convergence target may not preserve authorization. A later generic paragraph
+    # said the ruleset simply follows the binaries, which reads as the opposite promise. Two true-sounding sentences
+    # in one document that contradict each other is exactly the failure this validator exists for.
+    runbook = load_surface("docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md")
+    if runbook:
+        promise = re.compile(r"carr(y|ies|ying) live authorization across|authorization is (always )?carried across the change", re.I)
+        offenders = []
+        for para, _ in paragraphs(runbook):
+            if not promise.search(para):
+                continue
+            if HISTORY_MARKERS.search(para):
+                continue
+            # a paragraph that also states the boundary/condition is not an unconditional promise
+            if re.search(r"depends entirely on the target|convergence-capable|empty|refus|boundary", para, re.I):
+                continue
+            offenders.append(" ".join(para.split())[:180])
+        for hit in offenders:
+            bad("rollback-promise-parity",
+                "promises that rollback carries authorization across without stating the boundary: %s" % hit,
+                "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md")
+        if not offenders:
+            ok("the rollback runbook never promises preserved authorization without stating the boundary")
 
     # ---- report ----------------------------------------------------------------------------------------------------
     if as_json:

@@ -24,9 +24,25 @@ This plan governs implementation, tests, live-dark deployment and rollback. It i
 > The original approved requirements below (§0 onward) are unchanged — this section records what has been
 > BUILT against them, not a change to them.
 
-`PHASE-3 INCREMENT-9 DURABILITY CORRECTION CANDIDATE (D14 authorized / T0015; D15 Option C executed; software candidate T0016; pre-live safety closure T0017; hard-boundary and durability correction T0018; write-ahead durability and monotonic security time T0019; Increment-9 durability correction T0020; network-lifecycle correction T0021), DARK. Phase 3 is IN_PROGRESS: not accepted, not closed.`
+`PHASE 3 = ACCEPTED AND CLOSED AT VERIFIED DARK MATURITY` — Product-Owner decision **D16**, transition
+**T0024**, 2026-08-11. Accepted runtime candidate **`7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4`**, which is the
+build the appliance runs.
 
-**Live Increment 9 was EXECUTED on 2026-08-10** against the authorized appliance: Item 1 read-only PMS verification **PASS**, Item 2 live-dark deployment **BLOCKED/PARTIAL** on the old deployed HEAD, Item 3 reboot persistence **FAIL** on the old deployed HEAD, Item 4 rollback rehearsal **functional PASS** with a false-PASS tooling defect since corrected, Item 5 flags-OFF DARK safety **PASS**, legacy live-session continuity **NOT PROVEN**. Migration 0010 **IS applied** on the site database (iam_v2 **63 tables / 0 rows**) and the corrected software is **not yet deployed**. The next step is Product-Owner authorization to re-run only the blocked Increment-9 subset against the corrected candidate.
+**DARK and NOT CUT OVER.** All Phase-3 flags OFF; legacy public-schema IAM remains the sole production
+authority; iam_v2 dark at **63 tables / 0 rows** with migration 0010 applied and **zero** runtime `iam_v2`
+grants. Accepted at DARK maturity **only** — no IAM-v2 cutover, no feature enablement, no PMS financial
+posting, no paid access, no `PS`/`PA`, no implicit FX, no programmatic reversal, no Gate-P grants, no Phase 4.
+
+The Live Increment-9 blocked subset was **re-validated live on 2026-08-11 with every item PASS**, the corrected
+software **is deployed**, and the two findings that run produced — the pre-`nftconverge` rollback boundary and
+the missing DARK `pmsd` service — are closed, gated and live-verified. Nothing from Increment 9 remains pending.
+
+**Accepted limitation, not promoted to PASS:** legacy live-session continuity is **NOT PROVEN** — no real legacy
+guest was available during the authorized live windows. Nothing was fabricated; the populated-session behaviour
+is covered by the disposable real-kernel suite.
+
+**PR #6 remains OPEN and UNMERGED.** Its merge is a separate Product-Owner decision and is the only next
+authorized action.
 
 The software increments in this plan are **execution history**, not future work:
 
@@ -92,12 +108,12 @@ false-PASS tooling defect since corrected, Item 5 (flags-OFF) PASS. Legacy live-
 **NOT PROVEN** — no legacy guest was online during the window.
 
 As a result: **migration 0010 IS applied** on the production site database (63 iam_v2 tables, **0 rows**), the
-appliance and the live PMS **were** contacted under that authorization, and the corrected software is **not
-yet deployed**. Standing restrictions that remain true: PR #6 open and unmerged, all Phase-3 flags OFF, zero
+appliance and the live PMS **were** contacted under that authorization, and the corrected software **is deployed** (accepted candidate `7c8b8cf0…`). Standing restrictions that remain true: PR #6 open and unmerged, all Phase-3 flags OFF, zero
 runtime `iam_v2` privileges, no PS/PA, no financial posting, no cutover, no Phase 4.
 
-**Still PENDING:** re-running the BLOCKED subset of Increment 9 against the corrected HEAD — see
-`governance/project-state.json` `next_authorized_action`.
+**No longer pending.** That re-validation was performed on 2026-08-11 with every item PASS, and Phase 3 has
+since been accepted and closed at DARK maturity (D16 / T0024). The only remaining action is the Product-Owner
+decision on merging PR #6.
 
 ---
 

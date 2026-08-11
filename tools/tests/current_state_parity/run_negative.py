@@ -60,6 +60,8 @@ def patch_facts(d, key, value):
     one the case is named for."""
     p = os.path.join(d, "governance/project-state.json")
     doc = json.load(io.open(p, encoding="utf-8"))
+    if doc["current_state_facts"].get(key) == value:
+        raise AssertionError("mutation changed nothing: %s is already %r" % (key, value))
     doc["current_state_facts"][key] = value
     io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
 
@@ -148,7 +150,7 @@ def _(d):
 @case("current_activity disagrees with the recorded facts", "activity-parity")
 def _(d):
     patch_state(d, lambda s: s.replace(
-        '"current_activity": "PHASE_3_DARK_ACCEPTANCE_CANDIDATE",',
+        '"current_activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY",',
         '"current_activity": "PHASE_3_SOMETHING_ELSE_ENTIRELY",', 1))
 
 
@@ -157,9 +159,53 @@ def _(d):
     patch_facts(d, "appliance_contact_occurred", False)
 
 
-@case("the facts claim Phase 3 is accepted while every other surface says IN_PROGRESS", "facts-coherence")
+@case("the facts deny acceptance while the phase record says ACCEPTED_AND_CLOSED", "facts-coherence")
 def _(d):
-    patch_facts(d, "accepted", True)
+    # accepted/closed must move together AND agree with the phase record. Half-retracting acceptance in the
+    # facts while phases.3 still says closed is the shape a partially-applied reversal would take.
+    patch_facts(d, "accepted", False)
+
+
+# ---- the acceptance-state contradictions this closure round had to fix ------------------------------------
+
+@case("a current surface still presents Phase 3 as an unaccepted candidate", "acceptance-parity")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+               "## Status" + chr(10)*2 + "Phase 3 is a DARK ACCEPTANCE CANDIDATE and is NOT accepted, pending the Product "
+               "Owner's final decision.")
+
+
+@case("a current surface still says the corrected software is not deployed", "deployment-parity")
+def _(d):
+    append_doc(d, "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+               "## Deployment" + chr(10)*2 + "The corrected software is not yet deployed; the appliance still runs the "
+               "binaries from the previous candidate and the blocked subset remains pending.")
+
+
+@case("the accepted NOT-PROVEN limitation is quietly promoted to PASS", "limitation-parity")
+def _(d):
+    append_doc(d, "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+               "| 99 | Legacy live-session continuity | **PASS** | verified during the closure round |")
+
+
+@case("the runbook promises rollback carries authorization across, without the boundary", "rollback-promise-parity")
+def _(d):
+    append_doc(d, "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
+               "## Rollback" + chr(10)*2 + "Restoring any previous release is safe: the next start reconciles the ruleset "
+               "and authorization is always carried across the change.")
+
+
+@case("acceptance is recorded without the decision that granted it", "facts-coherence")
+def _(d):
+    patch_facts(d, "accepted_decision", "")
+
+
+@case("facts claim acceptance while the phase record still says IN_PROGRESS", "facts-coherence")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    doc["phases"]["3"]["status"] = "IN_PROGRESS"
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
 
 
 def main():
