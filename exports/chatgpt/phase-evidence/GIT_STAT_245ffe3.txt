@@ -1,0 +1,4 @@
+commit 245ffe30a92c00b2172b623682ad1d9d70a0d6f8
+Date:   Tue Aug 11 14:35:31 2026 +0300
+
+    Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
