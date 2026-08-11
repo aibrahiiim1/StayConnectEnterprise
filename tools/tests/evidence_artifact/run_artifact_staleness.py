@@ -185,20 +185,27 @@ def main():
     leak = "diff --git a/fixture.md b/fixture.md\n" + ("+leaked line\n" * 50)
     _, _, pw = generate(playwright_counts={
         "config": {"metadata": {"gitDiff": leak,
-                                "gitCommit": {"hash": "0" * 40, "subject": "provenance must survive"},
+                                "somethingNewAndUnbounded": leak,
+                                "gitCommit": {"hash": "0" * 40, "subject": "provenance must survive",
+                                              "body": leak},
                                 "ci": {"buildHref": "https://example.invalid/run/1"}}},
         "stats": {"expected": 1, "unexpected": 0}})
     if pw is None:
         bad("the generator did not copy counts/playwright.json into the artifact at all")
     elif "gitDiff" in ((pw.get("config") or {}).get("metadata") or {}):
         bad("the artifact still carries Playwright's embedded repository diff (gitDiff)")
+    elif "somethingNewAndUnbounded" in ((pw.get("config") or {}).get("metadata") or {}):
+        bad("metadata is filtered by a blocklist: an unknown field survived, so the next reporter version "
+            "can reintroduce the leak under a new name")
     else:
         ok("the embedded repository diff is stripped from counts/playwright.json")
         prov = ((pw.get("config") or {}).get("metadata") or {}).get("gitCommit") or {}
-        if prov.get("subject") == "provenance must survive":
-            ok("commit provenance survives the strip; only the unbounded blob is dropped")
-        else:
+        if prov.get("subject") != "provenance must survive":
             bad("stripping the diff also removed the commit provenance that makes the report traceable")
+        elif "body" in prov:
+            bad("gitCommit.body survived; a commit message is unbounded text and is not needed for provenance")
+        else:
+            ok("commit provenance survives the strip, and only the allowlisted fields do")
 
     print()
     for n in notes:

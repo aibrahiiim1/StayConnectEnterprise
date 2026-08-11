@@ -448,18 +448,42 @@ def main() -> int:
     #
     # Provenance is kept: the commit hash, subject and CI links stay. What is dropped is the unbounded blob,
     # which is not evidence about this gate and cannot be bounded by review.
+    # Dropping `gitDiff` by name is a blocklist, and a blocklist is the wrong shape here: the reporter decides
+    # what it puts in `metadata`, a version bump can add another unbounded field, and the artifact would carry
+    # it until something happened to notice. So `metadata` is reduced to an ALLOWLIST of the provenance this
+    # artifact actually needs — which run, which commit — and everything else goes, named or not.
+    PW_METADATA_KEEP = {
+        "ci": ("commitHref", "commitHash", "prHref", "prBaseHash", "buildHref"),
+        "gitCommit": ("shortHash", "hash", "subject"),
+        "actualWorkers": None,   # a scalar; kept whole
+    }
     pw_path = os.path.join(art, "counts", "playwright.json")
     if os.path.isfile(pw_path):
         try:
             with io.open(pw_path, encoding="utf-8") as f:
                 pw = json.load(f)
-            meta = (pw.get("config") or {}).get("metadata") or {}
-            if "gitDiff" in meta:
-                dropped = len(meta.pop("gitDiff") or "")
+            meta = (pw.get("config") or {}).get("metadata")
+            if isinstance(meta, dict):
+                kept, dropped = {}, []
+                for key, value in meta.items():
+                    if key not in PW_METADATA_KEEP:
+                        dropped.append(key)
+                        continue
+                    fields = PW_METADATA_KEEP[key]
+                    if fields is None or not isinstance(value, dict):
+                        kept[key] = value
+                    else:
+                        kept[key] = {k: v for k, v in value.items() if k in fields}
+                        extra = [k for k in value if k not in fields]
+                        if extra:
+                            dropped.append("%s.{%s}" % (key, ",".join(sorted(extra))))
+                pw["config"]["metadata"] = kept
                 with io.open(pw_path, "w", encoding="utf-8", newline="\n") as f:
                     json.dump(pw, f, indent=2)
                     f.write("\n")
-                print("stripped %d chars of embedded repository diff from counts/playwright.json" % dropped)
+                if dropped:
+                    print("counts/playwright.json: kept only allowlisted metadata; dropped %s"
+                          % ", ".join(sorted(dropped)))
         except Exception as exc:  # noqa: BLE001
             # A report we cannot parse is a report we cannot certify as clean. Fail rather than ship it.
             sys.stderr.write("could not sanitise counts/playwright.json: %s\n" % exc)
@@ -647,8 +671,17 @@ manifest is checked against, and it is recorded in the final report.
             fp = os.path.join(dirpath, fn)
             text = read_text(fp)
             for pat in forbidden:
-                if pat.search(text):
-                    offenders.append(f"{os.path.relpath(fp, art)} :: {pat.pattern}")
+                m = pat.search(text)
+                if not m:
+                    continue
+                # Name the offending TEXT, not just the file. "counts/playwright.json :: Phase-?1A" says a
+                # 700 KB machine-generated report contains something, somewhere — which is a fact, not a lead.
+                # The surrounding characters are what turn it into one, and the pattern that fired here is
+                # about document names rather than secrets, so a short window is safe to print.
+                lo, hi = max(0, m.start() - 60), min(len(text), m.end() + 60)
+                window = " ".join(text[lo:hi].split())
+                offenders.append("%s :: %s\n      ...%s..."
+                                 % (os.path.relpath(fp, art), pat.pattern, window))
     if offenders:
         sys.stderr.write("EVIDENCE HYGIENE FAILED — forbidden content in the artifact:\n")
         sys.stderr.write("\n".join("  " + o for o in offenders) + "\n")
