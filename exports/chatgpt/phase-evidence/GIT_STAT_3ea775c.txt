@@ -1,0 +1,4 @@
+commit 3ea775c8a10f20f58556e50d4f0e23819e51d796
+Date:   Wed Aug 12 02:09:01 2026 +0300
+
+    Behaviourally prove the non-IN_HOUSE CHARGE gate through the approved Stay lifecycle

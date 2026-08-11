@@ -33,7 +33,7 @@ Every design choice below is downstream of that sentence.
 
 | WS | Workstream | Primary paths |
 |---|---|---|
-| **WS-A** | Migration `0011_phase4_financial_execution` — additive/reversible: DB-level financial constraints, one-way outcome transitions, partial unique indexes, `P#` sequence function | `data-plane/migrations/0011_*.{up,down}.sql` |
+| **WS-A** | Migration `0011_phase4_financial_execution` — **additive only, and ONLY the four measured gaps**: G1 RN+G# mandatory, G2 `base_currency`/`base_currency_exponent` on `pms_interface_revisions` plus posting currency equality, G3 derived posting-status view, C21 review concurrency column. **It must NOT create, replace, rename or weaken** the append-only triggers, one-way outcome trigger, charge gate, `P#` uniqueness, outbox one-active index or composite FK pinning — all measured present and behaviourally proven 30/30. See `Phase4-Financial-Schema-Gap-Audit.md`. | `data-plane/migrations/0011_*.{up,down}.sql` |
 | **WS-B** | Posting domain + fail-closed gates (identity pinning, RN+G#, folio strategy, currency equality, freshness) | `data-plane/internal/iamv2/posting_*.go` |
 | **WS-C** | `P#` allocator — durable atomic per-interface sequence, **not** epoch-seeded | `posting_pnumber.go` |
 | **WS-D** | Outbox + per-interface financial lanes, single-writer claim, bounded in-flight | `posting_outbox.go`, `posting_worker.go` |
@@ -50,6 +50,27 @@ Every design choice below is downstream of that sentence.
 
 This is the checklist the delivery must reproduce from scratch at the end. **No row may silently disappear.**
 Status is the *current* state at authorization time; all are `NOT_IMPLEMENTED` because the runtime is greenfield.
+
+**The C1–C38 matrix below has been SUPERSEDED by measurement.** Its original statuses assumed the financial
+schema was empty; the disposable-PG16 rebuild proved otherwise — 24 rows already have verified DB enforcement
+and 30/30 behavioural checks pass before any 0011. The authoritative, layered matrix now lives in
+[`Phase4-Financial-Schema-Gap-Audit.md`](Phase4-Financial-Schema-Gap-Audit.md), which records each requirement
+independently as DB_ALREADY_PRESENT_AND_VERIFIED / DB_GAP / RUNTIME_GAP / TEST_GAP / OPERATOR_SURFACE_GAP /
+NOT_APPLICABLE / BLOCKED_BY_PRODUCT_OWNER_DECISION.
+
+Summary of what measurement changed:
+
+- **24 rows** have DB enforcement already present and behaviourally proven (append-only postings, attempts,
+  events and review actions; the UNSET charge gate; the stay eligibility gate; `P#` uniqueness; the one-way
+  outcome transition; the PA status catalog; the §15 review catalog; one-active outbox; idempotency).
+- **Only four genuine DB gaps remain**: RN+G# mandatory (G1), interface base currency and posting currency
+  equality (G2 — the interface has **no currency column at all**, so this is larger than planned), the derived
+  posting-status projection (G3), and a review concurrency column (C21).
+- **The Go runtime is entirely absent** — every requirement keeps `RUNTIME_GAP` regardless of its DB layer. An
+  existing constraint is never an overall PASS.
+- C25 is NOT_APPLICABLE by contract; C38 is BLOCKED_BY_PRODUCT_OWNER_DECISION.
+
+The table below is retained only as the original pre-measurement decomposition of owners and test intent.
 
 | # | Contract requirement | Source | Owner (WS) | DB enforcement | Test | Operator surface | Status |
 |---|---|---|---|---|---|---|---|
