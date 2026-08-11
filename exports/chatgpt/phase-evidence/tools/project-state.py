@@ -405,18 +405,38 @@ def cmd_validate(deep=True, manifest_equality=True):
     if cp == "3":
         p3 = st["phases"].get("3", {}).get("status")
         p3x = st.get("phase3_execution", {}) or {}
-        # Phase 3 IN_PROGRESS requires the D14 authorization + T0015 start transition, coherently pointed.
-        if p3 == "IN_PROGRESS":
+        # AUTHORIZATION PROVENANCE OUTLIVES THE PHASE.
+        #
+        # These guards used to apply only while Phase 3 was IN_PROGRESS, so closing the phase switched them
+        # off — and two mutation cases that had always been caught (D14 removed from the register; the
+        # authorization transition repointed away from T0015) silently started surviving. That is backwards:
+        # once a phase is accepted and closed its authorization becomes permanent record, and the question
+        # "who authorized this, and under which transition" must stay answerable forever, not only while the
+        # work is in flight.
+        if p3 in ("IN_PROGRESS", "ACCEPTED_AND_CLOSED"):
+            where = "is IN_PROGRESS" if p3 == "IN_PROGRESS" else "is ACCEPTED_AND_CLOSED"
             if "D14" not in dmap:
-                fail("Phase 3 is IN_PROGRESS but decision D14 is not in the register")
+                fail("Phase 3 %s but decision D14 (its authorization) is not in the register" % where)
             if not os.path.isfile(os.path.join(TRANSITIONS, "T0015.json")):
-                fail("Phase 3 is IN_PROGRESS but start transition T0015 is missing")
+                fail("Phase 3 %s but start transition T0015 is missing" % where)
             if p3x.get("authorization_decision") != "D14":
                 fail("phase3_execution.authorization_decision must be D14")
             if p3x.get("authorization_transition_id") != "T0015":
                 fail("phase3_execution.authorization_transition_id must be T0015")
             if p3x.get("transition_id") != "T0015":
-                fail("phase3_execution.transition_id must point at T0015 while Phase 3 is in progress")
+                fail("phase3_execution.transition_id must point at T0015 (the authorization it was started under)")
+
+        # A CLOSED Phase 3 must additionally carry the decision and receipt that CLOSED it, and must not have
+        # been closed without them.
+        if p3 == "ACCEPTED_AND_CLOSED":
+            facts = st.get("current_state_facts") or {}
+            dec, tr = facts.get("accepted_decision"), facts.get("accepted_transition")
+            if not dec or dec not in dmap:
+                fail("Phase 3 is ACCEPTED_AND_CLOSED but its acceptance decision (%r) is not in the register" % dec)
+            if not tr or not os.path.isfile(os.path.join(TRANSITIONS, "%s.json" % tr)):
+                fail("Phase 3 is ACCEPTED_AND_CLOSED but its acceptance transition (%r) has no receipt" % tr)
+            if not re.fullmatch(r"[0-9a-f]{40}", str(facts.get("accepted_runtime_head") or "")):
+                fail("Phase 3 is ACCEPTED_AND_CLOSED but no accepted runtime HEAD is recorded")
         # scope: prohibited must forbid Phase 4+ and must NOT forbid implementing Phase 3.
         for pa in prohibited:
             s = str(pa)

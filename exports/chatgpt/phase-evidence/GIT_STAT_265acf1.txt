@@ -1,4 +1,0 @@
-commit 265acf118bbc0849be0552f0ceb30cdffe5e4ae8
-Date:   Tue Aug 11 14:47:42 2026 +0300
-
-    Phase 3 (inventory_head): teach the PR-metadata gate that acceptance is a real state

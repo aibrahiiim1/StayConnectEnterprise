@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `86c52e4`
-- **Provenance (generation HEAD = inventory_head):** `245ffe30a92c00b2172b623682ad1d9d70a0d6f8`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `265acf1`
+- **Provenance (generation HEAD = inventory_head):** `265acf118bbc0849be0552f0ceb30cdffe5e4ae8`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/3-stay-resolution-grace`
 - **Remote branch:** `origin/phase/3-stay-resolution-grace`
 - **Changed files:** 274
@@ -199,7 +199,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_245ffe3.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_265acf1.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
@@ -208,7 +208,7 @@
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 DARK acceptance (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
@@ -283,8 +283,8 @@
 | `tools/tests/current_state_parity/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3 (inventory_head): ACCEPTED AND CLOSED at verified DARK maturity, with the audit chronology corrected |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 3 (inventory_head): ACCEPTED AND CLOSED at verified DARK maturity, with the audit chronology corrected |
 | `tools/validate-current-state-parity.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3 (inventory_head): ACCEPTED AND CLOSED at verified DARK maturity, with the audit chronology corrected |
-| `tools/validate-pr-metadata.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3 DARK acceptance (inventory_head): a rollback that cannot preserve authorization now refuses, and pmsd is actually deployed |
-| `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 3 DARK acceptance (inventory_head): a rollback that cannot preserve authorization now refuses, and pmsd is actually deployed |
+| `tools/validate-pr-metadata.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3 (inventory_head): teach the PR-metadata gate that acceptance is a real state |
+| `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `tools/validate-transition-times.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3 pre-live (inventory_head): trusted boot identity, semantic security-journal validation, and a corrected T0019 timestamp |
 
 ## Total diff statistics (`git diff --stat`)
@@ -473,10 +473,10 @@
  docs/manifests/Phase3-change-manifest.md           |  817 ++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
  .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1589 +++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 289090 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 108630 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 288918 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 108620 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 41913 bytes
- .../chatgpt/phase-evidence/GIT_STAT_245ffe3.txt    |    4 +
+ .../chatgpt/phase-evidence/GIT_STAT_265acf1.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
@@ -495,7 +495,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  824 ++++++
+ .../Phase3-change-manifest.md                      |  819 ++++++
  .../StayConnect-IAM-Handoff.md                     |   18 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   18 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   14 +-
@@ -560,10 +560,10 @@
  tools/tests/current_state_parity/run_negative.py   |  274 ++
  .../tests/project_state_validator/run_mutations.py |   73 +-
  tools/validate-current-state-parity.py             |  335 +++
- tools/validate-pr-metadata.sh                      |  183 ++
+ tools/validate-pr-metadata.sh                      |  202 ++
  tools/validate-project-state.sh                    |  161 +-
  tools/validate-transition-times.sh                 |   86 +
- 274 files changed, 56227 insertions(+), 557 deletions(-)
+ 274 files changed, 56241 insertions(+), 557 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -573,22 +573,22 @@ M  docs/reports/StayConnect-IAM-Phase3-Final-Report.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_245ffe3.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_86c52e4.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_245ffe3.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_265acf1.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/tools/validate-project-state.sh
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
-M  tools/validate-project-state.sh
+M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-245ffe3 Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
+265acf1 Phase 3 (inventory_head): teach the PR-metadata gate that acceptance is a real state
+ddbeccb Phase 3 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 86c52e4 Phase 3 (inventory_head): ACCEPTED AND CLOSED at verified DARK maturity, with the audit chronology corrected
 7c8b8cf Phase 3 DARK acceptance (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 b9cf833 Phase 3 DARK acceptance (inventory_head): the dark pmsd env must not even MENTION a Phase-3 flag name
