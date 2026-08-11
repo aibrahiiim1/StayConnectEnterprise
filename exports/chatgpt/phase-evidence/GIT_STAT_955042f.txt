@@ -1,0 +1,4 @@
+commit 955042f7b1273fd6de22eaaf355aac5cfa00bf78
+Date:   Tue Aug 11 21:55:00 2026 +0300
+
+    Edge 404 block: drop the per-site log file that made every Caddy start fail
