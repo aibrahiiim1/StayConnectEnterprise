@@ -1,4 +1,0 @@
-commit 8e465a2b0f4398d791ebadc075634859a524208e
-Date:   Tue Aug 11 17:34:11 2026 +0300
-
-    Post-closure hygiene: stop two surfaces presenting superseded state as current (T0026)
