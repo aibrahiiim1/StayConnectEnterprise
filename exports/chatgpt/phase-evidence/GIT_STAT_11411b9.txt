@@ -1,4 +1,0 @@
-commit 11411b9f44dda65250e9f1ac89f1c8946c7e95ed
-Date:   Tue Aug 11 13:30:17 2026 +0300
-
-    Phase 3 DARK acceptance (inventory_head): a rollback that cannot preserve authorization now refuses, and pmsd is actually deployed

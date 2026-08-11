@@ -1,0 +1,4 @@
+commit 1c1761ddd378617e4656266a07cdc1068c28c59f
+Date:   Tue Aug 11 13:50:05 2026 +0300
+
+    Phase 3 DARK acceptance (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
