@@ -1,0 +1,4 @@
+commit 95630c0def84438ec37b90f6d8cc3370eb8782e7
+Date:   Tue Aug 11 09:51:07 2026 +0300
+
+    Phase 3 network lifecycle (inventory_head): unreadable is not empty, boot reconstructs the confirmed revision, and rollback has no destructive fallback
