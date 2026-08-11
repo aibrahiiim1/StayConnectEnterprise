@@ -1004,7 +1004,10 @@ Q "ALTER TABLE public.schema_migrations OWNER TO postgres; DROP ROLE IF EXISTS r
 o="$(RUN --apply-role 'not a role' "${APPLY_ARGS[@]}" 2>&1 || true)"
 echo "$o" | grep -q "is not a plain role name" && ok "--apply-role rejects a non-identifier (§3)" || no "--apply-role accepted a non-identifier"
 # and a real role is honoured: the run executes as it, so current_user inside the run is that role.
-Q "DROP ROLE IF EXISTS mig_exec; CREATE ROLE mig_exec NOLOGIN; GRANT mig_exec TO postgres; GRANT SELECT, INSERT ON public.schema_migrations TO mig_exec;" >/dev/null
+# The apply role needs what a real one has: the ledger's two forward-apply privileges and access to the schema
+# it is migrating. Without the schema grants the runner refuses with "iam_v2 schema not present", which is
+# correct — a role that cannot see iam_v2 has no business applying a migration to it.
+Q "DROP ROLE IF EXISTS mig_exec; CREATE ROLE mig_exec NOLOGIN; GRANT mig_exec TO postgres; GRANT SELECT, INSERT ON public.schema_migrations TO mig_exec; GRANT USAGE, CREATE ON SCHEMA iam_v2 TO mig_exec;" >/dev/null
 o="$(RUN --apply-role mig_exec "${APPLY_ARGS[@]}" 2>&1 || true)"
 echo "$o" | grep -qE "skip-after-lock 0010|apply 0010" && ok "--apply-role executes the run as the named role (§3)" || no "--apply-role run did not proceed: $(echo "$o" | tail -2 | tr '\n' ' ')"
 Q "DROP ROLE IF EXISTS mig_exec;" >/dev/null

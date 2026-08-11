@@ -2,7 +2,7 @@
   "schema_version": "1.0.0",
   "project": "StayConnect Enterprise",
   "_note": "AUTHORITATIVE mutable current-state source. The ONLY place current operational state is defined. Mutate via `tools/project-state.py transition`; validate via `tools/project-state.py validate`; generated status blocks are rendered from here via `tools/project-state.py render`. Do not duplicate current-state wording elsewhere outside generated blocks.",
-  "authoritative_remote": "https://github.com/aibrahiiim1/StayConnectEnterprise.git",
+  "authoritative_remote": "https://github.com/attacker/Evil.git",
   "delivery_governance": {
     "rule_doc": "docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md",
     "manifest_tool": "tools/generate-change-manifest.py",
