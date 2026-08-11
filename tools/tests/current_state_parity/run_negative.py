@@ -27,6 +27,7 @@ COPY = [
     "tools/validate-current-state-parity.py",
     "governance/project-state.json",
     "governance/transitions/T0024.json",
+    "governance/transitions/T0025.json",
     "governance/decision-register.json",
     "docs/evidence/Phase3-Final-Live-Acceptance-Record.md",
     "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
@@ -38,7 +39,28 @@ COPY = [
 
 def sandbox():
     d = tempfile.mkdtemp(prefix="parity-")
+
+    # Every file COPY names, PLUS every file the copied transition receipts cite as evidence. Without the
+    # second half the evidence-reference rule reads a sandbox where cited files are simply absent, so the
+    # baseline fails the moment a new receipt cites a file nobody remembered to add to COPY — which is a
+    # fixture defect reported as a repository defect. Derived, not enumerated, so it cannot drift again.
+    rels = list(COPY)
     for rel in COPY:
+        if not (rel.startswith("governance/transitions/") and rel.endswith(".json")):
+            continue
+        src = os.path.join(ROOT, rel)
+        if not os.path.exists(src):
+            continue
+        try:
+            doc = json.load(io.open(src, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        for ev in doc.get("evidence_files") or []:
+            ev = str(ev).strip()
+            if ev and not ev.endswith("/") and ev not in rels:
+                rels.append(ev)
+
+    for rel in rels:
         src = os.path.join(ROOT, rel)
         if not os.path.exists(src):
             continue
@@ -153,7 +175,7 @@ def _(d):
 @case("current_activity disagrees with the recorded facts", "activity-parity")
 def _(d):
     patch_state(d, lambda s: s.replace(
-        '"current_activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY",',
+        '"current_activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER",',
         '"current_activity": "PHASE_3_SOMETHING_ELSE_ENTIRELY",', 1))
 
 
@@ -209,6 +231,33 @@ def _(d):
     doc = json.load(io.open(p, encoding="utf-8"))
     doc["phases"]["3"]["status"] = "IN_PROGRESS"
     io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+# ---- merge parity: the contradiction this merge round would otherwise have shipped -------------------------
+
+@case("a current surface still says the PR is open and unmerged after the merge", "merge-parity")
+def _(d):
+    # The exact sentence that stood, true, in six documents on the morning of the merge.
+    append_doc(d, "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+               "## Merge status\n\nPR #6 remains open and unmerged. Its merge is a separate Product-Owner "
+               "decision and is the only next authorized action.")
+
+
+@case("the facts record a merge while still flagging the PR as open", "merge-parity")
+def _(d):
+    patch_facts(d, "pr_open_and_unmerged", True)
+
+
+@case("the facts record a merge with no merge commit", "merge-parity")
+def _(d):
+    patch_facts(d, "merge_commit", "")
+
+
+@case("a current surface claims a merge the facts do not record", "merge-parity")
+def _(d):
+    patch_facts(d, "merged", False)
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "## Merge status\n\nPR #6 was merged and the branch is gone.")
 
 
 @case("a transition receipt cites evidence that is not in the repository", "evidence-reference")

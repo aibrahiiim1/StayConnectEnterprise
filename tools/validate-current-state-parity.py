@@ -273,7 +273,10 @@ def main():
         head = facts.get("accepted_runtime_head") or ""
         if not re.fullmatch(r"[0-9a-f]{40}", head):
             bad("acceptance-parity", "accepted_runtime_head is not a full commit id: %r" % head, STATE)
-        elif state.get("current_activity", "").endswith("ACCEPTED_AND_CLOSED_AT_DARK_MATURITY"):
+        elif "ACCEPTED_AND_CLOSED" in state.get("current_activity", ""):
+            # This used to be `endswith("ACCEPTED_AND_CLOSED_AT_DARK_MATURITY")`, which silently stopped
+            # emitting the moment the activity gained a suffix — exactly what closing the phase does. A rule
+            # that disappears when the state advances is not a rule.
             ok("the accepted runtime head is recorded (%s)" % head[:12])
 
         # (d) the accepted limitation must NOT have been promoted
@@ -286,6 +289,52 @@ def main():
                 bad("limitation-parity", "promotes the accepted NOT-PROVEN limitation to PASS: %s" % hit, rel)
         if not [f for f in failures if f[0] == "limitation-parity"]:
             ok("the accepted NOT-PROVEN limitation is not promoted to PASS anywhere")
+
+    # ---- 8e. MERGE PARITY -------------------------------------------------------------------------------------------
+    #
+    # "PR #6 remains OPEN and UNMERGED. Its merge is a separate Product-Owner decision and is the only next
+    # authorized action" was true in six documents on the morning of 2026-08-11 and false that afternoon. It is
+    # the same class of defect as every rule above it — a sentence that was accurate when written, left standing
+    # in the present tense after the world moved — and the merge is precisely the moment nobody re-reads the
+    # documentation. So the merge state is recorded as data and the prose is checked against it, in BOTH
+    # directions: a repository that has merged may not still promise the merge, and one that has not merged may
+    # not claim it did.
+    merged = facts.get("merged")
+    # Pinned to the recorded PR number so an older, genuinely-merged phase ("PR #4 merged to master") is not
+    # mistaken for a statement about this one.
+    prn = re.escape(str(facts.get("pr_number") or r"\d+"))
+    if merged:
+        for k, pat in (("merge_commit", r"[0-9a-f]{40}"), ("merged_pr", r"\d+")):
+            if not re.fullmatch(pat, str(facts.get(k) or "")):
+                bad("merge-parity", "merged is true but %s is %r" % (k, facts.get(k)), STATE)
+        for k in ("pr_open_and_unmerged", "pr6_open_and_unmerged"):
+            if facts.get(k):
+                bad("merge-parity", "merged is true while %s is still true" % k, STATE)
+        still_open = re.compile(
+            r"pr #?" + prn + r" (remains |is )?open and unmerged|"
+            r"merge is a separate product-owner decision|"
+            r"(decision|authorization) on merging pr #?" + prn + r"|"
+            r"merge_decision_pending|not authorized to merge pr #?" + prn,
+            re.I)
+        for rel in DOC_SURFACES:
+            text = load_surface(rel)
+            if text is None:
+                continue
+            for hit in scan(text, still_open):
+                bad("merge-parity", "still presents the merge as pending: %s" % hit, rel)
+        if not [f for f in failures if f[0] == "merge-parity"]:
+            ok("no current surface still presents the merge as pending (merge commit %s)"
+               % str(facts.get("merge_commit"))[:12])
+    else:
+        claims_merged = re.compile(r"pr #?" + prn + r" (was |is |has been )?merged", re.I)
+        for rel in DOC_SURFACES:
+            text = load_surface(rel)
+            if text is None:
+                continue
+            for hit in scan(text, claims_merged):
+                bad("merge-parity", "claims a merge that the recorded facts do not record: %s" % hit, rel)
+        if not [f for f in failures if f[0] == "merge-parity"]:
+            ok("no current surface claims a merge that has not happened")
 
     # ---- 9. the rollback runbook must not promise authorization it cannot preserve -----------------------------------
     #

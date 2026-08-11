@@ -18,7 +18,11 @@
 > records the blocked subset re-validated live on 2026-08-11, every item PASS. Historical failures stay in the
 > record; only their current interpretation changes.
 >
-> **PR #6 remains OPEN and UNMERGED** — its merge is a separate Product-Owner decision.
+> **PR #6 IS MERGED AND CLOSED** — merged into `master` on 2026-08-11 as merge commit `8a7230a7220e4c773bfb6399ce7774f31f20c906` under the
+> separate Product-Owner merge authorization (decision **D17**, transition **T0025**). The merge introduced
+> no content: `master`'s tree equals the merged head's, and the runtime tree is byte-for-byte identical to
+> the accepted candidate. It deployed nothing and enabled nothing. Post-merge gates: Phase 3 Software CI
+> **31497023194** and Project Governance **31497023118**, both SUCCESS on the merge commit.
 
 ---
 
@@ -546,7 +550,8 @@ What is true at acceptance:
   no posting, no folio change.
 - **No guest lost or gained access.** `auth_ipv4` was empty before, during and after every authorized window.
 - **Phase 3 is DARK and NOT CUT OVER.** All six flags OFF; legacy public-schema IAM remains the sole production
-  authority. PR #6 open and unmerged.
+  authority. PR #6 is merged and closed; merging changed the repository only and altered nothing on the
+  appliance, in the database or at the PMS.
 
 The appliance WAS deliberately contacted under Product-Owner authorization during Increment 9 and its
 re-validation — that is recorded in §6b and §6c rather than denied here. The acceptance/closure round itself

@@ -1,0 +1,61 @@
+{
+  "transition_id": "T0025",
+  "seq": 25,
+  "timestamp": "2026-08-11T13:43:23Z",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY_AND_MERGED_TO_MASTER",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "3",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-11, 'PRODUCT OWNER FINAL PHASE-3 REPOSITORY CLOSURE AUTHORIZATION', which corrected the Final Report's stale no-live-contact constraint, required a full re-validation, and stated: 'IF AND ONLY IF all of the above pass, this message is my explicit Product-Owner authorization to MERGE PR #6 into master', with the instruction to protect against head movement and to complete the post-merge closure in one continuous operation rather than stopping at MERGE_READY.",
+  "decision": "D17",
+  "preconditions_verified_before_merging": [
+    "Pre-merge delivery head fb25fd43bb83478c7b56d0ed18593ea89faaa4e5 confirmed as the PR #6 head via the list endpoint, state open, not draft, not already merged, base master.",
+    "Phase 3 Software CI 31496059979 = SUCCESS and Project Governance 31496060002 = SUCCESS, both reported as check-runs on that exact head commit.",
+    "Evidence artifact 9103191800 downloaded and independently verified: sha256sum -c MANIFEST.sha256 gave 18 OK and 0 FAILED; integrity root f2a51c3f77c76d707ab3a3088c3fefca5398b01fe71665fe446e6358d15139a3; RUN_META delivery_head equals the merged head; all_steps_passed true; 615 Go unit, 377 race, 63 Vitest, 49 Playwright, 27 real-kernel, 74 preflight.",
+    "ZERO runtime diff against the ACCEPTED candidate 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4: git diff --name-only returned 0 files for data-plane/, hotel-admin/, control-plane/, deploy/, scripts/ and */migrations/*. Merging therefore could not change what the appliance runs.",
+    "Local governance suite green on the merged head: current-state parity, the negative-case harness, project-state, zero-stale, transition-times, the 74-check preflight and the rollback suites.",
+    "Branch protection inspected rather than assumed: required check 'governance' SUCCESS; strict up-to-date satisfied (0 commits behind master); required conversation resolution satisfied (no review threads). The only unmet requirement was the 1-approving-review rule, which a PR author cannot satisfy on their own PR; enforce_admins is false, so the repository owner merged under the explicit Product-Owner authorization WITHOUT weakening, disabling or editing any protection rule."
+  ],
+  "head_movement_protection": "The merge was issued through the REST merge endpoint with sha pinned to fb25fd43bb83478c7b56d0ed18593ea89faaa4e5. GitHub rejects the merge with 409 if the PR head has moved from that value, so an unreviewed head could not have been merged silently. No --force or admin override of the SHA guard was used.",
+  "merge_result": {
+    "merge_commit": "8a7230a7220e4c773bfb6399ce7774f31f20c906",
+    "first_parent": "ffb68e1ad325f5dd6d2096f2e30a782f8caef059",
+    "second_parent": "fb25fd43bb83478c7b56d0ed18593ea89faaa4e5",
+    "parent_count": 2,
+    "merge_method": "merge commit, matching the Phase-2 precedent (PR #4 -> fe6a0d12a49f74b7b7b84ef0c848a38512273370)",
+    "merged_at": "2026-08-11T13:35:59Z",
+    "introduced_no_content": "master's tree after the merge (43f36288e594483f26b5e9aa71b0b05856d67ae3) is identical to the merged head's tree; git diff between them reports 0 files.",
+    "runtime_tree_vs_accepted_candidate": "0 files differ across data-plane/, hotel-admin/, control-plane/, deploy/, scripts/ and */migrations/*",
+    "post_merge_ci_runs": [
+      "31497023194",
+      "31497023118"
+    ],
+    "remote_branch_deleted": true
+  },
+  "scope_allowed": "Merging PR #6 into master under the explicit Product-Owner authorization, and the governance and documentation synchronisation that records the merged state, including one focused tightening of the semantic parity validator so the superseded PR-open claim cannot pass a green gate again.",
+  "scope_prohibited": "NO appliance action, NO Production database action, NO PMS contact, NO feature enablement, NO IAM-v2 cutover, NO financial posting, NO paid access, NO Phase-4 implementation and NO runtime implementation change. None was performed: the runtime tree is unchanged from the accepted candidate and this round touched only governance, documentation, governance validators and the CI evidence generator's standing-restrictions list.",
+  "validator_change": "tools/validate-current-state-parity.py gains rule 8e, MERGE PARITY. The merge state is now recorded as data (current_state_facts.merged / merge_commit / merged_pr / pr_open_and_unmerged) and every current surface is checked against it in both directions: a repository that has merged may not still present the merge as pending, and one that has not merged may not claim it did. The regexes are pinned to the recorded PR number so an older genuinely-merged phase is not mistaken for this one. Rule 8c's brittle endswith('ACCEPTED_AND_CLOSED_AT_DARK_MATURITY') was changed to a containment test, because it silently stopped emitting the moment the activity gained the '_AND_MERGED_TO_MASTER' suffix -- a rule that disappears when the state advances is not a rule.",
+  "accepted_limitation": "UNCHANGED and NOT promoted: legacy live-session continuity = NOT PROVEN, because no real legacy guest was available during the authorized live windows. Merging does not and cannot change this.",
+  "d16_relationship": "D16 accepted and closed Phase 3 at DARK maturity and closed with 'PR #6 remains OPEN and UNMERGED; its merge is a separate Product-Owner decision and is the only next authorized action'. That was true when D16 was written. D17 supersedes that clause ONLY. D16 is preserved unaltered, as T0023 was.",
+  "evidence_files": [
+    "governance/decision-register.json",
+    "governance/project-state.json",
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+    "docs/evidence/Phase3-Final-Live-Acceptance-Record.md",
+    "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+    "docs/context/StayConnect-IAM-Handoff.md",
+    "tools/validate-current-state-parity.py",
+    "tools/validate-project-state.sh"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC at the moment this receipt was written, after the merge was confirmed through the API and the merge commit was fetched and inspected locally. The merge's own time (2026-08-11T13:35:59Z) is GitHub's, taken from the PR object, not invented here.",
+  "source_commit": "8a7230a7220e4c773bfb6399ce7774f31f20c906",
+  "acceptance_verdict": "MERGED AND CLOSED -- PR #6 is merged into master as 8a7230a7220e4c773bfb6399ce7774f31f20c906 under Product-Owner decision D17. Phase 3 is ACCEPTED, CLOSED and MERGED at verified DARK maturity. The merge is a repository event only and widens no authorization.",
+  "next_action": "None for Phase 3: it is accepted, closed and merged to master, and no further Phase-3 action is authorized. Phase 4 and every enablement action require a separate explicit Product-Owner authorization."
+}

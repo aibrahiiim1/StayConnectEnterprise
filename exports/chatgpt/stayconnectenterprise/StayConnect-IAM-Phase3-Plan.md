@@ -41,8 +41,12 @@ the missing DARK `pmsd` service — are closed, gated and live-verified. Nothing
 guest was available during the authorized live windows. Nothing was fabricated; the populated-session behaviour
 is covered by the disposable real-kernel suite.
 
-**PR #6 remains OPEN and UNMERGED.** Its merge is a separate Product-Owner decision and is the only next
-authorized action.
+**PR #6 IS MERGED AND CLOSED.** The Product Owner authorized the merge on 2026-08-11 (decision **D17**,
+transition **T0025**) and PR #6 was merged into `master` as merge commit **`8a7230a7220e4c773bfb6399ce7774f31f20c906`**, whose second parent is
+the accepted delivery head `fb25fd43bb83478c7b56d0ed18593ea89faaa4e5`. The merge introduced no content — `master`'s tree is identical to the
+merged head's, and the runtime tree is byte-for-byte identical to the accepted candidate the appliance runs.
+Merging changed the repository only: nothing was deployed, enabled or contacted. **No further Phase-3
+action is authorized.**
 
 The software increments in this plan are **execution history**, not future work:
 
@@ -108,12 +112,12 @@ false-PASS tooling defect since corrected, Item 5 (flags-OFF) PASS. Legacy live-
 **NOT PROVEN** — no legacy guest was online during the window.
 
 As a result: **migration 0010 IS applied** on the production site database (63 iam_v2 tables, **0 rows**), the
-appliance and the live PMS **were** contacted under that authorization, and the corrected software **is deployed** (accepted candidate `7c8b8cf0…`). Standing restrictions that remain true: PR #6 open and unmerged, all Phase-3 flags OFF, zero
+appliance and the live PMS **were** contacted under that authorization, and the corrected software **is deployed** (accepted candidate `7c8b8cf0…`). Standing restrictions that remain true: all Phase-3 flags OFF, zero
 runtime `iam_v2` privileges, no PS/PA, no financial posting, no cutover, no Phase 4.
 
 **No longer pending.** That re-validation was performed on 2026-08-11 with every item PASS, and Phase 3 has
-since been accepted and closed at DARK maturity (D16 / T0024). The only remaining action is the Product-Owner
-decision on merging PR #6.
+since been accepted and closed at DARK maturity (D16 / T0024). PR #6 was then merged into `master` on 2026-08-11
+(D17 / T0025). No further Phase-3 action is authorized.
 
 ---
 

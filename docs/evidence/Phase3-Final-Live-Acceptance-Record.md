@@ -36,6 +36,7 @@ Taken from GitHub Actions run metadata and the preserved live-closure evidence, 
 | 5 | Same-HEAD gates on `7c8b8cf` | both started `10:56:59Z`; Software **31484446685** SUCCESS `11:03:15Z`; Governance **31484446661** SUCCESS `11:03:26Z` |
 | 6 | Final authorized live closure, **after** those gates | final candidate deployed and verified on disk and in `/proc/<pid>/exe`; pmsd reinstalled from the corrected env; darkness grep clean; reboot `11:04:00Z`; final required-state proof `11:06:43Z` |
 | 7 | Product-Owner acceptance | decision **D16**, receipt **T0024** |
+| 8 | Product-Owner repository closure and merge, **after** a full re-validation on the merged head | gates **31496059979** / **31496060002** SUCCESS and artifact **9103191800** verified on head `fb25fd43…`, zero runtime diff vs the accepted candidate; merged SHA-pinned `13:35:59Z` as `8a7230a7…`; post-merge gates **31497023194** / **31497023118** SUCCESS on the merge commit; decision **D17**, receipt **T0025** |
 
 **On T0023.** Its verdict said the two closure findings were "closed in software and verified live". At
 `10:23:22Z` the live half had not happened and the gates had not run. The software claim was true; the live
@@ -91,13 +92,20 @@ DARK maturity only. No IAM-v2 cutover, no Phase-3 feature enablement, no PMS fin
 no `PS`/`PA`, no implicit FX, no programmatic reversal, no Gate-P runtime grants, no Phase 4. Legacy
 public-schema IAM remains the sole production authority.
 
-**PR #6 remains OPEN and UNMERGED.** Its merge is a separate Product-Owner decision and is the only next
-authorized action.
+**PR #6 was subsequently MERGED into `master`** on 2026-08-11, as merge commit `8a7230a7220e4c773bfb6399ce7774f31f20c906`, under the separate
+Product-Owner merge authorization recorded as decision **D17** / transition **T0025**. That merge is a
+repository event: it deployed nothing, enabled nothing and contacted nothing, and it did not widen what
+acceptance authorizes. Everything this section withholds is still withheld.
 
-## 6. No live action in the closure round
+## 6. No live action in the acceptance or merge rounds
 
 The acceptance/closure round that produced this record changed governance, documentation and governance
 validators only. **No appliance action was required or performed**, no database was contacted, and no PMS
 traffic occurred. The runtime tree is byte-for-byte identical to the accepted candidate — proven by
 `git diff <accepted> <closure> -- data-plane/ hotel-admin/ deploy/ */migrations/*` being empty, which the
 Software CI on the closure HEAD re-confirms by rebuilding and re-testing that unchanged tree.
+
+The same is true of the merge round that followed. Merging PR #6 into `master` was a repository event: the
+runtime diff against the accepted candidate was re-proven zero across `data-plane/`, `hotel-admin/`,
+`control-plane/`, `deploy/`, `scripts/` and every migration path *before* the merge was issued, the merge
+commit introduced no content, and no appliance, Production database or PMS was contacted at any point in it.

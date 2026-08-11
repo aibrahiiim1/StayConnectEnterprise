@@ -73,6 +73,22 @@
         "deploy/",
         ".github/"
       ]
+    },
+    {
+      "id": "D17",
+      "title": "PR #6 MERGED INTO master BY EXPLICIT PRODUCT-OWNER AUTHORIZATION (2026-08-11), completing the repository closure of Phase 3. The Product Owner's instruction made the merge conditional on every gate passing first, and each condition was verified before the merge was performed: the pre-merge delivery head was fb25fd43bb83478c7b56d0ed18593ea89faaa4e5; Phase 3 Software CI 31496059979 SUCCESS and Project Governance 31496060002 SUCCESS on that head; evidence artifact 9103191800 downloaded and independently verified (18/18 files OK, 0 FAILED, integrity root f2a51c3f77c76d707ab3a3088c3fefca5398b01fe71665fe446e6358d15139a3, embedded delivery_head equal to the head being merged, all_steps_passed true, 615 Go unit / 377 race / 63 Vitest / 49 Playwright / 27 real-kernel / 74 preflight); and the runtime tree proven byte-for-byte identical to the ACCEPTED runtime candidate 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4 across data-plane/, hotel-admin/, control-plane/, deploy/, scripts/ and every migration path -- a zero runtime diff, so merging could not change what the appliance runs. The merge was performed SHA-pinned to fb25fd43bb83478c7b56d0ed18593ea89faaa4e5 so that any movement of the PR head would have aborted it rather than merging something unreviewed. Result: merge commit 8a7230a7220e4c773bfb6399ce7774f31f20c906, a true two-parent merge commit (first parent ffb68e1ad325f5dd6d2096f2e30a782f8caef059, second parent fb25fd43bb83478c7b56d0ed18593ea89faaa4e5) matching the Phase-2 precedent, which introduced no content -- master's tree is identical to the merged head's tree. THIS DECISION IS A REPOSITORY EVENT ONLY. It deployed nothing, enabled no flag, contacted no appliance, no Production database and no PMS, and it does not widen what D16 authorized: Phase 3 remains accepted at DARK maturity ONLY, with no IAM-v2 cutover, no Phase-3 feature enablement, no PMS financial posting, no paid access, no PS or PA, no implicit FX, no programmatic reversal, no Gate-P runtime grants and no Phase 4. The accepted limitation stands unchanged and is NOT promoted: legacy live-session continuity = NOT PROVEN, because no real legacy guest was available during the authorized live windows. SUPERSEDES ONE CLAUSE OF D16: D16's closing statement that PR #6 remains open and unmerged and that its merge is the only next authorized action was true when D16 was made and is superseded by this decision. D16 is preserved unaltered as the record of the acceptance. After this merge there is NO next authorized Phase-3 action.",
+      "status": "ACTIVE",
+      "effective": "2026-08-11",
+      "supersedes": [],
+      "supersedes_clause_of": "D16 -- its closing PR-open clause only; D16 is otherwise unaltered and remains ACTIVE",
+      "authoritative_document": "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+      "affected": [
+        "governance/",
+        "docs/",
+        "scripts/",
+        "tools/",
+        "exports/"
+      ]
     }
   ]
 }

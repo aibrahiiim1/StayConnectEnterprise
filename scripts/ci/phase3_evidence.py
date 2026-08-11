@@ -321,7 +321,6 @@ def main() -> int:
         # PROJECT-LEVEL standing restrictions: still true, and each one is a thing this delivery must not do.
         "standing_restrictions_confirmed": [
             "all Phase-3 flags OFF",
-            "PR open and unmerged",
             "zero persistent runtime iam_v2 privileges",
             "no Gate-P grants",
             "no PS/PA",
