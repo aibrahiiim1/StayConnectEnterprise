@@ -312,6 +312,56 @@ def main():
         if not offenders:
             ok("the rollback runbook never promises preserved authorization without stating the boundary")
 
+    # ---- 10. EVERY REFERENCED EVIDENCE FILE MUST ACTUALLY BE IN THE REPOSITORY --------------------------------------
+    #
+    # T0024 listed docs/evidence/Phase3-Final-Live-Acceptance-Record.md as evidence and the Final Report pointed
+    # readers at it. The file was written, and then silently never committed: .gitignore carried an UNANCHORED
+    # `evidence/` rule meant for generated bundles, which also matches docs/evidence/ at any depth. Every gate
+    # passed, because every gate only ever read files that were there.
+    #
+    # A receipt that cites evidence nobody else can open is worse than one that cites none: it reads as proof.
+    import subprocess
+    tdir = os.path.join(ROOT, "governance", "transitions")
+    # The tracked set is the strong form of the check. Where git cannot answer — an extracted pack, a test
+    # sandbox — fall back to "does the file exist under ROOT". Weaker, but still catches a citation of
+    # something that is not there, which is the defect. What must never happen is a silent pass.
+    tracked = None
+    try:
+        r = subprocess.run(["git", "-C", ROOT, "ls-files"], capture_output=True, text=True, timeout=60)
+        if r.returncode == 0 and r.stdout.strip():
+            tracked = set(r.stdout.split())
+    except Exception:  # noqa: BLE001
+        tracked = None
+
+    def cited_present(rel):
+        if tracked is not None:
+            return rel in tracked
+        return os.path.exists(os.path.join(ROOT, rel))
+
+    if not os.path.isdir(tdir):
+        bad("evidence-reference", "governance/transitions is missing, so cited evidence cannot be checked", ROOT)
+    else:
+        how = "tracked in git" if tracked is not None else "present on disk (git unavailable)"
+        missing = []
+        for rel in sorted(os.listdir(tdir)):
+            if not rel.endswith(".json"):
+                continue
+            try:
+                t = json.load(io.open(os.path.join(tdir, rel), encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            for ev in t.get("evidence_files") or []:
+                ev = str(ev).strip()
+                if not ev or ev.endswith("/"):
+                    continue
+                if not cited_present(ev):
+                    missing.append("%s cites %s" % (rel, ev))
+        for m in missing:
+            bad("evidence-reference", "a transition receipt cites evidence that is not %s: %s" % (how, m),
+                "governance/transitions")
+        if not missing:
+            ok("every file cited as evidence by a transition receipt is %s" % how)
+
     # ---- report ----------------------------------------------------------------------------------------------------
     if as_json:
         print(json.dumps({

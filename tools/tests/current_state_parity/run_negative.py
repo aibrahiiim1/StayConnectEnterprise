@@ -26,6 +26,9 @@ VALIDATOR = os.path.join("tools", "validate-current-state-parity.py")
 COPY = [
     "tools/validate-current-state-parity.py",
     "governance/project-state.json",
+    "governance/transitions/T0024.json",
+    "governance/decision-register.json",
+    "docs/evidence/Phase3-Final-Live-Acceptance-Record.md",
     "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
     "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
     "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
@@ -205,6 +208,16 @@ def _(d):
     p = os.path.join(d, "governance/project-state.json")
     doc = json.load(io.open(p, encoding="utf-8"))
     doc["phases"]["3"]["status"] = "IN_PROGRESS"
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("a transition receipt cites evidence that is not in the repository", "evidence-reference")
+def _(d):
+    # The sandbox is a copy, so "not tracked in git" is asserted against the REAL repo index; citing a path
+    # that has never existed reproduces the untracked-reference defect exactly.
+    p = os.path.join(d, "governance/transitions/T0024.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    doc["evidence_files"].append("docs/evidence/this-file-was-never-committed.md")
     io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
 
 

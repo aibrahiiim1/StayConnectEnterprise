@@ -31,7 +31,11 @@ __pycache__/
 # Phase-3 evidence bundles are generated per run and carry a timestamp + source HEAD; they are produced by
 # scripts/phase3-evidence.sh at deployment time, not committed (a committed bundle is stale the moment the
 # next commit lands, and a stale bundle reads as current evidence).
-evidence/
+# ANCHORED to the repository root on purpose. Written unanchored, `evidence/` matches at ANY depth, so it also
+# swallowed docs/evidence/ — and it did: the Phase-3 final live-acceptance record required by T0024 was written,
+# referenced by the transition receipt and by the Final Report, and silently never committed. A rule meant for
+# generated bundles must not be able to hide hand-written evidence somebody else is citing.
+/evidence/
 
 # Phase-3 software-gate staging + artifact (produced in CI, never committed)
 .phase3-evidence/

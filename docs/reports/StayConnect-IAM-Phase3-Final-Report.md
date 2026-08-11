@@ -109,10 +109,18 @@ ever fabricated to close it.
   `iam_v2.activate_session_enforcement` verifies the accounting checkpoint itself — this session, its device,
   the bridge, the class minor implied by its IP and the exact generation — and refuses a missing, foreign,
   stale or contested origin.
-- **A surgical live-dark nft foundation** (`cmd/phase3-foundation`) installs the Phase-3 set and rules into a
-  RUNNING ruleset in one nft transaction, never flushing or recreating the table, proving legacy-authorization
-  parity on both sides and rolling itself back if it cannot. It has an explicit rollback that touches nothing
-  legacy. **The cutover is flag-only only after that install has been performed and verified on the unit.**
+- **The Phase-3 nft structure is produced by the renderer itself (`nftconverge`, ADR-0003).** `netd` reconciles
+  the live ruleset against a fresh render of the running binary on every start, executing nothing when it
+  already matches, so the Phase-3 set and rules arrive with the service and survive every restart and reboot.
+  **This is the current approved deployment and cutover path; no manual installation step exists or is
+  permitted.**
+  > *Historical, superseded.* A **surgical live-dark nft foundation** (`cmd/phase3-foundation`) was built to
+  > install the Phase-3 set and rules into a RUNNING ruleset in one nft transaction, and an earlier revision of
+  > this report said the cutover became flag-only *only after that install had been performed on the unit*.
+  > Live Increment 9 disproved that: what the tool installed did not survive the next `netd` start, because boot
+  > reconciliation replayed a stored bundle rendered by an older binary (§6b). The tool is **retired from the
+  > deployment and rollback procedure** and survives only as a read-only diagnostic, which invalidates the
+  > render marker if a structural `install`/`rollback` is ever run by hand.
 - **Guest-visible timing now composes with enforcement.** The uniform non-success budget is derived from the
   reconciliation cadence rather than a PMS round trip, and scd's enforcement wait is derived from the caller's
   deadline instead of a flat maximum it could never reach. There is still exactly one budget for the endpoint,
@@ -275,8 +283,14 @@ be re-derived rather than trusted.
 
 ## 5. Risks and limitations
 
-- **No live evidence exists.** Nothing in this repository has touched an appliance, a production database or a
-  PMS. Every claim here is from local builds, unit tests and disposable PostgreSQL 16 containers.
+- **Live evidence EXISTS, and is separated from software evidence.** Every claim in §3–§5 is software evidence
+  from local builds, unit tests and disposable PostgreSQL 16 containers, and is labelled as such. The appliance,
+  the production site database and the live PMS **were** contacted under explicit Product-Owner authorization —
+  Live Increment 9 on 2026-08-10 (§6b), its re-validation on 2026-08-11 (§6c), and the final closure — and those
+  results are recorded there rather than denied here.
+  > *Historical, superseded.* An earlier revision of this bullet read "No live evidence exists. Nothing in this
+  > repository has touched an appliance, a production database or a PMS." That was true when it was written and
+  > stopped being true on 2026-08-10.
 - **Paid access is deliberately unimplemented.** Priced packages and settlement methods beyond `NOT_REQUIRED`
   fail closed; the fixtures used in F3 are zero-amount and are not payment evidence.
 - **Gate-P privileges are prepared but NOT applied.** Every runtime service role holds zero `iam_v2` table and
