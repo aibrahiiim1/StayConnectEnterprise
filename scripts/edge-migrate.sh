@@ -28,10 +28,11 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd -P)"
 CANON_MIG_DIR="$HERE/data-plane/migrations"
 ONLY=""; ALL=0; EXPECT_DB=""; TARGET_KIND=""; ACK=""; EXPECT_SHA=""; DIR_OVERRIDE=""; ACK_DIR=""
-BOOTSTRAP=0; BOOTSTRAP_OWNER=""
+BOOTSTRAP=0; BOOTSTRAP_OWNER=""; APPLY_ROLE=""
 LEDGER_OWNER_ALLOWLIST="${LEDGER_OWNER_ALLOWLIST:-iam_v2_owner postgres}"
 while [ $# -gt 0 ]; do
   case "$1" in
+    --apply-role) APPLY_ROLE="$2"; shift 2;;
     --only) ONLY="$2"; shift 2;;
     --all) ALL=1; shift;;
     --expect-db) EXPECT_DB="$2"; shift 2;;
@@ -46,7 +47,27 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "${EDGE_PSQL:-}" ] || { echo "REFUSED: EDGE_PSQL not set" >&2; exit 2; }
-q(){ $EDGE_PSQL -tAqc "$1"; }
+
+# --apply-role runs the whole migration as a named role via SET ROLE, so that the connection may be made by
+# whatever account can reach the database while the migration is EXECUTED by the least-privileged role that owns
+# the schema.
+#
+# It exists because discovering this took live time during Increment 9. The site appliance connects as the
+# cluster superuser `stayconnect`, which the live-site gate below correctly refuses (it holds public CREATE).
+# The correct executor is `iam_v2_owner`, which owns all 49 pre-existing iam_v2 tables — so applying as anyone
+# else also silently changes object ownership. Operators worked that out by hand and expressed it as a
+# PGOPTIONS=-crole=… string wrapped around EDGE_PSQL, which is easy to get wrong and invisible in the run log.
+# Naming the role as an argument makes it explicit, checked, and recorded.
+#
+# It grants nothing. SET ROLE can only reach a role the connecting account is already a member of, and every
+# least-privilege check below evaluates current_user AFTER the switch, so the role is held to exactly the same
+# standard it would be if it had connected directly.
+ROLE_PREFIX=""
+if [ -n "$APPLY_ROLE" ]; then
+  echo "$APPLY_ROLE" | grep -Eq '^[a-z_][a-z0-9_]*$' || { echo "REFUSED: --apply-role '$APPLY_ROLE' is not a plain role name" >&2; exit 2; }
+  ROLE_PREFIX="SET ROLE $APPLY_ROLE; "
+fi
+q(){ $EDGE_PSQL -tAqc "${ROLE_PREFIX}$1"; }
 NAME_RE='^[0-9]{4}_[a-z0-9_]+$'
 
 ack_for_kind(){ case "$1" in disposable) echo "I_UNDERSTAND_DISPOSABLE_DATABASE";; live-site) echo "I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION";; *) echo "";; esac; }
@@ -126,13 +147,39 @@ verify_ledger_structural(){ # read-only, BEFORE lock; fail closed
   [ "$(q "SELECT count(*) FROM (SELECT version FROM public.schema_migrations GROUP BY version HAVING count(*)>1) d")" = 0 ] \
     || { echo "REFUSED: duplicate versions present in ledger" >&2; exit 3; }
   # owner allowlist
+  #
+  # A CLUSTER SUPERUSER IS ALWAYS AN ACCEPTABLE LEDGER OWNER, whatever it is called. The allowlist defaults to
+  # "iam_v2_owner postgres" because those are the names in the reference deployment, and on the site appliance
+  # the check therefore refused a perfectly correct setup: the ledger is owned by `stayconnect`, which IS that
+  # cluster's superuser — there is no role named `postgres` at all. The rule the check is really trying to
+  # express is "the ledger is not owned by some ordinary role that could tamper with it", and superuser
+  # ownership satisfies that more strongly than the hard-coded names do. Operators had to override the
+  # allowlist by hand to proceed, which is exactly the sort of ad-hoc weakening this formalisation removes.
   local owner; owner="$(q "SELECT tableowner FROM pg_tables WHERE schemaname='public' AND tablename='schema_migrations'")"
-  case " $LEDGER_OWNER_ALLOWLIST " in *" $owner "*) : ;; *) echo "REFUSED: ledger owner '$owner' not in allowlist ($LEDGER_OWNER_ALLOWLIST)" >&2; exit 3;; esac
+  local owner_super; owner_super="$(q "SELECT rolsuper FROM pg_roles WHERE rolname='$owner'")"
+  case " $LEDGER_OWNER_ALLOWLIST " in
+    *" $owner "*) : ;;
+    *)
+      if [ "$owner_super" = "t" ]; then
+        echo "  ledger owner '$owner' is a cluster superuser; accepted (allowlist: $LEDGER_OWNER_ALLOWLIST)"
+      else
+        echo "REFUSED: ledger owner '$owner' is neither in the allowlist ($LEDGER_OWNER_ALLOWLIST) nor a cluster superuser" >&2; exit 3
+      fi
+      ;;
+  esac
   # APPLY needs exactly SELECT (read the ledger) + INSERT (record the applied version). It must NOT need or
   # hold DELETE/UPDATE/TRUNCATE — those belong to the separate rollback/admin operation, not a forward apply.
+  local who; who="$(q "SELECT current_user")"
   for p in SELECT INSERT; do
-    [ "$(q "SELECT has_table_privilege(current_user,'public.schema_migrations','$p')")" = t ] \
-      || { echo "REFUSED: apply role lacks required $p on schema_migrations" >&2; exit 3; }
+    if [ "$(q "SELECT has_table_privilege(current_user,'public.schema_migrations','$p')")" != t ]; then
+      # Name the remedy. This is the one precondition an otherwise correctly-provisioned appliance is likely
+      # to be missing, and "lacks required INSERT" alone sent an operator hunting for which role and which
+      # grant during a live window.
+      echo "REFUSED: apply role '$who' lacks required $p on public.schema_migrations." >&2
+      echo "         Grant exactly the two privileges a forward apply needs, and nothing more:" >&2
+      echo "           GRANT SELECT, INSERT ON public.schema_migrations TO $who;" >&2
+      exit 3
+    fi
   done
   if [ "$TARGET_KIND" = "live-site" ]; then
     # live-site apply role must be minimal: no destructive ledger rights, no public DDL.
@@ -173,7 +220,8 @@ apply_one(){ # $1=file  atomic lock-then-ledger
   key="$(q "SELECT hashtextextended('stayconnect_edge_migrate:'||'$ver', 0)")"
   echo "  select $ver  file=$base  sha256=$sha  lock_key=$key  db=$EXPECT_DB  kind=$TARGET_KIND"
   out="$(
-    { printf "SET statement_timeout='60s';\nSELECT pg_advisory_lock(%s);\nSET statement_timeout=0;\n" "$key"
+    { [ -n "$APPLY_ROLE" ] && printf "SET ROLE %s;\n" "$APPLY_ROLE"
+      printf "SET statement_timeout='60s';\nSELECT pg_advisory_lock(%s);\nSET statement_timeout=0;\n" "$key"
       printf "SELECT (NOT EXISTS(SELECT 1 FROM public.schema_migrations WHERE version='%s')) AS need \\\\gset\n" "$ver"
       printf "\\\\if :need\n\\\\echo APPLYING_UNDER_LOCK\n"
       cat "$f"

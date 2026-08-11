@@ -64,9 +64,10 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 		}
 	}
 
-	// nftables — load the full generated ruleset.
+	// nftables — converge to the render of THIS intent, through the same path boot reconciliation uses, so an
+	// operator applying a network change does not deauthorize the guests currently online.
 	if !a.dryRun {
-		if err := a.run(ctx, "nft", "-f", filepath.Join(bundle, "stayconnect.nft")); err != nil {
+		if _, err := a.ensureNftStructure(ctx, intent, "apply"); err != nil {
 			return fmt.Errorf("nft load: %w", err)
 		}
 	}
@@ -162,52 +163,67 @@ func (a *applier) destroyBridge(ctx context.Context, bridge string) error {
 	return nil
 }
 
-// ReconcileActiveOnBoot re-applies the active revision's rendered artifacts so
-// the live OS matches the DB source of truth after a reboot. This closes the
-// gap where nftables loads the static /etc/nftables.conf on boot (the IP-only
-// auth set) instead of netd's generated concatenated ruleset. netplan persists
-// on its own and Kea reloads its written config, but the generated nftables set
-// and Unbound fragment are re-installed here idempotently, and any managed
-// bridge/VLAN that netplan did not recreate is brought up surgically. It never
-// touches mgmt/WAN/legacy interfaces.
+// ReconcileActiveOnBoot brings the live OS back in line with the DB source of truth after a restart or reboot.
+// This closes the gap where nftables loads the static /etc/nftables.conf on boot (the IP-only auth set) instead
+// of netd's generated concatenated ruleset. netplan persists on its own and Kea reloads its written config; the
+// nftables ruleset and Unbound fragment are re-installed here, and any managed bridge/VLAN that netplan did not
+// recreate is brought up surgically. It never touches mgmt/WAN/legacy interfaces.
+//
+// The nftables half is reconciled against a FRESH RENDER, never against the stored bundle — see the commentary
+// in nft_reconcile.go for why replaying the bundle silently deleted structure the current software requires.
+// When the live ruleset already matches this binary's render, no nft command is issued at all.
 func (a *applier) ReconcileActiveOnBoot(ctx context.Context) {
 	id, bundle, err := a.st.CurrentActive(ctx)
-	if err != nil || id == "" || bundle == "" {
+	if err != nil || id == "" {
 		return
 	}
 	if a.dryRun {
 		return
 	}
-	if _, statErr := os.Stat(bundle); statErr != nil {
-		return // bundle dir gone; leave the live state untouched
+	intent, intentErr := a.st.LoadIntent(ctx)
+	if intentErr != nil {
+		// Without intent there is no defensible desired structure. Doing nothing keeps whatever is live —
+		// which is strictly safer than reconstructing from a stale artifact.
+		a.st.Event(ctx, id, "boot_reconcile", false, map[string]any{"intent": intentErr.Error()})
+		return
 	}
 	// Ensure managed bridges/VLANs exist (netplan should recreate them on boot,
 	// but a surgical create is idempotent and covers a generate-only apply).
-	if intent, err := a.st.LoadIntent(ctx); err == nil {
-		for _, n := range a.netdManaged(intent) {
-			if n.Enabled && !ifaceExists(n.BridgeName) {
-				_ = a.createNetwork(ctx, n)
+	for _, n := range a.netdManaged(intent) {
+		if n.Enabled && !ifaceExists(n.BridgeName) {
+			_ = a.createNetwork(ctx, n)
+		}
+	}
+	// nftables: converge to what THIS binary renders.
+	res, nftErr := a.ensureNftStructure(ctx, intent, "boot_reconcile")
+	if nftErr != nil {
+		a.st.Event(ctx, id, "boot_reconcile", false, map[string]any{"nft": nftErr.Error()})
+		return
+	}
+	// Keep the stored bundle honest: once the live ruleset has been rebuilt by the current renderer, the
+	// artifact on disk should say the same thing rather than remain a record of an older structure.
+	if res.Changed && bundle != "" {
+		if _, statErr := os.Stat(bundle); statErr == nil {
+			_ = os.WriteFile(filepath.Join(bundle, "stayconnect.nft"), netcfg.RenderNftables(intent, a.topo), 0o640)
+		}
+	}
+	if bundle != "" {
+		if _, statErr := os.Stat(bundle); statErr == nil {
+			// Re-push Kea config from the bundle (idempotent; ensures live == intent).
+			if raw, err := os.ReadFile(filepath.Join(bundle, "kea-dhcp4.json")); err == nil {
+				_ = a.pushKeaFile(raw)
+			}
+			// Re-install the Unbound fragment.
+			if raw, err := os.ReadFile(filepath.Join(bundle, "stayconnect-guest.conf")); err == nil {
+				_ = os.WriteFile(a.unboundFrag, raw, 0o644)
+				a.applyUnbound(ctx)
 			}
 		}
 	}
-	// Re-apply the generated nftables ruleset (restores the concatenated set).
-	nftFile := filepath.Join(bundle, "stayconnect.nft")
-	if _, statErr := os.Stat(nftFile); statErr == nil {
-		if err := a.run(ctx, "nft", "-f", nftFile); err != nil {
-			a.st.Event(ctx, id, "boot_reconcile", false, map[string]any{"nft": err.Error()})
-			return
-		}
-	}
-	// Re-push Kea config from the bundle (idempotent; ensures live == intent).
-	if raw, err := os.ReadFile(filepath.Join(bundle, "kea-dhcp4.json")); err == nil {
-		_ = a.pushKeaFile(raw)
-	}
-	// Re-install the Unbound fragment.
-	if raw, err := os.ReadFile(filepath.Join(bundle, "stayconnect-guest.conf")); err == nil {
-		_ = os.WriteFile(a.unboundFrag, raw, 0o644)
-		a.applyUnbound(ctx)
-	}
-	a.st.Event(ctx, id, "boot_reconcile", true, map[string]any{"bundle": bundle})
+	a.st.Event(ctx, id, "boot_reconcile", true, map[string]any{
+		"bundle": bundle, "nft_changed": res.Changed, "carried_elements": res.Carried,
+		"desired_fp": res.DesiredFP, "live_fp_before": res.LiveFP,
+	})
 }
 
 // rollback restores the previous active revision (its bundle re-applied) or, if
@@ -239,9 +255,18 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 			}
 		}
 	}
-	// Re-apply the previous good bundle's nft + kea + unbound + netplan file.
+	// Restore the previous good revision's nft structure by RENDERING ITS STORED INTENT with the current
+	// renderer, falling back to its bundle file only if the intent cannot be read. Replaying the file
+	// unconditionally would reinstate whatever structure the binary of that era produced — the same staleness
+	// that made a routine restart delete phase3_auth_ipv4.
 	if !a.dryRun {
-		_ = a.run(ctx, "nft", "-f", filepath.Join(prevBundle, "stayconnect.nft"))
+		if prevIntent, ierr := a.st.ActiveIntent(ctx, failedID); ierr == nil && prevIntent != nil {
+			if _, nerr := a.ensureNftStructure(ctx, prevIntent, "rollback"); nerr != nil {
+				_ = a.run(ctx, "nft", "-f", filepath.Join(prevBundle, "stayconnect.nft"))
+			}
+		} else {
+			_ = a.run(ctx, "nft", "-f", filepath.Join(prevBundle, "stayconnect.nft"))
+		}
 		if raw, err := os.ReadFile(filepath.Join(prevBundle, "kea-dhcp4.json")); err == nil {
 			_ = a.pushKeaFile(raw)
 		}

@@ -172,6 +172,24 @@ jobs:
           ./cmd/netd/ ./internal/nft/
           -run 'System|Lease|Activation|Durable|SecurityTime|BootID|Journal|Phase3Allow|LegacyAllow|Phase3Deny|Phase3List|PermanentConcat|AuthorizedIn|ListIn|ConcatProbe|AllowInCarries' -count=1
 
+      - name: Ruleset-durability tests (restart/reboot convergence, carry-over, fingerprint)
+        working-directory: data-plane
+        # The Live Increment-9 blocker: netd replayed a stored bundle rendered by an older binary and deleted
+        # phase3_auth_ipv4 on every start. Counted on its own because "a routine restart executes NO nft
+        # mutation" is the production invariant, and the evidence artifact should carry its own total for it
+        # rather than burying it in the unit count.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh durability --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh durability
+          ./internal/nftconverge/ ./internal/netcfg/ ./cmd/netd/
+          -run 'Reconcile|Render_|Converge' -count=1
+
+      - name: Verified binary rollback tool (false-PASS regression)
+        # Increment 9's rehearsal replaced binaries with cp, every replacement failed with "Text file busy",
+        # and it then reported PASS because the services were active. These tests are the standing proof that
+        # the tool can no longer report success without having changed the running process image.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh binary-rollback -- bash $GITHUB_WORKSPACE/scripts/ci/binary-rollback-tests.sh"
+
       - name: Surgical live-dark nft foundation tests
         working-directory: data-plane
         # The install/rollback that has to be safe on an appliance carrying live legacy guests. Counted on its

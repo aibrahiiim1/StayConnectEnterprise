@@ -1,9 +1,60 @@
 package netcfg
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
+
+// RenderMarkerSet is an empty set whose ONLY job is to carry, inside the live kernel, the fingerprint of the
+// render that produced the table. It exists because the structure netd must install is a pure function of
+// (intent, topology, RENDERER VERSION) — and the third term is invisible to anything that only inspects the
+// database or the stored bundle.
+//
+// Live Increment 9 is exactly what happens without it: an appliance whose active revision was rendered in July
+// replayed that stored file on every netd start and silently deleted a set the current software requires. The
+// stored artifact could not know it was stale, and neither could the DB, because neither changed.
+//
+// Putting the fingerprint in the kernel means the question "does the live ruleset match what this binary would
+// build?" is answered by reading the live ruleset — the same place the answer has to be true.
+const RenderMarkerSet = "sc_render_fp"
+
+const renderMarkerPrefix = "netd-render-fp="
+
+// RenderFingerprint returns the fingerprint of the ruleset RenderNftables would produce for this input. It is
+// computed over the rendered body WITHOUT the marker, so the marker can carry it without being circular.
+func RenderFingerprint(nets []GuestNetwork, topo Topology) string {
+	return fingerprintOf(renderNftBody(nets, topo))
+}
+
+func fingerprintOf(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:16])
+}
+
+// FingerprintFromSetComment extracts the fingerprint from the marker set's comment, or "" if the comment is not
+// a marker. A set that is present but carries an unrecognised comment yields "", which compares unequal to every
+// real fingerprint — an unreadable marker is treated as "does not match", never as "matches".
+func FingerprintFromSetComment(comment string) string {
+	i := strings.Index(comment, renderMarkerPrefix)
+	if i < 0 {
+		return ""
+	}
+	fp := comment[i+len(renderMarkerPrefix):]
+	if j := strings.IndexAny(fp, " ;\""); j >= 0 {
+		fp = fp[:j]
+	}
+	if len(fp) != 32 {
+		return ""
+	}
+	for _, c := range fp {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return ""
+		}
+	}
+	return fp
+}
 
 // RenderNftables produces the complete `table inet stayconnect` ruleset for all
 // enabled guest networks. It replaces the old single-br-lan static file.
@@ -23,6 +74,20 @@ import (
 // pre-auth-reachable; that is acceptable because walled-garden targets are
 // public login/payment endpoints, not per-tenant secrets.
 func RenderNftables(nets []GuestNetwork, topo Topology) []byte {
+	body := renderNftBody(nets, topo)
+	// The marker is injected AFTER fingerprinting, as the first declaration inside the table, so that the
+	// fingerprint describes the structure rather than itself.
+	const open = "table inet stayconnect {\n"
+	marker := fmt.Sprintf("\tset %s {\n\t\ttype ipv4_addr\n\t\tcomment \"%s%s\"\n\t}\n\n",
+		RenderMarkerSet, renderMarkerPrefix, fingerprintOf(body))
+	if i := strings.LastIndex(body, open); i >= 0 {
+		j := i + len(open)
+		return []byte(body[:j] + marker + body[j:])
+	}
+	return []byte(body)
+}
+
+func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	enabled := sortEnabled(nets)
 	var b strings.Builder
 
@@ -148,7 +213,7 @@ func RenderNftables(nets []GuestNetwork, topo Topology) []byte {
 	b.WriteString("\t}\n")
 
 	b.WriteString("}\n")
-	return []byte(b.String())
+	return b.String()
 }
 
 func joinBridges(nets []GuestNetwork) string {

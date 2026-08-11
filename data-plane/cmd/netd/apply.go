@@ -32,6 +32,13 @@ type applier struct {
 	// legacyBridge is never surgically managed (it is adopted as-is).
 	legacyBridge string
 	dryRun       bool // pilot-safe: skip real ip/nft/kea side effects
+
+	// runFn/outFn are the ONLY places netd shells out. They are fields so a test can observe exactly which
+	// commands a reconciliation issued — including, for the steady-state case, that it issued none. A test
+	// that could only inspect the resulting ruleset could not tell "already correct, did nothing" apart from
+	// "rewrote it to the same thing", and those differ by whether a live guest keeps their authorization.
+	runFn func(ctx context.Context, name string, args ...string) error
+	outFn func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
 type applyResult struct {
@@ -209,6 +216,9 @@ func (a *applier) netdManaged(intent []netcfg.GuestNetwork) []netcfg.GuestNetwor
 }
 
 func (a *applier) run(ctx context.Context, name string, args ...string) error {
+	if a.runFn != nil {
+		return a.runFn(ctx, name, args...)
+	}
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, name, args...)
@@ -217,4 +227,15 @@ func (a *applier) run(ctx context.Context, name string, args ...string) error {
 		return fmt.Errorf("%s %s: %v — %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// output runs a command and returns stdout. A non-zero exit is an error and the caller decides what it means —
+// `nft list table` failing because the table does not exist is a normal state, not a fault.
+func (a *applier) output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if a.outFn != nil {
+		return a.outFn(ctx, name, args...)
+	}
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	return exec.CommandContext(cctx, name, args...).Output()
 }

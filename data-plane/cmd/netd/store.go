@@ -306,6 +306,30 @@ func (s *store) ActiveBundlePath(ctx context.Context, exceptID string) (string, 
 	return *p, nil
 }
 
+// ActiveIntent returns the stored intent of the current active revision (the known-good to roll back to).
+//
+// Rollback needs the previous revision's INTENT, not its rendered file: the file was produced by whatever
+// binary was running when that revision was applied, and re-running it reinstates that binary's idea of the
+// ruleset structure. Every revision already carries its intent as jsonb, so the correct artifact is one render
+// away and never goes stale.
+func (s *store) ActiveIntent(ctx context.Context, exceptID string) ([]netcfg.GuestNetwork, error) {
+	var raw []byte
+	err := s.db.QueryRow(ctx, `
+        SELECT intent FROM network_config_revisions
+         WHERE state='active' AND id<>$1 ORDER BY seq DESC LIMIT 1`, exceptID).Scan(&raw)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil || len(raw) == 0 {
+		return nil, err
+	}
+	var nets []netcfg.GuestNetwork
+	if err := json.Unmarshal(raw, &nets); err != nil {
+		return nil, err
+	}
+	return nets, nil
+}
+
 // PendingRevision returns the single in-flight pending_confirmation revision,
 // if any (used by the watchdog on netd startup and by confirm/rollback).
 func (s *store) PendingRevision(ctx context.Context) (id, bundlePath string, deadlinePassed bool, err error) {

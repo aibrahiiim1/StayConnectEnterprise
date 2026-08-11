@@ -1,0 +1,50 @@
+{
+  "transition_id": "T0020",
+  "seq": 20,
+  "timestamp": "2026-08-11T00:11:19Z",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_PRE_LIVE_SAFETY_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_INCREMENT9_DURABILITY_CORRECTION_CANDIDATE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "3",
+  "po_authorization_ref": "Two Product-Owner instructions of 2026-08-10/11. First, 'PRODUCT OWNER AUTHORIZATION -- EXECUTE PHASE 3 LIVE INCREMENT 9 ONLY' against HEAD 83449200a8aca7018fac5b38a96b3a1aafc66ba2, and its resumption instruction, which authorized exactly five live items and nothing else. That authorization was executed on 2026-08-10 and its results are recorded verbatim in this transition and in the Phase-3 report section 6b. Second, 'PHASE 3 -- FIX THE LIVE INCREMENT-9 RESTART/REBOOT BLOCKER USING THE SIMPLEST CORRECT DEVELOPMENT-PHASE DESIGN', which authorizes repository and disposable-environment correction only, explicitly permits destructive development-stage simplification of generated runtime artifacts and disposable Phase-3 state, and explicitly forbids any further appliance change in this round. The activity name changes because the stage changed: the candidate is no longer awaiting Increment-9 authorization -- Increment 9 has been executed and returned a blocker.",
+  "live_increment_9_result": {
+    "executed_on": "2026-08-10",
+    "appliance": "172.21.60.23 (radius)",
+    "deployed_head": "83449200a8aca7018fac5b38a96b3a1aafc66ba2",
+    "identity_proven": "appliance ef78219b-0d47-4465-9f77-3d0c702c815c, serial SC-BEN1-JS4A-0D9C, signed assignment to tenant cad348b7-4e43-4dc4-8ea3-40ba5b3ec866 / site 7acf26a7-5ad2-4c65-aef7-651107484636, licence active with wan_mac matching the live ens160 MAC and the ARP entry",
+    "item_1_read_only_pms": "PASS -- Hotel ID 3 150.0.0.18:5003, reviewed builders only behind an outbound allowlist; 149 frames parsed with zero parse errors (122 GI, 24 GO, 1 DS, 2 LS); two runs byte-identical at 149 frames / 8594 bytes; record ids and 2-character field ids only, no guest data.",
+    "item_2_live_dark_deployment": "BLOCKED / PARTIAL -- migration 0010 applied cleanly under the live-site gate (49->63 tables, 4/4 controlled functions, all objects owned by iam_v2_owner, 0 rows) and the nft foundation installed surgically with byte-identical legacy auth_ipv4 parity and unchanged chain/DNAT counts; but the foundation did not survive the next netd start.",
+    "item_3_reboot": "FAIL for the required post-reboot persistence -- services converged with 0 failed units, delivery binaries running, flags OFF, schema intact and legacy path healthy, but phase3_auth_ipv4 was ABSENT and the inet stayconnect table was structurally identical to the pre-install baseline (0 diff lines).",
+    "item_4_rollback_rehearsal": "PASS functionally, with a tooling defect found -- foundation install/rollback returned the ruleset exactly to baseline and migration 0010 down/up round-tripped (63->49->63, ownership preserved). The binary rehearsal first reported a FALSE PASS because cp cannot overwrite a running executable ('Text file busy') and the check then read the still-running delivery build as proof of rollback; re-run with install(1) it restored and proved the exact pre-Increment-9 hashes.",
+    "item_5_flags_off": "PASS -- none of the six STAYCONNECT_PHASE3_* flags in any env file or unit, count 0 in all five running process environments, netd logs active=false, no pmsd process or unit, phase3_auth_ipv4 0 elements, iam_v2 0 rows across all 63 tables.",
+    "legacy_live_session_continuity": "NOT PROVEN -- zero authorized guests and zero active legacy sessions existed throughout the window, so parity was proven structurally and by real-kernel tests on a populated set, never with a live guest on this appliance. No guest or session state was fabricated.",
+    "root_cause": "netd applier.ReconcileActiveOnBoot re-applied the active revision's stored rendered ruleset /etc/stayconnect/generated/network/revision-000056/stayconnect.nft, rendered 2026-07-14 by the pre-Phase-3 binary, which begins with 'delete table inet stayconnect' and contains zero occurrences of phase3_auth_ipv4. Ruleset structure depends on the renderer version, which exists only in the running binary and cannot be represented by a stored artifact."
+  },
+  "scope_allowed": "Repository and disposable-environment correction only: reconcile the live ruleset structure against a fresh render of the current binary rather than a stored bundle, using a kernel-resident render fingerprint (ADR-0003, internal/nftconverge); guarantee that a steady-state restart or reboot issues NO nft mutation at all and that the single upgrade converge carries live authorization across the atomic replace with the remaining lease; render the rollback path from the previous revision's stored intent instead of its stored file; add the modelled restart/reboot/upgrade/fresh-install suite and the real-kernel suite that drives the same engine against real nft in disposable namespaces; add scripts/binary-rollback.sh with immediate failure propagation and running-process identity verification plus its disposable test suite; formalize the migration runner (--apply-role, superuser-ledger-owner acceptance, actionable grant message) without weakening any live-site least-privilege check; make an unmapped activity a FAILURE in the PR-metadata gate; extend the offline preflight; and synchronize the report, acceptance matrix, project state, packs and manifest with the Increment-9 results exactly as observed.",
+  "scope_prohibited": "No appliance change of any kind in this round: no deployment, no migration, no reboot, no rollback execution, no nft change, no Production-database change and no live PMS traffic. No Phase-3 flag enablement, no Gate-P grants, no IAM-v2 cutover, no guest paid access, no PMS financial posting, no FIAS PS or PA, no settlement, no implicit FX, no programmatic reversal, no Phase 4. PR #6 remains open and unmerged. The appliance enrollment/signed-assignment identity, licence identity, secrets and keys were not reset and must not be.",
+  "evidence_files": [
+    "docs/architecture/adr/ADR-0003-ruleset-structure-from-current-render.md",
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+    "docs/manifests/Phase3-change-manifest.md",
+    "data-plane/internal/nftconverge/converge.go",
+    "data-plane/cmd/netd/nft_reconcile_test.go",
+    "data-plane/internal/kerneltest/converge_kernel_test.go",
+    "data-plane/internal/netcfg/render_nft_marker_test.go",
+    "scripts/binary-rollback.sh",
+    "scripts/ci/binary-rollback-tests.sh",
+    "scripts/edge-migrate.sh",
+    "scripts/phase3-preflight.sh",
+    "tools/validate-pr-metadata.sh"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC at the moment this receipt was written, immediately before the inventory_head commit that introduces it. tools/validate-transition-times.sh checks that it is not later than that commit.",
+  "source_commit": "83449200a8aca7018fac5b38a96b3a1aafc66ba2",
+  "acceptance_verdict": "IN_PROGRESS -- Phase 3 remains DARK, NOT accepted and NOT closed. Live Increment 9 has been EXECUTED and returned one blocker, which is corrected in this candidate. The corrected software is NOT deployed: the appliance still runs the binaries from 83449200a8aca7018fac5b38a96b3a1aafc66ba2, migration 0010 IS applied there with 0 rows, and the Phase-3 nft structure is absent after each restart until the correction is deployed.",
+  "next_action": "Obtain a Product-Owner decision on this correction, then re-run only the BLOCKED subset of Live Increment 9 on the appliance: deploy the corrected HEAD, prove phase3_auth_ipv4 is present and empty, prove a netd restart issues no nft mutation and preserves the structure, prove reboot reconstruction, repeat once for idempotence, and re-run the binary rollback rehearsal with scripts/binary-rollback.sh. Items 1 and 5 already passed live and need not be repeated. Legacy live-session continuity remains NOT PROVEN."
+}

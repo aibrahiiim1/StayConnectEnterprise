@@ -78,10 +78,18 @@ trap 'rm -f "$BODYFILE" "$BODYFILE.status"' EXIT
 printf '%s' "$body" > "$BODYFILE"
 
 # ---- the current candidate state, derived rather than hard-coded ------------------------------------------
+#
+# An UNRECOGNISED activity used to fall through to want="" — which silently disabled every check below. That
+# is the wrong default for a staleness gate: renaming the activity (exactly what a new correction round does)
+# would have turned the check off rather than making it fail, and the PR body could then say anything. An
+# activity this script does not know about is now a FAILURE that names itself.
 case "$activity" in
+  *INCREMENT9_DURABILITY_CORRECTION*) want="INCREMENT-9 DURABILITY CORRECTION CANDIDATE"; superseded="PRE-LIVE SAFETY CANDIDATE";;
   *PRE_LIVE_SAFETY*) want="PRE-LIVE SAFETY CANDIDATE"; superseded="DARK ACCEPTANCE CANDIDATE";;
   *SOFTWARE_CANDIDATE*) want="DARK ACCEPTANCE CANDIDATE"; superseded="";;
-  *) want=""; superseded="";;
+  *)
+    bad "activity '$activity' has no expected PR candidate-state mapping in this script; add one rather than leaving the PR-body check silently disabled"
+    want=""; superseded="";;
 esac
 
 if [ -n "$want" ]; then

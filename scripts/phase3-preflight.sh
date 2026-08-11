@@ -415,6 +415,101 @@ if grep -q 'remaining.Truncate(time.Second)' "$LEASE" && grep -q 'ErrLeaseTooSho
 else
   no "a boundary-clamped lease can be rounded up past the hard access boundary"
 fi
+# ================================================== 9. ruleset durability across restart and reboot
+#
+# The Live Increment-9 blocker. netd re-asserted the ruleset on boot by replaying the stored bundle — a file
+# rendered by an OLDER binary — so every start deleted a set the current software requires. These checks hold
+# the corrected shape in place: reconciliation renders from the current binary, a matching fingerprint means
+# NOTHING is executed, and the authorization that was live is carried across the one converge that does happen.
+RECON="$ROOT/data-plane/internal/nftconverge/converge.go"
+BOOT="$ROOT/data-plane/cmd/netd/apply_ops.go"
+RENDER="$ROOT/data-plane/internal/netcfg/render_nft.go"
+
+# (a) boot reconciliation must not replay a stored bundle's nft file.
+if [ -f "$BOOT" ]; then
+  boot_fn="$(awk '/^func \(a \*applier\) ReconcileActiveOnBoot/,/^}/' "$BOOT")"
+  if printf '%s' "$boot_fn" | grep -q 'stayconnect.nft'; then
+    # writing the artifact back for the record is fine; EXECUTING it is the defect.
+    if printf '%s' "$boot_fn" | grep -qE '"nft", *"-f"'; then
+      no "boot reconciliation still executes a stored bundle ruleset file"
+    else
+      ok "boot reconciliation never executes a stored bundle ruleset file"
+    fi
+  else
+    ok "boot reconciliation never executes a stored bundle ruleset file"
+  fi
+  if printf '%s' "$boot_fn" | grep -q 'ensureNftStructure'; then
+    ok "boot reconciliation converges the ruleset from a fresh render of the current binary"
+  else
+    no "boot reconciliation does not render the ruleset from the current binary"
+  fi
+else
+  no "netd apply_ops.go not found; ruleset-durability checks cannot run"
+fi
+
+# (b) a matching fingerprint must return BEFORE anything is executed.
+if [ -f "$RECON" ]; then
+  ensure_fn="$(awk '/^func \(e \*Engine\) Ensure/,/^}/' "$RECON")"
+  skip_line="$(printf '%s' "$ensure_fn" | grep -n 'tableExists && live == out.DesiredFP' | cut -d: -f1 | head -1)"
+  run_line="$(printf '%s' "$ensure_fn" | grep -n 'e.R.Run(' | cut -d: -f1 | head -1)"
+  if [ -n "$skip_line" ] && [ -n "$run_line" ] && [ "$skip_line" -lt "$run_line" ]; then
+    ok "a live ruleset that already matches the current render short-circuits before any command is executed"
+  else
+    no "the steady-state short-circuit does not precede execution (a routine restart could rewrite the ruleset)"
+  fi
+  if printf '%s' "$ensure_fn" | grep -q 'CarryOverCommands'; then
+    ok "the upgrade converge carries live authorization across the atomic replace"
+  else
+    no "the converge does not carry live authorization across the replace"
+  fi
+  if printf '%s' "$ensure_fn" | grep -q 'nft applied but live fingerprint'; then
+    ok "the converge verifies the result against the kernel instead of trusting the exit code"
+  else
+    no "the converge does not verify its result against the kernel"
+  fi
+  # the remaining lease, never the original
+  if awk '/^func CarryOverCommands/,/^}/' "$RECON" | grep -q 'e.Expires > 0'; then
+    ok "carried authorizations use the REMAINING lease, not the original"
+  else
+    no "carried authorizations do not use the remaining lease"
+  fi
+else
+  no "internal/nftconverge/converge.go not found; ruleset-durability checks cannot run"
+fi
+
+# (c) the Phase-3 set is part of the rendered structure and carries a fingerprint.
+if [ -f "$RENDER" ]; then
+  if grep -q 'RenderMarkerSet' "$RENDER" && grep -q 'func RenderFingerprint' "$RENDER"; then
+    ok "the generated ruleset carries a structure fingerprint the kernel can be asked for"
+  else
+    no "the generated ruleset carries no structure fingerprint"
+  fi
+  if grep -q 'set phase3_auth_ipv4' "$RENDER"; then
+    ok "phase3_auth_ipv4 is emitted by the renderer itself, so its presence survives every restart"
+  else
+    no "phase3_auth_ipv4 is not part of the rendered structure"
+  fi
+else
+  no "render_nft.go not found"
+fi
+
+# (d) the verified binary rollback tool cannot report success it did not earn.
+ROLLBACK="$ROOT/scripts/binary-rollback.sh"
+if [ -f "$ROLLBACK" ]; then
+  if grep -nE '^\s*cp\s' "$ROLLBACK" | grep -qv '^\s*#'; then
+    no "binary-rollback.sh replaces binaries with cp (cannot overwrite a running executable)"
+  else
+    ok "binary rollback replaces binaries with install(1), never cp"
+  fi
+  if grep -q '/proc/\$pid/exe' "$ROLLBACK"; then
+    ok "binary rollback verifies the identity of the RUNNING process image, not just service health"
+  else
+    no "binary rollback does not verify the running process image"
+  fi
+else
+  no "scripts/binary-rollback.sh not found"
+fi
+
 # ============================================================================== report
 # Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json
 # silently reported a smaller, all-passing suite.
