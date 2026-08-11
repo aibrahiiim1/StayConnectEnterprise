@@ -108,10 +108,12 @@ api.stayconnect.local, admin.stayconnect.local {
 	handle {
 		respond "Not served by this appliance. api./admin. are Central Control Plane surfaces." 404
 	}
-	log {
-		output file /var/log/caddy/unsupported-host.log
-		format json
-	}
+	# Deliberately NO `log { output file ... }` here. A new log file is a new failure mode: Caddy runs as
+	# the `caddy` user, and anyone who runs `caddy validate` as root first instantiates the log writer and
+	# leaves the file root-owned - after which the service cannot open it and EVERY start fails with
+	# "setting up custom log 'log1': opening log writer". That is exactly how this block was first
+	# deployed, and it cost a restart loop to find. Refusals land in the default log, which is enough for
+	# a route whose entire job is to say "not here".
 }
 
 import /etc/caddy/hotel-admin/vhost.caddy
