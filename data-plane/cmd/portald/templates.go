@@ -29,6 +29,9 @@ const landingHTML = `<!doctype html>
   button:disabled { opacity:.5; cursor:wait; }
   button.link { background:none; color:#0a6cff; font-weight:400; padding:6px; margin-top:8px; }
   .err { color:#b00020; margin-top:12px; min-height:1.2em; font-size:.9rem; }
+  #pms-choices button.choice { display:block; width:100%; text-align:left; margin:8px 0; padding:12px 14px;
+    border:1px solid #ccc; border-radius:10px; background:#fff; cursor:pointer; font-size:1rem; }
+  #pms-choices button.choice[disabled] { opacity:.5; cursor:default; }
   .small { font-size:.8rem; color:#777; }
 </style>
 </head><body>
@@ -85,8 +88,11 @@ const landingHTML = `<!doctype html>
       <p class="small" id="pms-prompt" style="margin-top:10px"></p>
       <input id="pms-secondary" name="secondary" type="text" required placeholder="Last name or reservation number">
       <button type="submit">Connect</button>
-      <div class="err" id="pms-err"></div>
     </form>
+    <!-- the error lives OUTSIDE the form: during package selection the form is hidden, and a failure message
+         inside it would be invisible exactly when the guest most needs to see it. -->
+    <div class="err" id="pms-err" role="alert" aria-live="polite"></div>
+    <div id="pms-choices" role="group" aria-label="Internet packages" style="display:none"></div>
   </div>
 
   <!-- Social panel -->
@@ -145,6 +151,7 @@ const landingHTML = `<!doctype html>
       if (cfg.guest_account && cfg.guest_account.enabled) enabled.push('account');
       if (cfg.email   && cfg.email.enabled)   enabled.push('email');
       if (cfg.sms     && cfg.sms.enabled)     enabled.push('sms');
+      PHASE3_PMS = !!cfg.phase3_pms;
       if (cfg.pms     && cfg.pms.enabled) {
         enabled.push('pms');
         document.getElementById('pms-prompt').textContent = PMSPrompts[cfg.pms.mode] || PMSPrompts.either;
@@ -231,6 +238,100 @@ const landingHTML = `<!doctype html>
     attach('email');
     attach('sms');
 
+    // ---- Phase 3 (Stay resolution) ----------------------------------------
+    // The guest sees exactly two possible outcomes: they are in, or the one message below. There is
+    // deliberately no branch here that renders a server reason — a page that could say "that room exists but
+    // the name is wrong" is an occupancy oracle for anyone sitting in the lobby.
+    let PHASE3_PMS = false;
+    let PMS_REQUEST_ID = '';
+    // PMS_ATTEMPT_KEY is the details the current request id belongs to. The id must survive a retry of the
+    // SAME attempt and must not survive a different one — see phase3RequestID below.
+    let PMS_ATTEMPT_KEY = '';
+    let PMS_AUTH_CONTEXT = '';
+    const PHASE3_FAIL = 'We could not verify your stay. Please check your details or contact reception.';
+
+    function newRequestID() {
+      if (window.crypto && window.crypto.randomUUID) { return window.crypto.randomUUID(); }
+      const b = new Uint8Array(16); (window.crypto || {}).getRandomValues && window.crypto.getRandomValues(b);
+      return Array.from(b, function(x){ return ('0'+x.toString(16)).slice(-2); }).join('');
+    }
+
+    // phase3RequestID decides whether this submission is a RETRY of the attempt already in flight or a NEW
+    // attempt, and returns the id accordingly.
+    //
+    // This distinction is the whole value of the request id, and getting it wrong fails in both directions.
+    // Minting a fresh id every time means a guest on a flaky lobby connection — the normal case for a captive
+    // portal — records a second resolution and a second Auth Context every time they tap again, which is
+    // precisely the duplication the id exists to prevent. Never minting a new one means a guest who mistyped
+    // their room is stuck replaying the failed attempt forever, because the server correctly returns the same
+    // answer for the same id.
+    //
+    // The details themselves are the discriminator: same details, same attempt.
+    function phase3RequestID(body) {
+      const key = JSON.stringify([body.room||'', body.last_name||'', body.first_name||'', body.reservation_number||'']);
+      if (key !== PMS_ATTEMPT_KEY || !PMS_REQUEST_ID) {
+        PMS_ATTEMPT_KEY = key;
+        PMS_REQUEST_ID = newRequestID();
+      }
+      return PMS_REQUEST_ID;
+    }
+
+    async function submitPhase3(body, errEl) {
+      let j = {};
+      try {
+        const r = await fetch('/auth/pms/phase3', {
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+        });
+        j = await r.json().catch(function(){ return {}; });
+      } catch (e) { j = {}; }
+      if (j.ok && j.session_id) {
+        // A new attempt after this one must be a NEW resolution, not a replay of a spent request id.
+        PMS_REQUEST_ID = ''; PMS_ATTEMPT_KEY = '';
+        window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
+        return;
+      }
+      if (j.ok && j.needs_choice) {
+        PMS_AUTH_CONTEXT = j.auth_context_id || '';
+        renderPhase3Choices(j.choices || [], errEl);
+        return;
+      }
+      // EVERY other answer — including a transport failure — is the same message.
+      //
+      // The request id is deliberately KEPT. A non-success can mean the guest's details were wrong, but it can
+      // equally mean the attempt was abandoned at the server's response-time budget or lost in transit with
+      // the resolution already recorded. Discarding the id would turn the second of those into a duplicate
+      // resolution; keeping it lets the retry return the same Auth Context. A guest who corrects their details
+      // gets a new id automatically, because the details are what the id is keyed to.
+      errEl.textContent = PHASE3_FAIL;
+    }
+
+    function renderPhase3Choices(choices, errEl) {
+      const box = document.getElementById('pms-choices');
+      const form = document.getElementById('form-pms');
+      box.innerHTML = '';
+      if (!choices.length) { errEl.textContent = PHASE3_FAIL; return; }
+      const h = document.createElement('p');
+      h.className = 'small';
+      h.textContent = 'Choose your internet package';
+      box.appendChild(h);
+      choices.forEach(function(c) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'choice';
+        b.dataset.packageRevisionId = c.package_revision_id;
+        b.textContent = c.code + ' — ' + Math.round((c.down_kbps||0)/1000) + ' Mbps down';
+        b.addEventListener('click', async function() {
+          box.querySelectorAll('button').forEach(function(x){ x.disabled = true; });
+          errEl.textContent = '';
+          await submitPhase3({ auth_context_id: PMS_AUTH_CONTEXT, package_revision_id: c.package_revision_id }, errEl);
+          box.querySelectorAll('button').forEach(function(x){ x.disabled = false; });
+        });
+        box.appendChild(b);
+      });
+      form.style.display = 'none';
+      box.style.display = 'block';
+    }
+
     // PMS — single-step form: room + secondary field. Mode decides which
     // server-side field we fill from the secondary input.
     document.getElementById('form-pms').addEventListener('submit', async (e) => {
@@ -251,14 +352,21 @@ const landingHTML = `<!doctype html>
         else body.last_name = val;
       }
       try {
-        const r = await fetch('/auth/pms/verify', {
-          method:'POST', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify(body)
-        });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok) { errEl.textContent = j.error || 'Verification failed'; return; }
-        window.location = '/success?s=' + encodeURIComponent(j.session_id || '') +
-                          '&t=' + encodeURIComponent(j.duration_seconds || 0);
+        if (!PHASE3_PMS) {
+          const r = await fetch('/auth/pms/verify', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(body)
+          });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) { errEl.textContent = j.error || 'Verification failed'; return; }
+          window.location = '/success?s=' + encodeURIComponent(j.session_id || '') +
+                            '&t=' + encodeURIComponent(j.duration_seconds || 0);
+          return;
+        }
+        // PHASE 3: the Stay-resolution flow. The request id makes a double-tap or a retry on a bad
+        // connection resolve ONCE — without it the guest's second attempt records a second resolution.
+        body.request_id = phase3RequestID(body);
+        await submitPhase3(body, errEl);
       } finally { btn.disabled = false; }
     });
   </script>

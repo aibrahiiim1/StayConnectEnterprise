@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0023",
+  "seq": 23,
+  "timestamp": "2026-08-11T10:23:22Z",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_INCREMENT9_DURABILITY_CORRECTION_CANDIDATE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_DARK_ACCEPTANCE_CANDIDATE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "3",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-11, 'PHASE 3 -- FINAL DARK-ACCEPTANCE CLOSURE: SAFE PRE-CONVERGE ROLLBACK + PMSD DARK SERVICE INSTALLATION', issued against the live-validated candidate 7318ac239b5bbbe5ca210fce94089d528e82306f. It ACCEPTS the successful Live Increment-9 re-validation as verified progress, authorizes the smallest repository correction plus a tightly bounded live closure for the two remaining findings, and forbids reopening any other Phase-3 software scope. Phase 3 remains DARK, IN_PROGRESS, not accepted and not closed until the Product Owner's final acceptance decision.",
+  "scope_allowed": "Two closures and their evidence. (1) ROLLBACK COMPATIBILITY BOUNDARY: scripts/binary-rollback.sh determines whether the rollback target predates current-render convergence by reading the target ARTIFACT for the render-marker string rather than trusting a version, then reads the LIVE legacy authorization set: a convergence-capable target is unaffected, a pre-convergence target with an EMPTY set proceeds, and a pre-convergence target with a POPULATED or UNREADABLE set is REFUSED before anything is replaced or restarted, naming the operator action. There is deliberately no force or override path on the ordinary command. Proven by 29 disposable checks and by internal/kerneltest/rollback_boundary_kernel_test.go against a real populated authorization set with real packets, asserting the ruleset is untouched and the authorized guest stays online. (2) DARK PMSD DEPLOYMENT CONTRACT: deploy/env/pmsd.env.dark (deliberately setting no Phase-3 flag) and scripts/install-pmsd-dark.sh, which creates the dedicated least-privilege stayconnect-pmsd account rather than weakening the unit, installs and enables the reviewed unit, and verifies the dark contract -- clean exit, flags-OFF log line, no restart loop, no PMS socket, no process left running. (3) Offline preflight extended to 73 checks covering both. (4) Evidence synchronization of the completed Increment-9 re-validation across the Final Report (new section 6c, matrix rows 32/32a/32b re-validated and rows 32e-32h added), runbook, project state, PR metadata, Handoff, START-HERE, manifests and packs. (5) The authorized live closure: install and verify the DARK pmsd service, exercise the corrected rollback path against the pre-nftconverge previous release while the live legacy set is empty, redeploy the final candidate, one controlled reboot, and the final DARK proof.",
+  "scope_prohibited": "No Phase-3 flag enablement, no guest Phase-3 authentication, no live PMS protocol testing (Item 1 is not repeated), no PS or PA, no PMS financial posting, no paid access, no Gate-P grants, no IAM-v2 cutover, no implicit FX, no programmatic reversal, no Phase 4, no PR #6 merge. Migration 0010 is NOT re-applied. No legacy guest is fabricated to exercise the populated-set rollback case on Production -- that case belongs to the disposable real-kernel suite. No Phase-3 runtime feature behaviour is broadened. Phase 3 is not self-accepted.",
+  "evidence_files": [
+    "scripts/binary-rollback.sh",
+    "scripts/ci/binary-rollback-tests.sh",
+    "data-plane/internal/kerneltest/rollback_boundary_kernel_test.go",
+    "deploy/systemd/stayconnect-pmsd.service",
+    "deploy/env/pmsd.env.dark",
+    "scripts/install-pmsd-dark.sh",
+    "scripts/phase3-preflight.sh",
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+    "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC at the moment this receipt was written, immediately before the inventory_head commit that introduces it. tools/validate-transition-times.sh checks that it is not later than that commit.",
+  "source_commit": "7318ac239b5bbbe5ca210fce94089d528e82306f",
+  "acceptance_verdict": "IN_PROGRESS -- Phase 3 is a DARK ACCEPTANCE CANDIDATE: NOT accepted and NOT closed, pending the Product Owner's final decision. The Live Increment-9 blocked subset was re-validated live on 2026-08-11 with every item PASS, and the two findings that run produced are closed in software and verified live. Legacy live-session continuity remains NOT PROVEN because no real legacy guest was available, and nothing was fabricated to close it.",
+  "next_action": "Obtain the Product-Owner FINAL ACCEPTANCE decision for Phase 3 at DARK maturity, and a separate decision on merging PR #6."
+}

@@ -32,6 +32,11 @@ type Matrix = Record<string, Record<string, Perm>>;
 
 const MATRIX: Matrix = {
   hotel_it_manager: {
+    // Phase 3 (DARK): the IT manager owns the PMS integration — publishing the
+    // checkout-grace policy and clearing alerts are manager actions; stays,
+    // events and resolutions are read-only evidence.
+    "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read",
+    "checkout-grace": "write", "operational-alerts": "write",
     "guest-access-plans": "write", "voucher-batches": "write", "guest-accounts": "write",
     vouchers: "write", sessions: "write", "pms-providers": "write",
     "auth-methods": "write", "walled-garden": "write",
@@ -42,12 +47,14 @@ const MATRIX: Matrix = {
     reports: "read", backups: "read", license: "read", diagnostics: "write",
   },
   front_office_operator: {
+    "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
     "voucher-batches": "write", "guest-accounts": "write", vouchers: "write", sessions: "write",
     "guest-access-plans": "read", "pms-providers": "read",
     "auth-methods": "read", "walled-garden": "read", payments: "read",
     reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
+    "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
     "voucher-batches": "write", "guest-accounts": "write", vouchers: "write", sessions: "write",
     "guest-access-plans": "read", "pms-providers": "read",
     "auth-methods": "read", payments: "read", reports: "read",
@@ -63,6 +70,7 @@ const MATRIX: Matrix = {
     sessions: "read", reports: "read", audit: "read", license: "read", diagnostics: "read",
   },
   site_viewer: {
+    "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read", "checkout-grace": "read", "operational-alerts": "read",
     "guest-access-plans": "read", "voucher-batches": "read", "guest-accounts": "read", vouchers: "read",
     sessions: "read", "pms-providers": "read", "auth-methods": "read",
     "walled-garden": "read", "portal-branding": "read", payments: "read",

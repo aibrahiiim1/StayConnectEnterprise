@@ -58,6 +58,7 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
 	"github.com/stayconnect/enterprise/data-plane/internal/voucher"
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 	lic "github.com/stayconnect/enterprise/license"
 )
 
@@ -199,6 +200,10 @@ type server struct {
 	// the guest portal commerce routes are mounted at all (they are absent unless PortalOn()).
 	commerce    *iamv2.CommerceEngine
 	commerceCfg iamv2.CommerceConfig
+
+	// Phase 3 (DARK): the PMS auth vertical slice. nil while dark, and its routes are not mounted at all —
+	// an absent surface cannot be probed for behaviour the way a present-but-refusing one can.
+	p3auth *phase3Auth
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -811,6 +816,22 @@ func main() {
 		r.Post("/v1/commerce/quote", s.commerceQuote)
 		r.Post("/v1/commerce/confirm", s.commerceConfirm)
 		slog.Info("phase2 portal commerce routes mounted")
+	}
+
+	// Phase 3 (DARK): the PMS auth slice. Constructed and mounted ONLY with the master + PMS-auth flags on.
+	// While dark, scd issues zero Phase-3 SQL and these paths do not exist.
+	if pmsCfg3, err := iamv2.LoadPMSConfigFromEnv(os.Getenv); err != nil {
+		slog.Error("scd: phase3 config fail-closed", "err", err)
+		os.Exit(1)
+	} else if s.p3auth = newPhase3Auth(pmsCfg3, s); s.p3auth != nil {
+		// The controlled-writer boundary must be real before a guest-facing path can create an Entitlement.
+		if err := writerguard.Verify(rootCtx, s.db, writerguard.Phase3Requirements()); err != nil {
+			slog.Error("scd: refusing to serve the Phase-3 auth surface", "err", err)
+			os.Exit(1)
+		}
+		r.Post("/v1/phase3/auth/pms/resolve", s.p3auth.resolveHandler)
+		r.Post("/v1/phase3/auth/pms/grant", s.p3auth.grantHandler)
+		slog.Info("phase3 pms auth routes mounted", "flags", pmsCfg3.SafeFlagSummary())
 	}
 
 	_ = os.MkdirAll("/run/stayconnect", 0o755)

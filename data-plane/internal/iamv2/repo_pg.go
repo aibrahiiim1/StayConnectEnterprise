@@ -6,6 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
 
 // PgRepository is a SCRATCH/TEST iam_v2 Repository. It is provided only when a scratch/enabled run
@@ -23,6 +25,10 @@ func (r *PgRepository) WithTx(ctx context.Context, fn func(Tx) error) error {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+	// This repository's transactions issue and consume Auth Contexts.
+	if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
+		return err
+	}
 	if err := fn(&pgTx{tx: tx}); err != nil {
 		return err
 	}

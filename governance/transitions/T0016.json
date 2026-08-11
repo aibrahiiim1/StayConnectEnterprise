@@ -1,0 +1,27 @@
+{
+  "transition_id": "T0016",
+  "seq": 16,
+  "timestamp": "2026-07-23T13:00:00Z",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_IMPLEMENTATION_IN_PROGRESS",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_SOFTWARE_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "3",
+  "po_authorization_ref": "Product-Owner decision D15 (Option C, 2026-07-22): the Hotel-Admin scope-amendment proposal was REJECTED with NO scope reduction. This transition records that the Phase-3 SOFTWARE candidate is complete and awaiting a separate Product-Owner decision to authorize Live Increment 9. It is NOT an acceptance and does NOT close Phase 3, and it authorizes NO live execution. Preserves D14/T0015 and all prior transitions.",
+  "scope_allowed": "Governance/documentation synchronization only: record the completed Phase-3 software candidate (Option C executed, mixed Phase-2 direct-Entitlement writer eliminated, accountable-before-forwarding class provisioning, one true full same-HEAD software gate green with a verified evidence artifact). No new implementation is authorized by this transition.",
+  "scope_prohibited": "No Live Increment 9 (read-only live PMS verification, live-dark deployment, reboot, rollback rehearsal, flags-OFF confirmation) until a separate Product-Owner decision; no PMS financial posting or FIAS PS/PA; no payments/settlement/reversal; no guest paid access; no IAM-v2 cutover or production iam_v2 runtime reads/writes; no Gate-P grants; no Phase 4. PR #6 remains open and unmerged; migration 0010 undeployed; all Phase-3 flags OFF.",
+  "evidence_files": [
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+    "docs/manifests/Phase3-change-manifest.md",
+    ".github/workflows/phase3-software.yml"
+  ],
+  "source_commit": "4a9f602",
+  "acceptance_verdict": "IN_PROGRESS -- Phase-3 SOFTWARE candidate COMPLETE, DARK, NOT accepted, NOT closed. Awaiting one separate Product-Owner decision to authorize Live Increment 9.",
+  "next_action": "Obtain a separate Product-Owner decision authorizing Live Increment 9 before any live execution."
+}

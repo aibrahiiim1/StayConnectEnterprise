@@ -13,9 +13,10 @@ import (
 )
 
 // fakeApaleo routes three endpoints on a single httptest server:
-//   /connect/token          → OAuth client-credentials grant
-//   /inventory/v1/units     → paged units list
-//   /booking/v1/reservations → reservation lookup (expects bearer auth)
+//
+//	/connect/token          → OAuth client-credentials grant
+//	/inventory/v1/units     → paged units list
+//	/booking/v1/reservations → reservation lookup (expects bearer auth)
 //
 // It also counts how many token grants were issued so tests can assert
 // the cache-until-expiry behaviour.
@@ -131,7 +132,8 @@ func TestApaleoConfigureRequiresCreds(t *testing.T) {
 }
 
 func TestApaleoTokenCachedUntilExpiry(t *testing.T) {
-	f := newFakeApaleo(t); defer f.Close()
+	f := newFakeApaleo(t)
+	defer f.Close()
 	f.mu.Lock()
 	f.units = []apaleoUnit{{ID: "u-1", Name: "101"}}
 	f.mu.Unlock()
@@ -155,7 +157,8 @@ func TestApaleoTokenCachedUntilExpiry(t *testing.T) {
 }
 
 func TestApaleoTokenRefreshedWhenExpired(t *testing.T) {
-	f := newFakeApaleo(t); defer f.Close()
+	f := newFakeApaleo(t)
+	defer f.Close()
 	// 1-second token TTL (minus apaleoTokenSkew=60s makes expiry "in the
 	// past" immediately, so every call re-fetches).
 	f.mu.Lock()
@@ -175,7 +178,8 @@ func TestApaleoTokenRefreshedWhenExpired(t *testing.T) {
 }
 
 func TestApaleoValidateGuestSuccess(t *testing.T) {
-	f := newFakeApaleo(t); defer f.Close()
+	f := newFakeApaleo(t)
+	defer f.Close()
 	f.mu.Lock()
 	f.units = []apaleoUnit{{ID: "u-101", Name: "101"}}
 	f.reservsByID["u-101"] = []apaleoReservation{{
@@ -207,7 +211,8 @@ func TestApaleoValidateGuestSuccess(t *testing.T) {
 }
 
 func TestApaleoValidateGuestNoMatch(t *testing.T) {
-	f := newFakeApaleo(t); defer f.Close()
+	f := newFakeApaleo(t)
+	defer f.Close()
 	f.mu.Lock()
 	f.units = []apaleoUnit{{ID: "u-101", Name: "101"}}
 	f.reservsByID["u-101"] = []apaleoReservation{{
@@ -236,7 +241,8 @@ func TestApaleoTokenError(t *testing.T) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":"invalid_client","error_description":"unknown client"}`))
 	})
-	srv := httptest.NewServer(mux); defer srv.Close()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
 
 	a := newApaleoAt(t, srv.URL)
 	_, err := a.getToken(context.Background())
@@ -249,7 +255,8 @@ func TestApaleoTokenError(t *testing.T) {
 }
 
 func TestApaleoDropsTokenOn401(t *testing.T) {
-	f := newFakeApaleo(t); defer f.Close()
+	f := newFakeApaleo(t)
+	defer f.Close()
 	f.mu.Lock()
 	f.units = []apaleoUnit{{ID: "u-1", Name: "101"}}
 	f.mu.Unlock()

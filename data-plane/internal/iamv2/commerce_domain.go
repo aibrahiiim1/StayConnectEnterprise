@@ -22,13 +22,53 @@ const (
 	SubjectPrincipal SubjectKind = "PRINCIPAL" // OTP / SOCIAL
 )
 
-// EligibilitySubject is the set of NON-PMS facts a rule/tier condition may test in Phase 2.
+// EligibilitySubject is what a rule or tier condition may test.
+//
+// Phase 2 could only carry non-PMS facts, so the seven PMS rule types below were recognised but
+// capability-disabled: with no authoritative Stay data, evaluating them would have meant guessing, and a
+// guess that says "eligible" hands out access nobody authorised. Phase 3 supplies that data, so the same
+// rule types now evaluate for real — but ONLY when the evidence is present and coherent. StayEvidence being
+// absent is not "no constraint"; it is "we cannot answer", and the answer to that is still no.
 type EligibilitySubject struct {
 	Now                       time.Time
-	AuthMethod                Method // VOUCHER | ACCOUNT | OTP | SOCIAL
+	AuthMethod                Method // VOUCHER | ACCOUNT | OTP | SOCIAL | PMS
 	Kind                      SubjectKind
 	GuestNetworkID            string
 	HasPriorPurchaseOfPackage bool
+
+	// Stay is the authoritative Stay evidence for a PMS-authenticated subject. Nil for every other method,
+	// which is what keeps a voucher guest from matching a room-type rule.
+	Stay *StayEvidence
+}
+
+// StayEvidence is the server-pinned Stay state a PMS rule may test. Every field comes from the resolved Stay
+// row under the pinned Interface Revision — never from a guest, and never from a request body.
+type StayEvidence struct {
+	StayID      string
+	InterfaceID string
+	Status      string // IN_HOUSE | POST_STAY_ACTIVE | ...
+	RoomType    string
+	RatePlan    string
+	TravelAgent string
+	VIP         *bool // nil means the PMS did not state it — not "false"
+	Arrival     *time.Time
+	Departure   *time.Time
+	// EvidenceVersion is the occupancy-evidence version this snapshot was taken at. It is carried into the
+	// Quote so a decision can be re-read later against the exact evidence that produced it.
+	EvidenceVersion int64
+}
+
+// Nights is the stay length in nights, and whether it could be computed at all. A missing bound means the
+// question cannot be answered, which fails closed rather than defaulting to zero.
+func (e *StayEvidence) Nights() (int, bool) {
+	if e == nil || e.Arrival == nil || e.Departure == nil {
+		return 0, false
+	}
+	d := e.Departure.Sub(*e.Arrival)
+	if d < 0 {
+		return 0, false
+	}
+	return int(d.Hours() / 24), true
 }
 
 // EligibilityRule is one typed rule attached to a package revision (rule_type + rule_value jsonb).
@@ -53,17 +93,33 @@ const (
 	RuleSiteNetwork   = "SITE_NETWORK"   // {guest_network_ids: [uuid,...]}
 )
 
-// pmsRuleTypes are recognized but capability-disabled in Phase 2 (no authoritative Stay data yet).
-// A package/tier that depends on any of these is NOT eligible / does not match until Phase 3.
+// The PMS rule types. Phase 2 recognised them and refused to evaluate them, because there was no
+// authoritative Stay data and a guess in the permissive direction hands out access. Phase 3 evaluates them
+// against server-pinned Stay evidence — and still refuses when that evidence is missing or incoherent.
+const (
+	RuleStayStatus   = "STAY_STATUS"   // {statuses: ["IN_HOUSE", ...]}
+	RuleStayLength   = "STAY_LENGTH"   // {min_nights?, max_nights?}
+	RuleRoomType     = "ROOM_TYPE"     // {room_types: [...]}
+	RuleVIP          = "VIP"           // {is_vip: bool}
+	RuleTravelAgent  = "TRAVEL_AGENT"  // {travel_agents: [...]}
+	RulePMSInterface = "PMS_INTERFACE" // {pms_interface_ids: [uuid,...]}
+	RuleRatePlan     = "RATE_PLAN"     // {rate_plans: [...]}
+)
+
 var pmsRuleTypes = map[string]bool{
-	"STAY_STATUS": true, "STAY_LENGTH": true, "ROOM_TYPE": true, "VIP": true,
-	"TRAVEL_AGENT": true, "PMS_INTERFACE": true, "RATE_PLAN": true,
+	RuleStayStatus: true, RuleStayLength: true, RuleRoomType: true, RuleVIP: true,
+	RuleTravelAgent: true, RulePMSInterface: true, RuleRatePlan: true,
 }
 
-// IsCapabilityDisabledRuleType reports whether a rule/condition type is a Phase-3 PMS type that must
-// fail closed in Phase 2.
-func IsCapabilityDisabledRuleType(t string) bool {
+// IsPMSRuleType reports whether a rule/condition type needs authoritative Stay evidence.
+func IsPMSRuleType(t string) bool {
 	return pmsRuleTypes[strings.ToUpper(strings.TrimSpace(t))]
+}
+
+// IsCapabilityDisabledRuleType reports whether a type cannot be evaluated for THIS subject. A PMS rule
+// without Stay evidence is exactly that: recognised, but unanswerable, so it fails closed.
+func IsCapabilityDisabledRuleType(t string) bool {
+	return false
 }
 
 // EvaluatePackageEligible returns whether ALL of a package revision's eligibility rules pass for the
@@ -112,8 +168,17 @@ func FirstMatchTier(tiers []GrantTier, s EligibilitySubject) (GrantTier, bool) {
 // unknown/disabled/malformed.
 func evalTypedCondition(ctype string, v map[string]any, s EligibilitySubject) (bool, string) {
 	t := strings.ToUpper(strings.TrimSpace(ctype))
-	if IsCapabilityDisabledRuleType(t) {
-		return false, "capability_disabled_pms_rule"
+	if IsPMSRuleType(t) {
+		if s.Stay == nil {
+			// The rule is recognised and the subject cannot answer it. That is not "no constraint" — it is
+			// "unknown", and a permissive reading of unknown is how a voucher guest matches a suite rate.
+			return false, "pms_rule_without_stay_evidence"
+		}
+		if s.Stay.EvidenceVersion <= 0 {
+			// Evidence exists but was never authoritatively versioned, so it cannot be reproduced later.
+			return false, "pms_rule_without_versioned_evidence"
+		}
+		return evalPMSCondition(t, v, s.Stay)
 	}
 	switch t {
 	case RuleDateWindow:
@@ -248,4 +313,114 @@ func IsFreePackage(m MoneySpec) (bool, string) {
 		return false, "invalid_currency"
 	}
 	return true, "free"
+}
+
+// evalPMSCondition evaluates one PMS rule against server-pinned Stay evidence. Every branch fails closed on a
+// malformed rule or on evidence the PMS did not state: a rule the property wrote must never be satisfied by
+// the absence of the thing it tests.
+func evalPMSCondition(t string, v map[string]any, e *StayEvidence) (bool, string) {
+	switch t {
+	case RuleStayStatus:
+		set := stringSet(v["statuses"])
+		if len(set) == 0 {
+			return false, "malformed_stay_status_rule"
+		}
+		if e.Status == "" {
+			return false, "stay_status_unknown"
+		}
+		if set[strings.ToUpper(e.Status)] {
+			return true, ""
+		}
+		return false, "stay_status_not_matched"
+
+	case RuleStayLength:
+		nights, ok := e.Nights()
+		if !ok {
+			return false, "stay_length_unknown"
+		}
+		minN, minPresent, minOK := parseIntField(v, "min_nights")
+		maxN, maxPresent, maxOK := parseIntField(v, "max_nights")
+		if !minPresent && !maxPresent {
+			return false, "stay_length_needs_a_bound"
+		}
+		if (minPresent && !minOK) || (maxPresent && !maxOK) {
+			return false, "malformed_stay_length_rule"
+		}
+		if minPresent && maxPresent && minN > maxN {
+			return false, "stay_length_min_gt_max"
+		}
+		if minPresent && nights < minN {
+			return false, "stay_shorter_than_min"
+		}
+		if maxPresent && nights > maxN {
+			return false, "stay_longer_than_max"
+		}
+		return true, ""
+
+	case RuleRoomType:
+		return matchStringField(stringSet(v["room_types"]), e.RoomType, "room_type")
+	case RuleTravelAgent:
+		return matchStringField(stringSet(v["travel_agents"]), e.TravelAgent, "travel_agent")
+	case RuleRatePlan:
+		return matchStringField(stringSet(v["rate_plans"]), e.RatePlan, "rate_plan")
+	case RulePMSInterface:
+		return matchStringField(stringSet(v["pms_interface_ids"]), e.InterfaceID, "pms_interface")
+
+	case RuleVIP:
+		want, present := v["is_vip"].(bool)
+		if !present {
+			return false, "malformed_vip_rule"
+		}
+		if e.VIP == nil {
+			// The PMS did not state it. Treating "not stated" as false would silently satisfy every
+			// {is_vip:false} rule for guests whose status the property simply has not recorded.
+			return false, "vip_unknown"
+		}
+		if *e.VIP == want {
+			return true, ""
+		}
+		return false, "vip_not_matched"
+	}
+	return false, "unknown_pms_rule"
+}
+
+// matchStringField is the shared shape of the set-membership PMS rules.
+func matchStringField(set map[string]bool, value, label string) (bool, string) {
+	if len(set) == 0 {
+		return false, "malformed_" + label + "_rule"
+	}
+	if strings.TrimSpace(value) == "" {
+		return false, label + "_unknown"
+	}
+	if set[strings.ToUpper(strings.TrimSpace(value))] {
+		return true, ""
+	}
+	return false, label + "_not_matched"
+}
+
+// parseIntField reads an optional integer bound: (value, present, wellFormed). A present-but-malformed bound
+// is never treated as omitted — that would turn a typo into a wider offer.
+func parseIntField(v map[string]any, key string) (int, bool, bool) {
+	raw, present := v[key]
+	if !present || raw == nil {
+		return 0, false, true
+	}
+	switch n := raw.(type) {
+	case float64:
+		if n != float64(int(n)) || n < 0 {
+			return 0, true, false
+		}
+		return int(n), true, true
+	case int:
+		if n < 0 {
+			return 0, true, false
+		}
+		return n, true, true
+	case int64:
+		if n < 0 {
+			return 0, true, false
+		}
+		return int(n), true, true
+	}
+	return 0, true, false
 }

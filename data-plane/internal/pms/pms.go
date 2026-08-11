@@ -55,15 +55,15 @@ type Query struct {
 
 // Result is what the provider returns when validation succeeds.
 type Result struct {
-	Valid             bool
-	GuestName         string    // formatted display name (PMS-decided)
-	FirstName         string
-	LastName          string
-	CheckIn           time.Time // local PMS time, zero if unknown
-	CheckOut          time.Time
-	RoomNumber        string    // canonical (provider may normalize "0103" → "103")
-	ReservationID     string
-	Email             string    // optional, when PMS exposes it
+	Valid         bool
+	GuestName     string // formatted display name (PMS-decided)
+	FirstName     string
+	LastName      string
+	CheckIn       time.Time // local PMS time, zero if unknown
+	CheckOut      time.Time
+	RoomNumber    string // canonical (provider may normalize "0103" → "103")
+	ReservationID string
+	Email         string // optional, when PMS exposes it
 }
 
 type Provider interface {
@@ -140,8 +140,9 @@ type ConnectionConfig struct {
 // Empty string = "use the provider's built-in default".
 //
 // Canonical keys we recognize:
-//   "room_number", "first_name", "last_name", "reservation_number",
-//   "check_in", "check_out", "guest_email", "guest_display_name"
+//
+//	"room_number", "first_name", "last_name", "reservation_number",
+//	"check_in", "check_out", "guest_email", "guest_display_name"
 type FieldMap map[string]string
 
 // Normalization is per-tenant input shaping applied before matching.
@@ -160,7 +161,7 @@ type StayPolicy struct {
 
 // Health is the per-provider observability snapshot. Phase 4.5.5b syncs to DB.
 type Health struct {
-	Status         string    `json:"status"`                   // idle | connecting | connected | degraded | down
+	Status         string    `json:"status"`                    // idle | connecting | connected | degraded | down
 	ConnectedSince time.Time `json:"connected_since,omitempty"` // zero when not connected
 	LastRecordAt   time.Time `json:"last_record_at,omitempty"`  // last GI/GC/GO arrived (FIAS); zero for stub
 	LastError      string    `json:"last_error,omitempty"`
@@ -169,14 +170,14 @@ type Health struct {
 }
 
 var (
-	ErrNotFound      = errors.New("pms: no matching reservation")
-	ErrUpstreamFail  = errors.New("pms: upstream PMS unreachable")
-	ErrCheckedOut    = errors.New("pms: reservation outside stay window")
+	ErrNotFound     = errors.New("pms: no matching reservation")
+	ErrUpstreamFail = errors.New("pms: upstream PMS unreachable")
+	ErrCheckedOut   = errors.New("pms: reservation outside stay window")
 )
 
 type Registry struct{ providers map[string]Provider }
 
-func NewRegistry() *Registry { return &Registry{providers: map[string]Provider{}} }
+func NewRegistry() *Registry            { return &Registry{providers: map[string]Provider{}} }
 func (r *Registry) Register(p Provider) { r.providers[p.Name()] = p }
 func (r *Registry) Get(name string) (Provider, bool) {
 	p, ok := r.providers[name]
@@ -255,13 +256,17 @@ func NormalizeReservation(s string) string {
 // Pass NormalizedX values for both inputs.
 func MatchesQuery(mode Mode, qFirst, qLast, qRes, recFirst, recLast, recRes string) bool {
 	first := qFirst != "" && qFirst == recFirst
-	last  := qLast  != "" && qLast  == recLast
-	res   := qRes   != "" && qRes   == recRes
+	last := qLast != "" && qLast == recLast
+	res := qRes != "" && qRes == recRes
 	switch mode {
-	case ModeRoomFirstName:   return first
-	case ModeRoomLastName:    return last
-	case ModeRoomReservation: return res
-	case ModeEither:          return first || last || res
+	case ModeRoomFirstName:
+		return first
+	case ModeRoomLastName:
+		return last
+	case ModeRoomReservation:
+		return res
+	case ModeEither:
+		return first || last || res
 	}
 	return false
 }

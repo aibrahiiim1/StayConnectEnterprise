@@ -32,6 +32,60 @@ type applier struct {
 	// legacyBridge is never surgically managed (it is adopted as-is).
 	legacyBridge string
 	dryRun       bool // pilot-safe: skip real ip/nft/kea side effects
+
+	// runFn/outFn are the ONLY places netd shells out. They are fields so a test can observe exactly which
+	// commands a reconciliation issued — including, for the steady-state case, that it issued none. A test
+	// that could only inspect the resulting ruleset could not tell "already correct, did nothing" apart from
+	// "rewrote it to the same thing", and those differ by whether a live guest keeps their authorization.
+	runFn func(ctx context.Context, name string, args ...string) error
+	outFn func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+	// activeIntentFn / prevIntentFn / eventFn are the database seams the lifecycle paths use. They exist so a
+	// test can state, without a database, exactly what the CONFIRMED active revision holds and what the
+	// mutable guest_networks rows hold — which is the whole question item 2 is about: a restart must
+	// reconstruct the confirmed revision, never an unapplied draft.
+	activeIntentFn func(ctx context.Context) (string, string, []netcfg.GuestNetwork, error)
+	prevIntentFn   func(ctx context.Context, exceptID string) ([]netcfg.GuestNetwork, error)
+	eventFn        func(ctx context.Context, revID, kind string, ok bool, detail map[string]any)
+	prevBundleFn   func(ctx context.Context, exceptID string) (string, error)
+	markRolledFn   func(ctx context.Context, id, reason string) error
+}
+
+// currentActiveIntent returns the confirmed active revision's id, bundle and immutable intent snapshot.
+func (a *applier) currentActiveIntent(ctx context.Context) (string, string, []netcfg.GuestNetwork, error) {
+	if a.activeIntentFn != nil {
+		return a.activeIntentFn(ctx)
+	}
+	return a.st.CurrentActiveIntent(ctx)
+}
+
+func (a *applier) previousActiveIntent(ctx context.Context, exceptID string) ([]netcfg.GuestNetwork, error) {
+	if a.prevIntentFn != nil {
+		return a.prevIntentFn(ctx, exceptID)
+	}
+	return a.st.ActiveIntent(ctx, exceptID)
+}
+
+func (a *applier) previousBundle(ctx context.Context, exceptID string) (string, error) {
+	if a.prevBundleFn != nil {
+		return a.prevBundleFn(ctx, exceptID)
+	}
+	return a.st.ActiveBundlePath(ctx, exceptID)
+}
+
+func (a *applier) markRolledBack(ctx context.Context, id, reason string) error {
+	if a.markRolledFn != nil {
+		return a.markRolledFn(ctx, id, reason)
+	}
+	return a.st.MarkRolledBack(ctx, id, reason)
+}
+
+func (a *applier) event(ctx context.Context, revID, kind string, ok bool, detail map[string]any) {
+	if a.eventFn != nil {
+		a.eventFn(ctx, revID, kind, ok, detail)
+		return
+	}
+	a.st.Event(ctx, revID, kind, ok, detail)
 }
 
 type applyResult struct {
@@ -209,6 +263,9 @@ func (a *applier) netdManaged(intent []netcfg.GuestNetwork) []netcfg.GuestNetwor
 }
 
 func (a *applier) run(ctx context.Context, name string, args ...string) error {
+	if a.runFn != nil {
+		return a.runFn(ctx, name, args...)
+	}
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, name, args...)
@@ -217,4 +274,15 @@ func (a *applier) run(ctx context.Context, name string, args ...string) error {
 		return fmt.Errorf("%s %s: %v — %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// output runs a command and returns stdout. A non-zero exit is an error and the caller decides what it means —
+// `nft list table` failing because the table does not exist is a normal state, not a fault.
+func (a *applier) output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if a.outFn != nil {
+		return a.outFn(ctx, name, args...)
+	}
+	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	return exec.CommandContext(cctx, name, args...).Output()
 }

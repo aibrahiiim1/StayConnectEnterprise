@@ -113,12 +113,12 @@ func (s *Stub) ValidateGuest(_ context.Context, q Query) (*Result, error) {
 
 	// Apply name title-stripping (Mr./Mrs./...) before matching.
 	qFirst := ApplyNameNormalization(norm, q.FirstName)
-	qLast  := ApplyNameNormalization(norm, q.LastName)
-	qRes   := ApplyReservationCase(norm, q.ReservationNumber)
+	qLast := ApplyNameNormalization(norm, q.LastName)
+	qRes := ApplyReservationCase(norm, q.ReservationNumber)
 
 	recFirst := ApplyNameNormalization(norm, r.FirstName)
-	recLast  := ApplyNameNormalization(norm, r.LastName)
-	recRes   := ApplyReservationCase(norm, r.ReservationNumber)
+	recLast := ApplyNameNormalization(norm, r.LastName)
+	recRes := ApplyReservationCase(norm, r.ReservationNumber)
 
 	if !MatchesQuery(q.Mode, qFirst, qLast, qRes, recFirst, recLast, recRes) {
 		return nil, ErrNotFound

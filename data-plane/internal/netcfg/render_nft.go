@@ -1,9 +1,60 @@
 package netcfg
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
+
+// RenderMarkerSet is an empty set whose ONLY job is to carry, inside the live kernel, the fingerprint of the
+// render that produced the table. It exists because the structure netd must install is a pure function of
+// (intent, topology, RENDERER VERSION) — and the third term is invisible to anything that only inspects the
+// database or the stored bundle.
+//
+// Live Increment 9 is exactly what happens without it: an appliance whose active revision was rendered in July
+// replayed that stored file on every netd start and silently deleted a set the current software requires. The
+// stored artifact could not know it was stale, and neither could the DB, because neither changed.
+//
+// Putting the fingerprint in the kernel means the question "does the live ruleset match what this binary would
+// build?" is answered by reading the live ruleset — the same place the answer has to be true.
+const RenderMarkerSet = "sc_render_fp"
+
+const renderMarkerPrefix = "netd-render-fp="
+
+// RenderFingerprint returns the fingerprint of the ruleset RenderNftables would produce for this input. It is
+// computed over the rendered body WITHOUT the marker, so the marker can carry it without being circular.
+func RenderFingerprint(nets []GuestNetwork, topo Topology) string {
+	return fingerprintOf(renderNftBody(nets, topo))
+}
+
+func fingerprintOf(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:16])
+}
+
+// FingerprintFromSetComment extracts the fingerprint from the marker set's comment, or "" if the comment is not
+// a marker. A set that is present but carries an unrecognised comment yields "", which compares unequal to every
+// real fingerprint — an unreadable marker is treated as "does not match", never as "matches".
+func FingerprintFromSetComment(comment string) string {
+	i := strings.Index(comment, renderMarkerPrefix)
+	if i < 0 {
+		return ""
+	}
+	fp := comment[i+len(renderMarkerPrefix):]
+	if j := strings.IndexAny(fp, " ;\""); j >= 0 {
+		fp = fp[:j]
+	}
+	if len(fp) != 32 {
+		return ""
+	}
+	for _, c := range fp {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return ""
+		}
+	}
+	return fp
+}
 
 // RenderNftables produces the complete `table inet stayconnect` ruleset for all
 // enabled guest networks. It replaces the old single-br-lan static file.
@@ -23,6 +74,20 @@ import (
 // pre-auth-reachable; that is acceptable because walled-garden targets are
 // public login/payment endpoints, not per-tenant secrets.
 func RenderNftables(nets []GuestNetwork, topo Topology) []byte {
+	body := renderNftBody(nets, topo)
+	// The marker is injected AFTER fingerprinting, as the first declaration inside the table, so that the
+	// fingerprint describes the structure rather than itself.
+	const open = "table inet stayconnect {\n"
+	marker := fmt.Sprintf("\tset %s {\n\t\ttype ipv4_addr\n\t\tcomment \"%s%s\"\n\t}\n\n",
+		RenderMarkerSet, renderMarkerPrefix, fingerprintOf(body))
+	if i := strings.LastIndex(body, open); i >= 0 {
+		j := i + len(open)
+		return []byte(body[:j] + marker + body[j:])
+	}
+	return []byte(body)
+}
+
+func renderNftBody(nets []GuestNetwork, topo Topology) string {
 	enabled := sortEnabled(nets)
 	var b strings.Builder
 
@@ -42,6 +107,19 @@ func RenderNftables(nets []GuestNetwork, topo Topology) []byte {
 
 	// --- sets ---
 	b.WriteString("\tset auth_ipv4 {\n\t\ttype ifname . ipv4_addr\n\t\tflags timeout\n\t\tcomment \"Authenticated guests: (ingress bridge, IP)\"\n\t}\n\n")
+	// PHASE-3 packet-authorization set — owned by netd, written by nothing else.
+	//
+	// It is separate from auth_ipv4 on purpose. Legacy scd reconciles auth_ipv4 from public.sessions; Phase 3
+	// authorizes from iam_v2.sessions through netd. Sharing one set would mean a Phase-3 full-state
+	// reconciliation (which must delete what no Phase-3 session claims) could remove a live legacy guest's
+	// authorization. Two sets make that impossible structurally rather than by careful filtering.
+	//
+	// It is emitted ALWAYS and starts EMPTY. An empty set matches nothing, so while Phase 3 is dark the
+	// appliance forwards exactly what it forwarded before. Emitting it from the start (rather than adding it
+	// at cutover) matters because this ruleset is applied as `delete table` + recreate: regenerating it later
+	// would flush auth_ipv4 and drop every live legacy guest. Present-but-empty makes Phase-3 activation a
+	// flag flip with no packet interruption and exactly one cutover boundary.
+	b.WriteString("\tset phase3_auth_ipv4 {\n\t\ttype ifname . ipv4_addr\n\t\tflags timeout\n\t\tcomment \"Phase-3 authorized guests (netd-owned): (ingress bridge, IP)\"\n\t}\n\n")
 	b.WriteString("\tset walled_garden_ip {\n\t\ttype ipv4_addr\n\t\tflags interval\n\t\tauto-merge\n\t\telements = { 1.1.1.1, 8.8.8.8, 8.8.4.4 }\n\t}\n\n")
 	// dynamic descriptor sets (useful for generic rules + diagnostics)
 	b.WriteString("\tset guest_interfaces {\n\t\ttype ifname\n")
@@ -100,6 +178,8 @@ func RenderNftables(nets []GuestNetwork, topo Topology) []byte {
 	// authenticated guests -> WAN: single rule keyed on the concatenated
 	// (ingress bridge, source IP) auth set.
 	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @auth_ipv4 accept comment \"authenticated guests\"\n", topo.WANInterface)
+	// The Phase-3 gate. While the set is empty this rule can never match, so a dark appliance is unaffected.
+	fmt.Fprintf(&b, "\t\toifname \"%s\" iifname . ip saddr @phase3_auth_ipv4 accept comment \"phase-3 authorized guests\"\n", topo.WANInterface)
 	// walled-garden pre-auth -> WAN for any guest interface
 	fmt.Fprintf(&b, "\t\tiifname @guest_interfaces oifname \"%s\" ip daddr @walled_garden_ip accept\n", topo.WANInterface)
 	b.WriteString("\t}\n\n")
@@ -112,9 +192,12 @@ func RenderNftables(nets []GuestNetwork, topo Topology) []byte {
 		}
 		br := n.BridgeName
 		gw := n.GatewayIP
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 ip daddr != @walled_garden_ip tcp dport 80  dnat ip to %s:%d\n",
+		// A guest authorized in EITHER set must not be captive-redirected. Omitting the Phase-3 exclusion
+		// would leave an authorized Phase-3 guest's web traffic DNAT'd to the portal — internet "granted"
+		// but every page still the login screen.
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 80  dnat ip to %s:%d\n",
 			br, gw, topo.PortalHTTPPort)
-		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 ip daddr != @walled_garden_ip tcp dport 443 dnat ip to %s:%d\n",
+		fmt.Fprintf(&b, "\t\tiifname \"%s\" iifname . ip saddr != @auth_ipv4 iifname . ip saddr != @phase3_auth_ipv4 ip daddr != @walled_garden_ip tcp dport 443 dnat ip to %s:%d\n",
 			br, gw, topo.PortalTLSPort)
 	}
 	b.WriteString("\t}\n\n")
@@ -130,7 +213,7 @@ func RenderNftables(nets []GuestNetwork, topo Topology) []byte {
 	b.WriteString("\t}\n")
 
 	b.WriteString("}\n")
-	return []byte(b.String())
+	return b.String()
 }
 
 func joinBridges(nets []GuestNetwork) string {

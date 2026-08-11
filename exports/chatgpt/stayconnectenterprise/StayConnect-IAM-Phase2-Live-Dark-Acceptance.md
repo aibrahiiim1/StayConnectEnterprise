@@ -34,4 +34,4 @@
 - **Known dependency:** enabled guest Commerce requires a separately authorized IAM-v2 authentication cutover.
 
 ## Product-Owner decision (recorded)
-Phase 2 is **ACCEPTED at verified DARK maturity and CLOSED** by Product-Owner decision **D13** / closure transition **T0014** (2026-07-18), and **MERGED to master** (merge commit `fe6a0d12a49f74b7b7b84ef0c848a38512273370`); post-merge Governance CI green; no open Phase-2 work remains. Acceptance is at DARK maturity only; no enablement, cutover, paid access, PMS settlement, or Phase 3 is authorized. Phase 3 remains NOT_STARTED and unauthorized.
+Phase 2 is **ACCEPTED at verified DARK maturity and CLOSED** by Product-Owner decision **D13** / closure transition **T0014** (2026-07-18), and **MERGED to master** (merge commit `fe6a0d12a49f74b7b7b84ef0c848a38512273370`); post-merge Governance CI green; no open Phase-2 work remains. Acceptance is at DARK maturity only; no enablement, cutover, paid access, PMS settlement, or Phase 3 was authorized by this Phase-2 decision. (Phase 3 was NOT_STARTED at Phase-2 acceptance and was subsequently authorized separately under D14/T0015.)

@@ -101,6 +101,12 @@ func checkAcctd(ctx context.Context, s *server) (bool, string, string) {
 	if age > 15*time.Second {
 		return false, fmt.Sprintf("accounting loop stalled (%.0fs since last tick)", age.Seconds()), ""
 	}
+	// A loop that is ticking on time can still be failing every observation it makes — unreadable counters,
+	// refused ingestion, a shaping plan netd would not apply. That is not healthy, and it is invisible from
+	// the heartbeat alone.
+	if reason, reported := livez.Status("acctd"); reported && reason != "" {
+		return false, "accounting loop is progressing but degraded: " + reason, ""
+	}
 	return true, fmt.Sprintf("accounting loop progressing (%.1fs)", age.Seconds()), ""
 }
 

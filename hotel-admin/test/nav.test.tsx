@@ -37,3 +37,40 @@ describe("Nav — Commercial Packages visibility", () => {
     expect(screen.queryByText("Commercial packages")).toBeNull();
   });
 });
+
+// Phase 3 (DARK): the PMS stay/grace nav items follow the same rule as Phase 2 — hidden unless the deployment
+// flag is on AND the operator's role can read the resource. edged remains the authority (its routes are absent
+// while the backend flags are off), so this only governs what an operator is offered.
+describe("Nav — Phase 3 (DARK) stay/grace visibility", () => {
+  beforeEach(() => vi.resetModules());
+  afterEach(() => vi.unstubAllEnvs());
+
+  async function renderWithPhase3(flag: string | undefined, roles: string[]) {
+    vi.resetModules();
+    vi.stubEnv("NEXT_PUBLIC_PHASE2_ADMIN", "");
+    vi.stubEnv("NEXT_PUBLIC_PHASE3_ADMIN", flag === undefined ? "" : flag);
+    const { Nav } = await import("@/components/nav");
+    render(<Nav roles={roles} email="a@b.c" onLogout={() => {}} />);
+  }
+
+  it("hides every Phase-3 item when the flag is absent (even for site_admin)", async () => {
+    await renderWithPhase3(undefined, ["site_admin"]);
+    for (const label of ["Stays", "Stay events", "Checkout grace", "Operational alerts"]) {
+      expect(screen.queryByText(label)).toBeNull();
+    }
+  });
+
+  it("shows them when the flag is '1' and the role can read them", async () => {
+    await renderWithPhase3("1", ["site_admin"]);
+    for (const label of ["Stays", "Stay events", "Checkout grace", "Operational alerts"]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+  });
+
+  it("still hides items a role cannot read, even with the flag on", async () => {
+    await renderWithPhase3("1", ["payments_operator"]);
+    for (const label of ["Stays", "Stay events", "Checkout grace", "Operational alerts"]) {
+      expect(screen.queryByText(label)).toBeNull();
+    }
+  });
+});

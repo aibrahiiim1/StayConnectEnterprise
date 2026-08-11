@@ -1,0 +1,31 @@
+{
+  "transition_id": "T0019",
+  "seq": 19,
+  "timestamp": "2026-08-10T15:02:33Z",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_PRE_LIVE_SAFETY_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_PRE_LIVE_SAFETY_CANDIDATE_AWAITING_INCREMENT9_AUTHORIZATION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "3",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-10 (FINAL DURABILITY CLOSURE), issued against reviewed HEAD ac07ed39f3c1290fdfe91aed1d06468d16b820b8. It accepted the previous correction round as substantial verified progress, required the delivered architecture not to be redesigned or weakened, and directed three final corrections: write-ahead durability of the activation bound before provisional admission, monotonic security time in place of the wall clock, and correction of a remaining Zero-Stale overclaim including PR metadata. It explicitly does NOT authorize Live Increment 9. Preserves T0018 and all prior transitions. The activity is unchanged because the stage is unchanged: this is a correction within the PRE-LIVE SAFETY candidate.",
+  "scope_allowed": "Repository and disposable-environment software work only: a write-ahead, fsynced activation journal recorded before the first provisional nft authorization, with a failed write denying admission and a failed clear failing safe; boot-relative monotonic security time (/proc/uptime plus boot id) replacing the wall clock as the authority for the unproven-activation bound, with fail-closed cross-boot semantics; the corresponding crash, write-failure, clock-rollback and reboot tests; correction of phase3_execution.stage, the superseded 1200ms current-budget wording and the Plan AS-BUILT status; a CI-boundary PR-metadata Zero-Stale check; and the documentation, acceptance-matrix, pack and manifest synchronization those changes require.",
+  "scope_prohibited": "No Live Increment 9 (read-only live PMS verification, live-dark deployment, reboot, rollback rehearsal, flags-OFF confirmation) until a separate Product-Owner decision; no appliance, Production-database or live-PMS contact; no deployment, reboot of a live appliance or live rollback; no PMS financial posting or FIAS PS/PA; no payments, settlement, implicit FX or programmatic reversal; no guest paid access; no IAM-v2 cutover or production iam_v2 runtime reads/writes; no Gate-P grants; no Phase 4. PR #6 remains open and unmerged; migration 0010 undeployed; all Phase-3 flags OFF.",
+  "evidence_files": [
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+    "docs/architecture/adr/ADR-0002-phase3-single-shaping-owner.md",
+    "docs/manifests/Phase3-change-manifest.md",
+    "tools/validate-pr-metadata.sh",
+    "tools/validate-project-state.sh",
+    "scripts/phase3-preflight.sh"
+  ],
+  "timestamp_evidence": "The committer timestamp of this transition's own source_commit 41aa0b8762f98aadcfeeca89d45c45afc9e8331c (2026-08-10T18:02:33+03:00 = 2026-08-10T15:02:33Z), read from the repository with `git show -s --format=%cI`. The value recorded when this file was first written (2026-08-10T15:30:00Z) was future-dated: it was 26 minutes AFTER the commit 9c09cd6 that introduced the file, which is impossible. It was an approximation rather than a measured time, and it is corrected here from evidence rather than replaced with another estimate.",
+  "source_commit": "41aa0b8",
+  "acceptance_verdict": "IN_PROGRESS -- Phase-3 PRE-LIVE SAFETY candidate COMPLETE and corrected, DARK, NOT accepted, NOT closed. Live Increment-9 authorization is REQUESTED and remains ungranted.",
+  "next_action": "Obtain a separate Product-Owner decision authorizing Live Increment 9 before any live execution."
+}

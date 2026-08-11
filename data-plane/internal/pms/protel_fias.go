@@ -49,8 +49,8 @@ type ProtelFIAS struct {
 	addr         string
 	useTLS       bool
 	authKey      string
-	ifcName      string        // sent in LD as IFPB; defaults to "IFPB"
-	version      string        // sent in LD as V#; defaults to "1.13"
+	ifcName      string // sent in LD as IFPB; defaults to "IFPB"
+	version      string // sent in LD as V#; defaults to "1.13"
 	dialTimeout  time.Duration
 	writeTimeout time.Duration
 	readTimeout  time.Duration
@@ -226,11 +226,11 @@ func (p *ProtelFIAS) ValidateGuest(_ context.Context, q Query) (*Result, error) 
 	}
 
 	qFirst := ApplyNameNormalization(norm, q.FirstName)
-	qLast  := ApplyNameNormalization(norm, q.LastName)
-	qRes   := ApplyReservationCase(norm, q.ReservationNumber)
+	qLast := ApplyNameNormalization(norm, q.LastName)
+	qRes := ApplyReservationCase(norm, q.ReservationNumber)
 	recFirst := ApplyNameNormalization(norm, r.FirstName)
-	recLast  := ApplyNameNormalization(norm, r.LastName)
-	recRes   := ApplyReservationCase(norm, r.ReservationNumber)
+	recLast := ApplyNameNormalization(norm, r.LastName)
+	recRes := ApplyReservationCase(norm, r.ReservationNumber)
 
 	if !MatchesQuery(q.Mode, qFirst, qLast, qRes, recFirst, recLast, recRes) {
 		return nil, ErrNotFound

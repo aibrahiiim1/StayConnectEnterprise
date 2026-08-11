@@ -48,9 +48,10 @@ func TestKeySeparation(t *testing.T) {
 }
 
 // The three-state lifecycle is what makes rotation non-stranding:
-//   active      -> may sign + verify
-//   verify_only -> must NOT sign, but STILL verifies already-issued documents
-//   revoked     -> never verifies
+//
+//	active      -> may sign + verify
+//	verify_only -> must NOT sign, but STILL verifies already-issued documents
+//	revoked     -> never verifies
 func TestKeyLifecycleStates(t *testing.T) {
 	now := time.Now()
 	oldPub, oldPriv, _ := ed25519.GenerateKey(rand.Reader)

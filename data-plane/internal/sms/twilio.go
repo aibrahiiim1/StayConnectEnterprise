@@ -35,10 +35,10 @@ func NewTwilio(accountSID, authToken, fromNumber string) (*Twilio, error) {
 		return nil, errors.New("twilio: account_sid, auth_token, and from_number are required")
 	}
 	return &Twilio{
-		AccountSID:  accountSID,
-		AuthToken:   authToken,
-		FromNumber:  fromNumber,
-		HTTPClient:  &http.Client{Timeout: 10 * time.Second},
+		AccountSID: accountSID,
+		AuthToken:  authToken,
+		FromNumber: fromNumber,
+		HTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}, nil
 }
 

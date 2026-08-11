@@ -21,8 +21,63 @@ var (
 		RuleSubjectKind:   {"kinds": true},
 		RulePriorPurchase: {"requires_prior": true, "forbids_prior": true},
 		RuleSiteNetwork:   {"guest_network_ids": true},
+		// The PMS rule types. Phase 2 refused to publish these because nothing could evaluate them; Phase 3
+		// supplies authoritative Stay evidence, so they are publishable — and are validated as strictly as
+		// the others, because a property that writes a rule expects it to mean what it says.
+		RuleStayStatus:   {"statuses": true},
+		RuleStayLength:   {"min_nights": true, "max_nights": true},
+		RuleRoomType:     {"room_types": true},
+		RuleVIP:          {"is_vip": true},
+		RuleTravelAgent:  {"travel_agents": true},
+		RulePMSInterface: {"pms_interface_ids": true},
+		RuleRatePlan:     {"rate_plans": true},
 	}
 )
+
+// validatePMSRule checks the shape of a PMS rule at PUBLICATION time. Catching a malformed rule here is the
+// difference between an operator seeing an error while they are looking at the form and a guest silently
+// failing to qualify months later for a reason nobody can reconstruct.
+func validatePMSRule(t string, v map[string]any) error {
+	bad := func(m string) error { return &Error{Code: ErrInvalidInput, Msg: m} }
+	switch t {
+	case RuleStayStatus:
+		return requireNonEmptyStrings(v, "statuses", bad)
+	case RuleRoomType:
+		return requireNonEmptyStrings(v, "room_types", bad)
+	case RuleTravelAgent:
+		return requireNonEmptyStrings(v, "travel_agents", bad)
+	case RuleRatePlan:
+		return requireNonEmptyStrings(v, "rate_plans", bad)
+	case RulePMSInterface:
+		return requireNonEmptyStrings(v, "pms_interface_ids", bad)
+	case RuleVIP:
+		if _, ok := v["is_vip"].(bool); !ok {
+			return bad("VIP rule requires is_vip as a boolean")
+		}
+		return nil
+	case RuleStayLength:
+		minN, minPresent, minOK := parseIntField(v, "min_nights")
+		maxN, maxPresent, maxOK := parseIntField(v, "max_nights")
+		if !minPresent && !maxPresent {
+			return bad("STAY_LENGTH requires min_nights or max_nights")
+		}
+		if (minPresent && !minOK) || (maxPresent && !maxOK) {
+			return bad("STAY_LENGTH bounds must be non-negative whole numbers")
+		}
+		if minPresent && maxPresent && minN > maxN {
+			return bad("STAY_LENGTH min_nights exceeds max_nights")
+		}
+		return nil
+	}
+	return nil
+}
+
+func requireNonEmptyStrings(v map[string]any, key string, bad func(string) error) error {
+	if len(stringSet(v[key])) == 0 {
+		return bad(key + " must be a non-empty list of strings")
+	}
+	return nil
+}
 
 func noUnknownFields(v map[string]any, allowed map[string]bool) error {
 	for k := range v {
@@ -88,15 +143,18 @@ func normalizedUUIDList(a any) ([]string, error) {
 // capability-disabled PMS type, unknown fields, malformed values or ambiguous structure are rejected.
 func ValidateEligibilityRule(r EligibilityRule) error {
 	t := strings.ToUpper(strings.TrimSpace(r.Type))
-	if IsCapabilityDisabledRuleType(t) {
-		return &Error{Code: ErrInvalidInput, Msg: "capability-disabled PMS rule type " + t + " cannot be published in Phase 2"}
-	}
 	allowed, known := ruleAllowedFields[t]
 	if !known {
 		return &Error{Code: ErrInvalidInput, Msg: "unknown rule type " + t}
 	}
 	if r.Value == nil {
 		return &Error{Code: ErrInvalidInput, Msg: "rule value required"}
+	}
+	if IsPMSRuleType(t) {
+		if err := noUnknownFields(r.Value, allowed); err != nil {
+			return err
+		}
+		return validatePMSRule(t, r.Value)
 	}
 	if err := noUnknownFields(r.Value, allowed); err != nil {
 		return err
@@ -162,9 +220,6 @@ func ValidateGrantTier(t GrantTier) error {
 		ct := strings.ToUpper(strings.TrimSpace(ctype))
 		if ct == "" {
 			return &Error{Code: ErrInvalidInput, Msg: "tier match requires a condition type"}
-		}
-		if IsCapabilityDisabledRuleType(ct) {
-			return &Error{Code: ErrInvalidInput, Msg: "tier match uses a capability-disabled PMS type"}
 		}
 		// re-use rule validation for the embedded condition (strip the "type" key into a rule)
 		cv := map[string]any{}

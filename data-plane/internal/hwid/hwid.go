@@ -27,8 +27,8 @@ import (
 // Info is the appliance's detected hardware identity. Appliance ID is filled in
 // by the caller from the cryptographic identity; everything else is hardware.
 type Info struct {
-	Serial      string `json:"serial"`
-	Fingerprint string `json:"hardware_fingerprint"`
+	Serial       string `json:"serial"`
+	Fingerprint  string `json:"hardware_fingerprint"`
 	WANInterface string `json:"wan_interface"`
 	WANMAC       string `json:"wan_mac"`
 	LANInterface string `json:"lan_interface"`

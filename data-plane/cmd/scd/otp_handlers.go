@@ -35,6 +35,16 @@ func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 	}
 	// License gating: unlicensed methods never reach the portal.
 	s.applyLicenseToMethods(cfg)
+	if s.p3auth != nil {
+		// Phase 3 (DARK): the portal needs exactly ONE extra fact — whether to submit the room form to the
+		// Stay-resolution flow or the legacy one. It is derived from the flags this daemon started with, so a
+		// dark appliance advertises nothing and the portal keeps using the path it always used.
+		writeJSON(w, http.StatusOK, struct {
+			*tenantcfg.AuthMethods
+			Phase3PMS bool `json:"phase3_pms"`
+		}{cfg, true})
+		return
+	}
 	writeJSON(w, http.StatusOK, cfg)
 }
 

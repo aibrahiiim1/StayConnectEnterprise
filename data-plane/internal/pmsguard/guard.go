@@ -2,10 +2,10 @@
 //
 // Two independent rules:
 //
-//   1. Per-room lockout — too many failed attempts on a single room number
-//      within the lockout window blocks further tries until the window slides.
-//   2. Per-IP rate limit — too many attempts (success or failure) from a
-//      single source IP suggests scanning; throttle.
+//  1. Per-room lockout — too many failed attempts on a single room number
+//     within the lockout window blocks further tries until the window slides.
+//  2. Per-IP rate limit — too many attempts (success or failure) from a
+//     single source IP suggests scanning; throttle.
 //
 // All limits read from a single config struct so tenants can override the
 // defaults via tenants.auth_methods.pms.
@@ -21,10 +21,10 @@ import (
 )
 
 type Config struct {
-	MaxFailuresPerRoom    int           // default 5
-	LockoutWindow         time.Duration // default 15m
-	MaxAttemptsPerIP      int           // default 30 in IPWindow
-	IPWindow              time.Duration // default 15m
+	MaxFailuresPerRoom int           // default 5
+	LockoutWindow      time.Duration // default 15m
+	MaxAttemptsPerIP   int           // default 30 in IPWindow
+	IPWindow           time.Duration // default 15m
 }
 
 func (c Config) withDefaults() Config {

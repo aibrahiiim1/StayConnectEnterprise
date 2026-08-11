@@ -1,0 +1,48 @@
+{
+  "transition_id": "T0024",
+  "seq": 24,
+  "timestamp": "2026-08-11T11:22:38Z",
+  "previous_state": {
+    "phase": "3",
+    "activity": "PHASE_3_DARK_ACCEPTANCE_CANDIDATE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "3",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AT_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "3",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-11, 'PRODUCT OWNER FINAL DECISION -- ACCEPT AND CLOSE PHASE 3 AT VERIFIED DARK MATURITY' (decision D16). It accepts and closes Phase 3 at verified DARK maturity against runtime candidate 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4, accepts the NOT-PROVEN legacy live-session continuity limitation without promoting it, requires this chronology correction, requires final Zero-Stale synchronization, and requires PR #6 to remain OPEN and UNMERGED.",
+  "corrects": "T0023",
+  "chronology_correction": {
+    "what_was_premature": "T0023's acceptance_verdict stated that the two final closure findings -- the pre-nftconverge rollback boundary and the missing DARK pmsd service -- were 'closed in software and verified live'. At the moment that receipt was written the live closure had not been performed and the same-HEAD gates had not yet run. The claim was true of the software and premature about the live half.",
+    "why_it_matters": "The authorized execution order for that round was explicit: repository correction FIRST, then the same-HEAD Software and Governance gates GREEN, and only then the live closure. A receipt that records a live result before the gates that authorize it inverts that order in the audit trail, even though the work itself was ultimately performed in the correct sequence.",
+    "t0023_is_preserved": "T0023 is NOT rewritten or deleted. It remains in the trail exactly as written, as the record of the repository-correction stage. This receipt supersedes only its live-verification wording.",
+    "actual_order_from_existing_evidence": [
+      "1. REPOSITORY CORRECTION -- T0023 written 2026-08-11T10:23:22Z; inventory_head 11411b9f44dda65250e9f1ac89f1c8946c7e95ed; delivery_head 88c6deba7ed54154ec3b1f12485b48e2ac36e601.",
+      "2. SAME-HEAD GATES on 88c6deb -- both started 2026-08-11T10:34:52Z; Phase 3 Software CI 31482837021 SUCCESS at 10:40:44Z; Project Governance 31482837046 SUCCESS at 10:41:24Z.",
+      "3. AUTHORIZED LIVE CLOSURE on 88c6deb, AFTER those gates -- DARK pmsd service first installed and started 10:43:57Z; rollback compatibility boundary exercised against the pre-nftconverge previous release with the live legacy authorization set EMPTY; final candidate redeployed; controlled reboot issued 10:45:08Z; post-reboot required-state proof 10:47:44Z.",
+      "4. SECOND REPOSITORY CORRECTION -- the reviewed dark pmsd env mentioned Phase-3 flag NAMES in its comments, which tripped the appliance darkness grep with three false positives; corrected, inventory_head b9cf8330d3511bd452931016ca6b0b1a65e13bc6, delivery_head 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4.",
+      "5. SAME-HEAD GATES on 7c8b8cf -- both started 2026-08-11T10:56:59Z; Phase 3 Software CI 31484446685 SUCCESS at 11:03:15Z; Project Governance 31484446661 SUCCESS at 11:03:26Z.",
+      "6. FINAL AUTHORIZED LIVE CLOSURE on 7c8b8cf, AFTER those gates -- final candidate deployed and verified on disk and in /proc/<pid>/exe; DARK pmsd service reinstalled from the corrected env; appliance darkness grep clean; controlled reboot issued 11:04:00Z; final required-state proof 11:06:43Z.",
+      "7. PRODUCT-OWNER ACCEPTANCE -- decision D16, recorded by this receipt."
+    ]
+  },
+  "scope_allowed": "Governance, documentation and focused governance-validator changes only, recording the Product-Owner acceptance and closing Phase 3 at verified DARK maturity: decision D16; this chronology-correction and acceptance receipt; Zero-Stale synchronization of every current-state surface (project state current_maturity / phase3_execution.stage / phase-status fields / current_state_facts / next action, Phase-3 Plan AS-BUILT, Final Report scope-status-production-rollback sections, deployment runbook, PR #6 body, Handoff, START-HERE, Contract generated blocks, manifests and exported packs); a separate sanitized final live-acceptance record for the post-CI live closure; and the focused semantic governance checks needed to stop the same current-versus-historical contradictions passing a green gate again.",
+  "scope_prohibited": "ZERO runtime implementation change: the accepted runtime baseline 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4 is unchanged byte-for-byte across data-plane, hotel-admin, deploy and migrations. No appliance action of any kind was required or performed in this round. No IAM-v2 cutover, no Phase-3 feature enablement, no PMS financial posting, no paid access, no PS or PA, no implicit FX, no programmatic reversal, no Gate-P runtime grants, no Phase 4. PR #6 is NOT merged. The already-published Software CI artifact is NOT mutated or repacked; its pre-live snapshot fields remain historical to the moment it was generated.",
+  "accepted_limitation": "Legacy live-session continuity = NOT PROVEN -- no real legacy guest was available during the authorized live windows. Recorded permanently and NOT promoted to PASS. Accepted for DARK maturity because no test state was fabricated and the populated-session behaviour is covered by the disposable real-kernel suite. It may be observed opportunistically when a genuine legacy guest is naturally online; that observation does not by itself reopen Phase 3 unless it reveals a real defect.",
+  "evidence_files": [
+    "governance/decision-register.json",
+    "governance/project-state.json",
+    "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
+    "docs/evidence/Phase3-Final-Live-Acceptance-Record.md",
+    "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+    "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
+    "tools/validate-current-state-parity.py"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC at the moment this receipt was written, immediately before the inventory_head commit that introduces it. The chronology above is taken from GitHub Actions run metadata (run_started_at / updated_at) and from the preserved live-closure evidence files, not from estimation.",
+  "source_commit": "7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4",
+  "acceptance_verdict": "ACCEPTED_AND_CLOSED -- Phase 3 is ACCEPTED AND CLOSED AT VERIFIED DARK MATURITY (decision D16). DARK, NOT CUT OVER, all Phase-3 flags OFF, legacy public-schema IAM remains the sole production authority, iam_v2 remains dark at 63 tables / 0 rows, no financial posting, no paid access, no PS or PA, no implicit FX, no programmatic reversal. Phase 4 remains NOT_STARTED and unauthorized. PR #6 remains OPEN and UNMERGED.",
+  "next_action": "Product-Owner decision on merging PR #6."
+}

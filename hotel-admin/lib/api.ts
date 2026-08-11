@@ -142,6 +142,80 @@ export type Session = {
   bytes_up: number; bytes_down: number;
 };
 
+// ---- Phase 3 (DARK) PMS stay resolution + checkout grace -------------------
+// These mirror edged's resources_phase3.go exactly. Resolution evidence deliberately carries NO guest
+// identity: an operator learns that a resolution succeeded, never who it was.
+
+export type Stay = {
+  id: string; pms_interface_id: string; external_reservation_id: string;
+  room?: string | null; status: string; lifecycle_version: number;
+  arrival?: string | null; departure?: string | null;
+  effective_checkout_at?: string | null; posting_allowed: boolean; occupants: number;
+};
+
+export type StayDetail = Stay & {
+  occupant_list: { display_name?: string | null; is_primary: boolean }[];
+  folios: { external_folio_id: string; folio_kind: string; status: string; is_default_posting_target: boolean }[];
+};
+
+export type StayEvent = {
+  id: string; pms_interface_id: string; external_event_identity: string; event_type: string;
+  processing_status: string; review_code?: string | null; stay_id?: string | null;
+  pms_timestamp_utc?: string | null; received_at: string;
+};
+
+export type PmsResolution = {
+  id: string; guest_network_id: string; outcome_code: string; resolved: boolean; resolved_at: string;
+};
+
+export type CheckoutGraceConfig = {
+  grace_package_revision_id?: string | null;
+  grace_duration_seconds: number;
+  grace_down_kbps: number;
+  grace_up_kbps: number;
+  grace_data_quota_bytes: number;
+  grace_device_limit: number;
+  grace_device_limit_policy: string;
+  eligibility_window_seconds: number;
+  config_version: number;
+};
+
+// GracePackageOption is one selectable Checkout-Grace package revision, described by its own IMMUTABLE
+// attributes. The operator picks one; the numbers are never typed, so the published policy and the package
+// agree by construction.
+export type GracePackageOption = {
+  package_revision_id: string;
+  package_code: string;
+  revision_no: number;
+  service_plan_revision_id: string;
+  service_plan_code: string;
+  service_plan_revision_no: number;
+  down_kbps: number;
+  up_kbps: number;
+  data_quota_bytes: number;
+  device_limit: number;
+  device_limit_policy: string;
+  time_accounting_mode: string;
+  grace_duration_seconds: number;
+  end_mode: string;
+  policy_version: string;
+  settlement_mode: string;
+  is_current: boolean;
+  is_active: boolean;
+  selected: boolean;
+};
+
+export type OperationalAlert = {
+  audit_id: string; stay_id: string; lifecycle_version: number;
+  alert_code: string; trigger: string; reason_code?: string | null;
+  boundary_at: string; boundary_clock_suspect: boolean; created_at: string;
+  // the lifecycle head the operator is looking at. Every action sends it back, so a concurrent change is a
+  // clean 409 rather than a silent overwrite.
+  state: "OPEN" | "ACKNOWLEDGED";
+  seq: number;
+  state_changed_at?: string | null;
+};
+
 export type Operator = {
   id: string;
   email: string;
@@ -724,4 +798,46 @@ export type SysNetAudit = {
   rollback_result: string;
   failure_reason: string;
   backup_path: string;
+};
+
+// ---- Phase 3 (DARK): the PMS interface itself -------------------------------
+// The credential never appears in any of these shapes. There is no field for it because there is no endpoint
+// that returns it — see the write-only rule in edged's resources_phase3_interfaces.go.
+
+export type PmsInterface = {
+  id: string; connector_kind: string; display_label: string; lifecycle_state: string;
+  current_revision_id?: string; current_revision_no?: number | null;
+  revision_count: number; published: boolean;
+  secret_generation?: number | null; secret_rotated_at?: string | null;
+};
+
+export type PmsRevision = {
+  id: string; revision_no: number; source_timezone: string; folio_identity_strategy: string;
+  normalization_version: number; source_fingerprint?: string;
+  // already redacted by edged; the client never un-redacts anything
+  config: Record<string, unknown>;
+  published: boolean;
+};
+
+export type PmsInterfaceHealth = {
+  pms_interface_id: string;
+  transport_status: string; last_connected_at?: string | null; last_heartbeat_at?: string | null;
+  disconnected_since?: string | null; transport_error_code?: string;
+  continuity_status: string; last_valid_event_at?: string | null; discontinuity_detected_at?: string | null;
+  sync_status: string; resync_requested_at?: string | null; resync_started_at?: string | null;
+  last_complete_sync_at?: string | null; last_sync_failure_code?: string;
+  in_house_stays: number; last_stay_event_at?: string | null;
+  pending_events: number; review_events: number; oldest_pending_at?: string | null;
+};
+
+export type PmsGuestNetworkRoute = {
+  guest_network_id: string; guest_network_name?: string;
+  pms_interface_id: string; pms_interface_label?: string;
+  is_default: boolean; routing_mode: string;
+};
+
+export type PmsSourceConflict = {
+  id: string; interface_a: string; interface_a_label?: string;
+  interface_b: string; interface_b_label?: string;
+  severity?: string; resolution?: string;
 };

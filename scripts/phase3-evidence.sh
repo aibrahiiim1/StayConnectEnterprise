@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# Phase-3 EVIDENCE COLLECTOR.
+#
+# Produces one dated evidence bundle for a Phase-3 go/no-go decision, from THIS repository only. It records
+# what was actually run, with exit codes and durations, and it is explicit about what it did NOT do: it never
+# contacts an appliance, a production database or a PMS, so nothing in the bundle may be read as live
+# verification. The live Increment-9 evidence is produced separately by the operator, on the appliance, and
+# is recorded as PENDING here until it exists.
+#
+# Usage: bash scripts/phase3-evidence.sh [output-dir]
+set -uo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="${1:-$ROOT/evidence/phase3}"
+mkdir -p "$OUT"
+
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+HEAD_SHA="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+BRANCH="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+DIRTY="clean"
+[ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ] && DIRTY="dirty"
+BUNDLE="$OUT/phase3-evidence-$STAMP.md"
+
+run() { # run <label> <command...>
+  local label="$1"; shift
+  local start end rc log
+  log="$(mktemp)"
+  start=$(date +%s)
+  "$@" >"$log" 2>&1
+  rc=$?
+  end=$(date +%s)
+  {
+    echo "### $label"
+    echo
+    echo "- command: \`$*\`"
+    echo "- exit code: **$rc**"
+    echo "- duration: $((end - start))s"
+    echo
+    echo '```text'
+    tail -30 "$log"
+    echo '```'
+    echo
+  } >>"$BUNDLE"
+  rm -f "$log"
+  return $rc
+}
+
+{
+  echo "# Phase-3 evidence bundle"
+  echo
+  echo "- generated (UTC): \`$STAMP\`"
+  echo "- source HEAD: \`$HEAD_SHA\`"
+  echo "- branch: \`$BRANCH\`"
+  echo "- working tree: **$DIRTY**"
+  echo "- go: \`$(go version 2>/dev/null || echo 'not available')\`"
+  echo
+  echo "> **Scope of this bundle.** Everything below was executed OFFLINE against this repository and"
+  echo "> disposable containers created and destroyed by the scripts themselves. No appliance, production"
+  echo "> database or PMS was contacted, and nothing here constitutes live verification. Items marked"
+  echo "> PENDING require an operator to run them on the target appliance."
+  echo
+  echo "## Automated results"
+  echo
+} >"$BUNDLE"
+
+overall=0
+run "Offline preflight (build, flags, migration reversibility, zero runtime privilege)" \
+  bash "$ROOT/scripts/phase3-preflight.sh" || overall=1
+run "Go unit tests (whole module, race-free run)" \
+  bash -c "cd '$ROOT/data-plane' && go test ./... -count=1" || overall=1
+run "Migration lifecycle gate (disposable PG16: apply, behaviour, down, re-apply, teardown)" \
+  bash "$ROOT/iam_v2_scratch/phase3_0010_lifecycle.sh" || overall=1
+run "PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce)" \
+  bash "$ROOT/scripts/pmsd-pg-integration.sh" || overall=1
+
+{
+  echo "## Live verification — PENDING"
+  echo
+  echo "The following are deliberately NOT in this bundle. They can only be produced on the target appliance"
+  echo "by an authorized operator, and must never be inferred, simulated or written here in advance:"
+  echo
+  echo "- read-only PMS protocol verification against the live interface;"
+  echo "- controlled live-dark deployment of this exact HEAD;"
+  echo "- one full reboot with post-reboot convergence evidence;"
+  echo "- rollback rehearsal (migration down + previous release restored);"
+  echo "- flags-OFF confirmation on the running unit (zero Phase-3 SQL, no PMS socket)."
+  echo
+  echo "## Result"
+  echo
+  if [ $overall -eq 0 ]; then
+    echo "**OFFLINE EVIDENCE COMPLETE — every automated gate passed on \`$HEAD_SHA\`.**"
+    echo "Live Increment-9 evidence remains PENDING (see above)."
+  else
+    echo "**OFFLINE EVIDENCE INCOMPLETE — at least one automated gate failed. Do not deploy.**"
+  fi
+} >>"$BUNDLE"
+
+# ---------------------------------------------------------------- integrity manifest
+# The bundle is a downloadable artifact, and a downloadable artifact is one somebody will eventually receive
+# by a route nobody planned — pasted into a ticket, forwarded, copied off a laptop. The manifest below lets
+# the recipient establish that what they hold is what was produced, without having to trust the path it took.
+#
+# It covers the exact artifacts this bundle makes claims ABOUT, not merely the bundle text: a hash of a
+# document that says "the migration passed" proves nothing about the migration.
+{
+  echo
+  echo "## Artifact integrity (SHA-256)"
+  echo
+  echo "Every artifact this bundle makes a claim about, hashed at generation time on \`$HEAD_SHA\`."
+  echo "Verify with: \`sha256sum -c\` against the list below, from the repository root."
+  echo
+  echo '```'
+  for f in     data-plane/migrations/0010_phase3_stay_resolution.up.sql     data-plane/migrations/0010_phase3_stay_resolution.down.sql     scripts/phase3-preflight.sh     scripts/pmsd-pg-integration.sh     scripts/phase3-evidence.sh     iam_v2_scratch/phase3_0010_lifecycle.sh     docs/manifests/Phase3-change-manifest.md     governance/project-state.json
+  do
+    [ -f "$ROOT/$f" ] && (cd "$ROOT" && sha256sum "$f")
+  done
+  echo '```'
+  echo
+  echo "The bundle's own digest cannot appear inside the bundle. Compute it after generation:"
+  echo
+  echo '```'
+  echo "sha256sum $(basename "$BUNDLE")"
+  echo '```'
+} >>"$BUNDLE"
+
+echo "evidence bundle: $BUNDLE"
+echo "bundle sha256:  $(sha256sum "$BUNDLE" | awk '{print $1}')"
+[ $overall -eq 0 ]

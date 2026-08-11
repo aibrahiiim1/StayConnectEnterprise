@@ -112,6 +112,165 @@ while IFS= read -r line; do
 done < <(grep -rniE "$ARCH" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -v "validate-project-state.sh")
 [ "$a1" = "0" ] && ok "no stale architecture terms presented as current values" || fail "$a1 stale architecture-term line(s)"
 
+echo "== 1c. Phase-3 enforcement/evidence phrases must not drift =="
+# These are the exact phrases a previous round got wrong, each in a way that read as correct:
+#   - a stale preflight total in the Final Report (18/18 after the suite grew to 20);
+#   - "N/N entries passed sha256sum -c", which miscounts a manifest that cannot list itself;
+#   - any claim that removing a tc filter denies internet access, which it does not;
+#   - any claim that the cutover is already flag-only before the surgical nft foundation is installed;
+#   - any description of a modelled (fake-kernel) suite as real-kernel or live evidence;
+#   - any description of a permanent authorization as fail-closed;
+#   - current_activity and the Phase-3 stage narrative describing different stages;
+#   - a superseded candidate-state declaration left in the Report or the Plan;
+#   - the previous Portal budget (1200ms) quoted as the current one;
+#   - Final-Report delivery evidence (run ids, artifact id, integrity hash) that is not the current run.
+# Catching them here means the next drift of this class fails a gate instead of being reviewed for.
+p3drift=0
+REPORT="$DOCS/reports/StayConnect-IAM-Phase3-Final-Report.md"
+if [ -f "$REPORT" ]; then
+  # the preflight total in the report must match what the preflight actually reports
+  actual_pf="$(bash "$REPO_ROOT/scripts/phase3-preflight.sh" --json 2>/dev/null | sed -n 's/.*"pass":\([0-9]*\).*/\1/p')"
+  # NOTE: this used to read "$ROOT/..." — a variable this script never defines. Under `set -u` the unbound
+  # expansion killed only the COMMAND SUBSTITUTION's subshell, so actual_pf came back empty and the guard
+  # below skipped the entire check in silence. A Zero-Stale check that never runs is exactly the failure
+  # this file exists to catch, so an unreadable total is now a HIT rather than a quiet pass.
+  if [ -z "$actual_pf" ]; then
+    echo "    HIT [preflight total unreadable]: the preflight could not be run, so the report's total cannot be checked"
+    p3drift=$((p3drift+1))
+  fi
+  if [ -n "$actual_pf" ]; then
+    grep -qE "PASS $actual_pf/$actual_pf" "$REPORT" || { echo "    HIT [stale preflight total]: report does not state PASS $actual_pf/$actual_pf"; p3drift=$((p3drift+1)); }
+    for bad in 17 18 19 20 21; do
+      [ "$bad" = "$actual_pf" ] && continue
+      grep -qE "Offline preflight[^|]*\| \*\*PASS $bad/$bad\*\*" "$REPORT" && { echo "    HIT [stale preflight total]: PASS $bad/$bad still claimed"; p3drift=$((p3drift+1)); }
+    done
+  fi
+fi
+# no document may claim a tc-only action denies internet access
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [tc-denies-access overclaim]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "(deleting|removing|stripping) (a )?(tc )?(filter|class)[^.]{0,60}(denies|denying|blocks|cuts off)[^.]{0,30}(internet|access|forwarding)" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -viE "does not|never|cannot|not equivalent|is not" | grep -v "validate-project-state.sh")
+# the manifest-integrity wording must not claim the manifest verifies itself
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [manifest self-count overclaim]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "([0-9]+)/\1 (entries|files) (passed|verified)[^.]{0,40}sha256sum" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -v "validate-project-state.sh" | grep -viE "wrong to describe|must not|never describe|do not call")
+# no document may claim the cutover is already "flag-only" without the surgical nft foundation having been
+# installed on the unit. The software makes it flag-only AFTERWARDS; saying so beforehand is the same class of
+# overclaim as calling a modelled test live evidence.
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [premature flag-only cutover claim]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "cutover is (a )?flag[- ]only|flag[- ]only cutover is (ready|prepared|complete)" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -viE "not .{0,20}flag-only|only after|is NOT|until|becomes flag-only|makes .{0,30}flag[- ]only|no document may|must not" | grep -v "validate-project-state.sh")
+# no document may present a modelled (fake-kernel) suite as real-kernel or live evidence
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [fake-kernel described as kernel/live evidence]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "fake[- ]kernel[^.]{0,60}(live evidence|real[- ]kernel evidence|proves the kernel)" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -viE "not |never |do not|must not" | grep -v "validate-project-state.sh")
+# and no document may describe a Phase-3 authorization as permanent/non-expiring while calling it fail-closed
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [permanent authorization described as fail-closed]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "(permanent|non-expiring|never expires)[^.]{0,60}authorization[^.]{0,40}fail[- ]closed" "${SCAN[@]}" --include=*.md 2>/dev/null | grep -viE "not |never be|must not|cannot" | grep -v "validate-project-state.sh")
+# ---- current-state agreement ---------------------------------------------------------------------------
+# current_activity and the Phase-3 stage narrative are written by different hands at different times. A
+# snapshot that says PRE_LIVE while the phase entry still says IMPLEMENTATION IN PROGRESS reads as
+# authoritative in both places and is wrong in one, which is the whole failure mode this file exists for.
+# PY is whichever interpreter this host actually has. A check that cannot read the state must FAIL, never
+# silently pass — a validator that quietly does nothing is worse than no validator, because it is trusted.
+# Probe that the interpreter RUNS, not merely that a file of that name is on PATH: on Windows hosts
+# `python3` is often an App-Store stub that exits silently, which would make every check below no-op.
+PY3=""
+for cand in python3 python; do
+  if [ "$("$cand" -c 'print(42)' 2>/dev/null)" = "42" ]; then PY3="$cand"; break; fi
+done
+act="$($PY3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8')).get('current_activity',''))" "$REPO_ROOT/governance/project-state.json" 2>/dev/null)"
+if [ -z "$PY3" ] || [ -z "$act" ]; then
+  echo "    HIT [state unreadable]: current_activity could not be read; the current-state agreement checks cannot run"
+  p3drift=$((p3drift+1))
+fi
+p3mat="$($PY3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8')).get('phases',{}).get('3',{}).get('maturity',''))" "$REPO_ROOT/governance/project-state.json" 2>/dev/null)"
+p3stage="$($PY3 -c "import json,sys;print(json.load(open(sys.argv[1],encoding='utf-8')).get('phase3_execution',{}).get('stage',''))" "$REPO_ROOT/governance/project-state.json" 2>/dev/null)"
+case "$act" in
+  *PRE_LIVE_SAFETY*)
+    case "$p3mat" in
+      *"PRE-LIVE SAFETY"*) : ;;
+      *) echo "    HIT [stage disagreement]: current_activity is PRE_LIVE_SAFETY but the Phase-3 stage reads: $(printf '%.90s' "$p3mat")"; p3drift=$((p3drift+1));;
+    esac
+    case "$p3mat" in
+      *"IMPLEMENTATION IN PROGRESS"*)
+        echo "    HIT [stage disagreement]: the Phase-3 stage still claims IMPLEMENTATION IN PROGRESS"; p3drift=$((p3drift+1));;
+    esac
+    # phase3_execution.stage is a SECOND current-state field, read by different documents, and it is where
+    # the previous overclaim survived: current_activity said PRE-LIVE while this still opened with the
+    # superseded SOFTWARE-candidate token. Both must agree, and the check must look at both.
+    case "$p3stage" in
+      PHASE_3_PRE_LIVE_SAFETY_CANDIDATE*) : ;;
+      *) echo "    HIT [stage disagreement]: phase3_execution.stage opens with: $(printf '%.70s' "$p3stage")"; p3drift=$((p3drift+1));;
+    esac
+    # The CURRENT portion of that narrative must not quote the superseded Portal budget. Everything after the
+    # explicit historical marker is history and is allowed to.
+    p3head="$(printf '%s' "$p3stage" | head -c 1200)"
+    case "$p3head" in
+      *"1200ms"*)
+        case "$p3head" in
+          *HISTORICAL*|*superseded*|*SUPERSEDED*) : ;;
+          *) echo "    HIT [stale Portal budget in the current stage narrative]: phase3_execution.stage quotes 1200ms as current"; p3drift=$((p3drift+1));;
+        esac
+        ;;
+    esac
+    if [ -f "$REPORT" ] && grep -q "Status: DARK ACCEPTANCE CANDIDATE" "$REPORT"; then
+      echo "    HIT [superseded candidate state]: the Final Report still declares DARK ACCEPTANCE CANDIDATE"; p3drift=$((p3drift+1))
+    fi
+    if grep -q "PHASE-3 SOFTWARE CANDIDATE COMPLETE" "$DOCS/architecture/StayConnect-IAM-Phase3-Plan.md" 2>/dev/null; then
+      echo "    HIT [superseded candidate state]: the Plan still declares the SOFTWARE CANDIDATE state"; p3drift=$((p3drift+1))
+    fi
+    ;;
+esac
+
+# ---- the Portal budget quoted as CURRENT must be the one in the software --------------------------------
+# 1200ms was the budget before enforcement convergence was part of a guest-visible success. Quoting it as
+# current describes software that no longer exists; quoting it as history is fine and is excused.
+while IFS= read -r line; do
+  [ -z "$line" ] && continue
+  echo "    HIT [stale Portal budget quoted as current]: $line"; p3drift=$((p3drift+1))
+done < <(grep -rniE "(uniform|response-time|failure) budget[^.]{0,60}1200 ?ms" "${SCAN[@]}" --include=*.md 2>/dev/null \
+          | grep -viE "historical|superseded|no longer|used to be|previous|old |not " | grep -v "validate-project-state.sh")
+
+# ---- delivery evidence must not be baked into a committed document -------------------------------------
+# The Final Report deliberately carries NO numeric CI run id and NO artifact id: those describe the run that
+# the delivery commit itself triggers, so a committed document cannot cite them without being a round behind.
+# The report says exactly that and points the reader at the PR body.
+#
+# Enforcing the protocol is therefore the check that prevents stale delivery metadata, and unlike comparing
+# against a recorded value it has no self-reference problem: any numeric run/artifact id present in the report
+# is, by construction, from a previous round.
+if [ -f "$REPORT" ]; then
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    echo "    HIT [stale delivery evidence baked into the report]: $line"; p3drift=$((p3drift+1))
+  done < <(grep -niE "(run|artifact)[^0-9]{0,25}[0-9]{9,}" "$REPORT" 2>/dev/null \
+            | grep -viE "HISTORICAL|superseded|must not|deliberately|are in the PR|not recorded")
+  # and it must keep telling the reader where those numbers actually live
+  grep -q "PR #6 body" "$REPORT" || {
+    echo "    HIT [delivery-evidence pointer lost]: the report no longer says where the run ids and artifact metadata live"
+    p3drift=$((p3drift+1))
+  }
+fi
+
+[ "$p3drift" = "0" ] && ok "no Phase-3 enforcement/evidence phrase drift" || fail "$p3drift Phase-3 phrase drift hit(s)"
+
+echo "== 1d. transition receipts cannot be dated after the commit that introduced them =="
+if have_repo; then
+  if bash "$REPO_ROOT/tools/validate-transition-times.sh" >/dev/null 2>&1; then
+    ok "no transition receipt is dated after its introducing commit"
+  else
+    bash "$REPO_ROOT/tools/validate-transition-times.sh" 2>&1 | grep -E "^  (FAIL|grandfathered)" | sed 's/^/  /'
+    fail "a transition receipt describes its own future"
+  fi
+else skipped "transition timestamps (no repository)"; fi
+
 echo "== 2. single current maturity + consistent next action =="
 for f in "$PACK/StayConnect-IAM-Phase1A-Plan.md" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" "$PACK/MANIFEST.md"; do
   [ -f "$f" ] && grep -q "$MAT" "$f" && ok "maturity present in $(basename "$f")" || fail "maturity string missing in $(basename "$f")"
@@ -121,7 +280,7 @@ if have_repo; then
     [ -f "$f" ] && grep -q "$MAT" "$f" && ok "maturity present in repo $(basename "$f")" || fail "maturity missing in repo $(basename "$f")"
   done
 else skipped "repo docs maturity presence"; fi
-na=$(grep -rhoiE "next authorized (activity|action|step)[^.]*" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" 2>/dev/null | grep -ciE "acceptance of Phase 1A|acceptance of the live-dark|review of the live-dark|review of the Phase 1A LIVE-DARK|approval or rejection of the .{0,30}Phase 1B plan|approval of the .{0,30}Phase 1B (implementation )?plan|approval[^.]{0,90}Phase 1B plan|complete Phase 1B execution|(review/?)?acceptance of[^.]{0,40}Phase 1B live-dark|no next-phase implementation is authorized|await explicit product-owner authorization|complete phase 2 execution|return the single final phase-2 report|final phase-2 report for one product-owner|(review/?)?acceptance of[^.]{0,40}Phase 2 live-dark|merge PR #4[^.]{0,80}post-merge|merge PR #4 to master")
+na=$(grep -rhoiE "next authorized (activity|action|step)[^.]*" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" 2>/dev/null | grep -ciE "acceptance of Phase 1A|acceptance of the live-dark|review of the live-dark|review of the Phase 1A LIVE-DARK|approval or rejection of the .{0,30}Phase 1B plan|approval of the .{0,30}Phase 1B (implementation )?plan|approval[^.]{0,90}Phase 1B plan|complete Phase 1B execution|(review/?)?acceptance of[^.]{0,40}Phase 1B live-dark|no next-phase implementation is authorized|await explicit product-owner authorization|complete phase 2 execution|return the single final phase-2 report|final phase-2 report for one product-owner|(review/?)?acceptance of[^.]{0,40}Phase 2 live-dark|merge PR #4[^.]{0,80}post-merge|merge PR #4 to master|execute the authorized phase 3|final phase-3 acceptance report|authoriz[a-z]*[^.]{0,40}Live Increment 9|separate Product-Owner decision[^.]{0,80}Live Increment 9|await[^.]{0,60}Live Increment 9|Product-Owner decision on the Increment-9 durability correction|Product-Owner FINAL ACCEPTANCE decision for Phase 3|decision on merging PR #6|re-run[a-z]*[^.]{0,60}BLOCKED subset of Live Increment 9")
 [ "$na" -ge 2 ] && ok "next-action consistent" || fail "next-action inconsistent ($na)"
 
 echo "== 3. conflicting maturity WITHIN a single pack file =="

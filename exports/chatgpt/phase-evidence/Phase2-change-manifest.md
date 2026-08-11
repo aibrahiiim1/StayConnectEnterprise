@@ -166,15 +166,15 @@
  docs/context/StayConnect-IAM-Handoff.md            |   28 +-
  .../StayConnect-IAM-Phase2-Live-Dark-Evidence.md   |   73 +
  .../StayConnect-IAM-Phase2-Software-Gate.md        |   59 +
- docs/manifests/Phase2-change-manifest.md           |  312 +++
+ docs/manifests/Phase2-change-manifest.md           |  307 +++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |  118 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 217665 -> 250528 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 57220 -> 101322 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 217665 -> 250675 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 57220 -> 101471 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41646 -> 41921 bytes
  .../chatgpt/phase-evidence/GIT_STAT_70dd7f4.txt    |    4 -
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   18 +-
- .../phase-evidence/Phase2-change-manifest.md       |  312 +++
+ .../phase-evidence/Phase2-change-manifest.md       |  307 +++
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   10 +-
  ...StayConnect-IAM-Phase1B-Live-Dark-Acceptance.md |  141 +
  .../StayConnect-IAM-Phase2-Final-Report.md         |  118 +
@@ -196,7 +196,7 @@
  exports/chatgpt/stayconnectenterprise/MANIFEST.md  |   57 +-
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   12 +-
  .../Phase2-Privilege-Matrix.md                     |   33 +
- .../Phase2-change-manifest.md                      |  312 +++
+ .../Phase2-change-manifest.md                      |  307 +++
  .../StayConnect-IAM-Handoff.md                     |   28 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   12 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |   12 +-
@@ -233,11 +233,12 @@
  tools/project-state.py                             |  292 +-
  .../tests/project_state_validator/run_mutations.py |   66 +-
  tools/validate-project-state.sh                    |    2 +-
- 109 files changed, 12771 insertions(+), 520 deletions(-)
+ 109 files changed, 12756 insertions(+), 520 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
+M  docs/manifests/Phase2-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip

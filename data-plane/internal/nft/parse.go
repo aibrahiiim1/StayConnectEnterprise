@@ -49,9 +49,23 @@ func parseJSON(raw []byte) ([]Element, error) {
 					inner = v
 				}
 				el := Element{}
-				// "val" may be a plain IP string, or a concatenation
-				// {"concat": ["br-g20", "10.20.0.100"]}.
-				switch val := inner["val"].(type) {
+				// THE TWO SHAPES nft ACTUALLY EMITS.
+				//
+				// An element with stateful attributes (a timeout, an expiry, a counter) is wrapped:
+				//   {"elem": {"val": {"concat": ["br-g20","10.20.0.100"]}, "timeout": 90, "expires": 47}}
+				// An element with NONE — which is what a permanent authorization is — carries no wrapper and
+				// no "val" at all:
+				//   {"concat": ["br-g20","10.20.0.100"]}
+				//
+				// Reading only the first shape made every permanent concatenated element INVISIBLE to List and
+				// therefore to Authorized and Deny: a legacy guest could not be enumerated, and a Deny for one
+				// silently did nothing. The real-kernel suite is what surfaced it — the modelled tests all fed
+				// the wrapped shape, because that is the shape the code already understood.
+				value, hasVal := inner["val"]
+				if !hasVal {
+					value = inner
+				}
+				switch val := value.(type) {
 				case string:
 					el.IP = net.ParseIP(val)
 				case map[string]any:
@@ -69,6 +83,11 @@ func parseJSON(raw []byte) ([]Element, error) {
 				if t, ok := inner["timeout"].(float64); ok {
 					el.Timeout = time.Duration(t) * time.Second
 				}
+				// "expires" is the REMAINING lease. It is what a renewal decision must read: an element with a
+				// 90s timeout says nothing about whether it is about to disappear.
+				if x, ok := inner["expires"].(float64); ok {
+					el.Expires = time.Duration(x) * time.Second
+				}
 				if el.IP != nil {
 					out = append(out, el)
 				}
@@ -77,3 +96,7 @@ func parseJSON(raw []byte) ([]Element, error) {
 	}
 	return out, nil
 }
+
+// ParseSetJSON exposes the set-listing parser so other packages can read `nft -j list set` output without
+// duplicating the shape of it. One parser means one place where a change in nft's JSON has to be handled.
+func ParseSetJSON(raw []byte) ([]Element, error) { return parseJSON(raw) }

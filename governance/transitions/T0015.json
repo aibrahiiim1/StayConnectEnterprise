@@ -1,0 +1,18 @@
+{
+  "transition_id": "T0015",
+  "seq": 15,
+  "timestamp": "2026-07-18T17:30:00Z",
+  "previous_state": { "phase": "2", "activity": "PHASE_2_ACCEPTED_AND_CLOSED", "phase_status": "ACCEPTED_AND_CLOSED" },
+  "new_state": { "phase": "3", "activity": "PHASE_3_IMPLEMENTATION_IN_PROGRESS", "phase_status": "IN_PROGRESS" },
+  "phase_affected": "3",
+  "po_authorization_ref": "Product-Owner decision D14 (2026-07-18): complete Phase 3 (PMS Stay Domain, STRICT Multi-PMS Resolution, Room Movement, Checkout Grace and Reinstatement) authorized for execution as ONE end-to-end Phase. This transition starts Phase-3 implementation; it is NOT an acceptance and does not close Phase 3. Preserves D13/T0014 (Phase-2 closure) and all prior transitions.",
+  "scope_allowed": "Execute the complete Phase-3 scope described in D14 / docs/architecture/StayConnect-IAM-Phase3-Plan.md as one Phase, DARK: additive schema (migrations after 0009), dedicated read-only PMS connector runtime, live READ-ONLY PMS protocol verification (persistence to an isolated disposable test DB only), Stay/Event/Folio persistence, STRICT resolver, one-time PMS Auth Context, Phase-2 Commerce integration in test mode, Room Move, mandatory Checkout Grace + emergency fallback, Reinstatement, Guest Portal + Hotel Admin UI, automated tests, controlled live-dark deployment + service restarts + one final reboot, evidence and one final report. All Phase-3 flags default OFF; the live legacy public-schema pipeline is unchanged.",
+  "scope_prohibited": "No PMS financial posting or FIAS PS transaction; no Posting Engine/outbox/retry/financial UNKNOWN handling; no payments/Stripe/refunds/reversal/settlement execution; no guest paid access; no IAM-v2 production authentication cutover or production iam_v2 runtime reads/writes; no data migration into iam_v2; no dual read/write; no legacy IAM removal; no Phase 4/5/6 implementation; no Central Control Plane changes; no WAN/LAN/VLAN/DHCP/HA/topology changes. No executable PS sender, dormant financial worker or hidden Posting path. PR #6 not merged until the single Product-Owner Phase-3 acceptance decision.",
+  "evidence_files": [
+    "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+    "docs/architecture/Phase3-Privilege-Matrix.md"
+  ],
+  "source_commit": "ffb68e1",
+  "acceptance_verdict": "IN_PROGRESS -- Phase 3 implementation authorized (D14) and started as one end-to-end Phase, DARK. Not accepted/closed. Awaiting complete execution and one final Product-Owner acceptance decision at verified DARK maturity.",
+  "next_action": "Execute the authorized Phase-3 scope as one Phase per docs/architecture/StayConnect-IAM-Phase3-Plan.md, then return one final Phase-3 acceptance report at verified DARK maturity."
+}

@@ -37,10 +37,10 @@ import (
 )
 
 const (
-	defaultGoogleAuthBase     = "https://accounts.google.com/o/oauth2/v2/auth"
-	defaultGoogleTokenURL     = "https://oauth2.googleapis.com/token"
-	defaultGoogleUserInfoURL  = "https://openidconnect.googleapis.com/v1/userinfo"
-	defaultGoogleScope        = "openid email profile"
+	defaultGoogleAuthBase    = "https://accounts.google.com/o/oauth2/v2/auth"
+	defaultGoogleTokenURL    = "https://oauth2.googleapis.com/token"
+	defaultGoogleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
+	defaultGoogleScope       = "openid email profile"
 )
 
 type Google struct {
@@ -49,9 +49,9 @@ type Google struct {
 	Scopes       string // space-separated; empty = defaultGoogleScope
 
 	// Endpoint overrides (tests).
-	AuthBase     string
-	TokenURL     string
-	UserInfoURL  string
+	AuthBase    string
+	TokenURL    string
+	UserInfoURL string
 
 	HTTPClient *http.Client
 }

@@ -2,10 +2,10 @@
 // DB and returns ready-to-use mail.Mailer / sms.Sender instances.
 //
 // scd's startup chain:
-//   1. Load(ctx, db, tenantID, fallbacks)
-//   2. Returned Mailer/Sender are wired into the server struct
-//   3. If no enabled row for a channel, the matching fallback is used
-//      (typically a Stub for dev / unconfigured tenants)
+//  1. Load(ctx, db, tenantID, fallbacks)
+//  2. Returned Mailer/Sender are wired into the server struct
+//  3. If no enabled row for a channel, the matching fallback is used
+//     (typically a Stub for dev / unconfigured tenants)
 //
 // This module also wraps the chosen provider so every Send() goes through
 // the same metric instrumentation (success/failure/latency).

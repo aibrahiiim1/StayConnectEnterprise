@@ -12,9 +12,9 @@ import (
 // registryRecord is the appliance's durable, rollback-safe registry state:
 // the current verified signed registry plus the previous one.
 type registryRecord struct {
-	Current  *SignedRegistry `json:"current"`
-	Previous *SignedRegistry `json:"previous,omitempty"`
-	AdoptedAt string         `json:"adopted_at"`
+	Current   *SignedRegistry `json:"current"`
+	Previous  *SignedRegistry `json:"previous,omitempty"`
+	AdoptedAt string          `json:"adopted_at"`
 }
 
 // RegistryStore persists the SIGNED trust registry. It only ever replaces the
@@ -22,7 +22,7 @@ type registryRecord struct {
 // previous one for rollback, and never overwrites a good registry with a bad file.
 // During a Central outage the last-known-good registry keeps verifying assignments.
 type RegistryStore struct {
-	Path    string           // signed registry file
+	Path    string            // signed registry file
 	RootPub ed25519.PublicKey // baked-in trust anchor
 }
 

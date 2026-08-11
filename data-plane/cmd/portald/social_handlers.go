@@ -117,7 +117,9 @@ func (h *handler) socialCallback(w http.ResponseWriter, r *http.Request) {
 		// Render an error page so the captive browser shows something useful.
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(resp.StatusCode)
-		var e struct{ Error string `json:"error"` }
+		var e struct {
+			Error string `json:"error"`
+		}
 		_ = json.Unmarshal(payload, &e)
 		fmt.Fprintf(w, `<!doctype html><html><body style="font-family:system-ui;max-width:400px;margin:10vh auto;padding:24px">
 <h2>Sign-in failed</h2><p>%s</p><p><a href="/">Try another method</a></p></body></html>`,

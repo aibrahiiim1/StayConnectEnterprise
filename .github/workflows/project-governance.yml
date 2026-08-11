@@ -36,11 +36,38 @@ jobs:
       - name: Generated-block consistency
         run: python tools/project-state.py check-generated
 
+      - name: Transition-receipt timestamps
+        # A receipt that claims a moment AFTER the commit that introduced it is describing its own future.
+        # Checked here as well as in the Zero-Stale validator because it needs git history, which the
+        # extracted-pack mode of that validator deliberately does not have.
+        run: bash tools/validate-transition-times.sh
+
+      - name: PR-metadata Zero-Stale (the one authoritative surface that is not committed)
+        # Every other check stops at the repository boundary, so a PR whose top-level Status still announced a
+        # superseded candidate state passed every gate while being the most visible wrong statement in the
+        # delivery. This reads the PR body through the API IN THIS RUN and compares it with
+        # governance/project-state.json. It hard-codes no run ids and no future values.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash tools/validate-pr-metadata.sh
+
       - name: Adversarial mutation suite
         run: python tools/tests/project_state_validator/run_mutations.py
 
       - name: Zero-stale keyword validation
         run: bash tools/validate-project-state.sh
+
+      - name: Current-state semantic parity (every current surface vs the recorded facts)
+        # Keyword checks stop at vocabulary. This one compares MEANING: current_maturity said an authorization
+        # was still awaited while current_activity said that authorization had been executed, and iam_v2 was
+        # recorded as both 49 and 63 in the same file. Neither sentence contains a forbidden word; they are
+        # only wrong about each other.
+        run: python tools/validate-current-state-parity.py
+
+      - name: Current-state parity — negative tests (the validator must catch what shipped before)
+        # A validator that has only ever seen a passing repository is indistinguishable from one that returns
+        # PASS unconditionally. Each case reintroduces a contradiction that actually shipped green.
+        run: python tools/tests/current_state_parity/run_negative.py
 
       - name: Working tree must remain clean
         run: |
