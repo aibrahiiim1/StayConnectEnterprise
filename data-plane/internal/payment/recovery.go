@@ -2,7 +2,9 @@ package payment
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,21 +58,86 @@ func SystemIdentity(ctx context.Context, pool *pgxpool.Pool) (string, error) {
 	return id, nil
 }
 
+// MarkerPath is where the management-partition restore marker lives. It is deliberately OUTSIDE the
+// database directory: pg_dump does not read it and pg_restore does not write it, which is the entire reason
+// it can carry the truth across a restore.
+const MarkerPath = "/etc/stayconnect/financial-restore-generation.json"
+
+// EnvMarkerPath lets a test point at a temporary file. It is read at call time rather than cached, and it
+// changes WHERE the marker is read from, never WHAT the marker is trusted to do.
+const EnvMarkerPath = "STAYCONNECT_FINANCIAL_MARKER"
+
+type restoreMarker struct {
+	RestoreGeneration int64  `json:"restore_generation"`
+	AdvancedAt        string `json:"advanced_at"`
+	ManifestSHA256    string `json:"manifest_sha256"`
+}
+
+// ReadRestoreMarker reads the management-partition marker.
+//
+// A MISSING marker is not an error: a site that has never been restored has none, and that is the normal
+// case. It is reported as absent, and the database decides what absence means -- which is "nothing" for a
+// site at generation zero, and "this data may have been moved" for one that has a generation recorded.
+//
+// An UNREADABLE or malformed marker is treated as absent for the same reason: the only thing absence can
+// cause is more holding, so failing towards the hold is the safe direction.
+func ReadRestoreMarker() (generation int64, present bool) {
+	path := os.Getenv(EnvMarkerPath)
+	if path == "" {
+		path = MarkerPath
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	var m restoreMarker
+	if err := json.Unmarshal(b, &m); err != nil || m.RestoreGeneration < 0 {
+		return 0, false
+	}
+	return m.RestoreGeneration, true
+}
+
 // ReconcileEpoch is called at startup, per site, BEFORE any financial worker runs.
 //
-// It is idempotent: an ordinary restart finds the stored identity unchanged and returns UNCHANGED without
-// writing anything. It returns one of INITIALIZED, UNCHANGED, RECOVERY_ENTERED or RECOVERY_ACTIVE.
+// TWO INDEPENDENT SIGNALS, because neither is sufficient alone:
+//
+//	the management marker   catches the SUPPORTED restore. The repository's procedure is
+//	                        `pg_restore -d stayconnect_site <dump>` into the existing cluster, so nothing
+//	                        about the cluster changes and an identity check sees nothing at all. The marker
+//	                        lives outside the database and keeps counting forward.
+//	the system identity     catches what the marker cannot: a dump restored into a NEW cluster, a promoted
+//	                        replica, a cloned appliance -- cases where the marker may have travelled along
+//	                        with everything else.
+//
+// Neither signal is an authority a caller asserts. The marker is read from disk here, and the only outcome
+// either can produce is MORE holding: nothing in this path can release a hold or clear an epoch.
+//
+// It is idempotent: an ordinary restart finds both signals unchanged and returns UNCHANGED without writing.
+// It returns INITIALIZED, UNCHANGED, RECOVERY_ENTERED or RECOVERY_ACTIVE.
 func (e *Engine) ReconcileEpoch(ctx context.Context, tenantID, siteID string) (string, error) {
 	ident, err := SystemIdentity(ctx, e.pool)
 	if err != nil {
 		return "", err
 	}
+	gen, present := ReadRestoreMarker()
 	var out string
 	if err := e.pool.QueryRow(ctx,
-		`SELECT iam_v2.p4_reconcile_financial_epoch($1,$2,$3)`, tenantID, siteID, ident).Scan(&out); err != nil {
+		`SELECT iam_v2.p4_reconcile_financial_epoch_v2($1,$2,$3,$4,$5)`,
+		tenantID, siteID, ident, gen, present).Scan(&out); err != nil {
 		return "", classify(err)
 	}
 	return out, nil
+}
+
+// CurrentRestoreGeneration reports the generation the DATABASE records, for the operator surface and for
+// the restore tool to advance from.
+func (e *Engine) CurrentRestoreGeneration(ctx context.Context, tenantID, siteID string) (int64, error) {
+	var g int64
+	if err := e.pool.QueryRow(ctx,
+		`SELECT iam_v2.p4_current_restore_generation($1,$2)`, tenantID, siteID).Scan(&g); err != nil {
+		return 0, classify(err)
+	}
+	return g, nil
 }
 
 // RecoveryActive reports whether money movement is currently held for a site.
