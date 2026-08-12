@@ -68,7 +68,7 @@ func seedPaidChain(t *testing.T, p *pgxpool.Pool) scope {
 	t.Helper()
 	ctx := context.Background()
 	u := time.Now().UnixNano()
-	s := scope{merchant: scan1[string](t, p, `SELECT gen_random_uuid()::text`), amount: 1000, currency: "USD", exponent: 2}
+	s := scope{amount: 1000, currency: "USD", exponent: 2}
 
 	if err := p.QueryRow(ctx, `WITH
 	  t  AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
@@ -76,6 +76,12 @@ func seedPaidChain(t *testing.T, p *pgxpool.Pool) scope {
 	SELECT tenant_id::text, id::text FROM si`).Scan(&s.tenant, &s.site); err != nil {
 		t.Fatalf("seed tenant/site: %v", err)
 	}
+	// The site's authoritative payment identity. Nothing can create a payment intent without it, which is
+	// the corrected behaviour: no configuration means no charge, never an invented merchant account.
+	s.merchant = scan1[string](t, p, `INSERT INTO iam_v2.payment_provider_accounts
+		(tenant_id,site_id,provider,merchant_account_ref,status,is_default)
+		VALUES ($1,$2,'test-double','acct_'||substr(md5(random()::text),1,12),'ACTIVE',true)
+		RETURNING id::text`, s.tenant, s.site)
 	gn := scan1[string](t, p, `INSERT INTO public.guest_networks(id,tenant_id,site_id) VALUES (gen_random_uuid(),$1,$2)
 		RETURNING id::text`, s.tenant, s.site)
 	dev := scan1[string](t, p, `INSERT INTO iam_v2.devices(tenant_id,site_id,appliance_id,mac)
@@ -164,7 +170,7 @@ func TestIntegrationPayment_DarkNeverReachesTheProvider(t *testing.T) {
 	prov := NewScriptedProvider(Result{Outcome: OutcomeCaptured})
 	e := NewEngine(darkCfg, p, prov, &fakeGranter{})
 
-	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if err != nil {
 		t.Fatalf("intent: %v", err)
 	}
@@ -179,36 +185,27 @@ func TestIntegrationPayment_DarkNeverReachesTheProvider(t *testing.T) {
 	if e.ProviderRefusals() != 3 {
 		t.Fatalf("expected 3 recorded refusals, got %d", e.ProviderRefusals())
 	}
-	// the durable boundary WAS crossed, which is the truthful state: we began and did not proceed
-	if st := scan1[string](t, p, `SELECT status FROM iam_v2.payment_transactions WHERE id=$1`, in.ID); st != "PENDING" {
-		t.Fatalf("the intent should be PENDING after the durable boundary, got %s", st)
+	// A preflight refusal is provably NOT_SENT, so it must leave NOTHING behind. The intent stays CREATED
+	// and the settlement stays REQUIRED -- both still executable once the posture is fixed. The previous
+	// behaviour stranded them at PENDING / IN_PROGRESS, describing an execution that had never begun.
+	if st := scan1[string](t, p, `SELECT status FROM iam_v2.payment_transactions WHERE id=$1`, in.ID); st != "CREATED" {
+		t.Fatalf("a NOT_SENT preflight refusal moved the intent to %s", st)
 	}
-	if st := scan1[string](t, p, `SELECT status FROM iam_v2.settlements WHERE id=$1`, s.settlement); st != "IN_PROGRESS" {
-		t.Fatalf("the settlement should be IN_PROGRESS, got %s", st)
+	if st := scan1[string](t, p, `SELECT status FROM iam_v2.settlements WHERE id=$1`, s.settlement); st != "REQUIRED" {
+		t.Fatalf("a NOT_SENT preflight refusal moved the settlement to %s", st)
 	}
-}
-
-func TestIntegrationPayment_ProductionBuildHasNoProviderAndIsDark(t *testing.T) {
-	cfg := Config{}
-	pr, err := ProductionProviderFor(cfg)
-	if err != nil {
-		t.Fatalf("the delivered posture must construct: %v", err)
-	}
-	if pr.SupportsClientReference() {
-		t.Fatal("this build has no adapter; it must not claim the correlation capability")
-	}
-	if _, err := ProductionProviderFor(Config{MasterEnabled: true, PaymentEnabled: true, ProviderEnabled: true}); err == nil {
-		t.Fatal("provider execution enabled against a build with no adapter must fail closed")
+	if n := scan1[int](t, p, `SELECT count(*)::int FROM iam_v2.payment_transaction_events
+		WHERE payment_transaction_id=$1`, in.ID); n != 0 {
+		t.Fatalf("a NOT_SENT refusal recorded %d provider events", n)
 	}
 }
 
-// An adapter that cannot carry the client reference must be refused: correlation would have to be guessed.
 func TestIntegrationPayment_UncorrelatableAdapterIsRefused(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
 	s := seedPaidChain(t, p)
 	e := NewEngine(liveCfg, p, UncorrelatableProvider{}, &fakeGranter{})
-	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +221,7 @@ func TestIntegrationPayment_AmountComesFromThePinnedPurchase(t *testing.T) {
 	ctx := context.Background()
 	s := seedPaidChain(t, p)
 	e := NewEngine(darkCfg, p, NewScriptedProvider(), &fakeGranter{})
-	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +248,7 @@ func TestIntegrationPayment_CapturedChargeSettlesAndGrantsExactlyOnce(t *testing
 	prov := NewScriptedProvider(Result{Outcome: OutcomeCaptured})
 	e := NewEngine(liveCfg, p, prov, g)
 
-	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +286,7 @@ func TestIntegrationPayment_DuplicateAndConcurrentCallbacksGrantOnce(t *testing.
 	s := seedPaidChain(t, p)
 	g := &fakeGranter{}
 	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), g)
-	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,8 +303,7 @@ func TestIntegrationPayment_DuplicateAndConcurrentCallbacksGrantOnce(t *testing.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			o, _ := e.ApplyCallback(ctx, s.tenant, "test-double", s.merchant, in.ClientRef,
-				"evt-dup", "payment.captured", "CAPTURED", "prv_"+in.ClientRef, nil)
+			o, _ := e.HandleProviderNotification(ctx, BuildNotification(in.ClientRef, "evt-dup", OutcomeCaptured, "prv_"+in.ClientRef))
 			applied <- o.Applied
 		}()
 	}
@@ -342,7 +338,7 @@ func TestIntegrationPayment_UnknownGoesToManualReviewAndIsNeverRetried(t *testin
 	g := &fakeGranter{}
 	prov := NewScriptedProvider(Result{Outcome: OutcomeUnknown, ReasonCode: "timeout"})
 	e := NewEngine(liveCfg, p, prov, g)
-	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +362,7 @@ func TestIntegrationPayment_UnknownGoesToManualReviewAndIsNeverRetried(t *testin
 		t.Fatalf("UNKNOWN was retried: %d provider requests", n)
 	}
 	// and a new charge cannot be admitted against the same settlement while the UNKNOWN one is live
-	if _, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "2")); err == nil {
+	if _, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "2")); err == nil {
 		t.Fatal("a settlement with a live UNKNOWN charge must not admit another")
 	}
 }
@@ -377,7 +373,7 @@ func TestIntegrationPayment_DeclinedChargeFailsTheSettlementAndGrantsNothing(t *
 	s := seedPaidChain(t, p)
 	g := &fakeGranter{}
 	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeDeclined, ReasonCode: "declined"}), g)
-	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); err != nil {
 		t.Fatalf("a decline is an outcome, not an error: %v", err)
 	}
@@ -388,7 +384,7 @@ func TestIntegrationPayment_DeclinedChargeFailsTheSettlementAndGrantsNothing(t *
 		t.Fatal("a declined charge must not grant")
 	}
 	// (0016) a terminal settlement admits no further charge
-	if _, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "2")); CodeOf(err) != ErrNotExecutable {
+	if _, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "2")); CodeOf(err) != ErrNotExecutable {
 		t.Fatalf("a FAILED settlement must not admit another charge, got %v", err)
 	}
 }
@@ -400,7 +396,7 @@ func TestIntegrationPayment_RefundMovesTheSameSettlementAtomically(t *testing.T)
 	ctx := context.Background()
 	s := seedPaidChain(t, p)
 	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), &fakeGranter{})
-	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -435,51 +431,163 @@ func TestIntegrationPayment_RefundMovesTheSameSettlementAtomically(t *testing.T)
 
 // ---------------------------------------------------------------- correlation
 
-func TestIntegrationPayment_CallbackCorrelationAndConflict(t *testing.T) {
+func TestIntegrationPayment_CorrelationConflictAndForgery(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
 	s := seedPaidChain(t, p)
 	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), &fakeGranter{})
-	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if _, err := e.Execute(ctx, s.tenant, s.site, in.ID); err != nil {
 		t.Fatal(err)
 	}
 	// an unknown client reference correlates to nothing and is refused, not guessed
-	if _, err := e.ApplyCallback(ctx, s.tenant, "test-double", s.merchant, "sc_not_a_real_ref",
-		"evt-x", "payment.captured", "CAPTURED", "prv_x", nil); CodeOf(err) != ErrUncorrelated {
-		t.Fatalf("an uncorrelated callback must be refused, got %v", err)
+	if _, err := e.HandleProviderNotification(ctx,
+		BuildNotification("sc_not_a_real_ref", "evt-x", OutcomeCaptured, "prv_x")); CodeOf(err) != ErrUncorrelated {
+		t.Fatalf("an uncorrelated notification must be refused, got %v", err)
 	}
 	// a CONFLICTING provider reference for an already-pinned intent fails closed
-	if _, err := e.ApplyCallback(ctx, s.tenant, "test-double", s.merchant, in.ClientRef,
-		"evt-conflict", "payment.captured", "", "prv_someone_else", nil); CodeOf(err) != ErrRefConflict {
+	if _, err := e.HandleProviderNotification(ctx,
+		BuildNotification(in.ClientRef, "evt-conflict", OutcomeCaptured, "prv_someone_else")); CodeOf(err) != ErrRefConflict {
 		t.Fatalf("a conflicting provider reference must fail closed, got %v", err)
-	}
-	// a callback carrying a raw payload is refused before it reaches the append-only ledger
-	if _, err := e.ApplyCallback(ctx, s.tenant, "test-double", s.merchant, in.ClientRef,
-		"evt-raw", "payment.captured", "", "", map[string]string{"raw_body": "{}"}); CodeOf(err) != ErrUntrustedInput {
-		t.Fatalf("an unsafe callback evidence payload must be refused, got %v", err)
 	}
 }
 
-// A callback for another tenant's provider identity must not resolve.
-func TestIntegrationPayment_CrossTenantCallbackFailsClosed(t *testing.T) {
+// The forgery matrix. Each case is a way a caller might try to manufacture a CAPTURED, and each must fail
+// BEFORE anything is recorded. The baseline matters: the same delivery, correctly signed, is accepted --
+// otherwise these would pass against a boundary that simply rejects everything.
+func TestIntegrationPayment_ForgedNotificationsAreRefused(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
-	a := seedPaidChain(t, p)
-	b := seedPaidChain(t, p)
-	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), &fakeGranter{})
-	in, _ := e.CreateChargeIntent(ctx, a.tenant, a.site, a.settlement, a.merchant, idem(t, "1"))
-	if _, err := e.Execute(ctx, a.tenant, a.site, in.ID); err != nil {
+	s := seedPaidChain(t, p)
+	prov := NewScriptedProvider(Result{Outcome: OutcomeUnknown, ReasonCode: "no_answer"})
+	g := &fakeGranter{}
+	e := NewEngine(liveCfg, p, prov, g)
+	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
+
+	good := BuildNotification(in.ClientRef, "evt-good", OutcomeCaptured, "prv_"+in.ClientRef)
+
+	for _, tc := range []struct {
+		name string
+		raw  RawNotification
+	}{
+		{"no signature at all", RawNotification{Body: good.Body}},
+		{"a wrong signature", RawNotification{Body: good.Body,
+			Headers: map[string]string{"X-Test-Signature": "00"}}},
+		{"a valid signature over a DIFFERENT body", RawNotification{
+			Body:    []byte(`{"client_ref":"` + in.ClientRef + `","event_id":"evt-swap","outcome":"CAPTURED"}`),
+			Headers: good.Headers}},
+		{"an empty body with a valid signature for it", func() RawNotification {
+			return RawNotification{Body: []byte(``), Headers: map[string]string{"X-Test-Signature": SignNotification([]byte(``))}}
+		}()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := e.HandleProviderNotification(ctx, tc.raw)
+			if err == nil {
+				t.Fatal("a forged notification was accepted")
+			}
+			if c := CodeOf(err); c != ErrUntrusted && c != ErrUncorrelated {
+				t.Fatalf("expected an untrusted/uncorrelated refusal, got %v", err)
+			}
+		})
+	}
+	if n := scan1[int](t, p, `SELECT count(*)::int FROM iam_v2.payment_transaction_events
+		WHERE payment_transaction_id=$1`, in.ID); n != 0 {
+		t.Fatalf("forged notifications recorded %d events", n)
+	}
+	if st := scan1[string](t, p, `SELECT status FROM iam_v2.payment_transactions WHERE id=$1`, in.ID); st != "CREATED" {
+		t.Fatalf("forged notifications moved the intent to %s", st)
+	}
+	if g.calls != 0 {
+		t.Fatal("a forged notification reached the grant path")
+	}
+	// the baseline: the correctly signed delivery IS accepted, so the refusals above are about the forgery
+	if err := beginExecution(t, p, in.ID); err != nil {
 		t.Fatal(err)
 	}
-	// site B's tenant claiming site A's client reference
-	if _, err := e.ApplyCallback(ctx, b.tenant, "test-double", a.merchant, in.ClientRef,
-		"evt-cross", "payment.captured", "CAPTURED", "", nil); CodeOf(err) != ErrUncorrelated {
-		t.Fatalf("a cross-tenant callback must not correlate, got %v", err)
+	if _, err := e.HandleProviderNotification(ctx, good); err != nil {
+		t.Fatalf("a correctly signed notification was refused: %v", err)
 	}
-	// and a different merchant account within the right tenant must not either
-	if _, err := e.ApplyCallback(ctx, a.tenant, "test-double", b.merchant, in.ClientRef,
-		"evt-cross2", "payment.captured", "CAPTURED", "", nil); CodeOf(err) != ErrUncorrelated {
-		t.Fatalf("a cross-merchant callback must not correlate, got %v", err)
+}
+
+// beginExecution crosses the durable boundary directly, for tests that need an executing intent without
+// going through a provider double.
+func beginExecution(t *testing.T, p *pgxpool.Pool, txnID string) error {
+	t.Helper()
+	_, err := p.Exec(context.Background(), `SELECT iam_v2.begin_payment_execution($1)`, txnID)
+	return err
+}
+
+// An adapter that cannot authenticate notifications must not be able to deliver an outcome at all. This is
+// the difference between "we check a signature" and "there is no unauthenticated path".
+func TestIntegrationPayment_AdapterWithoutAuthenticationCannotDeliverAnOutcome(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedPaidChain(t, p)
+	e := NewEngine(liveCfg, p, &DeafProvider{}, &fakeGranter{})
+	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
+	raw := BuildNotification(in.ClientRef, "evt-1", OutcomeCaptured, "prv_x")
+	if _, err := e.HandleProviderNotification(ctx, raw); CodeOf(err) != ErrUntrusted {
+		t.Fatalf("an adapter that cannot authenticate must not deliver an outcome, got %v", err)
+	}
+	// and with no adapter at all
+	e2 := NewEngine(liveCfg, p, nil, &fakeGranter{})
+	if _, err := e2.HandleProviderNotification(ctx, raw); CodeOf(err) != ErrUntrusted {
+		t.Fatalf("no adapter must mean no notification path, got %v", err)
+	}
+}
+
+// Financial identity is configuration. A site without it cannot create an intent, and a DISABLED account
+// cannot take money.
+func TestIntegrationPayment_IdentityIsResolvedNotSupplied(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedPaidChain(t, p)
+	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), &fakeGranter{})
+
+	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.MerchantAccountID != s.merchant {
+		t.Fatalf("the intent did not resolve the site's configured account: %s", in.MerchantAccountID)
+	}
+	if in.Provider != "test-double" {
+		t.Fatalf("the intent resolved provider %q", in.Provider)
+	}
+	// no placeholder identity is representable in the financial record
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.payment_provider_accounts
+		(tenant_id,site_id,provider,merchant_account_ref,status) VALUES ($1,$2,'none','x','ACTIVE')`,
+		s.tenant, s.site); err == nil {
+		t.Fatal("a placeholder provider identity was accepted into configuration")
+	}
+
+	// a site with NO configured account fails closed rather than inventing one
+	b := seedPaidChain(t, p)
+	if _, err := p.Exec(ctx, `DELETE FROM iam_v2.payment_provider_accounts WHERE id=$1`, b.merchant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CreateChargeIntent(ctx, b.tenant, b.site, b.settlement, idem(t, "2")); CodeOf(err) != ErrNoAccount {
+		t.Fatalf("a site with no configured account must fail closed, got %v", err)
+	}
+
+	// a DISABLED account is not a default and cannot be resolved
+	c := seedPaidChain(t, p)
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.payment_provider_accounts SET is_default=false, status='DISABLED'
+		WHERE id=$1`, c.merchant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.CreateChargeIntent(ctx, c.tenant, c.site, c.settlement, idem(t, "3")); CodeOf(err) != ErrNoAccount {
+		t.Fatalf("a disabled account must not resolve, got %v", err)
+	}
+}
+
+// A production build has no adapter, so it must be unable to charge at all rather than charging as "none".
+func TestIntegrationPayment_ProductionBuildCannotPersistAFakeProvider(t *testing.T) {
+	pr, err := ProductionProviderFor(Config{})
+	if err != nil {
+		t.Fatalf("the delivered posture must construct: %v", err)
+	}
+	if pr != nil {
+		t.Fatalf("this build has no adapter; it must not present one (%s)", pr.Name())
 	}
 }

@@ -118,3 +118,22 @@ INSERT INTO iam_v2.pms_interface_runtime
   'CONNECTED',now(),now(),'CONTINUOUS',now(),'IN_SYNC',now(),0,0);
 
 COMMIT;
+
+-- The site's authoritative payment identity (0018). Payment fixtures reference this account; without it a
+-- payment intent is refused, which is the corrected behaviour rather than a fixture inconvenience.
+--
+-- Guarded on the table existing because this fixture is loaded at several points in the chain, including
+-- before 0018 has run. A fixture that only works at one chain position is a fixture that stops the gate
+-- from testing the positions either side of it.
+DO $fixture$
+BEGIN
+  IF to_regclass('iam_v2.payment_provider_accounts') IS NOT NULL THEN
+    INSERT INTO iam_v2.payment_provider_accounts
+      (id, tenant_id, site_id, provider, merchant_account_ref, status, is_default)
+    VALUES ('aa000000-0000-0000-0000-000000000011',
+            '11111111-1111-1111-1111-111111111111',
+            '22222222-2222-2222-2222-222222222222',
+            'stripe', 'acct_fixture_0011', 'ACTIVE', true)
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $fixture$;

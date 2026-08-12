@@ -18,7 +18,7 @@ SCRATCH_CONTAINER="$C" SCRATCH_DB="$DB" SCRATCH_PORT_ALLOW="$PORT" SCRATCH_ACK=I
 docker exec "$C" psql -U postgres -d "$DB" -tAqc "CREATE TABLE IF NOT EXISTS public.schema_migrations(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
 for m in 0009_phase2_commerce 0010_phase3_stay_resolution 0011_phase4_financial_execution \
          0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement \
-         0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege; do
+         0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege; do
   if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
     echo "$m did not apply - a defect, not a flake"

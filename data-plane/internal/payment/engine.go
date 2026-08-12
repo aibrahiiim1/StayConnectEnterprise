@@ -72,18 +72,40 @@ type Intent struct {
 	AmountMinor int64
 	Currency    string
 	Exponent    int16
+	// The resolved identity, reported back so a caller can SEE what was chosen for it rather than assuming.
+	Provider          string
+	MerchantAccountID string
 }
 
-// CreateChargeIntent writes the durable intent for a settlement, resolving every money field from the
-// pinned server-side Purchase.
+// CreateChargeIntent writes the durable intent for a settlement.
 //
-// The signature is the point: a caller supplies a settlement and an idempotency key and NOTHING ELSE. There
-// is no parameter for an amount, a currency, a merchant account, an internal transaction id or a provider
-// result, so an untrusted request has nothing to tamper with. The database re-derives and re-checks all of
-// it anyway (PAYMENT_AMOUNT_NOT_SERVER_PINNED), so this is defence in depth rather than the only defence.
-func (e *Engine) CreateChargeIntent(ctx context.Context, tenantID, siteID, settlementID, merchantAccountID, idempotencyKey string) (Intent, error) {
+// The signature is the point. A caller supplies a settlement and an idempotency key and NOTHING ELSE:
+// no amount, no currency, no exponent, no provider, no merchant account, no internal transaction id and no
+// financial result. There is nothing here for an untrusted request to tamper with.
+//
+// Where each value actually comes from:
+//
+//	amount / currency / exponent   the pinned Purchase, read by the INSERT itself
+//	provider / merchant account    p4_resolve_payment_account, the site's ACTIVE default configuration
+//	client reference               minted locally, before the row exists
+//
+// Resolution happens FIRST and fails closed. A site with no ACTIVE default account cannot create a payment
+// intent at all, which is the correct answer -- far better than persisting an invented identity and
+// discovering at capture time that nobody knows whose money moved.
+func (e *Engine) CreateChargeIntent(ctx context.Context, tenantID, siteID, settlementID, idempotencyKey string) (Intent, error) {
 	if !e.cfg.DomainOn() {
 		return Intent{}, fail(ErrConfig, "the phase-4 payment domain is disabled")
+	}
+	acct, err := e.resolveAccount(ctx, tenantID, siteID)
+	if err != nil {
+		return Intent{}, err
+	}
+	// The configured provider is the one this build must be able to reach. An adapter that is absent or
+	// answers to a different name is a misconfiguration, and finding that out before writing a durable
+	// intent is cheaper than finding it out afterwards.
+	if e.provider != nil && e.provider.Name() != acct.Provider {
+		return Intent{}, fail(ErrConfig,
+			"this build's payment adapter does not match the provider configured for this site")
 	}
 	ref, err := newClientRef()
 	if err != nil {
@@ -91,6 +113,8 @@ func (e *Engine) CreateChargeIntent(ctx context.Context, tenantID, siteID, settl
 	}
 	var in Intent
 	in.ClientRef = ref
+	in.Provider = acct.Provider
+	in.MerchantAccountID = acct.ID
 	err = e.pool.QueryRow(ctx, `
 INSERT INTO iam_v2.payment_transactions
   (tenant_id, site_id, settlement_id, merchant_account_id, transaction_type, provider, provider_ref,
@@ -100,7 +124,7 @@ SELECT $1, $2, $3, $4, 'CHARGE', $5, $6, $7, pu.amount_minor, pu.currency, pu.cu
   JOIN iam_v2.purchases pu ON pu.tenant_id = se.tenant_id AND pu.site_id = se.site_id AND pu.id = se.purchase_id
  WHERE se.tenant_id = $1 AND se.site_id = $2 AND se.id = $3
 RETURNING id::text, amount_minor, currency, currency_exponent`,
-		tenantID, siteID, settlementID, merchantAccountID, e.provider.Name(), ref, idempotencyKey).
+		tenantID, siteID, settlementID, acct.ID, acct.Provider, ref, idempotencyKey).
 		Scan(&in.ID, &in.AmountMinor, &in.Currency, &in.Exponent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Intent{}, fail(ErrNotExecutable, "no such settlement in this tenant/site")
@@ -111,9 +135,38 @@ RETURNING id::text, amount_minor, currency, currency_exponent`,
 	return in, nil
 }
 
-// CreateRefundIntent writes the durable intent for a refund of a captured charge. The amount is the only
-// caller-supplied money value, because a partial refund is a genuine operator decision; the database
-// enforces the cumulative bound against the captured parent under an advisory lock.
+// Account is the resolved, server-side financial identity for a site. It carries identifiers only; no
+// credential of any kind passes through this type.
+type Account struct {
+	ID          string
+	Provider    string
+	MerchantRef string
+}
+
+// resolveAccount reads the site's ACTIVE default payment account. It is the ONLY way this package learns
+// which provider and which merchant account to use, and there is deliberately no variant that accepts a
+// preference from anywhere.
+func (e *Engine) resolveAccount(ctx context.Context, tenantID, siteID string) (Account, error) {
+	var a Account
+	err := e.pool.QueryRow(ctx,
+		`SELECT account_id::text, provider, merchant_account_ref FROM iam_v2.p4_resolve_payment_account($1,$2)`,
+		tenantID, siteID).Scan(&a.ID, &a.Provider, &a.MerchantRef)
+	if errors.Is(err, pgx.ErrNoRows) || err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || strings.Contains(err.Error(), "PAYMENT_NO_CONFIGURED_ACCOUNT") {
+			return Account{}, fail(ErrNoAccount,
+				"this site has no ACTIVE default payment account; online payment cannot be attempted")
+		}
+		return Account{}, classify(err)
+	}
+	return a, nil
+}
+
+// CreateRefundIntent writes the durable intent for a refund of a captured charge.
+//
+// The amount is the only caller-supplied money value, because a partial refund is a genuine operator
+// decision; the database enforces the cumulative bound against the captured parent under an advisory lock.
+// Provider and merchant account are INHERITED from the parent row rather than resolved afresh: money must
+// return by the way it arrived, even if the site's default configuration has since changed.
 func (e *Engine) CreateRefundIntent(ctx context.Context, tenantID, siteID, parentID string, amountMinor int64, idempotencyKey string) (Intent, error) {
 	if !e.cfg.DomainOn() {
 		return Intent{}, fail(ErrConfig, "the phase-4 payment domain is disabled")
@@ -173,6 +226,21 @@ func (e *Engine) Execute(ctx context.Context, tenantID, siteID, txnID string) (E
 		return out, fail(ErrConfig, "the phase-4 payment domain is disabled")
 	}
 
+	// 0. PREFLIGHT, before anything durable moves.
+	//
+	// These checks read configuration and adapter capability only. They send nothing and change nothing, so
+	// a refusal here is provably NOT_SENT and must leave NO trace: the intent stays CREATED and the
+	// Settlement stays REQUIRED, both of which remain retriable once the configuration is fixed.
+	//
+	// Doing this after the durable transition -- as an earlier revision did -- meant a DARK build left every
+	// intent permanently PENDING and its Settlement stuck IN_PROGRESS, describing an execution that had
+	// never begun. A stuck IN_PROGRESS settlement is indistinguishable from one whose provider call is still
+	// outstanding, so it silently becomes manual-review work that nobody created.
+	if err := e.guard.preflight(); err != nil {
+		out.Outcome = OutcomeNotSent
+		return out, err
+	}
+
 	// 1. durable execution boundary
 	var began string
 	if err := e.pool.QueryRow(ctx, `SELECT iam_v2.begin_payment_execution($1)`, txnID).Scan(&began); err != nil {
@@ -201,92 +269,148 @@ SELECT t.provider, t.merchant_account_id::text, t.settlement_id::text, t.transac
 	// 2. the provider, behind the guard
 	res, perr := e.guard.execute(ctx, r)
 	if perr != nil {
-		// The guard refuses BEFORE the adapter is entered, so a guard error proves nothing was sent: DARK, a
-		// missing adapter, an adapter that cannot correlate. Nothing is asserted about the money and nothing
-		// is recorded. The intent stays PENDING and the settlement stays IN_PROGRESS, which is the truthful
-		// state -- we began and did not proceed. An adapter that was entered and failed comes back as
-		// OutcomeUnknown instead, never as an error.
+		// Preflight already passed, so reaching here means the posture changed between the two calls -- a
+		// flag flipped, an adapter withdrawn -- or the durable row carried no client reference. Either way
+		// the adapter was not entered and nothing was sent, so nothing is asserted and nothing is recorded.
+		// An adapter that WAS entered and failed comes back as OutcomeUnknown, never as an error.
 		out.Outcome = OutcomeNotSent
 		return out, perr
 	}
 
-	asserted := ""
-	switch res.Outcome {
-	case OutcomeCaptured:
-		asserted = "CAPTURED"
-	case OutcomeDeclined:
-		asserted = "FAILED"
-	case OutcomeNotSent:
-		asserted = "FAILED"
-	case OutcomeUnknown:
-		asserted = "UNKNOWN"
-	}
-	out.Outcome = res.Outcome
-
-	// 3. apply, correlated by the provider's identity
-	evidence, _ := json.Marshal(map[string]string{"provider_status": string(res.Outcome),
-		"provider_reason_code": res.ReasonCode})
-	var applied string
-	if err := e.pool.QueryRow(ctx,
-		`SELECT iam_v2.apply_payment_callback_v2($1,$2,$3::uuid,$4,$5,$6,$7,$8,$9::jsonb)`,
-		tenantID, provider, merchant, r.ClientRef,
-		"exec:"+r.ClientRef, "execution_result", asserted,
-		nullIfEmpty(res.ProviderTxnRef), string(evidence)).Scan(&applied); err != nil {
-		return out, classify(err)
-	}
-	out.Applied = applied
-
-	if res.Outcome == OutcomeUnknown {
-		return out, fail(ErrProviderUnknown,
-			"the provider outcome could not be determined; the settlement is in manual review and nothing "+
-				"will be retried automatically")
-	}
-
-	// 4. the grant, only for a settled charge, only through the Phase-2 path
-	if res.Outcome == OutcomeCaptured && kind == "CHARGE" {
-		g, err := e.grantForSettlement(ctx, tenantID, siteID, settlementID)
-		if err != nil {
-			return out, err
-		}
-		out.EntitlementID, out.AlreadyGranted = g.EntitlementID, g.AlreadyGranted
-	}
-	return out, nil
+	// 3. apply, through the SAME trusted path an authenticated webhook uses.
+	//
+	// This is a synchronous answer to a request we made ourselves, so it is trusted for the one reason that
+	// matters: we know which intent it belongs to because we are the ones who sent it. It still goes through
+	// applyTrusted so that there is exactly one place where a provider outcome becomes financial fact.
+	// 4. the settlement move and the grant both happen inside applyTrusted.
+	return e.applyTrusted(ctx, trustedNotification{
+		clientRef: r.ClientRef, eventID: "exec:" + r.ClientRef, eventType: "execution_result",
+		outcome: res.Outcome, providerTxnRef: res.ProviderTxnRef, reasonCode: res.ReasonCode,
+	})
 }
 
-// ApplyCallback applies an out-of-band provider notification. It takes what the PROVIDER supplied and
-// nothing that identifies an internal row, so a forged callback cannot nominate someone else's money.
-func (e *Engine) ApplyCallback(ctx context.Context, tenantID, provider, merchantAccountID, clientRef,
-	providerEventID, eventType, assertedStatus, providerTxnRef string, evidence map[string]string) (ExecuteResult, error) {
+// ---------------------------------------------------------------- the trusted notification boundary
+
+// HandleProviderNotification is the ONLY way an out-of-band provider outcome enters the financial record.
+//
+// THE PROBLEM IT SOLVES. The previous entry point took an "asserted status" string from its caller. Any
+// component that could reach it could therefore manufacture a CAPTURED for someone else's payment -- the
+// database would dutifully settle the settlement and grant the entitlement, because from its point of view
+// a trusted caller had said the money arrived. Correlating the client reference correctly does not help:
+// the reference is not a secret, it appears in provider dashboards and logs, and knowing one is not
+// evidence of anything.
+//
+// THE SHAPE OF THE FIX. A financial outcome is only trustworthy if it was AUTHENTICATED by the adapter that
+// owns the relationship with the provider. So:
+//
+//   - the raw delivery (bytes plus transport headers) goes to the adapter, which verifies the provider's
+//     signature with the secret only it holds;
+//   - the adapter returns parsed, non-sensitive fields -- it cannot return "trusted", only "here is what
+//     this authenticated delivery said";
+//   - THIS function mints the trustedNotification. The type's zero value is useless and its fields are
+//     unexported, so no caller anywhere can construct one;
+//   - an adapter that does not implement NotificationAuthenticator cannot deliver an outcome at all.
+//
+// Tenant and site are NOT parameters. They are resolved from the durable row the client reference names, so
+// a delivery cannot nominate whose money it is about.
+//
+// No real provider adapter exists in this build, so in practice this refuses. That is the correct DARK
+// behaviour and the deterministic doubles exercise the same path a real adapter would.
+func (e *Engine) HandleProviderNotification(ctx context.Context, raw RawNotification) (ExecuteResult, error) {
 	var out ExecuteResult
 	if !e.cfg.DomainOn() {
 		return out, fail(ErrConfig, "the phase-4 payment domain is disabled")
 	}
-	if evidence == nil {
-		// An absent evidence map is an EMPTY object, never a JSON null: the append-only ledger rejects a
-		// null, and a callback with nothing to record must still be recorded.
-		evidence = map[string]string{}
+	if e.provider == nil {
+		return out, fail(ErrUntrusted,
+			"no payment provider adapter is configured, so no notification can be authenticated")
 	}
-	raw, _ := json.Marshal(evidence)
+	auth, ok := e.provider.(NotificationAuthenticator)
+	if !ok {
+		return out, fail(ErrUntrusted,
+			"the configured adapter cannot authenticate provider notifications; an unauthenticated "+
+				"financial outcome is refused")
+	}
+	parsed, err := auth.AuthenticateNotification(ctx, raw)
+	if err != nil {
+		// Deliberately not the adapter's own words: a verification failure message is a probing oracle.
+		return out, fail(ErrUntrusted, "the provider notification did not authenticate")
+	}
+	return e.applyTrusted(ctx, trustedNotification{
+		clientRef: parsed.ClientRef, eventID: parsed.ProviderEventID, eventType: parsed.EventType,
+		outcome: parsed.Outcome, providerTxnRef: parsed.ProviderTxnRef, reasonCode: parsed.ReasonCode,
+	})
+}
+
+// trustedNotification is an authenticated provider outcome. Its fields are unexported and it is minted in
+// exactly two places in this package -- after an adapter authenticated a delivery, and by Execute for the
+// synchronous response to a call we ourselves made. There is no exported constructor, and there is
+// deliberately no way for any other package to produce one.
+type trustedNotification struct {
+	clientRef      string
+	eventID        string
+	eventType      string
+	outcome        Outcome
+	providerTxnRef string
+	reasonCode     string
+}
+
+// assertedStatus maps a provider outcome onto the payment status machine. NOT_SENT deliberately has no
+// mapping: nothing was sent, so there is nothing to assert.
+func (n trustedNotification) assertedStatus() string {
+	switch n.outcome {
+	case OutcomeCaptured:
+		return "CAPTURED"
+	case OutcomeDeclined:
+		return "FAILED"
+	case OutcomeUnknown:
+		return "UNKNOWN"
+	}
+	return ""
+}
+
+// applyTrusted records an authenticated outcome and moves the settlement with it, in one transaction, then
+// hands a settled charge to the Phase-2 grant.
+func (e *Engine) applyTrusted(ctx context.Context, n trustedNotification) (ExecuteResult, error) {
+	var out ExecuteResult
+	if n.clientRef == "" || n.eventID == "" {
+		return out, fail(ErrUncorrelated,
+			"a notification without a client reference and a provider event id cannot be correlated or "+
+				"deduplicated")
+	}
+	// Resolve ownership from the durable row rather than from the delivery. This is what makes tenant and
+	// site unforgeable: they are read from the intent the client reference names, not claimed by a caller.
+	var tenantID, siteID, settlementID, kind, provider, merchant string
+	err := e.pool.QueryRow(ctx, `
+SELECT tenant_id::text, site_id::text, settlement_id::text, transaction_type, provider,
+       merchant_account_id::text
+  FROM iam_v2.payment_transactions WHERE provider_ref = $1`, n.clientRef).
+		Scan(&tenantID, &siteID, &settlementID, &kind, &provider, &merchant)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, fail(ErrUncorrelated, "no payment intent matches this client reference")
+	}
+	if err != nil {
+		return out, classify(err)
+	}
+
+	evidence, _ := json.Marshal(map[string]string{
+		"provider_status": string(n.outcome), "provider_reason_code": n.reasonCode})
 	var applied string
 	if err := e.pool.QueryRow(ctx,
 		`SELECT iam_v2.apply_payment_callback_v2($1,$2,$3::uuid,$4,$5,$6,$7,$8,$9::jsonb)`,
-		tenantID, provider, merchantAccountID, clientRef, providerEventID, eventType,
-		nullIfEmpty(assertedStatus), nullIfEmpty(providerTxnRef), string(raw)).Scan(&applied); err != nil {
+		tenantID, provider, merchant, n.clientRef, n.eventID, n.eventType,
+		nullIfEmpty(n.assertedStatus()), nullIfEmpty(n.providerTxnRef), string(evidence)).Scan(&applied); err != nil {
 		return out, classify(err)
 	}
 	out.Applied = applied
-	if applied != "APPLIED" || assertedStatus != "CAPTURED" {
-		return out, nil
+	out.Outcome = n.outcome
+
+	if n.outcome == OutcomeUnknown {
+		return out, fail(ErrProviderUnknown,
+			"the provider outcome could not be determined; the settlement is in manual review and nothing "+
+				"will be retried automatically")
 	}
-	// A capture arriving out of band still settles and still grants -- through the same one path.
-	var siteID, settlementID, kind string
-	if err := e.pool.QueryRow(ctx, `
-SELECT t.site_id::text, t.settlement_id::text, t.transaction_type FROM iam_v2.payment_transactions t
- WHERE t.tenant_id=$1 AND t.provider=$2 AND t.merchant_account_id=$3::uuid AND t.provider_ref=$4`,
-		tenantID, provider, merchantAccountID, clientRef).Scan(&siteID, &settlementID, &kind); err != nil {
-		return out, classify(err)
-	}
-	if kind != "CHARGE" {
+	if n.outcome != OutcomeCaptured || kind != "CHARGE" {
 		return out, nil
 	}
 	g, err := e.grantForSettlement(ctx, tenantID, siteID, settlementID)

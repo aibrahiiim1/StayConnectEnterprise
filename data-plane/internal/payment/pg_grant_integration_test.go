@@ -39,7 +39,7 @@ func TestIntegrationGrant_CaptureGrantsThroughThePhase2Path(t *testing.T) {
 	ctx := context.Background()
 	s := seedPaidChain(t, p)
 	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), realGranter(t))
-	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestIntegrationGrant_ExactlyOnceUnderDuplicatesAndConcurrency(t *testing.T)
 	ctx := context.Background()
 	s := seedPaidChain(t, p)
 	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), realGranter(t))
-	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,8 +86,8 @@ func TestIntegrationGrant_ExactlyOnceUnderDuplicatesAndConcurrency(t *testing.T)
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			o, _ := e.ApplyCallback(ctx, s.tenant, "test-double", s.merchant, in.ClientRef,
-				"evt-race", "payment.captured", "CAPTURED", "prv_"+in.ClientRef, nil)
+			o, _ := e.HandleProviderNotification(ctx,
+				BuildNotification(in.ClientRef, "evt-race", OutcomeCaptured, "prv_"+in.ClientRef))
 			ids <- o.EntitlementID
 		}(i)
 	}
@@ -112,7 +112,7 @@ func TestIntegrationGrant_RestartReplayGrantsNothingFurther(t *testing.T) {
 	ctx := context.Background()
 	s := seedPaidChain(t, p)
 	e1 := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), realGranter(t))
-	in, _ := e1.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+	in, _ := e1.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if _, err := e1.Execute(ctx, s.tenant, s.site, in.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +121,8 @@ func TestIntegrationGrant_RestartReplayGrantsNothingFurther(t *testing.T) {
 	// a fresh engine, as after a restart, with no memory of anything
 	e2 := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), realGranter(t))
 	for i := 0; i < 3; i++ {
-		if _, err := e2.ApplyCallback(ctx, s.tenant, "test-double", s.merchant, in.ClientRef,
-			"exec:"+in.ClientRef, "execution_result", "CAPTURED", "prv_"+in.ClientRef, nil); err != nil {
+		if _, err := e2.HandleProviderNotification(ctx,
+			BuildNotification(in.ClientRef, "exec:"+in.ClientRef, OutcomeCaptured, "prv_"+in.ClientRef)); err != nil {
 			t.Fatalf("replay %d: %v", i, err)
 		}
 	}
@@ -147,7 +147,7 @@ func TestIntegrationGrant_FailedAndUnknownGrantZero(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := seedPaidChain(t, p)
 			e := NewEngine(liveCfg, p, NewScriptedProvider(tc.res), realGranter(t))
-			in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, s.merchant, idem(t, "1"))
+			in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 			_, _ = e.Execute(ctx, s.tenant, s.site, in.ID)
 			if st := scan1[string](t, p, `SELECT status FROM iam_v2.settlements WHERE id=$1`, s.settlement); st != tc.want {
 				t.Fatalf("expected settlement %s, got %s", tc.want, st)
@@ -157,8 +157,8 @@ func TestIntegrationGrant_FailedAndUnknownGrantZero(t *testing.T) {
 			}
 			// and an out-of-band capture claiming the same intent cannot rescue it either: the intent is
 			// terminal, so there is nothing left for a late callback to move.
-			_, _ = e.ApplyCallback(ctx, s.tenant, "test-double", s.merchant, in.ClientRef,
-				"evt-late", "payment.captured", "CAPTURED", "", nil)
+			_, _ = e.HandleProviderNotification(ctx,
+				BuildNotification(in.ClientRef, "evt-late", OutcomeCaptured, ""))
 			if n := entitlements(t, s.purchase); n != 0 {
 				t.Fatalf("%s: a late callback granted %d entitlements", tc.name, n)
 			}
@@ -186,6 +186,13 @@ func TestIntegrationGrant_SubstitutionFailsClosed(t *testing.T) {
 	// and the correct owner still cannot grant while the settlement has not reached SETTLED
 	if _, err := g.GrantSettledPurchase(ctx, b.tenant, b.site, b.purchase); err == nil {
 		t.Fatal("an unsettled purchase was granted")
+	}
+	// a PENDING purchase is not a paid-grant origin, even with a SETTLED settlement in front of it
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.purchases SET state='PENDING' WHERE id=$1`, b.purchase); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.GrantSettledPurchase(ctx, b.tenant, b.site, b.purchase); err == nil {
+		t.Fatal("a PENDING purchase took the paid grant path")
 	}
 	if n := entitlements(t, b.purchase); n != 0 {
 		t.Fatalf("substitution created %d entitlements", n)

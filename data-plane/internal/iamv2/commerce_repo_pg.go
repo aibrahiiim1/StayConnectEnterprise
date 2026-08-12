@@ -396,28 +396,20 @@ func (t *pgCommerceTx) InsertSettlement(ctx context.Context, tenantID, siteID, p
 // the read and the transition — the same lock the controlled operation takes, taken in the same order.
 func (t *pgCommerceTx) TerminateLiveEntitlementForSubject(ctx context.Context, tenantID, siteID string, subj CommerceSubject) (string, error) {
 	v, a, p := subjectCols(subj)
-	var id string
+	// Locking the live entitlement requires UPDATE privilege, which is exactly what the restricted runtime
+	// role must not hold -- so the SELECT ... FOR UPDATE and the termination both live inside the controlled
+	// function. A NULL result means the subject held nothing, which is ordinary, not an error.
+	var id *string
 	err := t.tx.QueryRow(ctx,
-		`SELECT id::text FROM iam_v2.entitlements
-		  WHERE tenant_id=$1 AND site_id=$2 AND status IN ('PENDING','ACTIVE','SUSPENDED')
-		    AND ( ($3::uuid IS NOT NULL AND voucher_id=$3::uuid)
-		       OR ($4::uuid IS NOT NULL AND guest_account_id=$4::uuid)
-		       OR ($5::uuid IS NOT NULL AND guest_principal_id=$5::uuid) )
-		  ORDER BY activated_at DESC NULLS LAST, id
-		  LIMIT 1
-		  FOR UPDATE`,
+		`SELECT iam_v2.p4_terminate_live_entitlement_for_subject($1,$2,$3::uuid,$4::uuid,$5::uuid)::text`,
 		tenantID, siteID, v, a, p).Scan(&id)
-	if err == pgx.ErrNoRows {
-		return "", nil // no live entitlement to supersede
-	}
 	if err != nil {
 		return "", err
 	}
-	if _, err := t.tx.Exec(ctx,
-		`SELECT iam_v2.apply_entitlement_transition($1::uuid, 'TERMINATED', now(), 'SUPERSEDED')`, id); err != nil {
-		return "", err
+	if id == nil {
+		return "", nil
 	}
-	return id, nil
+	return *id, nil
 }
 
 func (t *pgCommerceTx) InsertEntitlement(ctx context.Context, e EntitlementSpec) (string, error) {
@@ -427,38 +419,25 @@ func (t *pgCommerceTx) InsertEntitlement(ctx context.Context, e EntitlementSpec)
 	if e.SupersedesID != "" {
 		supersedes = &e.SupersedesID
 	}
-	endMode := e.EndMode
-	if endMode == "" {
-		endMode = "MANUAL_END"
-	}
+	// The row and its opening ACTIVE transition are created together by p4_insert_entitlement.
+	//
+	// This is still ONE writer -- this method -- but its statement is now a controlled function rather than
+	// direct DML. That is what lets a restricted runtime role complete a paid grant while holding no INSERT
+	// or UPDATE privilege on entitlements at all: it can call the sanctioned operation and nothing else.
+	// It also keeps the row and its transition inseparable, which is the T0037 defect made structural.
 	var id string
 	err := t.tx.QueryRow(ctx,
-		`INSERT INTO iam_v2.entitlements
-		   (tenant_id, site_id, voucher_id, guest_account_id, guest_principal_id, purchase_id,
-		    policy_snapshot, service_plan_revision_id, package_revision_id, time_accounting_mode,
-		    end_mode, window_ends_at, status, supersedes_entitlement_id, activated_at)
-		 VALUES ($1,$2,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,'ACTIVE',$13::uuid, now())
-		 RETURNING id::text`,
-		e.TenantID, e.SiteID, v, a, p, e.PurchaseID, snap, e.ServicePlanRevID, e.PackageRevID, e.TimeAccountingMode, endMode, e.WindowEndsAt, supersedes).Scan(&id)
-	if err != nil {
-		return "", err
-	}
-	// The OPENING transition, in the same transaction as the row it opens.
-	//
-	// A new entitlement is born ACTIVE, and Phase-3 requires an entitlement's status to be backed by its
-	// latest recorded transition (the deferred p3_entitlement_status_coherent constraint). An entitlement
-	// inserted without this has no history at all: its first recorded fact would be its termination, and it
-	// cannot commit. Recording it HERE, through the same controlled apply_entitlement_transition every other
-	// state change uses, keeps one writer and one history for both the free and the paid grant path.
-	if _, err := t.tx.Exec(ctx,
-		`SELECT iam_v2.apply_entitlement_transition($1::uuid, 'ACTIVE', now(), 'GRANTED')`, id); err != nil {
-		return "", err
-	}
-	return id, nil
+		`SELECT iam_v2.p4_insert_entitlement($1,$2,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,$13::uuid)::text`,
+		e.TenantID, e.SiteID, v, a, p, e.PurchaseID, snap, e.ServicePlanRevID, e.PackageRevID,
+		e.TimeAccountingMode, e.EndMode, e.WindowEndsAt, supersedes).Scan(&id)
+	return id, err
 }
 
 func (t *pgCommerceTx) MarkPurchaseGranted(ctx context.Context, purchaseID string) error {
-	_, err := t.tx.Exec(ctx, `UPDATE iam_v2.purchases SET state='GRANTED' WHERE id=$1`, purchaseID)
+	// GRANTED is reached through the controlled function, which locks the row and refuses any origin state
+	// the approved machine does not permit. A raw UPDATE could drive a CANCELLED or FAILED purchase to
+	// GRANTED, and nothing in the schema would have objected.
+	_, err := t.tx.Exec(ctx, `SELECT iam_v2.p4_mark_purchase_granted($1)`, purchaseID)
 	return err
 }
 

@@ -81,8 +81,15 @@ func (e *CommerceEngine) GrantSettledPurchase(ctx context.Context, tenantID, sit
 			// GRANTED with no entitlement row is a contradiction; refuse rather than paper over it.
 			return &Error{Code: ErrConflict, Msg: "purchase is GRANTED but has no entitlement"}
 		}
-		if g.PurchaseState != "AWAITING_SETTLEMENT" && g.PurchaseState != "PENDING" {
-			return &Error{Code: ErrNotRedeemable, Msg: "purchase state cannot be granted"}
+		// AWAITING_SETTLEMENT and nothing else.
+		//
+		// PENDING was previously accepted here, and it should not have been. A PENDING purchase is one that
+		// has not yet been committed to a settlement path; accepting it would let a settled payment grant
+		// against a purchase that never declared it was awaiting money, which is the state a free grant uses.
+		// The paid path has exactly one legitimate origin, so it names exactly one.
+		if g.PurchaseState != "AWAITING_SETTLEMENT" {
+			return &Error{Code: ErrNotRedeemable,
+				Msg: "a paid grant requires the purchase to be AWAITING_SETTLEMENT, not " + g.PurchaseState}
 		}
 
 		superseded, err := tx.TerminateLiveEntitlementForSubject(ctx, tenantID, siteID, g.Subject)

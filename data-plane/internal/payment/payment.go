@@ -32,6 +32,8 @@ const (
 	ErrProviderUnknown Code = "provider_outcome_unknown"
 	ErrGrant           Code = "entitlement_grant"
 	ErrUntrustedInput  Code = "untrusted_input"
+	ErrNoAccount       Code = "no_configured_account"
+	ErrUntrusted       Code = "untrusted_notification"
 )
 
 // Error is a deterministic typed error. Msg never carries card data, credentials or guest PII.
@@ -180,4 +182,45 @@ func newClientRef() (string, error) {
 		return "", fail(ErrRepo, "could not generate a durable client reference")
 	}
 	return "sc_" + hex.EncodeToString(b[:]), nil
+}
+
+// ---------------------------------------------------------------- the authenticated notification contract
+
+// RawNotification is a provider delivery exactly as it arrived, before anybody has decided to believe it.
+//
+// It is bytes and transport headers, nothing more. It is deliberately not parsed into fields before the
+// adapter sees it, because most provider signature schemes sign the RAW body: re-serialising it first is
+// how signature verification quietly starts passing on modified payloads.
+type RawNotification struct {
+	Body    []byte
+	Headers map[string]string
+}
+
+// ParsedNotification is what an adapter returns after it has AUTHENTICATED a delivery.
+//
+// Note what it cannot express: there is no "trusted" flag and no way to name an internal transaction id, a
+// tenant, a site, a settlement or an amount. An adapter reports what the authenticated delivery said about
+// ITS OWN transaction; every question of whose money that is gets answered from durable local state.
+type ParsedNotification struct {
+	// ClientRef is StayConnect's own reference, echoed back by the provider. It is the correlation handle.
+	ClientRef string
+	// ProviderEventID is the provider's identifier for this delivery, and the deduplication key.
+	ProviderEventID string
+	EventType       string
+	Outcome         Outcome
+	ProviderTxnRef  string
+	ReasonCode      string
+}
+
+// NotificationAuthenticator is the capability an adapter must have before ANY out-of-band outcome from it
+// can be believed.
+//
+// It is a separate interface from Provider on purpose. An adapter that can send a charge but cannot verify
+// a webhook signature is not partially usable for notifications -- it is unusable for them, and the type
+// system should say so rather than leaving it to a runtime check somebody may forget.
+type NotificationAuthenticator interface {
+	// AuthenticateNotification verifies the delivery against the provider's signing scheme and returns its
+	// parsed contents. It MUST return an error unless the delivery is cryptographically attributable to the
+	// provider; "looks well-formed" is not authentication.
+	AuthenticateNotification(ctx context.Context, raw RawNotification) (ParsedNotification, error)
 }

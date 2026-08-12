@@ -24,6 +24,8 @@ UP13="$ROOT/data-plane/migrations/0013_phase4_reversal_ledger.up.sql"
 UP14="$ROOT/data-plane/migrations/0014_phase4_payment_settlement.up.sql"
 UP16="$ROOT/data-plane/migrations/0016_phase4_payment_coherence.up.sql"
 DOWN16="$ROOT/data-plane/migrations/0016_phase4_payment_coherence.down.sql"
+UP18="$ROOT/data-plane/migrations/0018_phase4_financial_identity_and_privilege.up.sql"
+DOWN18="$ROOT/data-plane/migrations/0018_phase4_financial_identity_and_privilege.down.sql"
 UP17="$ROOT/data-plane/migrations/0017_phase4_least_privilege.up.sql"
 DOWN17="$ROOT/data-plane/migrations/0017_phase4_least_privilege.down.sql"
 UP15="$ROOT/data-plane/migrations/0015_phase4_payment_hardening.up.sql"
@@ -273,6 +275,7 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP17" >/dev
   && ok "0017 DOWN -> UP re-applies cleanly" || no "0017 DOWN -> UP re-applies cleanly" "re-up failed"
 eq "0017 is recorded in the migration ledger" "1" \
   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0017_phase4_least_privilege';")"
+
 
 # ------------------------------------------------------------------ nothing pre-existing was weakened
 echo "== pre-existing enforcement is intact =="
@@ -615,6 +618,63 @@ eq "ESCALATE was counted" "2" \
 rejects "a terminal decision still needs something to decide about" \
   "SELECT iam_v2.record_posting_review_action('c0110000-0000-0000-0000-000000000009','CONFIRM_POSTED','$T','no attempt exists',jsonb_build_object('folio','verified'));" \
   "REVIEW_NOT_APPLICABLE"
+
+# ------------------------------------------------------------------ 0018 financial identity + privilege
+if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP18" >/dev/null 2>&1; then ok "0018 applies"; else no "0018 applies" "$(docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP18" 2>&1 | tail -2 | tr "
+" " ")"; fi
+UP18_FP="$(Q "$FP")"
+# Seed the account directly rather than reloading the whole fixture: the fixture is not idempotent, and
+# re-running it here would duplicate the immutable PMS revisions it creates.
+# The backfill records historical accounts DISABLED and non-default, which is deliberate: activating one is
+# an operator decision, not a migration side effect. The gate performs that decision explicitly here, which
+# is also what proves the backfilled row is a real, usable account rather than a placeholder.
+ACCTSQL="INSERT INTO iam_v2.payment_provider_accounts(id,tenant_id,site_id,provider,merchant_account_ref,status,is_default) VALUES ('$MERCH','$T','$S','stripe','acct_fixture_0011','ACTIVE',true) ON CONFLICT (id) DO UPDATE SET status='ACTIVE', is_default=true;"
+Q "$ACCTSQL" >/dev/null
+# A dedicated ONLINE_PAYMENT settlement for the identity assertions. Reusing an earlier one would make the
+# result depend on what previous assertions left behind, and an INSERT ... SELECT that matches no rows
+# succeeds -- so a stale fixture turns a negative test into a vacuous pass.
+I18PUR=78780000-0000-0000-0000-000000000001
+I18SET=78780000-0000-0000-0000-0000000000d1
+Q "INSERT INTO iam_v2.purchases(id,tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,settlement_mapping_id,trigger,amount_minor,currency,currency_exponent,state) VALUES ('$I18PUR','$T','$S','cccc0000-0000-0000-0000-0000000000d1','$IF1','$STAY1','dddd0000-0000-0000-0000-000000000001','ADMIN_GRANT',100,'USD',2,'AWAITING_SETTLEMENT');" >/dev/null
+Q "INSERT INTO iam_v2.settlements(id,tenant_id,site_id,purchase_id,method,status) VALUES ('$I18SET','$T','$S','$I18PUR','ONLINE_PAYMENT','REQUIRED');" >/dev/null
+eq "the 0018 identity fixture settlement exists" "1"   "$(Q "SELECT count(*) FROM iam_v2.settlements WHERE id='$I18SET';")"
+
+eq "the payment identity table exists" "1" \
+  "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_name='payment_provider_accounts';")"
+rejects "a placeholder provider identity cannot be configured" \
+  "INSERT INTO iam_v2.payment_provider_accounts(tenant_id,site_id,provider,merchant_account_ref,status)
+   VALUES ('$T','$S','none','x','ACTIVE');" "violates check constraint"
+rejects "an unconfigured merchant account cannot appear in the financial record" \
+  "INSERT INTO iam_v2.payment_transactions(tenant_id,site_id,settlement_id,merchant_account_id,transaction_type,provider,provider_ref,idempotency_key,amount_minor,currency,currency_exponent,status)
+   SELECT '$T','$S',id,gen_random_uuid(),'CHARGE','stripe','ref-unconf','idem-unconf',100,'USD',2,'CREATED'
+     FROM iam_v2.settlements WHERE id='$I18SET';" "violates foreign key|PAYMENT_ACCOUNT_UNKNOWN"
+rejects "a payment cannot name a provider its configured account does not use" \
+  "INSERT INTO iam_v2.payment_transactions(tenant_id,site_id,settlement_id,merchant_account_id,transaction_type,provider,provider_ref,idempotency_key,amount_minor,currency,currency_exponent,status)
+   SELECT '$T','$S',id,'$MERCH','CHARGE','someone_else','ref-mm','idem-mm',100,'USD',2,'CREATED'
+     FROM iam_v2.settlements WHERE id='$I18SET';" "PAYMENT_PROVIDER_MISMATCH"
+eq "there is at most one default account per site" "1" \
+  "$(Q "SELECT count(*) FROM pg_indexes WHERE schemaname='iam_v2' AND indexname='ppa_one_default_per_site';")"
+eq "resolution returns the configured account" "1" \
+  "$(Q "SELECT count(*) FROM iam_v2.p4_resolve_payment_account('$T','$S') WHERE provider='stripe';")"
+eq "the controlled grant functions exist" "3" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname IN ('p4_insert_entitlement','p4_mark_purchase_granted','p4_terminate_live_entitlement_for_subject');")"
+eq "every phase-4 enforcement trigger runs as the owner, not the caller" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname IN ('p4_payment_admission_gate','p4_payment_identity_gate') AND NOT p.prosecdef;")"
+eq "reporting sees only the redacted views" "3" \
+  "$(Q "SELECT count(*) FROM information_schema.views WHERE table_schema='iam_v2' AND table_name IN ('v_financial_payments','v_financial_settlements','v_financial_review_queue');")"
+eq "the redacted payment view exposes no correlation handle" "0" \
+  "$(Q "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='v_financial_payments' AND column_name IN ('provider_ref','idempotency_key','provider_txn_ref');")"
+
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$DOWN18" >/dev/null 2>&1 \
+  && ok "0018 DOWN applies" || no "0018 DOWN applies" "down failed"
+eq "0018 DOWN removed the identity table" "0" \
+  "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_name='payment_provider_accounts';")"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP18" >/dev/null 2>&1 \
+  && ok "0018 DOWN -> UP re-applies cleanly" || no "0018 DOWN -> UP re-applies cleanly" "re-up failed"
+eq "0018 DOWN -> UP produces the SAME schema as the first UP" "$UP18_FP" "$(Q "$FP")"
+Q "$ACCTSQL" >/dev/null
+eq "0018 is recorded in the migration ledger" "1" \
+  "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0018_phase4_financial_identity_and_privilege';")"
 
 # ------------------------------------------------------------------ the baseline suite, after 0011
 # On a FRESHLY rebuilt database, so the second pass is judged on its own rows and not on what the first
