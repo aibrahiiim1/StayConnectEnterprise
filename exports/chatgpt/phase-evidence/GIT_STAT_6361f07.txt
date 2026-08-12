@@ -1,0 +1,4 @@
+commit 6361f079ae6a01db7c1cf976648bb62e88008520
+Date:   Wed Aug 12 09:52:29 2026 +0300
+
+    Phase 4: record the authoritative CI evidence for head f9f13f97
