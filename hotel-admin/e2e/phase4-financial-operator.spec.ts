@@ -204,7 +204,12 @@ test.describe("Phase 4 financial operator surface", () => {
   test("every control in the real accessibility tree has a name", async ({ page }) => {
     await installBackend(page, []);
     await page.goto("/financial-recovery");
-    await expect(page.getByText("FINANCIAL RECOVERY")).toBeVisible();
+    // Wait for the HELD TABLE, not merely the banner. The banner renders as soon as the recovery status
+    // arrives, while the controls this test enumerates come from the holds request -- so anchoring on the
+    // banner leaves a window in which the accessibility tree is legitimately still empty. On a fast local
+    // machine the two responses land together; on a slower runner they do not, and that is a race in the
+    // test rather than a defect in the screen.
+    await expect(page.getByRole("button", { name: /^record$/i }).first()).toBeVisible();
 
     for (const role of ["button", "combobox", "textbox"] as const) {
       const controls = page.getByRole(role);
