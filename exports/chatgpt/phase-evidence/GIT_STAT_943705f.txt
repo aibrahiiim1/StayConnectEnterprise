@@ -1,4 +1,0 @@
-commit 943705f55191954a22913a088b4698c04347cda7
-Date:   Wed Aug 12 11:59:58 2026 +0300
-
-    Phase 4: record the authoritative CI evidence for software candidate 82ce2d6

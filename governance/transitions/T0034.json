@@ -1,7 +1,7 @@
 {
   "transition_id": "T0034",
   "seq": 34,
-  "timestamp": "2026-08-12T10:10:00Z",
+  "timestamp": "2026-08-12T09:30:00Z",
   "record_type": "PHASE_4_MANUAL_REVIEW_SECURITY_CORRECTIONS_SCOPE_EVIDENCE_AND_ROLE_TRUTH",
   "previous_state": {
     "phase": "4",
