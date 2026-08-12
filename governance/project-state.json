@@ -213,7 +213,7 @@
     "phases_5_to_7_authorized": false,
     "phase4_accepted": false,
     "phase4_closed": false,
-    "phase4_migration": "0011_phase4_financial_execution + 0012_phase4_financial_hardening + 0013_phase4_reversal_ledger + 0014_phase4_payment_settlement + 0015_phase4_payment_hardening + 0016_phase4_payment_coherence + 0017_phase4_least_privilege + 0018_phase4_financial_identity_and_privilege + 0019_phase4_financial_recovery + 0020_phase4_financial_observability + 0021_phase4_trust_boundary + 0022_phase4_recovery_closure + 0023_phase4_restore_generation",
+    "phase4_migration": "0011_phase4_financial_execution + 0012_phase4_financial_hardening + 0013_phase4_reversal_ledger + 0014_phase4_payment_settlement + 0015_phase4_payment_hardening + 0016_phase4_payment_coherence + 0017_phase4_least_privilege + 0018_phase4_financial_identity_and_privilege + 0019_phase4_financial_recovery + 0020_phase4_financial_observability + 0021_phase4_trust_boundary + 0022_phase4_recovery_closure + 0023_phase4_restore_generation + 0024_phase4_outcome_authority_and_grant_kernel + 0025_phase4_recovery_completion_and_compliance",
     "phase4_core_hardened": true,
     "phase4_production_construction_boundary_closed": true,
     "phase4_construction_boundary_evidence": "NewProductionEngine(repo) is the only exported financial constructor and takes no Config and no Transport; newDarkGuard is unexported; the compile-time-only export_test.go carries the test seams. scripts/ci/phase4-dark-check.sh derives the exported surface with go doc and refuses ANY exported function whose PARAMETERS mention Config or Transport, with no exclusions. The check was proved bidirectional: it passes on the clean tree and fails on a deliberately planted exported constructor.",
@@ -317,15 +317,15 @@
     "guest_portal_upstream_reserve_ms": 200,
     "nft_deployment_architecture": "nftconverge",
     "surgical_foundation_retired_from_procedure": true,
-    "next_step": "Continue the authorized Phase 4 Financial Execution Layer DARK on the phase/4-financial-execution branch under D18/T0029. The restricted-role trust boundary, FINANCIAL_RECOVERY_MODE with a structural full-rail hold, the supported restore-generation model and the complete WS-J financial operator surface are delivered and verified in DARK (T0039). What remains is the Next.js major upgrade as its own authorized change, then WS-L: the authorized controlled live-DARK deployment and the reboot/rollback drill. Phase-4 feature flags stay OFF and no real financial traffic is authorized."
+    "next_step": "Phase 4 software is CLOSED for DARK under D18/T0029 (T0040): the provider-outcome authority is split from the execution authority, one entitlement grant kernel serves the free and paid paths, FINANCIAL_RECOVERY_MODE covers the zero-attempt restore and all four marker cases, the supported restore verifies its manifest against the appliance pinned registry anchor and proves every financial writer stopped, and C27 and C35 are closed to the extent an external receipt authority permits. The next milestone is WS-L: the authorized controlled live-DARK deployment and the reboot/rollback drill. Two blockers sit OUTSIDE Phase-4 DARK closure and each needs its own authorized change: the Next.js production advisories (minimum fix is a framework major that failed the browser regression suite and was reverted) and C35 receipt_verified (no external archival receipt authority exists). Phase-4 feature flags stay OFF and no real financial traffic is authorized."
   },
-  "latest_transition_id": "T0039",
+  "latest_transition_id": "T0040",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "99f78240240987a276ed03bbaf7817aae532eb71",
+  "acceptance_candidate_head": "49dd109e269a47c7e4030bf454f904232c0c8085",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "99f78240240987a276ed03bbaf7817aae532eb71",
+  "inventory_head": "49dd109e269a47c7e4030bf454f904232c0c8085",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }

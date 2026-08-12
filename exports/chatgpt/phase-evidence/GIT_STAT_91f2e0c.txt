@@ -1,4 +1,0 @@
-commit 91f2e0cd816803bcd3edbefdf56843d48956a935
-Date:   Wed Aug 12 23:02:38 2026 +0300
-
-    Phase 4: point the authoritative CI facts at the final-head run

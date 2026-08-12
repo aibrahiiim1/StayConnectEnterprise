@@ -1,7 +1,7 @@
 {
   "transition_id": "T0040",
   "seq": 40,
-  "timestamp": "2026-08-13T00:05:00Z",
+  "timestamp": "2026-08-12T22:05:00Z",
   "record_type": "PHASE_4_FINAL_SOFTWARE_CLOSURE_BEFORE_LIVE_DARK",
   "previous_state": {
     "phase": "4",
