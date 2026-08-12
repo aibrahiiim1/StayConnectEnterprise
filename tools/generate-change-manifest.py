@@ -214,8 +214,14 @@ def main():
     L.append("```")
     L.append("")
     L.append("## Commits in range (`git log --oneline <base>..HEAD`)")
+    # Each line is prefixed HISTORICAL: because a commit SUBJECT is a fact about the past, not a current
+    # pointer. Some subjects legitimately name the CI run they recorded, and without this marker the
+    # zero-stale validator reads a real history line as a stale delivery pointer baked into the report.
     L.append("```text")
-    L.append(commits if commits else "(none)")
+    if commits:
+        L.extend("HISTORICAL: " + line for line in commits.splitlines())
+    else:
+        L.append("(none)")
     L.append("```")
     if submods.strip():
         L.append("")
