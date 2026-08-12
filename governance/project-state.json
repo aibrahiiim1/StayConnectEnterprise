@@ -221,11 +221,11 @@
     "phase4_reversal_model": "PASSIVE_LEDGER_ROW_REQUIRED_BY_CONTRACT_15_16; EXECUTABLE_SENDER_FORBIDDEN_BY_9a_RULE_5_AND_GATE_3B; structurally non-executable (no outbox row, no attempt, no P#, no bytes, no PT=C, no negative TA)",
     "phase4_t0030_overclaims_corrected": ["C10", "C11", "C22", "C24", "C32", "retry single-use", "review evidence", "unbypassable DARK guard"],
     "phase4_authoritative_ci_run_on_head": true,
-    "phase4_authoritative_ci_run_id": "31635160616",
-    "phase4_authoritative_ci_head": "0ef40f3f50f01174c877db2dfa675dffecaa5690",
+    "phase4_authoritative_ci_run_id": "31647126232",
+    "phase4_authoritative_ci_head": "7fb4c5fc9da7ec4735e2018ca97fca7e813b6579",
     "phase4_authoritative_ci_conclusion": "success",
-    "phase4_authoritative_ci_artifact": "phase4-financial-core-evidence-0ef40f3f50f01174c877db2dfa675dffecaa5690",
-    "phase4_authoritative_ci_note": "Phase 4 Financial Core CI run 31635160616 succeeded on the FINAL head 0ef40f3f with 32/32 steps, artifact id 9156827946, digest sha256:7f41ab3988dfcdec59eb44912716062beb60c98b8d16e39e2047841523d8cc30. This is the final-head run, not an earlier candidate: two prior runs on this branch failed at npm ci because the lockfile resolved differently under the CI npm, and the run recorded here is the one on the head that fixes it.",
+    "phase4_authoritative_ci_artifact": "phase4-financial-core-evidence-7fb4c5fc9da7ec4735e2018ca97fca7e813b6579",
+    "phase4_authoritative_ci_note": "Phase 4 Financial Core CI run 31647126232 succeeded on head 7fb4c5fc with 33/33 steps, artifact id 9161300472, digest sha256:1a38e8116b02960ed240c6cf188892f25cdda764161af946c3db853667e6680f. This is the run on the head that carries the final SOFTWARE candidate. The one commit after it updates these CI pointers, the packs and the manifest and changes no software; an earlier run on 4053e36 failed the restore drill because the Linux runner has a real pg_dump that reached for a database socket the drill does not provide, and that head is deliberately not recorded here.",
     "phase4_manual_review_operator_workflow": "BACKEND_AND_API_COMPLETE_FRONTEND_NOT_BUILT",
     "phase4_manual_review_api": "edge/v1/financial-review (queue, actions catalog, posting detail, decision); financial-review RBAC with payments_operator WRITE per Contract section 15 and READ for hotel_it_manager/front_office_operator/site_viewer (guest_relations_operator has NO financial-review access -- T0033 prose said otherwise and was wrong); actor bound to the authenticated session and unforgeable; password step-up on every action; mandatory reason; CLOSED structured evidence contract that refuses credentials/tokens/card data/raw frames; scoped by tenant AND site, with an out-of-scope posting indistinguishable from an absent one",
     "phase4_manual_review_frontend": false,
@@ -324,8 +324,8 @@
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "49dd109e269a47c7e4030bf454f904232c0c8085",
+  "acceptance_candidate_head": "7fb4c5fc9da7ec4735e2018ca97fca7e813b6579",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "49dd109e269a47c7e4030bf454f904232c0c8085",
+  "inventory_head": "7fb4c5fc9da7ec4735e2018ca97fca7e813b6579",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }
