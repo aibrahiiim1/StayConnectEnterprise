@@ -108,19 +108,61 @@ else
   no "the second refund was refused by the bound" "$(printf '%s' "$RB" | head -2)"
 fi
 
-# ---- 3. unrelated settlements do not serialize -----------------------------------------------------------
-# A charge on the OTHER settlement must commit while the first settlement's parent lock is irrelevant to it.
+# ---- 3. unrelated money does not serialize, WHILE another parent lock is genuinely held -----------------
+# The weak version of this assertion runs the unrelated insert after everything else has committed, which
+# proves nothing: with no lock held, of course it is fast. Here a session BEGINs, inserts a refund against
+# settlement 1's captured parent -- taking and HOLDING the parent advisory lock -- and stays open. Only then
+# does a second, independent session insert a charge against settlement 2. If the lock namespace were too
+# coarse (a table lock, a single global key, a lock on the wrong id) the second session would block until the
+# first commits, and the elapsed time would show it.
+HOLD=$(mktemp)
+( docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 >"$HOLD" 2>&1 <<SQL
+BEGIN;
+INSERT INTO iam_v2.payment_transactions(tenant_id,site_id,settlement_id,merchant_account_id,transaction_type,
+  parent_transaction_id,provider,provider_ref,idempotency_key,amount_minor,currency,currency_exponent,status)
+SELECT tenant_id,site_id,settlement_id,merchant_account_id,'REFUND',id,provider,'ref-hold','idem-hold',10,
+       currency,currency_exponent,'CREATED'
+  FROM iam_v2.payment_transactions
+ WHERE settlement_id='cc1c0000-0000-0000-0000-0000000000d1' AND transaction_type='CHARGE' AND status='CAPTURED'
+ LIMIT 1;
+SELECT pg_sleep(6);
+COMMIT;
+SQL
+) &
+HOLDPID=$!
+sleep 2   # the holder is now inside its transaction with the parent lock taken
+
+# is the lock actually held? assert it, so a green result cannot come from a holder that silently failed
+# pg_locks splits a bigint advisory key into classid (high 32 bits) and objid (low 32), objsubid=1, so the
+# assertion reconstructs the EXACT key ns_payment_parent() would produce for this parent rather than merely
+# counting advisory locks -- a count would pass on any unrelated lock.
+LOCKQ="SELECT count(*) FROM pg_locks l, LATERAL (
+   SELECT iam_v2.ns_payment_parent(id::text) k FROM iam_v2.payment_transactions
+    WHERE settlement_id='cc1c0000-0000-0000-0000-0000000000d1' AND transaction_type='CHARGE'
+      AND status='CAPTURED' LIMIT 1) x
+  WHERE l.locktype='advisory' AND l.granted AND l.objsubid=1
+    AND l.classid = ((x.k >> 32) & 4294967295)::oid AND l.objid = (x.k & 4294967295)::oid;"
+held=$(Q "$LOCKQ")
+if [ "${held:-0}" -ge 1 ]; then
+  ok "the exact parent advisory key is genuinely held by the other session"
+else
+  no "the holder session took the parent lock" "matching granted advisory locks=$held"
+fi
+
 START=$(date +%s)
 Q "INSERT INTO iam_v2.payment_transactions(tenant_id,site_id,settlement_id,merchant_account_id,transaction_type,provider,provider_ref,idempotency_key,amount_minor,currency,currency_exponent,status)
    VALUES ('$T','$S','cc2c0000-0000-0000-0000-0000000000d1','$MERCH','CHARGE','stripe','ref-other','idem-other',100,'USD',2,'CREATED');" >/dev/null
 END=$(date +%s)
-eq "an unrelated settlement accepted its own charge" "1" \
-  "$(Q "SELECT count(*) FROM iam_v2.payment_transactions WHERE settlement_id='cc2c0000-0000-0000-0000-0000000000d1';")"
-if [ $((END-START)) -lt 2 ]; then
-  ok "the unrelated settlement did not wait on the other settlement's lock ($((END-START))s)"
+eq "an unrelated settlement accepted its own charge while another parent lock was held" "1"   "$(Q "SELECT count(*) FROM iam_v2.payment_transactions WHERE settlement_id='cc2c0000-0000-0000-0000-0000000000d1';")"
+if [ $((END-START)) -lt 3 ]; then
+  ok "the unrelated settlement did not wait on the held parent lock ($((END-START))s while it was held)"
 else
-  no "unrelated settlements serialize" "took $((END-START))s"
+  no "unrelated money serialized behind a held parent lock" "took $((END-START))s"
 fi
+wait $HOLDPID 2>/dev/null
+if grep -qi 'ERROR' "$HOLD"; then no "the holder session ran cleanly" "$(head -3 "$HOLD")"; else
+  ok "the holder session committed its own refund cleanly after releasing"; fi
+rm -f "$HOLD"
 
 echo
 echo "===== PAYMENT CONCURRENCY: PASS=$pass FAIL=$fail ====="

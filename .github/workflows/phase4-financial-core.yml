@@ -102,9 +102,9 @@ jobs:
           -race ./internal/posting/ ./internal/pmsd/ -count=1
 
       # ---------------------------------------------------------------- migration 0011
-      - name: Migrations 0011-0015 + financial DB invariant gate (disposable PG16)
+      - name: Migrations 0011-0017 + financial DB invariant gate (disposable PG16)
         # Includes the ENTIRE pre-0011 financial invariant suite, run on the pre-0011 chain and again after
-        # 0011+0012+0013 on a clean rebuild, so "nothing was weakened" is measured rather than asserted.
+        # the Phase-4 chain on a clean rebuild, so "nothing was weakened" is measured rather than asserted.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-migration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase4_0011_financial.sh"
 
       # ---------------------------------------------------------------- payment concurrency
@@ -113,6 +113,12 @@ jobs:
         # nesting it in a command substitution changes their scheduling -- exactly the timing dependence
         # this proof exists to rule out.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-payment-concurrency -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-payment-concurrency.sh"
+
+      # ---------------------------------------------------------------- least privilege
+      - name: Least-privilege boundary as real PostgreSQL roles (disposable PG16)
+        # Runs AS sc_payment_runtime / sc_financial_operator / sc_financial_readonly and shows the refusals.
+        # A grant file is a claim; this is the measurement.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-least-privilege -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-least-privilege.sh"
 
       # ---------------------------------------------------------------- financial core against real PG
       - name: Financial-core PG16 integration matrix (disposable PG16)

@@ -22,6 +22,10 @@ DOWN="$ROOT/data-plane/migrations/0011_phase4_financial_execution.down.sql"
 UP12="$ROOT/data-plane/migrations/0012_phase4_financial_hardening.up.sql"
 UP13="$ROOT/data-plane/migrations/0013_phase4_reversal_ledger.up.sql"
 UP14="$ROOT/data-plane/migrations/0014_phase4_payment_settlement.up.sql"
+UP16="$ROOT/data-plane/migrations/0016_phase4_payment_coherence.up.sql"
+DOWN16="$ROOT/data-plane/migrations/0016_phase4_payment_coherence.down.sql"
+UP17="$ROOT/data-plane/migrations/0017_phase4_least_privilege.up.sql"
+DOWN17="$ROOT/data-plane/migrations/0017_phase4_least_privilege.down.sql"
 UP15="$ROOT/data-plane/migrations/0015_phase4_payment_hardening.up.sql"
 DOWN15="$ROOT/data-plane/migrations/0015_phase4_payment_hardening.down.sql"
 DOWN14="$ROOT/data-plane/migrations/0014_phase4_payment_settlement.down.sql"
@@ -39,7 +43,7 @@ rejects(){
   local label="$1" sql="$2" want="${3:-}" out
   out="$(Q "$sql")"
   if printf '%s' "$out" | grep -qi 'ERROR'; then
-    if [ -z "$want" ] || printf '%s' "$out" | grep -qi -- "$want"; then ok "$label"
+    if [ -z "$want" ] || printf '%s' "$out" | grep -qiE -- "$want"; then ok "$label"
     else no "$label" "rejected for the wrong reason: $(printf '%s' "$out" | head -1)"; fi
   else
     no "$label" "WRITE WAS ACCEPTED"
@@ -233,6 +237,43 @@ eq "0012 is recorded in the migration ledger" "1" \
   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0012_phase4_financial_hardening';")"
 
 
+# ------------------------------------------------------------------ 0016 payment coherence
+echo "== 0016 payment coherence =="
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP16" >/dev/null 2>&1 \
+  && ok "0016 applies" || no "0016 applies" "up failed"
+UP16_FP="$(Q "$FP")"
+eq "the durable execution boundary exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='begin_payment_execution';")"
+eq "the settlement admission gate exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_trigger WHERE tgname='p4_payment_admission_gate' AND NOT tgisinternal;")"
+
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$DOWN16" >/dev/null 2>&1 \
+  && ok "0016 DOWN applies" || no "0016 DOWN applies" "down failed"
+eq "0016 DOWN removed the durable execution boundary" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='begin_payment_execution';")"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP16" >/dev/null 2>&1 \
+  && ok "0016 DOWN -> UP re-applies cleanly" || no "0016 DOWN -> UP re-applies cleanly" "re-up failed"
+eq "0016 DOWN -> UP produces the SAME schema as the first UP" "$UP16_FP" "$(Q "$FP")"
+eq "0016 is recorded in the migration ledger" "1" \
+  "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0016_phase4_payment_coherence';")"
+
+# ------------------------------------------------------------------ 0017 least privilege
+echo "== 0017 least privilege =="
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP17" >/dev/null 2>&1 \
+  && ok "0017 applies" || no "0017 applies" "up failed"
+eq "the three financial roles exist" "3" \
+  "$(Q "SELECT count(*) FROM pg_roles WHERE rolname IN ('sc_payment_runtime','sc_financial_operator','sc_financial_readonly');")"
+eq "PUBLIC holds EXECUTE on no SECURITY DEFINER function" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND has_function_privilege('public', p.oid, 'EXECUTE');")"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$DOWN17" >/dev/null 2>&1 \
+  && ok "0017 DOWN applies" || no "0017 DOWN applies" "down failed"
+eq "0017 DOWN removed the financial roles" "0" \
+  "$(Q "SELECT count(*) FROM pg_roles WHERE rolname IN ('sc_payment_runtime','sc_financial_operator','sc_financial_readonly');")"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP17" >/dev/null 2>&1 \
+  && ok "0017 DOWN -> UP re-applies cleanly" || no "0017 DOWN -> UP re-applies cleanly" "re-up failed"
+eq "0017 is recorded in the migration ledger" "1" \
+  "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0017_phase4_least_privilege';")"
+
 # ------------------------------------------------------------------ nothing pre-existing was weakened
 echo "== pre-existing enforcement is intact =="
 eq "every iam_v2 trigger is still ENABLED (0 disabled)" "0" \
@@ -347,8 +388,25 @@ rejects "C26 the payment status machine refuses CREATED -> CAPTURED" \
   "PAYMENT_STATUS_TRANSITION"
 # 0015: the caller no longer nominates the transaction. It presents what the PROVIDER gave it and the
 # database resolves the row itself.
-eq "C26 the first provider callback is APPLIED" "APPLIED" \
-  "$(Q "SELECT iam_v2.apply_payment_callback_v2('$T','stripe','$MERCH','ref2','evt-1','pending','PENDING');")"
+# The CHARGE machine is EXACT: the only edge out of CREATED is PENDING (0016). The intent behind 'ref2' is
+# genuinely CREATED at this point, so each widening is attempted against a real row rather than asserted.
+REF2="$(Q "SELECT id FROM iam_v2.payment_transactions WHERE tenant_id='$T' AND provider_ref='ref2';")"
+for st in CAPTURED FAILED CANCELLED EXPIRED UNKNOWN; do
+  out="$(Q "UPDATE iam_v2.payment_transactions SET status='$st' WHERE id='$REF2';")"
+  if printf '%s' "$out" | grep -q 'PAYMENT_STATUS_TRANSITION'; then
+    ok "CREATED -> $st is refused; the only edge out of CREATED is PENDING"
+  else
+    no "CREATED -> $st is refused" "$(printf '%s' "$out" | head -1)"
+  fi
+done
+
+# The durable execution boundary, which is what makes the settlement executable at all. Before 0016 the
+# callback invented IN_PROGRESS for itself; now the boundary must be crossed BEFORE a provider is contacted,
+# and a callback against a settlement that never began cannot settle anything.
+eq "the durable execution boundary moves the intent and the settlement together" "EXECUTING"   "$(Q "SELECT iam_v2.begin_payment_execution('$REF2');")"
+eq "the settlement is IN_PROGRESS once execution began" "IN_PROGRESS"   "$(Q "SELECT se.status FROM iam_v2.settlements se JOIN iam_v2.payment_transactions t ON t.settlement_id=se.id WHERE t.id='$REF2';")"
+eq "re-entering the execution boundary is idempotent, not a second attempt" "ALREADY_EXECUTING"   "$(Q "SELECT iam_v2.begin_payment_execution('$REF2');")"
+
 eq "C26 the capture callback is APPLIED" "APPLIED" \
   "$(Q "SELECT iam_v2.apply_payment_callback_v2('$T','stripe','$MERCH','ref2','evt-2','captured','CAPTURED');")"
 eq "C26 a REPLAYED callback is a DUPLICATE and changes nothing" "DUPLICATE" \
@@ -385,9 +443,9 @@ rejects "0015: REQUIRED -> FAILED directly is no longer permitted (section 16)" 
   "UPDATE iam_v2.settlements SET status='FAILED' WHERE id='$SET1';" "SETTLEMENT_TRANSITION"
 rejects "0015: REQUIRED -> MANUAL_REVIEW directly is no longer permitted (section 16)" \
   "UPDATE iam_v2.settlements SET status='MANUAL_REVIEW' WHERE id='$SET1';" "SETTLEMENT_TRANSITION"
-rejects "0015: a payment transaction cannot be inserted already CAPTURED" \
+rejects "0015/0016: a payment transaction cannot be inserted already CAPTURED (either gate is the right answer)" \
   "$(mkpay b0000000-0000-0000-0000-00000000000f CHARGE NULL refZ idemZ 100 USD 2 CAPTURED)" \
-  "PAYMENT_MUST_START_CREATED"
+  "PAYMENT_MUST_START_CREATED|PAYMENT_SETTLEMENT_CLOSED"
 rejects "the provider callback ledger is append-only" \
   "UPDATE iam_v2.payment_transaction_events SET event_type='TAMPERED';" "append-only"
 

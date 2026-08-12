@@ -38,7 +38,7 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-p
 pre="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${pre:-0}" != "63" ]; then echo "INFRA: pre-0011 chain did not build (iam_v2 tables=$pre)"; exit 2; fi
 
-for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement 0015_phase4_payment_hardening; do
+for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement 0015_phase4_payment_hardening 0016_phase4_payment_coherence; do
   if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
     # Deterministic: a broken migration fails the same way twice, so this is exit 1 and CI must not retry.
@@ -52,18 +52,42 @@ have="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM i
 if [ "${have:-0}" != "1" ]; then echo "0011 applied but its columns are missing - defect, not a flake"; exit 1; fi
 hard="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM pg_indexes WHERE schemaname='iam_v2' AND indexname='outbox_one_inflight_per_interface';")"
 if [ "${hard:-0}" != "1" ]; then echo "0012 applied but its lane index is missing - defect, not a flake"; exit 1; fi
-echo "  iam_v2 tables=$pre + 0011 + 0012 + 0013 + 0014 + 0015 applied"
+coh="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='begin_payment_execution';")"
+if [ "${coh:-0}" != "1" ]; then echo "0016 applied but begin_payment_execution is missing - defect, not a flake"; exit 1; fi
+echo "  iam_v2 tables=$pre + 0011 + 0012 + 0013 + 0014 + 0015 + 0016 applied"
 
 export PHASE4_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB"
 # The edged API contract tests use the Phase-3 DSN variable, because they are the same harness. Pointing it
 # at THIS database is what lets the Manual Review routes be exercised against 0011+0012+0013.
 export PHASE3_TEST_DSN="$PHASE4_TEST_DSN"
+# The Phase-2 commerce suite runs against THIS database too. That is the point: the paid grant path reuses
+# the Phase-2 writer, so the free path must be proven on the same schema the paid one runs on -- a Phase-2
+# suite that only ever sees the pre-0010 chain cannot catch a writer that later schema rejects.
+export PHASE2_TEST_DSN="$PHASE4_TEST_DSN"
 echo "== go test -tags integration -run IntegrationPosting ./internal/posting/ =="
 ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationPosting ./internal/posting/ -count=1 "$@" )
 rc=$?
 if [ "$rc" = 0 ]; then
   echo "== go test -tags integration -run IntegrationReviewAPI ./cmd/edged/ =="
   ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationReviewAPI ./cmd/edged/ -count=1 "$@" )
+  rc=$?
+fi
+if [ "$rc" = 0 ]; then
+  echo "== go test -tags integration -run IntegrationPayment ./internal/payment/ =="
+  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationPayment ./internal/payment/ -count=1 "$@" )
+  rc=$?
+fi
+if [ "$rc" = 0 ]; then
+  echo "== go test -tags integration -run "the phase-2 free grant path" ./internal/iamv2/ on this schema =="
+  ( cd "$ROOT/data-plane" && # Narrowed to the free GRANT path deliberately. TestC2RollbackAtEveryBoundary seeds a fixed device MAC and
+    # collides with itself when it shares a database with another suite; that is a pre-existing fixture defect
+    # in a test unrelated to the grant writer, and widening this step to it would be testing the fixture.
+    go test -tags integration -run "TestC2QuoteAndFreePurchase|TestC2ConcurrentSingleWinner|TestC4ImmutabilityAndPinTrigger" ./internal/iamv2/ -count=1 )
+  rc=$?
+fi
+if [ "$rc" = 0 ]; then
+  echo "== go test -tags integration -run IntegrationGrant ./internal/payment/ =="
+  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationGrant ./internal/payment/ -count=1 "$@" )
   rc=$?
 fi
 echo "PHASE4_PG_INTEGRATION rc=$rc"

@@ -440,10 +440,79 @@ func (t *pgCommerceTx) InsertEntitlement(ctx context.Context, e EntitlementSpec)
 		 VALUES ($1,$2,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,'ACTIVE',$13::uuid, now())
 		 RETURNING id::text`,
 		e.TenantID, e.SiteID, v, a, p, e.PurchaseID, snap, e.ServicePlanRevID, e.PackageRevID, e.TimeAccountingMode, endMode, e.WindowEndsAt, supersedes).Scan(&id)
-	return id, err
+	if err != nil {
+		return "", err
+	}
+	// The OPENING transition, in the same transaction as the row it opens.
+	//
+	// A new entitlement is born ACTIVE, and Phase-3 requires an entitlement's status to be backed by its
+	// latest recorded transition (the deferred p3_entitlement_status_coherent constraint). An entitlement
+	// inserted without this has no history at all: its first recorded fact would be its termination, and it
+	// cannot commit. Recording it HERE, through the same controlled apply_entitlement_transition every other
+	// state change uses, keeps one writer and one history for both the free and the paid grant path.
+	if _, err := t.tx.Exec(ctx,
+		`SELECT iam_v2.apply_entitlement_transition($1::uuid, 'ACTIVE', now(), 'GRANTED')`, id); err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 func (t *pgCommerceTx) MarkPurchaseGranted(ctx context.Context, purchaseID string) error {
 	_, err := t.tx.Exec(ctx, `UPDATE iam_v2.purchases SET state='GRANTED' WHERE id=$1`, purchaseID)
 	return err
+}
+
+// LoadSettledPurchaseGrant resolves a settled purchase's pinned grant evidence.
+//
+// Every value comes from a row the purchase already references: the package revision from the purchase, the
+// grant snapshot and subject from the quote and auth context it was created against, and the settlement
+// status from the settlement that owns it. There is no parameter through which a caller could substitute a
+// different package, price or subject -- which is what makes the paid grant path as tamper-proof as the
+// free one.
+func (t *pgCommerceTx) LoadSettledPurchaseGrant(ctx context.Context, tenantID, siteID, purchaseID string) (SettledPurchaseGrant, error) {
+	var g SettledPurchaseGrant
+	var snap []byte
+	var voucher, account, principal, existing *string
+	var method string
+	err := t.tx.QueryRow(ctx, `
+SELECT p.id::text, p.state, p.package_revision_id::text,
+       se.status, se.method,
+       q.grant_snapshot,
+       ac.method,
+       ac.voucher_id::text, ac.guest_account_id::text, ac.guest_principal_id::text,
+       (SELECT e.id::text FROM iam_v2.entitlements e WHERE e.purchase_id = p.id LIMIT 1)
+  FROM iam_v2.purchases p
+  JOIN iam_v2.settlements se ON se.tenant_id = p.tenant_id AND se.site_id = p.site_id AND se.purchase_id = p.id
+  JOIN iam_v2.offer_quotes q ON q.tenant_id = p.tenant_id AND q.site_id = p.site_id AND q.id = p.offer_quote_id
+  JOIN iam_v2.auth_contexts ac ON ac.tenant_id = p.tenant_id AND ac.site_id = p.site_id AND ac.id = q.auth_context_id
+ WHERE p.tenant_id = $1 AND p.site_id = $2 AND p.id = $3`,
+		tenantID, siteID, purchaseID).
+		Scan(&g.PurchaseID, &g.PurchaseState, &g.PackageRevisionID, &g.SettlementStatus, &g.SettlementMethod,
+			&snap, &method, &voucher, &account, &principal, &existing)
+	if err == pgx.ErrNoRows {
+		return SettledPurchaseGrant{}, &Error{Code: ErrSubjectResolve, Msg: "no such settled purchase in this tenant/site"}
+	}
+	if err != nil {
+		return SettledPurchaseGrant{}, err
+	}
+	parsed, perr := ParseGrantSnapshot(snap)
+	if perr != nil {
+		return SettledPurchaseGrant{}, &Error{Code: ErrRepo, Msg: "grant snapshot is unreadable"}
+	}
+	g.GrantSnapshot = parsed
+	g.Subject = CommerceSubject{Method: Method(method)}
+	switch {
+	case voucher != nil:
+		g.Subject.Kind, g.Subject.VoucherID = SubjectVoucher, *voucher
+	case account != nil:
+		g.Subject.Kind, g.Subject.AccountID = SubjectAccount, *account
+	case principal != nil:
+		g.Subject.Kind, g.Subject.PrincipalID = SubjectPrincipal, *principal
+	default:
+		return SettledPurchaseGrant{}, &Error{Code: ErrSubjectResolve, Msg: "purchase has no grantable subject"}
+	}
+	if existing != nil {
+		g.ExistingEntitlementID = *existing
+	}
+	return g, nil
 }

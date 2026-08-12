@@ -2,7 +2,7 @@
 
 **Status:** AUTHORIZED — **IMPLEMENTATION IN PROGRESS (DARK)**. Product-Owner decision **D18**, transition **T0029** (2026-08-11); implementation progress recorded in transition **T0030** (2026-08-12) under the SAME authorization — no new decision was created.
 **Delivered so far:** WS-A (migrations 0011 + **0012 hardening** + **0013 reversal ledger**), WS-B, WS-C, WS-D, WS-E and the financial-core half of WS-K, all verified DARK against disposable PostgreSQL 16 and wired into `.github/workflows/phase4-financial-core.yml`.
-**Still open:** WS-F frontend only (the Manual Review BACKEND, RBAC, step-up and API are delivered), WS-G (payments), WS-H (`FINANCIAL_RECOVERY_MODE`), WS-I (observability), WS-J (operator UI), WS-L (DARK deployment).
+**Still open:** WS-F frontend only (the Manual Review BACKEND, RBAC, step-up and API are delivered), WS-G payments is BACKEND-COMPLETE in DARK (durable intent, provider capability boundary, callback correlation, settlement runtime, Phase-2 entitlement handoff and the least-privilege role boundary are delivered and verified; the operator/guest-facing payment surface and any real provider adapter are not), WS-H (`FINANCIAL_RECOVERY_MODE`), WS-I (observability), WS-J (operator UI), WS-L (DARK deployment).
 **Not accepted, not closed.** Every Phase-4 flag is OFF and no real financial traffic has occurred.
 **Verification status:** AUTHORITATIVE CI EXISTS AND IS GREEN. `Phase 4 Financial Core CI` runs on every
 push to this branch and has passed on the delivered heads — see `phase4_authoritative_ci_*` in
@@ -47,7 +47,7 @@ Every design choice below is downstream of that sentence.
 | **WS-D** ✅ | Outbox + per-interface lanes — **DELIVERED**. `FOR UPDATE SKIP LOCKED` claiming behind the existing `outbox_one_active` index; lanes proved independent and duplicate-free. | `data-plane/internal/posting/{repo,engine}.go` |
 | **WS-E** ✅ | PS/PA + UNKNOWN — **DELIVERED**. Contract-order PS construction, PA correlation by interface + `P#` only, the exact `AS` catalog, and UNKNOWN as a terminal state the database itself refuses to retry. | `data-plane/internal/posting/{fias,engine,transport}.go` |
 | **WS-F** ◐ | Manual Review — **BACKEND COMPLETE**: the DB decision boundary, the §15 catalog, atomic reviewer concurrency, `financial-review` RBAC, password step-up, session-bound actor, tenant+site scope and the structured evidence contract are all delivered and tested. The **operator FRONTEND is open**. | `0011/0013_*.up.sql`, `internal/posting/repo.go`, `cmd/edged/resources_phase4_review.go`, `cmd/edged/phase4_review_evidence.go` |
-| **WS-G** | Payment/settlement execution — idempotent CHARGE/REFUND, callback dedupe, provider boundary in DARK | `payment_*.go` |
+| **WS-G** | Payment/settlement execution — idempotent CHARGE/REFUND, callback dedupe, provider boundary in DARK | `internal/payment/`, migrations 0014–0017 |
 | **WS-H** | Restore / `FINANCIAL_RECOVERY_MODE` — `financial_epoch`, `restore_generation`, `HELD_RECOVERY`, no replay | `financial_recovery.go` |
 | **WS-I** | Observability — queue depth, oldest age, UNKNOWN count, review backlog, lane state, bounded codes, no PII | `observability.go` |
 | **WS-J** | Operator UI — Postings, attempt history, UNKNOWN queue, Manual Review, evidence, redaction | `hotel-admin/app/(app)/financial/**` |
@@ -132,3 +132,45 @@ The table below is retained only as the original pre-measurement decomposition o
 Every C-row resolves to exactly one of: `PASS`, `NOT_APPLICABLE` with contractual reason,
 `BLOCKED_BY_PRODUCT_OWNER_DECISION`, `BLOCKED_BY_PROHIBITED_LIVE_ACTION`. No other label is permitted —
 "mostly done", "follow-up" and "future hardening" are not valid outcomes for a row in this table.
+
+
+---
+
+## 7. Standing Phase-4 execution rules
+
+These are not advice. They are the rules this phase has been run under, written down here so that any agent
+picking up Phase 4 inherits them without having to be corrected into them again. Each one exists because
+its absence produced a real defect in this phase.
+
+1. **Fix forward.** A defect found mid-milestone is corrected inside that milestone. No separate cleanup
+   branch, no deferred follow-up row.
+2. **Never promote a claim beyond its evidence.** If a check proves cross-tenant isolation, it does not
+   prove cross-site isolation. If a test asserts a status, it does not assert byte-identical responses.
+   Write down what was measured, not what it suggests.
+3. **Financial concurrency requires real concurrent PostgreSQL proof.** Two sessions, both open, both
+   committing. A sequential script cannot distinguish a constraint from a lucky ordering.
+4. **A sequential pre-check is not a money constraint.** `SELECT`-then-decide inside a trigger is not
+   enforcement: two transactions each read the pre-state, each pass, and both commit. Use a unique index,
+   an advisory lock over the right key, or a constraint.
+5. **FINAL state machines are exact.** The edges in the contract are the only edges. Widening one because a
+   runtime found it convenient is a contract change, and only the Product Owner makes those.
+6. **Full tenant / site / financial ownership scope is mandatory.** Every financial query and every negative
+   test carries tenant AND site AND the owning financial entity. A fixture that uses a fresh tenant per case
+   cannot catch a same-tenant, different-site leak.
+7. **Immutable audit inputs are structured, bounded and redacted BEFORE insert.** Once a row is in an
+   append-only ledger it cannot be cleaned up. A comment saying "no raw payload" is not enforcement.
+8. **UNKNOWN is never blindly retried.** An indeterminate provider outcome may have moved money. It routes
+   to manual review and stops; nothing re-sends it.
+9. **Durable intent precedes any external side effect.** The local record of what we are about to do is
+   committed before the provider is contacted, so a crash can never leave money moved with no record of
+   asking. This is what `begin_payment_execution` exists for.
+10. **One authoritative writer.** Settlement, Purchase and Entitlement each have exactly one writer. A new
+    caller becomes a new ENTRY POINT into it, never a second implementation.
+11. **Least privilege is part of implementation, not a later hardening pass.** A trigger constrains how a
+    row changes; a GRANT decides who may attempt it at all. Both, or neither is finished.
+12. **Zero stale leftovers at milestone completion.** The current Plan, Audit, Handoff, project-state and CI
+    pointers must agree with each other and with the delivered head. A superseded sentence left in a current
+    document is a defect in its own right.
+13. **Every new security check must be shown to FAIL against the pre-fix code before it is trusted.** Two
+    DARK checks in this phase passed against a deliberately planted hole. A check that has never failed has
+    not been tested.
