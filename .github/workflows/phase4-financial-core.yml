@@ -17,11 +17,16 @@ name: Phase 4 Financial Core CI
 # is a disposable container it creates and destroys itself, and every transport in the tests is an
 # in-process stub.
 
+# The phase branch is in the trigger list deliberately. workflow_dispatch cannot reach a workflow that does
+# not yet exist on the default branch, and the Phase-4 delivery rule is one branch and ONE eventual PR -- so
+# without this, the only way to obtain authoritative CI for the work in progress would be to open a PR early
+# or to merge, and neither is authorized. A push trigger uses the workflow file from the pushed branch, so
+# the branch gates itself on the exact HEAD under test.
 on:
   pull_request:
     branches: [ master ]
   push:
-    branches: [ master ]
+    branches: [ master, 'phase/**' ]
   workflow_dispatch:
 
 permissions:
