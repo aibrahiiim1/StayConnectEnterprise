@@ -1,0 +1,101 @@
+{
+  "transition_id": "T0036",
+  "seq": 36,
+  "timestamp": "2026-08-12T11:40:00Z",
+  "record_type": "PHASE_4_PAYMENT_HARDENING_WITH_PROVEN_CONCURRENCY",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030 through T0035 are PRESERVED unchanged. Migration 0014 is preserved; 0015 corrects it additively.",
+  "corrections": [
+    {
+      "id": "P-1",
+      "area": "concurrency",
+      "what_was_actually_true": "0014 enforced 'one live CHARGE per settlement' and the cumulative refund bound with SELECT-then-decide logic inside a BEFORE INSERT trigger. Two concurrent transactions each read the pre-state, each pass, and both commit. A count() in a trigger is not a constraint, and the sequential tests covering it could not tell the difference between a constraint and a lucky ordering.",
+      "correction": "The duplicate-charge bound is now the partial unique index ptx_one_live_charge_per_settlement -- not a check but an impossibility. The cumulative refund bound takes a transaction-scoped advisory lock on the PARENT (namespace 47) before summing, so children of one parent serialize and different parents never contend.",
+      "proved": "iam_v2_scratch/phase4_payment_concurrency.sh, 7 PASS / 0 FAIL, with REAL concurrent psql sessions: two differently-keyed CHARGEs racing leave exactly one live charge and the loser names the unique index; two individually-valid 60-unit refunds against a captured 100 do not both commit and the loser names the cumulative bound while the winner is still uncommitted; an unrelated settlement is unaffected and does not wait."
+    },
+    {
+      "id": "P-2",
+      "area": "settlement state machine",
+      "what_was_actually_true": "0014 also permitted REQUIRED -> FAILED and REQUIRED -> MANUAL_REVIEW directly, letting a settlement reach a terminal state without ever having been attempted. Contract section 16 is REQUIRED -> IN_PROGRESS -> SETTLED | FAILED | MANUAL_REVIEW.",
+      "correction": "REQUIRED now transitions only to IN_PROGRESS, and apply_payment_callback_v2 establishes IN_PROGRESS and the terminal state in the same transaction."
+    },
+    {
+      "id": "P-3",
+      "area": "callback audit safety",
+      "what_was_actually_true": "p_detail was arbitrary jsonb persisted verbatim into an append-only financial ledger, guarded only by a comment asking callers not to send payloads.",
+      "correction": "p4_callback_evidence_safe enforces a closed flat key set, 200-character values, no nesting or arrays, no control characters, and heuristic screening for credentials, key literals and card-like digit runs. It is a CHECK constraint on the table as well as a function-argument check, so it holds for every writer. Provider event ids and types are bounded too. The guarantee is stated as structurally closed and heuristically screened -- not as a proof."
+    },
+    {
+      "id": "P-4",
+      "area": "callback identity and deduplication",
+      "what_was_actually_true": "apply_payment_callback took the INTERNAL transaction id as an argument, so the caller decided which money the provider was talking about. Dedupe keyed on (payment_transaction_id, provider_event_id) let one provider event be applied to two different internal rows simply by naming a different one.",
+      "correction": "apply_payment_callback_v2 resolves the transaction from the provider's own identity -- tenant + provider + merchant account + the client reference the provider echoed back -- and has no argument in which a caller could name a transaction. Dedupe is now UNIQUE (tenant, provider, merchant_account, provider_event_id). An uncorrelated callback raises CALLBACK_UNCORRELATED and is not applied. The 0014 entry point is DROPPED so exactly one callback door exists."
+    },
+    {
+      "id": "P-5",
+      "area": "refund settlement effects",
+      "what_was_actually_true": "Child payment state and Settlement state were independently writable, so the authoritative status could disagree with its own arithmetic.",
+      "correction": "A captured REFUND or CHARGEBACK moves the Settlement to PARTIALLY_REVERSED or REVERSED in the SAME transaction, computed from the durable child sums."
+    },
+    {
+      "id": "P-6",
+      "area": "durable-before-side-effect",
+      "what_was_actually_true": "mg7 made provider_ref NOT NULL and 0014 made it immutable, so no row could exist before the provider had answered. That is precisely the crash window in which a provider takes money and StayConnect has no durable record of having intended it.",
+      "correction": "provider_ref is now explicitly the LOCAL durable intent reference, generated before any external call and unique per tenant/provider/merchant -- an idempotency root that survives a crash. provider_txn_ref is a new nullable, write-once column for the reference the provider assigns, with its own partial unique index. A transaction must be created as CREATED and may not carry a provider reference at creation.",
+      "provider_contract_assumption": "This design requires a provider that accepts a client-supplied reference on the charge request and ECHOES IT BACK on every callback about that charge. That is common (Stripe client_reference_id/metadata, Adyen merchantReference, Checkout.com reference) but NOT universal, and no provider integration in this milestone has been verified against a real endpoint. A provider without that capability would need a different correlation strategy, and adopting one is a separate, evidenced decision."
+    }
+  ],
+  "verification": {
+    "db_gate": "iam_v2_scratch/phase4_0011_financial.sh - 151 PASS / 0 FAIL, including 0015 UP/DOWN/DOWN-UP and object-level rollback assertions",
+    "payment_concurrency": "scripts/phase4-payment-concurrency.sh - 7 PASS / 0 FAIL with real concurrent PostgreSQL sessions",
+    "pre_0011_invariants": "31/31 on the pre-0011 chain and 31/31 after 0011+0012+0013+0014+0015 on a clean rebuild",
+    "financial_core_unit": "76 PASS / 0 FAIL",
+    "integration": "81 PASS / 0 FAIL",
+    "dark_static_assertion": "PASS"
+  },
+  "not_delivered_in_this_milestone": [
+    "The Go payment DOMAIN and deterministic provider doubles are NOT implemented. 0015 completes the durable contract the runtime will sit on; no Go service creates charges, calls a provider double, or applies callbacks through it.",
+    "The Phase-2 atomic Entitlement grant is NOT wired to payment success. No second entitlement writer was created; the existing controlled path in internal/iamv2/commerce_flow.go remains the one to reuse.",
+    "The Phase-4 least-privilege DB grant model is NOT designed or applied.",
+    "Frontend, FINANCIAL_RECOVERY_MODE, observability, runtime PMS ownership integration, live-DARK deployment and reboot/rollback all remain outstanding."
+  ],
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only.",
+    "migrations_added_this_round": "0015_phase4_payment_hardening"
+  },
+  "no_financial_traffic": {
+    "real_provider_charge_or_refund": false,
+    "real_pms_ps_transmitted": false,
+    "guest_folio_debited": false,
+    "paid_guest_access": false,
+    "programmatic_pms_reversal": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "deployment_performed": false
+  },
+  "evidence_files": [
+    "data-plane/migrations/0015_phase4_payment_hardening.up.sql",
+    "data-plane/migrations/0015_phase4_payment_hardening.down.sql",
+    "iam_v2_scratch/phase4_payment_concurrency.sh",
+    "scripts/phase4-payment-concurrency.sh",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. Phase 4 remains IN_PROGRESS at DARK maturity.",
+  "next_action": "Implement the Go payment domain and provider doubles on the 0015 contract, wire the existing Phase-2 atomic Entitlement grant to a settled payment, then the least-privilege grant model."
+}

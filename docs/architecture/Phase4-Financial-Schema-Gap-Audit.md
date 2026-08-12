@@ -408,3 +408,34 @@ rules, and `SETTLEMENT_REVERSAL_WRONG_RAIL` refuses a PMS settlement being rever
 abstraction or callback handler exists yet, and nothing wires a settled payment to the Phase-2 atomic
 Entitlement grant. Sixteen behavioural assertions in the DB gate prove the rules; no C-row moves to RT-OK on
 the strength of them, because the runtime that would use them has not been written.
+
+## 17. Migration 0015 — 0014 was not concurrency-safe
+
+0014 established the payment governance and got six things wrong. The most serious was that **neither of
+its two bounds was a constraint**: "one live CHARGE per settlement" and the cumulative refund bound were
+both SELECT-then-decide inside a BEFORE INSERT trigger, where two concurrent transactions each read the
+pre-state, each pass, and both commit. The sequential tests that covered them could not tell a constraint
+from a lucky ordering.
+
+| 0014 defect | 0015 |
+|---|---|
+| duplicate-charge count() in a trigger | partial unique index `ptx_one_live_charge_per_settlement` |
+| refund SUM without serialization | advisory lock on the PARENT (ns 47) before the sum |
+| REQUIRED → FAILED / MANUAL_REVIEW directly | REQUIRED → IN_PROGRESS only (§16) |
+| arbitrary `p_detail` jsonb in an append-only ledger | closed flat key set, bounded, screened, as a CHECK |
+| caller supplies the internal transaction id | resolved from provider + merchant + echoed client reference |
+| dedupe on (internal id, event id) | UNIQUE (tenant, provider, merchant, provider_event_id) |
+| refund capture left Settlement untouched | same-transaction PARTIALLY_REVERSED / REVERSED from child sums |
+| `provider_ref` NOT NULL + immutable ⇒ no durable pre-call row | `provider_ref` = local intent root; new write-once `provider_txn_ref` |
+
+**Proved with real concurrent sessions** (`scripts/phase4-payment-concurrency.sh`, 7/7): two racing CHARGEs
+leave exactly one live charge with the loser naming the index; two individually-valid 60-unit refunds
+against a captured 100 do not both commit, with the loser naming the bound *while the winner is still
+uncommitted*; an unrelated settlement neither fails nor waits.
+
+**Provider assumption, stated not assumed.** The correlation model needs a provider that echoes a
+client-supplied reference on every callback. Common, not universal, and unverified against any real
+endpoint here.
+
+**Still not a runtime.** No Go payment domain, provider double or callback handler exists, and nothing
+wires a settled payment to the Phase-2 atomic grant. No C-row moves to RT-OK.

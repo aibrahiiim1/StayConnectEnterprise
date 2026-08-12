@@ -213,7 +213,7 @@
     "phases_5_to_7_authorized": false,
     "phase4_accepted": false,
     "phase4_closed": false,
-    "phase4_migration": "0011_phase4_financial_execution + 0012_phase4_financial_hardening + 0013_phase4_reversal_ledger + 0014_phase4_payment_settlement",
+    "phase4_migration": "0011_phase4_financial_execution + 0012_phase4_financial_hardening + 0013_phase4_reversal_ledger + 0014_phase4_payment_settlement + 0015_phase4_payment_hardening",
     "phase4_core_hardened": true,
     "phase4_production_construction_boundary_closed": true,
     "phase4_construction_boundary_evidence": "NewProductionEngine(repo) is the only exported financial constructor and takes no Config and no Transport; newDarkGuard is unexported; the compile-time-only export_test.go carries the test seams. scripts/ci/phase4-dark-check.sh derives the exported surface with go doc and refuses ANY exported function whose PARAMETERS mention Config or Transport, with no exclusions. The check was proved bidirectional: it passes on the clean tree and fails on a deliberately planted exported constructor.",
@@ -229,7 +229,7 @@
     "phase4_manual_review_operator_workflow": "BACKEND_AND_API_COMPLETE_FRONTEND_NOT_BUILT",
     "phase4_manual_review_api": "edge/v1/financial-review (queue, actions catalog, posting detail, decision); financial-review RBAC with payments_operator WRITE per Contract section 15 and READ for hotel_it_manager/front_office_operator/site_viewer (guest_relations_operator has NO financial-review access -- T0033 prose said otherwise and was wrong); actor bound to the authenticated session and unforgeable; password step-up on every action; mandatory reason; CLOSED structured evidence contract that refuses credentials/tokens/card data/raw frames; scoped by tenant AND site, with an out-of-scope posting indistinguishable from an absent one",
     "phase4_manual_review_frontend": false,
-    "phase4_payments": "DB_ENFORCEMENT_COMPLETE_GO_DOMAIN_NOT_BUILT",
+    "phase4_payments": "DB_ENFORCEMENT_COMPLETE_AND_CONCURRENCY_PROVEN_GO_DOMAIN_NOT_BUILT",
     "phase4_payment_enforcement": "0014: append-only deduplicated provider callback ledger; one-way payment status machine with immutable identity; ONLINE_PAYMENT rail only; server-pinned amount/currency/exponent from the pinned Purchase; one live CHARGE per settlement; CAPTURED-parent refunds with same settlement/merchant/provider/currency and a cumulative bound; Settlement lifecycle with per-rail evidence required for SETTLED; apply_payment_callback returning APPLIED/DUPLICATE/NOOP with UNKNOWN routing to MANUAL_REVIEW and no retry",
     "phase4_entitlement_grant_wired": false,
     "phase4_financial_recovery_mode": false,
@@ -319,7 +319,7 @@
     "surgical_foundation_retired_from_procedure": true,
     "next_step": "Continue the authorized Phase 4 Financial Execution Layer DARK on the phase/4-financial-execution branch under D18/T0029: Manual Review operator workflow, payment/settlement boundary, FINANCIAL_RECOVERY_MODE, operator UI and observability, then the final controlled DARK deployment. Phase-4 feature flags stay OFF and no real financial traffic is authorized."
   },
-  "latest_transition_id": "T0035",
+  "latest_transition_id": "T0036",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"

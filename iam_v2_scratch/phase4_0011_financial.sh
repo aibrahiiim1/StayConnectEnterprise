@@ -22,6 +22,8 @@ DOWN="$ROOT/data-plane/migrations/0011_phase4_financial_execution.down.sql"
 UP12="$ROOT/data-plane/migrations/0012_phase4_financial_hardening.up.sql"
 UP13="$ROOT/data-plane/migrations/0013_phase4_reversal_ledger.up.sql"
 UP14="$ROOT/data-plane/migrations/0014_phase4_payment_settlement.up.sql"
+UP15="$ROOT/data-plane/migrations/0015_phase4_payment_hardening.up.sql"
+DOWN15="$ROOT/data-plane/migrations/0015_phase4_payment_hardening.down.sql"
 DOWN14="$ROOT/data-plane/migrations/0014_phase4_payment_settlement.down.sql"
 DOWN13="$ROOT/data-plane/migrations/0013_phase4_reversal_ledger.down.sql"
 DOWN12="$ROOT/data-plane/migrations/0012_phase4_financial_hardening.down.sql"
@@ -202,6 +204,31 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP14" >/dev
 eq "0014 DOWN -> UP produces the SAME schema as the first UP" "$UP14_FP" "$(Q "$FP")"
 eq "0014 is recorded in the migration ledger" "1" \
   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0014_phase4_payment_settlement';")"
+
+echo "== 0015 payment-hardening lifecycle: UP / DOWN / DOWN->UP =="
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP15" >/dev/null 2>&1 \
+  && ok "0015 UP applied" || no "0015 UP applied" "the hardening migration did not apply"
+UP15_FP="$(Q "$FP")"
+[ "$UP14_FP" != "$UP15_FP" ] && ok "0015 changed the catalog" || no "0015 changed the catalog" "identical"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$DOWN15" >/dev/null 2>&1 \
+  && ok "0015 DOWN applied" || no "0015 DOWN applied" "down failed"
+# Object-level, not a catalog hash: pg_get_functiondef renormalises whitespace, so a hash comparison
+# would be testing the formatter rather than the rollback.
+eq "0015 DOWN removed every 0015 object" "0"   "$(Q "SELECT (SELECT count(*) FROM pg_indexes WHERE schemaname='iam_v2' AND indexname IN ('ptx_one_live_charge_per_settlement','ptx_event_provider_identity','ptx_provider_txn_ref_identity'))
+       + (SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='payment_transactions' AND column_name IN ('provider_txn_ref','intent_created_at'))
+       + (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname IN ('apply_payment_callback_v2','p4_callback_evidence_safe','ns_payment_parent'));")"
+eq "0015 DOWN restored the 0014 callback entry point" "1"   "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='apply_payment_callback';")"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP15" >/dev/null 2>&1 \
+  && ok "0015 DOWN -> UP re-applies cleanly" || no "0015 DOWN -> UP re-applies cleanly" "re-up failed"
+eq "0015 DOWN -> UP produces the SAME schema as the first UP" "$UP15_FP" "$(Q "$FP")"
+eq "0015 is recorded in the migration ledger" "1" \
+  "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0015_phase4_payment_hardening';")"
+eq "the duplicate-charge bound is now a UNIQUE INDEX, not a trigger count()" "1" \
+  "$(Q "SELECT count(*) FROM pg_indexes WHERE schemaname='iam_v2' AND indexname='ptx_one_live_charge_per_settlement';")"
+eq "provider events are deduplicated at the PROVIDER identity" "1" \
+  "$(Q "SELECT count(*) FROM pg_indexes WHERE schemaname='iam_v2' AND indexname='ptx_event_provider_identity';")"
+eq "the 0014 caller-nominated callback entry point is GONE" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='apply_payment_callback';")"
 eq "0012 is recorded in the migration ledger" "1" \
   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0012_phase4_financial_hardening';")"
 
@@ -312,18 +339,26 @@ rejects "C28 a client-chosen amount is refused; money comes from the pinned Purc
   "PAYMENT_AMOUNT_NOT_SERVER_PINNED"
 accepts "C28 the server-pinned amount is accepted" \
   "$(mkpay b0000000-0000-0000-0000-000000000002 CHARGE NULL ref2 idem2 100 USD 2 CREATED)"
-rejects "C26 a second live CHARGE on one settlement is refused" \
+rejects "C26 a second live CHARGE on one settlement is refused (0015: by the unique index)" \
   "$(mkpay b0000000-0000-0000-0000-000000000003 CHARGE NULL ref3 idem3 100 USD 2 CREATED)" \
-  "PAYMENT_DUPLICATE_CHARGE"
+  "ptx_one_live_charge_per_settlement"
 rejects "C26 the payment status machine refuses CREATED -> CAPTURED" \
   "UPDATE iam_v2.payment_transactions SET status='CAPTURED' WHERE id=$PARENT;" \
   "PAYMENT_STATUS_TRANSITION"
+# 0015: the caller no longer nominates the transaction. It presents what the PROVIDER gave it and the
+# database resolves the row itself.
 eq "C26 the first provider callback is APPLIED" "APPLIED" \
-  "$(Q "SELECT iam_v2.apply_payment_callback($PARENT,'evt-1','pending','PENDING');")"
+  "$(Q "SELECT iam_v2.apply_payment_callback_v2('$T','stripe','$MERCH','ref2','evt-1','pending','PENDING');")"
 eq "C26 the capture callback is APPLIED" "APPLIED" \
-  "$(Q "SELECT iam_v2.apply_payment_callback($PARENT,'evt-2','captured','CAPTURED');")"
+  "$(Q "SELECT iam_v2.apply_payment_callback_v2('$T','stripe','$MERCH','ref2','evt-2','captured','CAPTURED');")"
 eq "C26 a REPLAYED callback is a DUPLICATE and changes nothing" "DUPLICATE" \
-  "$(Q "SELECT iam_v2.apply_payment_callback($PARENT,'evt-2','captured','CAPTURED');")"
+  "$(Q "SELECT iam_v2.apply_payment_callback_v2('$T','stripe','$MERCH','ref2','evt-2','captured','CAPTURED');")"
+rejects "C26 a callback that correlates to nothing is refused, not guessed" \
+  "SELECT iam_v2.apply_payment_callback_v2('$T','stripe','$MERCH','no-such-ref','evt-9','captured','CAPTURED');" \
+  "CALLBACK_UNCORRELATED"
+rejects "a raw provider payload cannot enter the append-only callback ledger" \
+  "SELECT iam_v2.apply_payment_callback_v2('$T','stripe','$MERCH','ref2','evt-10','x','PENDING',NULL,'{\"raw_body\":\"{}\"}'::jsonb);" \
+  "CALLBACK_EVIDENCE_UNSAFE"
 eq "the settlement reached SETTLED on the captured charge" "SETTLED" \
   "$(Q "SELECT status FROM iam_v2.settlements WHERE id='$PSET';")"
 rejects "C26 a terminal payment status cannot move again" \
@@ -346,6 +381,13 @@ rejects "the PMS rail cannot take a provider charge" \
 rejects "a PMS settlement cannot be declared SETTLED by an unapproved transition" \
   "UPDATE iam_v2.settlements SET status='SETTLED' WHERE id='$SET1';" \
   "SETTLEMENT_TRANSITION"
+rejects "0015: REQUIRED -> FAILED directly is no longer permitted (section 16)" \
+  "UPDATE iam_v2.settlements SET status='FAILED' WHERE id='$SET1';" "SETTLEMENT_TRANSITION"
+rejects "0015: REQUIRED -> MANUAL_REVIEW directly is no longer permitted (section 16)" \
+  "UPDATE iam_v2.settlements SET status='MANUAL_REVIEW' WHERE id='$SET1';" "SETTLEMENT_TRANSITION"
+rejects "0015: a payment transaction cannot be inserted already CAPTURED" \
+  "$(mkpay b0000000-0000-0000-0000-00000000000f CHARGE NULL refZ idemZ 100 USD 2 CAPTURED)" \
+  "PAYMENT_MUST_START_CREATED"
 rejects "the provider callback ledger is append-only" \
   "UPDATE iam_v2.payment_transaction_events SET event_type='TAMPERED';" "append-only"
 
@@ -533,9 +575,8 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP12" >/dev
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$FIXTURE" >/dev/null 2>&1 \
   || { echo "INFRA: fixture did not apply on the rebuild"; exit 2; }
 eq "the rebuild carries 0011 + 0012" "1" "$(Q "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_revisions' AND column_name='financial_base_currency';")"
-run_baseline "post-0011+0012+0013+0014"
+run_baseline "post-0011+0012+0013+0014+0015"
 
-echo
 echo "===== PHASE-4 0011 GATE: PASS=$pass FAIL=$fail ====="
 [ "$fail" -eq 0 ] || exit 1
 exit 0
