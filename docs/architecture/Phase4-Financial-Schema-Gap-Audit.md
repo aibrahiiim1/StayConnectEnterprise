@@ -346,3 +346,36 @@ and its answer is the one that decides.
 **What is NOT yet built:** the Hotel-Admin frontend. The operator API exists, is tested against real HTTP
 and a real database, and is DARK by default — the routes are mounted only when the Phase-4 master and
 review flags are both ON, and the delivered configuration has both OFF.
+
+## 15. Manual Review corrections — scope, evidence, and a role claim that was never true
+
+Three corrections, recorded rather than quietly applied.
+
+**Scope was tenant-only.** Every financial query in the review API filtered on `tenant_id` alone. The test
+that was supposed to cover this gave each fixture a fresh tenant *and* a fresh site, so it proved
+cross-TENANT isolation and proved nothing about two sites under one tenant — which is exactly how a
+multi-property customer is arranged. T0033's "another site's posting" claim was therefore stronger than its
+evidence. Every path now filters `tenant_id AND site_id`: queue, detail, pinned evidence, attempts, review
+history, the ownership pre-check and the decision itself. The test now builds **two sites under one
+tenant**, and it was verified to **fail** against the old tenant-only query before being trusted.
+
+The out-of-scope response is `404`, byte-identical to a genuinely absent posting, so the API does not
+confirm that another site's posting exists. That equality is asserted.
+
+**Evidence was an open blob.** The endpoint accepted any non-empty JSON object and wrote it verbatim into
+the append-only review ledger. That satisfied §15 and violated §11: an immutable ledger is the worst place
+to discover a credential later, because it cannot be redacted. Evidence is now a **closed structured
+shape** — `source_type` from a fixed allowlist, a bounded `reference`, a bounded single-line `note`, an
+optional `verified_at` — and the API refuses anything shaped like a credential, token, key literal, card
+number, CVV, raw FIAS frame or raw JSON/XML payload. Fourteen adversarial cases are covered, each
+additionally asserting that the refused evidence reached **no** ledger row.
+
+**A role claim that was never true.** T0033 stated that `guest_relations_operator` holds `financial-review`
+READ. The code never granted it, and §15 does not list Guest Relations among the financial roles at all.
+The **code is correct**; the receipt's prose was wrong. Nothing was broadened to match it. The delivered
+matrix is: `payments_operator` WRITE (§15), `site_admin` implicit, and READ for `hotel_it_manager`,
+`front_office_operator` and `site_viewer`.
+
+**C18** is promoted to `RT-OK` only now, with its whole backend security boundary proven: permission,
+session-bound actor, step-up, mandatory reason, structured evidence, and tenant+site scope. Its operator
+UI remains open.

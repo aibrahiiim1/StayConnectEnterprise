@@ -227,7 +227,7 @@
     "phase4_authoritative_ci_artifact": "phase4-financial-core-evidence-032a97d8207f40a1b886147ba0569b97bceb2288",
     "phase4_authoritative_ci_note": "Phase 4 Financial Core CI run 31580592811 succeeded on delivery head 032a97d8, whose SOFTWARE candidate is inventory head 82ce2d6. Every later commit on this branch changes only governance, docs, manifests and packs; git diff over data-plane, scripts, iam_v2_scratch and .github between the CI-tested head and the delivered head is EMPTY. Prior green runs this round: 31576073281 (1f65a63a).",
     "phase4_manual_review_operator_workflow": "BACKEND_AND_API_COMPLETE_FRONTEND_NOT_BUILT",
-    "phase4_manual_review_api": "edge/v1/financial-review (queue, actions catalog, posting detail, decision); financial-review RBAC with payments_operator WRITE per Contract section 15; actor bound to the authenticated session and unforgeable (strict decoding rejects any actor field); password step-up on every action; mandatory reason and evidence; tenant-scoped",
+    "phase4_manual_review_api": "edge/v1/financial-review (queue, actions catalog, posting detail, decision); financial-review RBAC with payments_operator WRITE per Contract section 15 and READ for hotel_it_manager/front_office_operator/site_viewer (guest_relations_operator has NO financial-review access -- T0033 prose said otherwise and was wrong); actor bound to the authenticated session and unforgeable; password step-up on every action; mandatory reason; CLOSED structured evidence contract that refuses credentials/tokens/card data/raw frames; scoped by tenant AND site, with an out-of-scope posting indistinguishable from an absent one",
     "phase4_manual_review_frontend": false,
     "phase4_payments": false,
     "phase4_financial_recovery_mode": false,
@@ -317,7 +317,7 @@
     "surgical_foundation_retired_from_procedure": true,
     "next_step": "Continue the authorized Phase 4 Financial Execution Layer DARK on the phase/4-financial-execution branch under D18/T0029: Manual Review operator workflow, payment/settlement boundary, FINANCIAL_RECOVERY_MODE, operator UI and observability, then the final controlled DARK deployment. Phase-4 feature flags stay OFF and no real financial traffic is authorized."
   },
-  "latest_transition_id": "T0033",
+  "latest_transition_id": "T0034",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"

@@ -1,0 +1,96 @@
+{
+  "transition_id": "T0034",
+  "seq": 34,
+  "timestamp": "2026-08-12T10:10:00Z",
+  "record_type": "PHASE_4_MANUAL_REVIEW_SECURITY_CORRECTIONS_SCOPE_EVIDENCE_AND_ROLE_TRUTH",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030 through T0033 are PRESERVED unchanged. This receipt records three corrections to what T0033 delivered and claimed.",
+  "corrections": [
+    {
+      "id": "S-1",
+      "area": "Manual Review scope",
+      "claim_in_T0033": "tenant scoping on every read and before every decision: another site's posting is 404, and nothing is written",
+      "what_was_actually_true": "Every financial query filtered on tenant_id ALONE. The test that was supposed to cover this gave each fixture a fresh tenant AND a fresh site, so it exercised cross-TENANT isolation only and would have passed unchanged while leaking between two sites of the SAME tenant -- which is exactly how a multi-property customer is arranged. The claim was stronger than its evidence.",
+      "correction": "Every path now filters tenant_id AND site_id: queue, posting detail, pinned evidence, attempts, review history, the ownership pre-check and the decision itself. A new test builds TWO SITES UNDER ONE TENANT and asserts the queue does not leak, the detail is 404, the decision is 404 with no ledger row, and that the out-of-scope 404 is byte-identical to a genuinely absent posting so the API does not confirm existence.",
+      "test_proved_bidirectional": "The new test was verified to FAIL against the previous tenant-only query ('the queue LEAKED a posting owned by another site of the same tenant') before being trusted, and to pass once the scope was corrected."
+    },
+    {
+      "id": "S-2",
+      "area": "Manual Review evidence",
+      "what_was_actually_true": "The endpoint accepted any non-empty JSON object and persisted it verbatim in the append-only review ledger. That satisfied section 15's mandatory-evidence rule and violated section 11's prohibition on secrets, credentials, card data and raw PMS material in audit payloads. An immutable ledger is the worst possible place to discover a secret, because it cannot be redacted afterwards.",
+      "correction": "Evidence is now a CLOSED, BOUNDED, STRUCTURED shape: source_type from a fixed allowlist of seven documented sources, a bounded reference identifying the external artefact, a bounded single-line note, and an optional RFC3339 verified_at. The API refuses anything shaped like a credential keyword, key/token literal, card number, CVV reference, raw FIAS frame or raw JSON/XML payload, plus control characters, multi-line text and over-length fields. Fourteen adversarial cases are covered and each additionally asserts that the refused evidence reached NO ledger row. The canonical stored shape is asserted on the positive path."
+    },
+    {
+      "id": "S-3",
+      "area": "role model documentation",
+      "claim_in_T0033": "READ for hotel_it_manager / front_office_operator / guest_relations_operator / site_viewer",
+      "what_was_actually_true": "guest_relations_operator was NEVER granted financial-review in the code, and Contract section 15 does not list Guest Relations among the financial roles at all. The receipt's prose was wrong; the code was right.",
+      "correction": "The documentation is corrected to the approved model and NOTHING was broadened to match the stale prose. The delivered matrix is payments_operator WRITE (section 15), site_admin implicit, and READ for hotel_it_manager, front_office_operator and site_viewer."
+    },
+    {
+      "id": "S-4",
+      "area": "Phase-4 Plan internal contradiction",
+      "what_was_actually_true": "The Plan header said the Manual Review backend/RBAC/step-up API was delivered while its own WS-F row still said those components were open.",
+      "correction": "The WS-F row now states BACKEND COMPLETE with the frontend open, and names the files that implement it."
+    }
+  ],
+  "verification": {
+    "db_gate": "iam_v2_scratch/phase4_0011_financial.sh - 112 PASS / 0 FAIL",
+    "financial_core_unit": "76 PASS / 0 FAIL",
+    "integration": "81 PASS / 0 FAIL (posting core + Manual Review API, including the two-sites-one-tenant isolation matrix and the fourteen adversarial evidence cases)",
+    "dark_static_assertion": "PASS",
+    "authoritative_ci": "see phase4_authoritative_ci_* in governance/project-state.json"
+  },
+  "c_row_changes": [
+    "C18 is promoted to RT-OK only now, with its whole backend security boundary proven: financial-review permission, session-bound unforgeable actor, password step-up on every action, mandatory reason, structured evidence contract, and tenant+site scope. Its operator UI remains open."
+  ],
+  "not_delivered_in_this_milestone": [
+    "Online Payment and Settlement execution (payment_transactions, idempotent CHARGE, callbacks, REFUND ledger, merchant scoping, provider abstraction) is NOT implemented.",
+    "The Settlement state machine beyond what Phase 2 already enforces is NOT implemented.",
+    "The Phase-2 atomic Entitlement grant is NOT wired to payment success, because payments are not implemented.",
+    "The Phase-4 least-privilege DB grant model is NOT designed or applied.",
+    "The Hotel-Admin Manual Review FRONTEND is NOT built; the operator API exists and is tested, and no page consumes it.",
+    "The payment/settlement inspection UI is NOT built.",
+    "FINANCIAL_RECOVERY_MODE, financial observability, runtime service ownership integration, live-DARK deployment and reboot/rollback all remain outstanding."
+  ],
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only.",
+    "migrations_added_this_round": "NONE. This round changed application code, tests and documentation only."
+  },
+  "no_financial_traffic": {
+    "real_pms_ps_transmitted": false,
+    "real_pa_accepted": false,
+    "guest_folio_debited": false,
+    "payment_provider_charge_or_refund": false,
+    "programmatic_pms_reversal": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "deployment_performed": false
+  },
+  "evidence_files": [
+    "data-plane/cmd/edged/resources_phase4_review.go",
+    "data-plane/cmd/edged/phase4_review_evidence.go",
+    "data-plane/cmd/edged/phase4_review_api_integration_test.go",
+    "docs/architecture/Phase4-Financial-Schema-Gap-Audit.md",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. Phase 4 remains IN_PROGRESS at DARK maturity, with the payment domain, the privilege model and the whole operator frontend still outstanding.",
+  "next_action": "Implement the Online Payment and Settlement domain with the approved Phase-2 atomic Entitlement grant, then the Phase-4 least-privilege grant model, then the Manual Review and payment inspection frontend."
+}

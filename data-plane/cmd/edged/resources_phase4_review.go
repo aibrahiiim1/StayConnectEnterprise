@@ -15,10 +15,15 @@ package main
 //	authorization   resourcePermission("financial-review") + the role matrix in auth.go
 //	identity        the actor is taken from the SESSION and never from the request body
 //	step-up         s.reauth(r, password) against the operator's own stored hash
-//	scope           every query is tenant-scoped, and the interface/site are checked against the posting
+//	scope           every query is scoped by tenant AND SITE, not tenant alone
 //
 // The actor binding is the part worth being explicit about: the request body carries no actor field at
 // all. There is nothing for a caller to spoof, because there is no parameter to put a forged identity in.
+//
+// SCOPE. Every financial query below filters on tenant_id AND site_id. An earlier version filtered on
+// tenant alone, and its test happened to give each fixture a fresh tenant AND a fresh site — so it proved
+// cross-TENANT isolation and silently proved nothing about two sites under one tenant, which is the
+// arrangement a multi-property customer actually has. The tests now build exactly that case.
 
 import (
 	"encoding/json"
@@ -82,6 +87,15 @@ func (s *server) listReviewActionCatalog(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"actions": out,
+		// The UI renders its evidence form from this, so the allowlist cannot drift between the two.
+		"evidence_contract": map[string]any{
+			"source_types":  evidenceSourceTypes,
+			"max_reference": maxEvidenceReference,
+			"max_note":      maxEvidenceNote,
+			"rejects": "credentials, tokens, API keys, card data, raw provider payloads and raw PMS frames. " +
+				"Financial review evidence is an immutable audit record: record a REFERENCE to the artefact, " +
+				"never its contents.",
+		},
 		"note": "There is no generic approve action. Programmatic PMS reversal is disabled in v1: " +
 			"CREATE_REVERSAL records an audited ledger row only, and the folio correction is manual.",
 	})
@@ -122,12 +136,12 @@ func (s *server) listReviewQueue(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.db.Query(ctx, `SELECT `+reviewQueueCols+`
 		FROM iam_v2.posting_execution_state p
-		WHERE p.tenant_id=$1
-		  AND ($2::uuid IS NULL OR p.pms_interface_id=$2::uuid)
+		WHERE p.tenant_id=$1 AND p.site_id=$2
+		  AND ($3::uuid IS NULL OR p.pms_interface_id=$3::uuid)
 		  AND (coalesce(p.awaiting_manual_review,false)
 		       OR p.outbox_state='HELD_RECOVERY'
 		       OR coalesce(p.escalation_count,0) > 0)
-		ORDER BY p.created_at ASC LIMIT 200`, s.tenantID, ifaceArg)
+		ORDER BY p.created_at ASC LIMIT 200`, s.tenantID, s.siteID, ifaceArg)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
@@ -205,7 +219,7 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 		JOIN iam_v2.settlements se ON se.id = o.settlement_id
 		JOIN iam_v2.purchases pu ON pu.id = o.purchase_id
 		LEFT JOIN iam_v2.posting_review_state rs ON rs.posting_id = p.posting_id
-		WHERE p.posting_id=$1 AND p.tenant_id=$2`, id, s.tenantID).
+		WHERE p.posting_id=$1 AND p.tenant_id=$2 AND p.site_id=$3`, id, s.tenantID, s.siteID).
 		Scan(&q.PostingID, &q.InterfaceID, &q.ExecutionState, &q.AmountMinor, &q.Currency, &q.Exponent,
 			&q.LatestAttemptNo, &q.LatestPNumber, &q.LatestPAStatus, &q.OutboxState, &q.ReviewVersion,
 			&q.TerminalAction, &q.AwaitingReview, &q.CreatedAt,
@@ -225,7 +239,8 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 	attempts := []reviewAttempt{}
 	arows, err := s.db.Query(ctx, `SELECT attempt_no, p_number, rn, g_number, outcome, pa_as_status,
 		sent_at::text, response_at::text FROM iam_v2.posting_attempts
-		WHERE internal_posting_id=$1 AND tenant_id=$2 ORDER BY attempt_no`, id, s.tenantID)
+		WHERE internal_posting_id=$1 AND tenant_id=$2 AND site_id=$3 ORDER BY attempt_no`,
+		id, s.tenantID, s.siteID)
 	if err == nil {
 		defer arows.Close()
 		for arows.Next() {
@@ -239,8 +254,8 @@ func (s *server) getReviewPosting(w http.ResponseWriter, r *http.Request) {
 
 	history := []reviewHistoryEntry{}
 	hrows, err := s.db.Query(ctx, `SELECT action, actor::text, reason, evidence, created_at::text
-		FROM iam_v2.posting_review_actions WHERE posting_id=$1 AND tenant_id=$2
-		ORDER BY created_at`, id, s.tenantID)
+		FROM iam_v2.posting_review_actions WHERE posting_id=$1 AND tenant_id=$2 AND site_id=$3
+		ORDER BY created_at`, id, s.tenantID, s.siteID)
 	if err == nil {
 		defer hrows.Close()
 		for hrows.Next() {
@@ -313,9 +328,10 @@ func (s *server) availableActions(q reviewQueueRow, attempts []reviewAttempt) []
 type reviewActionRequest struct {
 	Action string `json:"action"`
 	Reason string `json:"reason"`
-	// Evidence is a free-shaped JSON object recorded verbatim in the immutable ledger. §15 requires it for
-	// every terminal action; the database refuses an empty object.
-	Evidence json.RawMessage `json:"evidence"`
+	// Evidence is a CLOSED structured shape, not a blob. §15 requires it for every terminal action, and
+	// §11 forbids secrets and card data in audit payloads — an append-only ledger cannot be redacted
+	// afterwards, so the shape itself has to make a secret unrepresentable. See phase4_review_evidence.go.
+	Evidence reviewEvidenceInput `json:"evidence"`
 	// ExpectedVersion is the review version the operator's screen was rendered from. Supplying it turns
 	// "two operators clicked at the same time" into a refusal for the second, rather than two decisions.
 	ExpectedVersion *int `json:"expected_version"`
@@ -349,9 +365,9 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "reason_required", "a reason is mandatory for every review action")
 		return
 	}
-	if spec.needsEvidence && !isNonEmptyJSONObject(in.Evidence) {
-		jsonErr(w, http.StatusBadRequest, "evidence_required",
-			"a terminal financial decision must record its evidence")
+	evidence, evErr := validateEvidence(in.Evidence, spec.needsEvidence)
+	if evErr != nil {
+		jsonErr(w, http.StatusBadRequest, "evidence_invalid", evErr.Error())
 		return
 	}
 	if in.ReversalAmountMinor != nil && in.Action != "CREATE_REVERSAL" {
@@ -372,16 +388,15 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 	// Scope check BEFORE the decision: the posting must belong to this site's tenant. Without this, a
 	// valid operator of one property could decide another property's money.
 	var owned bool
+	// tenant AND site: a valid operator of one property must not decide another property's money, even
+	// when both properties belong to the same customer. The response is 404 rather than 403 so the API
+	// does not confirm that an out-of-scope posting exists.
 	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM iam_v2.pms_postings
-		WHERE id=$1 AND tenant_id=$2)`, id, s.tenantID).Scan(&owned); err != nil || !owned {
+		WHERE id=$1 AND tenant_id=$2 AND site_id=$3)`, id, s.tenantID, s.siteID).Scan(&owned); err != nil || !owned {
 		jsonErr(w, http.StatusNotFound, "not_found", "no such posting in this site")
 		return
 	}
 
-	evidence := "{}"
-	if len(in.Evidence) > 0 {
-		evidence = string(in.Evidence)
-	}
 	var actionID string
 	err := s.db.QueryRow(ctx,
 		`SELECT iam_v2.record_posting_review_action($1,$2,$3,$4,$5::jsonb,$6,$7)::text`,
@@ -397,19 +412,6 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 		"action":    in.Action,
 		"actor":     sess.OperatorID,
 	})
-}
-
-// isNonEmptyJSONObject reports whether the supplied evidence is a JSON object with at least one member.
-// A terminal financial decision recorded with `{}` is an unexplained decision.
-func isNonEmptyJSONObject(raw json.RawMessage) bool {
-	if len(raw) == 0 {
-		return false
-	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return false
-	}
-	return len(m) > 0
 }
 
 // classifyReviewError maps the database's own financial refusals onto HTTP, so an operator sees a

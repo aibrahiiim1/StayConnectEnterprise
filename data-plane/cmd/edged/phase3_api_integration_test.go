@@ -53,17 +53,28 @@ type apiFixture struct {
 
 // newAPI builds the REAL Phase-3 routes with the real auth middleware, backed by a disposable database and a
 // site/tenant seeded for this test.
-func newAPI(t *testing.T, roles ...string) *apiFixture {
+func newAPI(t *testing.T, roles ...string) *apiFixture { return newAPIIn(t, "", roles...) }
+
+// newAPIIn builds a fixture for a NEW site. When tenant is non-empty the site is created under that
+// EXISTING tenant, which is how a multi-property customer is actually arranged — and the arrangement
+// a tenant-only scope check silently fails to cover.
+func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	t.Helper()
 	p := testPool(t)
 	ctx := context.Background()
 	f := &apiFixture{pool: p, password: "operator-step-up-pw"}
 
-	if err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id)
-	SELECT (SELECT tenant_id FROM si)::text, (SELECT id FROM si)::text`).Scan(&f.tenant, &f.site); err != nil {
-		t.Fatalf("seed tenant/site: %v", err)
+	if tenant == "" {
+		if err := p.QueryRow(ctx, `WITH
+		  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
+		  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id)
+		SELECT (SELECT tenant_id FROM si)::text, (SELECT id FROM si)::text`).Scan(&f.tenant, &f.site); err != nil {
+			t.Fatalf("seed tenant/site: %v", err)
+		}
+	} else if err := p.QueryRow(ctx,
+		`INSERT INTO public.sites(id,tenant_id) VALUES (gen_random_uuid(), $1) RETURNING tenant_id::text, id::text`,
+		tenant).Scan(&f.tenant, &f.site); err != nil {
+		t.Fatalf("seed second site under the same tenant: %v", err)
 	}
 	// The disposable fixture builds the iam_v2 schema only. The appliance's own operator identity tables come
 	// from migration 0001; they are provisioned here (same shape) because the controlled operations validate a

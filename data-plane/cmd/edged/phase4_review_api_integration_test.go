@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -109,7 +110,11 @@ func nullIfEmpty(s string) any {
 func reviewBody(action, reason string, extra map[string]any) map[string]any {
 	b := map[string]any{
 		"action": action, "reason": reason,
-		"evidence": map[string]any{"folio_checked": true, "operator_finding": "recorded by test"},
+		"evidence": map[string]any{
+			"source_type": "PMS_FOLIO_INSPECTION",
+			"reference":   "folio-1421-line-7",
+			"note":        "checked the folio at the desk",
+		},
 		"password": "operator-step-up-pw",
 	}
 	for k, v := range extra {
@@ -399,11 +404,11 @@ func TestIntegrationReviewAPI_AnotherTenantsPostingIsNotVisible(t *testing.T) {
 	otherID, _ := b.seedReviewablePosting(t, "UNKNOWN", "")
 
 	if code, _ := a.do(t, "GET", "/financial-review/postings/"+otherID, nil); code != 404 {
-		t.Fatalf("another site's posting must not be readable, got %d", code)
+		t.Fatalf("another tenant's posting must not be readable, got %d", code)
 	}
 	if code, _ := a.do(t, "POST", "/financial-review/postings/"+otherID+"/actions",
 		reviewBody("CONFIRM_POSTED", "cross-tenant attempt", nil)); code != 404 {
-		t.Fatalf("another site's posting must not be decidable, got %d", code)
+		t.Fatalf("another tenant's posting must not be decidable, got %d", code)
 	}
 	var n int
 	if err := b.pool.QueryRow(context.Background(),
@@ -412,6 +417,72 @@ func TestIntegrationReviewAPI_AnotherTenantsPostingIsNotVisible(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("a cross-tenant decision reached the ledger (%d rows)", n)
+	}
+}
+
+// THE CASE THE EARLIER TEST MISSED. Every fixture used to get a fresh tenant AND a fresh site, so
+// "another site's posting is not visible" was only ever exercised across tenants — and the queries were
+// scoped by tenant alone, so they would have passed while leaking between two sites of the SAME customer.
+// That is the arrangement a multi-property hotel group actually has.
+func TestIntegrationReviewAPI_SameTenantDifferentSiteIsIsolated(t *testing.T) {
+	a := newAPI(t, "payments_operator")
+	b := newAPIIn(t, a.tenant, "payments_operator") // SAME tenant, different site
+	if a.tenant != b.tenant {
+		t.Fatalf("fixture error: the two sites must share a tenant (%s vs %s)", a.tenant, b.tenant)
+	}
+	if a.site == b.site {
+		t.Fatal("fixture error: the two sites must differ")
+	}
+
+	mine, _ := a.seedReviewablePosting(t, "UNKNOWN", "")
+	theirs, _ := b.seedReviewablePosting(t, "UNKNOWN", "")
+
+	// Site A's queue must contain its own posting and NOT site B's.
+	code, body := a.do(t, "GET", "/financial-review/queue", nil)
+	if code != 200 {
+		t.Fatalf("queue: %d", code)
+	}
+	items, _ := body["items"].([]any)
+	sawMine, sawTheirs := false, false
+	for _, it := range items {
+		row, _ := it.(map[string]any)
+		switch row["posting_id"] {
+		case mine:
+			sawMine = true
+		case theirs:
+			sawTheirs = true
+		}
+	}
+	if !sawMine {
+		t.Fatal("the queue must contain the operator's own site's posting")
+	}
+	if sawTheirs {
+		t.Fatal("the queue LEAKED a posting owned by another site of the same tenant")
+	}
+
+	// Detail, and every nested evidence query behind it, must not resolve it either.
+	if code, _ := a.do(t, "GET", "/financial-review/postings/"+theirs, nil); code != 404 {
+		t.Fatalf("another site's posting must not be readable, got %d", code)
+	}
+	// ...and it must not be DECIDABLE, with nothing written.
+	if code, _ := a.do(t, "POST", "/financial-review/postings/"+theirs+"/actions",
+		reviewBody("CONFIRM_POSTED", "cross-site attempt", nil)); code != 404 {
+		t.Fatalf("another site's posting must not be decidable, got %d", code)
+	}
+	var n int
+	if err := b.pool.QueryRow(context.Background(),
+		`SELECT count(*)::int FROM iam_v2.posting_review_actions WHERE posting_id=$1`, theirs).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("a cross-site decision reached the ledger (%d rows)", n)
+	}
+	// and the refusal must not confirm existence: the same 404 as a genuinely absent posting
+	absent := "00000000-0000-0000-0000-000000000000"
+	c1, _ := a.do(t, "GET", "/financial-review/postings/"+theirs, nil)
+	c2, _ := a.do(t, "GET", "/financial-review/postings/"+absent, nil)
+	if c1 != c2 {
+		t.Fatalf("an out-of-scope posting (%d) must be indistinguishable from an absent one (%d)", c1, c2)
 	}
 }
 
@@ -440,6 +511,85 @@ func TestIntegrationReviewAPI_DetailExposesEvidenceButNoSecrets(t *testing.T) {
 		"secret", "endpoint"} {
 		if contains(blob, banned) {
 			t.Fatalf("the review surface leaked %q", banned)
+		}
+	}
+}
+
+// ---------------------------------------------------------------- evidence contract
+
+// §15 requires evidence; §11 forbids secrets and card data in audit payloads. An append-only ledger cannot
+// be redacted afterwards, so the shape has to make a secret unrepresentable in the first place.
+func TestIntegrationReviewAPI_EvidenceIsStructuredAndRefusesSecrets(t *testing.T) {
+	f := newAPI(t, "payments_operator")
+
+	adversarial := []struct {
+		name string
+		ev   map[string]any
+	}{
+		{"unknown source type", map[string]any{"source_type": "SOMETHING_ELSE", "reference": "x"}},
+		{"missing reference", map[string]any{"source_type": "PMS_REPORT", "reference": "  "}},
+		{"a password in the note", map[string]any{"source_type": "PMS_REPORT", "reference": "r1",
+			"note": "the pms password is hunter2"}},
+		{"an api key in the reference", map[string]any{"source_type": "PMS_REPORT",
+			"reference": "sk_live_51H8xQ2eZvKYlo2C"}},
+		{"a bearer token", map[string]any{"source_type": "PROVIDER_DASHBOARD", "reference": "r1",
+			"note": "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"}},
+		{"something shaped like a card number", map[string]any{"source_type": "PROVIDER_DASHBOARD",
+			"reference": "r1", "note": "card 4111 1111 1111 1111 was charged"}},
+		{"a cvv reference", map[string]any{"source_type": "PROVIDER_DASHBOARD", "reference": "r1",
+			"note": "cvv mismatch reported"}},
+		{"a raw FIAS frame", map[string]any{"source_type": "PMS_REPORT", "reference": "r1",
+			"note": "PS|RN1421|G#5|TA1000|"}},
+		{"a raw JSON payload", map[string]any{"source_type": "PROVIDER_DASHBOARD", "reference": "r1",
+			"note": "{\"provider\":\"stripe\",\"secret\":\"x\"}"}},
+		{"an unbounded note", map[string]any{"source_type": "PMS_REPORT", "reference": "r1",
+			"note": strings.Repeat("x", 501)}},
+		{"an over-long reference", map[string]any{"source_type": "PMS_REPORT",
+			"reference": strings.Repeat("r", 121)}},
+		{"a multi-line note", map[string]any{"source_type": "PMS_REPORT", "reference": "r1",
+			"note": "line one\nline two"}},
+		{"OTHER_DOCUMENTED with no note", map[string]any{"source_type": "OTHER_DOCUMENTED", "reference": "r1"}},
+		{"a future verification time", map[string]any{"source_type": "PMS_REPORT", "reference": "r1",
+			"verified_at": "2099-01-01T00:00:00Z"}},
+	}
+	for _, tc := range adversarial {
+		t.Run(tc.name, func(t *testing.T) {
+			id, _ := f.seedReviewablePosting(t, "UNKNOWN", "")
+			b := reviewBody("CONFIRM_POSTED", "adversarial evidence", nil)
+			b["evidence"] = tc.ev
+			code, resp := f.do(t, "POST", "/financial-review/postings/"+id+"/actions", b)
+			if code != 400 {
+				t.Fatalf("expected the evidence to be refused, got %d: %v", code, resp)
+			}
+			var n int
+			if err := f.pool.QueryRow(context.Background(),
+				`SELECT count(*)::int FROM iam_v2.posting_review_actions WHERE posting_id=$1`, id).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n != 0 {
+				t.Fatalf("refused evidence still reached the immutable ledger (%d rows)", n)
+			}
+		})
+	}
+
+	// the positive case: a real reconciliation record is accepted and stored in its canonical shape
+	id, _ := f.seedReviewablePosting(t, "UNKNOWN", "")
+	b := reviewBody("CONFIRM_POSTED", "folio inspected", nil)
+	b["evidence"] = map[string]any{
+		"source_type": "PMS_FOLIO_INSPECTION", "reference": "folio-1421/line-7",
+		"note": "charge present on the guest folio", "verified_at": "2026-08-12T07:00:00Z",
+	}
+	if code, resp := f.do(t, "POST", "/financial-review/postings/"+id+"/actions", b); code != 200 {
+		t.Fatalf("legitimate evidence must be accepted, got %d: %v", code, resp)
+	}
+	var stored string
+	if err := f.pool.QueryRow(context.Background(),
+		`SELECT evidence::text FROM iam_v2.posting_review_actions WHERE posting_id=$1`, id).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"PMS_FOLIO_INSPECTION", "folio-1421/line-7", "2026-08-12T07:00:00Z"} {
+		if !contains(stored, want) {
+			t.Fatalf("the canonical evidence must retain %q, got %s", want, stored)
 		}
 	}
 }
