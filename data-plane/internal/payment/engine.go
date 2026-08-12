@@ -475,6 +475,17 @@ func classify(err error) error {
 		{"PAYMENT_REFUND_EXCEEDS_CHARGE", ErrNotExecutable},
 		{"ptx_one_live_charge_per_settlement", ErrNotExecutable},
 		{"CALLBACK_EVIDENCE_UNSAFE", ErrUntrustedInput},
+		{"FINANCIAL_RECOVERY_MODE", ErrRecoveryHeld},
+		{"RECOVERY_HOLDS_UNRESOLVED", ErrRecoveryHeld},
+		{"RECOVERY_HOLD_ALREADY_RESOLVED", ErrNotExecutable},
+		{"RECOVERY_NOTE_REQUIRED", ErrUntrustedInput},
+		{"RECOVERY_REASON_REQUIRED", ErrUntrustedInput},
+		{"RECOVERY_RESOLUTION_INVALID", ErrUntrustedInput},
+		{"RECOVERY_ACTOR_REQUIRED", ErrUntrustedInput},
+		{"PAYMENT_NO_CONFIGURED_ACCOUNT", ErrNoAccount},
+		{"PAYMENT_ACCOUNT_NOT_ACTIVE", ErrNoAccount},
+		{"PAYMENT_ACCOUNT_UNKNOWN", ErrNoAccount},
+		{"PAYMENT_PROVIDER_MISMATCH", ErrConfig},
 	} {
 		if strings.Contains(m, c.needle) {
 			return &Error{Code: c.code, Msg: c.needle}

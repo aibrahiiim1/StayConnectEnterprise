@@ -34,6 +34,7 @@ const (
 	ErrUntrustedInput  Code = "untrusted_input"
 	ErrNoAccount       Code = "no_configured_account"
 	ErrUntrusted       Code = "untrusted_notification"
+	ErrRecoveryHeld    Code = "financial_recovery_mode"
 )
 
 // Error is a deterministic typed error. Msg never carries card data, credentials or guest PII.

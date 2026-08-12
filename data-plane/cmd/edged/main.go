@@ -316,6 +316,10 @@ func main() {
 			// exist on the appliance.
 			if s.financialCfg.ReviewOn() {
 				mountResource(r, s, "financial-review", s.financialReviewRoutes)
+				// Financial OPERATIONS -- health, settlement history, recovery -- share the review
+				// permission because they share a readership, and mount under the same flag so the whole
+				// financial surface appears and disappears together.
+				mountResource(r, s, "financial-ops", s.financialOpsRoutes)
 			}
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "reports", s.reportsRoutes)

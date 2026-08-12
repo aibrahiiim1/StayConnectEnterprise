@@ -841,3 +841,86 @@ export type PmsSourceConflict = {
   interface_b: string; interface_b_label?: string;
   severity?: string; resolution?: string;
 };
+
+// ---------------------------------------------------------------- Phase 4 (DARK): financial operations
+//
+// These mirror the edged financial-ops surface exactly. Note what the types CANNOT express: there is no
+// provider reference, no idempotency key and no guest field anywhere. The API does not send them, and the
+// client cannot invent a place to put them.
+
+export type FinancialHealth = {
+  outbox_queued: number;
+  outbox_in_flight: number;
+  outbox_held_recovery: number;
+  outbox_oldest_age_seconds: number;
+  postings_unknown: number;
+  review_queue_open: number;
+  review_oldest_age_seconds: number;
+  payments_created: number;
+  payments_pending: number;
+  payments_unknown: number;
+  payments_oldest_age_seconds: number;
+  settlements_required: number;
+  settlements_in_progress: number;
+  settlements_manual_review: number;
+  settlements_failed: number;
+  recovery_active: boolean;
+  recovery_epoch: number;
+  recovery_holds_open: number;
+  payment_account_configured: boolean;
+  provider_egress_enabled: boolean;
+  status: "OK" | "DEGRADED" | "ATTENTION_REQUIRED" | "HELD";
+  reasons: string[];
+};
+
+export type FinancialSettlement = {
+  settlement_id: string;
+  purchase_id: string;
+  method: string;
+  status: string;
+  purchase_state: string;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+};
+
+export type FinancialPayment = {
+  payment_id: string;
+  transaction_type: "CHARGE" | "REFUND" | "CHARGEBACK";
+  status: string;
+  provider: string;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  parent_transaction_id: string | null;
+};
+
+export type RecoveryStatus = {
+  Epoch: number;
+  Reason: string;
+  Active: boolean;
+  HeldTotal: number;
+  HeldOpen: number;
+  EnteredAt: string;
+  ReleasedAt: string;
+};
+
+export type RecoveryHold = {
+  hold_id: string;
+  work_kind: "POSTING_OUTBOX" | "PAYMENT_TRANSACTION" | "SETTLEMENT";
+  work_id: string;
+  held_status: string;
+  amount_minor: number | null;
+  currency: string;
+  held_at: string;
+};
+
+// The four conclusions an operator may reach about a held item. Held deliberately in one place so the UI
+// and the database cannot drift into offering different words for the same decision.
+export const RECOVERY_RESOLUTIONS = [
+  "CONFIRMED_COMPLETED",
+  "CONFIRMED_NOT_COMPLETED",
+  "ABANDONED",
+  "ESCALATED",
+] as const;
+export type RecoveryResolution = (typeof RECOVERY_RESOLUTIONS)[number];
