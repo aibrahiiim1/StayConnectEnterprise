@@ -155,6 +155,15 @@ var (
 // design, so two runs against the same database must not collide over a name they legitimately share.
 var runNonce = strconv.FormatInt(time.Now().UnixNano(), 36)
 
+// seedOperator creates a real active operator of the tenant. The financial actor assertion (0021) refuses
+// an arbitrary uuid, so a test that passed gen_random_uuid() would be measuring nothing but the refusal.
+func seedOperator(t *testing.T, p *pgxpool.Pool, tenant string) string {
+	t.Helper()
+	return scan1[string](t, p, `INSERT INTO public.operators(tenant_id,email,display_name,status)
+		VALUES ($1,'op-'||substr(md5(random()::text),1,10)||'@test.local','Test Operator','active')
+		RETURNING id::text`, tenant)
+}
+
 func idem(t *testing.T, suffix string) string {
 	return "idem-" + runNonce + "-" + t.Name() + "-" + suffix
 }

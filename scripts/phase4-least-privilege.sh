@@ -18,7 +18,7 @@ SCRATCH_CONTAINER="$C" SCRATCH_DB="$DB" SCRATCH_PORT_ALLOW="$PORT" SCRATCH_ACK=I
 docker exec "$C" psql -U postgres -d "$DB" -tAqc "CREATE TABLE IF NOT EXISTS public.schema_migrations(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
 for m in 0009_phase2_commerce 0010_phase3_stay_resolution 0011_phase4_financial_execution \
          0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement \
-         0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege 0019_phase4_financial_recovery 0020_phase4_financial_observability 0021_phase4_trust_boundary; do
+         0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege 0019_phase4_financial_recovery 0020_phase4_financial_observability 0021_phase4_trust_boundary 0022_phase4_recovery_closure; do
   if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
     echo "$m did not apply - a defect, not a flake"
@@ -27,4 +27,14 @@ for m in 0009_phase2_commerce 0010_phase3_stay_resolution 0011_phase4_financial_
     exit 1
   fi
 done
+# public.operators comes from migration 0001 (the appliance's own schema), which the iam_v2 scratch chain
+# does not apply. The financial actor assertion added in 0021 checks the recorded author against it, so the
+# disposable database needs the same shape -- otherwise the tests would be exercising an assertion that
+# always errors rather than one that discriminates.
+docker exec "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -tAqc   "CREATE TABLE IF NOT EXISTS public.operators (
+     id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid, email text NOT NULL,
+     display_name text, password_hash text, status text NOT NULL DEFAULT 'active',
+     created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+     auth_method text NOT NULL DEFAULT 'local');" >/dev/null || { echo "INFRA: operators"; exit 2; }
+
 PHASE4_LP_CONTAINER="$C" PHASE4_LP_DB="$DB" bash "$ROOT/iam_v2_scratch/phase4_least_privilege.sh"

@@ -489,6 +489,7 @@ func classify(err error) error {
 		{"FINANCIAL_ACTOR_REQUIRED", ErrUntrustedInput},
 		{"FINANCIAL_RECOVERY_MODE", ErrRecoveryHeld},
 		{"RECOVERY_HOLDS_UNRESOLVED", ErrRecoveryHeld},
+		{"RECOVERY_STATE_UNSAFE", ErrRecoveryHeld},
 		{"RECOVERY_HOLD_ALREADY_RESOLVED", ErrNotExecutable},
 		{"RECOVERY_NOTE_REQUIRED", ErrUntrustedInput},
 		{"RECOVERY_REASON_REQUIRED", ErrUntrustedInput},

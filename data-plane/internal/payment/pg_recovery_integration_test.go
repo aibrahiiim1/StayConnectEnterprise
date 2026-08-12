@@ -183,7 +183,7 @@ func TestIntegrationRecovery_ReleaseRequiresEveryHoldReconciled(t *testing.T) {
 	if _, err := e.ReconcileEpoch(ctx, s.tenant, s.site); err != nil {
 		t.Fatal(err)
 	}
-	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
+	actor := seedOperator(t, p, s.tenant)
 
 	if _, err := e.ReleaseRecovery(ctx, s.tenant, s.site, actor, "everything looks fine to me"); CodeOf(err) != ErrRecoveryHeld {
 		t.Fatalf("recovery was released with unresolved holds: %v", err)
@@ -236,7 +236,7 @@ func TestIntegrationRecovery_OperatorCanDeclareAndTheDeclarationIsIdempotent(t *
 	ctx := context.Background()
 	s := recoverySite(t, p)
 	e := NewEngine(liveCfg, p, NewScriptedProvider(), &fakeGranter{})
-	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
+	actor := seedOperator(t, p, s.tenant)
 
 	if _, err := e.DeclareRecovery(ctx, s.tenant, s.site, actor, "short"); CodeOf(err) != ErrUntrustedInput {
 		t.Fatalf("a declaration without a reason was accepted: %v", err)

@@ -38,7 +38,7 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-p
 pre="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${pre:-0}" != "63" ]; then echo "INFRA: pre-0011 chain did not build (iam_v2 tables=$pre)"; exit 2; fi
 
-for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement 0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege 0019_phase4_financial_recovery 0020_phase4_financial_observability 0021_phase4_trust_boundary; do
+for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement 0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege 0019_phase4_financial_recovery 0020_phase4_financial_observability 0021_phase4_trust_boundary 0022_phase4_recovery_closure; do
   if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
     # Deterministic: a broken migration fails the same way twice, so this is exit 1 and CI must not retry.
@@ -55,6 +55,16 @@ if [ "${hard:-0}" != "1" ]; then echo "0012 applied but its lane index is missin
 coh="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='begin_payment_execution';")"
 if [ "${coh:-0}" != "1" ]; then echo "0016 applied but begin_payment_execution is missing - defect, not a flake"; exit 1; fi
 echo "  iam_v2 tables=$pre + 0011 + 0012 + 0013 + 0014 + 0015 + 0016 applied"
+
+# public.operators comes from migration 0001 (the appliance's own schema), which the iam_v2 scratch chain
+# does not apply. The financial actor assertion added in 0021 checks the recorded author against it, so the
+# disposable database needs the same shape -- otherwise the tests would be exercising an assertion that
+# always errors rather than one that discriminates.
+docker exec "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -tAqc   "CREATE TABLE IF NOT EXISTS public.operators (
+     id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid, email text NOT NULL,
+     display_name text, password_hash text, status text NOT NULL DEFAULT 'active',
+     created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+     auth_method text NOT NULL DEFAULT 'local');" >/dev/null || { echo "INFRA: operators"; exit 2; }
 
 export PHASE4_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB"
 # The edged API contract tests use the Phase-3 DSN variable, because they are the same harness. Pointing it
@@ -113,7 +123,7 @@ if [ "$rc" = 0 ]; then
 fi
 if [ "$rc" = 0 ]; then
   echo "== go test -tags integration -run IntegrationRecovery ./internal/payment/ (FINANCIAL_RECOVERY_MODE) =="
-  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationRecovery ./internal/payment/ -count=1 "$@" )
+  ( cd "$ROOT/data-plane" && go test -tags integration -run "IntegrationRecovery" ./internal/payment/ -count=1 "$@" )
   rc=$?
 fi
 if [ "$rc" = 0 ]; then
