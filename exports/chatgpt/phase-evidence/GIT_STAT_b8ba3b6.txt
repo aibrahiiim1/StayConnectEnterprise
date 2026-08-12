@@ -1,0 +1,4 @@
+commit b8ba3b6926df125c9266d629a69061f6b1718480
+Date:   Wed Aug 12 19:45:11 2026 +0300
+
+    Phase 4 (delivery_head): T0038 receipt + project-state pointers
