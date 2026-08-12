@@ -12,10 +12,15 @@ import (
 // Engine is the Posting domain core: creation under the fail-closed gate, and execution through the
 // per-interface outbox lanes.
 //
-// THE CONSTRUCTION BOUNDARY. Private fields alone were not enough: they stopped a caller MUTATING an
-// engine, but an exported constructor taking a Config and a Transport still let production code build an
-// independently configured, independently transported financial sender. So there is now exactly one
-// exported constructor — NewProductionEngine — and it takes neither.
+// THE CONSTRUCTION BOUNDARY, in its final form. Three attempts were needed, and the first two were each
+// narrower than the hole:
+//
+//	private fields          stopped a caller MUTATING an engine it was handed — but not building its own
+//	NewProductionEngine     removed the Config/Transport arguments — but still took an injectable getenv,
+//	                        and NewDarkGuard was still exported with both
+//	this                    NO exported function in this package accepts a Config or a Transport at all
+//
+// The package's exported financial surface is now: NewProductionEngine(repo). That is the whole of it.
 //
 //	config     comes from the environment, through the same fail-closed loader everything else uses
 //	transport  comes from the internal factory below, which in this milestone returns nothing at all
@@ -33,22 +38,21 @@ type Engine struct {
 // newEngine is the single internal constructor. Every path into an Engine goes through it, and it always
 // wraps the transport in the DARK guard.
 func newEngine(cfg Config, repo *Repo, inner Transport) *Engine {
-	return &Engine{cfg: cfg, repo: repo, transport: NewDarkGuard(cfg, inner)}
+	return &Engine{cfg: cfg, repo: repo, transport: newDarkGuard(cfg, inner)}
 }
 
-// NewProductionEngine is the ONLY exported way to obtain a financial engine.
+// NewProductionEngine is the ONLY exported way to obtain a financial engine, and it takes NOTHING that
+// could change its financial posture.
 //
-// It reads the flag posture from the environment and obtains its transport from productionTransport. A
-// caller cannot pass either one, so a service that wants a transmitting engine has to change the
-// deployment's environment and this package's factory — two separate, reviewable acts — rather than
-// writing one struct literal.
+// It reads the flag posture from the real process environment — not from an injected reader — and obtains
+// its transport from productionTransport. A service that wants a transmitting engine therefore has to
+// change the DEPLOYMENT's environment and this package's factory: two separate, reviewable acts in two
+// different places, neither of which is reachable by writing Go at a call site.
 //
-// getenv is injectable ONLY so a test can drive the loader; it cannot influence which transport is used.
-func NewProductionEngine(repo *Repo, getenv Getenv) (*Engine, error) {
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-	cfg, err := LoadConfigFromEnv(getenv)
+// The getenv seam that used to be here was a hole, not a convenience: a production caller could hand the
+// fail-closed loader any environment it liked. Tests drive the loader through export_test.go instead.
+func NewProductionEngine(repo *Repo) (*Engine, error) {
+	cfg, err := LoadConfigFromEnv(os.Getenv)
 	if err != nil {
 		return nil, err
 	}

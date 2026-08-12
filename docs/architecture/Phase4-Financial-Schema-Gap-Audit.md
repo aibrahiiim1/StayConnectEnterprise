@@ -5,7 +5,7 @@ disposable PostgreSQL 16 container and querying `pg_catalog` / `information_sche
 forbidden writes. Catalog presence alone is never recorded as acceptance evidence.
 
 **Original audit baseline:** branch `phase/4-financial-execution`, commit `3ea775c` (pre-0011 measurement).
-**Revised twice:** after migration 0011 and the financial execution core landed, and again after the migration-0012 hardening pass, which CORRECTED five rows this document had marked RT-OK too early (see section 11). Sections 1-2
+**Revised three times:** after migration 0011 and the financial execution core landed, and again after the migration-0012 hardening pass, which CORRECTED five rows this document had marked RT-OK too early (see section 11). Sections 1-2
 record the pre-0011 measurement unchanged; sections 3-10 record what closed the gaps and how it was verified.
 **Authorization:** D18 / T0029. Target maturity: DARK / NO-FINANCIAL-TRAFFIC.
 
@@ -182,11 +182,11 @@ is enabled anywhere, and no row in this table has been exercised against a real 
 | C14 | UNKNOWN never auto-retried, no auto second `P#` | **DB-OK** | **RT-OK** | UI |
 | C15 | Immutable attempt identity + one-way outcome | **DB-OK** | **RT-OK** | — |
 | C16 | Attempt events fully append-only | **DB-OK** | **RT-OK** | UI |
-| C17 | Exact §15 review catalog, no generic approve | **DB-OK** | **RT-OK** | UI |
-| C18 | `financial-review` write + step-up + reason + evidence | partial *(0012: evidence now mandatory; actor/reason enforced)* | **RT** — step-up, RBAC and operator binding NOT implemented | UI |
+| C17 | Exact §15 review catalog, no generic approve | **DB-OK** | **RT-OK** *(API serves the catalog; no generic approve)* | UI (frontend) |
+| C18 | `financial-review` write + step-up + reason + evidence | **DB-OK** *(evidence + actor/reason mandatory)* | **RT-OK** *(financial-review RBAC, password step-up on every action, actor bound to the authenticated session and unforgeable, tenant-scoped)* | UI (frontend) |
 | C19 | Review actions immutable | **DB-OK** | **RT-OK** | — |
 | C20 | `CONFIRM_NOT_POSTED_RETRY` requeues once, same key | **DB-OK** *(0012: the authorization is now CONSUMED, and an ACKed-OK charge can never be retried)* | **RT-OK** | UI |
-| C21 | Concurrent reviewers cannot both win | **DB-OK (C21)** | **RT-OK** | UI |
+| C21 | Concurrent reviewers cannot both win | **DB-OK (C21)** | **RT-OK** *(stale version → 409, second incompatible decision → 409)* | UI (frontend) |
 | C22 | Per-interface SERIALIZED lanes; no duplicate attempts | **DB-OK** *(0012 `outbox_one_inflight_per_interface`)* | **RT-OK** *(0012: 0011 only proved duplicate-claim protection on ONE posting)* | UI |
 | C23 | Interfaces are independent namespaces | **DB-OK** | **RT-OK** | UI |
 | C24 | Interface lifecycle / decommission guard | **DB-OK** *(0012)* | **RT-OK** *(0012: refusing every non-ACTIVE state was wrong; AUTH_DISABLED posts, DRAINING drains)* | UI |
@@ -211,8 +211,11 @@ rows. Genuine DB gaps remaining: **0**. Runtime implemented and verified DARK: *
 (C18 step-up/RBAC/operator binding, C27, C29, C30 recovery mode, C31, C33 metrics surface, C35, and the
 payment half of C26). `BLOCKED_BY_PRODUCT_OWNER_DECISION`: **1** (C38). Operator-surface gap: **21** rows.
 
-**RT-OK still means implemented and verified DARK by LOCAL disposable runs.** No authoritative CI run
-exists for the hardened HEAD yet, and the race detector cannot run on the development workstation at all.
+**RT-OK means implemented and verified DARK, by AUTHORITATIVE CI.** `Phase 4 Financial Core CI` runs on
+every push to this branch and gates the exact delivered head; the run id, head and artifact id of the
+latest are recorded in `governance/project-state.json` under `phase4_authoritative_ci_*`. RT-OK still does
+NOT mean live, deployed or accepted: no Phase-4 flag is enabled anywhere, nothing is deployed, and no row
+has been exercised against a real PMS or payment provider.
 
 ## 8. Verification of the delivered core
 
@@ -318,3 +321,28 @@ from the fail-closed environment loader; the transport comes from an internal fa
 in this build and **refuses to start** if transmission is enabled against a build with no transport. The
 deterministic test seam lives in `export_test.go`, which the Go toolchain compiles only for this package's
 own tests — a production binary does not contain it and cannot call it.
+
+## 14. Manual Review — where each guarantee lives
+
+§15 asks for two different kinds of thing, and it is worth being explicit about which layer answers which,
+because a reviewer of this system should not have to guess.
+
+| Guarantee | Enforced by | Why there |
+|---|---|---|
+| exact action catalog, no generic approve | database + API | the API refuses an unknown action before the database sees it; the database refuses it again for any other writer |
+| action/state applicability (no retry of an ACKed-OK charge) | database | it is a property of the ledger, so it must hold for every writer, forever |
+| reviewer concurrency, single-use retry authorization | database | only a lock can decide a race |
+| immutable history | database | append-only trigger |
+| **`financial-review` write permission** | **API** | authorization is about the caller, and the database has no caller |
+| **authenticated actor binding** | **API** | the actor is the session; the request schema has no actor field at all |
+| **password step-up** | **API** | §15 requires re-authentication, which only the operator's own session can perform |
+| mandatory reason and evidence | both | the API rejects early with a usable message; the database guarantees it for every writer |
+| tenant/site scope | API + composite keys | a valid operator of one property must not decide another's money |
+
+The `available_actions` field the detail view returns is a **convenience**, not the enforcement: it narrows
+the catalog so the UI never offers a decision the database would refuse. The database re-checks all of it,
+and its answer is the one that decides.
+
+**What is NOT yet built:** the Hotel-Admin frontend. The operator API exists, is tested against real HTTP
+and a real database, and is DARK by default — the routes are mounted only when the Phase-4 master and
+review flags are both ON, and the delivered configuration has both OFF.

@@ -2,9 +2,13 @@
 
 **Status:** AUTHORIZED — **IMPLEMENTATION IN PROGRESS (DARK)**. Product-Owner decision **D18**, transition **T0029** (2026-08-11); implementation progress recorded in transition **T0030** (2026-08-12) under the SAME authorization — no new decision was created.
 **Delivered so far:** WS-A (migrations 0011 + **0012 hardening** + **0013 reversal ledger**), WS-B, WS-C, WS-D, WS-E and the financial-core half of WS-K, all verified DARK against disposable PostgreSQL 16 and wired into `.github/workflows/phase4-financial-core.yml`.
-**Still open:** WS-F (Manual Review operator workflow), WS-G (payments), WS-H (`FINANCIAL_RECOVERY_MODE`), WS-I (observability), WS-J (operator UI), WS-L (DARK deployment).
+**Still open:** WS-F frontend only (the Manual Review BACKEND, RBAC, step-up and API are delivered), WS-G (payments), WS-H (`FINANCIAL_RECOVERY_MODE`), WS-I (observability), WS-J (operator UI), WS-L (DARK deployment).
 **Not accepted, not closed.** Every Phase-4 flag is OFF and no real financial traffic has occurred.
-**Verification status:** LOCAL/DISPOSABLE only. No authoritative CI run exists for the hardened HEAD yet (transition T0031), and the race detector is CI-only.
+**Verification status:** AUTHORITATIVE CI EXISTS AND IS GREEN. `Phase 4 Financial Core CI` runs on every
+push to this branch and has passed on the delivered heads — see `phase4_authoritative_ci_*` in
+`governance/project-state.json` for the run id, head and artifact id of the latest. It covers gofmt, build,
+vet, the unit matrix, the **race detector** (which cannot run on the Windows development workstation),
+migrations 0011+0012+0013 with the full DB gate, the PG16 integration matrix, and the DARK assertion.
 **Baseline:** master `a4e951972d8087f00a40d8b39eb1b87ea03144b6`; accepted Phase-3 runtime `7c8b8cf0…`.
 **Maturity target:** IMPLEMENTED + VERIFIED AT DARK / NO-FINANCIAL-TRAFFIC. Real-financial acceptance
 (Tier-3 3C live) is **out of scope** and requires separate explicit Product-Owner authorization.

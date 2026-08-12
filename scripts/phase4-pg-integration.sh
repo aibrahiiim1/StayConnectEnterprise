@@ -55,8 +55,16 @@ if [ "${hard:-0}" != "1" ]; then echo "0012 applied but its lane index is missin
 echo "  iam_v2 tables=$pre + 0011 + 0012 + 0013 applied"
 
 export PHASE4_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB"
+# The edged API contract tests use the Phase-3 DSN variable, because they are the same harness. Pointing it
+# at THIS database is what lets the Manual Review routes be exercised against 0011+0012+0013.
+export PHASE3_TEST_DSN="$PHASE4_TEST_DSN"
 echo "== go test -tags integration -run IntegrationPosting ./internal/posting/ =="
 ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationPosting ./internal/posting/ -count=1 "$@" )
 rc=$?
+if [ "$rc" = 0 ]; then
+  echo "== go test -tags integration -run IntegrationReviewAPI ./cmd/edged/ =="
+  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationReviewAPI ./cmd/edged/ -count=1 "$@" )
+  rc=$?
+fi
 echo "PHASE4_PG_INTEGRATION rc=$rc"
 exit $rc

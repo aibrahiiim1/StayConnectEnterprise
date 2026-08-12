@@ -35,6 +35,7 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/stayconnect/enterprise/data-plane/internal/posting"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
@@ -89,6 +90,11 @@ type server struct {
 	// Phase 3 DARK Hotel-Admin PMS/Stay surface. pmsCfg gates whether ANY Phase-3 route is mounted; while
 	// the master flag is OFF the routes do not exist at all and edged issues zero Phase-3 SQL.
 	pmsCfg iamv2.PMSConfig
+
+	// Phase 4 DARK financial surface. financialCfg gates whether the Manual Review routes are mounted at
+	// all; while dark they do not exist, so an unmounted route cannot leak a financial schema that is not
+	// live yet. It carries NO transport and constructs no engine — edged is an operator API, not a sender.
+	financialCfg posting.Config
 }
 
 func main() {
@@ -207,6 +213,13 @@ func main() {
 
 	// Phase 3 DARK Hotel-Admin PMS/Stay surface. All flags default OFF and a child flag set while the master
 	// flag is OFF is a startup failure (a deployment mistake must be loud, not silently "off anyway").
+	finCfg, err := posting.LoadConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("phase-4 financial flags are incoherent", "err", err)
+		os.Exit(2)
+	}
+	s.financialCfg = finCfg
+
 	pmsCfg, err := iamv2.LoadPMSConfigFromEnv(os.Getenv)
 	if err != nil {
 		slog.Error("phase3 pms config", "err", err)
@@ -297,6 +310,12 @@ func main() {
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 				mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 				mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
+			}
+			// Phase 4 (DARK): Financial Manual Review. Mounted only when the Phase-4 master flag AND the
+			// review flag are both ON. The delivered configuration has both OFF, so this path does not
+			// exist on the appliance.
+			if s.financialCfg.ReviewOn() {
+				mountResource(r, s, "financial-review", s.financialReviewRoutes)
 			}
 			mountResource(r, s, "audit", s.auditRoutes)
 			mountResource(r, s, "reports", s.reportsRoutes)

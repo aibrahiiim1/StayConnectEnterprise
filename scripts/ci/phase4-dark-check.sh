@@ -40,25 +40,53 @@ fi
 
 # 3. Every Transport in the tree is constructed through the guard. NewEngine is the only constructor, and
 #    it must wrap; a second constructor that did not would be a hole.
-# THE CONSTRUCTION BOUNDARY. Private fields stop a caller MUTATING an engine; they do not stop production
-# code CONSTRUCTING one with a config and transport of its own. So three things are asserted:
-#   1. the single internal constructor always wraps in the DARK guard;
-#   2. no exported field lets a caller unwrap an engine it was handed;
-#   3. the only exported constructor takes NEITHER a Config NOR a Transport, and the deterministic test
-#      seam lives in export_test.go, which the Go toolchain compiles only for this package's own tests --
-#      so a production binary does not contain it and cannot call it.
+# THE CONSTRUCTION BOUNDARY, asserted as a PROPERTY of the exported API rather than as a list of names.
+#
+# The previous version of this check EXCLUDED NewDarkGuard from its own exported-constructor rule, so it
+# could not fail on the exact hole that existed. This version asks the compiler what the package actually
+# exports and refuses any exported function that accepts a Config or a Transport — no exclusions, so a new
+# hole cannot be added without this failing.
 ctor_ok=1
-grep -q 'transport: NewDarkGuard(cfg, inner)' data-plane/internal/posting/engine.go || ctor_ok=0
-grep -qE '^\s+(Cfg|Repo|Transport|Gate)\s' data-plane/internal/posting/engine.go && ctor_ok=0
-grep -q 'func NewProductionEngine(repo \*Repo, getenv Getenv)' data-plane/internal/posting/engine.go || ctor_ok=0
-# any OTHER exported constructor taking a Transport, outside the test-only seam, is a hole
-if grep -rn 'func New[A-Za-z]*(.*Transport' data-plane/internal/posting/ --include='*.go' \
-   | grep -v '_test.go' | grep -v 'func NewDarkGuard' >/dev/null 2>&1; then ctor_ok=0; fi
-[ -f data-plane/internal/posting/export_test.go ] || ctor_ok=0
-if [ "$ctor_ok" = 1 ]; then
-  say "production financial construction has exactly one controlled path (NewProductionEngine); the test seam is compile-time test-only"
+api="$(cd data-plane && go doc -short ./internal/posting 2>/dev/null)"
+if [ -z "$api" ]; then
+  bad "could not read the exported API of internal/posting (go doc produced nothing)"
+  ctor_ok=0
 else
-  bad "the production financial construction boundary is no longer closed"
+  # Any exported func or method taking a Config or a Transport is a configurable financial construction
+  # path. NOTE the leading-whitespace class: go doc -short INDENTS constructors under their type, so an
+  # anchor of '^func' silently skipped every constructor -- which is exactly why the first version of
+  # this check passed a deliberately planted hole.
+  # Match Config/Transport ONLY inside the parameter list. Two earlier attempts got this wrong in
+  # opposite directions: anchoring on '^func' skipped every constructor (go doc indents them under their
+  # type), and matching the whole signature flagged DefaultConfig()/LoadConfigFromEnv(), whose names
+  # contain "Config" and which accept none. awk isolates the parameters, skipping a method receiver.
+  offenders="$(printf '%s\n' "$api" | grep -E '^[[:space:]]*func ' | awk '{
+      line = $0; rest = line
+      sub(/^[[:space:]]*func[[:space:]]*/, "", rest)
+      if (substr(rest, 1, 1) == "(") {            # method: drop the receiver group
+        c = index(rest, ")"); rest = substr(rest, c + 1)
+      }
+      o = index(rest, "("); if (o == 0) next
+      rest = substr(rest, o + 1)
+      c = index(rest, ")"); params = (c > 0) ? substr(rest, 1, c - 1) : rest
+      if (params ~ /Config|Transport/) print line
+    }')"
+  if [ -n "$offenders" ]; then
+    bad "the package exports a configurable financial construction path:"
+    printf '%s\n' "$offenders" | sed 's/^/      /'
+    ctor_ok=0
+  fi
+  printf '%s\n' "$api" | grep -q 'func NewProductionEngine(repo \*Repo) (\*Engine, error)' || {
+    bad "NewProductionEngine is not the expected zero-configuration constructor"; ctor_ok=0; }
+fi
+grep -q 'transport: newDarkGuard(cfg, inner)' data-plane/internal/posting/engine.go || {
+  bad "the internal constructor no longer wraps in the DARK guard"; ctor_ok=0; }
+grep -qE '^\s+(Cfg|Repo|Transport|Gate)\s' data-plane/internal/posting/engine.go && {
+  bad "an exported Engine field reappeared"; ctor_ok=0; }
+[ -f data-plane/internal/posting/export_test.go ] || {
+  bad "the compile-time-only test seam is missing"; ctor_ok=0; }
+if [ "$ctor_ok" = 1 ]; then
+  say "no exported function accepts a Config or a Transport; NewProductionEngine(repo) is the whole financial construction surface"
 fi
 
 # The reversal model: the passive ledger row is REQUIRED by the contract, the SENDER is forbidden. Assert

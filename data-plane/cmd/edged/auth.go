@@ -169,7 +169,10 @@ var rolePerms = map[string]map[string]perm{
 		// role exists for. Routing and source conflicts are read-only everywhere — the first is a network
 		// topology decision made where the networks are configured, the second is evidence, not a control.
 		"pms-interfaces": permWrite, "pms-routing": permRead, "pms-source-conflicts": permRead,
-		"payments": permRead, "operators": permRead, "audit": permRead,
+		// The IT manager can SEE the financial review queue as integration evidence, and cannot decide it:
+		// section 15 gives the decision to payments_operator (and site_admin).
+		"financial-review": permRead,
+		"payments":         permRead, "operators": permRead, "audit": permRead,
 		"reports": permRead, "backups": permRead, "license": permRead,
 		// Health & diagnostics: managers may run Recheck/Restart (write, step-up).
 		"diagnostics": permWrite,
@@ -181,6 +184,7 @@ var rolePerms = map[string]map[string]perm{
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
 		// telling a guest to try again, but must not be able to publish or rotate anything.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
+		"financial-review":   permRead,
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "walled-garden": permRead, "payments": permRead,
 		"reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
@@ -204,7 +208,10 @@ var rolePerms = map[string]map[string]perm{
 	},
 	"payments_operator": {
 		"payments": permWrite, "stripe-accounts": permRead,
-		"sessions": permRead, "reports": permRead, "audit": permRead, "license": permRead,
+		// Contract section 15: payments_operator is the role that holds financial-review WRITE. Every
+		// action additionally requires password re-authentication, enforced at the route.
+		"financial-review": permWrite,
+		"sessions":         permRead, "reports": permRead, "audit": permRead, "license": permRead,
 		"diagnostics": permRead,
 	},
 	"site_viewer": {
@@ -219,6 +226,7 @@ var rolePerms = map[string]map[string]perm{
 		"pms-stays": permRead, "pms-events": permRead, "pms-resolutions": permRead,
 		"checkout-grace": permRead, "operational-alerts": permRead,
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
+		"financial-review": permRead,
 	},
 	// Legacy tenant roles accepted for migrated operators.
 	"tenant_admin":    nil, // treated like site_admin below

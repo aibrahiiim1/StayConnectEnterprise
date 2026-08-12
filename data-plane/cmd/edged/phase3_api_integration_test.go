@@ -131,6 +131,9 @@ func newAPI(t *testing.T, roles ...string) *apiFixture {
 			mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 			mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 			mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
+			// Phase 4 (DARK): the Manual Review surface. Mounted here so the API contract tests exercise the
+			// real router and the real RBAC/step-up middleware, exactly as the appliance would when enabled.
+			mountResource(r, s, "financial-review", s.financialReviewRoutes)
 		})
 	})
 	f.srv = httptest.NewServer(r)

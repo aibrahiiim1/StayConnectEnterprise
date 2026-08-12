@@ -48,11 +48,11 @@ func NotTransmitted(err error) bool { return errors.Is(err, ErrNotTransmitted) }
 // It also re-checks the record against the connector's outbound allowlist. pmsd.CheckOutbound is the
 // Phase-3 read-only chokepoint and it lists PS and PA as forbidden financial records; asking it here means
 // a Phase-4 bug cannot smuggle a PS out through a Phase-3 connector even if the flags were somehow ON.
-// Both fields are UNEXPORTED. A caller outside this package cannot construct a DarkGuard with a config of
-// its own choosing, cannot reach in and flip Cfg on one it was handed, and cannot swap Inner for something
-// unguarded. The only way to obtain a working guard is NewDarkGuard, and the only way to obtain a working
-// Engine is NewEngine -- so "financial egress is guarded" is a property of the type, not a convention
-// about which constructor people remember to call.
+// Both the fields AND the constructor are unexported. A caller outside this package cannot build a guard
+// with a config of its own choosing, cannot reach in and flip one it was handed, and cannot swap the inner
+// transport for something unguarded. The only exported way to reach any of this is NewProductionEngine,
+// which takes no config and no transport — so "financial egress is guarded" is a property of the package's
+// exported surface, not a convention about which constructor people remember to call.
 type DarkGuard struct {
 	cfg   Config
 	inner Transport
@@ -62,9 +62,11 @@ type DarkGuard struct {
 	lastBody string
 }
 
-// NewDarkGuard wraps inner. inner may be nil in DARK deployments: with the flags OFF it is never reached,
+// newDarkGuard wraps inner. It is UNEXPORTED: an exported constructor taking an arbitrary Config and an
+// arbitrary Transport is exactly "an independently configured financial sender", which is the thing this
+// type exists to prevent. inner may be nil in DARK deployments — with the flags OFF it is never reached,
 // and a nil inner makes that structural rather than merely true.
-func NewDarkGuard(cfg Config, inner Transport) *DarkGuard { return &DarkGuard{cfg: cfg, inner: inner} }
+func newDarkGuard(cfg Config, inner Transport) *DarkGuard { return &DarkGuard{cfg: cfg, inner: inner} }
 
 // SendPS refuses every financial transmission while DARK.
 func (d *DarkGuard) SendPS(ctx context.Context, interfaceID string, pNumber int64, body string) (*PA, error) {

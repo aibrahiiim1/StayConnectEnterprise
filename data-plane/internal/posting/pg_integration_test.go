@@ -1435,7 +1435,7 @@ func TestIntegrationPosting_ProductionEngineIsDarkAndTakesNoCallerTransport(t *t
 	repo := NewRepo(p)
 
 	// the delivered environment: nothing set at all
-	e, err := NewProductionEngine(repo, func(string) string { return "" })
+	e, err := ProductionEngineWithEnv(repo, func(string) string { return "" })
 	if err != nil {
 		t.Fatalf("a production engine must construct in the delivered all-OFF environment: %v", err)
 	}
@@ -1444,7 +1444,7 @@ func TestIntegrationPosting_ProductionEngineIsDarkAndTakesNoCallerTransport(t *t
 	}
 	// even with the domain and worker enabled, transmission stays off and the transport stays absent
 	env := map[string]string{EnvPhase4Master: "true", EnvPhase4Posting: "true", EnvPhase4Outbox: "true"}
-	e2, err := NewProductionEngine(repo, func(k string) string { return env[k] })
+	e2, err := ProductionEngineWithEnv(repo, func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1457,7 +1457,7 @@ func TestIntegrationPosting_ProductionEngineIsDarkAndTakesNoCallerTransport(t *t
 	}
 	// and a build that claims to transmit without one refuses to start rather than pretending
 	env[EnvPhase4Transmit] = "true"
-	if _, err := NewProductionEngine(repo, func(k string) string { return env[k] }); err == nil {
+	if _, err := ProductionEngineWithEnv(repo, func(k string) string { return env[k] }); err == nil {
 		t.Fatal("transmission enabled against a build with no transport must fail closed at construction")
 	}
 }
