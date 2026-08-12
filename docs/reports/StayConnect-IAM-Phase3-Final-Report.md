@@ -596,8 +596,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `e6c7bc5`
-- **Provenance (generation HEAD = inventory_head):** `536e2985acc07b254004c643765fd7d0e37efaad`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `dd00fac`
+- **Provenance (generation HEAD = inventory_head):** `dd00fac6fca5f0eaca7dc3767a826e551b0f13c5`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/4-financial-execution`
 - **Remote branch:** `origin/phase/4-financial-execution`
 - **Changed files:** 319
@@ -608,7 +608,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | Path | Classification | Git status | Domain | Workstream | Rollback | Purpose (last commit subject in range) |
 |---|---|---|---|---|---|---|
 | `.github/workflows/phase3-software.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | Phase 3 Increment-9 correction (inventory_head): ruleset structure is reconciled from the current render, not a stored bundle |
-| `.github/workflows/phase4-financial-core.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | Phase 4: harden the financial execution core â€” migration 0012, contract lifecycle, freshness axes, real PA correlation |
+| `.github/workflows/phase4-financial-core.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | Phase 4: gate the phase branch itself, so authoritative CI can run without an early PR or a merge |
 | `.github/workflows/project-governance.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | Correct the Phase-4 current-state contradiction, and repair two silently-broken validator regexes |
 | `.gitignore` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Phase 3 (inventory_head): merge-readiness corrections â€” a cited evidence file that was silently gitignored, and four stale current-state claims |
 | `data-plane/cmd/acctd/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3: durable accounting, netd shaping control plane, controlled-writer boundary, guest vertical slice |
@@ -821,8 +821,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 hardening (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 hardening (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 hardening (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_536e298.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/GIT_STAT_dd00fac.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 hardening (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 hardening (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
@@ -868,7 +868,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `governance/transitions/T0028.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Ratify T0027 state, renew the appliance licence to 2027-08-08, make the Central reload contract honest (T0028) |
 | `governance/transitions/T0029.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Pre-Phase-4 baseline pass + Phase-4 authorization (D18 / T0029) |
 | `governance/transitions/T0030.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4: financial execution core â€” migration 0011, Posting domain, P# allocator, outbox lanes, PS/PA, UNKNOWN |
-| `governance/transitions/T0031.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4: harden the financial execution core â€” migration 0012, contract lifecycle, freshness axes, real PA correlation |
+| `governance/transitions/T0031.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4 hardening (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `hotel-admin/app/(app)/checkout-grace/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 1 (inventory_head): controlled alert lifecycle + governed grace publication + NOT VALID boundary CHECK; real API+PG contract tests: gate 310/310 |
 | `hotel-admin/app/(app)/operational-alerts/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 1 (inventory_head): controlled alert lifecycle + governed grace publication + NOT VALID boundary CHECK; real API+PG contract tests: gate 310/310 |
 | `hotel-admin/app/(app)/pms-interfaces/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 Â§6 (frontend): four Hotel-Admin pages over the PMS interface surface |
@@ -930,7 +930,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 ## Total diff statistics (`git diff --stat`)
 ```text
  .github/workflows/phase3-software.yml              |  271 ++
- .github/workflows/phase4-financial-core.yml        |  129 +
+ .github/workflows/phase4-financial-core.yml        |  134 +
  .github/workflows/project-governance.yml           |   42 +
  .gitignore                                         |   13 +
  data-plane/cmd/acctd/main.go                       |   69 +-
@@ -1137,14 +1137,14 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md |  146 +
  .../Phase3-Final-Live-Acceptance-Record.md         |  113 +
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           |  956 +++++++
+ docs/manifests/Phase3-change-manifest.md           |  952 +++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1763 ++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 293990 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 111146 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42054 bytes
- .../chatgpt/phase-evidence/GIT_STAT_536e298.txt    |    4 +
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1759 ++++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 293987 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 111134 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42051 bytes
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
+ .../chatgpt/phase-evidence/GIT_STAT_dd00fac.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -1162,7 +1162,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  956 +++++++
+ .../Phase3-change-manifest.md                      |  952 +++++++
  .../stayconnectenterprise/SYSTEM_OVERVIEW.md       |    2 +-
  .../StayConnect-IAM-Handoff.md                     |   18 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   18 +-
@@ -1248,7 +1248,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  tools/validate-pr-metadata.sh                      |  260 ++
  tools/validate-project-state.sh                    |  161 +-
  tools/validate-transition-times.sh                 |   86 +
- 319 files changed, 65325 insertions(+), 727 deletions(-)
+ 319 files changed, 65318 insertions(+), 727 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -1256,8 +1256,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_536e298.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_e6c7bc5.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_536e298.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_dd00fac.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -1265,12 +1265,13 @@ M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
-M  governance/transitions/T0031.json
+M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-536e298 Phase 4 hardening (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
+dd00fac Phase 4: gate the phase branch itself, so authoritative CI can run without an early PR or a merge
+795793d Phase 4 hardening (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 e6c7bc5 Phase 4: harden the financial execution core â€” migration 0012, contract lifecycle, freshness axes, real PA correlation
 824e49b Phase 4 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest
 64521ac Phase 4: financial execution core â€” migration 0011, Posting domain, P# allocator, outbox lanes, PS/PA, UNKNOWN

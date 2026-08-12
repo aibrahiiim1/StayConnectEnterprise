@@ -1,0 +1,4 @@
+commit dd00fac6fca5f0eaca7dc3767a826e551b0f13c5
+Date:   Wed Aug 12 09:49:15 2026 +0300
+
+    Phase 4: gate the phase branch itself, so authoritative CI can run without an early PR or a merge
