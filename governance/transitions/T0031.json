@@ -1,7 +1,7 @@
 {
   "transition_id": "T0031",
   "seq": 31,
-  "timestamp": "2026-08-12T10:00:00Z",
+  "timestamp": "2026-08-12T06:40:00Z",
   "record_type": "PHASE_4_FINANCIAL_CORE_HARDENING_AND_CORRECTION_OF_T0030_OVERCLAIMS",
   "previous_state": {
     "phase": "4",
