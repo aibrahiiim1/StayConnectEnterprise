@@ -1,4 +1,0 @@
-commit a37df59fffb9842f6fb8fa6c0055321a394f1cd9
-Date:   Wed Aug 12 02:12:19 2026 +0300
-
-    Authoritative Phase-4 financial schema-gap audit; correct the plan's pre-measurement assumptions

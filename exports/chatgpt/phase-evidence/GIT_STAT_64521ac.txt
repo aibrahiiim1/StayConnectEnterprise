@@ -1,0 +1,4 @@
+commit 64521ac0ef2e775663070b668e0fc2e1ba5e912a
+Date:   Wed Aug 12 05:31:20 2026 +0300
+
+    Phase 4: financial execution core â€” migration 0011, Posting domain, P# allocator, outbox lanes, PS/PA, UNKNOWN
