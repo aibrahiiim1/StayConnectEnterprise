@@ -596,8 +596,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `82ce2d6`
-- **Provenance (generation HEAD = inventory_head):** `032a97d8207f40a1b886147ba0569b97bceb2288`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `943705f`
+- **Provenance (generation HEAD = inventory_head):** `943705f55191954a22913a088b4698c04347cda7`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/4-financial-execution`
 - **Remote branch:** `origin/phase/4-financial-execution`
 - **Changed files:** 326
@@ -826,7 +826,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): manifest + rebuilt packs + pointer |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): manifest + rebuilt packs + pointer |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): manifest + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_032a97d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_943705f.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
@@ -856,7 +856,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 3 (delivery_head): T0028 manifest + rebuilt packs + pointer + report-embedded manifest |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Pre-Phase-4 baseline pass + Phase-4 authorization (D18 / T0029) |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 4 (delivery_head): manifest + rebuilt packs + pointer |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 4: record the authoritative CI evidence for software candidate 82ce2d6 |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `governance/transitions/T0016.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3: governance activity transition T0016 (software candidate awaiting Increment 9), doc sync |
 | `governance/transitions/T0017.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
@@ -875,7 +875,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `governance/transitions/T0030.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4: financial execution core â€” migration 0011, Posting domain, P# allocator, outbox lanes, PS/PA, UNKNOWN |
 | `governance/transitions/T0031.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4 hardening (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
 | `governance/transitions/T0032.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4 (delivery_head): manifest + rebuilt packs + pointer |
-| `governance/transitions/T0033.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4: close the construction boundary for real, and deliver the Manual Review operator surface |
+| `governance/transitions/T0033.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4 (delivery_head): manifest + rebuilt packs + pointer |
 | `hotel-admin/app/(app)/checkout-grace/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 1 (inventory_head): controlled alert lifecycle + governed grace publication + NOT VALID boundary CHECK; real API+PG contract tests: gate 310/310 |
 | `hotel-admin/app/(app)/operational-alerts/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 1 (inventory_head): controlled alert lifecycle + governed grace publication + NOT VALID boundary CHECK; real API+PG contract tests: gate 310/310 |
 | `hotel-admin/app/(app)/pms-interfaces/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 Â§6 (frontend): four Hotel-Admin pages over the PMS interface surface |
@@ -1149,13 +1149,13 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md |  146 +
  .../Phase3-Final-Live-Acceptance-Record.md         |  113 +
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           |  980 +++++++
+ docs/manifests/Phase3-change-manifest.md           |  976 +++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1787 ++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 294435 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 111111 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42054 bytes
- .../chatgpt/phase-evidence/GIT_STAT_032a97d.txt    |    4 +
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1783 ++++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 294414 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 111117 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42055 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_943705f.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
@@ -1174,7 +1174,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      |  980 +++++++
+ .../Phase3-change-manifest.md                      |  976 +++++++
  .../stayconnectenterprise/SYSTEM_OVERVIEW.md       |    2 +-
  .../StayConnect-IAM-Handoff.md                     |   18 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   18 +-
@@ -1262,7 +1262,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  tools/validate-pr-metadata.sh                      |  260 ++
  tools/validate-project-state.sh                    |  161 +-
  tools/validate-transition-times.sh                 |   86 +
- 326 files changed, 67302 insertions(+), 728 deletions(-)
+ 326 files changed, 67290 insertions(+), 728 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -1270,8 +1270,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_032a97d.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_82ce2d6.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_032a97d.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_943705f.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -1279,12 +1279,13 @@ M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
-M  governance/transitions/T0033.json
+M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-032a97d Phase 4 (delivery_head): manifest + rebuilt packs + pointer
+943705f Phase 4: record the authoritative CI evidence for software candidate 82ce2d6
+d853fe4 Phase 4 (delivery_head): manifest + rebuilt packs + pointer
 82ce2d6 Phase 4: close the construction boundary for real, and deliver the Manual Review operator surface
 1f65a63 Phase 4 (delivery_head): manifest + rebuilt packs + pointer
 8beed1e Phase 4: record the authoritative CI evidence for delivery head 0aa63d77
