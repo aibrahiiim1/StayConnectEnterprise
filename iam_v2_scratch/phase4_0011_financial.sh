@@ -20,6 +20,8 @@ C="${PHASE4_GATE_CONTAINER:-iamv2-p4gate}"; DB=iam_scratch; PORT="${PHASE4_GATE_
 UP="$ROOT/data-plane/migrations/0011_phase4_financial_execution.up.sql"
 DOWN="$ROOT/data-plane/migrations/0011_phase4_financial_execution.down.sql"
 UP12="$ROOT/data-plane/migrations/0012_phase4_financial_hardening.up.sql"
+UP13="$ROOT/data-plane/migrations/0013_phase4_reversal_ledger.up.sql"
+DOWN13="$ROOT/data-plane/migrations/0013_phase4_reversal_ledger.down.sql"
 DOWN12="$ROOT/data-plane/migrations/0012_phase4_financial_hardening.down.sql"
 FIXTURE="$ROOT/iam_v2_scratch/phase4_financial_fixture.sql"
 
@@ -174,6 +176,16 @@ eq "0012 DOWN left every 0011 object intact" "5" \
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP12" >/dev/null 2>&1 \
   && ok "0012 DOWN -> UP re-applies cleanly" || no "0012 DOWN -> UP re-applies cleanly" "re-up failed"
 eq "0012 DOWN -> UP produces the SAME schema as the first UP" "$UP12_FP" "$(Q "$FP")"
+
+echo "== 0013 reversal-ledger lifecycle: UP / DOWN / DOWN->UP =="
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP13" >/dev/null 2>&1   && ok "0013 UP applied" || no "0013 UP applied" "the reversal-ledger migration did not apply"
+UP13_FP="$(Q "$FP")"
+[ "$UP12_FP" != "$UP13_FP" ] && ok "0013 changed the catalog" || no "0013 changed the catalog" "identical"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$DOWN13" >/dev/null 2>&1   && ok "0013 DOWN applied" || no "0013 DOWN applied" "down failed"
+eq "0013 DOWN restores the 0012 blanket refusal (a MORE restrictive state, never a less safe one)" "1"   "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=chr(105)||chr(97)||chr(109)||chr(95)||chr(118)||chr(50) AND p.proname='p4_no_programmatic_reversal';")"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP13" >/dev/null 2>&1   && ok "0013 DOWN -> UP re-applies cleanly" || no "0013 DOWN -> UP re-applies cleanly" "re-up failed"
+eq "0013 DOWN -> UP produces the SAME schema as the first UP" "$UP13_FP" "$(Q "$FP")"
+eq "0013 is recorded in the migration ledger" "1"   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0013_phase4_reversal_ledger';")"
 eq "0012 is recorded in the migration ledger" "1" \
   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0012_phase4_financial_hardening';")"
 
@@ -195,7 +207,7 @@ eq "every phase-4 posting gate fires AFTER charge_gate (the folio refusal keeps 
 eq "the freshness gate fires LAST, so onboarding and currency reasons win over it" "p4_zz_posting_freshness_gate" \
   "$(Q "SELECT max(t.tgname) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam_v2' AND c.relname='pms_postings' AND NOT t.tgisinternal AND t.tgtype & 4 = 4;")"
 eq "no new EXECUTE granted to PUBLIC on the 0011 controlled functions" "false,false" \
-  "$(Q "SELECT has_function_privilege('public','iam_v2.record_posting_review_action(uuid,text,uuid,text,jsonb,int)','EXECUTE')||','||has_function_privilege('public','iam_v2.allocate_p_number(uuid,uuid,uuid)','EXECUTE');")"
+  "$(Q "SELECT has_function_privilege('public','iam_v2.record_posting_review_action(uuid,text,uuid,text,jsonb,int,bigint)','EXECUTE')||','||has_function_privilege('public','iam_v2.allocate_p_number(uuid,uuid,uuid)','EXECUTE');")"
 
 # ------------------------------------------------------------------ financial onboarding fixture
 echo "== financial onboarding is a REVISION event (revisions stay immutable) =="
@@ -218,9 +230,11 @@ IFSTATE(){ Q "UPDATE iam_v2.pms_interfaces SET lifecycle_state='$1' WHERE id='$I
 RT(){ Q "UPDATE iam_v2.pms_interface_runtime SET $1, updated_at=now() WHERE pms_interface_id='$IF1';" >/dev/null; }
 RT_OK(){ RT "transport_status='CONNECTED', last_heartbeat_at=now(), continuity_status='CONTINUOUS', last_valid_event_at=now(), sync_status='IN_SYNC', last_complete_sync_at=now(), resync_generation_seq=0, published_resync_generation=0"; }
 
-rejects "C24 a REVERSAL posting cannot be created programmatically (capability false in v1)" \
-  "INSERT INTO iam_v2.pms_postings(id,tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,posting_interface_revision_id,posting_type,reverses_posting_id,amount_minor,currency,currency_exponent,idempotency_key) VALUES ('c0120000-0000-0000-0000-0000000000ff','$T','$S','$IF1','$SET1','$PUR1','$STAY1','$FOL1','$REV_OK','REVERSAL',gen_random_uuid(),100,'USD',2,'p4-rev');" \
-  "PROGRAMMATIC_REVERSAL_DISABLED"
+# 0013 corrects 0012: the contract REQUIRES the ledger row (sections 15 and 16) and FORBIDS the sender
+# (section 9a rule 5, Gate 3B). Both halves are asserted here.
+rejects "C25 a reversal ledger row cannot be written outside the audited CREATE_REVERSAL action" \
+  "INSERT INTO iam_v2.pms_postings(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,posting_interface_revision_id,posting_type,reverses_posting_id,amount_minor,currency,currency_exponent,idempotency_key) VALUES ('$T','$S','$IF1','$SET1','$PUR1','$STAY1','$FOL1','$REV_OK','REVERSAL',gen_random_uuid(),100,'USD',2,'p4-revdirect');" \
+  "REVERSAL_WRITER_ONLY"
 
 rejects "C7 the protel-fias posting path refuses any exponent but 2" \
   "$(mkposting c0120000-0000-0000-0000-000000000011 "$SET3" "$PUR3" "$REV_OK" USD 2 p4-exp2 | sed "s/,'USD',2,/,'USD',3,/")" \
@@ -452,7 +466,7 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP12" >/dev
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$FIXTURE" >/dev/null 2>&1 \
   || { echo "INFRA: fixture did not apply on the rebuild"; exit 2; }
 eq "the rebuild carries 0011 + 0012" "1" "$(Q "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_revisions' AND column_name='financial_base_currency';")"
-run_baseline "post-0011+0012"
+run_baseline "post-0011+0012+0013"
 
 echo
 echo "===== PHASE-4 0011 GATE: PASS=$pass FAIL=$fail ====="

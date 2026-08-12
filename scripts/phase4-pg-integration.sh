@@ -38,7 +38,7 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-p
 pre="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${pre:-0}" != "63" ]; then echo "INFRA: pre-0011 chain did not build (iam_v2 tables=$pre)"; exit 2; fi
 
-for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening; do
+for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger; do
   if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
     # Deterministic: a broken migration fails the same way twice, so this is exit 1 and CI must not retry.
@@ -52,7 +52,7 @@ have="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM i
 if [ "${have:-0}" != "1" ]; then echo "0011 applied but its columns are missing - defect, not a flake"; exit 1; fi
 hard="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM pg_indexes WHERE schemaname='iam_v2' AND indexname='outbox_one_inflight_per_interface';")"
 if [ "${hard:-0}" != "1" ]; then echo "0012 applied but its lane index is missing - defect, not a flake"; exit 1; fi
-echo "  iam_v2 tables=$pre + 0011 + 0012 applied"
+echo "  iam_v2 tables=$pre + 0011 + 0012 + 0013 applied"
 
 export PHASE4_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB"
 echo "== go test -tags integration -run IntegrationPosting ./internal/posting/ =="

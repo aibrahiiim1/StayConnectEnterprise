@@ -4,16 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 
 	"github.com/jackc/pgx/v5"
 )
 
 // Engine is the Posting domain core: creation under the fail-closed gate, and execution through the
 // per-interface outbox lanes.
-// Every field is UNEXPORTED, and that is the safety boundary rather than a style choice. A caller outside
-// this package cannot build an Engine literal with transmit enabled, cannot reassign a handed-out Engine's
-// config, and cannot replace its transport with an unguarded one. NewEngine is the only way to obtain a
-// working Engine, and it always wraps.
+//
+// THE CONSTRUCTION BOUNDARY. Private fields alone were not enough: they stopped a caller MUTATING an
+// engine, but an exported constructor taking a Config and a Transport still let production code build an
+// independently configured, independently transported financial sender. So there is now exactly one
+// exported constructor — NewProductionEngine — and it takes neither.
+//
+//	config     comes from the environment, through the same fail-closed loader everything else uses
+//	transport  comes from the internal factory below, which in this milestone returns nothing at all
+//
+// The deterministic seam the tests need lives in export_test.go, which the Go toolchain compiles ONLY when
+// building this package's own tests. Production code cannot reference it — not by discipline, not by
+// review, but because it does not exist in a production build.
 type Engine struct {
 	cfg       Config
 	repo      *Repo
@@ -21,11 +30,52 @@ type Engine struct {
 	gate      Gate
 }
 
-// NewEngine builds an engine. The transport is always wrapped in a DarkGuard, so an engine constructed
-// anywhere in this codebase is DARK unless the flags say otherwise — there is no constructor that produces
-// an unguarded financial sender.
-func NewEngine(cfg Config, repo *Repo, inner Transport) *Engine {
+// newEngine is the single internal constructor. Every path into an Engine goes through it, and it always
+// wraps the transport in the DARK guard.
+func newEngine(cfg Config, repo *Repo, inner Transport) *Engine {
 	return &Engine{cfg: cfg, repo: repo, transport: NewDarkGuard(cfg, inner)}
+}
+
+// NewProductionEngine is the ONLY exported way to obtain a financial engine.
+//
+// It reads the flag posture from the environment and obtains its transport from productionTransport. A
+// caller cannot pass either one, so a service that wants a transmitting engine has to change the
+// deployment's environment and this package's factory — two separate, reviewable acts — rather than
+// writing one struct literal.
+//
+// getenv is injectable ONLY so a test can drive the loader; it cannot influence which transport is used.
+func NewProductionEngine(repo *Repo, getenv Getenv) (*Engine, error) {
+	if getenv == nil {
+		getenv = os.Getenv
+	}
+	cfg, err := LoadConfigFromEnv(getenv)
+	if err != nil {
+		return nil, err
+	}
+	inner, err := productionTransport(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return newEngine(cfg, repo, inner), nil
+}
+
+// productionTransport returns the real financial transport for this build.
+//
+// In this milestone it returns nil, and that is the honest answer rather than a placeholder: no real FIAS
+// posting transport has been built, and none is authorized. A nil inner transport is safe by construction
+// because DarkGuard refuses before it would ever be reached — and if the flags were somehow ON, the guard
+// refuses with "no financial transport is configured" instead of inventing one.
+//
+// When the real transport is built it goes HERE, behind the same guard, and nowhere else.
+func productionTransport(cfg Config) (Transport, error) {
+	if cfg.TransmitOn() {
+		// Fail closed and loudly. A deployment that enabled transmission against a build that has no
+		// transport is a misconfiguration, and starting anyway would leave an operator believing money was
+		// flowing when it was not.
+		return nil, fail(ErrConfig,
+			"phase-4 transmission is enabled but this build has no financial transport; refusing to start")
+	}
+	return nil, nil
 }
 
 // Config returns a COPY of the flag state. Config is a value type, so a caller can read the posture and

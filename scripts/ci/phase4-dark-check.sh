@@ -40,13 +40,38 @@ fi
 
 # 3. Every Transport in the tree is constructed through the guard. NewEngine is the only constructor, and
 #    it must wrap; a second constructor that did not would be a hole.
-# The engine's fields are unexported, so the ONLY way to obtain a working Engine is NewEngine, and
-# NewEngine must wrap. Both halves are asserted: the wrap itself, and the fact that no exported field
-# exists for a caller to swap afterwards.
-if grep -q 'transport: NewDarkGuard(cfg, inner)' data-plane/internal/posting/engine.go    && ! grep -qE '^\s+(Cfg|Repo|Transport|Gate)\s' data-plane/internal/posting/engine.go; then
-  say "the engine constructor always wraps, and no exported field lets a caller unwrap it"
+# THE CONSTRUCTION BOUNDARY. Private fields stop a caller MUTATING an engine; they do not stop production
+# code CONSTRUCTING one with a config and transport of its own. So three things are asserted:
+#   1. the single internal constructor always wraps in the DARK guard;
+#   2. no exported field lets a caller unwrap an engine it was handed;
+#   3. the only exported constructor takes NEITHER a Config NOR a Transport, and the deterministic test
+#      seam lives in export_test.go, which the Go toolchain compiles only for this package's own tests --
+#      so a production binary does not contain it and cannot call it.
+ctor_ok=1
+grep -q 'transport: NewDarkGuard(cfg, inner)' data-plane/internal/posting/engine.go || ctor_ok=0
+grep -qE '^\s+(Cfg|Repo|Transport|Gate)\s' data-plane/internal/posting/engine.go && ctor_ok=0
+grep -q 'func NewProductionEngine(repo \*Repo, getenv Getenv)' data-plane/internal/posting/engine.go || ctor_ok=0
+# any OTHER exported constructor taking a Transport, outside the test-only seam, is a hole
+if grep -rn 'func New[A-Za-z]*(.*Transport' data-plane/internal/posting/ --include='*.go' \
+   | grep -v '_test.go' | grep -v 'func NewDarkGuard' >/dev/null 2>&1; then ctor_ok=0; fi
+[ -f data-plane/internal/posting/export_test.go ] || ctor_ok=0
+if [ "$ctor_ok" = 1 ]; then
+  say "production financial construction has exactly one controlled path (NewProductionEngine); the test seam is compile-time test-only"
 else
-  bad "the engine no longer guarantees a wrapped transport (constructor or field visibility changed)"
+  bad "the production financial construction boundary is no longer closed"
+fi
+
+# The reversal model: the passive ledger row is REQUIRED by the contract, the SENDER is forbidden. Assert
+# that the forbidding half is still structural, and that no PT=C or negative-TA assumption ever appeared.
+rev_ok=1
+grep -q 'REVERSAL_NOT_EXECUTABLE' data-plane/migrations/0013_phase4_reversal_ledger.up.sql || rev_ok=0
+grep -q 'p4_reversal_never_queued' data-plane/migrations/0013_phase4_reversal_ledger.up.sql || rev_ok=0
+grep -q 'p4_reversal_never_attempted' data-plane/migrations/0013_phase4_reversal_ledger.up.sql || rev_ok=0
+if grep -rn "PT=C\|PTC\|'C'" data-plane/internal/posting/fias.go >/dev/null 2>&1; then rev_ok=0; fi
+if [ "$rev_ok" = 1 ]; then
+  say "the reversal ledger is passive and structurally non-executable; no PT=C and no negative-TA assumption exists"
+else
+  bad "the reversal safety model changed"
 fi
 
 # 4. The financial core opens no socket of its own. It has no net import at all: the transport is an

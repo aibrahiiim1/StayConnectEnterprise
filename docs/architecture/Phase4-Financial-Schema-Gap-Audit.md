@@ -190,7 +190,7 @@ is enabled anywhere, and no row in this table has been exercised against a real 
 | C22 | Per-interface SERIALIZED lanes; no duplicate attempts | **DB-OK** *(0012 `outbox_one_inflight_per_interface`)* | **RT-OK** *(0012: 0011 only proved duplicate-claim protection on ONE posting)* | UI |
 | C23 | Interfaces are independent namespaces | **DB-OK** | **RT-OK** | UI |
 | C24 | Interface lifecycle / decommission guard | **DB-OK** *(0012)* | **RT-OK** *(0012: refusing every non-ACTIVE state was wrong; AUTH_DISABLED posts, DRAINING drains)* | UI |
-| C25 | Programmatic reversal disabled | **DB-OK** *(0012 makes it structurally impossible, not merely absent)* | **RT-OK** | N/A |
+| C25 | Programmatic reversal disabled; CREATE_REVERSAL ledger row required | **DB-OK** *(0013: the PASSIVE row is permitted and audited; the SENDER is structurally impossible — see §12)* | **RT-OK** | UI |
 | C26 | No duplicate CHARGE/REFUND/callback | **DB-OK** | **RT-OK** (posting); RT (payment) | UI |
 | C27 | No cross-tenant merchant reuse | partial | RT | — |
 | C28 | Server-pinned totals | **DB-OK** | **RT-OK** | — |
@@ -271,3 +271,50 @@ Two further defects in the same review: the retry authorization was never consum
 `CONFIRM_NOT_POSTED_RETRY` could be recorded against a charge the PMS had already ACKed `OK` — the exact
 duplicate debit the UNKNOWN design exists to prevent. Both are now refused, and terminal review actions
 require real evidence rather than the `{}` default.
+
+## 12. The 0013 correction — 0012 over-constrained the reversal
+
+Section 11 recorded five rows this document had claimed too early. A further review of the same code found
+a sixth problem, of the opposite kind: **0012 was too strict, and it contradicted the contract.**
+
+0012 read "programmatic reversal is `capability=false`" and refused `REVERSAL` posting rows outright. The
+FINAL contract states *both* halves, and they have to be held apart:
+
+| Contract | Says |
+|---|---|
+| §9a rule 5, Gate 3B | the **executable** reversal is unsupported in v1. `PT=C` and a negative `TA` are **unverified** and must never be transmitted. Corrections are manual Front Office operations. |
+| §15, §16 | `CREATE_REVERSAL` produces "**a new ledger row referencing the original**", and "reversal is a new REVERSAL row". |
+
+So the row is **required** and the sender is **forbidden**. 0012 forbade both — which would have made the
+§15 action unimplementable and removed the audited record that Gate 3B requires in exchange for deferring
+the capability at all.
+
+**0013 separates them, additively.** 0012 and receipt T0031 are unchanged.
+
+The passive row is written **only** by the audited `CREATE_REVERSAL` action, must reference an in-scope
+original `CHARGE`, carries the same currency and exponent, records a **positive** amount (direction is
+carried by `posting_type`, never by a negative `TA`), and is bounded so cumulative reversals can never
+exceed the charge. It is then **structurally inert**: `p4_reversal_never_queued` and
+`p4_reversal_never_attempted` make it impossible for it to acquire an outbox row or an attempt, so it can
+never allocate a `P#` or produce a byte.
+
+The transmission-protecting gates — freshness, lifecycle, FIAS exponent — are deliberately **not** applied
+to a record that never transmits. Requiring a fresh, `ACTIVE` interface to write an audit row would make
+the audit trail unavailable exactly when corrections happen, which is while the interface is down.
+
+`CREATE_REVERSAL` is also refused where it would be meaningless: the latest attempt must be `UNKNOWN` or
+`ACKED`/`OK` — something the PMS is believed to hold. A rejected or never-sent charge has nothing to
+reverse, and `CONFIRM_NOT_POSTED_ABANDON` is the right action there.
+
+## 13. The production construction boundary
+
+Section 11 recorded that `Engine` and `DarkGuard` had exported fields. Making them private closed the
+*mutation* hole and left the *construction* hole: `NewEngine` still accepted a caller-supplied `Config` and
+`Transport`, so production code could have built an independently configured financial sender in one struct
+literal.
+
+`NewProductionEngine(repo, getenv)` is now the only exported constructor and takes neither. Config comes
+from the fail-closed environment loader; the transport comes from an internal factory that returns nothing
+in this build and **refuses to start** if transmission is enabled against a build with no transport. The
+deterministic test seam lives in `export_test.go`, which the Go toolchain compiles only for this package's
+own tests — a production binary does not contain it and cannot call it.

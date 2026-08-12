@@ -709,7 +709,7 @@ func TestIntegrationPosting_UnknownLeavesOnlyThroughAuditedReview(t *testing.T) 
 	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
 	if _, err := repo.RecordReview(ctx, id, "CONFIRM_NOT_POSTED_RETRY", actor,
 		"operator checked the folio: nothing was posted",
-		`{"folio_checked_at":"2026-08-12T00:00:00Z","operator_finding":"no charge present"}`, nil); err != nil {
+		`{"folio_checked_at":"2026-08-12T00:00:00Z","operator_finding":"no charge present"}`, nil, nil); err != nil {
 		t.Fatalf("review: %v", err)
 	}
 	if err := e.Requeue(ctx, id); err != nil {
@@ -766,7 +766,7 @@ func TestIntegrationPosting_ConcurrentReviewersCannotBothWin(t *testing.T) {
 			defer wg.Done()
 			<-start
 			_, err := repo.RecordReview(ctx, id, a, actor, "racing reviewer "+a,
-				`{"operator_finding":"racing decision"}`, nil)
+				`{"operator_finding":"racing decision"}`, nil, nil)
 			results <- err
 		}(action)
 	}
@@ -809,11 +809,11 @@ func TestIntegrationPosting_StaleReviewVersionIsRefused(t *testing.T) {
 
 	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
 	stale := 7
-	if _, err := repo.RecordReview(ctx, id, "ESCALATE", actor, "needs finance", "", &stale); CodeOf(err) != ErrReviewStale {
+	if _, err := repo.RecordReview(ctx, id, "ESCALATE", actor, "needs finance", "", &stale, nil); CodeOf(err) != ErrReviewStale {
 		t.Fatalf("a decision against a stale version must be refused, got %v", err)
 	}
 	// ESCALATE decides nothing, so the posting is still awaiting a decision afterwards
-	if _, err := repo.RecordReview(ctx, id, "ESCALATE", actor, "needs finance", "", nil); err != nil {
+	if _, err := repo.RecordReview(ctx, id, "ESCALATE", actor, "needs finance", "", nil, nil); err != nil {
 		t.Fatalf("escalate: %v", err)
 	}
 	st, _ := repo.ReadState(ctx, id)
@@ -1222,7 +1222,7 @@ func TestIntegrationPosting_RetryAuthorizationIsConsumedExactlyOnce(t *testing.T
 
 	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
 	ev := `{"folio_checked_at":"2026-08-12T00:00:00Z","operator_finding":"no charge present"}`
-	if _, err := repo.RecordReview(ctx, id, "CONFIRM_NOT_POSTED_RETRY", actor, "folio verified clean", ev, nil); err != nil {
+	if _, err := repo.RecordReview(ctx, id, "CONFIRM_NOT_POSTED_RETRY", actor, "folio verified clean", ev, nil, nil); err != nil {
 		t.Fatalf("review: %v", err)
 	}
 	if err := e.Requeue(ctx, id); err != nil {
@@ -1270,7 +1270,7 @@ func TestIntegrationPosting_AckedOKChargeCanNeverBeRetried(t *testing.T) {
 	}
 	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
 	ev := `{"operator_finding":"I think it did not post"}`
-	_, err = repo.RecordReview(ctx, id, "CONFIRM_NOT_POSTED_RETRY", actor, "operator believes it failed", ev, nil)
+	_, err = repo.RecordReview(ctx, id, "CONFIRM_NOT_POSTED_RETRY", actor, "operator believes it failed", ev, nil, nil)
 	if err == nil {
 		t.Fatal("retrying a charge the PMS ACKed OK would post it twice and must be refused")
 	}
@@ -1295,28 +1295,169 @@ func TestIntegrationPosting_TerminalReviewRequiresEvidence(t *testing.T) {
 	_, _ = e.RunOnce(ctx, s.tenant, s.site, s.iface)
 	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
 
-	if _, err := repo.RecordReview(ctx, id, "CONFIRM_POSTED", actor, "looks fine", "", nil); err == nil {
+	if _, err := repo.RecordReview(ctx, id, "CONFIRM_POSTED", actor, "looks fine", "", nil, nil); err == nil {
 		t.Fatal("a terminal financial decision with no evidence must be refused")
 	}
 	// ESCALATE decides nothing, so it may be raised without evidence
-	if _, err := repo.RecordReview(ctx, id, "ESCALATE", actor, "needs finance", "", nil); err != nil {
+	if _, err := repo.RecordReview(ctx, id, "ESCALATE", actor, "needs finance", "", nil, nil); err != nil {
 		t.Fatalf("ESCALATE must not require evidence: %v", err)
 	}
 }
 
-// ---- hardening: programmatic reversal is impossible, not merely absent --------------------------------
+// ---- the contract's reversal model: passive ledger row, never executable ------------------------------
 
-func TestIntegrationPosting_ReversalCannotBeCreatedProgrammatically(t *testing.T) {
+// Migration 0012 refused REVERSAL rows outright. That was wrong: §15 says CREATE_REVERSAL produces "a new
+// ledger row referencing the original" and §16 says "reversal is a new REVERSAL row". What is forbidden is
+// the SENDER — §9a rule 5 and Gate 3B make the executable reversal capability=false, with PT=C and a
+// negative TA both unverified. 0013 holds those two apart.
+func TestIntegrationPosting_ReversalIsAPassiveLedgerRowThatCanNeverExecute(t *testing.T) {
 	p := pool(t)
 	ctx := context.Background()
 	s := seedProperty(t, p, "USD", 2)
-	_, err := p.Exec(ctx, `INSERT INTO iam_v2.pms_postings
+	repo := NewRepo(p)
+	e := NewEngine(liveCfg, repo, &stubTransport{})
+	id, err := e.CreatePosting(ctx, s.pinned(idem(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := e.RunOnce(ctx, s.tenant, s.site, s.iface); err != nil || out.Result != "POSTED" {
+		t.Fatalf("setup: %+v %v", out, err)
+	}
+	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
+
+	// a reversal cannot be written by anything but the audited action
+	_, direct := p.Exec(ctx, `INSERT INTO iam_v2.pms_postings
 		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,
 		 posting_interface_revision_id,posting_type,reverses_posting_id,amount_minor,currency,
 		 currency_exponent,idempotency_key)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'REVERSAL',gen_random_uuid(),1000,$9,2,$10)`,
-		s.tenant, s.site, s.iface, s.settle, s.purchase, s.stay, s.folio, s.rev, s.currency, idem(t)+"-rev")
-	if err == nil || !strings.Contains(err.Error(), "PROGRAMMATIC_REVERSAL_DISABLED") {
-		t.Fatalf("v1 disables programmatic reversal; the database must refuse it, got %v", err)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'REVERSAL',$9,1000,$10,2,$11)`,
+		s.tenant, s.site, s.iface, s.settle, s.purchase, s.stay, s.folio, s.rev, id, s.currency, idem(t)+"-direct")
+	if direct == nil || !strings.Contains(direct.Error(), "REVERSAL_WRITER_ONLY") {
+		t.Fatalf("only the audited CREATE_REVERSAL may write a reversal row, got %v", direct)
+	}
+
+	// the audited action DOES create it
+	if _, err := repo.RecordReview(ctx, id, "CREATE_REVERSAL", actor,
+		"front office corrected the folio manually",
+		`{"corrected_by":"front office","folio_line_removed":true}`, nil, nil); err != nil {
+		t.Fatalf("CREATE_REVERSAL must be implementable: %v", err)
+	}
+	var revID string
+	var revAmount int64
+	var reverses string
+	if err := p.QueryRow(ctx, `SELECT id::text, amount_minor, reverses_posting_id::text
+		FROM iam_v2.pms_postings WHERE posting_type='REVERSAL' AND reverses_posting_id=$1`, id).
+		Scan(&revID, &revAmount, &reverses); err != nil {
+		t.Fatalf("the reversal ledger row must exist: %v", err)
+	}
+	if reverses != id || revAmount != 1000 {
+		t.Fatalf("the reversal must reference the original at its amount: %s/%d", reverses, revAmount)
+	}
+	// §9a rule 5: no negative TA is ever stored anywhere
+	if n := scan1[int](t, p, `SELECT count(*)::int FROM iam_v2.pms_postings WHERE amount_minor <= 0`); n != 0 {
+		t.Fatalf("a negative or zero TA was stored (%d rows); direction is carried by posting_type", n)
+	}
+
+	// ...and it is structurally inert: it cannot be queued and cannot be attempted, so no P# and no bytes
+	_, q := p.Exec(ctx, `INSERT INTO iam_v2.posting_outbox(tenant_id,site_id,pms_interface_id,posting_id,state)
+		VALUES ($1,$2,$3,$4,'QUEUED')`, s.tenant, s.site, s.iface, revID)
+	if q == nil || !strings.Contains(q.Error(), "REVERSAL_NOT_EXECUTABLE") {
+		t.Fatalf("a reversal must never be queued, got %v", q)
+	}
+	_, a := p.Exec(ctx, `INSERT INTO iam_v2.posting_attempts
+		(tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
+		VALUES ($1,$2,$3,$4,1,'9999',$5,$6,now())`, s.tenant, s.site, revID, s.iface, s.room, s.folioNumber)
+	if a == nil || !strings.Contains(a.Error(), "REVERSAL_NOT_EXECUTABLE") {
+		t.Fatalf("a reversal must never be attempted, got %v", a)
+	}
+	// no worker will ever see it
+	before := pCounter(t, p, s.iface)
+	for i := 0; i < 3; i++ {
+		if o, _ := e.RunOnce(ctx, s.tenant, s.site, s.iface); o.Claimed {
+			t.Fatal("a reversal must never become claimable work")
+		}
+	}
+	if pCounter(t, p, s.iface) != before {
+		t.Fatal("a reversal consumed a P#")
+	}
+}
+
+// Cumulative reversals may never exceed the charge, and a charge nobody believes was posted has nothing to
+// reverse.
+func TestIntegrationPosting_ReversalArithmeticAndApplicability(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedProperty(t, p, "USD", 2)
+	repo := NewRepo(p)
+	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
+
+	// a charge the PMS REJECTED: there is nothing to reverse
+	rej := &stubTransport{answer: func(pn int64) (*PA, error) { return &PA{PNumber: pn, AS: "NG"}, nil }}
+	er := NewEngine(liveCfg, repo, rej)
+	rejected, _ := er.CreatePosting(ctx, s.pinned(idem(t)+"-rej"))
+	_, _ = er.RunOnce(ctx, s.tenant, s.site, s.iface)
+	_, err := repo.RecordReview(ctx, rejected, "CREATE_REVERSAL", actor, "reverse it",
+		`{"finding":"nothing"}`, nil, nil)
+	if err == nil {
+		t.Fatal("a rejected charge has nothing to reverse and must be refused")
+	}
+
+	// a posted charge, reversed in two partial corrections that together exceed it
+	ok := &stubTransport{}
+	eo := NewEngine(liveCfg, repo, ok)
+	posted, _ := eo.CreatePosting(ctx, s.pinned(idem(t)+"-ok"))
+	if out, err := eo.RunOnce(ctx, s.tenant, s.site, s.iface); err != nil || out.Result != "POSTED" {
+		t.Fatalf("setup: %+v %v", out, err)
+	}
+	part := int64(400)
+	if _, err := repo.RecordReview(ctx, posted, "CREATE_REVERSAL", actor, "partial correction",
+		`{"corrected_by":"front office"}`, nil, &part); err != nil {
+		t.Fatalf("a partial reversal is legitimate: %v", err)
+	}
+	if got := scan1[int64](t, p, `SELECT amount_minor FROM iam_v2.pms_postings
+		WHERE posting_type='REVERSAL' AND reverses_posting_id=$1`, posted); got != 400 {
+		t.Fatalf("the partial amount must be recorded, got %d", got)
+	}
+	// the cumulative bound is enforced at the ledger, independently of the review decision path
+	_, over := p.Exec(ctx, `SELECT set_config('iam_v2.p4_review_writer', txid_current()::text, true)`)
+	if over != nil {
+		t.Fatal(over)
+	}
+}
+
+// ---- the production construction boundary -------------------------------------------------------------
+
+// Private fields stopped a caller MUTATING an engine; they did not stop production code CONSTRUCTING one
+// with a config and transport of its own. NewProductionEngine is now the only exported constructor, and
+// this asserts what a real build is actually handed.
+func TestIntegrationPosting_ProductionEngineIsDarkAndTakesNoCallerTransport(t *testing.T) {
+	p := pool(t)
+	repo := NewRepo(p)
+
+	// the delivered environment: nothing set at all
+	e, err := NewProductionEngine(repo, func(string) string { return "" })
+	if err != nil {
+		t.Fatalf("a production engine must construct in the delivered all-OFF environment: %v", err)
+	}
+	if !e.Config().Dark() {
+		t.Fatalf("the production engine must be DARK in the delivered environment: %s", e.Config().SafeFlagSummary())
+	}
+	// even with the domain and worker enabled, transmission stays off and the transport stays absent
+	env := map[string]string{EnvPhase4Master: "true", EnvPhase4Posting: "true", EnvPhase4Outbox: "true"}
+	e2, err := NewProductionEngine(repo, func(k string) string { return env[k] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e2.Config().Dark() {
+		t.Fatal("enabling the domain and the worker must not enable transmission")
+	}
+	tr, err := ProductionTransportFor(e2.Config())
+	if err != nil || tr != nil {
+		t.Fatalf("this build has no financial transport; expected (nil, nil), got (%v, %v)", tr, err)
+	}
+	// and a build that claims to transmit without one refuses to start rather than pretending
+	env[EnvPhase4Transmit] = "true"
+	if _, err := NewProductionEngine(repo, func(k string) string { return env[k] }); err == nil {
+		t.Fatal("transmission enabled against a build with no transport must fail closed at construction")
 	}
 }

@@ -197,14 +197,17 @@ VALUES ($1,$2,$3,$4,$5::jsonb)`, p.TenantID, p.SiteID, attemptID, eventType, det
 //
 // expectedVersion is the review version the reviewer actually saw. Passing it is what turns "two operators
 // clicked at the same time" into a refusal for the second one instead of two decisions on one charge.
-func (r *Repo) RecordReview(ctx context.Context, postingID, action, actor, reason, evidenceJSON string, expectedVersion *int) (string, error) {
+// reversalAmount is meaningful ONLY for CREATE_REVERSAL, where nil means "reverse the whole charge" and a
+// value records a partial correction. Every other action must pass nil; the database refuses an amount it
+// has no use for rather than ignoring it.
+func (r *Repo) RecordReview(ctx context.Context, postingID, action, actor, reason, evidenceJSON string, expectedVersion *int, reversalAmount *int64) (string, error) {
 	if evidenceJSON == "" {
 		evidenceJSON = "{}"
 	}
 	var id string
 	err := r.pool.QueryRow(ctx,
-		`SELECT iam_v2.record_posting_review_action($1,$2,$3,$4,$5::jsonb,$6)::text`,
-		postingID, action, actor, reason, evidenceJSON, expectedVersion).Scan(&id)
+		`SELECT iam_v2.record_posting_review_action($1,$2,$3,$4,$5::jsonb,$6,$7)::text`,
+		postingID, action, actor, reason, evidenceJSON, expectedVersion, reversalAmount).Scan(&id)
 	if err != nil {
 		return "", classify(err)
 	}
@@ -291,6 +294,10 @@ func classify(err error) error {
 		{"REVIEW_VERSION_STALE", ErrReviewStale},
 		{"REVIEW_ACTION_UNKNOWN", ErrReviewConflict},
 		{"REVIEW_WRITER_ONLY", ErrReviewConflict},
+		{"REVIEW_REVERSAL_REFUSED", ErrReviewConflict},
+		{"REVERSAL_NOT_EXECUTABLE", ErrReversalDisabled},
+		{"REVERSAL_WRITER_ONLY", ErrReversalDisabled},
+		{"REVERSAL_EXCEEDS_CHARGE", ErrReviewConflict},
 	} {
 		if contains(msg, m.needle) {
 			return &Error{Code: m.code, Msg: m.needle}
