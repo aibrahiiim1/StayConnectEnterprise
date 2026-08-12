@@ -1,0 +1,91 @@
+{
+  "transition_id": "T0030",
+  "seq": 30,
+  "timestamp": "2026-08-12T00:30:00Z",
+  "record_type": "PHASE_4_FINANCIAL_EXECUTION_CORE_IMPLEMENTED_DARK",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED__PHASE_4_AUTHORIZED_PLANNING",
+    "phase_status": "PLANNING"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "authorization_note": "NO new Product-Owner decision is created or implied by this receipt. D18 / T0029 already authorized Phase-4 implementation DARK. This receipt records only the FACT that the authorized financial execution core now exists and is verified, which is why the recorded phase status can no longer be PLANNING.",
+  "phase3_maturity_change": "NONE. Phase 3 remains ACCEPTED_AND_CLOSED at verified DARK maturity (D16/T0024) and MERGED (D17/T0025). Nothing in this receipt reopens, re-accepts or alters Phase 3.",
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-12, 'PHASE 4 - FINANCIAL EXECUTION CORE', continuing under the existing D18 / T0029 authorization and explicitly stating that no additional Product-Owner approval is required.",
+  "delivered": [
+    "data-plane/migrations/0011_phase4_financial_execution.{up,down}.sql - ADDITIVE and reversible, containing ONLY the four measured gaps plus the durable P# allocator and the structural no-blind-retry gate: G1 verified RN + G# (mandatory, non-blank, wire-safe), G2 the immutable per-revision financial base currency and exponent with exact three-way currency equality, G3 the DERIVED posting read model iam_v2.posting_execution_state, and C21 iam_v2.posting_review_state + record_posting_review_action() for atomic reviewer concurrency.",
+    "data-plane/internal/posting - the Posting domain core: pinned financial evidence, the fail-closed creation gate, the per-interface outbox lanes with FOR UPDATE SKIP LOCKED, the durable P# allocator, DARK FIAS PS construction, PA correlation by interface + P#, and the terminal UNKNOWN state.",
+    "posting.DarkGuard - the single financial-transmission chokepoint. Every engine constructor wraps its transport in it, and with the Phase-4 flags OFF it refuses before the inner transport is reached.",
+    "iam_v2_scratch/phase4_0011_financial.sh - the migration and financial DB gate (80 assertions), which also re-runs the ENTIRE pre-0011 financial invariant suite on the pre-0011 chain AND again after 0011 on a clean rebuild.",
+    "scripts/phase4-pg-integration.sh + data-plane/internal/posting/pg_integration_test.go - the financial-core integration matrix against a disposable PostgreSQL 16.",
+    ".github/workflows/phase4-financial-core.yml, scripts/ci/phase4-dark-check.sh, scripts/ci/phase4_evidence.py - the authoritative automated gate and its machine-derived evidence artifact."
+  ],
+  "verification": {
+    "migration_gate": "iam_v2_scratch/phase4_0011_financial.sh - 80 PASS / 0 FAIL on a freshly built disposable PostgreSQL 16.",
+    "pre_0011_invariants_pre_chain": "31 PASS / 0 FAIL",
+    "pre_0011_invariants_post_0011": "31 PASS / 0 FAIL on a clean rebuild carrying 0011 - nothing that existed before 0011 was weakened.",
+    "financial_core_unit": "go test ./internal/posting/ - 61 PASS / 0 FAIL",
+    "financial_core_integration": "go test -tags integration -run IntegrationPosting ./internal/posting/ - 32 PASS / 0 FAIL against disposable PostgreSQL 16.",
+    "dark_static_assertion": "scripts/ci/phase4-dark-check.sh - PASS (6/6).",
+    "governance": "PROJECT_STATE_GOVERNANCE PASS, ZERO_STALE_LEFTOVERS PASS, CURRENT_STATE_PARITY 18/18, negative 34/34, TOOLING_CONTROL_CHARS PASS.",
+    "race_detector": "go test -race ./internal/posting/ ./internal/pmsd/ runs in the Phase-4 CI gate. It cannot run on the Windows development workstation, which has no C toolchain, so its result is CI-only and is recorded in the CI evidence artifact rather than claimed from a local run."
+  },
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only, created and destroyed by the gate scripts on loopback."
+  },
+  "no_financial_traffic": {
+    "real_pms_ps_transmitted": false,
+    "real_pa_accepted": false,
+    "guest_folio_debited": false,
+    "payment_provider_charge_or_refund": false,
+    "paid_guest_access": false,
+    "hotel_id_2_financial_onboarding": false,
+    "programmatic_reversal_implemented": false,
+    "implicit_fx_possible": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "deployment_performed": false
+  },
+  "corrections_absorbed": [
+    "The direct SQL lifecycle UPDATE in the DB-level non-IN_HOUSE test is a STRUCTURAL charge_gate proof and is now described as exactly that. Migration 0010 separates structural lifecycle validity from the trusted controlled Stay-domain write boundary, so that test is not evidence of a trusted transition. The end-to-end equivalent now exists as TestIntegrationPosting_CheckoutAfterQueueingStopsTheCharge, which moves the stay after the posting is already authorized and queued and proves the engine stops the charge with no P#, no attempt and no bytes.",
+    "The Phase-4 audit's G3 attribution was wrong. G3, the derived posting read model, is NOT C3 - C3 is 'room number is evidence, never identity' and it was already satisfied. G3 serves C13, C20, C30 and C33, and the audit totals are corrected accordingly.",
+    "C21 is treated as a concurrency invariant, not a schema column. It is implemented as an advisory-lock plus row-lock plus optimistic-version mechanism and proved under real PostgreSQL concurrency, both in the DB gate and in the Go integration matrix, while posting_review_actions stays fully append-only.",
+    "The historical 0e6ba30..7202152 report inventory was stated as 19 paths. The Git-authoritative count for that range is 17. The count is corrected here; history is not rewritten."
+  ],
+  "remaining_phase4_scope": [
+    "Manual Review operator workflow: the section-15 catalog surfaced to an operator with RBAC and password step-up.",
+    "Payment-provider execution and the settlement boundary.",
+    "Restore handling and FINANCIAL_RECOVERY_MODE.",
+    "Operator UI and observability: queue depth, oldest queued age, UNKNOWN count and backlog.",
+    "Final controlled DARK deployment, reboot persistence and rollback rehearsal."
+  ],
+  "rollback": {
+    "database": "data-plane/migrations/0011_phase4_financial_execution.down.sql, proved to reverse ONLY 0011 - the full catalog fingerprint returns byte-identical to the pre-0011 baseline.",
+    "runtime": "No runtime was deployed. internal/posting is unreachable while the Phase-4 flags are OFF.",
+    "repository": "git revert of this branch's eventual merge commit."
+  },
+  "evidence_files": [
+    "data-plane/migrations/0011_phase4_financial_execution.up.sql",
+    "data-plane/migrations/0011_phase4_financial_execution.down.sql",
+    "iam_v2_scratch/phase4_0011_financial.sh",
+    "scripts/phase4-pg-integration.sh",
+    "scripts/ci/phase4-dark-check.sh",
+    ".github/workflows/phase4-financial-core.yml",
+    "docs/architecture/Phase4-Financial-Schema-Gap-Audit.md",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the financial-core verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. This receipt records implementation progress only. Phase 4 remains open, DARK, flags OFF, with the scope listed in remaining_phase4_scope still to be delivered.",
+  "next_action": "Continue the authorized Phase-4 implementation on the same branch with the Manual Review operator workflow, the payment and settlement boundary, FINANCIAL_RECOVERY_MODE, operator UI and observability, and the final controlled DARK deployment."
+}

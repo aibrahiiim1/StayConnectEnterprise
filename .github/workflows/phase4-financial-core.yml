@@ -1,0 +1,129 @@
+name: Phase 4 Financial Core CI
+
+# The authoritative automated gate for the Phase-4 financial execution core. It runs on the exact HEAD under
+# test and produces machine-verifiable evidence — never a hand-typed number and never a workstation result.
+#
+# What it proves, in order:
+#   1. the financial core builds, vets and formats clean;
+#   2. its unit matrix passes, including the PS golden wire, the PA catalog and the DARK guard;
+#   3. it passes under the race detector, because the outbox lanes and the review path are concurrent;
+#   4. migration 0011 applies, re-applies as designed, reverses cleanly, and weakens nothing that existed
+#      before it — the gate re-runs the ENTIRE pre-0011 financial invariant suite on both chains;
+#   5. the financial core behaves correctly against a real PostgreSQL: fail-closed creation, P# under
+#      contention, independent interface lanes, UNKNOWN that never auto-retries, and reviewer races;
+#   6. NOTHING in the tree enables a Phase-4 flag, and no financial record can leave a Phase-3 connector.
+#
+# It contacts no appliance, no Production database, no PMS and no payment provider. Every database it uses
+# is a disposable container it creates and destroys itself, and every transport in the tests is an
+# in-process stub.
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phase4-financial-core-gate:
+    name: phase4-financial-core-gate
+    runs-on: ubuntu-latest
+    env:
+      EVID: ${{ github.workspace }}/.phase4-evidence
+    steps:
+      - name: Check out the PR HEAD
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: data-plane/go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Initialise evidence staging
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVID/counts" "$EVID/logs"
+          {
+            printf 'head\t%s\n' "$(git rev-parse HEAD)"
+            printf 'branch\t%s\n' "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+            printf 'run_id\t%s\n' "$GITHUB_RUN_ID"
+            printf 'go\t%s\n' "$(go version)"
+            printf 'postgres\t%s\n' "postgres:16-alpine (disposable, per gate)"
+            printf 'start_utc\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$EVID/env.tsv"
+
+      # ---------------------------------------------------------------- build / static
+      - name: gofmt
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh gofmt -- bash $GITHUB_WORKSPACE/scripts/ci/gofmt-check.sh"
+
+      - name: go build (./...)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-build -- go build ./..."
+
+      - name: go vet (./...)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet -- go vet ./..."
+
+      # ---------------------------------------------------------------- financial core: unit + race
+      - name: Financial-core unit matrix
+        working-directory: data-plane
+        # PS golden wire, contract field order, no currency on the wire, the AS catalog, ambiguous-PA
+        # refusal, the DARK guard, and the fail-closed gate matrix on synthetic snapshots.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-unit --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh phase4-unit
+          ./internal/posting/ -count=1
+
+      - name: Financial-core race detector
+        working-directory: data-plane
+        # The outbox lanes, the P# allocator and the review path are all concurrent. A data race in a money
+        # path is a defect regardless of whether a test happened to observe it.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-race --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh phase4-race
+          -race ./internal/posting/ ./internal/pmsd/ -count=1
+
+      # ---------------------------------------------------------------- migration 0011
+      - name: Migration 0011 + financial DB invariant gate (disposable PG16)
+        # Includes the ENTIRE pre-0011 financial invariant suite, run on the pre-0011 chain and again after
+        # 0011 on a clean rebuild, so "0011 weakened nothing" is a measured claim rather than an assertion.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-migration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase4_0011_financial.sh"
+
+      # ---------------------------------------------------------------- financial core against real PG
+      - name: Financial-core PG16 integration matrix (disposable PG16)
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-pg-integration.sh"
+
+      # ---------------------------------------------------------------- DARK
+      - name: DARK assertion — no Phase-4 flag is enabled anywhere in the tree
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dark -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dark-check.sh"
+
+      - name: Assemble the Phase-4 financial-core evidence artifact
+        if: always()
+        run: python3 scripts/ci/phase4_evidence.py
+
+      - name: Record the HEAD for the artifact name
+        id: head
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the Phase-4 financial-core evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-financial-core-evidence-${{ steps.head.outputs.sha }}
+          path: ${{ github.workspace }}/.phase4-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90

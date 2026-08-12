@@ -22,6 +22,13 @@ CUR_ACTIVITY = _STATE_DOC["current_activity"]
 CUR_PHASE = _STATE_DOC["current_phase"]
 # First 60 chars are enough to anchor uniquely without pinning the whole sentence.
 CUR_NEXT_ACTION_PREFIX = _STATE_DOC["next_authorized_action"][:60]
+# Derived anchors. These two sentences are rewritten on every phase advance, so pinning their exact
+# wording made the suite drift silently: it kept passing its own fixtures until a run finally aborted
+# on "fixture drift". Deriving them means the suite follows the authoritative state file.
+CUR_GOV_MAINT = next(a for a in _STATE_DOC["allowed_actions"]
+                    if a.startswith("Governance and documentation maintenance"))
+CUR_PHASE_BEYOND = next(a for a in _STATE_DOC["prohibited_actions"]
+                       if a.startswith("Implementing any Phase beyond"))
 CUR_TRANSITION = json.load(_io.open(
     os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))["latest_transition_id"]
 
@@ -121,7 +128,7 @@ MUTATIONS = [
    ("replace", [("No governance blocker. Phase 3 is ACCEPTED and CLOSED",
                  "Site-DB services still connect as superuser stayconnect and least-privilege roles are not yet applied. No governance blocker. Phase 3 is ACCEPTED and CLOSED")])),
  ("M31 stale 'Phase 3 not-started/unauthorized' in a current field after D14/T0015", "governance/project-state.json",
-   ("replace", [('"Governance and documentation maintenance for Phase 3"',
+   ("replace", [(f'"{CUR_GOV_MAINT}"',
                  '"Phase 3 is NOT_STARTED and unauthorized; await explicit Product-Owner authorization"')])),
  ("M32 stale HEAD / production-unchanged in current state after T0010", "governance/project-state.json",
    ("replace", [("legacy public-schema IAM remains the sole production authority",
@@ -132,10 +139,10 @@ MUTATIONS = [
    ("replace", [("Product-Owner ACCEPTED_AND_CLOSED at DARK maturity via D11/T0011",
                  "reboot-validated; PENDING PO acceptance")])),
  ("M35 closed/merged but an allowed_action still says merge PR #2", "governance/project-state.json",
-   ("replace", [('"Governance and documentation maintenance for Phase 3"',
+   ("replace", [(f'"{CUR_GOV_MAINT}"',
                  '"Merge PR #2 as governance/code delivery only"')])),
  ("M36 stale prohibition still forbids the authorized current Phase 3", "governance/project-state.json",
-   ("replace", [("Implementing any Phase beyond the authorized Phase 3 scope (Phase 4 or any later Phase)",
+   ("replace", [(CUR_PHASE_BEYOND,
                  "Implementing any Phase beyond the authorized Phase 2 dark scope (Phase 3 or any later Phase)")])),
  ("M37 phase3_execution.transition_id not pointing at T0015 while in progress", "governance/project-state.json",
    ("replace", [('"transition_id": "T0015",', '"transition_id": "T0012",')])),

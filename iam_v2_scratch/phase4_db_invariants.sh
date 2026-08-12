@@ -46,12 +46,23 @@ echo "===== PHASE-4 FINANCIAL DB INVARIANTS (behavioural) ====="
 
 # Fixture context: a revision with a CONCRETE folio strategy, an IN_HOUSE postable stay and a folio, so the
 # fail-closed paths below are proven to fail for the RIGHT reason rather than for a missing fixture.
-REV_OK="$(q "SELECT id FROM iam_v2.pms_interface_revisions WHERE pms_interface_id='$IF1' AND folio_identity_strategy <> 'UNSET' ORDER BY revision_no DESC LIMIT 1;")"
+# This suite is the BASELINE proof: every invariant here existed before migration 0011. It is run against
+# BOTH chains - pre-0011 to record what was already true, and post-0011 to prove 0011 weakened none of it.
+# Where 0011 adds a STRICTER refusal on the same write, the expected reason differs, so the few checks
+# below that are affected branch on the schema instead of pretending the two chains are identical.
+HAS_0011="$(q "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_revisions' AND column_name='financial_base_currency';")"
+if [ "$HAS_0011" = "1" ]; then
+  # post-0011 a posting also needs a FINANCIALLY ONBOARDED revision, so the positive control must use one
+  REV_OK="$(q "SELECT id FROM iam_v2.pms_interface_revisions WHERE pms_interface_id='$IF1' AND folio_identity_strategy <> 'UNSET' AND financial_base_currency IS NOT NULL ORDER BY revision_no DESC LIMIT 1;")"
+else
+  REV_OK="$(q "SELECT id FROM iam_v2.pms_interface_revisions WHERE pms_interface_id='$IF1' AND folio_identity_strategy <> 'UNSET' ORDER BY revision_no DESC LIMIT 1;")"
+fi
 REV_UNSET="$(q "SELECT id FROM iam_v2.pms_interface_revisions WHERE pms_interface_id='$IF1' AND folio_identity_strategy='UNSET' ORDER BY revision_no DESC LIMIT 1;")"
 STAY="$(q "SELECT id FROM iam_v2.stays WHERE pms_interface_id='$IF1' LIMIT 1;")"
 FOLIO="$(q "SELECT id FROM iam_v2.folios WHERE pms_interface_id='$IF1' LIMIT 1;")"
 PUR="$(q "SELECT id FROM iam_v2.purchases LIMIT 1;")"
 SET="$(q "SELECT id FROM iam_v2.settlements LIMIT 1;")"
+echo "  schema: 0011_applied=$HAS_0011"
 echo "  fixture: rev_ok=${REV_OK:0:8} rev_unset=${REV_UNSET:0:8} stay=${STAY:0:8} folio=${FOLIO:0:8} purchase=${PUR:0:8} settlement=${SET:0:8}"
 
 mkposting(){ # $1=id $2=revision $3=idem
@@ -89,14 +100,22 @@ rejects "C1" "folio from another tenant/site/interface rejected" \
 accepts "C9" "first attempt with P#=900001 accepted" \
   "INSERT INTO iam_v2.posting_attempts(id,tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
    VALUES ('a9a90000-0000-0000-0000-000000000001','$T','$S','c1c10000-0000-0000-0000-000000000001','$IF1',1,'900001','14215','G1',now());"
+# A SECOND posting reusing the same P#. Deliberately a different posting rather than a second attempt on
+# the same one: this check is about the per-interface P# namespace, and reusing the first posting would
+# let the post-0011 retry gate answer first and leave P# uniqueness untested.
+accepts "C9" "a second posting exists to contest the P# namespace" \
+  "$(mkposting 'c1c10000-0000-0000-0000-000000000009' "$REV_OK" 'inv-ok-9')"
 rejects "C9" "duplicate P# in the SAME interface rejected" \
   "INSERT INTO iam_v2.posting_attempts(id,tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
-   VALUES ('a9a90000-0000-0000-0000-000000000002','$T','$S','c1c10000-0000-0000-0000-000000000001','$IF1',2,'900001','14215','G1',now());" "p_number"
+   VALUES ('a9a90000-0000-0000-0000-000000000002','$T','$S','c1c10000-0000-0000-0000-000000000009','$IF1',1,'900001','14215','G1',now());" "p_number"
 
 # ---- attempt_no uniqueness per posting -------------------------------------------------------------------
+# Pre-0011 the UNIQUE (internal_posting_id, attempt_no) index answers. Post-0011 the retry gate answers
+# first and refuses it as an out-of-sequence attempt. Both refuse the duplicate; they say different things.
+if [ "$HAS_0011" = "1" ]; then WANT8="ATTEMPT_SEQUENCE"; else WANT8="attempt_no"; fi
 rejects "C8" "duplicate attempt_no for one posting rejected" \
   "INSERT INTO iam_v2.posting_attempts(id,tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
-   VALUES ('a9a90000-0000-0000-0000-000000000003','$T','$S','c1c10000-0000-0000-0000-000000000001','$IF1',1,'900002','14215','G1',now());" "attempt_no"
+   VALUES ('a9a90000-0000-0000-0000-000000000003','$T','$S','c1c10000-0000-0000-0000-000000000001','$IF1',1,'900002','14215','G1',now());" "$WANT8"
 
 # ---- C15 one-way outcome ---------------------------------------------------------------------------------
 accepts "C15" "SENDING -> UNKNOWN allowed" \
@@ -120,16 +139,26 @@ rejects "C16" "attempt event DELETE rejected" \
   "DELETE FROM iam_v2.posting_attempt_events WHERE id='e1e10000-0000-0000-0000-000000000001';"
 
 # ---- C17/C19 review action catalog + immutability ---------------------------------------------------------
-accepts "C17" "CONFIRM_POSTED review action accepted" \
-  "INSERT INTO iam_v2.posting_review_actions(id,tenant_id,site_id,posting_id,action,actor,reason,evidence)
-   VALUES ('4a4a0000-0000-0000-0000-000000000001','$T','$S','c1c10000-0000-0000-0000-000000000001','CONFIRM_POSTED','$T','FOLIO_VERIFIED','{}');"
-rejects "C17" "generic APPROVE action rejected (no generic approve exists)" \
-  "INSERT INTO iam_v2.posting_review_actions(id,tenant_id,site_id,posting_id,action,actor,reason,evidence)
-   VALUES ('4a4a0000-0000-0000-0000-000000000002','$T','$S','c1c10000-0000-0000-0000-000000000001','APPROVE','$T','X','{}');" "action"
+if [ "$HAS_0011" = "1" ]; then
+  # post-0011 the append-only ledger has exactly ONE writer, so the review goes through it
+  accepts "C17" "CONFIRM_POSTED review action accepted (via the controlled writer)" \
+    "SELECT iam_v2.record_posting_review_action('c1c10000-0000-0000-0000-000000000001','CONFIRM_POSTED','$T','FOLIO_VERIFIED');"
+  rejects "C17" "generic APPROVE action rejected (no generic approve exists)" \
+    "SELECT iam_v2.record_posting_review_action('c1c10000-0000-0000-0000-000000000001','APPROVE','$T','X');" "REVIEW_ACTION_UNKNOWN"
+else
+  accepts "C17" "CONFIRM_POSTED review action accepted" \
+    "INSERT INTO iam_v2.posting_review_actions(id,tenant_id,site_id,posting_id,action,actor,reason,evidence)
+     VALUES ('4a4a0000-0000-0000-0000-000000000001','$T','$S','c1c10000-0000-0000-0000-000000000001','CONFIRM_POSTED','$T','FOLIO_VERIFIED','{}');"
+  rejects "C17" "generic APPROVE action rejected (no generic approve exists)" \
+    "INSERT INTO iam_v2.posting_review_actions(id,tenant_id,site_id,posting_id,action,actor,reason,evidence)
+     VALUES ('4a4a0000-0000-0000-0000-000000000002','$T','$S','c1c10000-0000-0000-0000-000000000001','APPROVE','$T','X','{}');" "action"
+fi
+# whichever way it was written, the recorded action is immutable
+RACT="$(q "SELECT id FROM iam_v2.posting_review_actions WHERE posting_id='c1c10000-0000-0000-0000-000000000001' LIMIT 1;")"
 rejects "C19" "review action UPDATE rejected" \
-  "UPDATE iam_v2.posting_review_actions SET reason='CHANGED' WHERE id='4a4a0000-0000-0000-0000-000000000001';"
+  "UPDATE iam_v2.posting_review_actions SET reason='CHANGED' WHERE id='$RACT';"
 rejects "C19" "review action DELETE rejected" \
-  "DELETE FROM iam_v2.posting_review_actions WHERE id='4a4a0000-0000-0000-0000-000000000001';"
+  "DELETE FROM iam_v2.posting_review_actions WHERE id='$RACT';"
 
 # ---- C22 one active outbox row per posting -----------------------------------------------------------------
 accepts "C22" "first QUEUED outbox row accepted" \

@@ -1,6 +1,9 @@
 # StayConnect IAM — Phase 4 Plan: Financial Execution Layer (DARK)
 
-**Status:** AUTHORIZED — PLANNING. Product-Owner decision **D18**, transition **T0029**, 2026-08-11.
+**Status:** AUTHORIZED — **IMPLEMENTATION IN PROGRESS (DARK)**. Product-Owner decision **D18**, transition **T0029** (2026-08-11); implementation progress recorded in transition **T0030** (2026-08-12) under the SAME authorization — no new decision was created.
+**Delivered so far:** WS-A, WS-B, WS-C, WS-D, WS-E and the financial-core half of WS-K, all verified DARK against disposable PostgreSQL 16 and wired into `.github/workflows/phase4-financial-core.yml`.
+**Still open:** WS-F (Manual Review operator workflow), WS-G (payments), WS-H (`FINANCIAL_RECOVERY_MODE`), WS-I (observability), WS-J (operator UI), WS-L (DARK deployment).
+**Not accepted, not closed.** Every Phase-4 flag is OFF and no real financial traffic has occurred.
 **Baseline:** master `a4e951972d8087f00a40d8b39eb1b87ea03144b6`; accepted Phase-3 runtime `7c8b8cf0…`.
 **Maturity target:** IMPLEMENTED + VERIFIED AT DARK / NO-FINANCIAL-TRAFFIC. Real-financial acceptance
 (Tier-3 3C live) is **out of scope** and requires separate explicit Product-Owner authorization.
@@ -33,12 +36,12 @@ Every design choice below is downstream of that sentence.
 
 | WS | Workstream | Primary paths |
 |---|---|---|
-| **WS-A** | Migration `0011_phase4_financial_execution` — **additive only, and ONLY the four measured gaps**: G1 RN+G# mandatory, G2 `base_currency`/`base_currency_exponent` on `pms_interface_revisions` plus posting currency equality, G3 derived posting-status view, C21 review concurrency column. **It must NOT create, replace, rename or weaken** the append-only triggers, one-way outcome trigger, charge gate, `P#` uniqueness, outbox one-active index or composite FK pinning — all measured present and behaviourally proven 30/30. See `Phase4-Financial-Schema-Gap-Audit.md`. | `data-plane/migrations/0011_*.{up,down}.sql` |
-| **WS-B** | Posting domain + fail-closed gates (identity pinning, RN+G#, folio strategy, currency equality, freshness) | `data-plane/internal/iamv2/posting_*.go` |
-| **WS-C** | `P#` allocator — durable atomic per-interface sequence, **not** epoch-seeded | `posting_pnumber.go` |
-| **WS-D** | Outbox + per-interface financial lanes, single-writer claim, bounded in-flight | `posting_outbox.go`, `posting_worker.go` |
-| **WS-E** | PS/PA state machine + UNKNOWN (no auto-retry, no second `P#`) | `posting_state.go`, `pms/protel_fias_posting.go` |
-| **WS-F** | Manual Review — the exact §15 action catalog, step-up, append-only, optimistic concurrency | `posting_review.go` |
+| **WS-A** ✅ | Migration `0011_phase4_financial_execution` — **DELIVERED**, additive and reversible, containing ONLY the measured gaps: G1 verified RN+G# (mandatory, non-blank, wire-safe), G2 `financial_base_currency`/`financial_base_currency_exponent` on the immutable `pms_interface_revisions` plus exact three-way currency equality, G3 the DERIVED view `iam_v2.posting_execution_state`, C21 `posting_review_state` + `record_posting_review_action()`, the durable `P#` allocator, and the structural no-blind-retry gate. It creates, replaces, renames and weakens **nothing** that existed before it — the gate asserts each pre-existing trigger is still present and enabled and that `charge_gate`'s body is unchanged. See `Phase4-Financial-Schema-Gap-Audit.md`. | `data-plane/migrations/0011_*.{up,down}.sql` |
+| **WS-B** ✅ | Posting domain + fail-closed gates — **DELIVERED**. Pinned evidence, the creation gate that refuses before any side effect, and re-verification before every attempt. | `data-plane/internal/posting/{evidence,gate,engine,repo}.go` |
+| **WS-C** ✅ | `P#` allocator — **DELIVERED**. `iam_v2.allocate_p_number()`: transactional, durable, row-locked, per-interface, no epoch or clock. Proved gapless and duplicate-free under 200 concurrent allocations. | `0011_*.up.sql`, `data-plane/internal/posting/repo.go` |
+| **WS-D** ✅ | Outbox + per-interface lanes — **DELIVERED**. `FOR UPDATE SKIP LOCKED` claiming behind the existing `outbox_one_active` index; lanes proved independent and duplicate-free. | `data-plane/internal/posting/{repo,engine}.go` |
+| **WS-E** ✅ | PS/PA + UNKNOWN — **DELIVERED**. Contract-order PS construction, PA correlation by interface + `P#` only, the exact `AS` catalog, and UNKNOWN as a terminal state the database itself refuses to retry. | `data-plane/internal/posting/{fias,engine,transport}.go` |
+| **WS-F** ◐ | Manual Review — the DB decision boundary, the §15 catalog and atomic reviewer concurrency are **delivered**; the operator workflow, RBAC and password step-up remain **open**. | `0011_*.up.sql`, `data-plane/internal/posting/repo.go` |
 | **WS-G** | Payment/settlement execution — idempotent CHARGE/REFUND, callback dedupe, provider boundary in DARK | `payment_*.go` |
 | **WS-H** | Restore / `FINANCIAL_RECOVERY_MODE` — `financial_epoch`, `restore_generation`, `HELD_RECOVERY`, no replay | `financial_recovery.go` |
 | **WS-I** | Observability — queue depth, oldest age, UNKNOWN count, review backlog, lane state, bounded codes, no PII | `observability.go` |
@@ -51,12 +54,7 @@ Every design choice below is downstream of that sentence.
 This is the checklist the delivery must reproduce from scratch at the end. **No row may silently disappear.**
 Status is the *current* state at authorization time; all are `NOT_IMPLEMENTED` because the runtime is greenfield.
 
-**The C1–C38 matrix below has been SUPERSEDED by measurement.** Its original statuses assumed the financial
-schema was empty; the disposable-PG16 rebuild proved otherwise — 24 rows already have verified DB enforcement
-and 30/30 behavioural checks pass before any 0011. The authoritative, layered matrix now lives in
-[`Phase4-Financial-Schema-Gap-Audit.md`](Phase4-Financial-Schema-Gap-Audit.md), which records each requirement
-independently as DB_ALREADY_PRESENT_AND_VERIFIED / DB_GAP / RUNTIME_GAP / TEST_GAP / OPERATOR_SURFACE_GAP /
-NOT_APPLICABLE / BLOCKED_BY_PRODUCT_OWNER_DECISION.
+**The C1–C38 matrix below has been SUPERSEDED by measurement and by delivery.** Its original statuses assumed the financial schema was empty; the disposable-PG16 rebuild proved otherwise, and migration 0011 plus the financial execution core have since closed every measured DB gap. The authoritative, layered matrix lives in [`Phase4-Financial-Schema-Gap-Audit.md`](Phase4-Financial-Schema-Gap-Audit.md), which records each requirement independently as DB_PRESENT_AND_BEHAVIOURALLY_VERIFIED / RUNTIME_IMPLEMENTED_AND_TESTED_DARK / RUNTIME_GAP / OPERATOR_SURFACE_GAP / NOT_APPLICABLE / BLOCKED_BY_PRODUCT_OWNER_DECISION. Read the table below as the ORIGINAL authorization-time scope list, retained so no row can silently disappear — never as the current status.
 
 Summary of what measurement changed:
 

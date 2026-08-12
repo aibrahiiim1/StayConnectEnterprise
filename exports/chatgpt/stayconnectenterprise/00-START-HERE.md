@@ -1,13 +1,13 @@
 # StayConnect Enterprise — START HERE (ChatGPT Project entry point)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0029 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0030 -->
 **Current phase:** 4 — Financial: settlements, postings + outbox, payments, recovery, manual review
-**Current activity:** `PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED__PHASE_4_AUTHORIZED_PLANNING`
-**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 PLANNING · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
+**Current activity:** `PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 IN_PROGRESS · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 63 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Execute the authorized Phase-4 implementation (decision D18, transition T0029) DARK on a single Phase-4 branch per docs/architecture/StayConnect-IAM-Phase4-Plan.md. Phase-4 feature flags remain OFF and no real financial traffic is authorized.
+**Single next authorized action:** Continue the authorized Phase-4 implementation (decision D18, transition T0029) DARK on the single Phase-4 branch per docs/architecture/StayConnect-IAM-Phase4-Plan.md, delivering the Manual Review operator workflow, the payment and settlement boundary, FINANCIAL_RECOVERY_MODE, operator UI and observability, and the final controlled DARK deployment with all Phase-4 feature flags OFF and no real financial traffic.
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D18`.
 <!-- END GENERATED PROJECT STATE -->
 
