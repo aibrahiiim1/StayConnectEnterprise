@@ -191,19 +191,44 @@ is enabled anywhere, and no row in this table has been exercised against a real 
 | C23 | Interfaces are independent namespaces | **DB-OK** | **RT-OK** | UI |
 | C24 | Interface lifecycle / decommission guard | **DB-OK** *(0012)* | **RT-OK** *(0012: refusing every non-ACTIVE state was wrong; AUTH_DISABLED posts, DRAINING drains)* | UI |
 | C25 | Programmatic reversal disabled; CREATE_REVERSAL ledger row required | **DB-OK** *(0013: the PASSIVE row is permitted and audited; the SENDER is structurally impossible — see §12)* | **RT-OK** | UI |
-| C26 | No duplicate CHARGE/REFUND/callback | **DB-OK** | **RT-OK** (posting); RT (payment) | UI |
-| C27 | No cross-tenant merchant reuse | partial | RT | — |
+| C26 | No duplicate CHARGE/REFUND/callback | **DB-OK** | **RT-OK** *(0015 unique index + 0016 dedupe; 0021 records a provider retry as NOOP rather than dropping it)* | **UI-OK** |
+| C27 | No cross-tenant merchant reuse | **DB-OK** *(0025 `ppa_merchant_ref_globally_unique`. MEASURED before it: 0018's uniqueness was per (tenant, site), so the same external merchant account could be configured under two customers)* | **RT-OK** *(identity is resolved from configuration, never supplied)* | — |
 | C28 | Server-pinned totals | **DB-OK** | **RT-OK** | — |
-| C29 | Entitlement only via approved atomic grant | **DB-OK** (Phase 2) | RT | — |
-| C30 | Restore ⇒ FINANCIAL_RECOVERY_MODE, HELD_RECOVERY | **DB-OK (G3)** | RT (HELD_RECOVERY reached; recovery mode pending) | UI |
-| C31 | Restore never auto-replays | **DB-OK** | RT | — |
+| C29 | Entitlement only via approved atomic grant | **DB-OK** *(0024: ONE `p4_entitlement_grant_kernel`, unreachable from every runtime role; free and paid reach it through their own authorization)* | **RT-OK** *(exactly-once under duplicate commands, concurrent callbacks and restart replay)* | — |
+| C30 | Restore ⇒ FINANCIAL_RECOVERY_MODE, HELD_RECOVERY | **DB-OK** *(0019 + 0022 structural hold + 0023/0025 marker AHEAD/BEHIND/MISSING)* | **RT-OK** *(real pg_dump/pg_restore drill, 39/0)* | **UI-OK** |
+| C31 | Restore never auto-replays | **DB-OK** *(0022 outbox gate; 0025 zero-attempt path authorizes attempt 1 without manufacturing a history)* | **RT-OK** *(nothing is transmitted before OR after recovery release)* | **UI-OK** *(the screen offers no retry/replay control)* |
 | C32 | Freshness / stay eligibility before charge | **DB-OK** *(0012: all four runtime axes)* | **RT-OK** *(0012: only the stay half existed; the four axes were never consulted)* | UI |
-| C33 | Metrics: queue depth, oldest age, UNKNOWN count, backlog | **DB-OK (G3)** | RT | UI |
-| C34 | No PII/card/credentials/secrets in logs or evidence | — | **RT-OK** | — |
-| C35 | Compliance archive before cross-customer purge | **DB-OK** | RT | — |
+| C33 | Metrics: queue depth, oldest age, UNKNOWN count, backlog | **DB-OK** *(0020 `enqueued_at` makes AGE a real signal)* | **RT-OK** *(closed condition vocabulary; JSON + Prometheus)* | **UI-OK** *(financial health screen)* |
+| C34 | No PII/card/credentials/secrets in logs or evidence | **DB-OK** *(0025 screens review evidence for secret shapes)* | **RT-OK** *(redaction proven bidirectionally: the check FAILS against a build with one raw field added back)* | **UI-OK** |
+| C35 | Compliance archive before cross-customer purge | **DB-OK** *(0025 `p4_record_compliance_archive` + `p4_assert_compliance_archived`)* | **RT-OK for the ARCHIVE and the GATE** *(scd exports the departing tenant's financial record, records its digest, and the purge is refused without it)*; **`receipt_verified` BLOCKED — no external archival receipt authority exists in this product; recorded in `receipt_blocked_reason`, never defaulted to true** | — |
 | C36 | Per-property onboarding gates posting | **DB-OK (G2)** | **RT-OK** | UI |
-| C37 | Flags OFF, no egress while DARK | — | **RT-OK** | — |
+| C37 | Flags OFF, no egress while DARK | — | **RT-OK** *(unchanged meaning: every Phase-4 flag OFF, no provider adapter, no socket in the financial core, delivered UI bundle hides the screens)* | — |
 | C38 | Real-financial acceptance (Contract §9c Tier-3 3C) | — | — | **PO** |
+
+### Measured status at the final software closure (T0040)
+
+Re-measured from code and tests rather than carried forward. Every row above whose status changed did so
+because a test now proves it, and the two that did NOT change are the two that must not:
+
+- **C37 remains DARK flags / no egress.** Its meaning is unchanged: every Phase-4 flag is OFF, no provider
+  adapter exists, the financial core imports no network package, and the delivered Hotel-Admin bundle does
+  not expose the financial screens. It is not a claim that anything is live.
+- **C38 remains Tier-3 3C real-financial acceptance and remains BLOCKED_BY_PRODUCT_OWNER_DECISION.** No part
+  of this milestone advances it, and nothing in Phase 4 may.
+
+**C27** was `partial` and is now closed: 0018 scoped merchant uniqueness to (tenant, site), so the same
+external merchant account could be configured under two customers — one customer's guests paying into
+another's account. 0025 makes it globally unique for CONFIGURED accounts.
+
+**C35** is delivered in the half that can exist and blocked in the half that cannot. The archive, its
+digest, and the purge gate are real and enforced; `receipt_verified` describes an EXTERNAL archival
+authority countersigning custody, and no such service, endpoint or key exists in this product. It stays
+false with the reason recorded in the row. **This is the external blocker for C35 and nothing about it was
+invented.**
+
+**C29** changed for a reason worth recording: 0021 had created a SECOND grant implementation in SQL while
+the free Phase-2 path stayed in Go. Two implementations of one set of semantics is the drift the one-writer
+rule exists to prevent, so 0024 reduced them to one kernel with two authorizations.
 
 **Totals after the 0012 hardening pass.** Database enforcement present and behaviourally verified: **34**
 rows. Genuine DB gaps remaining: **0**. Runtime implemented and verified DARK: **28** rows, five of which

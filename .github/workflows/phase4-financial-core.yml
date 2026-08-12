@@ -102,7 +102,7 @@ jobs:
           -race ./internal/posting/ ./internal/pmsd/ -count=1
 
       # ---------------------------------------------------------------- migration 0011
-      - name: Migrations 0011-0023 + financial DB invariant gate (disposable PG16)
+      - name: Migrations 0011-0025 + financial DB invariant gate (disposable PG16)
         # Includes the ENTIRE pre-0011 financial invariant suite, run on the pre-0011 chain and again after
         # the Phase-4 chain on a clean rebuild, so "nothing was weakened" is measured rather than asserted.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-migration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase4_0011_financial.sh"
@@ -181,9 +181,16 @@ jobs:
         working-directory: hotel-admin
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome"
 
-      - name: Hotel-Admin E2E — the financial operator surface in a real browser
+      - name: Hotel-Admin E2E — the FULL browser suite
         working-directory: hotel-admin
-        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-e2e -- npx playwright test phase4-financial-operator --reporter=list"
+        # The whole suite, not only the Phase-4 spec: a financial milestone that regressed the PMS-interface
+        # or guest-portal screens would still be a regression, and this is the gate that caught exactly that
+        # when the Next 16 upgrade was attempted.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-e2e -- npx playwright test --reporter=list"
+
+      # ---------------------------------------------------------------- dependency risk
+      - name: Production dependency advisory gate
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dependency-gate -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dependency-gate.sh"
 
       - name: Assemble the Phase-4 financial-core evidence artifact
         if: always()

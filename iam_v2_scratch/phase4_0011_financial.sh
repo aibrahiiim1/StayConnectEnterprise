@@ -740,6 +740,82 @@ eq "0021..0023 DOWN -> UP produces the SAME schema as the first UP" "$UP23_FP" "
 eq "0023 is recorded in the migration ledger" "1" \
   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0023_phase4_restore_generation';")"
 
+# ------------------------------------------------------------------ 0024/0025 final closure
+echo "== 0024/0025 outcome authority, grant kernel, recovery completion, C27, C35 =="
+for M in 0024_phase4_outcome_authority_and_grant_kernel 0025_phase4_recovery_completion_and_compliance; do
+  if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+       < "$ROOT/data-plane/migrations/$M.up.sql" >/dev/null 2>&1; then ok "$M applies"
+  else no "$M applies" "$(docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-plane/migrations/$M.up.sql" 2>&1 | tail -2 | tr '\n' ' ')"; fi
+done
+UP25_FP="$(Q "$FP")"
+
+# --- F1: the outcome authority is a DIFFERENT role from the execution authority
+eq "the outcome role exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_roles WHERE rolname='sc_payment_outcome';")"
+eq "the EXECUTION role cannot assert a provider outcome" "f" \
+  "$(Q "SELECT has_function_privilege('sc_payment_runtime','iam_v2.p4_apply_provider_outcome(text,text,text,text,text,jsonb)','EXECUTE');")"
+eq "the OUTCOME role can" "t" \
+  "$(Q "SELECT has_function_privilege('sc_payment_outcome','iam_v2.p4_apply_provider_outcome(text,text,text,text,text,jsonb)','EXECUTE');")"
+eq "the outcome role cannot begin an execution" "f" \
+  "$(Q "SELECT has_function_privilege('sc_payment_outcome','iam_v2.begin_payment_execution(uuid)','EXECUTE');")"
+eq "the outcome role cannot grant" "f" \
+  "$(Q "SELECT has_function_privilege('sc_payment_outcome','iam_v2.p4_grant_paid_entitlement(uuid,uuid,uuid)','EXECUTE');")"
+
+# --- F2: ONE grant kernel, reachable only through the two authorized entry points
+eq "the shared grant kernel exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p4_entitlement_grant_kernel';")"
+eq "no runtime role can call the kernel directly" "0" \
+  "$(Q "SELECT count(*) FROM (VALUES ('sc_payment_runtime'),('sc_commerce_runtime'),('sc_payment_outcome'),('sc_financial_operator'),('sc_financial_readonly')) r(x) WHERE has_function_privilege(r.x,'iam_v2.p4_entitlement_grant_kernel(uuid,uuid,uuid,uuid,uuid,uuid,jsonb,uuid,uuid)','EXECUTE');")"
+eq "the free entry point exists and belongs to commerce" "t" \
+  "$(Q "SELECT has_function_privilege('sc_commerce_runtime','iam_v2.p4_grant_quoted_entitlement(uuid,uuid,uuid)','EXECUTE');")"
+eq "the payment runtime cannot use the FREE entry point" "f" \
+  "$(Q "SELECT has_function_privilege('sc_payment_runtime','iam_v2.p4_grant_quoted_entitlement(uuid,uuid,uuid)','EXECUTE');")"
+eq "commerce cannot use the PAID entry point" "f" \
+  "$(Q "SELECT has_function_privilege('sc_commerce_runtime','iam_v2.p4_grant_paid_entitlement(uuid,uuid,uuid)','EXECUTE');")"
+
+# --- F3: the zero-attempt authorization and the marker cases
+eq "the zero-attempt retry authorization exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p4_authorize_zero_attempt_retry';")"
+eq "it belongs to the financial operator and to nobody else" "1" \
+  "$(Q "SELECT count(*) FROM (VALUES ('sc_financial_operator'),('sc_payment_runtime'),('sc_payment_outcome'),('sc_commerce_runtime')) r(x) WHERE has_function_privilege(r.x,'iam_v2.p4_authorize_zero_attempt_retry(uuid,uuid,text,jsonb)','EXECUTE');")"
+
+# --- C27
+eq "C27: one external merchant account belongs to one customer" "1" \
+  "$(Q "SELECT count(*) FROM pg_indexes WHERE schemaname='iam_v2' AND indexname='ppa_merchant_ref_globally_unique';")"
+
+# --- C35
+eq "C35: the compliance archive recorder exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p4_record_compliance_archive';")"
+eq "C35: the purge gate exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p4_assert_compliance_archived';")"
+rejects "C35: a purge with no archive is refused" \
+  "SELECT iam_v2.p4_assert_compliance_archived('$T'::uuid);" "COMPLIANCE_ARCHIVE_MISSING"
+eq "C35: the missing external receipt authority is recorded rather than defaulted" "1" \
+  "$(Q "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='compliance_archives' AND column_name='receipt_blocked_reason';")"
+
+# --- posture, re-asserted after the new definer functions
+eq "PUBLIC still holds EXECUTE on no SECURITY DEFINER function" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND has_function_privilege('public', p.oid, 'EXECUTE');")"
+eq "every phase-4 definer function still pins its search_path" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig,'{}')) c WHERE c LIKE 'search_path=%');")"
+
+for M in 0025_phase4_recovery_completion_and_compliance 0024_phase4_outcome_authority_and_grant_kernel; do
+  if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+       < "$ROOT/data-plane/migrations/$M.down.sql" >/dev/null 2>&1; then ok "$M DOWN applies"
+  else no "$M DOWN applies" "down failed"; fi
+done
+eq "0024 DOWN handed outcome authority back to the execution role" "t" \
+  "$(Q "SELECT has_function_privilege('sc_payment_runtime','iam_v2.p4_apply_provider_outcome(text,text,text,text,text,jsonb)','EXECUTE');")"
+for M in 0024_phase4_outcome_authority_and_grant_kernel 0025_phase4_recovery_completion_and_compliance; do
+  if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+       < "$ROOT/data-plane/migrations/$M.up.sql" >/dev/null 2>&1; then ok "$M DOWN -> UP re-applies cleanly"
+  else no "$M DOWN -> UP re-applies cleanly" "re-up failed"; fi
+done
+eq "0024..0025 DOWN -> UP produces the SAME schema as the first UP" "$UP25_FP" "$(Q "$FP")"
+eq "0025 is recorded in the migration ledger" "1" \
+  "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0025_phase4_recovery_completion_and_compliance';")"
+
+
 
 # ------------------------------------------------------------------ the baseline suite, after 0011
 # On a FRESHLY rebuilt database, so the second pass is judged on its own rows and not on what the first
