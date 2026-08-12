@@ -146,6 +146,8 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 			// Phase 4 (DARK): the Manual Review surface. Mounted here so the API contract tests exercise the
 			// real router and the real RBAC/step-up middleware, exactly as the appliance would when enabled.
 			mountResource(r, s, "financial-review", s.financialReviewRoutes)
+			// ...and the financial OPERATIONS surface, which shares that permission.
+			mountResource(r, s, "financial-ops", s.financialOpsRoutes)
 		})
 	})
 	f.srv = httptest.NewServer(r)

@@ -172,7 +172,10 @@ var rolePerms = map[string]map[string]perm{
 		// The IT manager can SEE the financial review queue as integration evidence, and cannot decide it:
 		// section 15 gives the decision to payments_operator (and site_admin).
 		"financial-review": permRead,
-		"payments":         permRead, "operators": permRead, "audit": permRead,
+		// financial-ops mirrors financial-review deliberately: it is the same readership looking at the
+		// same money from a different angle, and two permissions for one boundary is how they drift apart.
+		"financial-ops": permRead,
+		"payments":      permRead, "operators": permRead, "audit": permRead,
 		"reports": permRead, "backups": permRead, "license": permRead,
 		// Health & diagnostics: managers may run Recheck/Restart (write, step-up).
 		"diagnostics": permWrite,
@@ -185,6 +188,7 @@ var rolePerms = map[string]map[string]perm{
 		// telling a guest to try again, but must not be able to publish or rotate anything.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		"financial-review":   permRead,
+		"financial-ops":      permRead,
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "walled-garden": permRead, "payments": permRead,
 		"reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
@@ -211,6 +215,7 @@ var rolePerms = map[string]map[string]perm{
 		// Contract section 15: payments_operator is the role that holds financial-review WRITE. Every
 		// action additionally requires password re-authentication, enforced at the route.
 		"financial-review": permWrite,
+		"financial-ops":    permWrite,
 		"sessions":         permRead, "reports": permRead, "audit": permRead, "license": permRead,
 		"diagnostics": permRead,
 	},
@@ -227,6 +232,9 @@ var rolePerms = map[string]map[string]perm{
 		"checkout-grace": permRead, "operational-alerts": permRead,
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		"financial-review": permRead,
+		// financial-ops mirrors financial-review deliberately: it is the same readership looking at the
+		// same money from a different angle, and two permissions for one boundary is how they drift apart.
+		"financial-ops": permRead,
 	},
 	// Legacy tenant roles accepted for migrated operators.
 	"tenant_admin":    nil, // treated like site_admin below

@@ -138,7 +138,8 @@ SELECT id::text, work_kind, work_id::text, held_status, amount_minor, coalesce(c
 // ResolveHold records an operator's conclusion about one held item. It moves no money and replays nothing.
 func (e *Engine) ResolveHold(ctx context.Context, holdID, resolution, actorID, note string) error {
 	_, err := e.pool.Exec(ctx,
-		`SELECT iam_v2.p4_resolve_recovery_hold($1,$2,$3,$4)`, holdID, resolution, actorID, note)
+		`SELECT iam_v2.p4_resolve_recovery_hold($1::uuid,$2::text,$3::uuid,$4::text)`,
+		holdID, resolution, actorID, note)
 	return classify(err)
 }
 
@@ -147,7 +148,7 @@ func (e *Engine) ResolveHold(ctx context.Context, holdID, resolution, actorID, n
 func (e *Engine) ReleaseRecovery(ctx context.Context, tenantID, siteID, actorID, note string) (int64, error) {
 	var epoch int64
 	if err := e.pool.QueryRow(ctx,
-		`SELECT iam_v2.p4_release_financial_recovery($1,$2,$3,$4)`,
+		`SELECT iam_v2.p4_release_financial_recovery($1::uuid,$2::uuid,$3::uuid,$4::text)`,
 		tenantID, siteID, actorID, note).Scan(&epoch); err != nil {
 		return 0, classify(err)
 	}
@@ -159,7 +160,7 @@ func (e *Engine) ReleaseRecovery(ctx context.Context, tenantID, siteID, actorID,
 func (e *Engine) DeclareRecovery(ctx context.Context, tenantID, siteID, actorID, reason string) (int64, error) {
 	var epoch int64
 	if err := e.pool.QueryRow(ctx,
-		`SELECT iam_v2.p4_declare_financial_recovery($1,$2,$3,$4)`,
+		`SELECT iam_v2.p4_declare_financial_recovery($1::uuid,$2::uuid,$3::uuid,$4::text)`,
 		tenantID, siteID, actorID, reason).Scan(&epoch); err != nil {
 		return 0, classify(err)
 	}

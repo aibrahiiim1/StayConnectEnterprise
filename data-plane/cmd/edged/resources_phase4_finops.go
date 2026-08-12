@@ -318,7 +318,9 @@ func (s *server) paymentEngine() (*payment.Engine, error) {
 func financialOpErr(w http.ResponseWriter, err error) {
 	switch payment.CodeOf(err) {
 	case payment.ErrUntrustedInput:
-		jsonErr(w, http.StatusBadRequest, "invalid", "the decision is missing something it requires")
+		// The database's own words: these are deterministic RECOVERY_* codes describing what the decision
+		// is missing, never guest data, and hiding them just makes a correctable mistake unfixable.
+		jsonErr(w, http.StatusBadRequest, "invalid", err.Error())
 	case payment.ErrRecoveryHeld:
 		jsonErr(w, http.StatusConflict, "holds_unresolved",
 			"recovery is not released while held financial work is unreconciled")

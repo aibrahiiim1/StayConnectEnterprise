@@ -2,7 +2,7 @@
 
 **Status:** AUTHORIZED — **IMPLEMENTATION IN PROGRESS (DARK)**. Product-Owner decision **D18**, transition **T0029** (2026-08-11); implementation progress recorded in transition **T0030** (2026-08-12) under the SAME authorization — no new decision was created.
 **Delivered so far:** WS-A (migrations 0011 + **0012 hardening** + **0013 reversal ledger**), WS-B, WS-C, WS-D, WS-E and the financial-core half of WS-K, all verified DARK against disposable PostgreSQL 16 and wired into `.github/workflows/phase4-financial-core.yml`.
-**Still open:** WS-F frontend only (the Manual Review BACKEND, RBAC, step-up and API are delivered), WS-G payments is BACKEND-COMPLETE in DARK (durable intent, provider capability boundary, callback correlation, settlement runtime, Phase-2 entitlement handoff and the least-privilege role boundary are delivered and verified; the operator/guest-facing payment surface and any real provider adapter are not), WS-H (`FINANCIAL_RECOVERY_MODE`), WS-I (observability), WS-J (operator UI), WS-L (DARK deployment).
+**Still open:** WS-F frontend is DELIVERED for the health and recovery screens and still open for the Manual Review queue screen; WS-G (payments) is **backend-closed in DARK** — durable intent, resolved financial identity, the authenticated notification boundary, settlement runtime, the Phase-2 entitlement handoff and the least-privilege role boundary are delivered and verified, and no provider adapter exists or is authorized; WS-H (`FINANCIAL_RECOVERY_MODE`) and WS-I (observability) are DELIVERED in DARK; WS-J (operator surface) is partially delivered (financial health, financial recovery); WS-L (DARK deployment) is not started.
 **Not accepted, not closed.** Every Phase-4 flag is OFF and no real financial traffic has occurred.
 **Verification status:** AUTHORITATIVE CI EXISTS AND IS GREEN. `Phase 4 Financial Core CI` runs on every
 push to this branch and has passed on the delivered heads — see `phase4_authoritative_ci_*` in
@@ -47,7 +47,7 @@ Every design choice below is downstream of that sentence.
 | **WS-D** ✅ | Outbox + per-interface lanes — **DELIVERED**. `FOR UPDATE SKIP LOCKED` claiming behind the existing `outbox_one_active` index; lanes proved independent and duplicate-free. | `data-plane/internal/posting/{repo,engine}.go` |
 | **WS-E** ✅ | PS/PA + UNKNOWN — **DELIVERED**. Contract-order PS construction, PA correlation by interface + `P#` only, the exact `AS` catalog, and UNKNOWN as a terminal state the database itself refuses to retry. | `data-plane/internal/posting/{fias,engine,transport}.go` |
 | **WS-F** ◐ | Manual Review — **BACKEND COMPLETE**: the DB decision boundary, the §15 catalog, atomic reviewer concurrency, `financial-review` RBAC, password step-up, session-bound actor, tenant+site scope and the structured evidence contract are all delivered and tested. The **operator FRONTEND is open**. | `0011/0013_*.up.sql`, `internal/posting/repo.go`, `cmd/edged/resources_phase4_review.go`, `cmd/edged/phase4_review_evidence.go` |
-| **WS-G** | Payment/settlement execution — idempotent CHARGE/REFUND, callback dedupe, provider boundary in DARK | `internal/payment/`, migrations 0014–0017 |
+| **WS-G** | Payment/settlement execution — idempotent CHARGE/REFUND, authenticated notification boundary, provider capability contract in DARK | `internal/payment/`, migrations 0014–0018 |
 | **WS-H** | Restore / `FINANCIAL_RECOVERY_MODE` — `financial_epoch`, `restore_generation`, `HELD_RECOVERY`, no replay | `financial_recovery.go` |
 | **WS-I** | Observability — queue depth, oldest age, UNKNOWN count, review backlog, lane state, bounded codes, no PII | `observability.go` |
 | **WS-J** | Operator UI — Postings, attempt history, UNKNOWN queue, Manual Review, evidence, redaction | `hotel-admin/app/(app)/financial/**` |
@@ -174,3 +174,33 @@ its absence produced a real defect in this phase.
 13. **Every new security check must be shown to FAIL against the pre-fix code before it is trusted.** Two
     DARK checks in this phase passed against a deliberately planted hole. A check that has never failed has
     not been tested.
+
+
+---
+
+## 8. The Phase-4 migration chain
+
+The authoritative chain, in application order. Every one of them applies, reverses and re-applies to an
+identical schema fingerprint under `iam_v2_scratch/phase4_0011_financial.sh`.
+
+| Migration | What it establishes |
+|---|---|
+| `0011_phase4_financial_execution` | Posting execution core, the P# allocator, the review ledger and `record_posting_review_action` |
+| `0012_phase4_financial_hardening` | Per-interface serialization, lane discipline, the four PMS runtime freshness axes |
+| `0013_phase4_reversal_ledger` | The passive, structurally non-executable reversal ledger (`CREATE_REVERSAL` records; it never posts) |
+| `0014_phase4_payment_settlement` | Payment/settlement governance: the status machine, the callback ledger, server-pinned amounts |
+| `0015_phase4_payment_hardening` | Real concurrency: the duplicate-charge unique index and the advisory-locked cumulative refund bound |
+| `0016_phase4_payment_coherence` | The exact CHARGE machine, settlement admission, `begin_payment_execution`, provider-reference conflict |
+| `0017_phase4_least_privilege` | The three financial roles and the first cut of their grants |
+| `0018_phase4_financial_identity_and_privilege` | Authoritative provider/merchant configuration, the controlled grant path, operational role grants |
+| `0019_phase4_financial_recovery` | `FINANCIAL_RECOVERY_MODE`: the financial epoch, held work, operator reconciliation and release |
+| `0020_phase4_financial_observability` | `posting_outbox.enqueued_at`, so backlog AGE is a real signal rather than an inference |
+
+### Authoritative CI
+
+`.github/workflows/phase4-financial-core.yml` is the only authoritative Phase-4 gate. It runs, in order:
+gofmt, `go build`, `go vet`, the pre-0011 invariant suite on both chains, the migrations 0011–0020 DB gate,
+the least-privilege role proof, the payment concurrency proof, the PG16 integration matrix (posting, review
+API, financial-ops API, payment runtime, recovery, restricted-role end-to-end, Phase-2 free grant, entitlement
+exactly-once), the DARK static assertion, and the Hotel-Admin typecheck, unit tests, flags-OFF production
+build and financial-operator E2E.

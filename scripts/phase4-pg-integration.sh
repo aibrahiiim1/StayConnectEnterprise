@@ -89,8 +89,8 @@ echo "== go test -tags integration -run IntegrationPosting ./internal/posting/ =
 ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationPosting ./internal/posting/ -count=1 "$@" )
 rc=$?
 if [ "$rc" = 0 ]; then
-  echo "== go test -tags integration -run IntegrationReviewAPI ./cmd/edged/ =="
-  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationReviewAPI ./cmd/edged/ -count=1 "$@" )
+  echo "== go test -tags integration -run "IntegrationReviewAPI|IntegrationFinOpsAPI" ./cmd/edged/ =="
+  ( cd "$ROOT/data-plane" && go test -tags integration -run "IntegrationReviewAPI|IntegrationFinOpsAPI" ./cmd/edged/ -count=1 "$@" )
   rc=$?
 fi
 if [ "$rc" = 0 ]; then

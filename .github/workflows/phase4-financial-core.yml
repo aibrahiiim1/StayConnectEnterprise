@@ -102,7 +102,7 @@ jobs:
           -race ./internal/posting/ ./internal/pmsd/ -count=1
 
       # ---------------------------------------------------------------- migration 0011
-      - name: Migrations 0011-0017 + financial DB invariant gate (disposable PG16)
+      - name: Migrations 0011-0020 + financial DB invariant gate (disposable PG16)
         # Includes the ENTIRE pre-0011 financial invariant suite, run on the pre-0011 chain and again after
         # the Phase-4 chain on a clean rebuild, so "nothing was weakened" is measured rather than asserted.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-migration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase4_0011_financial.sh"
@@ -127,6 +127,44 @@ jobs:
       # ---------------------------------------------------------------- DARK
       - name: DARK assertion — no Phase-4 flag is enabled anywhere in the tree
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dark -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dark-check.sh"
+
+      # ---------------------------------------------------------------- Hotel-Admin financial operator UI
+      # The operator screens are part of the Phase-4 software boundary: a recovery screen that grew a
+      # "retry" button would be a way to double-charge a guest, and only a UI test catches that.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: hotel-admin/package-lock.json
+
+      - name: Install the Hotel-Admin toolchain
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-npm-ci -- npm ci"
+
+      - name: Hotel-Admin typecheck
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-typecheck -- npx tsc --noEmit"
+
+      - name: Hotel-Admin unit tests (financial operator surface)
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-vitest -- npx vitest run --reporter=default"
+
+      - name: Hotel-Admin production build with Phase-4 flags OFF
+        working-directory: hotel-admin
+        # The DELIVERED bundle. Building it with the flags off is what proves the financial screens are
+        # absent from the shipped navigation rather than merely hidden by a runtime check.
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-build -- npx next build"
+
+      - name: Install Chrome for the browser tests
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome"
+
+      - name: Hotel-Admin E2E — the financial operator surface in a real browser
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-e2e -- npx playwright test phase4-financial-operator --reporter=list"
 
       - name: Assemble the Phase-4 financial-core evidence artifact
         if: always()

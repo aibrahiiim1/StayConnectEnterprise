@@ -112,6 +112,39 @@ else
   bad "the financial core reaches the network directly:"; printf '%s\n' "$netimports"
 fi
 
+# 4b. The PAYMENT runtime ships no provider adapter, and cannot acquire one from a caller.
+#
+#     Two separate things are checked because they fail differently. productionProvider returning nil is
+#     what stops the runtime persisting an invented provider identity; the absence of an exported
+#     constructor taking a Provider is what stops a caller supplying its own money sender.
+if grep -q 'return nil, nil' data-plane/internal/payment/provider.go    && grep -q 'provider execution is enabled but this build has no payment provider adapter'         data-plane/internal/payment/provider.go; then
+  say "the payment runtime ships no provider adapter and fails closed if egress is enabled without one"
+else
+  bad "productionProvider no longer fails closed without an adapter"
+fi
+
+# An exported constructor taking a Provider or a Config would be an independently-configured money sender.
+# The parameter list is isolated with awk (skipping any method receiver) so a function whose NAME merely
+# contains "Config" -- LoadConfigFromEnv, DefaultConfig -- is not a false positive.
+payctors="$(grep -rn '^func [A-Z]' data-plane/internal/payment/*.go             | grep -v '_test.go'             | awk -F'(' '{ split($2, p, ")"); print $1 " ||PARAMS|| " p[1] }'             | grep -E '\|\|PARAMS\|\|.*(^|[^A-Za-z])(Provider|Config)([^A-Za-z]|$)' || true)"
+if [ -z "$payctors" ]; then
+  say "no exported payment function accepts a Provider or a Config; NewProductionEngine is the whole surface"
+else
+  bad "an exported payment constructor is caller-configurable:"; printf '%s
+' "$payctors"
+fi
+
+# 4c. The DELIVERED Hotel-Admin bundle does not enable the Phase-4 operator screens. The test profile in
+#     playwright.config.ts sets the flag deliberately and is excluded: it builds a server that is never
+#     deployed, and excluding it is what keeps this check about the shipped artefact.
+uiflag="$(grep -rn 'NEXT_PUBLIC_PHASE4_ADMIN' hotel-admin/ deploy/ 2>/dev/null           --include='*.json' --include='*.mjs' --include='*.env*' --include='*.yml' --include='*.sh'           | grep -v node_modules || true)"
+if [ -z "$uiflag" ]; then
+  say "no delivered Hotel-Admin configuration enables the Phase-4 financial screens"
+else
+  bad "a delivered configuration enables the Phase-4 operator UI:"; printf '%s
+' "$uiflag"
+fi
+
 # 5. The Phase-3 read-only connector still forbids the financial records. If PS were ever moved onto its
 #    allowlist, a Phase-4 defect could smuggle a charge out through the Phase-3 socket.
 if grep -q '"PS": {}, // financial Posting (Phase 4 only)' data-plane/internal/pmsd/fias_adapter.go \
