@@ -248,8 +248,12 @@ if ! python3 --version >/dev/null 2>&1; then
   printf '#!/usr/bin/env bash\nexec python "$@"\n' > "$W/bin/python3"
   chmod +x "$W/bin/python3"
 fi
-if ! pg_dump --version >/dev/null 2>&1; then
-  cat > "$W/bin/pg_dump" <<'PGSTUB'
+# The pg_dump stand-in is installed UNCONDITIONALLY, in its own directory used only by the backup-script
+# block below. On a Linux runner a real pg_dump exists but would try to reach a local socket -- this drill's
+# database lives in a container -- so using it there would test the runner's socket rather than the thing
+# under test, which is whether the /etc archive excludes the financial marker.
+mkdir -p "$W/pgstub"
+cat > "$W/pgstub/pg_dump" <<'PGSTUB'
 #!/usr/bin/env bash
 prev=""
 for a in "$@"; do
@@ -258,8 +262,7 @@ for a in "$@"; do
 done
 exit 0
 PGSTUB
-  chmod +x "$W/bin/pg_dump"
-fi
+chmod +x "$W/pgstub/pg_dump"
 export PATH="$W/bin:$PATH"
 
 run_tool() {  # run_tool <anchor> <manifest> <extra args...>
@@ -368,7 +371,7 @@ fi
 mkdir -p "$W/etcroot/stayconnect"
 echo '{"restore_generation": 7}' > "$W/etcroot/stayconnect/financial-restore-generation.json"
 echo 'identity' > "$W/etcroot/stayconnect/identity.key"
-out="$(STAYCONNECT_BACKUP_DIR="$W/backups" STAYCONNECT_ETC_DIR="$W/etcroot/stayconnect" \
+out="$(PATH="$W/pgstub:$PATH" STAYCONNECT_BACKUP_DIR="$W/backups" STAYCONNECT_ETC_DIR="$W/etcroot/stayconnect" \
   bash "$BACKUP" 2>&1 || true)"
 TGZ="$(ls "$W/backups"/*-etc.tgz 2>/dev/null | head -1)"
 if [ -n "$TGZ" ] && ! tar tzf "$TGZ" | grep -q 'financial-restore-generation.json'; then
