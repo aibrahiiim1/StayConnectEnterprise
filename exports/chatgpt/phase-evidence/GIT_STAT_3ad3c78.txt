@@ -1,0 +1,4 @@
+commit 3ad3c7832c4fd2debc1b5df90dac15e683b06c88
+Date:   Thu Aug 13 01:51:50 2026 +0300
+
+    Phase 4: anchor the accessibility E2E on the held table rather than the banner, removing a two-response race

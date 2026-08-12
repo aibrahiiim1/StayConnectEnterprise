@@ -1,4 +1,0 @@
-commit 9fbc28488c724652da5f94877df9e8b9b46a2636
-Date:   Thu Aug 13 01:34:47 2026 +0300
-
-    Phase 4: point the authoritative CI facts at the final software candidate
