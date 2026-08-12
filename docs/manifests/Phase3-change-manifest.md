@@ -2,7 +2,7 @@
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
 - **HEAD commit:** `829444b7`
-- **Provenance (generation HEAD = inventory_head):** `329d77afa661e99cc344457b897d8c041f2ea687`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `1d20ecd2c20544d654048db078d06eb06b74011c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/4-financial-execution`
 - **Remote branch:** `origin/phase/4-financial-execution`
 - **Changed files:** 353
@@ -250,7 +250,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0037 receipt + project-state pointers + regenerated manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0037 receipt + project-state pointers + regenerated manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0037 receipt + project-state pointers + regenerated manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_329d77a.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_1d20ecd.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0037 receipt + project-state pointers + regenerated manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
@@ -600,13 +600,13 @@
  docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md |  146 +
  .../Phase3-Final-Live-Acceptance-Record.md         |  113 +
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           | 1051 +++++++
+ docs/manifests/Phase3-change-manifest.md           | 1039 +++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1858 ++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 295641 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 111131 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42053 bytes
- .../chatgpt/phase-evidence/GIT_STAT_329d77a.txt    |    4 +
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1846 ++++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 295578 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 111134 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42050 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_1d20ecd.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
@@ -625,7 +625,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      | 1051 +++++++
+ .../Phase3-change-manifest.md                      | 1039 +++++++
  .../stayconnectenterprise/SYSTEM_OVERVIEW.md       |    2 +-
  .../StayConnect-IAM-Handoff.md                     |   18 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   18 +-
@@ -721,7 +721,7 @@
  tools/validate-pr-metadata.sh                      |  260 ++
  tools/validate-project-state.sh                    |  161 +-
  tools/validate-transition-times.sh                 |   86 +
- 353 files changed, 72330 insertions(+), 729 deletions(-)
+ 353 files changed, 72294 insertions(+), 729 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -729,7 +729,7 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-R  exports/chatgpt/phase-evidence/GIT_STAT_31b61d5.txt -> exports/chatgpt/phase-evidence/GIT_STAT_329d77a.txt
+R  exports/chatgpt/phase-evidence/GIT_STAT_329d77a.txt -> exports/chatgpt/phase-evidence/GIT_STAT_1d20ecd.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -737,12 +737,12 @@ M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
-M  governance/transitions/T0037.json
+M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-329d77a Phase 4 (delivery_head): T0037 receipt + project-state pointers + regenerated manifest
+1d20ecd Phase 4 (delivery_head): T0037 receipt + project-state pointers + regenerated manifest
 829444b Phase 4 (inventory_head): payment runtime, Phase-2 entitlement handoff, migrations 0016-0017, least-privilege roles
 7db028e Phase 4 (delivery_head): manifest + rebuilt packs + pointer
 edd0e8a Phase 4: migration 0015 â€” 0014's payment bounds were not concurrency-safe
