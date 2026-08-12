@@ -1,0 +1,143 @@
+{
+  "transition_id": "T0037",
+  "seq": 37,
+  "timestamp": "2026-08-12T13:20:00Z",
+  "record_type": "PHASE_4_PAYMENT_RUNTIME_ENTITLEMENT_AND_LEAST_PRIVILEGE_BACKEND",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030 through T0036 are PRESERVED unchanged. Migrations 0011 through 0015 are preserved; 0016 and 0017 correct and extend them additively.",
+  "corrections": [
+    {
+      "id": "Q-1",
+      "area": "CHARGE state machine",
+      "what_was_actually_true": "0015 permitted CREATED to move directly to a terminal status. Section 16 defines exactly one edge out of CREATED, and a runtime that can terminate a charge without ever having begun executing it can record a financial outcome for a request that was never made.",
+      "correction": "0016 narrows the machine to CREATED -> PENDING -> CAPTURED|FAILED|EXPIRED|CANCELLED|UNKNOWN. Every direct CREATED-to-terminal edge now raises PAYMENT_STATUS_TRANSITION.",
+      "proved": "iam_v2_scratch/phase4_0011_financial.sh drives each of CAPTURED, FAILED, CANCELLED, EXPIRED and UNKNOWN against a genuinely CREATED row and shows the refusal, then shows CREATED -> PENDING still permitted so the machine is narrow rather than broken."
+    },
+    {
+      "id": "Q-2",
+      "area": "payment / settlement coherence",
+      "what_was_actually_true": "Payment intent creation and Settlement admission were incoherent: a Settlement already SETTLED, FAILED, PARTIALLY_REVERSED or REVERSED would still admit a new CHARGE. That charge could later be captured while the settlement stayed terminal, leaving captured money whose settlement says otherwise.",
+      "correction": "0016 adds the p4_payment_admission_gate BEFORE INSERT trigger, which locks the settlement row and refuses a CHARGE against a terminal settlement with PAYMENT_SETTLEMENT_CLOSED.",
+      "proved": "Go integration TestIntegrationPayment_DeclinedChargeFailsTheSettlementAndGrantsNothing (a FAILED settlement refuses a second charge) and TestIntegrationPayment_UnknownGoesToManualReviewAndIsNeverRetried (a live UNKNOWN charge blocks another)."
+    },
+    {
+      "id": "Q-3",
+      "area": "durable execution boundary",
+      "what_was_actually_true": "apply_payment_callback_v2 invented IN_PROGRESS for itself when a callback arrived, so the settlement only learned it was executing AFTER the provider had already been contacted. That is the crash window in which a provider can take money while StayConnect has no durable record of having asked.",
+      "correction": "0016 adds iam_v2.begin_payment_execution(uuid): in ONE transaction it moves the Settlement REQUIRED -> IN_PROGRESS and the intent CREATED -> PENDING, and it is the only thing the runtime may call before contacting a provider. The callback no longer invents IN_PROGRESS; it settles only from IN_PROGRESS.",
+      "proved": "iam_v2_scratch/phase4_0011_financial.sh asserts EXECUTING, then IN_PROGRESS, then ALREADY_EXECUTING on re-entry. Go integration TestIntegrationPayment_DarkNeverReachesTheProvider shows the boundary CROSSED and the provider still never reached: the intent is PENDING and the settlement IN_PROGRESS after three refused executions."
+    },
+    {
+      "id": "Q-4",
+      "area": "provider reference conflict",
+      "what_was_actually_true": "A later callback carrying a DIFFERENT provider transaction reference for an already-pinned intent was silently discarded. Two provider transactions claiming one intent is an ambiguity about which money moved, and burying it in an applied event hides it permanently.",
+      "correction": "0016 makes provider_txn_ref write-once and raises PAYMENT_EXTERNAL_REF_CONFLICT BEFORE anything is recorded, so the conflict cannot be buried in an applied event.",
+      "proved": "Go integration TestIntegrationPayment_CallbackCorrelationAndConflict asserts the typed provider_reference_conflict refusal."
+    },
+    {
+      "id": "Q-5",
+      "area": "concurrency proof strength",
+      "what_was_actually_true": "The 'unrelated settlements do not serialize' assertion ran after every other transaction had committed. With no lock held it proved nothing: of course an unrelated insert is fast when nothing is contended.",
+      "correction": "The proof now opens a session that inserts a refund against a captured parent and HOLDS the parent advisory lock open for six seconds, asserts from pg_locks that the EXACT reconstructed ns_payment_parent key is granted to another backend, and only then has an independent session insert a charge on a different settlement.",
+      "proved": "iam_v2_scratch/phase4_payment_concurrency.sh, 9 PASS / 0 FAIL, including 'the exact parent advisory key is genuinely held by the other session' and 'the unrelated settlement did not wait on the held parent lock'."
+    },
+    {
+      "id": "Q-6",
+      "area": "the one entitlement writer, on the current schema",
+      "what_was_actually_true": "InsertEntitlement created an ACTIVE entitlement without recording its opening transition. Phase 3 requires an entitlement's status to be backed by its latest transition (the deferred p3_entitlement_status_coherent constraint), so on the CURRENT schema that writer could not commit at all. It was invisible because the Phase-2 suite only ever ran on the pre-0010 chain. No entitlement has ever been granted in Production from this path, so nothing live was affected.",
+      "correction": "InsertEntitlement now records its opening ACTIVE transition through the same controlled apply_entitlement_transition every other state change uses, in the same transaction. One writer, one history, for both the free and the paid grant path.",
+      "proved": "The Phase-2 free grant path (TestC2QuoteAndFreePurchase, TestC2ConcurrentSingleWinner, TestC4ImmutabilityAndPinTrigger) now runs against the FULL Phase-4 schema in scripts/phase4-pg-integration.sh, alongside the five paid-grant tests."
+    },
+    {
+      "id": "Q-7",
+      "area": "provider guard outcome classification",
+      "what_was_actually_true": "The engine mapped every non-DARK guard refusal to UNKNOWN, so a refusal that provably never entered the adapter -- a missing adapter, an adapter that cannot correlate -- was recorded as money that may have moved.",
+      "correction": "The guard refuses BEFORE delegating, so every error it returns is a pre-send refusal and is reported as NOT_SENT with nothing recorded. Only an adapter that was ENTERED and failed to answer becomes OutcomeUnknown.",
+      "proved": "Go integration TestIntegrationPayment_UncorrelatableAdapterIsRefused asserts the typed config refusal rather than an UNKNOWN, and the settlement is left untouched."
+    },
+    {
+      "id": "Q-8",
+      "area": "callback evidence",
+      "what_was_actually_true": "A callback with no evidence marshalled to a JSON null, which the append-only ledger correctly refuses -- so an ordinary provider notification carrying nothing to record could not be recorded at all.",
+      "correction": "An absent evidence map is now an empty object. A callback with nothing to say is still a fact that must be written down.",
+      "proved": "Go integration TestIntegrationPayment_DuplicateAndConcurrentCallbacksGrantOnce asserts exactly one new event row from eight concurrent duplicate deliveries."
+    }
+  ],
+  "delivered": {
+    "payment_runtime": "data-plane/internal/payment/: durable intent (CreateChargeIntent, CreateRefundIntent), the ordered Execute path (begin_payment_execution -> guard -> apply_payment_callback_v2 -> grant), ApplyCallback for out-of-band notifications, and a typed error vocabulary. Money fields are resolved from the pinned Purchase by the INSERT itself; the signatures accept no amount, currency, exponent, internal transaction id or provider result.",
+    "provider_boundary": "A CAPABILITY CONTRACT, not a claim about any real provider. An adapter must carry StayConnect's client reference and return it on every notification; one that cannot is refused rather than allowed to guess. This build ships NO adapter: productionProvider returns a nilProvider and fails closed if provider execution is ever enabled without one. No real provider has been contacted, integrated or verified, and none is named as supported.",
+    "provider_doubles": "Deterministic in-process only: ScriptedProvider (fixed outcome sequence, echoes the client reference back) and UncorrelatableProvider (must be refused). No networking exists anywhere in the package.",
+    "entitlement_handoff": "internal/iamv2/commerce_settled_grant.go is a second ENTRY POINT into the existing Phase-2 writer, not a second writer: it calls the same TerminateLiveEntitlementForSubject / InsertEntitlement / MarkPurchaseGranted under the same subject lock inside the same WithTx. internal/payment/granter.go is the only Granter implementation and forwards without logic.",
+    "least_privilege": "0017 creates sc_payment_runtime, sc_financial_operator and sc_financial_readonly as real PostgreSQL roles with minimum grants, and re-asserts that PUBLIC holds EXECUTE on no SECURITY DEFINER function."
+  },
+  "verification": {
+    "financial_db_gate": "173 PASS / 0 FAIL (iam_v2_scratch/phase4_0011_financial.sh), including 0016 and 0017 UP / DOWN / re-UP with identical schema fingerprints",
+    "payment_concurrency": "9 PASS / 0 FAIL, real concurrent PostgreSQL sessions with a genuinely held parent advisory lock",
+    "least_privilege": "18 PASS / 0 FAIL as the real restricted roles (scripts/phase4-least-privilege.sh)",
+    "payment_runtime_integration": "9 PASS / 0 FAIL (IntegrationPayment)",
+    "entitlement_exactly_once": "5 PASS / 0 FAIL (IntegrationGrant), against the REAL CommerceEngine writing real entitlement rows",
+    "phase2_free_path_on_this_schema": "PASS (TestC2QuoteAndFreePurchase, TestC2ConcurrentSingleWinner, TestC4ImmutabilityAndPinTrigger)",
+    "posting_and_review_integration": "PASS (IntegrationPosting, IntegrationReviewAPI)",
+    "unit": "PASS across the whole data-plane module",
+    "dark_static_assertion": "PASS"
+  },
+  "not_delivered_in_this_milestone": [
+    "No real provider adapter exists. The provider model is a capability contract this build cannot yet satisfy, and it fails closed rather than degrading.",
+    "The runtime DSN still connects as the schema owner. Switching the payment service to sc_payment_runtime additionally requires the entitlement grant to be reachable from a non-owner role; the roles are created, granted and proven at the database boundary, but the connection change is a deployment step deliberately not taken while DARK.",
+    "TestC2RollbackAtEveryBoundary is excluded from the shared-database step: it seeds a fixed device MAC and collides with itself when it shares a database. That is a pre-existing fixture defect in a test unrelated to the grant writer, and it still runs in its own Phase-2 harness.",
+    "Frontend, FINANCIAL_RECOVERY_MODE, observability, runtime PMS ownership integration, live-DARK deployment and reboot/rollback all remain outstanding."
+  ],
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only.",
+    "migrations_added_this_round": "0016_phase4_payment_coherence, 0017_phase4_least_privilege"
+  },
+  "no_financial_traffic": {
+    "real_provider_charge_or_refund": false,
+    "real_pms_ps_transmitted": false,
+    "guest_folio_debited": false,
+    "paid_guest_access": false,
+    "programmatic_pms_reversal": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "deployment_performed": false
+  },
+  "evidence_files": [
+    "data-plane/migrations/0016_phase4_payment_coherence.up.sql",
+    "data-plane/migrations/0016_phase4_payment_coherence.down.sql",
+    "data-plane/migrations/0017_phase4_least_privilege.up.sql",
+    "data-plane/migrations/0017_phase4_least_privilege.down.sql",
+    "data-plane/internal/payment/payment.go",
+    "data-plane/internal/payment/engine.go",
+    "data-plane/internal/payment/provider.go",
+    "data-plane/internal/payment/testdouble.go",
+    "data-plane/internal/payment/granter.go",
+    "data-plane/internal/payment/pg_integration_test.go",
+    "data-plane/internal/payment/pg_grant_integration_test.go",
+    "data-plane/internal/iamv2/commerce_settled_grant.go",
+    "iam_v2_scratch/phase4_least_privilege.sh",
+    "iam_v2_scratch/phase4_payment_concurrency.sh",
+    "scripts/phase4-least-privilege.sh",
+    "scripts/phase4-pg-integration.sh",
+    ".github/workflows/phase4-financial-core.yml",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. Phase 4 remains IN_PROGRESS at DARK maturity. No cutover, no enablement, no deployment, no PR and no merge.",
+  "next_action": "Build the WS-F Manual Review frontend and the WS-J operator payment surface, FINANCIAL_RECOVERY_MODE (WS-H) and observability (WS-I), then prepare the authorized controlled live-DARK deployment."
+}

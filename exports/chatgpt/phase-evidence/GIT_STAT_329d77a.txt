@@ -1,0 +1,4 @@
+commit 329d77afa661e99cc344457b897d8c041f2ea687
+Date:   Wed Aug 12 16:19:45 2026 +0300
+
+    Phase 4 (delivery_head): T0037 receipt + project-state pointers + regenerated manifest

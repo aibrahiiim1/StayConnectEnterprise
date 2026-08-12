@@ -213,7 +213,7 @@
     "phases_5_to_7_authorized": false,
     "phase4_accepted": false,
     "phase4_closed": false,
-    "phase4_migration": "0011_phase4_financial_execution + 0012_phase4_financial_hardening + 0013_phase4_reversal_ledger + 0014_phase4_payment_settlement + 0015_phase4_payment_hardening",
+    "phase4_migration": "0011_phase4_financial_execution + 0012_phase4_financial_hardening + 0013_phase4_reversal_ledger + 0014_phase4_payment_settlement + 0015_phase4_payment_hardening + 0016_phase4_payment_coherence + 0017_phase4_least_privilege",
     "phase4_core_hardened": true,
     "phase4_production_construction_boundary_closed": true,
     "phase4_construction_boundary_evidence": "NewProductionEngine(repo) is the only exported financial constructor and takes no Config and no Transport; newDarkGuard is unexported; the compile-time-only export_test.go carries the test seams. scripts/ci/phase4-dark-check.sh derives the exported surface with go doc and refuses ANY exported function whose PARAMETERS mention Config or Transport, with no exclusions. The check was proved bidirectional: it passes on the clean tree and fails on a deliberately planted exported constructor.",
@@ -317,15 +317,15 @@
     "guest_portal_upstream_reserve_ms": 200,
     "nft_deployment_architecture": "nftconverge",
     "surgical_foundation_retired_from_procedure": true,
-    "next_step": "Continue the authorized Phase 4 Financial Execution Layer DARK on the phase/4-financial-execution branch under D18/T0029: Manual Review operator workflow, payment/settlement boundary, FINANCIAL_RECOVERY_MODE, operator UI and observability, then the final controlled DARK deployment. Phase-4 feature flags stay OFF and no real financial traffic is authorized."
+    "next_step": "Continue the authorized Phase 4 Financial Execution Layer DARK on the phase/4-financial-execution branch under D18/T0029. The payment runtime, the Phase-2 entitlement handoff and the least-privilege role boundary are delivered and verified in DARK (T0037); what remains is the Manual Review frontend and operator payment surface, FINANCIAL_RECOVERY_MODE, observability, and then the final controlled DARK deployment. Phase-4 feature flags stay OFF and no real financial traffic is authorized."
   },
-  "latest_transition_id": "T0036",
+  "latest_transition_id": "T0037",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "edd0e8a8749859e1e6230517eb2a9299abbd57a6",
+  "acceptance_candidate_head": "829444b7c23a4acce1ee54ad94fa8042fb224f16",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "edd0e8a8749859e1e6230517eb2a9299abbd57a6",
+  "inventory_head": "829444b7c23a4acce1ee54ad94fa8042fb224f16",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }
