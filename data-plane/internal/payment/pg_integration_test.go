@@ -135,7 +135,7 @@ type fakeGranter struct {
 	id    string
 }
 
-func (g *fakeGranter) GrantSettledPurchase(_ context.Context, _, _, _ string) (GrantOutcome, error) {
+func (g *fakeGranter) GrantSettledSettlement(_ context.Context, _, _, _ string) (GrantOutcome, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.calls++

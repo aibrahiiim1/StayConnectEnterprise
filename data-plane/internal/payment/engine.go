@@ -10,10 +10,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// GrantOutcome is what the Phase-2 grant path reports back.
+// GrantOutcome is what the paid-grant operation reports back.
 type GrantOutcome struct {
 	EntitlementID  string
 	AlreadyGranted bool
+	Superseded     string
 }
 
 // Granter is the ONLY way this package can create guest access.
@@ -22,7 +23,9 @@ type GrantOutcome struct {
 // entitlement writer of its own: there is no SQL here that touches iam_v2.entitlements, and the only
 // implementation in the tree adapts the existing Phase-2 controlled path.
 type Granter interface {
-	GrantSettledPurchase(ctx context.Context, tenantID, siteID, purchaseID string) (GrantOutcome, error)
+	// The parameter is a SETTLEMENT, deliberately. Passing a purchase would mean the caller had decided
+	// which purchase this money paid for; passing the settlement means the database decides.
+	GrantSettledSettlement(ctx context.Context, tenantID, siteID, settlementID string) (GrantOutcome, error)
 }
 
 // Engine is the payment runtime.
@@ -395,11 +398,15 @@ SELECT tenant_id::text, site_id::text, settlement_id::text, transaction_type, pr
 
 	evidence, _ := json.Marshal(map[string]string{
 		"provider_status": string(n.outcome), "provider_reason_code": n.reasonCode})
+	// The NARROWED operation (0021). The runtime no longer holds EXECUTE on apply_payment_callback_v2,
+	// which would let it assert any status for any correlated intent; this one refuses unless the intent is
+	// genuinely executing, and takes no tenant, site or merchant parameter to be pointed elsewhere.
+	_, _ = provider, merchant
 	var applied string
 	if err := e.pool.QueryRow(ctx,
-		`SELECT iam_v2.apply_payment_callback_v2($1,$2,$3::uuid,$4,$5,$6,$7,$8,$9::jsonb)`,
-		tenantID, provider, merchant, n.clientRef, n.eventID, n.eventType,
-		nullIfEmpty(n.assertedStatus()), nullIfEmpty(n.providerTxnRef), string(evidence)).Scan(&applied); err != nil {
+		`SELECT iam_v2.p4_apply_provider_outcome($1,$2,$3,$4,$5,$6::jsonb)`,
+		n.clientRef, n.eventID, n.eventType, n.assertedStatus(),
+		n.providerTxnRef, string(evidence)).Scan(&applied); err != nil {
 		return out, classify(err)
 	}
 	out.Applied = applied
@@ -424,25 +431,20 @@ SELECT tenant_id::text, site_id::text, settlement_id::text, transaction_type, pr
 // grantForSettlement hands off to the EXISTING Phase-2 controlled path. It resolves the purchase from the
 // settlement rather than accepting one, and it grants only when the settlement is durably SETTLED.
 func (e *Engine) grantForSettlement(ctx context.Context, tenantID, siteID, settlementID string) (GrantOutcome, error) {
-	var purchaseID, status string
-	if err := e.pool.QueryRow(ctx,
-		`SELECT purchase_id::text, status FROM iam_v2.settlements WHERE tenant_id=$1 AND site_id=$2 AND id=$3`,
-		tenantID, siteID, settlementID).Scan(&purchaseID, &status); err != nil {
-		return GrantOutcome{}, classify(err)
-	}
-	if status != "SETTLED" {
-		// Not an error: a charge can be captured while the settlement is legitimately elsewhere (already
-		// reversed, for instance). Granting would be the bug.
-		return GrantOutcome{}, nil
-	}
 	if e.granter == nil {
 		return GrantOutcome{}, fail(ErrGrant, "no entitlement granter is configured")
 	}
-	g, err := e.granter.GrantSettledPurchase(ctx, tenantID, siteID, purchaseID)
+	// No pre-check on the settlement status here. The operation re-reads and locks it, so a check performed
+	// beforehand would be both redundant and racy -- and a caller that "verified" first would be tempted to
+	// pass what it read.
+	g, err := e.granter.GrantSettledSettlement(ctx, tenantID, siteID, settlementID)
 	if err != nil {
-		// Carry the Phase-2 refusal's own words. It is a deterministic domain code, never guest data, and
-		// swallowing it turns every grant problem into the same unactionable sentence.
-		return GrantOutcome{}, fail(ErrGrant, "the phase-2 grant refused: "+err.Error())
+		// A settlement that is legitimately not SETTLED -- already reversed, still in review -- is not an
+		// error here: the capture was recorded, and granting would be the bug.
+		if CodeOf(err) == ErrNotExecutable {
+			return GrantOutcome{}, nil
+		}
+		return GrantOutcome{}, fail(ErrGrant, "the paid grant refused: "+err.Error())
 	}
 	return g, nil
 }
@@ -475,6 +477,16 @@ func classify(err error) error {
 		{"PAYMENT_REFUND_EXCEEDS_CHARGE", ErrNotExecutable},
 		{"ptx_one_live_charge_per_settlement", ErrNotExecutable},
 		{"CALLBACK_EVIDENCE_UNSAFE", ErrUntrustedInput},
+		{"GRANT_NOT_SETTLED", ErrNotExecutable},
+		{"GRANT_WRONG_RAIL", ErrNotExecutable},
+		{"GRANT_PURCHASE_STATE", ErrNotExecutable},
+		{"GRANT_SETTLEMENT_UNKNOWN", ErrNotExecutable},
+		{"GRANT_EVIDENCE_MISSING", ErrNotExecutable},
+		{"GRANT_SUBJECT_UNRESOLVED", ErrNotExecutable},
+		{"PAYMENT_NOT_EXECUTING", ErrNotExecutable},
+		{"PAYMENT_OUTCOME_INVALID", ErrUntrustedInput},
+		{"FINANCIAL_ACTOR_UNKNOWN", ErrUntrustedInput},
+		{"FINANCIAL_ACTOR_REQUIRED", ErrUntrustedInput},
 		{"FINANCIAL_RECOVERY_MODE", ErrRecoveryHeld},
 		{"RECOVERY_HOLDS_UNRESOLVED", ErrRecoveryHeld},
 		{"RECOVERY_HOLD_ALREADY_RESOLVED", ErrNotExecutable},

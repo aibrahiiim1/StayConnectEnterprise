@@ -6,8 +6,6 @@ import (
 	"context"
 	"sync"
 	"testing"
-
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 // Exactly-once against the REAL Phase-2 grant path.
@@ -17,15 +15,12 @@ import (
 // about the production wiring and a double cannot prove it. The assertion throughout is a COUNT of
 // entitlement rows for the purchase: one, or zero, and never two.
 
+// realGranter is the production granter: the one that calls iam_v2.p4_grant_paid_entitlement. There is no
+// double here on purpose -- "we reuse the one paid-grant operation" is a claim about production wiring, and
+// a stand-in cannot prove it.
 func realGranter(t *testing.T) Granter {
 	t.Helper()
-	e, err := iamv2.NewCommerceEngine(
-		iamv2.CommerceConfig{MasterEnabled: true, PortalEnabled: true},
-		iamv2.NewPgCommerceRepository(pool(t)), iamv2.NopObserver{})
-	if err != nil {
-		t.Fatalf("commerce engine: %v", err)
-	}
-	return CommerceGranter{Engine: e}
+	return SQLGranter{Pool: pool(t)}
 }
 
 func entitlements(t *testing.T, purchaseID string) int {
@@ -175,24 +170,48 @@ func TestIntegrationGrant_SubstitutionFailsClosed(t *testing.T) {
 	b := seedPaidChain(t, p)
 	g := realGranter(t)
 
-	// site A's tenant asking to grant site B's purchase
-	if _, err := g.GrantSettledPurchase(ctx, a.tenant, a.site, b.purchase); err == nil {
-		t.Fatal("a cross-tenant purchase was granted")
+	// site A's tenant asking to grant site B's settlement
+	if _, err := g.GrantSettledSettlement(ctx, a.tenant, a.site, b.settlement); err == nil {
+		t.Fatal("a cross-tenant settlement was granted")
 	}
 	// the right tenant, the wrong site
-	if _, err := g.GrantSettledPurchase(ctx, b.tenant, a.site, b.purchase); err == nil {
-		t.Fatal("a cross-site purchase was granted")
+	if _, err := g.GrantSettledSettlement(ctx, b.tenant, a.site, b.settlement); err == nil {
+		t.Fatal("a cross-site settlement was granted")
 	}
-	// and the correct owner still cannot grant while the settlement has not reached SETTLED
-	if _, err := g.GrantSettledPurchase(ctx, b.tenant, b.site, b.purchase); err == nil {
-		t.Fatal("an unsettled purchase was granted")
+	// the correct owner still cannot grant while the settlement has not reached SETTLED
+	if _, err := g.GrantSettledSettlement(ctx, b.tenant, b.site, b.settlement); err == nil {
+		t.Fatal("an unsettled settlement was granted")
 	}
-	// a PENDING purchase is not a paid-grant origin, even with a SETTLED settlement in front of it
-	if _, err := p.Exec(ctx, `UPDATE iam_v2.purchases SET state='PENDING' WHERE id=$1`, b.purchase); err != nil {
+	// A PENDING purchase is not a paid-grant origin, even with a legitimately SETTLED settlement in front
+	// of it. The settlement is driven to SETTLED the real way -- a captured charge -- because forcing the
+	// status directly is refused by an existing invariant (ONLINE_PAYMENT settles only on a CAPTURED
+	// charge), and a test that worked around that would be proving something about a state the system
+	// cannot actually be in.
+	c := seedPaidChain(t, p)
+	e := NewEngine(liveCfg, p, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), &fakeGranter{})
+	in, err := e.CreateChargeIntent(ctx, c.tenant, c.site, c.settlement, idem(t, "pending-origin"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.GrantSettledPurchase(ctx, b.tenant, b.site, b.purchase); err == nil {
+	if err := beginExecution(t, p, in.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Exec(ctx,
+		`SELECT iam_v2.p4_apply_provider_outcome($1,'evt-po','x','CAPTURED',NULL,'{}'::jsonb)`,
+		in.ClientRef); err != nil {
+		t.Fatal(err)
+	}
+	if st := scan1[string](t, p, `SELECT status FROM iam_v2.settlements WHERE id=$1`, c.settlement); st != "SETTLED" {
+		t.Fatalf("setup: expected SETTLED, got %s", st)
+	}
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.purchases SET state='PENDING' WHERE id=$1`, c.purchase); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.GrantSettledSettlement(ctx, c.tenant, c.site, c.settlement); err == nil {
 		t.Fatal("a PENDING purchase took the paid grant path")
+	}
+	if n := entitlements(t, c.purchase); n != 0 {
+		t.Fatalf("a PENDING-origin grant created %d entitlements", n)
 	}
 	if n := entitlements(t, b.purchase); n != 0 {
 		t.Fatalf("substitution created %d entitlements", n)

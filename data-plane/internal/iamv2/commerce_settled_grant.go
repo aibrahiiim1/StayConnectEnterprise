@@ -20,10 +20,7 @@ package iamv2
 // subject advisory lock, so a duplicate callback, a concurrent callback and a replay after restart all
 // converge on one entitlement rather than racing to create a second.
 
-import (
-	"context"
-	"time"
-)
+import "context"
 
 // SettledPurchaseGrant is the pinned evidence a settled purchase carries. Every field is read from durable
 // rows the purchase already points at; none of it is supplied by a caller.
@@ -48,87 +45,20 @@ type SettledGrantResult struct {
 	AlreadyGranted bool
 }
 
-// GrantSettledPurchase creates access for a purchase whose settlement has reached SETTLED.
+// GrantSettledPurchase is RETIRED as an implementation and kept only as a signpost.
 //
-// It refuses, fail-closed, when: the purchase is not in this tenant/site; the settlement is not SETTLED;
-// the purchase is in a state that cannot be granted. It is safe to call repeatedly and concurrently.
+// The paid grant moved into iam_v2.p4_grant_paid_entitlement (migration 0021) because of what the previous
+// arrangement implied about privilege: performing the grant from Go required the caller to hold EXECUTE on
+// p4_insert_entitlement, which takes thirteen caller-supplied parameters -- subject, package revision,
+// policy snapshot, window. A restricted runtime holding that primitive could fabricate an entitlement for
+// anyone, from evidence it invented. Moving the whole operation behind one definer function that
+// re-resolves its own evidence is what removes that.
+//
+// There is still exactly ONE paid-grant implementation; it is now SQL rather than Go, and both the owner
+// and the restricted runtime reach it the same way. The FREE path is unchanged and still lives in
+// ConfirmFreePurchase, as it always did.
 func (e *CommerceEngine) GrantSettledPurchase(ctx context.Context, tenantID, siteID, purchaseID string) (SettledGrantResult, error) {
-	var res SettledGrantResult
-	err := e.repo.WithTx(ctx, func(tx CommerceTx) error {
-		g, err := tx.LoadSettledPurchaseGrant(ctx, tenantID, siteID, purchaseID)
-		if err != nil {
-			return err
-		}
-		// The subject lock is taken BEFORE the already-granted check, so two concurrent callers cannot both
-		// read "not granted" and then both grant.
-		if err := tx.AcquireSubjectLock(ctx, tenantID, siteID, g.Subject); err != nil {
-			return err
-		}
-		g, err = tx.LoadSettledPurchaseGrant(ctx, tenantID, siteID, purchaseID) // re-read under the lock
-		if err != nil {
-			return err
-		}
-		if g.ExistingEntitlementID != "" {
-			res = SettledGrantResult{EntitlementID: g.ExistingEntitlementID, AlreadyGranted: true}
-			return nil
-		}
-		// Money is the authorization. Anything short of SETTLED grants nothing -- including MANUAL_REVIEW,
-		// which is precisely the state that says nobody knows yet.
-		if g.SettlementStatus != "SETTLED" {
-			return &Error{Code: ErrNotRedeemable, Msg: "settlement is not SETTLED"}
-		}
-		if g.PurchaseState == "GRANTED" {
-			// GRANTED with no entitlement row is a contradiction; refuse rather than paper over it.
-			return &Error{Code: ErrConflict, Msg: "purchase is GRANTED but has no entitlement"}
-		}
-		// AWAITING_SETTLEMENT and nothing else.
-		//
-		// PENDING was previously accepted here, and it should not have been. A PENDING purchase is one that
-		// has not yet been committed to a settlement path; accepting it would let a settled payment grant
-		// against a purchase that never declared it was awaiting money, which is the state a free grant uses.
-		// The paid path has exactly one legitimate origin, so it names exactly one.
-		if g.PurchaseState != "AWAITING_SETTLEMENT" {
-			return &Error{Code: ErrNotRedeemable,
-				Msg: "a paid grant requires the purchase to be AWAITING_SETTLEMENT, not " + g.PurchaseState}
-		}
-
-		superseded, err := tx.TerminateLiveEntitlementForSubject(ctx, tenantID, siteID, g.Subject)
-		if err != nil {
-			return err
-		}
-		var window *time.Time
-		if g.GrantSnapshot.WindowEndsAt != "" {
-			if w, perr := time.Parse(time.RFC3339, g.GrantSnapshot.WindowEndsAt); perr == nil {
-				window = &w
-			}
-		}
-		eid, err := tx.InsertEntitlement(ctx, EntitlementSpec{
-			TenantID: tenantID, SiteID: siteID, PurchaseID: purchaseID, Subject: g.Subject,
-			ServicePlanRevID:   g.GrantSnapshot.ServicePlanRevisionID,
-			PackageRevID:       g.PackageRevisionID,
-			PolicySnapshot:     g.GrantSnapshot,
-			TimeAccountingMode: g.GrantSnapshot.TimeAccountingMode,
-			EndMode:            g.GrantSnapshot.EndMode,
-			WindowEndsAt:       window,
-			SupersedesID:       superseded,
-		})
-		if err != nil {
-			return err
-		}
-		// GRANTED only once the entitlement exists, exactly as the free path orders it.
-		if err := tx.MarkPurchaseGranted(ctx, purchaseID); err != nil {
-			return err
-		}
-		res = SettledGrantResult{EntitlementID: eid, Superseded: superseded}
-		return nil
-	})
-	if err != nil {
-		if e, ok := err.(*Error); ok {
-			return SettledGrantResult{}, e
-		}
-		// Keep the underlying repository message. It is deterministic infrastructure text, never guest data,
-		// and collapsing every failure to one sentence makes a grant problem unactionable.
-		return SettledGrantResult{}, &Error{Code: ErrRepo, Msg: "grant settled purchase: " + err.Error()}
-	}
-	return res, nil
+	return SettledGrantResult{}, &Error{Code: ErrNotRedeemable,
+		Msg: "the paid grant is performed by iam_v2.p4_grant_paid_entitlement; call it with the SETTLEMENT " +
+			"rather than the purchase so the operation can re-resolve its own evidence"}
 }

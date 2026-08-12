@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 // THE RESTRICTED-ROLE END-TO-END PROOF.
@@ -75,7 +74,7 @@ func TestIntegrationRestricted_FullPaymentToEntitlementUnderLeastPrivilege(t *te
 	s := seedPaidChain(t, owner)
 
 	// Everything from here runs on the restricted connection, including the Phase-2 grant.
-	granter := CommerceGranter{Engine: mustCommerceEngine(t, rp)}
+	granter := SQLGranter{Pool: rp}
 	e := NewEngine(liveCfg, rp, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), granter)
 
 	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
@@ -197,15 +196,4 @@ func TestIntegrationRestricted_OperatorCanReviewAndOnlyReview(t *testing.T) {
 	}
 	// the reporting role sees the redacted views and NOT the underlying detail
 	_ = owner
-}
-
-func mustCommerceEngine(t *testing.T, p *pgxpool.Pool) *iamv2.CommerceEngine {
-	t.Helper()
-	e, err := iamv2.NewCommerceEngine(
-		iamv2.CommerceConfig{MasterEnabled: true, PortalEnabled: true},
-		iamv2.NewPgCommerceRepository(p), iamv2.NopObserver{})
-	if err != nil {
-		t.Fatalf("commerce engine: %v", err)
-	}
-	return e
 }

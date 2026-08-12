@@ -3,27 +3,41 @@ package payment
 import (
 	"context"
 
-	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// CommerceGranter adapts the existing Phase-2 CommerceEngine to this package's Granter interface.
+// SQLGranter is the ONLY implementation of Granter, and it calls exactly one thing:
+// iam_v2.p4_grant_paid_entitlement (migration 0021).
 //
-// It is the ONLY implementation of Granter in the tree, and it has deliberately no logic: it forwards, and
-// nothing else. If this adapter ever needed a decision of its own, that would be the moment a second
-// entitlement writer was being born, and the right response would be to change the Phase-2 path instead.
+// WHY THIS SHAPE. The previous implementation adapted the Go CommerceEngine, which performed the grant from
+// three primitives. Holding EXECUTE on those primitives is equivalent to holding the ability to fabricate an
+// entitlement: p4_insert_entitlement takes the subject, the package revision and the policy snapshot as
+// parameters, so the CALLER supplied the evidence rather than the database deriving it. A compromised
+// runtime role could therefore grant free access to anyone, from evidence it invented, without ever
+// touching a table directly -- which is why "the role holds no DML" was true and almost meaningless.
 //
-// The dependency points payment -> iamv2, which is the honest direction: the payment runtime is a caller of
-// commerce, not the other way round.
-type CommerceGranter struct{ Engine *iamv2.CommerceEngine }
+// The high-level operation takes a tenant, a site and a SETTLEMENT. It re-resolves the purchase, the quote,
+// the auth context, the subject and the grant snapshot itself, under lock, and enforces ONLINE_PAYMENT +
+// SETTLED + AWAITING_SETTLEMENT. There is no parameter here through which anything can be substituted --
+// which is what lets a restricted role complete a paid grant without being able to invent one.
+type SQLGranter struct{ Pool *pgxpool.Pool }
 
-// GrantSettledPurchase forwards to the one authoritative grant path.
-func (g CommerceGranter) GrantSettledPurchase(ctx context.Context, tenantID, siteID, purchaseID string) (GrantOutcome, error) {
-	r, err := g.Engine.GrantSettledPurchase(ctx, tenantID, siteID, purchaseID)
+// GrantSettledSettlement performs the paid grant for a settled online payment. It is idempotent: a purchase
+// that already granted returns its existing entitlement without writing anything.
+func (g SQLGranter) GrantSettledSettlement(ctx context.Context, tenantID, siteID, settlementID string) (GrantOutcome, error) {
+	var out GrantOutcome
+	var superseded *string
+	err := g.Pool.QueryRow(ctx,
+		`SELECT entitlement_id::text, already_granted, superseded::text
+		   FROM iam_v2.p4_grant_paid_entitlement($1::uuid,$2::uuid,$3::uuid)`,
+		tenantID, siteID, settlementID).Scan(&out.EntitlementID, &out.AlreadyGranted, &superseded)
 	if err != nil {
-		return GrantOutcome{}, err
+		return GrantOutcome{}, classify(err)
 	}
-	return GrantOutcome{EntitlementID: r.EntitlementID, AlreadyGranted: r.AlreadyGranted}, nil
+	if superseded != nil {
+		out.Superseded = *superseded
+	}
+	return out, nil
 }
 
-// compile-time proof that the adapter is a Granter
-var _ Granter = CommerceGranter{}
+var _ Granter = SQLGranter{}

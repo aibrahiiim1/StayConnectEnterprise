@@ -38,7 +38,7 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-p
 pre="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${pre:-0}" != "63" ]; then echo "INFRA: pre-0011 chain did not build (iam_v2 tables=$pre)"; exit 2; fi
 
-for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement 0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege 0019_phase4_financial_recovery 0020_phase4_financial_observability; do
+for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement 0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege 0019_phase4_financial_recovery 0020_phase4_financial_observability 0021_phase4_trust_boundary; do
   if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
     # Deterministic: a broken migration fails the same way twice, so this is exit 1 and CI must not retry.
@@ -114,6 +114,11 @@ fi
 if [ "$rc" = 0 ]; then
   echo "== go test -tags integration -run IntegrationRecovery ./internal/payment/ (FINANCIAL_RECOVERY_MODE) =="
   ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationRecovery ./internal/payment/ -count=1 "$@" )
+  rc=$?
+fi
+if [ "$rc" = 0 ]; then
+  echo "== go test -tags integration -run IntegrationDefinerAbuse ./internal/payment/ (definer-abuse matrix) =="
+  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationDefinerAbuse ./internal/payment/ -count=1 "$@" )
   rc=$?
 fi
 if [ "$rc" = 0 ]; then
