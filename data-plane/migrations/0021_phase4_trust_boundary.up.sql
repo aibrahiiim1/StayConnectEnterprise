@@ -188,16 +188,15 @@ BEGIN
     RAISE EXCEPTION 'CALLBACK_UNCORRELATED: no payment intent matches this client reference'
       USING ERRCODE = 'no_data_found';
   END IF;
-  -- A provider retries its webhooks, so a delivery that merely REPEATS the outcome already recorded is an
-  -- ordinary event and is reported as a duplicate rather than an error. Nothing is written: the intent is
-  -- already where the delivery says it should be.
-  IF tx.status = p_outcome THEN
-    RETURN 'DUPLICATE';
-  END IF;
-  -- The narrowing that matters: an outcome may only be applied to a payment that is actually executing.
-  -- A terminal intent is not moved by a late delivery claiming something different -- that is a conflict,
-  -- not a retry, and it belongs in manual review rather than in an automatic status change.
-  IF tx.status <> 'PENDING' THEN
+  -- THE NARROWING THAT MATTERS. An outcome may only be applied to a payment that is actually executing --
+  -- so this cannot be used to conjure a result for an intent nobody started.
+  --
+  -- The one exception is a delivery that REPEATS the outcome already recorded, which is what every provider
+  -- does when it retries a webhook. That is not a status change and it is not a manufacture; it is a fact
+  -- about a delivery, and it still goes through to the callback ledger below so the retry is RECORDED
+  -- rather than silently dropped. The ledger's unique index makes it a no-op, and the reference-conflict
+  -- check still runs -- which is why this delegates instead of returning early.
+  IF tx.status <> 'PENDING' AND tx.status IS DISTINCT FROM p_outcome THEN
     RAISE EXCEPTION 'PAYMENT_NOT_EXECUTING: the intent is %; an outcome may only be applied to a payment '
                     'that crossed the execution boundary', tx.status USING ERRCODE = 'check_violation';
   END IF;

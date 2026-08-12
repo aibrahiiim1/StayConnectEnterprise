@@ -63,8 +63,13 @@ func TestIntegrationDefinerAbuse_TheRuntimeDefinerSurfaceIsExactlyWhatWeThinkItI
 		"iam_v2.p4_grant_paid_entitlement(uuid,uuid,uuid)":                 true,
 		"iam_v2.p4_apply_provider_outcome(text,text,text,text,text,jsonb)": true,
 		"iam_v2.p4_financial_recovery_active(uuid,uuid)":                   true,
-		"iam_v2.p4_reconcile_financial_epoch(uuid,uuid,text)":              true,
-		"iam_v2.begin_controlled_operation(text)":                          true,
+		// Reviewed (0023). It reads two signals and compares them; the ONLY outcome it can produce is more
+		// holding. Nothing in it releases an epoch, resolves a hold or unholds a rail, which is what makes
+		// accepting a caller-supplied marker generation safe -- see the abuse test below.
+		"iam_v2.p4_reconcile_financial_epoch_v2(uuid,uuid,text,bigint,boolean)": true,
+		// Reviewed (0023). Read-only: it returns a bigint and writes nothing.
+		"iam_v2.p4_current_restore_generation(uuid,uuid)": true,
+		"iam_v2.begin_controlled_operation(text)":         true,
 	}
 	for _, sig := range got {
 		if !want[sig] {
@@ -263,6 +268,60 @@ func TestIntegrationDefinerAbuse_TheResidualBlastRadiusIsBoundedAndKnown(t *test
 	if st := scan1[string](t, owner, `SELECT status FROM iam_v2.settlements WHERE id=$1`,
 		others.settlement); st != "REQUIRED" {
 		t.Fatalf("an unrelated settlement moved to %s", st)
+	}
+}
+
+// The reconciliation entry point accepts a marker generation from its caller. That is safe for one reason
+// and one reason only: the worst a liar can do is hold their own site.
+func TestIntegrationDefinerAbuse_TheMarkerParameterCannotBeUsedToUNHOLD(t *testing.T) {
+	owner := pool(t)
+	rp := runtimePool(t)
+	ctx := context.Background()
+	s := recoverySite(t, owner)
+	e := NewEngine(liveCfg, owner, NewScriptedProvider(), &fakeGranter{})
+
+	// A caller claiming a HIGHER generation puts its own site into recovery. Undesirable, not dangerous.
+	if _, err := rp.Exec(ctx,
+		`SELECT iam_v2.p4_reconcile_financial_epoch_v2($1::uuid,$2::uuid,'whatever',9999,true)`,
+		s.tenant, s.site); err != nil {
+		t.Fatalf("the reconciliation entry point errored: %v", err)
+	}
+	if active, _ := e.RecoveryActive(ctx, s.tenant, s.site); !active {
+		t.Fatal("a claimed marker generation did not hold the site")
+	}
+
+	// Now the important half: no claim can get back OUT. Zero, absent, enormous -- none of them release.
+	for _, tc := range []struct {
+		name    string
+		gen     int64
+		present bool
+	}{
+		{"claiming generation zero", 0, true},
+		{"claiming no marker at all", 0, false},
+		{"claiming an enormous generation", 1 << 40, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := rp.Exec(ctx,
+				`SELECT iam_v2.p4_reconcile_financial_epoch_v2($1::uuid,$2::uuid,'whatever',$3,$4)`,
+				s.tenant, s.site, tc.gen, tc.present); err != nil {
+				t.Fatalf("errored: %v", err)
+			}
+			if active, _ := e.RecoveryActive(ctx, s.tenant, s.site); !active {
+				t.Fatalf("%s released the hold", tc.name)
+			}
+		})
+	}
+	if n := scan1[int](t, owner, `SELECT count(*)::int FROM iam_v2.financial_epochs
+		WHERE tenant_id=$1 AND site_id=$2 AND released_at IS NOT NULL AND reason <> 'INITIAL'`,
+		s.tenant, s.site); n != 0 {
+		t.Fatal("a claimed marker generation released an epoch")
+	}
+	// and the runtime cannot record a supported restore either: that needs a verified manifest, and the
+	// verification happens in the restore tool, not here.
+	if _, err := rp.Exec(ctx,
+		`SELECT iam_v2.p4_record_supported_restore($1::uuid,$2::uuid,99,repeat('a',64),now(),'forged')`,
+		s.tenant, s.site); err == nil {
+		t.Fatal("the payment runtime recorded a supported restore")
 	}
 }
 

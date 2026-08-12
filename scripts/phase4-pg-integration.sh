@@ -95,51 +95,54 @@ docker exec "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -tAqc   "DO \$\$ B
    GRANT USAGE ON SCHEMA public TO p4_operator_login;" >/dev/null || { echo "INFRA: runtime role"; exit 2; }
 export PHASE4_RUNTIME_DSN="postgres://p4_runtime_login:runtimepw@127.0.0.1:$PORT/$DB"
 export PHASE4_OPERATOR_DSN="postgres://p4_operator_login:operatorpw@127.0.0.1:$PORT/$DB"
-echo "== go test -tags integration -run IntegrationPosting ./internal/posting/ =="
-( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationPosting ./internal/posting/ -count=1 "$@" )
-rc=$?
-if [ "$rc" = 0 ]; then
-  echo "== go test -tags integration -run "IntegrationReviewAPI|IntegrationFinOpsAPI" ./cmd/edged/ =="
-  ( cd "$ROOT/data-plane" && go test -tags integration -run "IntegrationReviewAPI|IntegrationFinOpsAPI" ./cmd/edged/ -count=1 "$@" )
-  rc=$?
+# ---------------------------------------------------------------- the suite
+#
+# Every step goes through run_step, for two reasons that a chain of copy-pasted `if [ "$rc" = 0 ]` blocks
+# could not give:
+#
+#   * a step name is quoted ONCE, in a variable, so a label containing quotes cannot leak into the shell.
+#     The previous form embedded a quoted phrase inside an already-quoted echo and a comment after a `&&`,
+#     which produced a real `No such file or directory` INSIDE an otherwise green run. A deterministic
+#     command error sitting quietly in a passing gate is worse than a failure: it trains a reader to
+#     ignore the output.
+#   * the FIRST failure stops the suite and is reported by name, so "which step failed" never has to be
+#     inferred from where the output stops.
+#
+# PHASE4_SELFTEST_BREAK exists so the gate can be shown to fail on demand. A gate nobody has watched fail
+# is a gate nobody has tested.
+FAILED_STEP=""
+run_step() {
+  local name="$1"; shift
+  [ -n "$FAILED_STEP" ] && return 0
+  echo "== $name =="
+  if [ "${PHASE4_SELFTEST_BREAK:-}" = "$name" ]; then
+    echo "   (PHASE4_SELFTEST_BREAK: deliberately breaking this step to prove the gate reports it)"
+    set -- /nonexistent-harness-command-for-selftest
+  fi
+  if ! ( cd "$ROOT/data-plane" && "$@" ); then
+    FAILED_STEP="$name"
+    echo "   STEP FAILED: $name"
+  fi
+}
+
+GO=(go test -tags integration -count=1)
+
+run_step "posting core"            "${GO[@]}" -run IntegrationPosting ./internal/posting/ "$@"
+run_step "review + finops API"     "${GO[@]}" -run "IntegrationReviewAPI|IntegrationFinOpsAPI" ./cmd/edged/ "$@"
+run_step "payment runtime"         "${GO[@]}" -run IntegrationPayment ./internal/payment/ "$@"
+# Narrowed to the free GRANT path deliberately: TestC2RollbackAtEveryBoundary seeds a fixed device MAC and
+# collides with itself when it shares a database with another suite. That is a pre-existing fixture defect
+# in a test unrelated to the grant writer, and widening this step would be testing the fixture.
+run_step "phase-2 free grant path" "${GO[@]}"   -run "TestC2QuoteAndFreePurchase|TestC2ConcurrentSingleWinner|TestC4ImmutabilityAndPinTrigger"   ./internal/iamv2/
+run_step "observability"           "${GO[@]}" -run IntegrationHealth ./internal/payment/ "$@"
+run_step "recovery"                "${GO[@]}" -run IntegrationRecovery ./internal/payment/ "$@"
+run_step "definer abuse"           "${GO[@]}" -run IntegrationDefinerAbuse ./internal/payment/ "$@"
+run_step "restricted role"         "${GO[@]}" -run IntegrationRestricted ./internal/payment/ "$@"
+run_step "entitlement grant"       "${GO[@]}" -run IntegrationGrant ./internal/payment/ "$@"
+
+if [ -n "$FAILED_STEP" ]; then
+  echo "PHASE4_PG_INTEGRATION rc=1 (failed step: $FAILED_STEP)"
+  exit 1
 fi
-if [ "$rc" = 0 ]; then
-  echo "== go test -tags integration -run IntegrationPayment ./internal/payment/ =="
-  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationPayment ./internal/payment/ -count=1 "$@" )
-  rc=$?
-fi
-if [ "$rc" = 0 ]; then
-  echo "== go test -tags integration -run "the phase-2 free grant path" ./internal/iamv2/ on this schema =="
-  ( cd "$ROOT/data-plane" && # Narrowed to the free GRANT path deliberately. TestC2RollbackAtEveryBoundary seeds a fixed device MAC and
-    # collides with itself when it shares a database with another suite; that is a pre-existing fixture defect
-    # in a test unrelated to the grant writer, and widening this step to it would be testing the fixture.
-    go test -tags integration -run "TestC2QuoteAndFreePurchase|TestC2ConcurrentSingleWinner|TestC4ImmutabilityAndPinTrigger" ./internal/iamv2/ -count=1 )
-  rc=$?
-fi
-if [ "$rc" = 0 ]; then
-  echo "== go test -tags integration -run IntegrationHealth ./internal/payment/ (observability + redaction) =="
-  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationHealth ./internal/payment/ -count=1 "$@" )
-  rc=$?
-fi
-if [ "$rc" = 0 ]; then
-  echo "== go test -tags integration -run IntegrationRecovery ./internal/payment/ (FINANCIAL_RECOVERY_MODE) =="
-  ( cd "$ROOT/data-plane" && go test -tags integration -run "IntegrationRecovery" ./internal/payment/ -count=1 "$@" )
-  rc=$?
-fi
-if [ "$rc" = 0 ]; then
-  echo "== go test -tags integration -run IntegrationDefinerAbuse ./internal/payment/ (definer-abuse matrix) =="
-  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationDefinerAbuse ./internal/payment/ -count=1 "$@" )
-  rc=$?
-fi
-if [ "$rc" = 0 ]; then
-  echo "== go test -tags integration -run IntegrationRestricted ./internal/payment/ (as sc_payment_runtime) =="
-  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationRestricted ./internal/payment/ -count=1 "$@" )
-  rc=$?
-fi
-if [ "$rc" = 0 ]; then
-  echo "== go test -tags integration -run IntegrationGrant ./internal/payment/ =="
-  ( cd "$ROOT/data-plane" && go test -tags integration -run IntegrationGrant ./internal/payment/ -count=1 "$@" )
-  rc=$?
-fi
-echo "PHASE4_PG_INTEGRATION rc=$rc"
-exit $rc
+echo "PHASE4_PG_INTEGRATION rc=0"
+exit 0

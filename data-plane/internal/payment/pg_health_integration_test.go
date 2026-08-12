@@ -53,7 +53,7 @@ func TestIntegrationHealth_ReportsTheContractRequiredSignals(t *testing.T) {
 	}
 
 	// recovery outranks everything
-	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
+	actor := seedOperator(t, p, s.tenant)
 	if _, err := e.DeclareRecovery(ctx, s.tenant, s.site, actor, "reconciling after a restore drill"); err != nil {
 		t.Fatal(err)
 	}

@@ -208,6 +208,10 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_current_restore_generation(uuid,uuid)
   TO sc_payment_runtime, sc_financial_operator;
 GRANT SELECT ON iam_v2.financial_restore_events TO sc_financial_operator;
 
+-- v1 is superseded. Leaving it granted would keep a detector on the runtime's surface that CANNOT see the
+-- supported restore, and a smaller surface with one correct entry point is worth more than two.
+REVOKE EXECUTE ON FUNCTION iam_v2.p4_reconcile_financial_epoch(uuid,uuid,text) FROM sc_payment_runtime;
+
 INSERT INTO public.schema_migrations (version) VALUES ('0023_phase4_restore_generation')
   ON CONFLICT DO NOTHING;
 COMMIT;

@@ -133,10 +133,24 @@ BEGIN
                     'claimed or transmitted until an operator has reconciled what already happened'
       USING ERRCODE = 'check_violation';
   END IF;
+  -- Leaving HELD_RECOVERY has exactly two sanctioned routes, and an ordinary UPDATE is neither.
+  --
+  --   1. a recovery reconciliation decision, which sets the session flag below;
+  --   2. the EXISTING audited retry authorization -- record_posting_review_action grants exactly one
+  --      attempt and records who granted it. That is the path the contract names for making
+  --      CONFIRMED_NOT_COMPLETED work retryable, so blocking it here would have replaced one gap with
+  --      another: held work that can never be finished at all.
+  --
+  -- Route 2 is recognised structurally, from the review state, rather than by a second session flag. A flag
+  -- proves a code path was taken; the authorization proves a decision was made and by whom.
   IF OLD.state = 'HELD_RECOVERY' AND NEW.state <> 'HELD_RECOVERY'
-     AND coalesce(current_setting('iam_v2.p4_recovery_reconciling', true), '') <> 'on' THEN
+     AND coalesce(current_setting('iam_v2.p4_recovery_reconciling', true), '') <> 'on'
+     AND NOT EXISTS (SELECT 1 FROM iam_v2.posting_review_state rs
+                      WHERE rs.posting_id = NEW.posting_id
+                        AND rs.retry_authorized_attempt_no IS NOT NULL) THEN
     RAISE EXCEPTION 'RECOVERY_HOLD_RELEASE_UNCONTROLLED: held posting work leaves HELD_RECOVERY only '
-                    'through an audited reconciliation decision' USING ERRCODE = 'check_violation';
+                    'through a recovery reconciliation decision or an audited retry authorization'
+      USING ERRCODE = 'check_violation';
   END IF;
   RETURN NEW;
 END $fn$;
