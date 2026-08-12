@@ -38,7 +38,7 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-p
 pre="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${pre:-0}" != "63" ]; then echo "INFRA: pre-0011 chain did not build (iam_v2 tables=$pre)"; exit 2; fi
 
-for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement 0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege 0019_phase4_financial_recovery 0020_phase4_financial_observability 0021_phase4_trust_boundary 0022_phase4_recovery_closure 0023_phase4_restore_generation 0024_phase4_outcome_authority_and_grant_kernel; do
+for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement 0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege 0019_phase4_financial_recovery 0020_phase4_financial_observability 0021_phase4_trust_boundary 0022_phase4_recovery_closure 0023_phase4_restore_generation 0024_phase4_outcome_authority_and_grant_kernel 0025_phase4_recovery_completion_and_compliance; do
   if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
     # Deterministic: a broken migration fails the same way twice, so this is exit 1 and CI must not retry.
@@ -156,6 +156,7 @@ run_step "recovery"                "${GO[@]}" -run IntegrationRecovery ./interna
 run_step "definer abuse"           "${GO[@]}" -run IntegrationDefinerAbuse ./internal/payment/ "$@"
 run_step "restricted role"         "${GO[@]}" -run IntegrationRestricted ./internal/payment/ "$@"
 run_step "entitlement grant"       "${GO[@]}" -run IntegrationGrant ./internal/payment/ "$@"
+run_step "final closure"           "${GO[@]}" -run IntegrationClosure ./internal/payment/ "$@"
 
 if [ -n "$FAILED_STEP" ]; then
   echo "PHASE4_PG_INTEGRATION rc=1 (failed step: $FAILED_STEP)"
