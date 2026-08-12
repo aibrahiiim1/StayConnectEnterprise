@@ -9,10 +9,22 @@ package main
 //
 // So evidence is now a CLOSED, BOUNDED, STRUCTURED shape rather than a blob. An operator records where
 // they looked, what reference identifies it, and a short note. That is what the external-folio
-// reconciliation workflow actually needs, and it is not a place a credential can hide.
+// reconciliation workflow actually needs.
 //
-// The rejection rules below are deliberately conservative. A refusal costs an operator a re-typed note;
-// a false accept costs a permanent secret in a financial audit trail.
+// WHAT THIS ACTUALLY GUARANTEES, stated precisely because the earlier wording overclaimed. The closed shape
+// removes the STRUCTURAL places a secret could be attached: there is no free-form JSON member, no array, no
+// nested object, and every string is length-bounded and single-line. So a raw provider payload, a PMS frame
+// or a credentials blob cannot be ATTACHED at all.
+//
+// What it does NOT do is make a secret mathematically unrepresentable. An operator who deliberately types a
+// password into a 500-character note is screened by the pattern rules below, and those are heuristics: they
+// catch the recognisable shapes (credential keywords, key/token literals, card-like digit runs, CVV
+// references, FIAS frames, JSON/XML) and they will not catch an arbitrary high-entropy string that looks
+// like an ordinary reference. The honest claim is: structurally closed, heuristically screened, bounded,
+// and small enough that a leak is a short human sentence rather than a payload.
+//
+// The rejection rules are deliberately conservative. A refusal costs an operator a re-typed note; a false
+// accept costs a permanent secret in a financial audit trail.
 
 import (
 	"encoding/json"
@@ -39,7 +51,25 @@ var evidenceSourceTypes = map[string]string{
 const (
 	maxEvidenceReference = 120
 	maxEvidenceNote      = 500
+	// reason reaches the SAME immutable ledger as evidence. Bounding and screening evidence while leaving
+	// reason free-form would have left the whole protection bypassable through the other field.
+	maxReviewReason = 500
 )
+
+// validateReason applies to `reason` exactly what validateEvidence applies to the evidence fields.
+func validateReason(v string) (string, error) {
+	r := strings.TrimSpace(v)
+	if r == "" {
+		return "", evidenceError{"a reason is mandatory for every review action"}
+	}
+	if len(r) > maxReviewReason {
+		return "", evidenceError{fmt.Sprintf("reason must be at most %d characters", maxReviewReason)}
+	}
+	if err := checkSafeText("reason", r); err != nil {
+		return "", err
+	}
+	return r, nil
+}
 
 // reviewEvidenceInput is exactly what a reviewer may record. There is no free-form JSON member, so there
 // is nowhere for a raw provider payload or a PMS frame to be attached.

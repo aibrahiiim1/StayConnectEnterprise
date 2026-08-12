@@ -92,9 +92,12 @@ func (s *server) listReviewActionCatalog(w http.ResponseWriter, r *http.Request)
 			"source_types":  evidenceSourceTypes,
 			"max_reference": maxEvidenceReference,
 			"max_note":      maxEvidenceNote,
-			"rejects": "credentials, tokens, API keys, card data, raw provider payloads and raw PMS frames. " +
-				"Financial review evidence is an immutable audit record: record a REFERENCE to the artefact, " +
-				"never its contents.",
+			"max_reason":    maxReviewReason,
+			"rejects": "credentials, tokens, API keys, card data, raw provider payloads and raw PMS frames, " +
+				"in BOTH the evidence fields and the reason. Financial review evidence is an immutable audit " +
+				"record: record a REFERENCE to the artefact, never its contents.",
+			"guarantee": "structurally closed (no free-form member), length-bounded, single-line, and " +
+				"heuristically screened for recognisable secret shapes. Screening is heuristic, not a proof.",
 		},
 		"note": "There is no generic approve action. Programmatic PMS reversal is disabled in v1: " +
 			"CREATE_REVERSAL records an audited ledger row only, and the folio correction is manual.",
@@ -361,8 +364,9 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 			"not in the approved review catalog; there is no generic approve action")
 		return
 	}
-	if strings.TrimSpace(in.Reason) == "" {
-		jsonErr(w, http.StatusBadRequest, "reason_required", "a reason is mandatory for every review action")
+	reason, rErr := validateReason(in.Reason)
+	if rErr != nil {
+		jsonErr(w, http.StatusBadRequest, "reason_invalid", rErr.Error())
 		return
 	}
 	evidence, evErr := validateEvidence(in.Evidence, spec.needsEvidence)
@@ -400,7 +404,7 @@ func (s *server) postReviewAction(w http.ResponseWriter, r *http.Request) {
 	var actionID string
 	err := s.db.QueryRow(ctx,
 		`SELECT iam_v2.record_posting_review_action($1,$2,$3,$4,$5::jsonb,$6,$7)::text`,
-		id, in.Action, sess.OperatorID, strings.TrimSpace(in.Reason), evidence,
+		id, in.Action, sess.OperatorID, reason, evidence,
 		in.ExpectedVersion, in.ReversalAmountMinor).Scan(&actionID)
 	if err != nil {
 		code, msg := classifyReviewError(err)

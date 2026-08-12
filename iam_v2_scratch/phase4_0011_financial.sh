@@ -21,6 +21,8 @@ UP="$ROOT/data-plane/migrations/0011_phase4_financial_execution.up.sql"
 DOWN="$ROOT/data-plane/migrations/0011_phase4_financial_execution.down.sql"
 UP12="$ROOT/data-plane/migrations/0012_phase4_financial_hardening.up.sql"
 UP13="$ROOT/data-plane/migrations/0013_phase4_reversal_ledger.up.sql"
+UP14="$ROOT/data-plane/migrations/0014_phase4_payment_settlement.up.sql"
+DOWN14="$ROOT/data-plane/migrations/0014_phase4_payment_settlement.down.sql"
 DOWN13="$ROOT/data-plane/migrations/0013_phase4_reversal_ledger.down.sql"
 DOWN12="$ROOT/data-plane/migrations/0012_phase4_financial_hardening.down.sql"
 FIXTURE="$ROOT/iam_v2_scratch/phase4_financial_fixture.sql"
@@ -186,6 +188,20 @@ eq "0013 DOWN restores the 0012 blanket refusal (a MORE restrictive state, never
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP13" >/dev/null 2>&1   && ok "0013 DOWN -> UP re-applies cleanly" || no "0013 DOWN -> UP re-applies cleanly" "re-up failed"
 eq "0013 DOWN -> UP produces the SAME schema as the first UP" "$UP13_FP" "$(Q "$FP")"
 eq "0013 is recorded in the migration ledger" "1"   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0013_phase4_reversal_ledger';")"
+
+echo "== 0014 payment/settlement lifecycle: UP / DOWN / DOWN->UP =="
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP14" >/dev/null 2>&1 \
+  && ok "0014 UP applied" || no "0014 UP applied" "the payment migration did not apply"
+UP14_FP="$(Q "$FP")"
+[ "$UP13_FP" != "$UP14_FP" ] && ok "0014 changed the catalog" || no "0014 changed the catalog" "identical"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$DOWN14" >/dev/null 2>&1 \
+  && ok "0014 DOWN applied" || no "0014 DOWN applied" "down failed"
+eq "0014 DOWN restores the exact 0013 schema" "$UP13_FP" "$(Q "$FP")"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP14" >/dev/null 2>&1 \
+  && ok "0014 DOWN -> UP re-applies cleanly" || no "0014 DOWN -> UP re-applies cleanly" "re-up failed"
+eq "0014 DOWN -> UP produces the SAME schema as the first UP" "$UP14_FP" "$(Q "$FP")"
+eq "0014 is recorded in the migration ledger" "1" \
+  "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0014_phase4_payment_settlement';")"
 eq "0012 is recorded in the migration ledger" "1" \
   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0012_phase4_financial_hardening';")"
 
@@ -281,6 +297,57 @@ accepts "C23 a DIFFERENT interface may be in flight at the same time" \
   "INSERT INTO iam_v2.pms_postings(id,tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,posting_interface_revision_id,posting_type,amount_minor,currency,currency_exponent,idempotency_key) VALUES ('c0120000-0000-0000-0000-00000000001a','$T','$S','$IF2','99990000-0000-0000-0000-0000000000d4','99990000-0000-0000-0000-000000000004','eeee0000-0000-0000-0000-000000000002','eeee0000-0000-0000-0000-0000000000f2','aaaa0000-0000-0000-0000-0000000002d1','CHARGE',100,'EUR',2,'p4-if2');
    INSERT INTO iam_v2.posting_outbox(tenant_id,site_id,pms_interface_id,posting_id,state) VALUES ('$T','$S','$IF2','c0120000-0000-0000-0000-00000000001a','IN_FLIGHT');"
 Q "UPDATE iam_v2.posting_outbox SET state='DONE' WHERE pms_interface_id IN ('$IF1','$IF2');" >/dev/null
+
+echo "== 0014: online payment and settlement execution =="
+MERCH=aa000000-0000-0000-0000-000000000011
+PPUR=77770000-0000-0000-0000-000000000001
+PSET=77770000-0000-0000-0000-0000000000d1
+Q "INSERT INTO iam_v2.purchases(id,tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,settlement_mapping_id,trigger,amount_minor,currency,currency_exponent,state) VALUES ('$PPUR','$T','$S','cccc0000-0000-0000-0000-0000000000d1','$IF1','$STAY1','dddd0000-0000-0000-0000-000000000001','ADMIN_GRANT',100,'USD',2,'AWAITING_SETTLEMENT');" >/dev/null
+Q "INSERT INTO iam_v2.settlements(id,tenant_id,site_id,purchase_id,method,status) VALUES ('$PSET','$T','$S','$PPUR','ONLINE_PAYMENT','REQUIRED');" >/dev/null
+mkpay(){ echo "INSERT INTO iam_v2.payment_transactions(id,tenant_id,site_id,settlement_id,merchant_account_id,transaction_type,parent_transaction_id,provider,provider_ref,idempotency_key,amount_minor,currency,currency_exponent,status) VALUES ('$1','$T','$S','$PSET','$MERCH','$2',$3,'stripe','$4','$5',$6,'$7',$8,'$9');"; }
+PARENT="'b0000000-0000-0000-0000-000000000002'"
+
+rejects "C28 a client-chosen amount is refused; money comes from the pinned Purchase" \
+  "$(mkpay b0000000-0000-0000-0000-000000000001 CHARGE NULL ref1 idem1 999 USD 2 CREATED)" \
+  "PAYMENT_AMOUNT_NOT_SERVER_PINNED"
+accepts "C28 the server-pinned amount is accepted" \
+  "$(mkpay b0000000-0000-0000-0000-000000000002 CHARGE NULL ref2 idem2 100 USD 2 CREATED)"
+rejects "C26 a second live CHARGE on one settlement is refused" \
+  "$(mkpay b0000000-0000-0000-0000-000000000003 CHARGE NULL ref3 idem3 100 USD 2 CREATED)" \
+  "PAYMENT_DUPLICATE_CHARGE"
+rejects "C26 the payment status machine refuses CREATED -> CAPTURED" \
+  "UPDATE iam_v2.payment_transactions SET status='CAPTURED' WHERE id=$PARENT;" \
+  "PAYMENT_STATUS_TRANSITION"
+eq "C26 the first provider callback is APPLIED" "APPLIED" \
+  "$(Q "SELECT iam_v2.apply_payment_callback($PARENT,'evt-1','pending','PENDING');")"
+eq "C26 the capture callback is APPLIED" "APPLIED" \
+  "$(Q "SELECT iam_v2.apply_payment_callback($PARENT,'evt-2','captured','CAPTURED');")"
+eq "C26 a REPLAYED callback is a DUPLICATE and changes nothing" "DUPLICATE" \
+  "$(Q "SELECT iam_v2.apply_payment_callback($PARENT,'evt-2','captured','CAPTURED');")"
+eq "the settlement reached SETTLED on the captured charge" "SETTLED" \
+  "$(Q "SELECT status FROM iam_v2.settlements WHERE id='$PSET';")"
+rejects "C26 a terminal payment status cannot move again" \
+  "UPDATE iam_v2.payment_transactions SET status='FAILED' WHERE id=$PARENT;" \
+  "PAYMENT_STATUS_TERMINAL"
+rejects "a refund larger than the captured parent is refused" \
+  "$(mkpay b0000000-0000-0000-0000-000000000004 REFUND $PARENT ref4 idem4 101 USD 2 CREATED)" \
+  "PAYMENT_REFUND_EXCEEDS_CHARGE"
+accepts "a partial refund within the bound is accepted" \
+  "$(mkpay b0000000-0000-0000-0000-000000000005 REFUND $PARENT ref5 idem5 40 USD 2 CREATED)"
+rejects "the CUMULATIVE refund bound is enforced" \
+  "$(mkpay b0000000-0000-0000-0000-000000000006 REFUND $PARENT ref6 idem6 61 USD 2 CREATED)" \
+  "PAYMENT_REFUND_EXCEEDS_CHARGE"
+rejects "a refund in another currency is refused (no implicit FX)" \
+  "$(mkpay b0000000-0000-0000-0000-000000000007 REFUND $PARENT ref7 idem7 10 EUR 2 CREATED)" \
+  "PAYMENT_PARENT_CURRENCY_MISMATCH"
+rejects "the PMS rail cannot take a provider charge" \
+  "INSERT INTO iam_v2.payment_transactions(tenant_id,site_id,settlement_id,merchant_account_id,transaction_type,provider,provider_ref,idempotency_key,amount_minor,currency,currency_exponent,status) VALUES ('$T','$S','$SET1','$MERCH','CHARGE','stripe','refX','idemX',100,'USD',2,'CREATED');" \
+  "PAYMENT_WRONG_RAIL"
+rejects "a PMS settlement cannot be declared SETTLED by an unapproved transition" \
+  "UPDATE iam_v2.settlements SET status='SETTLED' WHERE id='$SET1';" \
+  "SETTLEMENT_TRANSITION"
+rejects "the provider callback ledger is append-only" \
+  "UPDATE iam_v2.payment_transaction_events SET event_type='TAMPERED';" "append-only"
 
 echo "== C18/C20 review: evidence, the action/state matrix, single-use authorization =="
 Q "INSERT INTO iam_v2.posting_attempts(tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at,outcome,pa_as_status,response_at) VALUES ('$T','$S','c0120000-0000-0000-0000-000000000019','$IF1',1,'7001','1421','5',now(),'ACKED','OK',now());" >/dev/null
@@ -466,7 +533,7 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP12" >/dev
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$FIXTURE" >/dev/null 2>&1 \
   || { echo "INFRA: fixture did not apply on the rebuild"; exit 2; }
 eq "the rebuild carries 0011 + 0012" "1" "$(Q "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_revisions' AND column_name='financial_base_currency';")"
-run_baseline "post-0011+0012+0013"
+run_baseline "post-0011+0012+0013+0014"
 
 echo
 echo "===== PHASE-4 0011 GATE: PASS=$pass FAIL=$fail ====="

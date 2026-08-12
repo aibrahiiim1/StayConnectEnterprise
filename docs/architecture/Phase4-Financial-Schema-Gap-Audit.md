@@ -379,3 +379,32 @@ matrix is: `payments_operator` WRITE (§15), `site_admin` implicit, and READ for
 **C18** is promoted to `RT-OK` only now, with its whole backend security boundary proven: permission,
 session-bound actor, step-up, mandatory reason, structured evidence, and tenant+site scope. Its operator
 UI remains open.
+
+## 16. Migration 0014 — payment and settlement governance
+
+**Measured first.** On the 0011+0012+0013 chain: `payment_transactions` triggers **NONE**, `settlements`
+triggers **NONE**, callback/webhook ledger **NONE**. mg7 supplied the shape — `amount_minor > 0`, unique
+idempotency key, unique (tenant, provider, merchant, provider_ref), the status and type enums, `ptx_parent`,
+composite FKs — and **nothing that governs how money moves through it**.
+
+0014 adds only that governance, and duplicates none of the above:
+
+| Rule | Enforced by |
+|---|---|
+| duplicate callback can never be applied twice | UNIQUE (payment_transaction_id, provider_event_id) on an append-only ledger |
+| identity immutable; status one-way; terminal is terminal; no deletes | `p4_payment_status_machine` |
+| ONLINE_PAYMENT rail only | `p4_payment_creation_gate` |
+| server-pinned amount/currency/exponent from the pinned Purchase | same |
+| one live CHARGE per settlement | same |
+| refunds: CAPTURED parent, same settlement/merchant/provider/currency, cumulative bound | same |
+| Settlement lifecycle, and SETTLED requires evidence **on its own rail** | `p4_settlement_state_machine` |
+| reversal states must match the child arithmetic | same |
+| UNKNOWN provider outcome routes to MANUAL_REVIEW and is never retried | `apply_payment_callback` |
+
+**Separate rails, enforced.** A PMS passive REVERSAL is not a provider REFUND: different tables, different
+rules, and `SETTLEMENT_REVERSAL_WRONG_RAIL` refuses a PMS settlement being reversed by provider refunds.
+
+**What 0014 is not.** It is the durable enforcement, not the application. No Go payment domain, provider
+abstraction or callback handler exists yet, and nothing wires a settled payment to the Phase-2 atomic
+Entitlement grant. Sixteen behavioural assertions in the DB gate prove the rules; no C-row moves to RT-OK on
+the strength of them, because the runtime that would use them has not been written.

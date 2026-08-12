@@ -1,0 +1,92 @@
+{
+  "transition_id": "T0035",
+  "seq": 35,
+  "timestamp": "2026-08-12T11:20:00Z",
+  "record_type": "PHASE_4_MANUAL_REVIEW_AUDIT_INPUT_HARDENING_AND_PAYMENT_SETTLEMENT_ENFORCEMENT",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030 through T0034 are PRESERVED unchanged. This receipt records two corrections to T0034 and the payment/settlement enforcement added this round.",
+  "corrections": [
+    {
+      "id": "R-1",
+      "area": "Manual Review audit inputs",
+      "what_was_actually_true": "T0034 bounded and screened the structured EVIDENCE while leaving `reason` free-form. Both reach the same append-only ledger, so the whole protection was bypassable through the other field.",
+      "correction": "validateReason applies the same length bound (500), single-line rule, control-character rejection and secret-shape screening to `reason`. Seven adversarial reason cases are covered, each also asserting that the refused reason reached NO ledger row."
+    },
+    {
+      "id": "R-2",
+      "area": "accuracy of the evidence guarantee",
+      "what_was_actually_true": "The T0034 wording implied the closed shape made secrets unrepresentable. It does not. The closed shape removes the STRUCTURAL places a secret can be attached -- no free-form member, no nesting, bounded single-line strings -- but an operator who types a credential into a note is caught only by heuristics, and heuristics do not catch an arbitrary high-entropy string.",
+      "correction": "The code and the audit now state the guarantee precisely: structurally closed, length-bounded, single-line, and heuristically screened for recognisable secret shapes; screening is not a proof."
+    },
+    {
+      "id": "R-3",
+      "area": "non-enumeration proof",
+      "what_was_actually_true": "T0034 claimed out-of-scope and absent responses were byte-identical, but the test compared STATUS CODES only. A status comparison cannot see a message body that confirms the row exists.",
+      "correction": "A doRaw helper returns the exact response bytes, and the test now compares raw bodies for BOTH the read and the decision path, and additionally asserts the refusal does not echo the out-of-scope posting id."
+    }
+  ],
+  "delivered": [
+    "data-plane/migrations/0014_phase4_payment_settlement.{up,down}.sql -- the payment/settlement GOVERNANCE that mg7 never had.",
+    "iam_v2.payment_transaction_events: an append-only provider callback ledger whose UNIQUE (payment_transaction_id, provider_event_id) is the duplicate-callback defence.",
+    "p4_payment_status_machine: identity immutable, one-way status, terminal means terminal, no deletes.",
+    "p4_payment_creation_gate: ONLINE_PAYMENT rail only, SERVER-PINNED amount/currency/exponent from the pinned Purchase, one live CHARGE per settlement, and for children a CAPTURED parent in the same tenant/site/settlement/merchant/provider/currency with a cumulative refund bound.",
+    "p4_settlement_state_machine: the approved lifecycle, plus SETTLED requires evidence on its own rail (a CAPTURED charge, or a posting the PMS ACKed OK) and the reversal states must match the child arithmetic.",
+    "iam_v2.apply_payment_callback: the controlled callback application, returning APPLIED / DUPLICATE / NOOP so a replay is distinguishable from a first delivery without guessing. An UNKNOWN provider outcome routes the Settlement to MANUAL_REVIEW and nothing retries it."
+  ],
+  "measured_before_adding": "payment_transactions triggers: NONE. settlements triggers: NONE. callback/webhook ledger: NONE. mg7 already provided amount>0, UNIQUE idempotency_key, UNIQUE (tenant,provider,merchant,provider_ref), the status and type enums, ptx_parent and the composite FKs -- none of which govern how money moves. 0014 adds only governance and duplicates none of it. One additive UNIQUE (tenant_id, site_id, id) was needed on payment_transactions so the scope-carrying foreign key from the event ledger had a key to reference.",
+  "verification": {
+    "db_gate": "iam_v2_scratch/phase4_0011_financial.sh - 135 PASS / 0 FAIL, including 0014 UP/DOWN/DOWN-UP and sixteen behavioural payment/settlement assertions",
+    "pre_0011_invariants": "31/31 on the pre-0011 chain and 31/31 after 0011+0012+0013+0014 on a clean rebuild",
+    "financial_core_unit": "76 PASS / 0 FAIL",
+    "integration": "81 PASS / 0 FAIL",
+    "dark_static_assertion": "PASS",
+    "authoritative_ci": "see phase4_authoritative_ci_* in governance/project-state.json"
+  },
+  "not_delivered_in_this_milestone": [
+    "The Go payment DOMAIN and provider abstraction are NOT implemented. 0014 is the durable enforcement; there is no Go service that creates charges, calls a provider double or applies callbacks through it yet.",
+    "The Phase-2 atomic Entitlement grant is NOT wired to payment success. The existing Phase-2 controlled path (TerminateLiveEntitlementForSubject + InsertEntitlement + MarkPurchaseGranted in internal/iamv2/commerce_flow.go) was identified as the path to reuse, and nothing calls it from a settled payment yet. No second entitlement writer was created.",
+    "The Phase-4 least-privilege DB grant model is NOT designed or applied.",
+    "The Manual Review and payment inspection FRONTEND is NOT built.",
+    "FINANCIAL_RECOVERY_MODE, observability, runtime PMS ownership integration, live-DARK deployment and reboot/rollback remain outstanding."
+  ],
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only.",
+    "migrations_added_this_round": "0014_phase4_payment_settlement"
+  },
+  "no_financial_traffic": {
+    "real_provider_charge_or_refund": false,
+    "real_pms_ps_transmitted": false,
+    "guest_folio_debited": false,
+    "paid_guest_access": false,
+    "programmatic_pms_reversal": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "deployment_performed": false
+  },
+  "evidence_files": [
+    "data-plane/migrations/0014_phase4_payment_settlement.up.sql",
+    "data-plane/migrations/0014_phase4_payment_settlement.down.sql",
+    "data-plane/cmd/edged/phase4_review_evidence.go",
+    "data-plane/cmd/edged/phase4_review_api_integration_test.go",
+    "iam_v2_scratch/phase4_0011_financial.sh",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. Phase 4 remains IN_PROGRESS at DARK maturity.",
+  "next_action": "Implement the Go payment domain and provider test doubles on top of migration 0014, wire the existing Phase-2 atomic Entitlement grant to a settled payment, then the least-privilege grant model and the operator frontend."
+}

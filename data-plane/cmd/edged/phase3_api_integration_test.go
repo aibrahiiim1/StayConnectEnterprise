@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -150,6 +151,36 @@ func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	f.srv = httptest.NewServer(r)
 	t.Cleanup(func() { f.srv.Close(); p.Close() })
 	return f
+}
+
+// doRaw returns the status AND the exact response bytes. A non-enumeration claim -- "an out-of-scope
+// resource is indistinguishable from an absent one" -- can only be proved from raw bodies: two responses
+// can share a status code and still differ in a message that confirms the resource exists.
+func (f *apiFixture) doRaw(t *testing.T, method, path string, body any) (int, string) {
+	t.Helper()
+	var rdr *bytes.Reader
+	if body != nil {
+		raw, _ := json.Marshal(body)
+		rdr = bytes.NewReader(raw)
+	} else {
+		rdr = bytes.NewReader(nil)
+	}
+	req, err := http.NewRequest(method, f.srv.URL+"/edge/v1"+path, rdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: f.sessTok})
+	resp, err := f.srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, string(raw)
 }
 
 func (f *apiFixture) do(t *testing.T, method, path string, body any) (int, map[string]any) {

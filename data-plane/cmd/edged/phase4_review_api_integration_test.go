@@ -477,12 +477,26 @@ func TestIntegrationReviewAPI_SameTenantDifferentSiteIsIsolated(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("a cross-site decision reached the ledger (%d rows)", n)
 	}
-	// and the refusal must not confirm existence: the same 404 as a genuinely absent posting
+	// Non-enumeration, proved from RAW BODIES rather than status codes. T0034 claimed "byte-identical" on
+	// the strength of a status comparison, which cannot see a message that confirms the row exists.
 	absent := "00000000-0000-0000-0000-000000000000"
-	c1, _ := a.do(t, "GET", "/financial-review/postings/"+theirs, nil)
-	c2, _ := a.do(t, "GET", "/financial-review/postings/"+absent, nil)
-	if c1 != c2 {
-		t.Fatalf("an out-of-scope posting (%d) must be indistinguishable from an absent one (%d)", c1, c2)
+	c1, b1 := a.doRaw(t, "GET", "/financial-review/postings/"+theirs, nil)
+	c2, b2 := a.doRaw(t, "GET", "/financial-review/postings/"+absent, nil)
+	if c1 != c2 || b1 != b2 {
+		t.Fatalf("an out-of-scope posting must be byte-identical to an absent one: out-of-scope %d %q; absent %d %q",
+			c1, b1, c2, b2)
+	}
+	if contains(b1, theirs) {
+		t.Fatalf("the refusal echoed the out-of-scope posting id: %q", b1)
+	}
+	// the same for the DECISION path
+	d1, db1 := a.doRaw(t, "POST", "/financial-review/postings/"+theirs+"/actions",
+		reviewBody("CONFIRM_POSTED", "cross-site attempt", nil))
+	d2, db2 := a.doRaw(t, "POST", "/financial-review/postings/"+absent+"/actions",
+		reviewBody("CONFIRM_POSTED", "absent posting", nil))
+	if d1 != d2 || db1 != db2 {
+		t.Fatalf("an out-of-scope decision must be byte-identical to one on an absent posting: %d %q vs %d %q",
+			d1, db1, d2, db2)
 	}
 }
 
@@ -591,5 +605,45 @@ func TestIntegrationReviewAPI_EvidenceIsStructuredAndRefusesSecrets(t *testing.T
 		if !contains(stored, want) {
 			t.Fatalf("the canonical evidence must retain %q, got %s", want, stored)
 		}
+	}
+}
+
+// ---------------------------------------------------------------- reason is audit input too
+
+// The structured evidence contract would have been bypassable through the free-form reason, which reaches
+// the SAME immutable ledger.
+func TestIntegrationReviewAPI_ReasonIsBoundedAndScreened(t *testing.T) {
+	f := newAPI(t, "payments_operator")
+	for _, tc := range []struct{ name, reason string }{
+		{"a password in the reason", "the pms password is hunter2"},
+		{"an api key in the reason", "used sk_live_51H8xQ2eZvKYlo2C to check"},
+		{"a card number in the reason", "guest card 4111 1111 1111 1111"},
+		{"a raw FIAS frame in the reason", "PS|RN1421|G#5|TA1000|"},
+		{"a raw JSON payload in the reason", `{"secret":"x"}`},
+		{"an unbounded reason", strings.Repeat("x", 501)},
+		{"a multi-line reason", "line one\nline two"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id, _ := f.seedReviewablePosting(t, "UNKNOWN", "")
+			code, resp := f.do(t, "POST", "/financial-review/postings/"+id+"/actions",
+				reviewBody("CONFIRM_POSTED", tc.reason, nil))
+			if code != 400 {
+				t.Fatalf("the reason reaches the immutable ledger and must be screened; got %d: %v", code, resp)
+			}
+			var n int
+			if err := f.pool.QueryRow(context.Background(),
+				`SELECT count(*)::int FROM iam_v2.posting_review_actions WHERE posting_id=$1`, id).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n != 0 {
+				t.Fatalf("a refused reason still reached the ledger (%d rows)", n)
+			}
+		})
+	}
+	// an ordinary operator sentence is accepted
+	id, _ := f.seedReviewablePosting(t, "UNKNOWN", "")
+	if code, resp := f.do(t, "POST", "/financial-review/postings/"+id+"/actions",
+		reviewBody("CONFIRM_POSTED", "checked folio 1421 at the front desk; the charge is present", nil)); code != 200 {
+		t.Fatalf("an ordinary reason must be accepted, got %d: %v", code, resp)
 	}
 }
