@@ -19,6 +19,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 C="${PHASE4_GATE_CONTAINER:-iamv2-p4gate}"; DB=iam_scratch; PORT="${PHASE4_GATE_PORT:-55433}"
 UP="$ROOT/data-plane/migrations/0011_phase4_financial_execution.up.sql"
 DOWN="$ROOT/data-plane/migrations/0011_phase4_financial_execution.down.sql"
+UP12="$ROOT/data-plane/migrations/0012_phase4_financial_hardening.up.sql"
+DOWN12="$ROOT/data-plane/migrations/0012_phase4_financial_hardening.down.sql"
 FIXTURE="$ROOT/iam_v2_scratch/phase4_financial_fixture.sql"
 
 pass=0; fail=0
@@ -153,6 +155,28 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP" >/dev/n
   && ok "DOWN -> UP re-applies cleanly" || no "DOWN -> UP re-applies cleanly" "re-up failed"
 eq "DOWN -> UP produces the SAME schema as the first UP" "$UP_FP" "$(Q "$FP")"
 
+echo "== 0012 hardening lifecycle: UP / DOWN / DOWN->UP =="
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP12" >/dev/null 2>&1 \
+  && ok "0012 UP applied" || no "0012 UP applied" "the hardening migration did not apply"
+UP12_FP="$(Q "$FP")"
+[ "$UP_FP" != "$UP12_FP" ] && ok "0012 changed the catalog" || no "0012 changed the catalog" "catalog identical"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$DOWN12" >/dev/null 2>&1 \
+  && ok "0012 DOWN applied" || no "0012 DOWN applied" "down failed"
+# Assert on the OBJECTS and the BEHAVIOUR rather than a byte-identical catalog hash: pg_get_functiondef
+# normalises whitespace differently from the source text, so a hash comparison would be testing the
+# formatter, not the rollback.
+eq "0012 DOWN removed every 0012 object" "0" \
+  "$(Q "SELECT (SELECT count(*) FROM pg_indexes WHERE schemaname='iam_v2' AND indexname='outbox_one_inflight_per_interface')
+       + (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname IN ('p4_posting_lifecycle_gate','p4_attempt_lifecycle_gate','p4_interface_decommission_gate','p4_fias_exponent_gate','p4_interface_freshness_block','p4_posting_freshness_gate','p4_attempt_freshness_gate','p4_consume_retry_authorization','p4_no_programmatic_reversal'))
+       + (SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='posting_review_state' AND column_name='retry_authorization_consumed_at');")"
+eq "0012 DOWN left every 0011 object intact" "5" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname IN ('p4_posting_currency_gate','p4_review_writer_only','record_posting_review_action','allocate_p_number','p4_attempt_retry_gate');")"
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP12" >/dev/null 2>&1 \
+  && ok "0012 DOWN -> UP re-applies cleanly" || no "0012 DOWN -> UP re-applies cleanly" "re-up failed"
+eq "0012 DOWN -> UP produces the SAME schema as the first UP" "$UP12_FP" "$(Q "$FP")"
+eq "0012 is recorded in the migration ledger" "1" \
+  "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0012_phase4_financial_hardening';")"
+
 
 # ------------------------------------------------------------------ nothing pre-existing was weakened
 echo "== pre-existing enforcement is intact =="
@@ -166,8 +190,10 @@ eq "charge_gate body is UNCHANGED by 0011" "1" \
   "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='trg_posting_charge_gate' AND pg_get_functiondef(p.oid) LIKE '%FOLIO_STRATEGY_UNSET%' AND pg_get_functiondef(p.oid) LIKE '%POSTING_NOT_ALLOWED%';")"
 eq "outbox_one_active partial unique index still present" "1" \
   "$(Q "SELECT count(*) FROM pg_indexes WHERE schemaname='iam_v2' AND indexname='outbox_one_active';")"
-eq "0011 fires AFTER charge_gate on pms_postings (folio refusal keeps precedence)" "charge_gate p4_posting_currency_gate" \
-  "$(Q "SELECT string_agg(t.tgname,' ' ORDER BY t.tgname) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam_v2' AND c.relname='pms_postings' AND NOT t.tgisinternal AND t.tgtype & 4 = 4;")"
+eq "every phase-4 posting gate fires AFTER charge_gate (the folio refusal keeps precedence)" "charge_gate" \
+  "$(Q "SELECT min(t.tgname) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam_v2' AND c.relname='pms_postings' AND NOT t.tgisinternal AND t.tgtype & 4 = 4;")"
+eq "the freshness gate fires LAST, so onboarding and currency reasons win over it" "p4_zz_posting_freshness_gate" \
+  "$(Q "SELECT max(t.tgname) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam_v2' AND c.relname='pms_postings' AND NOT t.tgisinternal AND t.tgtype & 4 = 4;")"
 eq "no new EXECUTE granted to PUBLIC on the 0011 controlled functions" "false,false" \
   "$(Q "SELECT has_function_privilege('public','iam_v2.record_posting_review_action(uuid,text,uuid,text,jsonb,int)','EXECUTE')||','||has_function_privilege('public','iam_v2.allocate_p_number(uuid,uuid,uuid)','EXECUTE');")"
 
@@ -186,6 +212,73 @@ rejects "a non-ISO currency code is rejected" \
 rejects "an out-of-range minor-unit exponent is rejected" \
   "INSERT INTO iam_v2.pms_interface_revisions(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,config,financial_base_currency,financial_base_currency_exponent) VALUES ('$T','$S','$IF1',92,'UTC','GLOBALLY_UNIQUE','{}','USD',9);" \
   "pmsrev_financial_currency_exponent_range"
+
+echo "== 0012: contract lifecycle, freshness axes, wire bounds and reversal =="
+IFSTATE(){ Q "UPDATE iam_v2.pms_interfaces SET lifecycle_state='$1' WHERE id='$IF1';" >/dev/null; }
+RT(){ Q "UPDATE iam_v2.pms_interface_runtime SET $1, updated_at=now() WHERE pms_interface_id='$IF1';" >/dev/null; }
+RT_OK(){ RT "transport_status='CONNECTED', last_heartbeat_at=now(), continuity_status='CONTINUOUS', last_valid_event_at=now(), sync_status='IN_SYNC', last_complete_sync_at=now(), resync_generation_seq=0, published_resync_generation=0"; }
+
+rejects "C24 a REVERSAL posting cannot be created programmatically (capability false in v1)" \
+  "INSERT INTO iam_v2.pms_postings(id,tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,posting_interface_revision_id,posting_type,reverses_posting_id,amount_minor,currency,currency_exponent,idempotency_key) VALUES ('c0120000-0000-0000-0000-0000000000ff','$T','$S','$IF1','$SET1','$PUR1','$STAY1','$FOL1','$REV_OK','REVERSAL',gen_random_uuid(),100,'USD',2,'p4-rev');" \
+  "PROGRAMMATIC_REVERSAL_DISABLED"
+
+rejects "C7 the protel-fias posting path refuses any exponent but 2" \
+  "$(mkposting c0120000-0000-0000-0000-000000000011 "$SET3" "$PUR3" "$REV_OK" USD 2 p4-exp2 | sed "s/,'USD',2,/,'USD',3,/")" \
+  "FIAS_EXPONENT_UNSUPPORTED"
+
+IFSTATE AUTH_DISABLED
+accepts "C24 AUTH_DISABLED still permits posting (it disables guest AUTH, not the folio)" \
+  "$(mkposting c0120000-0000-0000-0000-000000000012 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-authdis)"
+IFSTATE DRAINING
+rejects "C24 DRAINING refuses NEW financial work" \
+  "$(mkposting c0120000-0000-0000-0000-000000000013 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-drain)" \
+  "INTERFACE_NOT_ACCEPTING_WORK"
+IFSTATE ACTIVE
+
+RT "transport_status='DISCONNECTED'"
+rejects "C32 axis 1: a DISCONNECTED interface fails closed before any financial work" \
+  "$(mkposting c0120000-0000-0000-0000-000000000014 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-ax1)" "INTERFACE_NOT_FRESH"
+RT_OK
+RT "last_heartbeat_at=now()-interval '30 minutes'"
+rejects "C32 axis 1: a stale heartbeat fails closed" \
+  "$(mkposting c0120000-0000-0000-0000-000000000015 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-ax1b)" "TRANSPORT_HEARTBEAT_STALE"
+RT_OK
+RT "continuity_status='GAP_DETECTED'"
+rejects "C32 axis 2: a discontinuous feed fails closed" \
+  "$(mkposting c0120000-0000-0000-0000-000000000016 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-ax2)" "CONTINUITY_GAP_DETECTED"
+RT_OK
+RT "sync_status='RESYNC_REQUIRED'"
+rejects "C32 axis 3: an out-of-sync interface fails closed" \
+  "$(mkposting c0120000-0000-0000-0000-000000000017 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-ax3)" "SYNC_RESYNC_REQUIRED"
+RT_OK
+RT "resync_generation_seq=2, published_resync_generation=1"
+rejects "C32 axis 4: a part-published resync generation fails closed" \
+  "$(mkposting c0120000-0000-0000-0000-000000000018 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-ax4)" "PIN_RESYNC_IN_FLIGHT"
+RT_OK
+accepts "C32 with all four axes green the charge is accepted again" \
+  "$(mkposting c0120000-0000-0000-0000-000000000019 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-axok)"
+
+echo "== C22 per-interface lane serialization, across DIFFERENT postings =="
+Q "INSERT INTO iam_v2.posting_outbox(tenant_id,site_id,pms_interface_id,posting_id,state) VALUES ('$T','$S','$IF1','c0120000-0000-0000-0000-000000000012','IN_FLIGHT');" >/dev/null
+rejects "C22 a SECOND different posting cannot be IN_FLIGHT on the same interface" \
+  "INSERT INTO iam_v2.posting_outbox(tenant_id,site_id,pms_interface_id,posting_id,state) VALUES ('$T','$S','$IF1','c0120000-0000-0000-0000-000000000019','IN_FLIGHT');" \
+  "outbox_one_inflight_per_interface"
+accepts "C23 a DIFFERENT interface may be in flight at the same time" \
+  "INSERT INTO iam_v2.pms_postings(id,tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,posting_interface_revision_id,posting_type,amount_minor,currency,currency_exponent,idempotency_key) VALUES ('c0120000-0000-0000-0000-00000000001a','$T','$S','$IF2','99990000-0000-0000-0000-0000000000d4','99990000-0000-0000-0000-000000000004','eeee0000-0000-0000-0000-000000000002','eeee0000-0000-0000-0000-0000000000f2','aaaa0000-0000-0000-0000-0000000002d1','CHARGE',100,'EUR',2,'p4-if2');
+   INSERT INTO iam_v2.posting_outbox(tenant_id,site_id,pms_interface_id,posting_id,state) VALUES ('$T','$S','$IF2','c0120000-0000-0000-0000-00000000001a','IN_FLIGHT');"
+Q "UPDATE iam_v2.posting_outbox SET state='DONE' WHERE pms_interface_id IN ('$IF1','$IF2');" >/dev/null
+
+echo "== C18/C20 review: evidence, the action/state matrix, single-use authorization =="
+Q "INSERT INTO iam_v2.posting_attempts(tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at,outcome,pa_as_status,response_at) VALUES ('$T','$S','c0120000-0000-0000-0000-000000000019','$IF1',1,'7001','1421','5',now(),'ACKED','OK',now());" >/dev/null
+rejects "C18 a terminal decision with no evidence is refused" \
+  "SELECT iam_v2.record_posting_review_action('c0120000-0000-0000-0000-000000000019','CONFIRM_POSTED','$T','looks fine');" \
+  "REVIEW_EVIDENCE_REQUIRED"
+rejects "C20 a charge the PMS ACKed OK can NEVER be authorized for retry" \
+  "SELECT iam_v2.record_posting_review_action('c0120000-0000-0000-0000-000000000019','CONFIRM_NOT_POSTED_RETRY','$T','operator believes it failed',jsonb_build_object('folio','verified'));" \
+  "REVIEW_RETRY_REFUSED"
+accepts "C18 a terminal decision WITH evidence is accepted" \
+  "SELECT iam_v2.record_posting_review_action('c0120000-0000-0000-0000-000000000019','CONFIRM_POSTED','$T','folio verified',jsonb_build_object('folio','verified'));"
+
 
 # ------------------------------------------------------------------ G2 currency gate
 echo "== G2: exact currency equality, no implicit FX =="
@@ -277,11 +370,11 @@ rejects "a direct INSERT into the append-only review ledger is refused" \
   "INSERT INTO iam_v2.posting_review_actions(tenant_id,site_id,posting_id,action,actor,reason) VALUES ('$T','$S','$POK','CONFIRM_POSTED','$T','bypass');" \
   "REVIEW_WRITER_ONLY"
 rejects "C17 an invented review action is refused" \
-  "SELECT iam_v2.record_posting_review_action('$POK','APPROVE','$T','x');" "REVIEW_ACTION_UNKNOWN"
+  "SELECT iam_v2.record_posting_review_action('$POK','APPROVE','$T','x',jsonb_build_object('folio','verified'));" "REVIEW_ACTION_UNKNOWN"
 rejects "C18 a review decision with no reason is refused" \
-  "SELECT iam_v2.record_posting_review_action('$POK','CONFIRM_POSTED','$T','   ');" "REVIEW_ACTOR_REASON_REQUIRED"
+  "SELECT iam_v2.record_posting_review_action('$POK','CONFIRM_POSTED','$T','   ',jsonb_build_object('folio','verified'));" "REVIEW_ACTOR_REASON_REQUIRED"
 rejects "C21 a decision made against a stale version is refused" \
-  "SELECT iam_v2.record_posting_review_action('$POK','CONFIRM_POSTED','$T','stale reviewer','{}'::jsonb,7);" \
+  "SELECT iam_v2.record_posting_review_action('$POK','CONFIRM_POSTED','$T','stale reviewer',jsonb_build_object('folio','verified'),7);" \
   "REVIEW_VERSION_STALE"
 
 echo "== C21 under REAL concurrency: two reviewers, incompatible decisions, same posting =="
@@ -290,7 +383,7 @@ echo "== C21 under REAL concurrency: two reviewers, incompatible decisions, same
 # claim — a version column that nobody blocks on would let both of these commit.
 docker exec -i "$C" psql -U postgres -d "$DB" -tAq > /tmp/p4_rev_a.log 2>&1 <<SQLA &
 BEGIN;
-SELECT iam_v2.record_posting_review_action('$POK','CONFIRM_NOT_POSTED_RETRY','$T','reviewer A: PMS shows no charge');
+SELECT iam_v2.record_posting_review_action('$POK','CONFIRM_NOT_POSTED_RETRY','$T','reviewer A: PMS shows no charge',jsonb_build_object('folio','verified'));
 SELECT pg_sleep(4);
 COMMIT;
 SQLA
@@ -298,7 +391,7 @@ A_PID=$!
 sleep 1
 B_OUT="$(docker exec -i "$C" psql -U postgres -d "$DB" -tAq 2>&1 <<SQLB
 BEGIN;
-SELECT iam_v2.record_posting_review_action('$POK','CREATE_REVERSAL','$T','reviewer B: reverse it');
+SELECT iam_v2.record_posting_review_action('$POK','CREATE_REVERSAL','$T','reviewer B: reverse it',jsonb_build_object('folio','verified'));
 COMMIT;
 SQLB
 )"
@@ -317,6 +410,8 @@ rejects "C14 an attempt number the review did NOT authorize is still refused" "$
 accepts "C20 the ONE authorized retry attempt is accepted" "$(mkattempt "$POK" 2 1002 '101' 'G-1')"
 Q "UPDATE iam_v2.posting_attempts SET outcome='ACKED', pa_as_status='OK', response_at=now() WHERE internal_posting_id='$POK' AND attempt_no=2;" >/dev/null
 rejects "C14 no further attempt is possible after the authorization was consumed" "$(mkattempt "$POK" 3 1003 '101' 'G-1')" "RETRY_REQUIRES_REVIEW"
+eq "C20 the retry authorization was CONSUMED by the attempt it authorized" "t" \
+  "$(Q "SELECT (retry_authorized_attempt_no IS NULL AND retry_authorization_consumed_at IS NOT NULL) FROM iam_v2.posting_review_state WHERE posting_id='$POK';")"
 eq "C26 the retry reused the SAME business idempotency key (one posting, two attempts)" "1" \
   "$(Q "SELECT count(DISTINCT idempotency_key) FROM iam_v2.pms_postings WHERE id='$POK';")"
 eq "G3 the read model now reports POSTED from the latest attempt" "POSTED|2|true" \
@@ -337,13 +432,13 @@ eq "ESCALATE left the posting undecided" "" \
 eq "ESCALATE was counted" "2" \
   "$(Q "SELECT escalation_count FROM iam_v2.posting_review_state WHERE posting_id='c0110000-0000-0000-0000-000000000009';")"
 rejects "a terminal decision still needs something to decide about" \
-  "SELECT iam_v2.record_posting_review_action('c0110000-0000-0000-0000-000000000009','CONFIRM_POSTED','$T','no attempt exists');" \
+  "SELECT iam_v2.record_posting_review_action('c0110000-0000-0000-0000-000000000009','CONFIRM_POSTED','$T','no attempt exists',jsonb_build_object('folio','verified'));" \
   "REVIEW_NOT_APPLICABLE"
 
 # ------------------------------------------------------------------ the baseline suite, after 0011
 # On a FRESHLY rebuilt database, so the second pass is judged on its own rows and not on what the first
 # pass left behind in append-only tables. If 0011 weakened any pre-0011 financial invariant, it fails here.
-echo "== the same baseline invariants AFTER 0011, on a clean rebuild (nothing was weakened) =="
+echo "== the same baseline invariants AFTER 0011 + 0012, on a clean rebuild (nothing was weakened) =="
 SCRATCH_CONTAINER="$C" SCRATCH_DB="$DB" SCRATCH_PORT_ALLOW="$PORT" SCRATCH_ACK=I_UNDERSTAND_DISPOSABLE \
   bash "$ROOT/iam_v2_scratch/run.sh" fresh >/dev/null 2>&1 || { echo "INFRA: rebuild failed"; exit 2; }
 Q "CREATE TABLE IF NOT EXISTS public.schema_migrations(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
@@ -352,10 +447,12 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-p
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/iam_v2_scratch/seed.sql" >/dev/null 2>&1
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP" >/dev/null 2>&1 \
   || { echo "INFRA: 0011 did not re-apply on the rebuild"; exit 2; }
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$UP12" >/dev/null 2>&1 \
+  || { echo "INFRA: 0012 did not re-apply on the rebuild"; exit 2; }
 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$FIXTURE" >/dev/null 2>&1 \
   || { echo "INFRA: fixture did not apply on the rebuild"; exit 2; }
-eq "the rebuild carries 0011" "1" "$(Q "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_revisions' AND column_name='financial_base_currency';")"
-run_baseline "post-0011"
+eq "the rebuild carries 0011 + 0012" "1" "$(Q "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_revisions' AND column_name='financial_base_currency';")"
+run_baseline "post-0011+0012"
 
 echo
 echo "===== PHASE-4 0011 GATE: PASS=$pass FAIL=$fail ====="

@@ -1,0 +1,121 @@
+{
+  "transition_id": "T0031",
+  "seq": 31,
+  "timestamp": "2026-08-12T10:00:00Z",
+  "record_type": "PHASE_4_FINANCIAL_CORE_HARDENING_AND_CORRECTION_OF_T0030_OVERCLAIMS",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "supersedes_claims_in": "T0030",
+  "history_note": "T0030 is PRESERVED unchanged as the historical record of what was believed and reported at that HEAD. This receipt does not rewrite it; it records what a hardening review of the same code then found to be wrong, and what was done about it.",
+  "authorization_note": "No new Product-Owner decision. D18 / T0029 authorized Phase-4 implementation DARK; this is a correction inside that authorization.",
+  "overclaims_corrected": [
+    {
+      "id": "OC-1",
+      "claim_in_T0030": "per-interface financial outbox lanes, with C22 reported RUNTIME_IMPLEMENTED_AND_TESTED_DARK",
+      "what_was_actually_true": "outbox_one_active prevents two ACTIVE outbox rows for the SAME posting. Nothing prevented two DIFFERENT postings being IN_FLIGHT on ONE interface at the same time. The test that 'proved' lane behaviour raced six workers over a SINGLE posting, so it could only ever have demonstrated duplicate-claim protection. Contract section 10 requires a serialized lane, and a FIAS interface is one ordered socket.",
+      "correction": "Migration 0012 adds the partial unique index outbox_one_inflight_per_interface. TestIntegrationPosting_InterfaceLaneIsSerializedAcrossDifferentPostings now queues six DIFFERENT postings, runs five workers on one interface plus one worker on a second interface, and measures observed peak concurrency per lane."
+    },
+    {
+      "id": "OC-2",
+      "claim_in_T0030": "C24 interface lifecycle guard, reported RUNTIME_IMPLEMENTED_AND_TESTED_DARK because the gate refused any non-ACTIVE interface",
+      "what_was_actually_true": "That is not the contract. Section 10 says AUTH_DISABLED blocks new guest AUTHENTICATION while posting and events continue, and DRAINING blocks new work while the outbox DRAINS. Refusing both would have stranded authorized money on an interface that had merely stopped accepting new logins, and would have made DRAINING undrainable.",
+      "correction": "Gate.CheckFor(Purpose) implements the contract matrix exactly, and 0012 enforces it in the database on both the posting and the attempt. DECOMMISSIONED additionally requires the contractual zero-pending/UNKNOWN precondition, enforced by p4_interface_decommission_gate."
+    },
+    {
+      "id": "OC-3",
+      "claim_in_T0030": "C32 freshness / stay eligibility before charge, reported RUNTIME_IMPLEMENTED_AND_TESTED_DARK",
+      "what_was_actually_true": "Only the STAY eligibility half was implemented. The four PMS runtime freshness axes were never consulted at the financial boundary at all, so a disconnected, discontinuous, out-of-sync or unpinned interface would have been charged against.",
+      "correction": "iam_v2.p4_interface_freshness_block reads the SAME Phase-3 pms_interface_runtime axes and the SAME per-revision thresholds the resolver uses -- no second freshness model. It is enforced at posting creation AND again at attempt creation, and it is surfaced in the read model. All four axes are proved to fail closed before P#, attempt, outbox execution or bytes."
+    },
+    {
+      "id": "OC-4",
+      "claim_in_T0030": "C11 PS field order and fixed values, reported RUNTIME_IMPLEMENTED_AND_TESTED_DARK",
+      "what_was_actually_true": "CT was bounded at 32 characters. The authoritative bound in contract section 9a is 20. A PMS that truncated silently would have posted against a code nobody chose. Separately, the interface currency exponent was allowed to be 0..4 on the FIAS posting path, where section 9a and the Gate-3A live evidence both fix it at 2.",
+      "correction": "maxCTLen is 20. The exponent-2 bound is enforced in the Go gate and by p4_fias_exponent_gate for connector_kind = protel-fias only, so the currency MODEL keeps its real ISO-4217 range while the WIRE keeps the bound the evidence supports."
+    },
+    {
+      "id": "OC-5",
+      "claim_in_T0030": "C10 PA matched by interface + P#, never RN, reported RUNTIME_IMPLEMENTED_AND_TESTED_DARK",
+      "what_was_actually_true": "ParsePA correlated by P# when PARSING, but the engine then accepted whatever PA the transport returned without checking it against the P# it had just allocated. A valid-looking, catalog-correct, OK answer carrying another P# would have ACKed the wrong attempt.",
+      "correction": "SendPS now takes the allocated pNumber explicitly. The DarkGuard verifies the body carries it and that the answer matches it, and the engine verifies it again itself. A mismatch never ACKs; because the PS was genuinely transmitted, the honest outcome is UNKNOWN."
+    },
+    {
+      "id": "OC-6",
+      "claim_in_T0030": "the retry authorization is single-use",
+      "what_was_actually_true": "retry_authorized_attempt_no was set and never cleared, so the authorization stayed live after the attempt it authorized. Nothing stopped CONFIRM_NOT_POSTED_RETRY being recorded for a charge the PMS had already ACKed OK -- the exact duplicate debit the UNKNOWN design exists to prevent. Review evidence defaulted to '{}', so a terminal financial decision could carry none.",
+      "correction": "p4_consume_retry_authorization clears and stamps the authorization in the same transaction as the attempt it authorized. record_posting_review_action refuses a retry of an ACKed-OK or still-SENDING attempt and requires non-empty evidence for every terminal action."
+    },
+    {
+      "id": "OC-7",
+      "claim_in_T0030": "the DARK guard is the single chokepoint",
+      "what_was_actually_true": "True in practice, but only by convention: Engine and DarkGuard had EXPORTED fields, so any caller could construct an Engine literal with an unwrapped transport or reassign Cfg on one it was handed.",
+      "correction": "Every field on Engine and DarkGuard is unexported. NewEngine is the only way to obtain a working Engine and it always wraps; Config() returns a copy. The DARK CI check now asserts both the wrap and the absence of exported fields."
+    },
+    {
+      "id": "OC-8",
+      "claim_in_T0030": "CREATE_REVERSAL remains non-programmatic",
+      "what_was_actually_true": "True by omission -- nothing created reversals because nothing had been written yet.",
+      "correction": "p4_no_programmatic_reversal makes it structurally impossible: no REVERSAL posting row can be created at all. The passive mg7 ledger shape is untouched, so a future authorized version can lift one trigger without a schema change."
+    }
+  ],
+  "delivered": [
+    "data-plane/migrations/0012_phase4_financial_hardening.{up,down}.sql - additive and reversible; a SEPARATE migration rather than an amendment to 0011, because 0011 is recorded in T0030 with a measured fingerprint and migrations are append-only here for the same reason the ledgers are.",
+    "Go hardening across internal/posting: contract lifecycle purposes, the four freshness axes read through the SAME SQL function the database enforces with, CT<=20, FIAS exponent 2, transport-level and engine-level PA correlation, and unexported Engine/DarkGuard fields."
+  ],
+  "verification": {
+    "migration_and_db_gate": "iam_v2_scratch/phase4_0011_financial.sh - 105 PASS / 0 FAIL, including 0012 UP/DOWN/DOWN-UP and the assertion that 0012 DOWN restores every 0011 object and removes every 0012 one.",
+    "pre_0011_invariants": "31/31 on the pre-0011 chain and 31/31 again after 0011 + 0012 on a clean rebuild.",
+    "financial_core_unit": "76 PASS / 0 FAIL",
+    "financial_core_integration": "49 PASS / 0 FAIL against disposable PostgreSQL 16",
+    "dark_static_assertion": "PASS (6/6)",
+    "lane_serialization": "measured observed peak in-flight per interface = 1 across six different postings and five concurrent workers, with a second interface transmitting concurrently and unaffected.",
+    "authoritative_ci": "NOT YET RUN on this HEAD. Everything above is LOCAL/DISPOSABLE verification on the development workstation. The race detector cannot run there at all (no C toolchain) and is CI-only."
+  },
+  "not_delivered_in_this_milestone": [
+    "Item 2 beyond the DB boundary: the Manual Review OPERATOR WORKFLOW (least-privilege runtime roles, actor bound to the authenticated operator, financial-review permission and password step-up) is NOT implemented. The custom-GUC writer token remains an internal controlled-writer mechanism and is explicitly NOT an authorization boundary.",
+    "Item 3: the Payment and Settlement execution boundary is NOT implemented.",
+    "Item 4: FINANCIAL_RECOVERY_MODE and supported-restore safety are NOT implemented.",
+    "Item 5: the operator surface and observability are NOT implemented.",
+    "Item 6: the Posting engine is NOT yet wired into a runtime service owner.",
+    "Item 7: authoritative CI has NOT been run on this HEAD.",
+    "Item 9: the controlled DARK deployment has NOT been performed."
+  ],
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only, created and destroyed on loopback by the gate scripts."
+  },
+  "no_financial_traffic": {
+    "real_pms_ps_transmitted": false,
+    "real_pa_accepted": false,
+    "guest_folio_debited": false,
+    "payment_provider_charge_or_refund": false,
+    "paid_guest_access": false,
+    "programmatic_reversal_implemented": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "deployment_performed": false
+  },
+  "evidence_files": [
+    "data-plane/migrations/0012_phase4_financial_hardening.up.sql",
+    "data-plane/migrations/0012_phase4_financial_hardening.down.sql",
+    "iam_v2_scratch/phase4_0011_financial.sh",
+    "docs/architecture/Phase4-Financial-Schema-Gap-Audit.md",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the hardening verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. Phase 4 remains IN_PROGRESS at DARK maturity with substantial scope outstanding.",
+  "next_action": "Implement the Manual Review operator workflow with least-privilege runtime roles and step-up, then payments, recovery, observability and runtime integration, then run the authoritative CI on the resulting HEAD."
+}

@@ -40,10 +40,13 @@ fi
 
 # 3. Every Transport in the tree is constructed through the guard. NewEngine is the only constructor, and
 #    it must wrap; a second constructor that did not would be a hole.
-if grep -q 'Transport: NewDarkGuard(cfg, inner)' data-plane/internal/posting/engine.go; then
-  say "the engine constructor always wraps the transport in the DARK guard"
+# The engine's fields are unexported, so the ONLY way to obtain a working Engine is NewEngine, and
+# NewEngine must wrap. Both halves are asserted: the wrap itself, and the fact that no exported field
+# exists for a caller to swap afterwards.
+if grep -q 'transport: NewDarkGuard(cfg, inner)' data-plane/internal/posting/engine.go    && ! grep -qE '^\s+(Cfg|Repo|Transport|Gate)\s' data-plane/internal/posting/engine.go; then
+  say "the engine constructor always wraps, and no exported field lets a caller unwrap it"
 else
-  bad "the engine constructor no longer wraps the transport in the DARK guard"
+  bad "the engine no longer guarantees a wrapped transport (constructor or field visibility changed)"
 fi
 
 # 4. The financial core opens no socket of its own. It has no net import at all: the transport is an

@@ -5,7 +5,7 @@ disposable PostgreSQL 16 container and querying `pg_catalog` / `information_sche
 forbidden writes. Catalog presence alone is never recorded as acceptance evidence.
 
 **Original audit baseline:** branch `phase/4-financial-execution`, commit `3ea775c` (pre-0011 measurement).
-**Revised:** after migration 0011 and the financial execution core landed on the same branch. Sections 1-2
+**Revised twice:** after migration 0011 and the financial execution core landed, and again after the migration-0012 hardening pass, which CORRECTED five rows this document had marked RT-OK too early (see section 11). Sections 1-2
 record the pre-0011 measurement unchanged; sections 3-10 record what closed the gaps and how it was verified.
 **Authorization:** D18 / T0029. Target maturity: DARK / NO-FINANCIAL-TRAFFIC.
 
@@ -175,29 +175,29 @@ is enabled anywhere, and no row in this table has been exercised against a real 
 | C7 | ISO-4217 minor units, integer `TA`, no currency on wire | **DB-OK** | **RT-OK** | — |
 | C8 | `P#` is a protocol-attempt reference, not idempotency | **DB-OK** | **RT-OK** | UI |
 | C9 | `P#` unique per interface | **DB-OK** | **RT-OK** | — |
-| C10 | `PA` matched by interface + `P#`, never RN | **DB-OK** | **RT-OK** | — |
-| C11 | `PS` field order and fixed values | N/A (wire) | **RT-OK** | — |
+| C10 | `PA` matched by interface + `P#`, never RN | **DB-OK** | **RT-OK** *(0012: the core verifies the answer against the ALLOCATED `P#`; parsing alone was not correlation)* | — |
+| C11 | `PS` field order and fixed values, `CT` ≤ 20, exponent 2 | N/A (wire) | **RT-OK** *(0012: `CT` was bounded at 32, and the FIAS path is exponent-2-only)* | — |
 | C12 | `AS` catalog only | **DB-OK** | **RT-OK** | UI |
 | C13 | Transmitted `PS` without `PA` ⇒ UNKNOWN | **DB-OK (G3)** | **RT-OK** | UI |
 | C14 | UNKNOWN never auto-retried, no auto second `P#` | **DB-OK** | **RT-OK** | UI |
 | C15 | Immutable attempt identity + one-way outcome | **DB-OK** | **RT-OK** | — |
 | C16 | Attempt events fully append-only | **DB-OK** | **RT-OK** | UI |
 | C17 | Exact §15 review catalog, no generic approve | **DB-OK** | **RT-OK** | UI |
-| C18 | `financial-review` write + step-up + reason + evidence | partial (actor/reason enforced) | RT (step-up + RBAC pending) | UI |
+| C18 | `financial-review` write + step-up + reason + evidence | partial *(0012: evidence now mandatory; actor/reason enforced)* | **RT** — step-up, RBAC and operator binding NOT implemented | UI |
 | C19 | Review actions immutable | **DB-OK** | **RT-OK** | — |
-| C20 | `CONFIRM_NOT_POSTED_RETRY` requeues once, same key | **DB-OK (G3)** | **RT-OK** | UI |
+| C20 | `CONFIRM_NOT_POSTED_RETRY` requeues once, same key | **DB-OK** *(0012: the authorization is now CONSUMED, and an ACKed-OK charge can never be retried)* | **RT-OK** | UI |
 | C21 | Concurrent reviewers cannot both win | **DB-OK (C21)** | **RT-OK** | UI |
-| C22 | Per-interface lanes; no duplicate attempts | **DB-OK** | **RT-OK** | UI |
+| C22 | Per-interface SERIALIZED lanes; no duplicate attempts | **DB-OK** *(0012 `outbox_one_inflight_per_interface`)* | **RT-OK** *(0012: 0011 only proved duplicate-claim protection on ONE posting)* | UI |
 | C23 | Interfaces are independent namespaces | **DB-OK** | **RT-OK** | UI |
-| C24 | Interface lifecycle / decommission guard | partial | **RT-OK** (gate refuses non-ACTIVE) | UI |
-| C25 | Programmatic reversal disabled | **N/A** — capability false in v1 by contract | N/A | N/A |
+| C24 | Interface lifecycle / decommission guard | **DB-OK** *(0012)* | **RT-OK** *(0012: refusing every non-ACTIVE state was wrong; AUTH_DISABLED posts, DRAINING drains)* | UI |
+| C25 | Programmatic reversal disabled | **DB-OK** *(0012 makes it structurally impossible, not merely absent)* | **RT-OK** | N/A |
 | C26 | No duplicate CHARGE/REFUND/callback | **DB-OK** | **RT-OK** (posting); RT (payment) | UI |
 | C27 | No cross-tenant merchant reuse | partial | RT | — |
 | C28 | Server-pinned totals | **DB-OK** | **RT-OK** | — |
 | C29 | Entitlement only via approved atomic grant | **DB-OK** (Phase 2) | RT | — |
 | C30 | Restore ⇒ FINANCIAL_RECOVERY_MODE, HELD_RECOVERY | **DB-OK (G3)** | RT (HELD_RECOVERY reached; recovery mode pending) | UI |
 | C31 | Restore never auto-replays | **DB-OK** | RT | — |
-| C32 | Freshness / stay eligibility before charge | **DB-OK** | **RT-OK** | UI |
+| C32 | Freshness / stay eligibility before charge | **DB-OK** *(0012: all four runtime axes)* | **RT-OK** *(0012: only the stay half existed; the four axes were never consulted)* | UI |
 | C33 | Metrics: queue depth, oldest age, UNKNOWN count, backlog | **DB-OK (G3)** | RT | UI |
 | C34 | No PII/card/credentials/secrets in logs or evidence | — | **RT-OK** | — |
 | C35 | Compliance archive before cross-customer purge | **DB-OK** | RT | — |
@@ -205,12 +205,14 @@ is enabled anywhere, and no row in this table has been exercised against a real 
 | C37 | Flags OFF, no egress while DARK | — | **RT-OK** | — |
 | C38 | Real-financial acceptance (Contract §9c Tier-3 3C) | — | — | **PO** |
 
-**Totals.** Database enforcement present and behaviourally verified: **32** rows (24 before 0011, plus C4,
-C6, C13, C20, C21, C30, C33 and C36 closed or completed by 0011). Genuine DB gaps remaining: **0**.
-Runtime implemented and verified DARK: **28** rows. Runtime still open: **9** (C18 step-up/RBAC, C27, C29,
-C30 recovery mode, C31, C33 metrics surface, C35, and the payment half of C26). `NOT_APPLICABLE`: **1**
-(C25). `BLOCKED_BY_PRODUCT_OWNER_DECISION`: **1** (C38). Operator-surface gap: **21** rows — the Manual
-Review workflow and the observability UI are the next milestone.
+**Totals after the 0012 hardening pass.** Database enforcement present and behaviourally verified: **34**
+rows. Genuine DB gaps remaining: **0**. Runtime implemented and verified DARK: **28** rows, five of which
+(C10, C11, C22, C24, C32) reached that status only after 0012 — see section 11. Runtime still open: **9**
+(C18 step-up/RBAC/operator binding, C27, C29, C30 recovery mode, C31, C33 metrics surface, C35, and the
+payment half of C26). `BLOCKED_BY_PRODUCT_OWNER_DECISION`: **1** (C38). Operator-surface gap: **21** rows.
+
+**RT-OK still means implemented and verified DARK by LOCAL disposable runs.** No authoritative CI run
+exists for the hardened HEAD yet, and the race detector cannot run on the development workstation at all.
 
 ## 8. Verification of the delivered core
 
@@ -248,3 +250,24 @@ Disposable PostgreSQL 16 containers only, created and destroyed on loopback by t
 **`0010_phase3_stay_resolution` remains the latest migration applied in Production and on the appliance.**
 No Phase-4 flag is enabled anywhere, no real PMS `PS` has been transmitted, no `PA` has been accepted, no
 guest folio has been debited and no payment provider has been called.
+
+## 11. The 0012 hardening pass — what section 7 claimed too early
+
+A hardening review of the same code found five rows this document had marked `RT-OK`, and one design
+property it had described as structural, that did not survive being looked at properly. They are listed
+here rather than quietly corrected in the table above, because a status that was wrong once is worth being
+able to find later.
+
+| # | What was claimed | What was actually true | What 0012 does |
+|---|---|---|---|
+| C22 | per-interface lanes | `outbox_one_active` stops two ACTIVE rows for the SAME posting. Two DIFFERENT postings could be in flight on one interface at once. The test raced six workers over ONE posting, so it could only ever have proved duplicate-claim protection | partial unique `outbox_one_inflight_per_interface`; the test now queues six different postings and MEASURES observed peak concurrency per lane |
+| C24 | lifecycle guard | the gate refused every non-`ACTIVE` state, which is not the contract — `AUTH_DISABLED` posts, `DRAINING` drains | `Gate.CheckFor(Purpose)` plus DB triggers implementing §10 exactly, and the contractual zero-pending precondition for `DECOMMISSIONED` |
+| C32 | freshness before charge | only the STAY half existed. The four PMS runtime axes were never consulted | `p4_interface_freshness_block` over the SAME Phase-3 runtime state and thresholds, enforced at creation AND at transmission |
+| C11 | wire contract | `CT` was bounded at 32; §9a says 20. The exponent was generalized to 0..4 where §9a and the Gate-3A evidence fix it at 2 | `maxCTLen` 20; exponent-2 enforced for `protel-fias` only, so the currency MODEL keeps its real ISO range |
+| C10 | PA correlation | `ParsePA` correlated when PARSING, but the engine accepted whatever the transport returned. A valid OK answer for another `P#` would have ACKed the wrong attempt | `SendPS` takes the allocated `P#`; guard and engine both verify; a mismatch never ACKs and becomes UNKNOWN |
+| — | "the DARK guard is the chokepoint" | true only by convention — `Engine` and `DarkGuard` had EXPORTED fields, so a caller could build an unwrapped engine | every field unexported; `NewEngine` is the only constructor and always wraps; the CI check asserts both |
+
+Two further defects in the same review: the retry authorization was never consumed, and
+`CONFIRM_NOT_POSTED_RETRY` could be recorded against a charge the PMS had already ACKed `OK` — the exact
+duplicate debit the UNKNOWN design exists to prevent. Both are now refused, and terminal review actions
+require real evidence rather than the `{}` default.

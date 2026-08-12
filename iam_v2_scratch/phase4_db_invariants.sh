@@ -142,9 +142,9 @@ rejects "C16" "attempt event DELETE rejected" \
 if [ "$HAS_0011" = "1" ]; then
   # post-0011 the append-only ledger has exactly ONE writer, so the review goes through it
   accepts "C17" "CONFIRM_POSTED review action accepted (via the controlled writer)" \
-    "SELECT iam_v2.record_posting_review_action('c1c10000-0000-0000-0000-000000000001','CONFIRM_POSTED','$T','FOLIO_VERIFIED');"
+    "SELECT iam_v2.record_posting_review_action('c1c10000-0000-0000-0000-000000000001','CONFIRM_POSTED','$T','FOLIO_VERIFIED',jsonb_build_object('folio','verified'));"
   rejects "C17" "generic APPROVE action rejected (no generic approve exists)" \
-    "SELECT iam_v2.record_posting_review_action('c1c10000-0000-0000-0000-000000000001','APPROVE','$T','X');" "REVIEW_ACTION_UNKNOWN"
+    "SELECT iam_v2.record_posting_review_action('c1c10000-0000-0000-0000-000000000001','APPROVE','$T','X',jsonb_build_object('folio','verified'));" "REVIEW_ACTION_UNKNOWN"
 else
   accepts "C17" "CONFIRM_POSTED review action accepted" \
     "INSERT INTO iam_v2.posting_review_actions(id,tenant_id,site_id,posting_id,action,actor,reason,evidence)

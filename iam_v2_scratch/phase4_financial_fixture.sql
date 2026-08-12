@@ -20,12 +20,12 @@ INSERT INTO iam_v2.pms_interface_revisions
   (id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,config,
    financial_base_currency,financial_base_currency_exponent) VALUES
  ('aaaa0000-0000-0000-0000-0000000000d3','11111111-1111-1111-1111-111111111111',
-  '22222222-2222-2222-2222-222222222222','aaaa0000-0000-0000-0000-000000000001',3,'UTC','GLOBALLY_UNIQUE','{}',
+  '22222222-2222-2222-2222-222222222222','aaaa0000-0000-0000-0000-000000000001',3,'UTC','GLOBALLY_UNIQUE','{"heartbeat_timeout_ms":60000,"feed_freshness_ms":300000,"complete_sync_ms":3600000}',
   'USD',2),
 -- revision 4: folio strategy is fine, but the property was never financially onboarded. This is the row
 -- that proves INTERFACE_CURRENCY_NOT_ONBOARDED is a currency refusal and not a folio refusal.
  ('aaaa0000-0000-0000-0000-0000000000d4','11111111-1111-1111-1111-111111111111',
-  '22222222-2222-2222-2222-222222222222','aaaa0000-0000-0000-0000-000000000001',4,'UTC','GLOBALLY_UNIQUE','{}',
+  '22222222-2222-2222-2222-222222222222','aaaa0000-0000-0000-0000-000000000001',4,'UTC','GLOBALLY_UNIQUE','{"heartbeat_timeout_ms":60000,"feed_freshness_ms":300000,"complete_sync_ms":3600000}',
   NULL,NULL);
 UPDATE iam_v2.pms_interfaces SET current_revision_id='aaaa0000-0000-0000-0000-0000000000d3'
  WHERE id='aaaa0000-0000-0000-0000-000000000001';
@@ -38,7 +38,7 @@ INSERT INTO iam_v2.pms_interface_revisions
   (id,tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,config,
    financial_base_currency,financial_base_currency_exponent) VALUES
  ('aaaa0000-0000-0000-0000-0000000002d1','11111111-1111-1111-1111-111111111111',
-  '22222222-2222-2222-2222-222222222222','aaaa0000-0000-0000-0000-000000000002',1,'UTC','GLOBALLY_UNIQUE','{}',
+  '22222222-2222-2222-2222-222222222222','aaaa0000-0000-0000-0000-000000000002',1,'UTC','GLOBALLY_UNIQUE','{"heartbeat_timeout_ms":60000,"feed_freshness_ms":300000,"complete_sync_ms":3600000}',
   'EUR',2);
 UPDATE iam_v2.pms_interfaces SET current_revision_id='aaaa0000-0000-0000-0000-0000000002d1'
  WHERE id='aaaa0000-0000-0000-0000-000000000002';
@@ -99,5 +99,22 @@ INSERT INTO iam_v2.settlements(id,tenant_id,site_id,purchase_id,method,status) V
   '99990000-0000-0000-0000-000000000003','PMS_POSTING','REQUIRED'),
  ('99990000-0000-0000-0000-0000000000d4','11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222',
   '99990000-0000-0000-0000-000000000004','PMS_POSTING','REQUIRED');
+
+-- ---------------------------------------------------------------- PMS runtime state: all four axes green
+-- Migration 0012 makes the financial boundary consult the SAME Phase-3 runtime axes the resolver uses. A
+-- fixture without a runtime row would fail closed with RUNTIME_UNKNOWN, which is correct behaviour but
+-- would make every other check untestable, so the fixture records a healthy interface explicitly.
+INSERT INTO iam_v2.pms_interface_runtime
+  (tenant_id,site_id,pms_interface_id,pinned_revision_id,credential_mode,runtime_generation,
+   transport_status,last_connected_at,last_heartbeat_at,
+   continuity_status,last_valid_event_at,
+   sync_status,last_complete_sync_at,
+   resync_generation_seq,published_resync_generation) VALUES
+ ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222',
+  'aaaa0000-0000-0000-0000-000000000001','aaaa0000-0000-0000-0000-0000000000d3','NONE',1,
+  'CONNECTED',now(),now(),'CONTINUOUS',now(),'IN_SYNC',now(),0,0),
+ ('11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222',
+  'aaaa0000-0000-0000-0000-000000000002','aaaa0000-0000-0000-0000-0000000002d1','NONE',1,
+  'CONNECTED',now(),now(),'CONTINUOUS',now(),'IN_SYNC',now(),0,0);
 
 COMMIT;

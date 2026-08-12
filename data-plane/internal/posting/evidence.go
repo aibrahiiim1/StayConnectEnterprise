@@ -87,6 +87,14 @@ type Snapshot struct {
 	FolioExternalID string
 
 	SettlementMappingRetired bool
+
+	// ConnectorKind decides which WIRE rules apply. protel-fias is exponent-2-only by contract section 9a.
+	ConnectorKind string
+	// FreshnessBlock is the code of the FIRST failed PMS runtime axis, or "" when all four are green. It is
+	// computed by iam_v2.p4_interface_freshness_block -- the SAME function migration 0012 enforces with, so
+	// the gate and the database cannot disagree about what "fresh" means, and there is exactly ONE
+	// freshness model rather than a Go copy of a SQL one.
+	FreshnessBlock string
 }
 
 // Querier is the read surface the gate needs. Both *pgxpool.Pool and pgx.Tx satisfy it.
@@ -109,6 +117,8 @@ func LoadSnapshot(ctx context.Context, q Querier, p Pinned) (Snapshot, error) {
 	const sql = `
 SELECT i.lifecycle_state,
        coalesce(i.current_revision_id::text, ''),
+       i.connector_kind,
+       coalesce(iam_v2.p4_interface_freshness_block(i.tenant_id, i.site_id, i.id, r.id, now()), ''),
        r.folio_identity_strategy,
        coalesce(r.financial_base_currency, ''),
        r.financial_base_currency_exponent,
@@ -144,7 +154,7 @@ SELECT i.lifecycle_state,
 		p.TenantID, p.SiteID, p.PMSInterfaceID, p.PostingInterfaceRevisionID,
 		p.PurchaseID, p.PackageRevisionID, p.StayID, p.FolioID, p.SettlementMappingID, p.SettlementID,
 	).Scan(
-		&s.InterfaceLifecycleState, &s.InterfaceCurrentRevision,
+		&s.InterfaceLifecycleState, &s.InterfaceCurrentRevision, &s.ConnectorKind, &s.FreshnessBlock,
 		&s.FolioIdentityStrategy, &s.InterfaceCurrency, &s.InterfaceExponent,
 		&s.PurchaseCurrency, &s.PurchaseExponent, &s.PurchaseState,
 		&s.PackageCurrency, &s.PackageExponent,

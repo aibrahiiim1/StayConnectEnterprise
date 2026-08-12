@@ -126,7 +126,7 @@ func TestBuildPS_RefusesUntransmissibleFields(t *testing.T) {
 		{"zero amount", func(r *PSRequest) { r.AmountMinor = 0 }, ErrAmountInvalid},
 		{"negative amount", func(r *PSRequest) { r.AmountMinor = -1 }, ErrAmountInvalid},
 		{"empty CT", func(r *PSRequest) { r.PostingCode = "  " }, ErrWireFieldInvalid},
-		{"unbounded CT", func(r *PSRequest) { r.PostingCode = strings.Repeat("x", maxCTLen+1) }, ErrWireFieldInvalid},
+		{"CT over the contract bound of 20", func(r *PSRequest) { r.PostingCode = strings.Repeat("x", 21) }, ErrWireFieldInvalid},
 		{"no P#", func(r *PSRequest) { r.PNumber = 0 }, ErrWireFieldInvalid},
 	}
 	for _, tc := range cases {
@@ -234,9 +234,9 @@ func TestParsePA_NeverUsesRoomNumberAsIdentity(t *testing.T) {
 // recordingTransport is the "even if the worker is running" stand-in: it would happily accept a send.
 type recordingTransport struct{ sends []string }
 
-func (r *recordingTransport) SendPS(_ context.Context, _, body string) (*PA, error) {
+func (r *recordingTransport) SendPS(_ context.Context, _ string, pn int64, body string) (*PA, error) {
 	r.sends = append(r.sends, body)
-	return &PA{PNumber: 1, AS: "OK"}, nil
+	return &PA{PNumber: pn, AS: "OK"}, nil
 }
 
 func TestDarkGuard_RefusesEveryTransmissionWhileDark(t *testing.T) {
@@ -244,7 +244,7 @@ func TestDarkGuard_RefusesEveryTransmissionWhileDark(t *testing.T) {
 	g := NewDarkGuard(DefaultConfig(), inner)
 	body, _ := BuildPS(PSRequest{RN: "101", GNumber: "5", AmountMinor: 100, PostingCode: "WIFI", PNumber: 9})
 
-	pa, err := g.SendPS(context.Background(), "iface", body)
+	pa, err := g.SendPS(context.Background(), "iface", 9, body)
 	if err == nil {
 		t.Fatal("a DARK transport must refuse")
 	}
@@ -272,7 +272,7 @@ func TestDarkGuard_RefusesEveryTransmissionWhileDark(t *testing.T) {
 
 func TestDarkGuard_NilInnerIsStillSafe(t *testing.T) {
 	g := NewDarkGuard(DefaultConfig(), nil)
-	if _, err := g.SendPS(context.Background(), "iface", "PS|RN1|G#1|TA1|PTD|SOWIFI|CTW|P#1|WSSTAYCONNECT|"); err == nil {
+	if _, err := g.SendPS(context.Background(), "iface", 1, "PS|RN1|G#1|TA1|PTD|SOWIFI|CTW|P#1|WSSTAYCONNECT|"); err == nil {
 		t.Fatal("a DARK guard with no transport must still refuse rather than panic")
 	}
 }
@@ -281,7 +281,7 @@ func TestDarkGuard_RefusesNonPSEvenWhenEnabled(t *testing.T) {
 	on := Config{MasterEnabled: true, OutboxEnabled: true, TransmitEnabled: true}
 	g := NewDarkGuard(on, &recordingTransport{})
 	for _, body := range []string{"LA|", "DR|", "GI|RN101|", ""} {
-		if _, err := g.SendPS(context.Background(), "iface", body); err == nil {
+		if _, err := g.SendPS(context.Background(), "iface", 9, body); err == nil {
 			t.Fatalf("only a PS may pass the financial transport; %q was accepted", body)
 		}
 	}
@@ -317,6 +317,7 @@ func goodPair() (Pinned, Snapshot) {
 		PackageCurrency: "USD", PackageExponent: exp(2),
 		StayStatus: "IN_HOUSE", StayPostingAllowed: true, StayLifecycleVersion: 1,
 		StayRoomNumber: "101", FolioExternalID: "5",
+		ConnectorKind: "protel-fias", FreshnessBlock: "",
 	}
 	return p, s
 }
@@ -359,8 +360,14 @@ func TestGate_FailClosedMatrix(t *testing.T) {
 		{"package currency absent", func(_ *Pinned, s *Snapshot) { s.PackageCurrency = ""; s.PackageExponent = nil }, ErrCurrencyMismatch},
 		{"zero amount", func(p *Pinned, _ *Snapshot) { p.AmountMinor = 0 }, ErrAmountInvalid},
 		{"negative amount", func(p *Pinned, _ *Snapshot) { p.AmountMinor = -100 }, ErrAmountInvalid},
-		{"interface decommissioned", func(_ *Pinned, s *Snapshot) { s.InterfaceLifecycleState = "DECOMMISSIONED" }, ErrInterfaceInactive},
-		{"interface draining", func(_ *Pinned, s *Snapshot) { s.InterfaceLifecycleState = "DRAINING" }, ErrInterfaceInactive},
+		{"interface decommissioned", func(_ *Pinned, s *Snapshot) { s.InterfaceLifecycleState = "DECOMMISSIONED" }, ErrInterfaceDecomm},
+		{"interface draining refuses NEW work", func(_ *Pinned, s *Snapshot) { s.InterfaceLifecycleState = "DRAINING" }, ErrInterfaceInactive},
+		{"transport axis down", func(_ *Pinned, s *Snapshot) { s.FreshnessBlock = "TRANSPORT_DISCONNECTED" }, ErrInterfaceNotFresh},
+		{"heartbeat axis stale", func(_ *Pinned, s *Snapshot) { s.FreshnessBlock = "TRANSPORT_HEARTBEAT_STALE" }, ErrInterfaceNotFresh},
+		{"continuity axis broken", func(_ *Pinned, s *Snapshot) { s.FreshnessBlock = "CONTINUITY_GAP_DETECTED" }, ErrInterfaceNotFresh},
+		{"sync axis out of sync", func(_ *Pinned, s *Snapshot) { s.FreshnessBlock = "SYNC_RESYNC_REQUIRED" }, ErrInterfaceNotFresh},
+		{"pin coherence axis broken", func(_ *Pinned, s *Snapshot) { s.FreshnessBlock = "PIN_RESYNC_IN_FLIGHT" }, ErrInterfaceNotFresh},
+		{"no runtime state at all", func(_ *Pinned, s *Snapshot) { s.FreshnessBlock = "RUNTIME_UNKNOWN" }, ErrInterfaceNotFresh},
 		{"posting code not wire safe", func(p *Pinned, _ *Snapshot) { p.PostingCode = "WI|FI" }, ErrWireFieldInvalid},
 	}
 	for _, tc := range cases {
@@ -387,5 +394,105 @@ func TestGate_NeverConvertsBetweenCurrencies(t *testing.T) {
 		if err := (Gate{}).Check(p, s); err == nil {
 			t.Fatalf("%s posted against a %s interface must be refused", pair[0], pair[1])
 		}
+	}
+}
+
+// ---------------------------------------------------------------- hardening corrections
+
+// Contract section 10: AUTH_DISABLED closes guest AUTHENTICATION, not the folio, and DRAINING must still
+// drain. The first version of this gate refused both, which would have stranded authorized money.
+func TestGate_LifecycleMatrixMatchesTheContract(t *testing.T) {
+	cases := []struct {
+		state             string
+		createOK, drainOK bool
+	}{
+		{"ACTIVE", true, true},
+		{"AUTH_DISABLED", true, true},
+		{"DRAINING", false, true},
+		{"DECOMMISSIONED", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.state, func(t *testing.T) {
+			p, s := goodPair()
+			s.InterfaceLifecycleState = tc.state
+			if got := (Gate{}).CheckFor(PurposeCreate, p, s) == nil; got != tc.createOK {
+				t.Fatalf("%s create: expected allowed=%v", tc.state, tc.createOK)
+			}
+			if got := (Gate{}).CheckFor(PurposeExecute, p, s) == nil; got != tc.drainOK {
+				t.Fatalf("%s drain: expected allowed=%v", tc.state, tc.drainOK)
+			}
+		})
+	}
+}
+
+// Contract section 9a fixes this posting path at exponent 2, and the Gate-3A evidence is a USD 1.00 debit.
+func TestGate_FIASPathIsExponentTwoOnly(t *testing.T) {
+	for _, exp := range []int16{0, 1, 3, 4} {
+		p, s := goodPair()
+		p.CurrencyExponent = exp
+		s.InterfaceExponent, s.PurchaseExponent, s.PackageExponent = &exp, &exp, &exp
+		err := (Gate{}).Check(p, s)
+		if CodeOf(err) != ErrFIASExponent {
+			t.Fatalf("exponent %d on protel-fias must be refused as unsupported, got %v", exp, err)
+		}
+	}
+	// a non-FIAS connector is not constrained by the FIAS wire
+	p, s := goodPair()
+	three := int16(3)
+	p.CurrencyExponent, s.ConnectorKind = 3, "some-other-connector"
+	s.InterfaceExponent, s.PurchaseExponent, s.PackageExponent = &three, &three, &three
+	if err := (Gate{}).Check(p, s); err != nil {
+		t.Fatalf("a non-FIAS connector must not inherit the FIAS wire bound: %v", err)
+	}
+}
+
+func TestBuildPS_CTIsBoundedAtTwenty(t *testing.T) {
+	base := PSRequest{RN: "101", GNumber: "5", AmountMinor: 100, PNumber: 1}
+	base.PostingCode = strings.Repeat("W", 20)
+	if _, err := BuildPS(base); err != nil {
+		t.Fatalf("a 20-character CT is within the contract bound: %v", err)
+	}
+	base.PostingCode = strings.Repeat("W", 21)
+	if _, err := BuildPS(base); err == nil {
+		t.Fatal("a 21-character CT exceeds the contract bound and must be refused")
+	}
+}
+
+// wrongPNumberTransport answers with a P# that belongs to a different attempt. It is the shape of the
+// defect that matters: everything about the answer looks valid except who it is for.
+type wrongPNumberTransport struct{ answered int }
+
+func (w *wrongPNumberTransport) SendPS(_ context.Context, _ string, pn int64, _ string) (*PA, error) {
+	w.answered++
+	return &PA{PNumber: pn + 1000, AS: "OK"}, nil
+}
+
+func TestDarkGuard_RefusesAPAForADifferentPNumber(t *testing.T) {
+	on := Config{MasterEnabled: true, OutboxEnabled: true, TransmitEnabled: true}
+	g := NewDarkGuard(on, &wrongPNumberTransport{})
+	body, _ := BuildPS(PSRequest{RN: "101", GNumber: "5", AmountMinor: 100, PostingCode: "WIFI", PNumber: 7})
+	pa, err := g.SendPS(context.Background(), "iface", 7, body)
+	if err == nil || pa != nil {
+		t.Fatal("a PA carrying another P# must never be returned as this attempt's answer")
+	}
+	if CodeOf(err) != ErrPAWrongPNumber {
+		t.Fatalf("expected pa_wrong_p_number, got %s", CodeOf(err))
+	}
+	// and it must NOT be classified as not-transmitted: the PS really did go out
+	if NotTransmitted(err) {
+		t.Fatal("a mis-correlated answer follows a real transmission; it is not a not-sent failure")
+	}
+}
+
+func TestDarkGuard_RefusesABodyThatDoesNotCarryTheAllocatedPNumber(t *testing.T) {
+	on := Config{MasterEnabled: true, OutboxEnabled: true, TransmitEnabled: true}
+	inner := &recordingTransport{}
+	g := NewDarkGuard(on, inner)
+	body, _ := BuildPS(PSRequest{RN: "101", GNumber: "5", AmountMinor: 100, PostingCode: "WIFI", PNumber: 7})
+	if _, err := g.SendPS(context.Background(), "iface", 8, body); err == nil {
+		t.Fatal("a PS body whose P# is not the allocated one must be refused before transmission")
+	}
+	if len(inner.sends) != 0 {
+		t.Fatal("the inner transport must not be reached when the record and the allocation disagree")
 	}
 }

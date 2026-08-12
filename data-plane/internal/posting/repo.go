@@ -214,17 +214,29 @@ func (r *Repo) RecordReview(ctx context.Context, postingID, action, actor, reaso
 // State is one row of the derived read model. Nothing here is stored; every field is computed by the view
 // from the posting, outbox, attempt and review ledgers.
 type State struct {
-	PostingID            string
-	ExecutionState       string
-	LatestAttemptNo      *int
-	LatestPNumber        *string
-	OutboxState          *string
-	HasUnknownHistory    bool
-	AwaitingManualReview bool
-	TerminalReviewAction *string
-	ReviewVersion        *int
-	AttemptCount         int64
-	UnknownAttemptCount  int64
+	PostingID                  string
+	ExecutionState             string
+	LatestAttemptNo            *int
+	LatestPNumber              *string
+	OutboxState                *string
+	HasUnknownHistory          bool
+	AwaitingManualReview       bool
+	TerminalReviewAction       *string
+	ReviewVersion              *int
+	AttemptCount               int64
+	UnknownAttemptCount        int64
+	LatestPAStatusValue        *string
+	RetryAuthorizationConsumed bool
+	FreshnessBlock             *string
+}
+
+// LatestPAStatus returns the AS the PMS gave for the latest attempt, or "" when it gave none. It is a
+// method rather than a bare pointer so a caller cannot accidentally treat "no answer" as an answer.
+func (s State) LatestPAStatus() string {
+	if s.LatestPAStatusValue == nil {
+		return ""
+	}
+	return *s.LatestPAStatusValue
 }
 
 // ReadState reads the derived projection for one posting.
@@ -233,11 +245,13 @@ func (r *Repo) ReadState(ctx context.Context, postingID string) (State, error) {
 	err := r.pool.QueryRow(ctx, `
 SELECT posting_id::text, execution_state, latest_attempt_no, latest_p_number, outbox_state,
        coalesce(has_unknown_history,false), coalesce(awaiting_manual_review,false),
-       terminal_review_action, review_version, coalesce(attempt_count,0), coalesce(unknown_attempt_count,0)
+       terminal_review_action, review_version, coalesce(attempt_count,0), coalesce(unknown_attempt_count,0),
+       latest_pa_as_status, coalesce(retry_authorization_consumed,false), freshness_block
   FROM iam_v2.posting_execution_state WHERE posting_id = $1`, postingID).Scan(
 		&s.PostingID, &s.ExecutionState, &s.LatestAttemptNo, &s.LatestPNumber, &s.OutboxState,
 		&s.HasUnknownHistory, &s.AwaitingManualReview, &s.TerminalReviewAction, &s.ReviewVersion,
-		&s.AttemptCount, &s.UnknownAttemptCount)
+		&s.AttemptCount, &s.UnknownAttemptCount,
+		&s.LatestPAStatusValue, &s.RetryAuthorizationConsumed, &s.FreshnessBlock)
 	if err != nil {
 		return State{}, classify(err)
 	}

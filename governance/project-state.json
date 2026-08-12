@@ -213,7 +213,15 @@
     "phases_5_to_7_authorized": false,
     "phase4_accepted": false,
     "phase4_closed": false,
-    "phase4_migration": "0011_phase4_financial_execution",
+    "phase4_migration": "0011_phase4_financial_execution + 0012_phase4_financial_hardening",
+    "phase4_core_hardened": true,
+    "phase4_t0030_overclaims_corrected": ["C10", "C11", "C22", "C24", "C32", "retry single-use", "review evidence", "unbypassable DARK guard"],
+    "phase4_authoritative_ci_run_on_head": false,
+    "phase4_manual_review_operator_workflow": false,
+    "phase4_payments": false,
+    "phase4_financial_recovery_mode": false,
+    "phase4_operator_surface": false,
+    "phase4_runtime_integration": false,
     "phase4_migration_applied_in_production": false,
     "phase4_migration_applied_on_appliance": false,
     "phase4_latest_applied_migration_in_production": "0010_phase3_stay_resolution",
@@ -298,7 +306,7 @@
     "surgical_foundation_retired_from_procedure": true,
     "next_step": "Continue the authorized Phase 4 Financial Execution Layer DARK on the phase/4-financial-execution branch under D18/T0029: Manual Review operator workflow, payment/settlement boundary, FINANCIAL_RECOVERY_MODE, operator UI and observability, then the final controlled DARK deployment. Phase-4 feature flags stay OFF and no real financial traffic is authorized."
   },
-  "latest_transition_id": "T0030",
+  "latest_transition_id": "T0031",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"

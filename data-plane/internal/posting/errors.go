@@ -28,7 +28,11 @@ const (
 	ErrCurrencyMismatch    Code = "currency_mismatch"
 	ErrExponentMismatch    Code = "currency_exponent_mismatch"
 	ErrAmountInvalid       Code = "amount_invalid"
-	ErrInterfaceInactive   Code = "interface_not_active"
+	ErrInterfaceInactive   Code = "interface_not_accepting_work"
+	ErrInterfaceDecomm     Code = "interface_decommissioned"
+	ErrInterfaceNotFresh   Code = "interface_not_fresh"
+	ErrFIASExponent        Code = "fias_exponent_unsupported"
+	ErrReversalDisabled    Code = "programmatic_reversal_disabled"
 
 	// ---- execution / protocol ----
 	ErrDarkNoEgress     Code = "dark_no_egress"
@@ -37,6 +41,8 @@ const (
 	ErrPACorrelation    Code = "pa_correlation_failed"
 	ErrPAStatusUnknown  Code = "pa_status_not_in_catalog"
 	ErrPAAmbiguous      Code = "pa_ambiguous"
+	ErrPAWrongPNumber   Code = "pa_wrong_p_number"
+	ErrLaneBusy         Code = "interface_lane_busy"
 	ErrUnknownTerminal  Code = "unknown_requires_manual_review"
 	ErrReviewConflict   Code = "review_conflict"
 	ErrReviewStale      Code = "review_version_stale"

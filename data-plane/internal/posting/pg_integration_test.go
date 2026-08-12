@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -98,9 +99,20 @@ func seedProperty(t *testing.T, p *pgxpool.Pool, currency string, exponent int16
 	s.rev = scan1[string](t, p, `INSERT INTO iam_v2.pms_interface_revisions
 		(tenant_id,site_id,pms_interface_id,revision_no,source_timezone,folio_identity_strategy,config,
 		 financial_base_currency,financial_base_currency_exponent)
-		VALUES ($1,$2,$3,3,'UTC','GLOBALLY_UNIQUE','{}',$4,$5) RETURNING id::text`,
-		s.tenant, s.site, s.iface, currency, exponent)
+		VALUES ($1,$2,$3,3,'UTC','GLOBALLY_UNIQUE',
+		 '{"heartbeat_timeout_ms":60000,"feed_freshness_ms":300000,"complete_sync_ms":3600000}',$4,$5)
+		RETURNING id::text`, s.tenant, s.site, s.iface, currency, exponent)
 	mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$2 WHERE id=$1`, s.iface, s.rev)
+
+	// Migration 0012 makes the financial boundary consult the SAME Phase-3 runtime axes the resolver uses.
+	// A property with no runtime row fails closed with RUNTIME_UNKNOWN, which is correct -- so a fixture
+	// that wants to test anything else has to record a healthy interface explicitly.
+	mustExec(t, p, `INSERT INTO iam_v2.pms_interface_runtime
+		(tenant_id,site_id,pms_interface_id,pinned_revision_id,credential_mode,runtime_generation,
+		 transport_status,last_connected_at,last_heartbeat_at,continuity_status,last_valid_event_at,
+		 sync_status,last_complete_sync_at,resync_generation_seq,published_resync_generation)
+		VALUES ($1,$2,$3,$4,'NONE',1,'CONNECTED',now(),now(),'CONTINUOUS',now(),'IN_SYNC',now(),0,0)`,
+		s.tenant, s.site, s.iface, s.rev)
 
 	plan := scan1[string](t, p, `INSERT INTO iam_v2.service_plans(tenant_id,site_id,code)
 		VALUES ($1,$2,'P-'||substr(gen_random_uuid()::text,1,8)) RETURNING id::text`, s.tenant, s.site)
@@ -169,30 +181,17 @@ type stubTransport struct {
 	answer func(pn int64) (*PA, error)
 }
 
-func (s *stubTransport) SendPS(_ context.Context, _, body string) (*PA, error) {
+func (s *stubTransport) SendPS(_ context.Context, _ string, pn int64, body string) (*PA, error) {
 	s.mu.Lock()
 	s.bodies = append(s.bodies, body)
 	s.mu.Unlock()
-	pa, err := ParsePA("PA|P#" + pnOf(body) + "|ASOK|")
 	if s.answer != nil {
-		return s.answer(pa.PNumber)
+		return s.answer(pn)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &pa, nil
+	return &PA{PNumber: pn, AS: "OK"}, nil
 }
 
 func (s *stubTransport) count() int { s.mu.Lock(); defer s.mu.Unlock(); return len(s.bodies) }
-
-func pnOf(body string) string {
-	for _, tok := range strings.Split(body, "|") {
-		if strings.HasPrefix(tok, "P#") {
-			return tok[2:]
-		}
-	}
-	return "0"
-}
 
 // ---- helpers -------------------------------------------------------------------------------------------
 
@@ -295,6 +294,36 @@ func TestIntegrationPosting_FailClosedConsumesNothing(t *testing.T) {
 		}, ErrPostingNotAllowed},
 		{"currency mismatch", func(_ *testing.T, _ *scope, pin *Pinned) { pin.Currency = "EUR" }, ErrCurrencyMismatch},
 		{"exponent mismatch", func(_ *testing.T, _ *scope, pin *Pinned) { pin.CurrencyExponent = 3 }, ErrExponentMismatch},
+		{"interface DRAINING refuses new work", func(t *testing.T, s *scope, _ *Pinned) {
+			mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET lifecycle_state='DRAINING' WHERE id=$1`, s.iface)
+		}, ErrInterfaceInactive},
+		{"interface DECOMMISSIONED", func(t *testing.T, s *scope, _ *Pinned) {
+			mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET lifecycle_state='DECOMMISSIONED' WHERE id=$1`, s.iface)
+		}, ErrInterfaceDecomm},
+		{"transport axis disconnected", func(t *testing.T, s *scope, _ *Pinned) {
+			mustExec(t, p, `UPDATE iam_v2.pms_interface_runtime SET transport_status='DISCONNECTED',
+				updated_at=now() WHERE pms_interface_id=$1`, s.iface)
+		}, ErrInterfaceNotFresh},
+		{"heartbeat axis stale", func(t *testing.T, s *scope, _ *Pinned) {
+			mustExec(t, p, `UPDATE iam_v2.pms_interface_runtime
+				SET last_heartbeat_at=now()-interval '10 minutes', updated_at=now()
+				WHERE pms_interface_id=$1`, s.iface)
+		}, ErrInterfaceNotFresh},
+		{"continuity axis gapped", func(t *testing.T, s *scope, _ *Pinned) {
+			mustExec(t, p, `UPDATE iam_v2.pms_interface_runtime SET continuity_status='GAP_DETECTED',
+				updated_at=now() WHERE pms_interface_id=$1`, s.iface)
+		}, ErrInterfaceNotFresh},
+		{"sync axis requires resync", func(t *testing.T, s *scope, _ *Pinned) {
+			mustExec(t, p, `UPDATE iam_v2.pms_interface_runtime SET sync_status='RESYNC_REQUIRED',
+				updated_at=now() WHERE pms_interface_id=$1`, s.iface)
+		}, ErrInterfaceNotFresh},
+		{"pin coherence: a resync generation is part-published", func(t *testing.T, s *scope, _ *Pinned) {
+			mustExec(t, p, `UPDATE iam_v2.pms_interface_runtime SET resync_generation_seq=2,
+				published_resync_generation=1, updated_at=now() WHERE pms_interface_id=$1`, s.iface)
+		}, ErrInterfaceNotFresh},
+		{"no PMS runtime state at all", func(t *testing.T, s *scope, _ *Pinned) {
+			mustExec(t, p, `DELETE FROM iam_v2.pms_interface_runtime WHERE pms_interface_id=$1`, s.iface)
+		}, ErrInterfaceNotFresh},
 		{"stale stay evidence", func(_ *testing.T, _ *scope, pin *Pinned) {
 			v := 99
 			pin.ExpectStayLifecycleVersion = &v
@@ -381,12 +410,11 @@ func TestIntegrationPosting_DarkWorkerProducesNoEgress(t *testing.T) {
 	}
 
 	// POSITIVE evidence: the worker really tried, five times, and was refused AT THE WIRE.
-	guard := e.Transport.(*DarkGuard)
-	if guard.Refusals() != 5 {
-		t.Fatalf("expected 5 recorded wire refusals, got %d", guard.Refusals())
+	if e.TransportRefusals() != 5 {
+		t.Fatalf("expected 5 recorded wire refusals, got %d", e.TransportRefusals())
 	}
-	if !strings.HasPrefix(guard.LastRefusedBody(), "PS|RN") {
-		t.Fatalf("the guard should have refused a fully-built PS, got %q", guard.LastRefusedBody())
+	if !strings.HasPrefix(e.LastRefusedBody(), "PS|RN") {
+		t.Fatalf("the guard should have refused a fully-built PS, got %q", e.LastRefusedBody())
 	}
 	// NEGATIVE evidence: nothing was produced, allocated or sent.
 	if inner.count() != 0 {
@@ -680,7 +708,8 @@ func TestIntegrationPosting_UnknownLeavesOnlyThroughAuditedReview(t *testing.T) 
 
 	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
 	if _, err := repo.RecordReview(ctx, id, "CONFIRM_NOT_POSTED_RETRY", actor,
-		"operator checked the folio: nothing was posted", "", nil); err != nil {
+		"operator checked the folio: nothing was posted",
+		`{"folio_checked_at":"2026-08-12T00:00:00Z","operator_finding":"no charge present"}`, nil); err != nil {
 		t.Fatalf("review: %v", err)
 	}
 	if err := e.Requeue(ctx, id); err != nil {
@@ -736,7 +765,8 @@ func TestIntegrationPosting_ConcurrentReviewersCannotBothWin(t *testing.T) {
 		go func(a string) {
 			defer wg.Done()
 			<-start
-			_, err := repo.RecordReview(ctx, id, a, actor, "racing reviewer "+a, "", nil)
+			_, err := repo.RecordReview(ctx, id, a, actor, "racing reviewer "+a,
+				`{"operator_finding":"racing decision"}`, nil)
 			results <- err
 		}(action)
 	}
@@ -979,5 +1009,314 @@ func TestIntegrationPosting_AttemptEvidenceCarriesNoSecretsOrPII(t *testing.T) {
 		if strings.Contains(strings.ToLower(rows), banned) {
 			t.Fatalf("attempt evidence contains %q: %s", banned, rows)
 		}
+	}
+}
+
+// ---- hardening: per-interface lane serialization, with DIFFERENT postings -----------------------------
+
+// The 0011 claim was overstated. outbox_one_active stops two ACTIVE rows for the SAME posting; it says
+// nothing about two DIFFERENT postings on one interface. This is the test that actually proves Contract
+// section 10: many queued postings, many workers, ONE interface -- and at most one in flight at a time,
+// while a second interface is completely unaffected.
+func TestIntegrationPosting_InterfaceLaneIsSerializedAcrossDifferentPostings(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	a := seedProperty(t, p, "USD", 2)
+	b := seedProperty(t, p, "EUR", 2)
+
+	// a transport that holds the lane open long enough for a second worker to try to enter it
+	var peak, cur int32
+	hold := func(int64) (*PA, error) {
+		n := atomic.AddInt32(&cur, 1)
+		for {
+			old := atomic.LoadInt32(&peak)
+			if n <= old || atomic.CompareAndSwapInt32(&peak, old, n) {
+				break
+			}
+		}
+		time.Sleep(120 * time.Millisecond)
+		atomic.AddInt32(&cur, -1)
+		return &PA{PNumber: 1, AS: "OK"}, nil
+	}
+	trA := &stubTransport{answer: func(pn int64) (*PA, error) {
+		if _, err := hold(pn); err != nil {
+			return nil, err
+		}
+		return &PA{PNumber: pn, AS: "OK"}, nil
+	}}
+	trB := &stubTransport{}
+	ea := NewEngine(liveCfg, NewRepo(p), trA)
+	eb := NewEngine(liveCfg, NewRepo(p), trB)
+
+	const postings = 6
+	for i := 0; i < postings; i++ {
+		if _, err := ea.CreatePosting(ctx, a.pinned(fmt.Sprintf("%s-a-%d", idem(t), i))); err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+	}
+	bID, err := eb.CreatePosting(ctx, b.pinned(idem(t)+"-b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for w := 0; w < 5; w++ { // five workers, one lane
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < postings; i++ {
+				_, _ = NewEngine(liveCfg, NewRepo(p), trA).RunOnce(ctx, a.tenant, a.site, a.iface)
+			}
+		}()
+	}
+	wg.Add(1) // and one worker on the OTHER interface, running concurrently throughout
+	go func() {
+		defer wg.Done()
+		_, _ = eb.RunOnce(ctx, b.tenant, b.site, b.iface)
+	}()
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&peak); got > 1 {
+		t.Fatalf("Contract 10: at most ONE posting may be in flight per interface, observed %d", got)
+	}
+	// every posting is accounted for exactly once
+	if n := scan1[int](t, p, `SELECT count(*)::int FROM iam_v2.posting_attempts WHERE pms_interface_id=$1`, a.iface); n != postings {
+		t.Fatalf("expected exactly %d attempts on the serialized lane, got %d", postings, n)
+	}
+	if n := scan1[int](t, p, `SELECT count(DISTINCT p_number)::int FROM iam_v2.posting_attempts
+		WHERE pms_interface_id=$1`, a.iface); n != postings {
+		t.Fatalf("every attempt must own a distinct P#, got %d distinct", n)
+	}
+	// the other interface was never blocked by the busy one
+	st, _ := NewRepo(p).ReadState(ctx, bID)
+	if st.ExecutionState != "POSTED" {
+		t.Fatalf("a busy lane must not affect another interface: %+v", st)
+	}
+}
+
+// ---- hardening: DRAINING drains -----------------------------------------------------------------------
+
+func TestIntegrationPosting_DrainingInterfaceStillDrains(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedProperty(t, p, "USD", 2)
+	tr := &stubTransport{}
+	e := NewEngine(liveCfg, NewRepo(p), tr)
+	id, err := e.CreatePosting(ctx, s.pinned(idem(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, p, `UPDATE iam_v2.pms_interfaces SET lifecycle_state='DRAINING' WHERE id=$1`, s.iface)
+
+	// new work is refused...
+	if _, err := e.CreatePosting(ctx, s.pinned(idem(t)+"-new")); CodeOf(err) != ErrInterfaceInactive {
+		t.Fatalf("DRAINING must refuse NEW financial work, got %v", err)
+	}
+	// ...but the outbox drains, which is the whole point of the state
+	out, err := e.RunOnce(ctx, s.tenant, s.site, s.iface)
+	if err != nil || out.Result != "POSTED" {
+		t.Fatalf("DRAINING must let the existing outbox drain: %+v %v", out, err)
+	}
+	st, _ := NewRepo(p).ReadState(ctx, id)
+	if st.ExecutionState != "POSTED" {
+		t.Fatalf("read model: %+v", st)
+	}
+}
+
+// A DECOMMISSIONED interface may not transmit, and it may not be decommissioned while work is outstanding.
+func TestIntegrationPosting_DecommissionRequiresAQuietInterface(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedProperty(t, p, "USD", 2)
+	e := NewEngine(liveCfg, NewRepo(p), &stubTransport{})
+	if _, err := e.CreatePosting(ctx, s.pinned(idem(t))); err != nil {
+		t.Fatal(err)
+	}
+	_, err := p.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET lifecycle_state='DECOMMISSIONED' WHERE id=$1`, s.iface)
+	if err == nil || !strings.Contains(err.Error(), "DECOMMISSION_BLOCKED") {
+		t.Fatalf("decommissioning with a queued posting must be refused, got %v", err)
+	}
+	if _, err := e.RunOnce(ctx, s.tenant, s.site, s.iface); err != nil {
+		t.Fatalf("drain: %v", err)
+	}
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET lifecycle_state='DECOMMISSIONED' WHERE id=$1`, s.iface); err != nil {
+		t.Fatalf("a quiet interface must be decommissionable: %v", err)
+	}
+}
+
+// ---- hardening: freshness is re-checked at TRANSMISSION, not only at authorization --------------------
+
+func TestIntegrationPosting_InterfaceGoingStaleStopsTheBytes(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedProperty(t, p, "USD", 2)
+	tr := &stubTransport{}
+	e := NewEngine(liveCfg, NewRepo(p), tr)
+	id, err := e.CreatePosting(ctx, s.pinned(idem(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := pCounter(t, p, s.iface)
+	// the feed goes discontinuous AFTER the charge was authorized and queued
+	mustExec(t, p, `UPDATE iam_v2.pms_interface_runtime SET continuity_status='GAP_DETECTED', updated_at=now()
+		WHERE pms_interface_id=$1`, s.iface)
+
+	out, err := e.RunOnce(ctx, s.tenant, s.site, s.iface)
+	if out.Result != "DECLINED" || CodeOf(err) != ErrInterfaceNotFresh {
+		t.Fatalf("a stale interface must stop the bytes: %+v %v", out, err)
+	}
+	if tr.count() != 0 {
+		t.Fatalf("a stale interface produced %d transmissions", tr.count())
+	}
+	if got := pCounter(t, p, s.iface); got != before {
+		t.Fatalf("a stale interface consumed a P# (%d -> %d)", before, got)
+	}
+	if n := attemptCount(t, p, id); n != 0 {
+		t.Fatalf("a stale interface wrote %d attempts", n)
+	}
+}
+
+// ---- hardening: a PA for another P# never ACKs this attempt -------------------------------------------
+
+func TestIntegrationPosting_PAForAnotherPNumberNeverAcks(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedProperty(t, p, "USD", 2)
+	// a valid-looking, catalog-correct, OK answer -- for somebody else's attempt
+	tr := &stubTransport{answer: func(pn int64) (*PA, error) { return &PA{PNumber: pn + 1000, AS: "OK"}, nil }}
+	e := NewEngine(liveCfg, NewRepo(p), tr)
+	id, err := e.CreatePosting(ctx, s.pinned(idem(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := e.RunOnce(ctx, s.tenant, s.site, s.iface)
+	if out.Result == "POSTED" {
+		t.Fatal("a PA carrying another P# must NEVER be accepted as this attempt's acknowledgement")
+	}
+	if out.Result != "UNKNOWN" {
+		t.Fatalf("the PS was transmitted and never conclusively answered; expected UNKNOWN, got %+v", out)
+	}
+	st, _ := NewRepo(p).ReadState(ctx, id)
+	if st.ExecutionState != "UNKNOWN" || !st.AwaitingManualReview {
+		t.Fatalf("a mis-correlated answer must be surfaced for review: %+v", st)
+	}
+	if st.LatestPAStatus() != "" {
+		t.Fatalf("no AS may be recorded from an answer that was not this attempt's: %q", st.LatestPAStatus())
+	}
+}
+
+// ---- hardening: the retry authorization is single-use -------------------------------------------------
+
+func TestIntegrationPosting_RetryAuthorizationIsConsumedExactlyOnce(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedProperty(t, p, "USD", 2)
+	repo := NewRepo(p)
+	silent := &stubTransport{answer: func(int64) (*PA, error) { return nil, ErrTransmittedNoAnswer }}
+	e := NewEngine(liveCfg, repo, silent)
+	id, err := e.CreatePosting(ctx, s.pinned(idem(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = e.RunOnce(ctx, s.tenant, s.site, s.iface) // -> UNKNOWN
+
+	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
+	ev := `{"folio_checked_at":"2026-08-12T00:00:00Z","operator_finding":"no charge present"}`
+	if _, err := repo.RecordReview(ctx, id, "CONFIRM_NOT_POSTED_RETRY", actor, "folio verified clean", ev, nil); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	if err := e.Requeue(ctx, id); err != nil {
+		t.Fatalf("first requeue: %v", err)
+	}
+	// the authorized retry runs and goes UNKNOWN again -- the worst case for a hot loop
+	_, _ = e.RunOnce(ctx, s.tenant, s.site, s.iface)
+
+	// The authorization was for ONE attempt and is now spent. A second Requeue must find nothing, and the
+	// item must NOT be sitting QUEUED waiting to be picked up again.
+	if err := e.Requeue(ctx, id); CodeOf(err) != ErrRetryNotAuthed {
+		t.Fatalf("a spent retry authorization must not permit a second requeue, got %v", err)
+	}
+	st, _ := repo.ReadState(ctx, id)
+	if st.OutboxState == nil || *st.OutboxState != "HELD_RECOVERY" {
+		t.Fatalf("a second UNKNOWN must park in HELD_RECOVERY, not hot-loop as QUEUED: %+v", st)
+	}
+	if !st.RetryAuthorizationConsumed {
+		t.Fatal("the retry authorization must be recorded as consumed")
+	}
+	if silent.count() != 2 {
+		t.Fatalf("exactly two transmissions were authorized in total, got %d", silent.count())
+	}
+	for i := 0; i < 4; i++ {
+		if o, _ := e.RunOnce(ctx, s.tenant, s.site, s.iface); o.Claimed {
+			t.Fatal("nothing may be claimed after the authorization is spent")
+		}
+	}
+}
+
+// ---- hardening: a posted charge can never be retried --------------------------------------------------
+
+func TestIntegrationPosting_AckedOKChargeCanNeverBeRetried(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedProperty(t, p, "USD", 2)
+	repo := NewRepo(p)
+	e := NewEngine(liveCfg, repo, &stubTransport{})
+	id, err := e.CreatePosting(ctx, s.pinned(idem(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := e.RunOnce(ctx, s.tenant, s.site, s.iface); err != nil || out.Result != "POSTED" {
+		t.Fatalf("setup: %+v %v", out, err)
+	}
+	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
+	ev := `{"operator_finding":"I think it did not post"}`
+	_, err = repo.RecordReview(ctx, id, "CONFIRM_NOT_POSTED_RETRY", actor, "operator believes it failed", ev, nil)
+	if err == nil {
+		t.Fatal("retrying a charge the PMS ACKed OK would post it twice and must be refused")
+	}
+	if !strings.Contains(err.Error(), "REVIEW_RETRY_REFUSED") && CodeOf(err) != ErrRetryNotAuthed {
+		t.Fatalf("expected an explicit retry refusal, got %v", err)
+	}
+	if n := attemptCount(t, p, id); n != 1 {
+		t.Fatalf("the posted charge must still have exactly one attempt, got %d", n)
+	}
+}
+
+// ---- hardening: review evidence is mandatory ----------------------------------------------------------
+
+func TestIntegrationPosting_TerminalReviewRequiresEvidence(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedProperty(t, p, "USD", 2)
+	repo := NewRepo(p)
+	silent := &stubTransport{answer: func(int64) (*PA, error) { return nil, ErrTransmittedNoAnswer }}
+	e := NewEngine(liveCfg, repo, silent)
+	id, _ := e.CreatePosting(ctx, s.pinned(idem(t)))
+	_, _ = e.RunOnce(ctx, s.tenant, s.site, s.iface)
+	actor := scan1[string](t, p, `SELECT gen_random_uuid()::text`)
+
+	if _, err := repo.RecordReview(ctx, id, "CONFIRM_POSTED", actor, "looks fine", "", nil); err == nil {
+		t.Fatal("a terminal financial decision with no evidence must be refused")
+	}
+	// ESCALATE decides nothing, so it may be raised without evidence
+	if _, err := repo.RecordReview(ctx, id, "ESCALATE", actor, "needs finance", "", nil); err != nil {
+		t.Fatalf("ESCALATE must not require evidence: %v", err)
+	}
+}
+
+// ---- hardening: programmatic reversal is impossible, not merely absent --------------------------------
+
+func TestIntegrationPosting_ReversalCannotBeCreatedProgrammatically(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	s := seedProperty(t, p, "USD", 2)
+	_, err := p.Exec(ctx, `INSERT INTO iam_v2.pms_postings
+		(tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,
+		 posting_interface_revision_id,posting_type,reverses_posting_id,amount_minor,currency,
+		 currency_exponent,idempotency_key)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'REVERSAL',gen_random_uuid(),1000,$9,2,$10)`,
+		s.tenant, s.site, s.iface, s.settle, s.purchase, s.stay, s.folio, s.rev, s.currency, idem(t)+"-rev")
+	if err == nil || !strings.Contains(err.Error(), "PROGRAMMATIC_REVERSAL_DISABLED") {
+		t.Fatalf("v1 disables programmatic reversal; the database must refuse it, got %v", err)
 	}
 }

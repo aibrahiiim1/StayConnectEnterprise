@@ -20,14 +20,53 @@ const maxWireField = 32
 // database cannot see (P# allocation and transmission) are reached.
 type Gate struct{}
 
+// Purpose distinguishes the two things the gate is asked, because the contract answers them differently.
+//
+// PurposeCreate is "may NEW financial work be authorized on this interface?" PurposeExecute is "may work
+// that was already authorized be drained?" Collapsing them -- which 0011 did, by refusing anything that was
+// not ACTIVE -- both strands legitimate money on a DRAINING interface and refuses a posting on an interface
+// that has merely stopped accepting new guest logins.
+type Purpose int
+
+const (
+	PurposeCreate Purpose = iota
+	PurposeExecute
+)
+
+// lifecycleAllows implements Contract section 10 exactly:
+//
+//	ACTIVE          create yes, drain yes
+//	AUTH_DISABLED   create yes, drain yes  -- it disables guest AUTH, not posting
+//	DRAINING        create NO,  drain yes  -- "no new auth/purchases/postings; outbox drains"
+//	DECOMMISSIONED  create NO,  drain NO   -- terminal
+func lifecycleAllows(state string, p Purpose) error {
+	switch state {
+	case "ACTIVE", "AUTH_DISABLED":
+		return nil
+	case "DRAINING":
+		if p == PurposeExecute {
+			return nil
+		}
+		return fail(ErrInterfaceInactive, "interface is DRAINING; no new financial work may be created")
+	case "DECOMMISSIONED":
+		return fail(ErrInterfaceDecomm, "interface is DECOMMISSIONED")
+	default:
+		return fail(ErrInterfaceInactive, "interface lifecycle_state is "+state)
+	}
+}
+
 // Check validates pinned evidence against the snapshot read from the database. It returns the FIRST
 // violation, ordered so the reason an operator sees is the most actionable one: onboarding before
 // targeting, targeting before money.
-func (Gate) Check(p Pinned, s Snapshot) error {
+func (g Gate) Check(p Pinned, s Snapshot) error { return g.CheckFor(PurposeCreate, p, s) }
+
+// CheckFor is Check with an explicit purpose. Creation and execution differ only in what the interface
+// lifecycle permits; every other rule is identical, deliberately, so a posting cannot be created under one
+// set of rules and transmitted under a weaker one.
+func (Gate) CheckFor(purpose Purpose, p Pinned, s Snapshot) error {
 	// ---- interface state -------------------------------------------------------------------------
-	if s.InterfaceLifecycleState != "ACTIVE" {
-		return fail(ErrInterfaceInactive,
-			fmt.Sprintf("pms interface lifecycle_state is %s", s.InterfaceLifecycleState))
+	if err := lifecycleAllows(s.InterfaceLifecycleState, purpose); err != nil {
+		return err
 	}
 
 	// ---- Tier-2 onboarding: folio identity, then financial currency -------------------------------
@@ -38,6 +77,14 @@ func (Gate) Check(p Pinned, s Snapshot) error {
 	if s.InterfaceCurrency == "" || s.InterfaceExponent == nil {
 		return fail(ErrInterfaceNoCurrency,
 			"pinned interface revision has no financial base currency (property not financially onboarded)")
+	}
+
+	// ---- the four PMS runtime freshness axes -----------------------------------------------------
+	// Contract section 9 / D10: a stale, disconnected, discontinuous or out-of-sync interface must fail
+	// closed BEFORE a P#, an attempt, an outbox execution or a byte. This is re-checked at execution too,
+	// so an interface that went stale between authorization and the wire stops the bytes.
+	if s.FreshnessBlock != "" {
+		return fail(ErrInterfaceNotFresh, "PMS runtime axis: "+s.FreshnessBlock)
 	}
 
 	// ---- stale evidence --------------------------------------------------------------------------
@@ -119,6 +166,13 @@ func (Gate) Check(p Pinned, s Snapshot) error {
 	}
 	if err := matchCurrency("package", s.PackageCurrency, s.PackageExponent, s); err != nil {
 		return err
+	}
+	// The WIRE bound, which is narrower than the currency model. Only the connector that actually carries
+	// the money gets to say what it can carry.
+	if s.ConnectorKind == "protel-fias" && p.CurrencyExponent != FIASCurrencyExponent {
+		return fail(ErrFIASExponent,
+			fmt.Sprintf("the protel-fias posting path is exponent %d by contract; posting exponent is %d",
+				FIASCurrencyExponent, p.CurrencyExponent))
 	}
 	return nil
 }

@@ -1,9 +1,10 @@
 # StayConnect IAM — Phase 4 Plan: Financial Execution Layer (DARK)
 
 **Status:** AUTHORIZED — **IMPLEMENTATION IN PROGRESS (DARK)**. Product-Owner decision **D18**, transition **T0029** (2026-08-11); implementation progress recorded in transition **T0030** (2026-08-12) under the SAME authorization — no new decision was created.
-**Delivered so far:** WS-A, WS-B, WS-C, WS-D, WS-E and the financial-core half of WS-K, all verified DARK against disposable PostgreSQL 16 and wired into `.github/workflows/phase4-financial-core.yml`.
+**Delivered so far:** WS-A (migrations 0011 + **0012 hardening**), WS-B, WS-C, WS-D, WS-E and the financial-core half of WS-K, all verified DARK against disposable PostgreSQL 16 and wired into `.github/workflows/phase4-financial-core.yml`.
 **Still open:** WS-F (Manual Review operator workflow), WS-G (payments), WS-H (`FINANCIAL_RECOVERY_MODE`), WS-I (observability), WS-J (operator UI), WS-L (DARK deployment).
 **Not accepted, not closed.** Every Phase-4 flag is OFF and no real financial traffic has occurred.
+**Verification status:** LOCAL/DISPOSABLE only. No authoritative CI run exists for the hardened HEAD yet (transition T0031), and the race detector is CI-only.
 **Baseline:** master `a4e951972d8087f00a40d8b39eb1b87ea03144b6`; accepted Phase-3 runtime `7c8b8cf0…`.
 **Maturity target:** IMPLEMENTED + VERIFIED AT DARK / NO-FINANCIAL-TRAFFIC. Real-financial acceptance
 (Tier-3 3C live) is **out of scope** and requires separate explicit Product-Owner authorization.

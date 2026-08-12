@@ -7,8 +7,8 @@ name: Phase 4 Financial Core CI
 #   1. the financial core builds, vets and formats clean;
 #   2. its unit matrix passes, including the PS golden wire, the PA catalog and the DARK guard;
 #   3. it passes under the race detector, because the outbox lanes and the review path are concurrent;
-#   4. migration 0011 applies, re-applies as designed, reverses cleanly, and weakens nothing that existed
-#      before it — the gate re-runs the ENTIRE pre-0011 financial invariant suite on both chains;
+#   4. migrations 0011 and 0012 apply, re-apply as designed, reverse cleanly, and weaken nothing that
+#      existed before them — the gate re-runs the ENTIRE pre-0011 financial invariant suite on both chains;
 #   5. the financial core behaves correctly against a real PostgreSQL: fail-closed creation, P# under
 #      contention, independent interface lanes, UNKNOWN that never auto-retries, and reviewer races;
 #   6. NOTHING in the tree enables a Phase-4 flag, and no financial record can leave a Phase-3 connector.
@@ -97,7 +97,7 @@ jobs:
           -race ./internal/posting/ ./internal/pmsd/ -count=1
 
       # ---------------------------------------------------------------- migration 0011
-      - name: Migration 0011 + financial DB invariant gate (disposable PG16)
+      - name: Migrations 0011 + 0012 + financial DB invariant gate (disposable PG16)
         # Includes the ENTIRE pre-0011 financial invariant suite, run on the pre-0011 chain and again after
         # 0011 on a clean rebuild, so "0011 weakened nothing" is a measured claim rather than an assertion.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-migration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase4_0011_financial.sh"

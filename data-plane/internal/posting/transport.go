@@ -3,6 +3,7 @@ package posting
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsd"
@@ -15,13 +16,17 @@ import (
 // "financial egress" is a single, testable chokepoint rather than a property of how carefully each call
 // site was written.
 type Transport interface {
-	// SendPS transmits a PS record body and waits for its correlated PA.
+	// SendPS transmits a PS record body on ONE interface and waits for the PA that answers THIS attempt.
+	//
+	// pNumber is passed explicitly, and it is not decoration: the caller is stating which protocol-attempt
+	// reference this transmission owns, and the core verifies the returned answer against it. A transport
+	// that returns a PA for a different P# has not answered this attempt, whatever it looks like.
 	//
 	// The three-valued return is the entire UNKNOWN contract. (pa, nil) means a PA was conclusively
 	// matched. (nil, err) where NotTransmitted(err) is true means the bytes provably never left. (nil, err)
 	// where it is false means the outcome is UNKNOWN: the PS may or may not have been applied, and nobody
 	// is allowed to guess which.
-	SendPS(ctx context.Context, interfaceID, body string) (*PA, error)
+	SendPS(ctx context.Context, interfaceID string, pNumber int64, body string) (*PA, error)
 }
 
 // ErrNotTransmitted marks a failure that provably happened BEFORE any byte reached the PMS — a refused
@@ -43,9 +48,14 @@ func NotTransmitted(err error) bool { return errors.Is(err, ErrNotTransmitted) }
 // It also re-checks the record against the connector's outbound allowlist. pmsd.CheckOutbound is the
 // Phase-3 read-only chokepoint and it lists PS and PA as forbidden financial records; asking it here means
 // a Phase-4 bug cannot smuggle a PS out through a Phase-3 connector even if the flags were somehow ON.
+// Both fields are UNEXPORTED. A caller outside this package cannot construct a DarkGuard with a config of
+// its own choosing, cannot reach in and flip Cfg on one it was handed, and cannot swap Inner for something
+// unguarded. The only way to obtain a working guard is NewDarkGuard, and the only way to obtain a working
+// Engine is NewEngine -- so "financial egress is guarded" is a property of the type, not a convention
+// about which constructor people remember to call.
 type DarkGuard struct {
-	Cfg   Config
-	Inner Transport
+	cfg   Config
+	inner Transport
 
 	mu       sync.Mutex
 	refusals int
@@ -54,11 +64,11 @@ type DarkGuard struct {
 
 // NewDarkGuard wraps inner. inner may be nil in DARK deployments: with the flags OFF it is never reached,
 // and a nil inner makes that structural rather than merely true.
-func NewDarkGuard(cfg Config, inner Transport) *DarkGuard { return &DarkGuard{Cfg: cfg, Inner: inner} }
+func NewDarkGuard(cfg Config, inner Transport) *DarkGuard { return &DarkGuard{cfg: cfg, inner: inner} }
 
 // SendPS refuses every financial transmission while DARK.
-func (d *DarkGuard) SendPS(ctx context.Context, interfaceID, body string) (*PA, error) {
-	if d.Cfg.Dark() {
+func (d *DarkGuard) SendPS(ctx context.Context, interfaceID string, pNumber int64, body string) (*PA, error) {
+	if d.cfg.Dark() {
 		d.mu.Lock()
 		d.refusals++
 		d.lastBody = body
@@ -75,10 +85,44 @@ func (d *DarkGuard) SendPS(ctx context.Context, interfaceID, body string) (*PA, 
 		// Phase-3 read-only would have silently changed meaning. Refuse rather than inherit the change.
 		return nil, refusedDark("PS is no longer classified as a financial record; refusing to transmit")
 	}
-	if d.Inner == nil {
+	// The body must carry the P# the caller says it owns. A mismatch here means the record and the
+	// allocation have already diverged before a byte was written, and correlating the answer afterwards
+	// would be correlating against the wrong reference.
+	if pnOfBody(body) != pNumber {
+		return nil, refusedDark("the PS body does not carry the allocated protocol-attempt reference")
+	}
+	if d.inner == nil {
 		return nil, refusedDark("no financial transport is configured")
 	}
-	return d.Inner.SendPS(ctx, interfaceID, body)
+	pa, err := d.inner.SendPS(ctx, interfaceID, pNumber, body)
+	if err != nil {
+		return nil, err
+	}
+	// Last line of defence, inside the chokepoint: an answer that is not for this P# is not this attempt's
+	// answer. The engine checks this too; both checks are cheap and neither is the only one.
+	if pa != nil && pa.PNumber != pNumber {
+		return nil, fail(ErrPAWrongPNumber, "the PA answers a different protocol-attempt reference")
+	}
+	return pa, nil
+}
+
+// pnOfBody extracts the P# a PS body carries, or 0 when it carries none.
+func pnOfBody(body string) int64 {
+	const tag = "|P#"
+	i := strings.Index(body, tag)
+	if i < 0 {
+		return 0
+	}
+	rest := body[i+len(tag):]
+	var n int64
+	for k := 0; k < len(rest); k++ {
+		c := rest[k]
+		if c < '0' || c > '9' {
+			break
+		}
+		n = n*10 + int64(c-'0')
+	}
+	return n
 }
 
 // Refusals reports how many financial transmissions this guard has refused. It is the positive no-egress

@@ -31,7 +31,15 @@ const (
 	fixedSource      = "WIFI"
 	fixedWorkstation = "STAYCONNECT"
 
-	maxCTLen = 32
+	// Contract section 9a: CT is bounded at 20 characters on this wire. 0011 used 32, which is not a
+	// bound the contract grants -- a PMS that truncated silently would post against a code nobody chose.
+	maxCTLen = 20
+
+	// Contract section 9a fixes TA at integer minor units with EXPONENT 2 for this posting path, and the
+	// Gate-3A live evidence is a USD 1.00 debit at exponent 2. The interface currency MODEL still allows
+	// 0..4 because real ISO-4217 currencies do; this is the bound on what may be TRANSMITTED here, and
+	// widening it would mean inventing protocol behaviour the evidence does not support.
+	FIASCurrencyExponent = 2
 )
 
 // PSRequest is the fully-resolved input to a PS record. Every field is already pinned and verified; this
