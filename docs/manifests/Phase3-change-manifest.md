@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `99f7824`
-- **Provenance (generation HEAD = inventory_head):** `157508592de1784b528fc6b1c2f94a3710950fb5`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `99f78240`
+- **Provenance (generation HEAD = inventory_head):** `454409518a8b688a393fa355317fca937de73f8c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/4-financial-execution`
 - **Remote branch:** `origin/phase/4-financial-execution`
 - **Changed files:** 391
@@ -267,32 +267,32 @@
 | `docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Close five residual findings: cloned host identity, Central-only Edge vhosts, artifact-audit record (T0027) |
 | `docs/evidence/Phase3-Final-Live-Acceptance-Record.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Ratify T0027 state, renew the appliance licence to 2027-08-08, make the Central reload contract honest (T0028) |
 | `docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
-| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
+| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: point the authoritative CI facts at the final-head run |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
-| `exports/chatgpt/phase-evidence/GIT_STAT_1575085.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: point the authoritative CI facts at the final-head run |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
+| `exports/chatgpt/phase-evidence/GIT_STAT_0ef40f3.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 4: point the authoritative CI facts at the final-head run |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Pre-Phase-4 baseline pass + Phase-4 authorization (D18 / T0029) |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 authorization (delivery_head): manifest + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
 | `exports/chatgpt/stayconnectenterprise/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
+| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 4: point the authoritative CI facts at the final-head run |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): T0028 manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
@@ -303,7 +303,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 3 (delivery_head): T0028 manifest + rebuilt packs + pointer + report-embedded manifest |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Pre-Phase-4 baseline pass + Phase-4 authorization (D18 / T0029) |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `governance/transitions/T0016.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3: governance activity transition T0016 (software candidate awaiting Increment 9), doc sync |
 | `governance/transitions/T0017.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
@@ -328,7 +328,7 @@
 | `governance/transitions/T0036.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4 (delivery_head): manifest + rebuilt packs + pointer |
 | `governance/transitions/T0037.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4 (delivery_head): T0037 receipt + project-state pointers + regenerated manifest |
 | `governance/transitions/T0038.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4 (delivery_head): T0038 receipt + project-state pointers |
-| `governance/transitions/T0039.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4: extend the DB gate to 0019-0023, make the provenance backfill idempotent |
+| `governance/transitions/T0039.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4 (delivery_head): T0039 receipt + project-state pointers |
 | `hotel-admin/app/(app)/checkout-grace/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 1 (inventory_head): controlled alert lifecycle + governed grace publication + NOT VALID boundary CHECK; real API+PG contract tests: gate 310/310 |
 | `hotel-admin/app/(app)/financial-health/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 4: FINANCIAL_RECOVERY_MODE (0019), observability (0020), financial-ops API and the Hotel-Admin operator surface |
 | `hotel-admin/app/(app)/financial-recovery/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 4: FINANCIAL_RECOVERY_MODE (0019), observability (0020), financial-ops API and the Hotel-Admin operator surface |
@@ -355,7 +355,7 @@
 | `hotel-admin/e2e/phase4-financial-operator.spec.ts` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 4: complete the WS-J operator surface, dependency triage, restore drill and gate self-test in CI, Plan sync |
 | `hotel-admin/lib/api.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 4: complete the WS-J operator surface, dependency triage, restore drill and gate self-test in CI, Plan sync |
 | `hotel-admin/lib/roles.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 Hotel-Admin surface (inventory_head): dark-gated stays/events/resolutions/grace/alerts API + RBAC + four UI pages: tsc clean, Vitest 48/48 |
-| `hotel-admin/package-lock.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 4: complete the WS-J operator surface, dependency triage, restore drill and gate self-test in CI, Plan sync |
+| `hotel-admin/package-lock.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 4: regenerate the Hotel-Admin lockfile from a clean install so npm ci resolves identically on CI |
 | `hotel-admin/package.json` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 4: complete the WS-J operator surface, dependency triage, restore drill and gate self-test in CI, Plan sync |
 | `hotel-admin/playwright.config.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 4: FINANCIAL_RECOVERY_MODE (0019), observability (0020), financial-ops API and the Hotel-Admin operator surface |
 | `hotel-admin/test/nav.test.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3 Hotel-Admin surface (inventory_head): dark-gated stays/events/resolutions/grace/alerts API + RBAC + four UI pages: tsc clean, Vitest 48/48 |
@@ -661,13 +661,13 @@
  docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md |  146 +
  .../Phase3-Final-Live-Acceptance-Record.md         |  113 +
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           | 1139 ++++++++
+ docs/manifests/Phase3-change-manifest.md           | 1131 ++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1946 +++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 297930 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 111118 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42054 bytes
- .../chatgpt/phase-evidence/GIT_STAT_1575085.txt    |    4 +
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1938 +++++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 297832 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 111140 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42055 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_0ef40f3.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
@@ -686,7 +686,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      | 1139 ++++++++
+ .../Phase3-change-manifest.md                      | 1128 ++++++++
  .../stayconnectenterprise/SYSTEM_OVERVIEW.md       |    2 +-
  .../StayConnect-IAM-Handoff.md                     |   18 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   18 +-
@@ -749,7 +749,7 @@
  hotel-admin/e2e/phase4-financial-operator.spec.ts  |  265 ++
  hotel-admin/lib/api.ts                             |  274 ++
  hotel-admin/lib/roles.ts                           |    8 +
- hotel-admin/package-lock.json                      |  258 +-
+ hotel-admin/package-lock.json                      |  758 +++--
  hotel-admin/package.json                           |    5 +-
  hotel-admin/playwright.config.ts                   |    2 +-
  hotel-admin/test/nav.test.tsx                      |   37 +
@@ -797,28 +797,20 @@
  tools/validate-pr-metadata.sh                      |  260 ++
  tools/validate-project-state.sh                    |  161 +-
  tools/validate-transition-times.sh                 |   86 +
- 391 files changed, 80448 insertions(+), 852 deletions(-)
+ 391 files changed, 80677 insertions(+), 1096 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-R  exports/chatgpt/phase-evidence/GIT_STAT_7e046fb.txt -> exports/chatgpt/phase-evidence/GIT_STAT_1575085.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
-M  governance/transitions/T0039.json
+(clean)
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 1575085 Phase 4 (delivery_head): T0039 receipt + project-state pointers
+HISTORICAL: 4544095 Phase 4: point the authoritative CI facts at the final-head run
+HISTORICAL: 0ef40f3 Phase 4: regenerate the Hotel-Admin lockfile from a clean install so npm ci resolves identically on CI
+HISTORICAL: c35de89 Phase 4: resynchronize the Hotel-Admin lockfile after the security upgrades so npm ci is deterministic
+HISTORICAL: 5d28452 Phase 4 (delivery_head): T0039 receipt + project-state pointers
 HISTORICAL: 99f7824 Phase 4: extend the DB gate to 0019-0023, make the provenance backfill idempotent
 HISTORICAL: a1c85d7 Phase 4: complete the WS-J operator surface, dependency triage, restore drill and gate self-test in CI, Plan sync
 HISTORICAL: 8f5cfb1 Phase 4: unambiguous CI gate runner, marker-driven reconciliation wiring, reviewed definer surface
