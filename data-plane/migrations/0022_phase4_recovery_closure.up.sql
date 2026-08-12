@@ -43,11 +43,24 @@ ALTER TABLE iam_v2.payment_provider_accounts ALTER COLUMN merchant_account_ref D
 -- Replace 0018's fabricated identifiers with the honest absence. Matching on the exact shape 0018 wrote
 -- means a real provider reference that happens to start with 'legacy:' -- vanishingly unlikely, but the
 -- migration should not depend on that -- is left alone unless it is also the internal uuid.
+-- MEASURED: an account 0018 backfilled can already have been ACTIVATED by an operator who never supplied a
+-- real external reference -- the gate's own fixture does exactly that. Converting such a row to
+-- BACKFILLED_UNVERIFIED while leaving it live would violate the constraint below and the migration would
+-- fail to apply. Disabling it is the correct answer rather than a workaround: an account whose external
+-- identity is UNKNOWN must not be taking money, and an operator supplying the real reference is what makes
+-- it usable again. Any site relying on such an account learns this at migration time rather than at capture
+-- time, which is the cheaper place to find out.
 UPDATE iam_v2.payment_provider_accounts
    SET merchant_account_ref = NULL,
        provenance = 'BACKFILLED_UNVERIFIED',
+       status = 'DISABLED',
+       is_default = false,
        display_name = coalesce(display_name, 'Reconstructed from an existing payment record (0018)')
- WHERE merchant_account_ref = 'legacy:' || id::text;
+ -- A NULL reference can only be a row a previous run of THIS migration already converted (the column was
+ -- NOT NULL before 0022). Catching it here is what makes the migration idempotent across a down/up cycle:
+ -- the DOWN drops `provenance`, so on re-apply those rows would default back to CONFIGURED with no
+ -- reference and violate the constraint below.
+ WHERE merchant_account_ref = 'legacy:' || id::text OR merchant_account_ref IS NULL;
 
 ALTER TABLE iam_v2.payment_provider_accounts
   ADD CONSTRAINT ppa_reference_matches_provenance CHECK (

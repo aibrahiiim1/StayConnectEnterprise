@@ -676,6 +676,71 @@ Q "$ACCTSQL" >/dev/null
 eq "0018 is recorded in the migration ledger" "1" \
   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0018_phase4_financial_identity_and_privilege';")"
 
+# ------------------------------------------------------------------ 0019..0023 recovery, restore, trust boundary
+# 0019 and 0020 are applied here rather than in a block of their own: 0021-0023 build directly on the
+# recovery tables and the observability column, and a gate that tested them against a chain missing their
+# dependencies would be measuring the dependency error rather than the migrations.
+echo "== 0019/0020 recovery and observability =="
+for M in 0019_phase4_financial_recovery 0020_phase4_financial_observability; do
+  if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1        < "$ROOT/data-plane/migrations/$M.up.sql" >/dev/null 2>&1; then ok "$M applies"
+  else no "$M applies" "up failed"; fi
+done
+eq "the financial epoch table exists" "1"   "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_name='financial_epochs';")"
+
+echo "== 0021/0022/0023 trust boundary, recovery closure and restore generation =="
+for M in 0021_phase4_trust_boundary 0022_phase4_recovery_closure 0023_phase4_restore_generation; do
+  if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+       < "$ROOT/data-plane/migrations/$M.up.sql" >/dev/null 2>&1; then ok "$M applies"
+  else no "$M applies" "$(docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-plane/migrations/$M.up.sql" 2>&1 | tail -2 | tr '\n' ' ')"; fi
+done
+UP23_FP="$(Q "$FP")"
+
+eq "the high-level paid-grant operation exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p4_grant_paid_entitlement';")"
+eq "the narrowed provider-outcome operation exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p4_apply_provider_outcome';")"
+eq "the runtime holds NO low-level financial primitive" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND has_function_privilege('sc_payment_runtime',p.oid,'EXECUTE') AND p.proname IN ('apply_payment_callback_v2','p4_insert_entitlement','p4_terminate_live_entitlement_for_subject','p4_mark_purchase_granted','apply_entitlement_transition','record_posting_review_action');")"
+eq "the outbox recovery gate exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_trigger WHERE tgname='p4_outbox_recovery_gate' AND NOT tgisinternal;")"
+eq "the shared full-rail hold exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p4_hold_financial_rails';")"
+eq "a backfilled identity can never be live" "1" \
+  "$(Q "SELECT count(*) FROM pg_constraint WHERE conname='ppa_unverified_is_never_live';")"
+rejects "an unverified legacy account cannot be activated" \
+  "INSERT INTO iam_v2.payment_provider_accounts(tenant_id,site_id,provider,merchant_account_ref,provenance,status,is_default)
+   VALUES ('$T','$S','stripe',NULL,'BACKFILLED_UNVERIFIED','ACTIVE',true);" "ppa_unverified_is_never_live|ppa_default_is_active"
+rejects "a CONFIGURED account still needs a real external reference" \
+  "INSERT INTO iam_v2.payment_provider_accounts(tenant_id,site_id,provider,merchant_account_ref,provenance,status)
+   VALUES ('$T','$S','stripe',NULL,'CONFIGURED','DISABLED');" "ppa_reference_matches_provenance"
+eq "the restore generation column exists" "1" \
+  "$(Q "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='financial_epochs' AND column_name='restore_generation';")"
+eq "the restore event ledger exists" "1" \
+  "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_name='financial_restore_events';")"
+eq "the financial actor assertion exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p4_assert_financial_actor';")"
+eq "PUBLIC still holds EXECUTE on no SECURITY DEFINER function" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND has_function_privilege('public', p.oid, 'EXECUTE');")"
+eq "every phase-4 definer function still pins its search_path" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig,'{}')) c WHERE c LIKE 'search_path=%');")"
+
+for M in 0023_phase4_restore_generation 0022_phase4_recovery_closure 0021_phase4_trust_boundary; do
+  if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+       < "$ROOT/data-plane/migrations/$M.down.sql" >/dev/null 2>&1; then ok "$M DOWN applies"
+  else no "$M DOWN applies" "down failed"; fi
+done
+eq "0021 DOWN handed the primitives back" "1" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p4_insert_entitlement' AND has_function_privilege('sc_payment_runtime',p.oid,'EXECUTE');")"
+for M in 0021_phase4_trust_boundary 0022_phase4_recovery_closure 0023_phase4_restore_generation; do
+  if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+       < "$ROOT/data-plane/migrations/$M.up.sql" >/dev/null 2>&1; then ok "$M DOWN -> UP re-applies cleanly"
+  else no "$M DOWN -> UP re-applies cleanly" "re-up failed"; fi
+done
+eq "0021..0023 DOWN -> UP produces the SAME schema as the first UP" "$UP23_FP" "$(Q "$FP")"
+eq "0023 is recorded in the migration ledger" "1" \
+  "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0023_phase4_restore_generation';")"
+
+
 # ------------------------------------------------------------------ the baseline suite, after 0011
 # On a FRESHLY rebuilt database, so the second pass is judged on its own rows and not on what the first
 # pass left behind in append-only tables. If 0011 weakened any pre-0011 financial invariant, it fails here.
