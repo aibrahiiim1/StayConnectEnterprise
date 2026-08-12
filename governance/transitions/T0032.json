@@ -1,7 +1,7 @@
 {
   "transition_id": "T0032",
   "seq": 32,
-  "timestamp": "2026-08-12T11:30:00Z",
+  "timestamp": "2026-08-12T07:40:00Z",
   "record_type": "PHASE_4_CONSTRUCTION_BOUNDARY_AND_CONTRACT_CORRECT_REVERSAL_LEDGER",
   "previous_state": {
     "phase": "4",
