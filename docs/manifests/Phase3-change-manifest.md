@@ -2,7 +2,7 @@
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
 - **HEAD commit:** `99f78240`
-- **Provenance (generation HEAD = inventory_head):** `454409518a8b688a393fa355317fca937de73f8c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `91f2e0cd816803bcd3edbefdf56843d48956a935`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/4-financial-execution`
 - **Remote branch:** `origin/phase/4-financial-execution`
 - **Changed files:** 391
@@ -273,7 +273,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
-| `exports/chatgpt/phase-evidence/GIT_STAT_0ef40f3.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 4: point the authoritative CI facts at the final-head run |
+| `exports/chatgpt/phase-evidence/GIT_STAT_91f2e0c.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the final-head run |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
@@ -661,13 +661,13 @@
  docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md |  146 +
  .../Phase3-Final-Live-Acceptance-Record.md         |  113 +
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
- docs/manifests/Phase3-change-manifest.md           | 1131 ++++++++
+ docs/manifests/Phase3-change-manifest.md           | 1120 ++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1938 +++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 297832 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 111140 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42055 bytes
- .../chatgpt/phase-evidence/GIT_STAT_0ef40f3.txt    |    4 +
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 1927 +++++++++++++
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 297898 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 111111 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42050 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_91f2e0c.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
@@ -686,7 +686,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      | 1128 ++++++++
+ .../Phase3-change-manifest.md                      | 1120 ++++++++
  .../stayconnectenterprise/SYSTEM_OVERVIEW.md       |    2 +-
  .../StayConnect-IAM-Handoff.md                     |   18 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   18 +-
@@ -797,17 +797,26 @@
  tools/validate-pr-metadata.sh                      |  260 ++
  tools/validate-project-state.sh                    |  161 +-
  tools/validate-transition-times.sh                 |   86 +
- 391 files changed, 80677 insertions(+), 1096 deletions(-)
+ 391 files changed, 80647 insertions(+), 1096 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-(clean)
+M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
+R  exports/chatgpt/phase-evidence/GIT_STAT_4544095.txt -> exports/chatgpt/phase-evidence/GIT_STAT_91f2e0c.txt
+M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/MANIFEST.md
+M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 4544095 Phase 4: point the authoritative CI facts at the final-head run
+HISTORICAL: 91f2e0c Phase 4: point the authoritative CI facts at the final-head run
 HISTORICAL: 0ef40f3 Phase 4: regenerate the Hotel-Admin lockfile from a clean install so npm ci resolves identically on CI
 HISTORICAL: c35de89 Phase 4: resynchronize the Hotel-Admin lockfile after the security upgrades so npm ci is deterministic
 HISTORICAL: 5d28452 Phase 4 (delivery_head): T0039 receipt + project-state pointers
