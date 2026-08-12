@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -129,10 +130,23 @@ func (s *server) reconcileTenantOwnership(ctx context.Context) error {
 		return fmt.Errorf("repoint guest_networks: %w", err)
 	}
 
-	// The database's own gate. It refuses the purge unless an archive is recorded for the departing tenant,
-	// so this cannot be bypassed by a caller that skipped the step above.
+	// The database's own gate (C35). It refuses the purge unless an EXTERNAL authority has acknowledged
+	// custody of the archive -- not merely that this appliance wrote one, which would be the party doing the
+	// deleting certifying its own copy.
+	//
+	// No archival receipt authority exists in this product, so in practice this ALWAYS refuses and the
+	// cross-customer purge cannot complete. That is the correct failure mode and the caller holds the
+	// appliance fail-closed, exactly as it does for any other incomplete transition. What matters here is
+	// that the operator is told WHICH thing is missing: "cleanup failed" would send someone looking for a
+	// database fault that does not exist.
 	for _, dt := range departing {
 		if _, err := tx.Exec(ctx, `SELECT iam_v2.p4_assert_compliance_archived($1::uuid)`, dt); err != nil {
+			if strings.Contains(err.Error(), "COMPLIANCE_RECEIPT_UNVERIFIED") {
+				return fmt.Errorf("compliance receipt for departing tenant %s is not verified: the archive "+
+					"exists and its digest is recorded, but no external archival authority has acknowledged "+
+					"custody of it. Cross-customer purge is blocked until one does; the appliance stays "+
+					"fail-closed and no guest is authorized: %w", dt, err)
+			}
 			return fmt.Errorf("compliance gate for %s: %w", dt, err)
 		}
 	}
