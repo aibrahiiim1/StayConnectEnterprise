@@ -191,15 +191,195 @@ eq "a vanished management marker is treated as an unsupported restore" "RECOVERY
   "$(Q "SELECT iam_v2.p4_reconcile_financial_epoch_v2('$T','$S','$IDENT2',0,false);")"
 
 # ---------------------------------------------------------------- the tool itself
-if bash -n "$ROOT/deploy/scripts/stayconnect-financial-restore.sh"; then
-  ok "the supported restore tool parses"
+if bash -n "$ROOT/deploy/scripts/stayconnect-financial-restore.sh"    && bash -n "$ROOT/deploy/scripts/stayconnect-site-backup.sh"; then
+  ok "the supported backup and restore tools parse"
 else
-  no "the supported restore tool parses" "syntax error"
+  no "the supported backup and restore tools parse" "syntax error"
 fi
 if grep -q 'no TPM' "$ROOT/deploy/scripts/stayconnect-financial-restore.sh"; then
   ok "the tool records the absence of hardware anti-rollback rather than implying it"
 else
   no "the tool records its own limitation" "the TPM/monotonic-counter limitation is not stated"
+fi
+
+
+# ============================================================================
+# THE SUPPORTED FLOW, END TO END, WITH A REAL SIGNED MANIFEST
+# ============================================================================
+# Everything above proved the DATABASE half. This proves the TOOL half: a manifest signed with the
+# appliance's pinned registry root, a caller-chosen key being refused, a quiesce that cannot be faked, and
+# the /etc backup leaving the marker alone.
+echo
+echo "== the supported restore flow (pinned anchor, proven quiesce, marker vs /etc) =="
+TOOL="$ROOT/deploy/scripts/stayconnect-financial-restore.sh"
+BACKUP="$ROOT/deploy/scripts/stayconnect-site-backup.sh"
+W="$(mktemp -d)"; trap 'rm -rf "$W"' RETURN 2>/dev/null || true
+
+# The REAL trust anchor shape: a raw 32-byte Ed25519 public key, exactly as the assignment registry pins it.
+openssl genpkey -algorithm ed25519 -out "$W/root.pem" 2>/dev/null
+openssl pkey -in "$W/root.pem" -pubout -outform DER 2>/dev/null | tail -c 32 > "$W/anchor.pub"
+# ...and an unrelated key, which is what an attacker or a careless operator would bring.
+openssl genpkey -algorithm ed25519 -out "$W/other.pem" 2>/dev/null
+
+if [ "$(stat -c%s "$W/anchor.pub" 2>/dev/null || stat -f%z "$W/anchor.pub")" = "32" ]; then
+  ok "the pinned anchor is a raw 32-byte Ed25519 key, the shape the product already uses"
+else
+  no "the pinned anchor is a raw 32-byte Ed25519 key" "wrong size"
+fi
+
+# a dump and a manifest that describes it
+printf 'not-a-real-dump-but-a-real-digest' > "$W/site.dump"
+DSHA="$(sha256sum "$W/site.dump" | awk '{print $1}')"
+cat > "$W/m.json" <<JSON
+{"dump_sha256":"$DSHA","backup_taken_at":"2026-08-13T00:00:00Z","database":"stayconnect_site"}
+JSON
+openssl pkeyutl -sign -inkey "$W/root.pem" -rawin -in "$W/m.json" -out "$W/m.json.sig" 2>/dev/null
+openssl pkeyutl -sign -inkey "$W/other.pem" -rawin -in "$W/m.json" -out "$W/other.sig" 2>/dev/null
+
+# Host shims. The restore tool targets a Linux appliance where python3 and pg_dump are present; this
+# drill also runs on a developer workstation whose Git Bash PATH has neither. The shims make the drill
+# deterministic on both WITHOUT changing what the tool does: python3 forwards to whatever python exists,
+# and pg_dump writes a stand-in artefact so the /etc-exclusion check -- the thing actually under test --
+# still runs. Neither shim touches the verification, the quiesce or the marker logic.
+mkdir -p "$W/bin"
+# `command -v` is not enough on Windows: the Microsoft Store ships a zero-byte python3 alias that
+# resolves but does not run. Ask it for its version instead.
+if ! python3 --version >/dev/null 2>&1; then
+  printf '#!/usr/bin/env bash\nexec python "$@"\n' > "$W/bin/python3"
+  chmod +x "$W/bin/python3"
+fi
+if ! pg_dump --version >/dev/null 2>&1; then
+  cat > "$W/bin/pg_dump" <<'PGSTUB'
+#!/usr/bin/env bash
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-f" ]; then printf 'stand-in dump' > "$a"; fi
+  prev="$a"
+done
+exit 0
+PGSTUB
+  chmod +x "$W/bin/pg_dump"
+fi
+export PATH="$W/bin:$PATH"
+
+run_tool() {  # run_tool <anchor> <manifest> <extra args...>
+  SCD_ASSIGNMENT_REGISTRY_ROOT="$1" STAYCONNECT_MARKER_DIR="$W/etc" \
+    bash "$TOOL" --dump "$W/site.dump" --manifest "$2" \
+    --tenant 11111111-1111-1111-1111-111111111111 \
+    --site 22222222-2222-2222-2222-222222222222 "${@:3}" 2>&1
+}
+
+out="$(run_tool "$W/anchor.pub" "$W/m.json" --dry-run)"
+if printf '%s' "$out" | grep -q "verified against the pinned registry root anchor"; then
+  ok "a manifest signed by the pinned root verifies"
+else
+  no "a manifest signed by the pinned root verifies" "$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+fi
+
+# THE FINDING THIS BLOCK EXISTS FOR: a manifest signed by any other key must not be accepted, and the tool
+# must not offer a way to nominate the key it is checked against.
+cp "$W/other.sig" "$W/m.json.sig"
+out="$(run_tool "$W/anchor.pub" "$W/m.json" --dry-run || true)"
+if printf '%s' "$out" | grep -q "did not verify against this appliance's pinned registry root"; then
+  ok "a manifest signed by an unrelated key is refused"
+else
+  no "a manifest signed by an unrelated key is refused" "$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+fi
+openssl pkeyutl -sign -inkey "$W/root.pem" -rawin -in "$W/m.json" -out "$W/m.json.sig" 2>/dev/null
+
+out="$(run_tool "$W/anchor.pub" "$W/m.json" --dry-run --pubkey "$W/other.pem" || true)"
+if printf '%s' "$out" | grep -q -- "--pubkey is not accepted"; then
+  ok "the tool refuses a caller-chosen verification key outright"
+else
+  no "the tool refuses a caller-chosen verification key" "$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+fi
+
+# a tampered dump is caught by the digest the VERIFIED manifest carries
+printf 'tampered' >> "$W/site.dump"
+out="$(run_tool "$W/anchor.pub" "$W/m.json" --dry-run || true)"
+if printf '%s' "$out" | grep -q "does not match the manifest"; then
+  ok "a dump that does not match the verified manifest is refused"
+else
+  no "a dump that does not match the verified manifest is refused" "$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+fi
+printf 'not-a-real-dump-but-a-real-digest' > "$W/site.dump"
+
+# no anchor at all: fail closed rather than fall back to something
+out="$(run_tool "$W/absent.pub" "$W/m.json" --dry-run || true)"
+if printf '%s' "$out" | grep -q "no pinned registry root anchor"; then
+  ok "an appliance with no pinned anchor cannot restore at all"
+else
+  no "an appliance with no pinned anchor cannot restore" "$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+fi
+
+# ---------------------------------------------------------------- the proven quiesce
+# systemctl does not exist in this container, so the tool's own "not installed on this appliance" branch is
+# what runs. The assertion that matters is the SHAPE of the check: it stops, then verifies with is-active,
+# and treats an un-provable stop as fatal rather than logging and continuing.
+if grep -q 'systemctl is-active' "$TOOL" && grep -q 'could not be proven stopped' "$TOOL"; then
+  ok "the restore proves each writer stopped rather than assuming the stop worked"
+else
+  no "the restore proves each writer stopped" "no is-active verification found"
+fi
+if grep -q 'stayconnect-pmsd' "$TOOL"; then
+  ok "the quiesce list includes the PMS/financial runtime that exists after phase 4"
+else
+  no "the quiesce list includes pmsd" "pmsd is not in SERVICES"
+fi
+if grep -qE 'systemctl stop "\$s" \|\| true' "$TOOL"; then
+  no "a failed stop is never swallowed" "the tool still discards a stop failure"
+else
+  ok "a failed stop is never swallowed"
+fi
+
+# A quiesce that cannot be proven must abort. Simulated with a systemctl stub that reports the service is
+# still running -- which is exactly what a hung writer looks like.
+mkdir -p "$W/stub"
+cat > "$W/stub/systemctl" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+  list-unit-files) exit 0 ;;
+  stop)            exit 0 ;;
+  is-active)       echo active; exit 0 ;;
+  start)           exit 0 ;;
+esac
+exit 0
+STUB
+chmod +x "$W/stub/systemctl"
+# install -d -m 0700 cannot set POSIX permissions on a Windows filesystem, so the directory is created
+# up front. The tool still runs its own permission call; it simply finds the directory already there.
+mkdir -p "$W/etc2"
+out="$(PATH="$W/stub:$W/bin:$PATH" SCD_ASSIGNMENT_REGISTRY_ROOT="$W/anchor.pub" STAYCONNECT_MARKER_DIR="$W/etc2" \
+  bash "$TOOL" --dump "$W/site.dump" --manifest "$W/m.json" \
+  --tenant 11111111-1111-1111-1111-111111111111 \
+  --site 22222222-2222-2222-2222-222222222222 2>&1 || true)"
+if printf '%s' "$out" | grep -q "could not be proven stopped"; then
+  ok "a writer that will not stop aborts the restore"
+else
+  no "a writer that will not stop aborts the restore" "$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+fi
+if [ -f "$W/etc2/financial-restore-generation.json" ]; then
+  ok "the marker was already advanced before the abort, so the next startup still holds money movement"
+else
+  no "the marker is advanced before the quiesce" "no marker was written"
+fi
+
+# ---------------------------------------------------------------- the marker vs the /etc backup domain
+mkdir -p "$W/etcroot/stayconnect"
+echo '{"restore_generation": 7}' > "$W/etcroot/stayconnect/financial-restore-generation.json"
+echo 'identity' > "$W/etcroot/stayconnect/identity.key"
+out="$(STAYCONNECT_BACKUP_DIR="$W/backups" STAYCONNECT_ETC_DIR="$W/etcroot/stayconnect" \
+  bash "$BACKUP" 2>&1 || true)"
+TGZ="$(ls "$W/backups"/*-etc.tgz 2>/dev/null | head -1)"
+if [ -n "$TGZ" ] && ! tar tzf "$TGZ" | grep -q 'financial-restore-generation.json'; then
+  ok "the /etc backup excludes the financial restore marker"
+else
+  no "the /etc backup excludes the marker" "$(printf '%s' "$out" | tail -2 | tr '\n' ' ')"
+fi
+if [ -n "$TGZ" ] && tar tzf "$TGZ" | grep -q 'identity.key'; then
+  ok "the /etc backup still contains everything else it always did"
+else
+  no "the /etc backup still contains identity material" "identity.key missing from the archive"
 fi
 
 echo
