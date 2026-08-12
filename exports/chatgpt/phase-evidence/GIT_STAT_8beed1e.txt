@@ -1,0 +1,4 @@
+commit 8beed1e81d12da0d56d0803fdf7d61fb1a875b4f
+Date:   Wed Aug 12 10:54:14 2026 +0300
+
+    Phase 4: record the authoritative CI evidence for delivery head 0aa63d77
