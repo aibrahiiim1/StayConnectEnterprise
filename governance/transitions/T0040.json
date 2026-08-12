@@ -1,0 +1,181 @@
+{
+  "transition_id": "T0040",
+  "seq": 40,
+  "timestamp": "2026-08-13T00:05:00Z",
+  "record_type": "PHASE_4_FINAL_SOFTWARE_CLOSURE_BEFORE_LIVE_DARK",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030 through T0039 are PRESERVED unchanged. Migrations 0011 through 0023 are preserved; 0024 and 0025 correct and extend them additively. No C-row was renamed or repurposed.",
+  "corrections": [
+    {
+      "id": "U-1",
+      "area": "provider outcome authority",
+      "what_was_actually_true": "0021 narrowed the outcome operation and T0039 recorded honestly that a compromised runtime could still lie about a payment it started. That residual was larger than necessary: the SAME database credential created intents, crossed the execution boundary AND asserted outcomes, so one stolen DSN was sufficient to fabricate money end to end -- start a payment, then declare it captured.",
+      "correction": "0024 creates sc_payment_outcome as a separate role holding EXECUTE on p4_apply_provider_outcome and nothing else, and REVOKES that function from sc_payment_runtime. The payment engine holds two pools; the outcome credential is a separate DSN (STAYCONNECT_PHASE4_PAYMENT_OUTCOME_DSN) and is nil in the delivered build, so the outcome path fails closed rather than falling back to the execution credential. Provider authenticity remains an application concern -- no database privilege can verify a signature -- and this is stated rather than implied.",
+      "proved": "TestIntegrationDefinerAbuse_TheExecutionRoleCannotAssertAnOutcome drives the execution role up to the boundary, shows it CANNOT assert an outcome (permission denied), asserts the settlement did not move and nothing was granted, then shows the outcome credential CAN -- so the split discriminates rather than simply blocking. TestIntegrationDefinerAbuse_TheOutcomeRoleCannotStartOrGrantAnything is the mirror: the outcome credential cannot create an intent, begin an execution, grant, or call the kernel."
+    },
+    {
+      "id": "U-2",
+      "area": "one entitlement grant kernel",
+      "what_was_actually_true": "0021 moved the paid grant into p4_grant_paid_entitlement, which re-implemented the supersede / insert / opening-transition / mark-granted sequence the free Phase-2 path performs in Go. Two implementations of one set of semantics is exactly the drift the one-writer rule exists to prevent.",
+      "correction": "0024 reduces them to ONE kernel, p4_entitlement_grant_kernel, which performs the subject lock, the already-granted check under that lock, the supersession, the insert, the opening transition and the purchase's move to GRANTED. It performs NO authorization. Two high-level entry points carry the caller-specific authorization -- p4_grant_paid_entitlement (ONLINE_PAYMENT + SETTLED + AWAITING_SETTLEMENT) and p4_grant_quoted_entitlement (free quote, settlement NOT_REQUIRED) -- and the Go free path now calls the second instead of three separate writes. The kernel is granted to no runtime role.",
+      "proved": "TestIntegrationDefinerAbuse_TheGrantKernelIsUnreachableFromEveryRuntimeRole asserts no role can call it, and that the payment runtime cannot use the free entry point nor commerce the paid one. The Phase-2 free-grant suite and the paid exactly-once suite both pass against the shared kernel."
+    },
+    {
+      "id": "U-3",
+      "area": "the zero-attempt restore",
+      "what_was_actually_true": "A posting restored as QUEUED or HELD_RECOVERY with NO surviving attempts had no way out at all. 0022 correctly refused to re-queue it, and record_posting_review_action raises REVIEW_NOT_APPLICABLE when no attempt exists -- so the only audited route was closed and the posting was stuck permanently, meaning the guest's charge would never reach the folio.",
+      "correction": "0025 adds p4_authorize_zero_attempt_retry: an audited, one-time authorization requiring that recovery held the posting, that its hold resolved CONFIRMED_NOT_COMPLETED, that there are ZERO attempts, and that the author is an active operator of the tenant. It authorizes attempt 1 and writes nothing to posting_attempts -- no manufactured history and no allocated P#. The decision goes into the SAME append-only review ledger as every other financial decision. p4_release_financial_recovery was also refined: sendable work backed by an audited retry authorization is not 'unaccounted for', so the two correct rules no longer cancel each other out.",
+      "proved": "TestIntegrationClosure_ZeroAttemptRestoreHasASafeAuditedPathOut shows the ordinary review path refusing first, then the authorization releasing it, attempt 1 authorized, ZERO attempts fabricated, one ledger row. Four refusal cases cover an unreconciled posting, a forged actor, unsafe evidence and a posting that does have attempts. TestIntegrationClosure_NothingReplaysAcrossRecoveryRelease asserts nothing is transmitted before OR after release."
+    },
+    {
+      "id": "U-4",
+      "area": "marker BEHIND the database",
+      "what_was_actually_true": "0023 handled a marker AHEAD (a restore) and MISSING. A marker BEHIND the database fell through to 'no signal'. That is not hypothetical: the documented runbook tars and restores /etc/stayconnect, so restoring an old /etc rolls the marker backwards while the database stays current.",
+      "correction": "0025 adds the MARKER_BEHIND branch, which holds money movement and records the detection. The two records disagree about how many times the site has been restored, and until someone establishes which is right nobody can say whether the financial data is current.",
+      "proved": "TestIntegrationClosure_MarkerAheadEqualBehindAndMissing covers all four cases, including that EQUAL is the ordinary restart and changes nothing."
+    },
+    {
+      "id": "U-5",
+      "area": "restore manifest trust",
+      "what_was_actually_true": "The restore tool took the verification key as --pubkey. A key supplied by whoever runs the restore verifies nothing except that they have a key.",
+      "correction": "The manifest is now verified against the appliance's EXISTING pinned trust anchor -- /etc/stayconnect/assignment-registry-root.pub, the raw 32-byte Ed25519 registry root the assignment registry already uses. No new root of trust was introduced and no certificate anchor was redesigned. --pubkey is now an explicit error, and an appliance with no anchor cannot restore at all.",
+      "proved": "The drill signs a manifest with the pinned root (verifies), with an unrelated key (refused), passes --pubkey (refused outright), tampers the dump (refused by the verified manifest's digest), and removes the anchor (refused)."
+    },
+    {
+      "id": "U-6",
+      "area": "proven quiesce",
+      "what_was_actually_true": "The restore stopped services with `systemctl stop \"$s\" || true` -- a stop failure was swallowed, no service was ever verified stopped, and the future PMS/financial runtime was not in the list.",
+      "correction": "Each service is stopped and then PROVEN stopped with systemctl is-active; anything still active aborts the restore, and stayconnect-pmsd is in the list. A service that is not installed is reported as such rather than silently skipped. Nothing is swallowed.",
+      "proved": "The drill runs the tool against a systemctl stub that reports a service still active and asserts the restore aborts -- and that the marker was already advanced before the abort, so the next startup still holds money movement."
+    },
+    {
+      "id": "U-7",
+      "area": "the marker versus the real backup domain",
+      "what_was_actually_true": "docs/BACKUP_AND_RESTORE.md tars /etc/stayconnect. The marker lives there, so the documented backup would capture it and the documented restore would roll it back -- silencing the rollback detector at exactly the moment it is needed.",
+      "correction": "deploy/scripts/stayconnect-site-backup.sh implements the documented backup with the marker excluded, and VERIFIES the exclusion rather than trusting the flag: it refuses to produce an archive containing it. The runbook was updated for both the backup and the restore, including the supported-tool invocation. 0025's MARKER_BEHIND branch covers archives taken before this change.",
+      "proved": "The drill runs the real backup script against a fixture /etc containing a marker and an identity key, and asserts the archive excludes the marker and still contains everything else."
+    },
+    {
+      "id": "U-8",
+      "area": "C27 cross-tenant merchant reuse",
+      "what_was_actually_true": "0018's uniqueness was per (tenant, site), so the SAME external merchant account could be configured under two different customers -- one customer's guests paying into another customer's account, indistinguishable afterwards. The matrix recorded C27 as 'partial' and that was accurate.",
+      "correction": "0025 adds ppa_merchant_ref_globally_unique on (provider, merchant_account_ref) for CONFIGURED accounts. Backfilled rows carry a NULL reference by construction and name no external account, so they cannot collide.",
+      "proved": "TestIntegrationClosure_C27NoCrossTenantMerchantReuse configures an account under tenant A and asserts the same reference is refused under tenant B by that constraint, while a DIFFERENT reference is still accepted."
+    },
+    {
+      "id": "U-9",
+      "area": "C35 compliance archive before cross-customer purge",
+      "what_was_actually_true": "iam_v2.compliance_archives had existed since mg7 and NOTHING in the tree wrote it. scd's reconcileTenantOwnership DELETEd the departing customer's rows outright. 'Archive before purge' was a table shape.",
+      "correction": "scd now exports the departing tenant's financial and commercial record to a file under the appliance's backup root, records its SHA-256 through p4_record_compliance_archive, and the purge is gated in the DATABASE by p4_assert_compliance_archived -- so a future purge path that forgot the step is refused rather than silently succeeding. A failure to archive aborts reconciliation and the appliance stays fail-closed.",
+      "proved": "TestIntegrationClosure_C35ArchiveGatesTheCrossCustomerPurge asserts the gate refuses with no archive, refuses a non-digest, accepts after a real record, and that receipt_verified is false with the reason recorded."
+    },
+    {
+      "id": "U-10",
+      "area": "the CI integration gate",
+      "what_was_actually_true": "The Hotel-Admin E2E step ran only the Phase-4 spec, so a financial milestone could regress the PMS-interface or guest-portal screens without the gate noticing.",
+      "correction": "CI now runs the FULL browser suite. That is the step that caught the Next 16 regression described below.",
+      "proved": "The Next 16 attempt produced 49 passed / 7 failed under the full suite and would have passed a Phase-4-only step."
+    }
+  ],
+  "external_blockers": [
+    {
+      "id": "B-1",
+      "item": "C35 receipt_verified",
+      "blocker": "No external archival receipt authority exists in this product: no service, no endpoint and no issued key for one. The archive, its digest and the purge gate are delivered and enforced; the counter-signature cannot be produced without inventing managed state, so receipt_verified stays false and receipt_blocked_reason records why.",
+      "invented_nothing": true
+    },
+    {
+      "id": "B-2",
+      "item": "Next.js production advisories",
+      "blocker": "22 high advisories against next@14.2.35 (request smuggling, middleware bypass, App Router XSS, RSC cache poisoning, SSRF, DoS). npm's own resolver reports the minimum fixing version as next@16.3.0, isSemVerMajor. The upgrade WAS attempted in this milestone under the full regression suite: tsc, next build and 83/83 unit tests passed, but the browser suite regressed 49/7 -- every failure on the PMS-interfaces page, which renders no content at all under React 19/Next 16 with no page or console error. It was REVERTED rather than shipped red. Evidence: docs/evidence/phase4/npm-audit-{full,production}.json and docs/PHASE4_DEPENDENCY_TRIAGE.md.",
+      "invented_nothing": true
+    }
+  ],
+  "verification": {
+    "financial_db_gate": "246 PASS / 0 FAIL (migrations 0011-0025, UP/DOWN/re-UP, identical schema fingerprints)",
+    "restore_drill": "39 PASS / 0 FAIL, real pg_dump + pg_restore, pinned-anchor verification, proven quiesce, /etc exclusion",
+    "definer_abuse_matrix": "10 PASS / 0 FAIL as real restricted roles, including a closed-surface enumeration that fails on any unreviewed grant",
+    "final_closure_matrix": "7 PASS / 0 FAIL (zero-attempt retry and its four refusals, no-replay across release, four marker cases, C27, C35)",
+    "recovery_closure": "6 PASS / 0 FAIL including a 12-round concurrent claim-versus-recovery race",
+    "least_privilege": "18 PASS / 0 FAIL",
+    "payment_concurrency": "9 PASS / 0 FAIL",
+    "integration_suite": "all steps green (posting, review + finops API, payment runtime, phase-2 free grant, observability, recovery, definer abuse, restricted role, entitlement grant, final closure)",
+    "hotel_admin": "tsc clean, next build clean (flags OFF), 83/83 unit, 56/56 browser",
+    "dependency_gate": "PASS — the production tree's advisories are exactly the triaged baseline (next, postcss)",
+    "dark_static_assertion": "PASS",
+    "unit": "PASS across the whole data-plane module"
+  },
+  "c_matrix": {
+    "c27": "CLOSED (0025). Was measured 'partial'; the global uniqueness constraint now prevents two customers naming one external merchant account.",
+    "c29": "CLOSED via ONE kernel (0024) rather than two implementations.",
+    "c30_c31_c33_c34": "Re-measured from code and tests, not carried forward; all now DB + runtime + operator surface.",
+    "c35": "Archive and gate DELIVERED; receipt_verified BLOCKED on an external authority that does not exist.",
+    "c37": "UNCHANGED meaning: DARK flags, no egress. Not a claim that anything is live.",
+    "c38": "UNCHANGED: Tier-3 3C real-financial acceptance, BLOCKED_BY_PRODUCT_OWNER_DECISION. Nothing in this milestone advances it."
+  },
+  "not_delivered_in_this_milestone": [
+    "WS-L, the authorized controlled live-DARK deployment and the reboot/rollback drill. Not started, as this milestone required.",
+    "No real provider adapter. The trusted-computing boundary for provider authenticity remains the payment process; the database now requires a second, independent credential underneath it.",
+    "The Next 16 upgrade (see B-2). Attempted, failed its regression suite, reverted.",
+    "C35's external archival receipt (see B-1).",
+    "Refund and chargeback initiation still have no operator path, deliberately.",
+    "The runtime DSNs are unchanged. The restricted-role and split-authority paths are proven end to end against disposable databases with purpose-built login roles; no Production DSN or grant was touched."
+  ],
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only.",
+    "migrations_added_this_round": "0024_phase4_outcome_authority_and_grant_kernel, 0025_phase4_recovery_completion_and_compliance"
+  },
+  "no_financial_traffic": {
+    "real_provider_charge_or_refund": false,
+    "real_provider_network_integration": false,
+    "real_pms_ps_transmitted": false,
+    "guest_folio_debited": false,
+    "paid_guest_access": false,
+    "programmatic_pms_reversal": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "production_dsn_or_grant_changed": false,
+    "deployment_performed": false
+  },
+  "evidence_files": [
+    "data-plane/migrations/0024_phase4_outcome_authority_and_grant_kernel.up.sql",
+    "data-plane/migrations/0024_phase4_outcome_authority_and_grant_kernel.down.sql",
+    "data-plane/migrations/0025_phase4_recovery_completion_and_compliance.up.sql",
+    "data-plane/migrations/0025_phase4_recovery_completion_and_compliance.down.sql",
+    "data-plane/internal/payment/pg_closure_integration_test.go",
+    "data-plane/internal/payment/pg_definer_abuse_integration_test.go",
+    "data-plane/cmd/scd/compliance_archive.go",
+    "data-plane/cmd/scd/tenant_transition.go",
+    "deploy/scripts/stayconnect-site-backup.sh",
+    "deploy/scripts/stayconnect-financial-restore.sh",
+    "scripts/phase4-restore-drill.sh",
+    "scripts/ci/phase4-dependency-gate.sh",
+    "docs/PHASE4_DEPENDENCY_TRIAGE.md",
+    "docs/evidence/phase4/npm-audit-full.json",
+    "docs/evidence/phase4/npm-audit-production.json",
+    "docs/BACKUP_AND_RESTORE.md",
+    "docs/architecture/Phase4-Financial-Schema-Gap-Audit.md",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "iam_v2_scratch/phase4_0011_financial.sh",
+    ".github/workflows/phase4-financial-core.yml",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. Phase 4 remains IN_PROGRESS at DARK maturity. No cutover, no enablement, no deployment, no PR and no merge.",
+  "next_action": "WS-L: prepare the authorized controlled live-DARK deployment and the reboot/rollback drill. The two external blockers (Next 16, C35 receipt authority) are outside Phase-4 DARK closure and each needs its own authorized change."
+}
