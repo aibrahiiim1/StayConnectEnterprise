@@ -38,7 +38,7 @@ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/data-p
 pre="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${pre:-0}" != "63" ]; then echo "INFRA: pre-0011 chain did not build (iam_v2 tables=$pre)"; exit 2; fi
 
-for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement 0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege 0019_phase4_financial_recovery 0020_phase4_financial_observability 0021_phase4_trust_boundary 0022_phase4_recovery_closure 0023_phase4_restore_generation; do
+for m in 0011_phase4_financial_execution 0012_phase4_financial_hardening 0013_phase4_reversal_ledger 0014_phase4_payment_settlement 0015_phase4_payment_hardening 0016_phase4_payment_coherence 0017_phase4_least_privilege 0018_phase4_financial_identity_and_privilege 0019_phase4_financial_recovery 0020_phase4_financial_observability 0021_phase4_trust_boundary 0022_phase4_recovery_closure 0023_phase4_restore_generation 0024_phase4_outcome_authority_and_grant_kernel; do
   if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$m.up.sql" >/dev/null 2>&1; then
     # Deterministic: a broken migration fails the same way twice, so this is exit 1 and CI must not retry.
@@ -95,6 +95,23 @@ docker exec "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -tAqc   "DO \$\$ B
    GRANT USAGE ON SCHEMA public TO p4_operator_login;" >/dev/null || { echo "INFRA: runtime role"; exit 2; }
 export PHASE4_RUNTIME_DSN="postgres://p4_runtime_login:runtimepw@127.0.0.1:$PORT/$DB"
 export PHASE4_OPERATOR_DSN="postgres://p4_operator_login:operatorpw@127.0.0.1:$PORT/$DB"
+
+# The OUTCOME credential (0024) is a genuinely separate login holding only sc_payment_outcome. Sharing a
+# login with the execution role would make every "the execution credential cannot assert an outcome" test
+# vacuous, which is the whole property under test.
+docker exec "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -tAqc   "DO \$\$ BEGIN
+     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='p4_outcome_login') THEN
+       CREATE ROLE p4_outcome_login LOGIN PASSWORD 'outcomepw' INHERIT;
+     END IF;
+     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='p4_commerce_login') THEN
+       CREATE ROLE p4_commerce_login LOGIN PASSWORD 'commercepw' INHERIT;
+     END IF;
+   END \$\$;
+   GRANT sc_payment_outcome TO p4_outcome_login;
+   GRANT sc_commerce_runtime TO p4_commerce_login;
+   GRANT USAGE ON SCHEMA public TO p4_outcome_login, p4_commerce_login;" >/dev/null   || { echo "INFRA: outcome role"; exit 2; }
+export PHASE4_OUTCOME_DSN="postgres://p4_outcome_login:outcomepw@127.0.0.1:$PORT/$DB"
+export PHASE4_COMMERCE_DSN="postgres://p4_commerce_login:commercepw@127.0.0.1:$PORT/$DB"
 # ---------------------------------------------------------------- the suite
 #
 # Every step goes through run_step, for two reasons that a chain of copy-pasted `if [ "$rc" = 0 ]` blocks

@@ -62,6 +62,11 @@ const (
 	EnvPhase4Master   = "STAYCONNECT_PHASE4_MASTER"
 	EnvPhase4Payment  = "STAYCONNECT_PHASE4_PAYMENT"          // the payment domain may create intents
 	EnvPhase4Provider = "STAYCONNECT_PHASE4_PAYMENT_PROVIDER" // the ONLY flag that can permit provider calls
+
+	// EnvOutcomeDSN names the SEPARATE database credential that may assert a provider outcome. It is a
+	// different DSN from the execution connection on purpose (migration 0024): with one credential, a
+	// single theft is sufficient to start a payment and then declare it captured.
+	EnvOutcomeDSN = "STAYCONNECT_PHASE4_PAYMENT_OUTCOME_DSN"
 )
 
 // Config is the payment flag posture. The zero value is the delivered state: everything OFF.

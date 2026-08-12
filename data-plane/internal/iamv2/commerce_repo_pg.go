@@ -433,6 +433,27 @@ func (t *pgCommerceTx) InsertEntitlement(ctx context.Context, e EntitlementSpec)
 	return id, err
 }
 
+// GrantQuotedEntitlement performs the FREE grant through the shared kernel. There is deliberately no
+// parameter for a subject, a package revision or a policy snapshot: the operation re-resolves all of it
+// from the purchase's own pinned quote and auth context, so a caller cannot substitute anyone else's
+// evidence -- exactly as the paid entry point cannot.
+func (t *pgCommerceTx) GrantQuotedEntitlement(ctx context.Context, tenantID, siteID, purchaseID string) (string, string, error) {
+	var eid string
+	var already bool
+	var superseded *string
+	err := t.tx.QueryRow(ctx,
+		`SELECT entitlement_id::text, already_granted, superseded::text
+		   FROM iam_v2.p4_grant_quoted_entitlement($1::uuid,$2::uuid,$3::uuid)`,
+		tenantID, siteID, purchaseID).Scan(&eid, &already, &superseded)
+	if err != nil {
+		return "", "", err
+	}
+	if superseded == nil {
+		return eid, "", nil
+	}
+	return eid, *superseded, nil
+}
+
 func (t *pgCommerceTx) MarkPurchaseGranted(ctx context.Context, purchaseID string) error {
 	// GRANTED is reached through the controlled function, which locks the row and refuses any origin state
 	// the approved machine does not permit. A raw UPDATE could drive a CANCELLED or FAILED purchase to

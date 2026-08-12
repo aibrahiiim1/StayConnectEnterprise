@@ -58,11 +58,10 @@ func TestIntegrationDefinerAbuse_TheRuntimeDefinerSurfaceIsExactlyWhatWeThinkItI
 	_ = runtimePool(t) // skip cleanly when the restricted matrix is not configured
 	got := executableDefiners(t, "sc_payment_runtime")
 	want := map[string]bool{
-		"iam_v2.begin_payment_execution(uuid)":                             true,
-		"iam_v2.p4_resolve_payment_account(uuid,uuid)":                     true,
-		"iam_v2.p4_grant_paid_entitlement(uuid,uuid,uuid)":                 true,
-		"iam_v2.p4_apply_provider_outcome(text,text,text,text,text,jsonb)": true,
-		"iam_v2.p4_financial_recovery_active(uuid,uuid)":                   true,
+		"iam_v2.begin_payment_execution(uuid)":             true,
+		"iam_v2.p4_resolve_payment_account(uuid,uuid)":     true,
+		"iam_v2.p4_grant_paid_entitlement(uuid,uuid,uuid)": true,
+		"iam_v2.p4_financial_recovery_active(uuid,uuid)":   true,
 		// Reviewed (0023). It reads two signals and compares them; the ONLY outcome it can produce is more
 		// holding. Nothing in it releases an epoch, resolves a hold or unholds a rail, which is what makes
 		// accepting a caller-supplied marker generation safe -- see the abuse test below.
@@ -233,41 +232,133 @@ func TestIntegrationDefinerAbuse_CannotManufactureACapture(t *testing.T) {
 	}
 }
 
-// What a compromised runtime CAN still do, stated as a test so the boundary is documented by measurement
-// rather than by assertion. It can lie about the outcome of a payment IT started -- because proving
-// provider authenticity requires a signing secret the database does not hold, and the trusted-computing
-// boundary for that is the payment process. Bounding the blast radius is the achievable property.
-func TestIntegrationDefinerAbuse_TheResidualBlastRadiusIsBoundedAndKnown(t *testing.T) {
+// THE OUTCOME-AUTHORITY SPLIT (0024).
+//
+// T0039 recorded a residual: the execution credential could still lie about a payment it started, because
+// the same role both executed payments and asserted their outcomes. One stolen DSN was therefore sufficient
+// to fabricate money end to end. 0024 removes that: asserting an outcome is a different authority.
+//
+// This is the adversarial proof of the split, from both sides.
+func TestIntegrationDefinerAbuse_TheExecutionRoleCannotAssertAnOutcome(t *testing.T) {
 	owner := pool(t)
 	rp := runtimePool(t)
+	op := outcomePool(t)
 	ctx := context.Background()
 	s := seedPaidChain(t, owner)
-	e := NewEngine(liveCfg, rp, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), SQLGranter{Pool: rp})
-	in, _ := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
-	if err := beginExecution(t, owner, in.ID); err != nil {
-		t.Fatal(err)
+
+	// The execution role does everything up to the boundary...
+	e := NewEngineWithOutcome(liveCfg, rp, op, NewScriptedProvider(Result{Outcome: OutcomeCaptured}),
+		SQLGranter{Pool: rp})
+	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
+	if err != nil {
+		t.Fatalf("the execution role could not create an intent: %v", err)
+	}
+	if err := beginExecution(t, rp, in.ID); err != nil {
+		t.Fatalf("the execution role could not cross the durable boundary: %v", err)
 	}
 
-	// KNOWN AND ACCEPTED: for a payment already executing, the role can assert an outcome. The database
-	// cannot distinguish this from a genuine authenticated notification, and this test records that.
+	// ...and then cannot say what happened. This is the property the split exists for: a stolen execution
+	// credential can start payments and stop there.
 	if _, err := rp.Exec(ctx,
-		`SELECT iam_v2.p4_apply_provider_outcome($1,'evt-residual','x','CAPTURED',NULL,'{}'::jsonb)`,
+		`SELECT iam_v2.p4_apply_provider_outcome($1,'forged','x','CAPTURED',NULL,'{}'::jsonb)`,
+		in.ClientRef); err == nil {
+		t.Fatal("the execution credential asserted a provider outcome")
+	} else if !strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("refused, but not by privilege: %v", err)
+	}
+	if st := scan1[string](t, owner, `SELECT status FROM iam_v2.settlements WHERE id=$1`, s.settlement); st != "IN_PROGRESS" {
+		t.Fatalf("the settlement moved to %s without an outcome authority", st)
+	}
+	if n := scan1[int](t, owner, `SELECT count(*)::int FROM iam_v2.entitlements WHERE purchase_id=$1`, s.purchase); n != 0 {
+		t.Fatal("a payment with no asserted outcome granted access")
+	}
+
+	// The OUTCOME credential can assert it -- so the split discriminates rather than simply blocking.
+	if _, err := op.Exec(ctx,
+		`SELECT iam_v2.p4_apply_provider_outcome($1,'evt-legit','x','CAPTURED',NULL,'{}'::jsonb)`,
 		in.ClientRef); err != nil {
-		t.Fatalf("the sanctioned path stopped working: %v", err)
+		t.Fatalf("the outcome credential could not assert an outcome: %v", err)
 	}
+	if st := scan1[string](t, owner, `SELECT status FROM iam_v2.settlements WHERE id=$1`, s.settlement); st != "SETTLED" {
+		t.Fatalf("the sanctioned outcome path did not settle: %s", st)
+	}
+}
 
-	// BOUNDED: it cannot reach any OTHER payment. Every other intent in the estate is untouched, because
-	// there is no execution in flight for them.
-	others := seedPaidChain(t, owner)
-	otherIntent, _ := e.CreateChargeIntent(ctx, others.tenant, others.site, others.settlement, idem(t, "2"))
-	if _, err := rp.Exec(ctx,
-		`SELECT iam_v2.p4_apply_provider_outcome($1,'evt-other','x','CAPTURED',NULL,'{}'::jsonb)`,
-		otherIntent.ClientRef); err == nil {
-		t.Fatal("the blast radius extends to payments that never began executing")
+// And the mirror: a stolen OUTCOME credential has nothing of its own to assert about.
+func TestIntegrationDefinerAbuse_TheOutcomeRoleCannotStartOrGrantAnything(t *testing.T) {
+	owner := pool(t)
+	op := outcomePool(t)
+	ctx := context.Background()
+	s := seedPaidChain(t, owner)
+
+	for _, tc := range []struct {
+		name string
+		sql  string
+		args []any
+	}{
+		{"create a payment intent",
+			`INSERT INTO iam_v2.payment_transactions
+			   (tenant_id,site_id,settlement_id,merchant_account_id,transaction_type,provider,provider_ref,
+			    idempotency_key,amount_minor,currency,currency_exponent,status)
+			 VALUES ($1,$2,$3,$4,'CHARGE','test-double','sc_forged','idem-forged',100,'USD',2,'CREATED')`,
+			[]any{s.tenant, s.site, s.settlement, s.merchant}},
+		{"cross the durable execution boundary",
+			`SELECT iam_v2.begin_payment_execution(gen_random_uuid())`, nil},
+		{"grant an entitlement",
+			`SELECT * FROM iam_v2.p4_grant_paid_entitlement($1::uuid,$2::uuid,$3::uuid)`,
+			[]any{s.tenant, s.site, s.settlement}},
+		{"grant a free entitlement",
+			`SELECT * FROM iam_v2.p4_grant_quoted_entitlement($1::uuid,$2::uuid,$3::uuid)`,
+			[]any{s.tenant, s.site, s.purchase}},
+		{"call the grant kernel directly",
+			`SELECT * FROM iam_v2.p4_entitlement_grant_kernel($1::uuid,$2::uuid,$3::uuid,gen_random_uuid(),
+			   NULL,NULL,'{"version":1,"service_plan_revision_id":"00000000-0000-0000-0000-000000000001"}'::jsonb,
+			   gen_random_uuid(),gen_random_uuid())`,
+			[]any{s.tenant, s.site, s.purchase}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := op.Exec(ctx, tc.sql, tc.args...); err == nil {
+				t.Fatalf("the outcome credential could %s", tc.name)
+			}
+		})
 	}
-	if st := scan1[string](t, owner, `SELECT status FROM iam_v2.settlements WHERE id=$1`,
-		others.settlement); st != "REQUIRED" {
-		t.Fatalf("an unrelated settlement moved to %s", st)
+	if n := scan1[int](t, owner, `SELECT count(*)::int FROM iam_v2.entitlements WHERE purchase_id=$1`, s.purchase); n != 0 {
+		t.Fatal("the outcome credential created an entitlement")
+	}
+}
+
+// The GRANT KERNEL is the only thing in the schema that writes an entitlement, and no runtime role may
+// call it directly -- only the two high-level entry points, each with its own authorization.
+func TestIntegrationDefinerAbuse_TheGrantKernelIsUnreachableFromEveryRuntimeRole(t *testing.T) {
+	owner := pool(t)
+	ctx := context.Background()
+	for _, role := range []string{"sc_payment_runtime", "sc_commerce_runtime", "sc_payment_outcome",
+		"sc_financial_operator", "sc_financial_readonly"} {
+		var can bool
+		if err := owner.QueryRow(ctx,
+			`SELECT has_function_privilege($1,
+			   'iam_v2.p4_entitlement_grant_kernel(uuid,uuid,uuid,uuid,uuid,uuid,jsonb,uuid,uuid)','EXECUTE')`,
+			role).Scan(&can); err != nil {
+			t.Fatal(err)
+		}
+		if can {
+			t.Errorf("%s can call the grant kernel directly, bypassing every authorization", role)
+		}
+	}
+	// and the free entry point is not reachable from the PAYMENT runtime, nor the paid one from commerce
+	for _, tc := range []struct{ role, fn string }{
+		{"sc_payment_runtime", "iam_v2.p4_grant_quoted_entitlement(uuid,uuid,uuid)"},
+		{"sc_commerce_runtime", "iam_v2.p4_grant_paid_entitlement(uuid,uuid,uuid)"},
+		{"sc_commerce_runtime", "iam_v2.p4_apply_provider_outcome(text,text,text,text,text,jsonb)"},
+	} {
+		var can bool
+		if err := owner.QueryRow(ctx,
+			`SELECT has_function_privilege($1,$2,'EXECUTE')`, tc.role, tc.fn).Scan(&can); err != nil {
+			t.Fatal(err)
+		}
+		if can {
+			t.Errorf("%s can call %s, which belongs to a different service", tc.role, tc.fn)
+		}
 	}
 }
 

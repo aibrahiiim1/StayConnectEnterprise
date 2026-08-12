@@ -39,6 +39,21 @@ type Engine struct {
 	provider Provider
 	granter  Granter
 	guard    *providerGuard
+
+	// outcomePool is a SEPARATE database credential holding sc_payment_outcome, and it is the only
+	// connection that may assert what a provider said (migration 0024).
+	//
+	// WHY IT IS A DIFFERENT POOL. With one credential, stealing it is sufficient to fabricate money end
+	// to end: create an intent, cross the execution boundary, declare it captured. Splitting the
+	// authority means the execution credential can start payments and stop there, and the outcome
+	// credential can only speak about payments some other credential already put in flight.
+	//
+	// It is NOT provider authentication -- that needs a signing secret the database never holds, and it
+	// stays in AuthenticateNotification. This is the layer underneath it.
+	//
+	// nil is the DELIVERED state: with no adapter there is no authenticated notification to apply, so
+	// the outcome path fails closed rather than quietly falling back to the execution credential.
+	outcomePool *pgxpool.Pool
 }
 
 // NewProductionEngine is the ONLY exported constructor. It takes no config and no provider: the posture
@@ -52,7 +67,18 @@ func NewProductionEngine(pool *pgxpool.Pool, granter Granter) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newEngine(cfg, pool, p, granter), nil
+	e := newEngine(cfg, pool, p, granter)
+	// The outcome credential is deliberately a separate DSN. Its absence is not an error at startup --
+	// a build with no provider adapter has no notifications to apply -- but it makes every outcome
+	// application fail closed, which is the correct posture for a DARK build.
+	if dsn := osGetenv(EnvOutcomeDSN); dsn != "" {
+		op, oerr := pgxpool.New(context.Background(), dsn)
+		if oerr != nil {
+			return nil, fail(ErrConfig, "the payment outcome credential could not be opened")
+		}
+		e.outcomePool = op
+	}
+	return e, nil
 }
 
 func newEngine(cfg Config, pool *pgxpool.Pool, p Provider, g Granter) *Engine {
@@ -398,12 +424,17 @@ SELECT tenant_id::text, site_id::text, settlement_id::text, transaction_type, pr
 
 	evidence, _ := json.Marshal(map[string]string{
 		"provider_status": string(n.outcome), "provider_reason_code": n.reasonCode})
-	// The NARROWED operation (0021). The runtime no longer holds EXECUTE on apply_payment_callback_v2,
-	// which would let it assert any status for any correlated intent; this one refuses unless the intent is
-	// genuinely executing, and takes no tenant, site or merchant parameter to be pointed elsewhere.
+	// The NARROWED operation (0021), through the SEPARATE outcome credential (0024). The execution pool
+	// is not used here and does not hold EXECUTE on this function: asserting what a provider said is a
+	// different authority from executing a payment, so one stolen credential is not enough to fabricate
+	// a financial outcome.
 	_, _ = provider, merchant
+	if e.outcomePool == nil {
+		return out, fail(ErrUntrusted,
+			"no payment outcome credential is configured; a provider outcome cannot be applied")
+	}
 	var applied string
-	if err := e.pool.QueryRow(ctx,
+	if err := e.outcomePool.QueryRow(ctx,
 		`SELECT iam_v2.p4_apply_provider_outcome($1,$2,$3,$4,$5,$6::jsonb)`,
 		n.clientRef, n.eventID, n.eventType, n.assertedStatus(),
 		n.providerTxnRef, string(evidence)).Scan(&applied); err != nil {

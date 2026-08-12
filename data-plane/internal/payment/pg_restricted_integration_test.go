@@ -73,9 +73,12 @@ func TestIntegrationRestricted_FullPaymentToEntitlementUnderLeastPrivilege(t *te
 	ctx := context.Background()
 	s := seedPaidChain(t, owner)
 
-	// Everything from here runs on the restricted connection, including the Phase-2 grant.
+	// Everything from here runs on restricted connections. There are TWO of them, deliberately: the
+	// execution credential and the outcome credential are separate authorities (0024), and an end-to-end
+	// proof that used one connection for both would be proving the pre-0024 arrangement.
+	op := outcomePool(t)
 	granter := SQLGranter{Pool: rp}
-	e := NewEngine(liveCfg, rp, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), granter)
+	e := NewEngineWithOutcome(liveCfg, rp, op, NewScriptedProvider(Result{Outcome: OutcomeCaptured}), granter)
 
 	in, err := e.CreateChargeIntent(ctx, s.tenant, s.site, s.settlement, idem(t, "1"))
 	if err != nil {

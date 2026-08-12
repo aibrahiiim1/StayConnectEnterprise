@@ -239,31 +239,20 @@ func (e *CommerceEngine) ConfirmFreePurchase(ctx context.Context, req ConfirmReq
 		if err := tx.InsertSettlement(ctx, req.TenantID, req.SiteID, pid); err != nil {
 			return err
 		}
-		// 6. create/supersede the subject's single live entitlement from the quote's immutable snapshot.
-		superseded, err := tx.TerminateLiveEntitlementForSubject(ctx, req.TenantID, req.SiteID, ac.Subject)
+		// 6+7. THE SHARED GRANT KERNEL (migration 0024).
+		//
+		// This used to be three separate CommerceTx calls -- terminate, insert, mark granted -- and the paid
+		// path in 0021 re-implemented the same three steps in SQL. Two implementations of one set of
+		// semantics is the drift the one-writer rule exists to prevent: a change to supersession or to the
+		// opening transition would have to be made twice, and the first symptom of missing one would be two
+		// guests holding differently-shaped entitlements.
+		//
+		// p4_grant_quoted_entitlement carries the FREE authorization -- the quote was priced at zero and the
+		// settlement required nothing -- and then calls the same kernel the paid path calls. The subject
+		// lock, the already-granted check, the supersession, the opening transition and the purchase's move
+		// to GRANTED all live there now, in one place, for both paths.
+		eid, superseded, err := tx.GrantQuotedEntitlement(ctx, req.TenantID, req.SiteID, pid)
 		if err != nil {
-			return err
-		}
-		var window *time.Time
-		if q.GrantSnapshot.WindowEndsAt != "" {
-			if w, perr := time.Parse(time.RFC3339, q.GrantSnapshot.WindowEndsAt); perr == nil {
-				window = &w
-			}
-		}
-		eid, err := tx.InsertEntitlement(ctx, EntitlementSpec{
-			TenantID: req.TenantID, SiteID: req.SiteID, PurchaseID: pid, Subject: ac.Subject,
-			ServicePlanRevID: q.GrantSnapshot.ServicePlanRevisionID, PackageRevID: q.PackageRevisionID,
-			PolicySnapshot:     q.GrantSnapshot,
-			TimeAccountingMode: q.GrantSnapshot.TimeAccountingMode,
-			EndMode:            q.GrantSnapshot.EndMode,
-			WindowEndsAt:       window,
-			SupersedesID:       superseded,
-		})
-		if err != nil {
-			return err
-		}
-		// 7. mark the Purchase GRANTED only now that the entitlement exists.
-		if err := tx.MarkPurchaseGranted(ctx, pid); err != nil {
 			return err
 		}
 		res = PurchaseResult{PurchaseID: pid, EntitlementID: eid, Superseded: superseded, Reason: "granted"}

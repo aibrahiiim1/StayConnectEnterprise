@@ -21,6 +21,24 @@ import (
 // No provider is ever contacted: every provider here is a deterministic in-process double, and the DARK
 // tests assert that even a double which WOULD capture is never reached.
 
+// outcomePool is the SEPARATE outcome-authority credential (0024). A test that needs to assert a provider
+// outcome must use it; the execution credential deliberately cannot.
+func outcomePool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("PHASE4_OUTCOME_DSN")
+	if dsn == "" {
+		t.Skip("PHASE4_OUTCOME_DSN not set; skipping the outcome-authority matrix")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	p, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect as the outcome role: %v", err)
+	}
+	t.Cleanup(p.Close)
+	return p
+}
+
 func pool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := os.Getenv("PHASE4_TEST_DSN")
