@@ -1,7 +1,7 @@
 {
   "transition_id": "T0036",
   "seq": 36,
-  "timestamp": "2026-08-12T11:40:00Z",
+  "timestamp": "2026-08-12T11:00:00Z",
   "record_type": "PHASE_4_PAYMENT_HARDENING_WITH_PROVEN_CONCURRENCY",
   "previous_state": {
     "phase": "4",

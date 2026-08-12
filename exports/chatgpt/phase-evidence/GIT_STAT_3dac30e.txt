@@ -1,0 +1,4 @@
+commit 3dac30e6577462a91620392911f01335029e3d1e
+Date:   Wed Aug 12 14:07:49 2026 +0300
+
+    Phase 4 (delivery_head): manifest + rebuilt packs + pointer
