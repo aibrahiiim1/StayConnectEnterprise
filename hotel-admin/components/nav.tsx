@@ -60,6 +60,8 @@ const SECTIONS: Section[] = [
       { href: "/checkout-grace",    label: "Checkout grace",    icon: Shield,  resource: "checkout-grace",     enabled: PHASE3_ADMIN },
       { href: "/operational-alerts", label: "Operational alerts", icon: Shield, resource: "operational-alerts", enabled: PHASE3_ADMIN },
       { href: "/financial-health",   label: "Financial health",   icon: Wallet, resource: "financial-review", enabled: PHASE4_ADMIN },
+      { href: "/financial-review",   label: "Manual review",      icon: Shield, resource: "financial-review", enabled: PHASE4_ADMIN },
+      { href: "/financial-settlements", label: "Settlements",     icon: Wallet, resource: "financial-review", enabled: PHASE4_ADMIN },
       { href: "/financial-recovery", label: "Financial recovery", icon: Shield, resource: "financial-review", enabled: PHASE4_ADMIN },
       { href: "/notifications",    label: "Notifications", icon: Send,     resource: "notification-providers" },
       { href: "/social-providers", label: "Social login",  icon: KeyRound, resource: "social-providers" },

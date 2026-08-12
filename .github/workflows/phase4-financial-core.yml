@@ -102,7 +102,7 @@ jobs:
           -race ./internal/posting/ ./internal/pmsd/ -count=1
 
       # ---------------------------------------------------------------- migration 0011
-      - name: Migrations 0011-0020 + financial DB invariant gate (disposable PG16)
+      - name: Migrations 0011-0023 + financial DB invariant gate (disposable PG16)
         # Includes the ENTIRE pre-0011 financial invariant suite, run on the pre-0011 chain and again after
         # the Phase-4 chain on a clean rebuild, so "nothing was weakened" is measured rather than asserted.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-migration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase4_0011_financial.sh"
@@ -120,11 +120,30 @@ jobs:
         # A grant file is a claim; this is the measurement.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-least-privilege -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-least-privilege.sh"
 
+      # ---------------------------------------------------------------- restore
+      - name: Supported restore drill (real pg_dump / pg_restore, disposable PG16)
+        # Performs an ACTUAL dump-and-restore rather than faking the signal. It is the step that would have
+        # caught the T0038 defect: the supported restore goes into the same cluster, so system_identifier
+        # never changes and an identity-only detector sees nothing.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-restore-drill -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-restore-drill.sh"
+
       # ---------------------------------------------------------------- financial core against real PG
       - name: Financial-core PG16 integration matrix (disposable PG16)
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-pg-integration.sh"
 
       # ---------------------------------------------------------------- DARK
+      # The gate must be able to FAIL. A suite nobody has watched fail is a suite nobody has tested, and a
+      # deterministic command error sitting inside a green run is worse than a red one.
+      - name: Prove the integration gate reports a broken step
+        env:
+          PHASE4_SELFTEST_BREAK: recovery
+        run: |
+          if bash "$GITHUB_WORKSPACE/scripts/phase4-pg-integration.sh"; then
+            echo "the integration gate PASSED with a deliberately broken step; it cannot be trusted"
+            exit 1
+          fi
+          echo "the integration gate correctly failed on the broken step"
+
       - name: DARK assertion — no Phase-4 flag is enabled anywhere in the tree
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dark -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dark-check.sh"
 

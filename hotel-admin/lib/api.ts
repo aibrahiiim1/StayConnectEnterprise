@@ -924,3 +924,78 @@ export const RECOVERY_RESOLUTIONS = [
   "ESCALATED",
 ] as const;
 export type RecoveryResolution = (typeof RECOVERY_RESOLUTIONS)[number];
+
+// ---------------------------------------------------------------- Phase 4 (DARK): Manual Review
+//
+// The action catalog and the evidence contract are SERVED, not declared here. §15's rules live in the
+// database; a second copy in the frontend would drift, and the first symptom would be an operator offered
+// an action the backend refuses.
+
+export type ReviewActionDoc = {
+  action: string;
+  terminal: boolean;
+  needs_evidence: boolean;
+  accepts_amount: boolean;
+  summary: string;
+};
+
+export type ReviewQueueRow = {
+  posting_id: string;
+  pms_interface_id: string;
+  execution_state: string;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  latest_attempt_no: number | null;
+  latest_p_number: string | null;
+  latest_pa_as_status: string | null;
+  outbox_state: string | null;
+  review_version: number | null;
+  terminal_review_action: string | null;
+  awaiting_manual_review: boolean;
+  created_at: string;
+};
+
+export type ReviewAttempt = {
+  attempt_no: number;
+  p_number: string;
+  rn: string;
+  g_number: string;
+  outcome: string;
+  pa_as_status: string | null;
+  sent_at: string;
+  response_at: string | null;
+};
+
+export type ReviewPostingDetail = {
+  posting: ReviewQueueRow;
+  pinned_evidence: {
+    settlement_id: string;
+    purchase_id: string;
+    stay_id: string | null;
+    folio_id: string | null;
+    connector_kind: string;
+    folio_identity_strategy: string;
+    interface_lifecycle_state: string;
+    settlement_status: string;
+    purchase_state: string;
+  };
+  attempts: ReviewAttempt[];
+  review: {
+    history: { action: string; actor: string; reason: string; created_at: string }[];
+    version: number | null;
+    terminal_action: string | null;
+    escalation_count: number;
+    retry_authorized_attempt_no: number | null;
+    retry_authorization_consumed: boolean;
+  };
+  diagnostics: {
+    attempt_count: number;
+    unknown_attempt_count: number;
+    has_unknown_history: boolean;
+    interface_freshness_block: string | null;
+  };
+  available_actions: string[];
+  evidence_contract?: { source_types: string[] };
+  limitations: string[];
+};

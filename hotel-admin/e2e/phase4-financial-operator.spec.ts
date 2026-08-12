@@ -29,6 +29,34 @@ const HOLDS = [
     amount_minor: null, currency: "", held_at: new Date().toISOString() },
 ];
 
+const REVIEW_ROW = {
+  posting_id: "p1", pms_interface_id: "i1", execution_state: "UNKNOWN", amount_minor: 1500,
+  currency: "USD", currency_exponent: 2, latest_attempt_no: 1, latest_p_number: "42",
+  latest_pa_as_status: null, outbox_state: "HELD_RECOVERY", review_version: 0,
+  terminal_review_action: null, awaiting_manual_review: true, created_at: new Date().toISOString(),
+};
+const REVIEW_DETAIL = {
+  posting: REVIEW_ROW,
+  pinned_evidence: { settlement_id: "s1", purchase_id: "pu1", stay_id: "st1", folio_id: "f1",
+    connector_kind: "protel-fias", folio_identity_strategy: "UNIQUE_PER_STAY",
+    interface_lifecycle_state: "ACTIVE", settlement_status: "REQUIRED",
+    purchase_state: "AWAITING_SETTLEMENT" },
+  attempts: [{ attempt_no: 1, p_number: "42", rn: "101", g_number: "7", outcome: "UNKNOWN",
+    pa_as_status: null, sent_at: new Date().toISOString(), response_at: null }],
+  review: { history: [], version: 0, terminal_action: null, escalation_count: 0,
+    retry_authorized_attempt_no: null, retry_authorization_consumed: false },
+  diagnostics: { attempt_count: 1, unknown_attempt_count: 1, has_unknown_history: true,
+    interface_freshness_block: null },
+  available_actions: ["CONFIRM_POSTED", "ESCALATE"],
+  evidence_contract: { source_types: ["PMS_SCREEN", "PROVIDER_DASHBOARD"] },
+  limitations: ["Programmatic PMS reversal is capability=false in v1."],
+};
+const SETTLEMENT = { settlement_id: "s1", purchase_id: "pu1", method: "ONLINE_PAYMENT", status: "SETTLED",
+  purchase_state: "GRANTED", amount_minor: 1000, currency: "USD", currency_exponent: 2 };
+const PAYMENT = { payment_id: "x1", transaction_type: "CHARGE", status: "CAPTURED",
+  provider: "test-double", amount_minor: 1000, currency: "USD", currency_exponent: 2,
+  parent_transaction_id: null };
+
 async function installBackend(page: Page, mutations: Mutations, opts: { holdsAfter?: any[] } = {}) {
   let resolved = 0;
   // The middleware gates every page on a session cookie. Setting one is what makes these specs exercise the
@@ -69,6 +97,24 @@ async function installBackend(page: Page, mutations: Mutations, opts: { holdsAft
         return json({ resolved: true });
       case path === "/financial-ops/recovery/release":
         return json({ released: true, epoch: 2 });
+      case path === "/financial-review/actions":
+        return json({ actions: [
+          { action: "CONFIRM_POSTED", terminal: true, needs_evidence: true, accepts_amount: false,
+            summary: "the folio already shows it" },
+          { action: "CREATE_REVERSAL", terminal: true, needs_evidence: true, accepts_amount: true,
+            summary: "record a reversal ledger row" },
+          { action: "ESCALATE", terminal: false, needs_evidence: false, accepts_amount: false,
+            summary: "someone else must look" },
+        ] });
+      case path === "/financial-review/queue":
+        return json({ queue: [REVIEW_ROW] });
+      case path === "/financial-review/postings/p1":
+        return json(REVIEW_DETAIL);
+      case path === "/financial-ops/settlements":
+        return json({ settlements: [SETTLEMENT] });
+      case path === "/financial-ops/settlements/s1":
+        return json({ settlement: SETTLEMENT, payments: [PAYMENT], available_actions: [],
+          note: "Refund and chargeback initiation are NOT available from this surface in Phase 4." });
       default:
         return json({ error: "not_found" }, 404);
     }
@@ -177,5 +223,43 @@ test.describe("Phase 4 financial operator surface", () => {
         expect(name, `${role} #${i} has no accessible name`).not.toBe("");
       }
     }
+  });
+
+  test("manual review offers only the authorized actions and records a decision", async ({ page }) => {
+    const mutations: Mutations = [];
+    await installBackend(page, mutations);
+    await page.goto("/financial-review");
+
+    await expect(page.getByText(/nobody knows whether the folio was charged/i)).toHaveCount(0);
+    await page.getByRole("button", { name: /^review$/i }).first().click();
+    await expect(page.getByText(/nobody knows whether the folio was charged/i)).toBeVisible();
+
+    const select = page.getByLabel(/what did you establish/i);
+    await expect(select.locator('option[value="CONFIRM_POSTED"]')).toHaveCount(1);
+    // available_actions did not include it, so the screen must not offer it
+    await expect(select.locator('option[value="CREATE_REVERSAL"]')).toHaveCount(0);
+
+    await select.selectOption("CONFIRM_POSTED");
+    await page.getByLabel(/^why$/i).fill("the folio shows the charge");
+    await page.getByLabel(/evidence source/i).selectOption("PMS_SCREEN");
+    await page.getByLabel(/reference to it/i).fill("folio screen 14:22");
+    await page.getByLabel(/your password/i).fill("hunter2");
+    await page.getByRole("button", { name: /record decision/i }).click();
+
+    const decision = mutations.find((m) => m.path.endsWith("/actions"));
+    expect(decision).toBeTruthy();
+    expect(decision!.body).toMatchObject({ action: "CONFIRM_POSTED", expected_version: 0 });
+    expect(Object.keys(decision!.body)).not.toContain("actor");
+  });
+
+  test("the settlement browser shows the charge and offers no refund", async ({ page }) => {
+    await installBackend(page, []);
+    await page.goto("/financial-settlements");
+    await page.getByRole("button", { name: /^open$/i }).first().click();
+    await expect(page.getByText("CAPTURED")).toBeVisible();
+    for (const forbidden of [/refund/i, /chargeback/i, /reverse/i]) {
+      await expect(page.getByRole("button", { name: forbidden })).toHaveCount(0);
+    }
+    await expect(page.getByText(/not available from this surface/i)).toBeVisible();
   });
 });

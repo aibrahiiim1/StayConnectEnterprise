@@ -2,7 +2,7 @@
 
 **Status:** AUTHORIZED — **IMPLEMENTATION IN PROGRESS (DARK)**. Product-Owner decision **D18**, transition **T0029** (2026-08-11); implementation progress recorded in transition **T0030** (2026-08-12) under the SAME authorization — no new decision was created.
 **Delivered so far:** WS-A (migrations 0011 + **0012 hardening** + **0013 reversal ledger**), WS-B, WS-C, WS-D, WS-E and the financial-core half of WS-K, all verified DARK against disposable PostgreSQL 16 and wired into `.github/workflows/phase4-financial-core.yml`.
-**Still open:** WS-F frontend is DELIVERED for the health and recovery screens and still open for the Manual Review queue screen; WS-G (payments) is **backend-closed in DARK** — durable intent, resolved financial identity, the authenticated notification boundary, settlement runtime, the Phase-2 entitlement handoff and the least-privilege role boundary are delivered and verified, and no provider adapter exists or is authorized; WS-H (`FINANCIAL_RECOVERY_MODE`) and WS-I (observability) are DELIVERED in DARK; WS-J (operator surface) is partially delivered (financial health, financial recovery); WS-L (DARK deployment) is not started.
+**Still open:** WS-F frontend and WS-J are DELIVERED for financial health, financial recovery, Manual Review and the settlement browser; WS-G (payments) is **backend-complete in DARK** with the restricted-role trust boundary closed and no provider adapter authorized or written; WS-H (`FINANCIAL_RECOVERY_MODE`) is **complete in DARK** including the structural full-rail hold and the supported restore-generation model; WS-I (observability) is DELIVERED; WS-L (the authorized controlled live-DARK deployment and the reboot/rollback drill) is NOT started.
 **Not accepted, not closed.** Every Phase-4 flag is OFF and no real financial traffic has occurred.
 **Verification status:** AUTHORITATIVE CI EXISTS AND IS GREEN. `Phase 4 Financial Core CI` runs on every
 push to this branch and has passed on the delivered heads — see `phase4_authoritative_ci_*` in
@@ -195,12 +195,16 @@ identical schema fingerprint under `iam_v2_scratch/phase4_0011_financial.sh`.
 | `0018_phase4_financial_identity_and_privilege` | Authoritative provider/merchant configuration, the controlled grant path, operational role grants |
 | `0019_phase4_financial_recovery` | `FINANCIAL_RECOVERY_MODE`: the financial epoch, held work, operator reconciliation and release |
 | `0020_phase4_financial_observability` | `posting_outbox.enqueued_at`, so backlog AGE is a real signal rather than an inference |
+| `0021_phase4_trust_boundary` | High-level operations for the restricted runtime; EXECUTE on every low-level definer primitive revoked |
+| `0022_phase4_recovery_closure` | The STRUCTURAL hold (existing outbox work becomes non-sendable), rail-specific reconciliation, release verified against the records, legacy identity provenance |
+| `0023_phase4_restore_generation` | The supported restore-generation model: a management-partition marker the database cannot rewrite, plus the unsupported-raw-snapshot path |
 
 ### Authoritative CI
 
 `.github/workflows/phase4-financial-core.yml` is the only authoritative Phase-4 gate. It runs, in order:
-gofmt, `go build`, `go vet`, the pre-0011 invariant suite on both chains, the migrations 0011–0020 DB gate,
+gofmt, `go build`, `go vet`, the pre-0011 invariant suite on both chains, the migrations 0011–0023 DB gate,
 the least-privilege role proof, the payment concurrency proof, the PG16 integration matrix (posting, review
 API, financial-ops API, payment runtime, recovery, restricted-role end-to-end, Phase-2 free grant, entitlement
 exactly-once), the DARK static assertion, and the Hotel-Admin typecheck, unit tests, flags-OFF production
-build and financial-operator E2E.
+build and financial-operator E2E, the supported restore drill, and a self-test that deliberately breaks a
+step and fails if the gate still reports success.
