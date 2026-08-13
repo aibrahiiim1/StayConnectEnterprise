@@ -91,8 +91,27 @@ sys.stdout.write(((d.get('title') or '') + chr(10) + (d.get('body') or '')))
 fi
 
 # ---- find the PR body, in this run, without guessing -----------------------------------------------------
+#
+# ORDER MATTERS: the LIVE PR is read FIRST, and the webhook payload is only a fallback.
+#
+# This used to read GITHUB_EVENT_PATH first. That payload is a SNAPSHOT taken when the event fired, so a
+# re-run replays the ORIGINAL body no matter what the PR says now -- which means correcting a stale PR body
+# and re-running the job could never turn it green, and the only way out was to push a commit. Observed on
+# run 31746141832: attempt 1 failed on a missing receipt id, the body was corrected, attempt 2 replayed the
+# old body and failed identically. A check on a live surface has to read the live surface.
 body=""
-if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  ref="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}"
+  owner="${REPO%%/*}"
+  body="$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN"       "https://api.github.com/repos/$REPO/pulls?state=open&head=$owner:$ref" 2>/dev/null     | $PY3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d=[]
+sys.stdout.write((d[0].get('body') or '') if isinstance(d,list) and d else '')
+" 2>/dev/null)"
+  [ -n "$body" ] && note "PR body read LIVE from the API (not from the frozen event payload)"
+fi
+if [ -z "$body" ] && [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
   body="$($PY3 -c "
 import json,sys
 try: e=json.load(open(sys.argv[1],encoding='utf-8'))
@@ -101,6 +120,7 @@ pr=e.get('pull_request') or {}
 sys.stdout.write(pr.get('body') or '')
 " "$GITHUB_EVENT_PATH" 2>/dev/null)"
 fi
+# (Kept as a last resort for a token that only became available after the block above ran.)
 if [ -z "$body" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
   ref="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}"
   owner="${REPO%%/*}"
