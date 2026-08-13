@@ -1,4 +1,0 @@
-commit aea2b8838f8b8595a08f9e4fd27c18ce447dbd68
-Date:   Fri Aug 14 01:18:41 2026 +0300
-
-    Phase 4 closure correction (T0046): static current-state prose outside the generated block
