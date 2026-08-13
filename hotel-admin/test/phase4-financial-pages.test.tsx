@@ -110,6 +110,12 @@ const HELD_STATUS = {
   recovery: { Epoch: 2, Reason: "RESTORE_DETECTED", Active: true, HeldTotal: 1, HeldOpen: 1,
     EnteredAt: "2026-08-12T10:00:00Z", ReleasedAt: "" },
 };
+// The zero-attempt queue is served alongside the holds. Empty here: these tests are about the ordinary
+// reconciliation path, and a screen that started calling something new should fail loudly.
+const NO_ZERO = {
+  queue: [], limit: 200, evidence_contract: { source_types: ["PMS_FOLIO_INSPECTION", "PMS_REPORT"] },
+  note: "n/a", eligibility: "n/a",
+};
 const HELD_HOLDS = {
   holds: [{ hold_id: "h1", work_kind: "PAYMENT_TRANSACTION", work_id: "w1", held_status: "PENDING",
     amount_minor: 1000, currency: "USD", held_at: "2026-08-12T10:00:00Z" }],
@@ -120,6 +126,7 @@ describe("financial recovery", () => {
     route({
       "/financial-ops/recovery": HELD_STATUS,
       "/financial-ops/recovery/holds": HELD_HOLDS,
+      "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView />);
     expect(await screen.findByText("FINANCIAL RECOVERY")).toBeInTheDocument();
@@ -134,6 +141,7 @@ describe("financial recovery", () => {
     route({
       "/financial-ops/recovery": HELD_STATUS,
       "/financial-ops/recovery/holds": HELD_HOLDS,
+      "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView />);
     expect(await screen.findByText(/Guest internet access is unaffected/i)).toBeInTheDocument();
@@ -143,6 +151,7 @@ describe("financial recovery", () => {
     route({
       "/financial-ops/recovery": HELD_STATUS,
       "/financial-ops/recovery/holds": HELD_HOLDS,
+      "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView />);
     const btn = await screen.findByRole("button", { name: /record/i });
@@ -157,6 +166,7 @@ describe("financial recovery", () => {
     route({
       "/financial-ops/recovery": HELD_STATUS,
       "/financial-ops/recovery/holds": HELD_HOLDS,
+      "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     post.mockImplementation(async (path: string, body: any) => {
       sentPath = path;
@@ -193,6 +203,7 @@ describe("financial recovery", () => {
     route({
       "/financial-ops/recovery": HELD_STATUS,
       "/financial-ops/recovery/holds": HELD_HOLDS,
+      "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     const { unmount } = render(<FinancialRecoveryView />);
     await screen.findByText("FINANCIAL RECOVERY");
@@ -202,6 +213,7 @@ describe("financial recovery", () => {
     route({
       "/financial-ops/recovery": { recovery: { ...HELD_STATUS.recovery, HeldOpen: 0 } },
       "/financial-ops/recovery/holds": { holds: [] },
+      "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView />);
     expect(await screen.findByRole("button", { name: /release financial recovery/i })).toBeInTheDocument();
@@ -211,6 +223,7 @@ describe("financial recovery", () => {
     route({
       "/financial-ops/recovery": HELD_STATUS,
       "/financial-ops/recovery/holds": HELD_HOLDS,
+      "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView canAct={false} />);
     const btn = await screen.findByRole("button", { name: /record/i });
@@ -221,6 +234,7 @@ describe("financial recovery", () => {
     route({
       "/financial-ops/recovery": HELD_STATUS,
       "/financial-ops/recovery/holds": HELD_HOLDS,
+      "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView />);
     await screen.findByText("FINANCIAL RECOVERY");
@@ -242,8 +256,161 @@ describe("financial recovery", () => {
           EnteredAt: "", ReleasedAt: "" },
       },
       "/financial-ops/recovery/holds": { holds: [] },
+      "/financial-ops/recovery/zero-attempt": NO_ZERO,
     });
     render(<FinancialRecoveryView />);
     expect(await screen.findByText("NOT IN RECOVERY")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------- the zero-attempt path
+//
+// The state a restore can produce that nothing else on the appliance can decide: a charge that was held
+// BEFORE anything was sent, so there is no attempt and the Manual Review queue -- which keys on attempts --
+// cannot show it. Until this section existed the safe database function that resolves it was reachable from
+// no screen at all.
+
+const ZERO_ELIGIBLE = {
+  queue: [{
+    posting_id: "11111111-1111-1111-1111-111111111111", outbox_id: "o1", pms_interface_id: "i1",
+    amount_minor: 2500, currency: "USD", currency_exponent: 2,
+    hold_id: "h9", hold_resolution: "CONFIRMED_NOT_COMPLETED", retry_authorized_attempt_no: null,
+    eligible_for_retry_authorization: true,
+  }],
+  limit: 200,
+  evidence_contract: { source_types: ["PMS_FOLIO_INSPECTION", "PMS_REPORT"] },
+  note: "Authorizing a retry sends nothing.",
+  eligibility: "Eligible only when the hold was reconciled as CONFIRMED_NOT_COMPLETED.",
+};
+
+function zeroRoute(zero: any) {
+  route({
+    "/financial-ops/recovery": HELD_STATUS,
+    "/financial-ops/recovery/holds": HELD_HOLDS,
+    "/financial-ops/recovery/zero-attempt": zero,
+  });
+}
+
+describe("zero-attempt recovery", () => {
+  it("shows a never-transmitted posting that the review queue cannot show", async () => {
+    zeroRoute(ZERO_ELIGIBLE);
+    render(<FinancialRecoveryView />);
+    expect(await screen.findByText(/Never transmitted \(1\)/)).toBeInTheDocument();
+    expect(screen.getByText(/do not appear on the Manual Review screen/i)).toBeInTheDocument();
+    expect(screen.getByText("25.00 USD")).toBeInTheDocument();
+  });
+
+  it("sends the reason, the evidence and the password, and never an actor or an amount", async () => {
+    let sent: any = null;
+    let sentPath = "";
+    zeroRoute(ZERO_ELIGIBLE);
+    post.mockImplementation(async (path: string, body: any) => {
+      sentPath = path;
+      sent = body;
+      return { action_id: "a1", authorized_attempt_no: 1, transmitted: false };
+    });
+    render(<FinancialRecoveryView />);
+    await screen.findByText(/Never transmitted/);
+
+    await userEvent.type(screen.getByLabelText(/your password/i), "hunter2");
+    await userEvent.type(
+      screen.getByLabelText(/why this charge must still go out/i),
+      "checked the folio; nothing was posted",
+    );
+    await userEvent.selectOptions(
+      screen.getByLabelText(/evidence source for this posting/i),
+      "PMS_FOLIO_INSPECTION",
+    );
+    await userEvent.type(screen.getByLabelText(/reference to that evidence/i), "folio 4471");
+    await userEvent.click(screen.getByRole("button", { name: /authorize one attempt/i }));
+
+    await waitFor(() => expect(sent).not.toBeNull());
+    expect(sentPath).toBe(
+      "/financial-ops/recovery/zero-attempt/11111111-1111-1111-1111-111111111111/authorize",
+    );
+    expect(sent).toEqual({
+      reason: "checked the folio; nothing was posted",
+      evidence: { source_type: "PMS_FOLIO_INSPECTION", reference: "folio 4471" },
+      password: "hunter2",
+    });
+    for (const forbidden of ["actor", "operator_id", "amount_minor", "attempt_no"]) {
+      expect(Object.keys(sent)).not.toContain(forbidden);
+    }
+  });
+
+  it("says plainly that authorizing sends nothing", async () => {
+    zeroRoute(ZERO_ELIGIBLE);
+    post.mockResolvedValue({ transmitted: false });
+    render(<FinancialRecoveryView />);
+    await screen.findByText(/Never transmitted/);
+    await userEvent.click(screen.getByRole("button", { name: /authorize one attempt/i }));
+    expect(await screen.findByRole("status")).toHaveTextContent(/nothing has been sent/i);
+  });
+
+  it("offers no authorization for an item nobody has reconciled, and says why", async () => {
+    zeroRoute({
+      ...ZERO_ELIGIBLE,
+      queue: [{ ...ZERO_ELIGIBLE.queue[0], hold_resolution: null,
+        eligible_for_retry_authorization: false }],
+    });
+    render(<FinancialRecoveryView />);
+    await screen.findByText(/Never transmitted/);
+    expect(screen.getByText("NOT YET RECONCILED")).toBeInTheDocument();
+    expect(screen.getByText(/Reconcile this item above/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /authorize one attempt/i })).not.toBeInTheDocument();
+  });
+
+  it("shows an already-authorized posting as done rather than offering a second attempt", async () => {
+    zeroRoute({
+      ...ZERO_ELIGIBLE,
+      queue: [{ ...ZERO_ELIGIBLE.queue[0], retry_authorized_attempt_no: 1,
+        eligible_for_retry_authorization: false }],
+    });
+    render(<FinancialRecoveryView />);
+    await screen.findByText(/Never transmitted/);
+    expect(screen.getByText("ATTEMPT 1 AUTHORIZED")).toBeInTheDocument();
+    expect(screen.getByText(/Exactly one is allowed/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /authorize one attempt/i })).not.toBeInTheDocument();
+  });
+
+  it("offers no bulk action and no way to send anything", async () => {
+    zeroRoute({
+      ...ZERO_ELIGIBLE,
+      queue: [ZERO_ELIGIBLE.queue[0],
+        { ...ZERO_ELIGIBLE.queue[0], posting_id: "22222222-2222-2222-2222-222222222222" }],
+    });
+    render(<FinancialRecoveryView />);
+    await screen.findByText(/Never transmitted \(2\)/);
+    expect(screen.getAllByRole("button", { name: /authorize one attempt/i })).toHaveLength(2);
+    for (const forbidden of [/authorize all/i, /send now/i, /transmit/i, /retry all/i, /post now/i]) {
+      expect(screen.queryByRole("button", { name: forbidden })).not.toBeInTheDocument();
+    }
+  });
+
+  it("is read-only for an operator who may not act", async () => {
+    zeroRoute(ZERO_ELIGIBLE);
+    render(<FinancialRecoveryView canAct={false} />);
+    await screen.findByText(/Never transmitted/);
+    expect(screen.getByRole("button", { name: /authorize one attempt/i })).toBeDisabled();
+  });
+
+  it("hides the section entirely when no posting is in that state", async () => {
+    zeroRoute(NO_ZERO);
+    render(<FinancialRecoveryView />);
+    await screen.findByText("FINANCIAL RECOVERY");
+    expect(screen.queryByText(/Never transmitted/)).not.toBeInTheDocument();
+  });
+
+  it("names every control it adds", async () => {
+    zeroRoute(ZERO_ELIGIBLE);
+    render(<FinancialRecoveryView />);
+    await screen.findByText(/Never transmitted/);
+    for (const el of [
+      ...screen.getAllByRole("textbox"),
+      ...screen.getAllByRole("combobox"),
+      ...screen.getAllByRole("button"),
+    ]) {
+      expect(el).toHaveAccessibleName();
+    }
   });
 });

@@ -57,8 +57,13 @@ const PAYMENT = { payment_id: "x1", transaction_type: "CHARGE", status: "CAPTURE
   provider: "test-double", amount_minor: 1000, currency: "USD", currency_exponent: 2,
   parent_transaction_id: null };
 
-async function installBackend(page: Page, mutations: Mutations, opts: { holdsAfter?: any[] } = {}) {
+async function installBackend(
+  page: Page,
+  mutations: Mutations,
+  opts: { holdsAfter?: any[]; zeroQueue?: any[] } = {},
+) {
   let resolved = 0;
+  let authorized = 0;
   // The middleware gates every page on a session cookie. Setting one is what makes these specs exercise the
   // real routes rather than the login redirect; the value is never validated here because edged is mocked.
   await page.context().addCookies([
@@ -97,6 +102,17 @@ async function installBackend(page: Page, mutations: Mutations, opts: { holdsAft
         return json({ resolved: true });
       case path === "/financial-ops/recovery/release":
         return json({ released: true, epoch: 2 });
+      case path === "/financial-ops/recovery/zero-attempt":
+        return json({
+          queue: authorized > 0 ? [] : (opts.zeroQueue ?? []),
+          limit: 200,
+          evidence_contract: { source_types: ["PMS_FOLIO_INSPECTION", "PMS_REPORT"] },
+          note: "Authorizing a retry sends nothing: it authorises exactly ONE future attempt.",
+          eligibility: "Eligible only once the hold was reconciled as CONFIRMED_NOT_COMPLETED.",
+        });
+      case /\/financial-ops\/recovery\/zero-attempt\/.+\/authorize$/.test(path):
+        authorized += 1;
+        return json({ action_id: "a1", authorized_attempt_no: 1, actor: "op-1", transmitted: false });
       case path === "/financial-review/actions":
         return json({ actions: [
           { action: "CONFIRM_POSTED", terminal: true, needs_evidence: true, accepts_amount: false,
@@ -190,6 +206,78 @@ test.describe("Phase 4 financial operator surface", () => {
     await page.getByLabel(/why is it safe to resume/i).fill("every held item reconciled against the provider");
     await release.click();
     await expect(page.getByText(/money movement has resumed/i)).toBeVisible();
+  });
+
+  // ---------------------------------------------------------------- the zero-attempt path
+  //
+  // The one state a restore can produce that no other screen can decide: a charge held BEFORE anything was
+  // sent. It has no attempt, so the Manual Review queue -- which keys on attempts -- cannot list it. What a
+  // browser proves that jsdom cannot is that the whole authorization is genuinely completable: real form
+  // controls, a real submit, and the exact body that leaves the page.
+  const ZERO_ROW = {
+    posting_id: "11111111-1111-1111-1111-111111111111", outbox_id: "o1", pms_interface_id: "i1",
+    amount_minor: 2500, currency: "USD", currency_exponent: 2,
+    hold_id: "h9", hold_resolution: "CONFIRMED_NOT_COMPLETED", retry_authorized_attempt_no: null,
+    eligible_for_retry_authorization: true,
+  };
+
+  test("an operator can authorize a never-transmitted posting, and nothing is sent", async ({ page }) => {
+    const mutations: Mutations = [];
+    await installBackend(page, mutations, { zeroQueue: [ZERO_ROW] });
+    await page.goto("/financial-recovery");
+
+    await expect(page.getByText(/Never transmitted \(1\)/)).toBeVisible();
+    await expect(page.getByText("25.00 USD")).toBeVisible();
+
+    await page.getByLabel(/your password/i).fill("hunter2");
+    await page.getByLabel(/why this charge must still go out/i)
+      .fill("checked the folio directly; this charge was never posted");
+    await page.getByLabel(/evidence source for this posting/i).selectOption("PMS_FOLIO_INSPECTION");
+    await page.getByLabel(/reference to that evidence/i).fill("folio 4471");
+    await page.getByRole("button", { name: /authorize one attempt/i }).click();
+
+    await expect(page.getByText(/nothing has been sent/i)).toBeVisible();
+
+    const sent = mutations.filter((m) => /zero-attempt/.test(m.path));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].method).toBe("POST");
+    expect(sent[0].path).toBe(
+      "/financial-ops/recovery/zero-attempt/11111111-1111-1111-1111-111111111111/authorize",
+    );
+    expect(sent[0].body).toEqual({
+      reason: "checked the folio directly; this charge was never posted",
+      evidence: { source_type: "PMS_FOLIO_INSPECTION", reference: "folio 4471" },
+      password: "hunter2",
+    });
+    // the audit author comes from the session, and no amount travels with an authorization
+    for (const forbidden of ["actor", "operator_id", "amount_minor", "attempt_no"]) {
+      expect(Object.keys(sent[0].body as object)).not.toContain(forbidden);
+    }
+    // it is offered exactly once
+    await expect(page.getByRole("button", { name: /authorize one attempt/i })).toHaveCount(0);
+  });
+
+  test("an unreconciled never-transmitted posting is visible but not authorizable", async ({ page }) => {
+    await installBackend(page, [], {
+      zeroQueue: [{ ...ZERO_ROW, hold_resolution: null, eligible_for_retry_authorization: false }],
+    });
+    await page.goto("/financial-recovery");
+
+    await expect(page.getByText("NOT YET RECONCILED")).toBeVisible();
+    await expect(page.getByText(/Reconcile this item above/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /authorize one attempt/i })).toHaveCount(0);
+  });
+
+  test("the zero-attempt section offers no bulk action and no way to send", async ({ page }) => {
+    await installBackend(page, [], {
+      zeroQueue: [ZERO_ROW, { ...ZERO_ROW, posting_id: "22222222-2222-2222-2222-222222222222" }],
+    });
+    await page.goto("/financial-recovery");
+    await expect(page.getByText(/Never transmitted \(2\)/)).toBeVisible();
+    await expect(page.getByRole("button", { name: /authorize one attempt/i })).toHaveCount(2);
+    for (const forbidden of [/authorize all/i, /send now/i, /transmit/i, /post now/i]) {
+      await expect(page.getByRole("button", { name: forbidden })).toHaveCount(0);
+    }
   });
 
   test("the recovery screen offers no way to replay anything", async ({ page }) => {

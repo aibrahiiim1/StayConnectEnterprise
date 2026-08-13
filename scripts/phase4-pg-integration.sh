@@ -145,7 +145,7 @@ run_step() {
 GO=(go test -tags integration -count=1)
 
 run_step "posting core"            "${GO[@]}" -run IntegrationPosting ./internal/posting/ "$@"
-run_step "review + finops API"     "${GO[@]}" -run "IntegrationReviewAPI|IntegrationFinOpsAPI" ./cmd/edged/ "$@"
+run_step "review + finops API"     "${GO[@]}" -run "IntegrationReviewAPI|IntegrationFinOpsAPI|IntegrationZeroAttemptAPI" ./cmd/edged/ "$@"
 run_step "payment runtime"         "${GO[@]}" -run IntegrationPayment ./internal/payment/ "$@"
 # Narrowed to the free GRANT path deliberately: TestC2RollbackAtEveryBoundary seeds a fixed device MAC and
 # collides with itself when it shares a database with another suite. That is a pre-existing fixture defect

@@ -35,6 +35,10 @@ func (s *server) financialOpsRoutes() http.Handler {
 	r.Get("/recovery/holds", s.listRecoveryHolds)
 	r.Post("/recovery/holds/{id}/resolve", s.resolveRecoveryHold)
 	r.Post("/recovery/release", s.releaseRecovery)
+	// The zero-attempt path. It lives here rather than under financial-review because the postings it lists
+	// are recovery holds, and an operator reaches them from the recovery screen.
+	r.Get("/recovery/zero-attempt", s.listZeroAttemptQueue)
+	r.Post("/recovery/zero-attempt/{id}/authorize", s.authorizeZeroAttemptRetry)
 	return r
 }
 
@@ -331,4 +335,137 @@ func financialOpErr(w http.ResponseWriter, err error) {
 	default:
 		jsonErr(w, http.StatusBadRequest, "invalid", "the request could not be applied")
 	}
+}
+
+// ---------------------------------------------------------------- the zero-attempt recovery path
+//
+// A posting restored with NO surviving attempts cannot appear in the ordinary review queue, which keys on
+// attempts, and record_posting_review_action refuses it for the same reason. Before these two routes the
+// only safe way out of that state existed in the database and was reachable from nowhere -- which is not a
+// path, it is a function.
+//
+// The authorization model is the EXISTING financial-review one, unchanged: this surface is mounted under
+// resourcePermission("financial-ops"), the write requires a password step-up, the actor is taken from the
+// session and cannot be named by the request, and the reason and evidence go through the same bounded,
+// screened contract every other financial decision uses.
+
+type zeroAttemptRow struct {
+	PostingID    string  `json:"posting_id"`
+	OutboxID     string  `json:"outbox_id"`
+	InterfaceID  string  `json:"pms_interface_id"`
+	AmountMinor  int64   `json:"amount_minor"`
+	Currency     string  `json:"currency"`
+	Exponent     int16   `json:"currency_exponent"`
+	HoldID       *string `json:"hold_id"`
+	HoldResolved *string `json:"hold_resolution"`
+	RetryAttempt *int    `json:"retry_authorized_attempt_no"`
+	Eligible     bool    `json:"eligible_for_retry_authorization"`
+}
+
+// listZeroAttemptQueue shows postings held by recovery that have never been transmitted, together with
+// WHY each one is or is not eligible. The eligibility comes from the database view rather than being
+// recomputed here: a screen that disagreed with the function about what is allowed would send an operator
+// to be refused, and two copies of those rules is how that starts.
+func (s *server) listZeroAttemptQueue(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	rows, err := s.db.Query(ctx, `
+SELECT posting_id::text, outbox_id::text, pms_interface_id::text, amount_minor, currency, currency_exponent,
+       hold_id::text, hold_resolution, retry_authorized_attempt_no,
+       coalesce(eligible_for_retry_authorization, false)
+  FROM iam_v2.v_zero_attempt_recovery_queue
+ WHERE tenant_id=$1 AND site_id=$2
+ ORDER BY posting_id LIMIT 200`, s.tenantID, s.siteID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	defer rows.Close()
+	out := []zeroAttemptRow{}
+	for rows.Next() {
+		var e zeroAttemptRow
+		if err := rows.Scan(&e.PostingID, &e.OutboxID, &e.InterfaceID, &e.AmountMinor, &e.Currency,
+			&e.Exponent, &e.HoldID, &e.HoldResolved, &e.RetryAttempt, &e.Eligible); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
+			return
+		}
+		out = append(out, e)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"queue": out,
+		"limit": 200,
+		// The evidence contract travels with the queue, exactly as it does on the review surface. A second
+		// copy of it in the frontend is a copy that drifts.
+		"evidence_contract": map[string]any{"source_types": evidenceSourceTypeNames()},
+		"note": "These postings were held by recovery and have never been transmitted. Authorizing a retry " +
+			"sends nothing: it authorises exactly ONE future attempt, and only after an operator has " +
+			"established that the folio was never charged.",
+		"eligibility": "A posting is eligible only when its recovery hold was reconciled as " +
+			"CONFIRMED_NOT_COMPLETED and no retry has already been authorized.",
+	})
+}
+
+type zeroAttemptRetryReq struct {
+	Reason   string              `json:"reason"`
+	Evidence reviewEvidenceInput `json:"evidence"`
+	Password string              `json:"password"`
+}
+
+// authorizeZeroAttemptRetry is the operator route to the safe audited path. It TRANSMITS NOTHING: the
+// database records the decision in the same append-only review ledger every other financial decision uses,
+// authorises attempt number one, and returns the posting to the queue. No attempt row and no P# are
+// created, so the posting's history stays honestly empty until a real transmission happens.
+func (s *server) authorizeZeroAttemptRetry(w http.ResponseWriter, r *http.Request) {
+	var in zeroAttemptRetryReq
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed body")
+		return
+	}
+	reason, rerr := validateReason(in.Reason)
+	if rerr != nil {
+		jsonErr(w, http.StatusBadRequest, "reason_invalid", rerr.Error())
+		return
+	}
+	// Evidence is REQUIRED here. The whole authorization rests on somebody having actually looked at the
+	// folio, so "I checked" without saying where is not a decision anyone can audit later.
+	evidence, everr := validateEvidence(in.Evidence, true)
+	if everr != nil {
+		jsonErr(w, http.StatusBadRequest, "evidence_invalid", everr.Error())
+		return
+	}
+	actor, ok := s.stepUpActor(w, r, in.Password)
+	if !ok {
+		return
+	}
+
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	id := chi.URLParam(r, "id")
+
+	// Scope FIRST, and by tenant AND site. A valid operator of one property must not be able to authorize
+	// another property's money, even within the same customer. 404 rather than 403 so the API does not
+	// confirm that an out-of-scope posting exists.
+	var owned bool
+	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM iam_v2.pms_postings
+		WHERE id=$1 AND tenant_id=$2 AND site_id=$3)`, id, s.tenantID, s.siteID).Scan(&owned); err != nil || !owned {
+		jsonErr(w, http.StatusNotFound, "not_found", "no such posting in this site")
+		return
+	}
+
+	var actionID string
+	if err := s.db.QueryRow(ctx,
+		`SELECT iam_v2.p4_authorize_zero_attempt_retry($1::uuid,$2::uuid,$3,$4::jsonb)::text`,
+		id, actor, reason, evidence).Scan(&actionID); err != nil {
+		code, msg := classifyReviewError(err)
+		jsonErr(w, code, msg, reviewErrorMessage(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"action_id":             actionID,
+		"authorized_attempt_no": 1,
+		"actor":                 actor,
+		"transmitted":           false,
+		"note": "One attempt is authorized. Nothing has been sent, no attempt record and no P# were created, " +
+			"and the authorization is consumed by the attempt it authorises.",
+	})
 }

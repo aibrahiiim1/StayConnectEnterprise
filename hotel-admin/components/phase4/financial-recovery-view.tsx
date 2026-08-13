@@ -20,6 +20,8 @@ import {
   RecoveryHold,
   RecoveryResolution,
   RecoveryStatus,
+  ZeroAttemptQueue,
+  ZeroAttemptRow,
 } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
@@ -48,6 +50,7 @@ function money(minor: number | null, currency: string, exponent = 2): string {
 export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
   const [status, setStatus] = useState<RecoveryStatus | null>(null);
   const [holds, setHolds] = useState<RecoveryHold[] | null>(null);
+  const [zero, setZero] = useState<ZeroAttemptQueue | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -57,14 +60,22 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
   const [evidence, setEvidence] = useState<Record<string, string>>({});
   const [password, setPassword] = useState("");
 
+  // The zero-attempt authorization form, keyed per posting for the same reason: two half-written
+  // authorizations about two different charges must not be able to merge into one.
+  const [zaReason, setZaReason] = useState<Record<string, string>>({});
+  const [zaSource, setZaSource] = useState<Record<string, string>>({});
+  const [zaRef, setZaRef] = useState<Record<string, string>>({});
+
   const load = useCallback(async () => {
     try {
-      const [s, h] = await Promise.all([
+      const [s, h, z] = await Promise.all([
         api.get<{ recovery: RecoveryStatus }>("/financial-ops/recovery"),
         api.get<{ holds: RecoveryHold[] }>("/financial-ops/recovery/holds"),
+        api.get<ZeroAttemptQueue>("/financial-ops/recovery/zero-attempt"),
       ]);
       setStatus(s.recovery);
       setHolds(h.holds ?? []);
+      setZero(z);
       setErr(null);
     } catch (e: any) {
       setErr(e?.message ?? "Could not load recovery state");
@@ -110,6 +121,34 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       await load();
     } catch (e: any) {
       setErr(e?.message ?? "Could not release recovery");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Authorizing ONE attempt for a posting that was never transmitted. This sends nothing: it records that an
+  // operator established the folio was never charged, and permits exactly one future attempt by the ordinary
+  // worker. There is deliberately no "send now" here, and no bulk action -- each charge is decided on its own
+  // evidence or not at all.
+  async function authorizeZeroAttempt(row: ZeroAttemptRow) {
+    setBusy(row.posting_id);
+    setErr(null);
+    try {
+      await api.post(`/financial-ops/recovery/zero-attempt/${row.posting_id}/authorize`, {
+        reason: zaReason[row.posting_id] ?? "",
+        evidence: {
+          source_type: zaSource[row.posting_id] ?? "",
+          reference: zaRef[row.posting_id] ?? "",
+        },
+        password,
+      });
+      setNote(
+        "One attempt authorized. Nothing has been sent — the posting re-joins the ordinary queue and will " +
+          "be transmitted once, when recovery is released.",
+      );
+      await load();
+    } catch (e: any) {
+      setErr(e?.message ?? "Could not authorize that retry");
     } finally {
       setBusy(null);
     }
@@ -178,6 +217,126 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
           </p>
         </CardBody>
       </Card>
+
+      {(zero?.queue.length ?? 0) > 0 ? (
+        <Card>
+          <CardBody>
+            <h3 className="mb-1 text-sm font-medium text-slate-500">
+              Never transmitted ({zero!.queue.length})
+            </h3>
+            <p className="mb-3 max-w-3xl text-sm text-slate-700">
+              These charges were held before anything was sent to the PMS, so there is no attempt to review
+              and they do not appear on the Manual Review screen. {zero!.note}
+            </p>
+            <Table>
+              <THead>
+                <TR>
+                  <TH>Posting</TH>
+                  <TH>Amount</TH>
+                  <TH>What was established</TH>
+                  <TH>Authorize one attempt</TH>
+                  <TH> </TH>
+                </TR>
+              </THead>
+              <tbody>
+                {zero!.queue.map((z) => (
+                  <TR key={z.posting_id}>
+                    <TD>
+                      <code className="text-xs">{z.posting_id.slice(0, 8)}</code>
+                    </TD>
+                    <TD>{money(z.amount_minor, z.currency, z.currency_exponent)}</TD>
+                    <TD>
+                      {z.retry_authorized_attempt_no !== null ? (
+                        <Badge tone="ok">ATTEMPT {z.retry_authorized_attempt_no} AUTHORIZED</Badge>
+                      ) : z.hold_resolution ? (
+                        <Badge tone={z.eligible_for_retry_authorization ? "warn" : "default"}>
+                          {z.hold_resolution.replace(/_/g, " ")}
+                        </Badge>
+                      ) : (
+                        <Badge tone="default">NOT YET RECONCILED</Badge>
+                      )}
+                    </TD>
+                    <TD>
+                      {z.eligible_for_retry_authorization ? (
+                        <div className="space-y-2">
+                          <div>
+                            <label className="sr-only" htmlFor={`za-reason-${z.posting_id}`}>
+                              Why this charge must still go out
+                            </label>
+                            <textarea
+                              id={`za-reason-${z.posting_id}`}
+                              rows={2}
+                              className="w-72 rounded-md border border-slate-300 px-2 py-1"
+                              placeholder="Why this charge must still go out"
+                              value={zaReason[z.posting_id] ?? ""}
+                              onChange={(e) =>
+                                setZaReason({ ...zaReason, [z.posting_id]: e.target.value })
+                              }
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <div>
+                              <label className="sr-only" htmlFor={`za-source-${z.posting_id}`}>
+                                Evidence source for this posting
+                              </label>
+                              <select
+                                id={`za-source-${z.posting_id}`}
+                                className="rounded-md border border-slate-300 px-2 py-1"
+                                value={zaSource[z.posting_id] ?? ""}
+                                onChange={(e) =>
+                                  setZaSource({ ...zaSource, [z.posting_id]: e.target.value })
+                                }
+                              >
+                                <option value="">Choose…</option>
+                                {(zero!.evidence_contract?.source_types ?? []).map((t) => (
+                                  <option key={t} value={t}>
+                                    {t}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="sr-only" htmlFor={`za-ref-${z.posting_id}`}>
+                                Reference to that evidence
+                              </label>
+                              <input
+                                id={`za-ref-${z.posting_id}`}
+                                className="w-40 rounded-md border border-slate-300 px-2 py-1"
+                                placeholder="e.g. folio 4471"
+                                value={zaRef[z.posting_id] ?? ""}
+                                onChange={(e) => setZaRef({ ...zaRef, [z.posting_id]: e.target.value })}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="max-w-xs text-xs text-slate-500">
+                          {z.retry_authorized_attempt_no !== null
+                            ? "An attempt has already been authorized for this posting. Exactly one is allowed."
+                            : "Reconcile this item above as “It never completed” first — the authorization rests on that finding."}
+                        </p>
+                      )}
+                    </TD>
+                    <TD>
+                      {z.eligible_for_retry_authorization ? (
+                        <Button
+                          disabled={!canAct || busy === z.posting_id}
+                          onClick={() => void authorizeZeroAttempt(z)}
+                        >
+                          {busy === z.posting_id ? "Authorizing…" : "Authorize one attempt"}
+                        </Button>
+                      ) : null}
+                    </TD>
+                  </TR>
+                ))}
+              </tbody>
+            </Table>
+            <p className="mt-3 text-xs text-slate-500">
+              {zero!.eligibility} Authorizing sends nothing now, and it can be done once per posting.
+            </p>
+          </CardBody>
+        </Card>
+      ) : null}
 
       {open.length === 0 ? (
         <Card>

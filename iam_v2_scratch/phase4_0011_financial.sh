@@ -815,6 +815,77 @@ eq "0024..0025 DOWN -> UP produces the SAME schema as the first UP" "$UP25_FP" "
 eq "0025 is recorded in the migration ledger" "1" \
   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0025_phase4_recovery_completion_and_compliance';")"
 
+# ------------------------------------------------------------------ 0026 closure
+# C35 FAILING CLOSED, and the read model the zero-attempt operator path needs.
+#
+# The 0025 gate passed as soon as ANY archive row existed, so the export the appliance wrote about itself
+# authorized the deletion. These assertions are about the corrected property and, just as importantly,
+# about it not being routable AROUND: the flag cannot be set without external evidence even by the owner.
+echo "== 0026 C35 fail-closed + zero-attempt read model =="
+if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0026_phase4_c35_failclosed_and_operator_retry.up.sql" >/dev/null 2>&1; then
+  ok "0026 applies"
+else
+  no "0026 applies" "$(docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+      < "$ROOT/data-plane/migrations/0026_phase4_c35_failclosed_and_operator_retry.up.sql" 2>&1 | tail -2 | tr '\n' ' ')"
+fi
+UP26_FP="$(Q "$FP")"
+
+# an archive the appliance wrote about itself, digest and all
+ARCH="$(Q "SELECT iam_v2.p4_record_compliance_archive('$T'::uuid,'$S'::uuid,repeat('b',64),'/var/backups/x.json','{\"iam_v2.purchases\":1}'::jsonb)::text;")"
+eq "C35: a locally written archive does not claim a verified receipt" "f" \
+  "$(Q "SELECT receipt_verified FROM iam_v2.compliance_archives WHERE id='$ARCH';")"
+rejects "C35: a local archive with no external receipt cannot authorize a purge" \
+  "SELECT iam_v2.p4_assert_compliance_archived('$T'::uuid);" "COMPLIANCE_RECEIPT_UNVERIFIED"
+rejects "C35: the receipt flag cannot be set by hand, even as the owner" \
+  "UPDATE iam_v2.compliance_archives SET receipt_verified=true WHERE id='$ARCH';" \
+  "ca_receipt_evidence_matches_flag"
+rejects "C35: a blank authority does not satisfy the evidence constraint" \
+  "UPDATE iam_v2.compliance_archives SET receipt_verified=true, receipt_authority='  ', receipt_reference='x', receipt_verified_at=now() WHERE id='$ARCH';" \
+  "ca_receipt_evidence_matches_flag"
+rejects "C35: an archive cannot be INSERTed already verified" \
+  "INSERT INTO iam_v2.compliance_archives(tenant_id,site_id,manifest_sha256,receipt_verified,purpose) VALUES ('$T','$S',repeat('c',64),true,'CROSS_CUSTOMER_PURGE');" \
+  "ca_receipt_evidence_matches_flag"
+rejects "C35: a receipt with no reference is refused outright" \
+  "SELECT iam_v2.p4_record_compliance_receipt('$ARCH'::uuid,'an-authority','');" \
+  "COMPLIANCE_RECEIPT_EVIDENCE_REQUIRED"
+eq "C35: no role can record a receipt -- there is no authority to have heard from" "0" \
+  "$(Q "SELECT count(*) FROM (VALUES ('sc_payment_runtime'),('sc_payment_outcome'),('sc_commerce_runtime'),('sc_financial_operator'),('sc_financial_readonly'),('public')) r(x) WHERE has_function_privilege(r.x,'iam_v2.p4_record_compliance_receipt(uuid,text,text)','EXECUTE');")"
+# ...and the gate is not merely "always refuse": with real external evidence it opens. Recorded as the
+# OWNER, standing in for the day an authority exists.
+accepts "C35: a receipt with full external evidence is recordable by the owner" \
+  "SELECT iam_v2.p4_record_compliance_receipt('$ARCH'::uuid,'gate-archival-authority','receipt-0001');"
+accepts "C35: a VERIFIED receipt opens the same gate" \
+  "SELECT iam_v2.p4_assert_compliance_archived('$T'::uuid);"
+rejects "C35: custody cannot be acknowledged twice" \
+  "SELECT iam_v2.p4_record_compliance_receipt('$ARCH'::uuid,'someone-else','receipt-0002');" \
+  "COMPLIANCE_RECEIPT_ALREADY_RECORDED"
+
+eq "0026: the zero-attempt read model exists" "1" \
+  "$(Q "SELECT count(*) FROM pg_views WHERE schemaname='iam_v2' AND viewname='v_zero_attempt_recovery_queue';")"
+eq "0026: it belongs to the financial operator and to no runtime role" "1" \
+  "$(Q "SELECT count(*) FROM (VALUES ('sc_financial_operator'),('sc_payment_runtime'),('sc_payment_outcome'),('sc_commerce_runtime')) r(x) WHERE has_table_privilege(r.x,'iam_v2.v_zero_attempt_recovery_queue','SELECT');")"
+eq "0026: PUBLIC still holds EXECUTE on no SECURITY DEFINER function" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND has_function_privilege('public', p.oid, 'EXECUTE');")"
+eq "0026: every phase-4 definer function still pins its search_path" "0" \
+  "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig,'{}')) c WHERE c LIKE 'search_path=%');")"
+
+if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0026_phase4_c35_failclosed_and_operator_retry.down.sql" >/dev/null 2>&1; then
+  ok "0026 DOWN applies"
+else no "0026 DOWN applies" "down failed"; fi
+# The receipt columns SURVIVE the DOWN on purpose: an acknowledgement by an outside party is a fact about
+# the world, and a migration rolling back is not a reason to forget who acknowledged what.
+eq "0026 DOWN keeps the recorded external evidence" "gate-archival-authority" \
+  "$(Q "SELECT receipt_authority FROM iam_v2.compliance_archives WHERE id='$ARCH';")"
+if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0026_phase4_c35_failclosed_and_operator_retry.up.sql" >/dev/null 2>&1; then
+  ok "0026 DOWN -> UP re-applies cleanly"
+else no "0026 DOWN -> UP re-applies cleanly" "re-up failed"; fi
+eq "0026 DOWN -> UP produces the SAME schema as the first UP" "$UP26_FP" "$(Q "$FP")"
+eq "0026 is recorded in the migration ledger" "1" \
+  "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0026_phase4_c35_failclosed_and_operator_retry';")"
+
 
 
 # ------------------------------------------------------------------ the baseline suite, after 0011

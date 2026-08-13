@@ -925,6 +925,33 @@ export const RECOVERY_RESOLUTIONS = [
 ] as const;
 export type RecoveryResolution = (typeof RECOVERY_RESOLUTIONS)[number];
 
+// Postings held by recovery that were NEVER transmitted. They cannot appear in the Manual Review queue,
+// which keys on attempts, so before this they were reachable from no operator surface at all -- the one
+// state a restore can produce that nobody could decide.
+//
+// eligible_for_retry_authorization is SERVED, not computed here. The screen must not be able to disagree
+// with the database about what is allowed.
+export type ZeroAttemptRow = {
+  posting_id: string;
+  outbox_id: string;
+  pms_interface_id: string;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  hold_id: string | null;
+  hold_resolution: string | null;
+  retry_authorized_attempt_no: number | null;
+  eligible_for_retry_authorization: boolean;
+};
+
+export type ZeroAttemptQueue = {
+  queue: ZeroAttemptRow[];
+  limit: number;
+  evidence_contract?: { source_types: string[] };
+  note: string;
+  eligibility: string;
+};
+
 // ---------------------------------------------------------------- Phase 4 (DARK): Manual Review
 //
 // The action catalog and the evidence contract are SERVED, not declared here. §15's rules live in the
