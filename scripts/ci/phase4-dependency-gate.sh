@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
 # PHASE-4 PRODUCTION DEPENDENCY ADVISORY GATE.
 #
-# What this gate is for, and what it deliberately is not.
+# WHAT CHANGED, AND WHY IT MATTERED.
 #
-# It does NOT fail the build on any advisory. `npm audit` on a Next application reports dozens of findings
-# in build and test tooling that never reach the appliance, and a gate that goes red on all of them is a
-# gate people learn to ignore -- which is worse than no gate at all.
+# The previous version of this gate carried its own accepted-risk list (`ACCEPTED="next postcss"`) written
+# by the same agent that was delivering the code. That is self-acceptance: the party shipping the risk
+# recorded that the risk was fine, and the gate then reported PASS on a production tree with known high
+# severity advisories in it. A gate that can grant itself an exception is not measuring anything.
 #
-# It fails when the PRODUCTION dependency tree -- what actually ships -- acquires a vulnerable package that
-# is not in the recorded, triaged baseline, or loses one that is. A new production advisory is a decision
-# somebody has to make; an accepted-risk entry for a risk that no longer exists is how a real one gets lost
-# in the noise.
+# The distinction this version enforces:
 #
-# The baseline is ACCEPTED below and is assessed in docs/PHASE4_DEPENDENCY_TRIAGE.md. Changing it means
-# editing this file, which is the point: accepting a production risk should be a deliberate act with a name
-# attached to the commit.
+#   TRIAGED   an advisory that has been investigated and written up in docs/PHASE4_DEPENDENCY_TRIAGE.md.
+#             Understanding a risk is not the same as accepting it. The gate FAILS on a triaged-only
+#             production advisory, because somebody still has to decide.
+#
+#   ACCEPTED  a decision the PRODUCT OWNER made, recorded in governance/dependency-acceptances.json with the
+#             exact advisory ids it covers, who decided, which governance transition carries the decision,
+#             and when it expires. Only this makes the gate pass with a vulnerability in the tree.
+#
+# Acceptances name ADVISORIES, not packages. A package-level exception would silently absorb the next,
+# unrelated advisory published against the same package.
+#
+# It gates the PRODUCTION tree -- what actually ships to the appliance. The full tree, which includes build
+# and test tooling that never reaches an appliance, is measured and recorded on every run but is reported
+# rather than gated; conflating the two is how a gate becomes noise people learn to ignore.
 #
 # Evidence for BOTH trees is written on every run, so a reviewer sees what was true when the gate passed
 # rather than re-running it later against a registry that has moved.
@@ -22,6 +31,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${EVID:-$ROOT/.phase4-evidence}/deps"
 mkdir -p "$OUT"
+ACCEPT_FILE="$ROOT/governance/dependency-acceptances.json"
+DOC="$ROOT/docs/PHASE4_DEPENDENCY_TRIAGE.md"
 cd "$ROOT/hotel-admin" || { echo "INFRA: no hotel-admin directory"; exit 2; }
 
 # python3 on a Linux runner. On a Windows developer host the Microsoft Store ships a python3 alias that
@@ -30,70 +41,23 @@ PY=python3
 python3 --version >/dev/null 2>&1 || PY=python
 "$PY" --version >/dev/null 2>&1 || { echo "INFRA: no usable python"; exit 2; }
 
-# --- the accepted production baseline -------------------------------------------------------------------
-# `next` is here because its minimum fixing version is a framework major that was attempted in this
-# milestone, failed the Hotel-Admin browser regression suite, and was reverted rather than shipped red.
-# `postcss` is here because the production tree's copy is the one bundled inside next.
-ACCEPTED="next postcss"
+[ -f "$ACCEPT_FILE" ] || { echo "INFRA: governance/dependency-acceptances.json is missing"; exit 2; }
 
 echo "== production dependency advisories =="
 
-# The JSON is PIPED into python rather than handed over as a path. Passing a path from bash to python is
-# where an earlier version of this gate went wrong: on a Windows host the two disagree about what /tmp
-# means, python silently read a different empty file, and the gate reported every triaged advisory as gone.
-# A pipe has no path in it to disagree about.
-npm audit --omit=dev --json 2>/dev/null | tee "$OUT/npm-audit-production.json" \
-  | "$PY" -c 'import json,sys; d=json.load(sys.stdin); sys.stdout.write(" ".join(sorted(d.get("vulnerabilities",{}))))' \
-  > "$OUT/prod-packages.txt"
-npm audit --json 2>/dev/null | tee "$OUT/npm-audit-full.json" \
-  | "$PY" -c 'import json,sys; d=json.load(sys.stdin); sys.stdout.write(str(len(d.get("vulnerabilities",{}))))' \
-  > "$OUT/full-count.txt"
+# The audit output is written to the evidence directory and the judgement reads it from there. An earlier
+# version passed a path through /tmp, where a Windows host and MSYS disagree about what the path means and
+# python silently read a different, empty file. Everything here stays inside $OUT, which both agree about.
 
+npm audit --omit=dev --json 2>/dev/null > "$OUT/npm-audit-production.json"
+npm audit --json 2>/dev/null > "$OUT/npm-audit-full.json"
 [ -s "$OUT/npm-audit-production.json" ] || { echo "INFRA: npm audit produced no output"; exit 2; }
 
-PROD="$(tr -d '\r' < "$OUT/prod-packages.txt")"
-FULL_N="$(tr -d '\r' < "$OUT/full-count.txt")"
-PROD_N=0
-for _p in $PROD; do PROD_N=$((PROD_N + 1)); done
+# One python pass does the whole judgement, because the comparison is between two structured documents and
+# expressing it in shell is how the previous version accumulated its quoting bugs.
+"$PY" "$ROOT/scripts/ci/dependency-judgement.py" \
+  "$OUT/npm-audit-production.json" "$OUT/npm-audit-full.json" "$ACCEPT_FILE" "$DOC"
+rc=$?
 
-echo "  full tree:       ${FULL_N:-?} advisory group(s)   (recorded, not gated)"
-echo "  production tree: $PROD_N advisory group(s)"
 echo "  evidence:        $OUT/npm-audit-production.json, $OUT/npm-audit-full.json"
-
-rc=0
-
-# Anything in production that is not on the accepted list is a decision nobody has made yet.
-for pkg in $PROD; do
-  case " $ACCEPTED " in
-    *" $pkg "*) echo "  [accepted]  $pkg — assessed in docs/PHASE4_DEPENDENCY_TRIAGE.md" ;;
-    *)          echo "  [NEW]       $pkg — a production advisory that has never been assessed"; rc=1 ;;
-  esac
-done
-
-# ...and anything on the accepted list that production no longer reports is a stale accepted risk.
-for pkg in $ACCEPTED; do
-  case " $PROD " in
-    *" $pkg "*) ;;
-    *) echo "  [stale]     $pkg is accepted here but is no longer reported — remove it from this gate and"
-       echo "              from docs/PHASE4_DEPENDENCY_TRIAGE.md"
-       rc=1 ;;
-  esac
-done
-
-# The triage document must exist and must still assess what this gate claims it assesses.
-DOC="$ROOT/docs/PHASE4_DEPENDENCY_TRIAGE.md"
-if [ ! -f "$DOC" ]; then
-  echo "  [FAIL]      docs/PHASE4_DEPENDENCY_TRIAGE.md is missing"; rc=1
-else
-  for pkg in $ACCEPTED; do
-    grep -q "$pkg" "$DOC" || { echo "  [FAIL]      the triage document does not assess $pkg"; rc=1; }
-  done
-fi
-
-echo
-if [ "$rc" = 0 ]; then
-  echo "PHASE4_DEPENDENCY_GATE: PASS (production advisories are exactly the triaged baseline)"
-else
-  echo "PHASE4_DEPENDENCY_GATE: FAIL — the production dependency risk has changed and needs a decision"
-fi
 exit $rc

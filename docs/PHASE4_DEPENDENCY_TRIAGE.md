@@ -1,120 +1,162 @@
 # Phase-4 Hotel-Admin dependency advisory triage
 
+**Status as of 2026-08-13: both dependency trees report ZERO advisories.** Nothing is accepted, nothing is
+outstanding, and `governance/dependency-acceptances.json` is empty because there is nothing to accept.
+
 Evidence, preserved verbatim, is in [`docs/evidence/phase4/`](evidence/phase4/):
 
-| File | Tree |
-|---|---|
-| `npm-audit-full.json` | `npm audit --json` — every dependency, including dev and build tooling |
-| `npm-audit-production.json` | `npm audit --omit=dev --json` — only what ships to the appliance |
+| File | Tree | Result |
+|---|---|---|
+| `npm-audit-production.json` | `npm audit --omit=dev --json` — only what ships to the appliance | **0** advisories |
+| `npm-audit-full.json` | `npm audit --json` — every dependency, including dev and build tooling | **0** advisories |
 
 Nothing here was resolved with `npm audit fix --force`.
 
-## The number that matters
+---
 
-| Tree | Advisory groups | Severity |
-|---|---|---|
-| Full | 13 | 1 critical, 10 high, 2 moderate |
-| **Production-only** | **2** (`next`, `postcss`) | high |
+## What the previous version of this document got wrong
 
-The production tree contains exactly two vulnerable packages, and the `postcss` entry there is the copy
-bundled inside `next` — our direct `postcss` (8.5.26) is build tooling and is already patched. So the entire
-production exposure is **Next.js**.
+It stated: *"Minimum fixing version, per npm's own resolver: `next@16.3.0`, `isSemVerMajor: true`. There is
+no 14.x or 15.x release that clears these; the advisory range is `9.3.4-canary.0 - 16.3.0-preview.10`."*
 
-## Production exposure: Next.js
+That was read off npm's **aggregated** `range` and its `fixAvailable`, which reports the latest release
+rather than the earliest sufficient one. The **per-advisory** ranges in the same JSON say something
+different. The 22 advisories against `next@14.2.35` had these upper bounds:
 
-Twenty-two advisories against `next@14.2.35`, all `high`. By GHSA, with the ones that matter most to an
-authenticated admin app behind a reverse proxy first:
+| Upper bound | Advisories |
+|---|---|
+| `<15.0.8` | 1 |
+| `<15.5.10`, `<15.5.13`, `<15.5.14`, `<15.5.15` | 4 |
+| `<15.5.16` | 9 |
+| **`<15.5.21`** | 8 |
 
-| GHSA | Class | Reachability here |
-|---|---|---|
-| `GHSA-ggv3-7p47-pfv8` | HTTP request smuggling in rewrites | Hotel Admin runs behind Caddy and uses Next rewrites for `/api/edge/*` |
-| `GHSA-36qx-fr4f-26g5` | Middleware / proxy bypass (Pages Router) | Hotel Admin gates every route on a session cookie **in middleware** |
-| `GHSA-3g8h-86w9-wvmq` | Middleware / proxy redirects cache-poisoned | same middleware path |
-| `GHSA-ffhc-5mcf-pf4q`, `GHSA-gx5p-jg67-6x7h` | XSS (App Router, beforeInteractive) | the whole admin app is App Router |
-| `GHSA-vfv6-92ff-j949`, `GHSA-wfc6-r584-vfw7`, `GHSA-68g3-v927-f742`, `GHSA-4633-3j49-mh5q` | RSC cache poisoning / response-body confusion | App Router |
-| `GHSA-c4j6-fc7j-m34r`, `GHSA-89xv-2m56-2m9x`, `GHSA-p9j2-gv94-2wf4` | SSRF (Server Actions, rewrites) | no Server Actions in this app; rewrites are used |
-| `GHSA-955p-x3mx-jcvp` | Unauthenticated disclosure of internal Server Function IDs | App Router |
-| `GHSA-9g9p-9gw9-jx7f`, `GHSA-h64f-5h5j-jqjh`, `GHSA-3x4c-7xq6-9pq8` | Image-optimizer DoS / unbounded cache | `next/image` is not used by any Phase-3 or Phase-4 screen |
-| `GHSA-q4gf-8mx6-v5v3`, `GHSA-8h8q-6873-q5fj`, `GHSA-m99w-x7hq-7vfj`, `GHSA-4c39-4ccg-62r3`, `GHSA-h25m-26qc-wcjf` | DoS (Server Components, Server Actions, deserialization) | App Router |
+The highest bound is `15.5.21`. **Every listed advisory is cleared by a 15.5.x release** — no framework
+major was ever required. The Next 16 attempt in the previous milestone was therefore a larger step than the
+advisories asked for, and it was that larger step — not the security fix — that produced the browser
+regression.
 
-**Minimum fixing version, per npm's own resolver:** `next@16.3.0`, `isSemVerMajor: true`. There is no 14.x
-or 15.x release that clears these; the advisory range is `9.3.4-canary.0 - 16.3.0-preview.10`. So the
-earlier statement that "Next 16 is the only fix" was not an assumption — it is what the advisory data says,
-and it is recorded here rather than asserted.
+The lesson is narrow and worth keeping: `fixAvailable` answers *"what is the newest version?"*, not
+*"what is the minimum patched version?"*. The second question is answered by reading the ranges.
 
-## The upgrade was attempted in this milestone, and it is NOT shipped
+---
 
-The milestone authorizes a framework major *if it is genuinely required to remove a production-exposed
-blocker*, provided it receives the full Hotel-Admin regression suite. It is required. It was attempted. It
-does not pass the suite, so it is not shipped.
+## What was delivered
 
-Measured, on `next@16.3.0` + `react@19.2.8` + `eslint@10`:
+| Package | Before | After | Why this version |
+|---|---|---|---|
+| `next` | `14.2.35` | **`15.5.23`** | 15.5.21 is the minimum that clears every advisory; `.23` is the current patch on that line. Its peer range is `react: ^18.2.0 \|\| ^19.0.0`, so **React stays at 18.3.1** — no React 19 migration. |
+| `postcss` (production copy) | `8.4.31`, pinned inside `next` | **`8.5.26`** via `overrides` | `next` declares `postcss: 8.4.31` as a hard dependency, so the production tree carried the vulnerable copy no matter how new the direct devDependency was. Advisories ran to `<=8.5.22`. |
+| `sharp` | `0.34.5`, optional dep of `next` | **`0.35.3`** via `overrides` | The libvips CVEs (`CVE-2026-33327/33328/35590/35591`) are fixed in `>=0.35.0`. Verified to load and encode: libvips **8.18.3**. |
+| `vitest` | `2.1.9` | **`3.2.7`** | Clears the `vitest` UI-server RCE (critical) and the whole `vite`/`vite-node`/`esbuild`/`@vitest/mocker` chain beneath it. Dev-only, but it costs one line and removes five advisory groups. |
+| `eslint-config-next` | `14.2.5` | `15.5.23` | Kept aligned with `next`. Not exercised: this repository has no ESLint configuration file and CI does not run lint. |
 
-| Gate | Result |
+`react` and `react-dom` are **unchanged at 18.3.1**. This is the point: the security remediation did not
+require React 19, and the previously reported "React 19 regression" was never a React problem at all.
+
+---
+
+## The PMS-Interfaces regression: what it actually was
+
+The previous milestone recorded seven failures in `e2e/phase3-pms-interfaces.spec.ts` under Next 16 and
+described them as *"the PMS-interfaces page renders its layout and navigation but no page content at all …
+the fetch or its effect is not completing under React 19 / Next 16."*
+
+That diagnosis was wrong, and it was wrong in a way that mattered: it attributed a test-harness problem to
+the application and used it to justify keeping a vulnerable production tree.
+
+The same seven tests fail on **Next 15.5.23 with React 18.3.1**. Reproducing them with a page snapshot shows
+the real cause immediately:
+
+```yaml
+- main:
+    - heading "PMS interfaces" [level=1]
+    - table:
+        - row:
+          - cell "Main PMS"
+          - cell "protel-fias"
+          ...
+          - cell: [ button "Open" ]           # <- the page rendered perfectly
+- generic [active]:
+    - menu "Next.js Dev Tools Items"          # <- and this was on top of it
+```
+
+The page had rendered its data all along. **Next 15.5 introduces a floating Dev Tools panel in `next dev`**,
+bottom-left, above the page. Playwright's click on the `Open` button landed on the overlay, so the detail
+section never opened and every assertion after it timed out. The earlier "no console error, no failed
+request, the component simply produces nothing" observation was consistent with this the whole time — the
+component produced everything; the click never reached it.
+
+**Fix:** `devIndicators: false` in `next.config.mjs`. It applies to `next dev` only, so the deployed
+appliance bundle is byte-identical either way, and the browser suite goes back to measuring the application
+rather than the development tooling.
+
+---
+
+## The full regression surface, re-run on the delivered tree
+
+`next@15.5.23` · `react@18.3.1` · `postcss@8.5.26` · `sharp@0.35.3` · `vitest@3.2.7`
+
+| Surface | Result |
 |---|---|
 | `tsc --noEmit` | **pass** |
-| `next build` (Phase-4 flags OFF) | **pass** — every route compiles, middleware builds as the renamed "Proxy" |
-| `vitest run` (all suites) | **pass**, 83/83 |
-| `playwright test` (all suites) | **FAIL — 49 passed, 7 failed** |
+| `next build` (Phase-4 flags OFF) | **pass** — every route compiles, middleware builds at 34 kB |
+| standalone bundle (`node .next/standalone/server.js`) | **pass** — boots, serves `/login` 200, middleware issues `307 → /login?next=%2Fdashboard` |
+| `vitest run`, all suites | **pass — 92/92** |
+| `playwright test`, all suites | **pass — 64/64** |
+| ├ `phase3-pms-interfaces.spec.ts` | **pass — 10/10** (was 3/10) |
+| ├ `phase3-guest-portal`, `phase3-guest-portal-resilience`, `phase3-stays-grace` | pass |
+| ├ `phase4-financial-operator.spec.ts` | pass, including the 3 new zero-attempt tests |
+| ├ `hotel-admin.spec.ts`, `guest-portal.spec.ts` | pass |
+| └ `auth-middleware.spec.ts` *(new)* | **pass — 5/5** |
+| `npm audit --omit=dev` | **0 advisories** |
+| `npm audit` | **0 advisories** |
 
-Every failure is in `e2e/phase3-pms-interfaces.spec.ts`, and they share one symptom: the PMS-interfaces page
-renders its layout and navigation but **no page content at all** — no status badges, no Publish control, no
-revision table. There is no page error, no console error and no failed request; the component simply
-produces nothing. That page returns `null` until its health fetch resolves, so the fetch or its effect is
-not completing under React 19 / Next 16, and the same spec passes on 14.2.35.
+### New: browser coverage for the authentication gate
 
-Diagnosing an App-Router data-loading regression across seven browser tests is open-ended work on a page
-that governs PMS credentials and revision publication. Doing it inside a financial milestone — where the
-reviewer's attention is on money handling — is the wrong place to discover a routing or effect-ordering
-regression, and shipping a framework major whose own regression suite is red would be worse than the
-advisory it fixes.
+`e2e/auth-middleware.spec.ts` did not exist before. The middleware is the single function that gates every
+operator page on this appliance, it is the part of Next most likely to change across a major, and
+`middleware.ts` itself records a previous 500 caused by exactly that. It had no browser test. It now
+proves, in a real browser:
 
-**The upgrade was reverted.** The delivered baseline is `next@14.2.35` + `react@18.3.1`, re-verified after
-the revert: `tsc` clean, `next build` clean, **83/83 unit**, **56/56 browser**.
+- an operator with no session is redirected to `/login?next=<path>` from every app route, and the login page
+  actually renders rather than the redirect landing on an error;
+- nothing from a gated page reaches the browser for an unauthenticated request;
+- an operator who already has a session is redirected off `/login` to `/dashboard`;
+- `/icon.svg` is exempt, so the login page can render itself;
+- the redirect carries an **absolute** `Location`, which is what Next's middleware normalisation requires.
 
-### What this leaves
+---
 
-`next@14.2.35` picks up the critical Cache Poisoning fix resolved in the previous milestone and every other
-patch on the 14.2 line. It does not clear the 22 advisories above.
+## The gate that reports on all this
 
-Compensating controls, stated as controls and not as fixes:
+`scripts/ci/phase4-dependency-gate.sh` was rewritten in this milestone. The previous version carried
+`ACCEPTED="next postcss"` **inside the script itself**, written by the same agent that was delivering the
+code — so it reported PASS on a production tree with high-severity advisories in it. A gate that can grant
+itself an exception measures nothing.
 
-- Hotel Admin listens on `127.0.0.1:3100` and is reached only through Caddy on the hotel LAN. It is not
-  internet-facing and is not multi-tenant: one appliance serves one property.
-- Every route except `/login` requires an authenticated operator session, and edged re-authorizes every API
-  call independently of the frontend.
-- `next/image` is unused, so the image-optimizer advisories have no reachable surface.
-- No Server Actions are used.
+The rewritten gate distinguishes two things the old one conflated:
 
-None of that makes the smuggling, middleware-bypass or XSS advisories unreachable. They remain **an open
-production-exposed blocker**, and closing them needs the Next 16 upgrade delivered as its own authorized
-change with the Phase-3 browser regressions diagnosed and fixed first.
+| | Meaning | Gate verdict |
+|---|---|---|
+| **TRIAGED** | investigated and written up in this document | **FAIL** — understanding a risk is not accepting it |
+| **PO-ACCEPTED** | recorded in `governance/dependency-acceptances.json` with the exact GHSA ids, `decided_by`, `decision_ref`, `decided_on` and `expires_on` | PASS, until it expires |
 
-## Build-time only
+Acceptances name **advisories**, not packages, so an exception cannot silently absorb the next unrelated
+advisory published against the same package. An expired acceptance is treated as no acceptance. An
+acceptance for a risk that is no longer reported fails as stale, because a dead entry is how a live one gets
+lost in the noise.
 
-`glob` (`GHSA-5j98-mcp5-4vw2`), `minimatch` (`GHSA-3ppc-4f35-3m26`, `GHSA-7r86-cg39-jmmj`,
-`GHSA-23c5-xmqv-rm74`), `postcss` direct (`GHSA-qx2v-qp2m-jg93`, `GHSA-6g55-p6wh-862q`,
-`GHSA-r28c-9q8g-f849`, `GHSA-fxqj-rqcc-2cmp`).
+`scripts/ci/phase4-dependency-gate-selftest.sh` runs the **same** judgement file CI runs against synthetic
+audits and proves it refuses what it claims to refuse: a triaged-but-unaccepted advisory, an acceptance with
+no named decider, an expired acceptance, an acceptance of a *different* advisory in the same package, and a
+stale acceptance — while still passing a complete, current Product-Owner acceptance and a clean tree. It
+runs **before** the gate in CI, because a gate observed only passing on a clean tree has not been shown to
+do anything.
 
-These run on a developer machine or a CI runner against this repository's own sources. They do not execute
-on the appliance and never process guest or financial input. They are transitive and pinned by their
-parents; resolving them individually means overriding versions their parents were tested against.
-
-## Development / test only
-
-`vitest` (`GHSA-5xrq-8626-4rwp`, critical), `esbuild` (`GHSA-67mh-4wv8-2f99`), `vite`
-(`GHSA-4w7w-66w2-5vf9`, `GHSA-v6wh-96g9-6wx3`, `GHSA-fx2h-pf6j-xcff`).
-
-All three require a **listening dev server or UI server**. This repository never starts one: the scripts are
-`vitest run`, and CI runs `npx vitest run --reporter=default`. The Playwright web server is `next dev`,
-which is Next's server rather than Vite's.
-
-Upgrading `vitest` 2 → 4 is a major with a changed mocking API that every test file uses. It is mechanical
-but broad, and it is not a financial-milestone change.
+---
 
 ## Standing position
 
-The production tree has exactly one vulnerable package. Its fix is a framework major; the major was
-attempted under the full regression suite, failed it, and was reverted rather than shipped red. Build-time
-and dev-only advisories are recorded with their actual reachability rather than silenced. Nothing was
-resolved by force.
+There is no outstanding production dependency risk and nothing has been accepted by anybody. If a new
+advisory appears, the gate fails and the decision goes to the Product Owner — it cannot be closed by this
+document, by the gate, or by whoever is delivering the change.
