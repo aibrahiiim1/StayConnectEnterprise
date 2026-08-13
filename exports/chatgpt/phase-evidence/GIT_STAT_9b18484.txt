@@ -1,4 +1,0 @@
-commit 9b1848488e2ffd38aa8ae0a4fb674ca0589ef656
-Date:   Thu Aug 13 22:45:07 2026 +0300
-
-    Phase 4 closure correction: rule D must scan every phase maturity, not only 1B's
