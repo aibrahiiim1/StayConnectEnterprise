@@ -174,7 +174,14 @@ def cmd_validate(deep=True, manifest_equality=True):
                 fail("stale-state contradiction: next action is Product-Owner acceptance but allowed_actions still say execute Phase 1B")
     # D: after T0010, no current-state field may present the stale authoritative HEAD or "Production unchanged/untouched".
     if str(st.get("latest_transition_id", "")) >= "T0010":
-        cur_blob = " ".join([act, st.get("current_maturity", ""), p1b_mat, st.get("service_routing_state", ""),
+        # EVERY phase's maturity string is a current-state field too. This list used to name only 1B's, so a
+        # stale HEAD or a "Production unchanged" claim sitting in phases["3"].maturity -- or 1A's, or 4's --
+        # passed the rule untouched. The adversarial suite caught it the moment a correction round moved the
+        # last occurrence of that sentence out of current_maturity and into phases["3"].maturity: mutation
+        # M32 injected the stale HEAD there and NEITHER validator objected.
+        phase_maturities = " ".join(str((v or {}).get("maturity", "")) for v in (st.get("phases") or {}).values())
+        cur_blob = " ".join([act, st.get("current_maturity", ""), p1b_mat, phase_maturities,
+                             st.get("service_routing_state", ""),
                              " ".join(str(x) for x in blockers), " ".join(str(x) for x in allowed), na_txt])
         if "1844da2" in cur_blob:
             fail("stale-state contradiction: stale HEAD 1844da2 present in a current-state field after T0010")
