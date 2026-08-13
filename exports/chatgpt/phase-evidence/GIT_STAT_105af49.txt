@@ -1,0 +1,4 @@
+commit 105af49b9a0b44e6eda131b08f7d5fa6a37a2bbc
+Date:   Thu Aug 13 13:19:21 2026 +0300
+
+    Phase 4 (delivery_head): T0043 WS-L receipt, complete staged manifest, rebuilt packs, pointer and report-embedded manifest

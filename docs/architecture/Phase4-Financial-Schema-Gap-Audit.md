@@ -7,7 +7,7 @@ forbidden writes. Catalog presence alone is never recorded as acceptance evidenc
 **Original audit baseline:** branch `phase/4-financial-execution`, commit `3ea775c` (pre-0011 measurement).
 **Revised three times:** after migration 0011 and the financial execution core landed, and again after the migration-0012 hardening pass, which CORRECTED five rows this document had marked RT-OK too early (see section 11). Sections 1-2
 record the pre-0011 measurement unchanged; sections 3-10 record what closed the gaps and how it was verified.
-**Authorization:** D18 / T0029. Target maturity: DARK / NO-FINANCIAL-TRAFFIC.
+**Authorization:** D18 / T0029. **Phase 4 is ACCEPTED AND CLOSED at VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity** (D19 / T0044, 2026-08-13) against software candidate `b94112d8cb0ab63938b60f829ddd465c14491f97` and live evidence T0043. Six limitations are accepted and NOT promoted to PASS — see `docs/acceptance/StayConnect-IAM-Phase4-Live-Dark-Acceptance.md`.
 
 ---
 
@@ -275,7 +275,7 @@ Every row above was verified DARK against disposable PostgreSQL. At T0043 the wh
 | **C35** | `p4_assert_compliance_archived` refuses; an INSERT that tries to be born `receipt_verified` is refused by `ca_receipt_evidence_matches_flag` **even as the database superuser**; 0 archives, 0 verified receipts, no row names an authority. **Cross-customer purge is unavailable on the live appliance.** No external receipt verification exists and none is simulated. |
 | **C37** | 0 files under `/etc/stayconnect` and 0 systemd units mention any Phase-4 flag — DARK by absence. Every Phase-4 route on the running `edged` returns **404** while `/edge/v1/health` returns 200. No PMS socket, no provider socket, no financial worker. Verified before, after, across a reboot and after a rollback rehearsal. |
 | **C38** | Unchanged, PO-blocked. Nothing in WS-L advances it. |
-| least privilege | The five Phase-4 roles are NOLOGIN and hold no direct write on `entitlements`, `settlements`, `posting_review_actions` or `compliance_archives`; PUBLIC has EXECUTE on no Phase-4 definer function; the grant kernel is reachable by nobody; execution and outcome authorities are separated; and **no role at all** can execute `p4_record_compliance_receipt`. |
+| least privilege | The five Phase-4 roles are NOLOGIN and hold no direct write on `entitlements`, `settlements`, `posting_review_actions` or `compliance_archives`; PUBLIC has EXECUTE on no Phase-4 definer function; the grant kernel is reachable by nobody; execution and outcome authorities are separated; and **no deployed runtime, service or PUBLIC role is authorized** to execute `p4_record_compliance_receipt` — 0 of the ten roles measured hold EXECUTE and it is unreachable from the current runtime; the controlled function exists deliberately for a future real external archival authority. |
 
 Three things the live environment exposed that a disposable database could not, all fixed forward: the
 supported backup could not run at all (host `pg_dump` 14 against a 16 server, plus a `PGUSER` default that
