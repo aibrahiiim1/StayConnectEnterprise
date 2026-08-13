@@ -1,0 +1,4 @@
+commit b895f412d67c9c177b2f00cfd5c14baf6c73383d
+Date:   Thu Aug 13 04:32:10 2026 +0300
+
+    Phase 4 (delivery_head): T0041 receipt, complete staged manifest, rebuilt packs, pointer and report-embedded manifest

@@ -449,7 +449,13 @@
     "phase4_authoritative_ci_artifact_id": 9164965342,
     "phase4_authoritative_ci_artifact_digest": "sha256:ad4a4a58ecc1bc193b53530e3dfe60408c087387352cd9f2ca8c0080a3a182c4",
     "acceptance_candidate_head": "f2771dc6d0c409ff66443dc60d57fc5abecfdb6a",
-    "inventory_head": "f2771dc6d0c409ff66443dc60d57fc5abecfdb6a"
+    "inventory_head": "f2771dc6d0c409ff66443dc60d57fc5abecfdb6a",
+    "phase4_delivery_head_ci_run_id": 31658169886,
+    "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
+    "phase4_delivery_head_ci_conclusion": "success",
+    "phase4_delivery_head_ci_artifact": "phase4-financial-core-evidence-b895f412d67c9c177b2f00cfd5c14baf6c73383d",
+    "phase4_delivery_head_ci_artifact_digest": "sha256:771fae03417d8899680b6c5bc5d1a8251804a4c28446dfa916926e4a7ac1ad5e",
+    "phase4_delivery_head_ci_note": "The GOVERNANCE-ONLY delivery head b895f41 was ALSO run through the authoritative gate and passed 34/34 (run 31658169886), so the milestone has CI evidence on both the software candidate f2771dc and the delivered head itself rather than only on the candidate. The measured software diff between them is EMPTY: git diff f2771dc..b895f41 touches zero paths under data-plane/, hotel-admin/, control-plane/, scripts/, .github/, deploy/, iam_v2_scratch/ or tools/ -- only docs/, exports/ and governance/. This pointer is itself recorded in a governance-only commit above b895f41, which likewise changes no software; a committed artifact cannot name its own commit, which is the same self-reference protocol the change manifest uses."
   },
   "latest_transition_id": "T0041",
   "phase3_delivery_evidence": {
