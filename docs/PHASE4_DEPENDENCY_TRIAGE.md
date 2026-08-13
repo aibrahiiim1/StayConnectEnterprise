@@ -125,6 +125,15 @@ proves, in a real browser:
 - `/icon.svg` is exempt, so the login page can render itself;
 - the redirect carries an **absolute** `Location`, which is what Next's middleware normalisation requires.
 
+### One operational note: where the lockfile is generated
+
+`package-lock.json` is produced by a real `npm install` on **Linux** (`node:20-bookworm`), not on the
+Windows development host. `sharp` and the SWC binaries are optional platform packages, and npm's ideal-tree
+differs per platform: a Windows-generated lock omits the hoisted `@emnapi/core` and `@emnapi/runtime` that a
+Linux `npm ci` computes, and CI fails `EUSAGE — package.json and package-lock.json are not in sync`. The
+Linux-generated lock is a superset — it carries every platform's binaries — and `npm ci` reproduces it
+byte-for-byte on both Linux and Windows, with `sharp` loading on each. Measured both ways.
+
 ---
 
 ## The gate that reports on all this

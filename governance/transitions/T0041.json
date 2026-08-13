@@ -44,9 +44,10 @@
     {
       "id": "V-4",
       "area": "CI evidence language",
-      "what_was_actually_true": "T0040 recorded run 31648910147 as having succeeded 'on the FINAL DELIVERY HEAD 35ef249a'. It ran on 35ef249a, which was that milestone's SOFTWARE candidate; the literal final branch head was 71d7ac05657ddf27f84f7e8649e10319206ffd09.",
+      "what_was_actually_true": "T0040 recorded run 31648910147 as having succeeded 'on the FINAL DELIVERY HEAD 35ef249a'. It ran on 35ef249a, which was that milestone's SOFTWARE candidate; the literal final branch head was 71d7ac05657ddf27f84f7e8649e10319206ffd09. A separate run, 31649545309, DID run on 71d7ac and also succeeded 33/33 -- so the evidence for the literal final head exists; it simply was not the run the record cited, and a reader could not have checked the claim as written.",
       "correction": "The distinction is now stated exactly wherever the evidence is cited. 71d7ac is a governance/documentation commit over 35ef249a with no software or runtime change, which is precisely why the earlier run remains valid evidence for that head's software -- but 'final-head CI' was the wrong phrase for it and a reader could not have checked the claim from the record. This milestone records its authoritative run against the head it actually ran on, plus a measured diff proving no software path differs between the software candidate and any later governance-only head.",
-      "proved": "phase4_authoritative_ci_* in governance/project-state.json, and the no-software-difference diff recorded alongside it."
+      "proved": "phase4_authoritative_ci_* in governance/project-state.json, and the no-software-difference diff recorded alongside it.",
+      "measured_difference": "git diff 35ef249a..71d7ac0 touches ONLY docs/, exports/ and governance/. Zero paths under data-plane/, hotel-admin/, control-plane/, scripts/, .github/, deploy/ or iam_v2_scratch/ differ. That is why run 31648910147 remains valid evidence for the software of 71d7ac."
     }
   ],
   "external_blockers": [
