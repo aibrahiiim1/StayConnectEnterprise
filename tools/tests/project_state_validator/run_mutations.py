@@ -377,7 +377,7 @@ MUTATIONS = [
                  "")])),
  # --- Phase-2 acceptance/closure + complete-manifest self-reference contradiction classes ---
  ("M45 Phase 2 accepted (transition_accepted=true) but status not ACCEPTED_AND_CLOSED", "governance/project-state.json",
-   ("replace", [('"2":  { "status": "ACCEPTED_AND_CLOSED"', '"2":  { "status": "IN_PROGRESS"')])),
+   ("json_set", [(["phases", "2", "status"], "IN_PROGRESS")])),
  ("M46 change-manifest lists a path not present in git base..HEAD", "docs/manifests/Phase3-change-manifest.md",
    ("append", "\n| `zz-fabricated-extra-path.md` | CREATED | `A` | other | OTHER | rollback REMOVES it | fabricated |\n")),
  ("M47 acceptance decision D13 removed from the register", "governance/decision-register.json",
