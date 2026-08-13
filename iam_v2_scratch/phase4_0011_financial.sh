@@ -886,6 +886,27 @@ eq "0026 DOWN -> UP produces the SAME schema as the first UP" "$UP26_FP" "$(Q "$
 eq "0026 is recorded in the migration ledger" "1" \
   "$(Q "SELECT count(*) FROM public.schema_migrations WHERE version='0026_phase4_c35_failclosed_and_operator_retry';")"
 
+# STRUCTURAL equality across the DOWN -> UP cycle, which the catalog fingerprint above cannot prove.
+#
+# MEASURED ON THE APPLIANCE (WS-L): rolling 0026 -> 0011 and back produced an IDENTICAL schema with a
+# DIFFERENT catalog fingerprint, because dropping a column leaves its attribute slot occupied and every
+# column added after it renumbers. The catalog fingerprint happens to match on a disposable database only
+# because its dropped columns are the last ones added. So the property "a rollback returns the same schema"
+# needs a fingerprint that does not include ordinal_position -- see iam_v2_scratch/schema_structure_fingerprint.sql.
+STRUCT_FP="$(cat "$ROOT/iam_v2_scratch/schema_structure_fingerprint.sql" | grep -v '^--' | tr '\n' ' ')"
+UP26_STRUCT="$(Q "$STRUCT_FP")"
+for M in $(ls "$ROOT"/data-plane/migrations/00*_phase4_*.down.sql | sort -r); do
+  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$M" >/dev/null 2>&1
+done
+eq "the whole Phase-4 chain rolls back to 62 iam_v2 tables" "62" \
+  "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_type='BASE TABLE';")"
+for M in $(ls "$ROOT"/data-plane/migrations/00*_phase4_*.up.sql | sort); do
+  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$M" >/dev/null 2>&1
+done
+eq "0011..0026 DOWN -> UP returns the SAME SCHEMA STRUCTURE" "$UP26_STRUCT" "$(Q "$STRUCT_FP")"
+eq "...and the same object counts" "68" \
+  "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_type='BASE TABLE';")"
+
 
 
 # ------------------------------------------------------------------ the baseline suite, after 0011
