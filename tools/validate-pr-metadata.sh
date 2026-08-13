@@ -101,15 +101,43 @@ fi
 # old body and failed identically. A check on a live surface has to read the live surface.
 body=""
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-  ref="${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}"
-  owner="${REPO%%/*}"
-  body="$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN"       "https://api.github.com/repos/$REPO/pulls?state=open&head=$owner:$ref" 2>/dev/null     | $PY3 -c "
+  # BY NUMBER FIRST. On a pull_request event GITHUB_REF_NAME is the MERGE ref ("12/merge"), not the source
+  # branch, so a `head=owner:$GITHUB_REF_NAME` query matches nothing, returns empty, and this check silently
+  # fell through to the frozen webhook payload -- the exact fallback it was rewritten to avoid. The event
+  # payload still carries the PR NUMBER, which is the unambiguous handle; the branch query is the fallback
+  # for a push build where no PR number is available.
+  prnum=""
+  if [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
+    prnum="$($PY3 -c "
+import json,sys
+try: e=json.load(open(sys.argv[1],encoding='utf-8'))
+except Exception: sys.exit(0)
+pr=e.get('pull_request') or {}
+n=pr.get('number') or (e.get('issue') or {}).get('number')
+sys.stdout.write(str(n) if n else '')
+" "$GITHUB_EVENT_PATH" 2>/dev/null)"
+  fi
+  if [ -n "$prnum" ]; then
+    body="$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN"         "https://api.github.com/repos/$REPO/pulls/$prnum" 2>/dev/null       | $PY3 -c "
+import json,sys
+try: d=json.load(sys.stdin)
+except Exception: d={}
+sys.stdout.write(d.get('body') or '')
+" 2>/dev/null)"
+    [ -n "$body" ] && note "PR body read LIVE from the API by number (#$prnum), not from the frozen event payload"
+  fi
+  if [ -z "$body" ]; then
+    # GITHUB_HEAD_REF is the SOURCE branch on a pull_request event; GITHUB_REF_NAME is the branch on a push.
+    ref="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-$(git rev-parse --abbrev-ref HEAD 2>/dev/null)}}"
+    owner="${REPO%%/*}"
+    body="$(curl -sS -H "Authorization: Bearer $GITHUB_TOKEN"         "https://api.github.com/repos/$REPO/pulls?state=open&head=$owner:$ref" 2>/dev/null       | $PY3 -c "
 import json,sys
 try: d=json.load(sys.stdin)
 except Exception: d=[]
 sys.stdout.write((d[0].get('body') or '') if isinstance(d,list) and d else '')
 " 2>/dev/null)"
-  [ -n "$body" ] && note "PR body read LIVE from the API (not from the frozen event payload)"
+    [ -n "$body" ] && note "PR body read LIVE from the API by head branch ($ref)"
+  fi
 fi
 if [ -z "$body" ] && [ -n "${GITHUB_EVENT_PATH:-}" ] && [ -f "${GITHUB_EVENT_PATH}" ]; then
   body="$($PY3 -c "
