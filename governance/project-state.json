@@ -522,7 +522,16 @@
     "phase4_merged": false,
     "phase4_merge_authorization": "NOT GRANTED. Merging the Phase-4 pull request requires a separate explicit Product-Owner decision.",
     "phase4_closure_inventory_head": "38e94267a1827dadc6fcc3ec17ed014d7060e98f",
-    "phase4_closure_head_note": "The D19/T0044 closure round is repository-only. Its inventory head 38e9426 and the delivery commit above it change governance, documentation, validation tooling, packs and the manifest ONLY: git diff from the ACCEPTED software candidate b94112d over data-plane/, hotel-admin/, control-plane/ and deploy/ is EMPTY, so the accepted software is byte-identical to what the appliance runs."
+    "phase4_closure_head_note": "The D19/T0044 closure round is repository-only. Its inventory head 38e9426 and the delivery commit above it change governance, documentation, validation tooling, packs and the manifest ONLY: git diff from the ACCEPTED software candidate b94112d over data-plane/, hotel-admin/, control-plane/ and deploy/ is EMPTY, so the accepted software is byte-identical to what the appliance runs.",
+    "phase4_pr_number": 12,
+    "phase4_pr_url": "https://github.com/aibrahiiim1/StayConnectEnterprise/pull/12",
+    "phase4_pr_head_at_open": "43b5c29adbb78f9cd338c43f9b55d07ac924060d",
+    "phase4_pr_note": "The single Phase-4 pull request, opened after the D19/T0044 closure commit and its green CI, and left OPEN and UNMERGED by design. It was opened at head 43b5c29; this pointer is recorded in the commit above it, because a committed artefact cannot name a pull request that does not exist until it is committed -- the same self-reference protocol the change manifest uses. Merging requires a separate explicit Product-Owner decision.",
+    "phase4_closure_ci_run": 31699958646,
+    "phase4_closure_ci_head": "43b5c29adbb78f9cd338c43f9b55d07ac924060d",
+    "phase4_closure_ci_conclusion": "success",
+    "phase4_closure_ci_artifact": 9180983833,
+    "phase4_closure_ci_artifact_digest": "sha256:98cedeb086862b8f2e0f6b732664101226d1bf10dca0bcb2fcf830427589820f"
   },
   "latest_transition_id": "T0044",
   "phase3_delivery_evidence": {

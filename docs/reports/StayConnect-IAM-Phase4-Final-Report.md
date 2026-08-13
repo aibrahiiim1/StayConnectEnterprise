@@ -39,7 +39,7 @@
 - **Authorized:** Product-Owner decision **D18**, transition **T0029** (2026-08-11).
 - **Live WS-L deployment:** transition **T0043** (2026-08-13).
 - **Accepted and closed:** decision **D19**, closure transition **T0044** (2026-08-13).
-- **Branch:** `phase/4-financial-execution` — open, unmerged.
+- **Branch:** `phase/4-financial-execution`; **PR #12 — OPEN and UNMERGED**.
 - **Appliance:** `radius` / `172.21.60.23` — the **development** appliance. Production was never migrated or contacted.
 
 ---

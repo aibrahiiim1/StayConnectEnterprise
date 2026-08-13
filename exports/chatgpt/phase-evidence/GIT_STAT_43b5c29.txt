@@ -1,0 +1,4 @@
+commit 43b5c29adbb78f9cd338c43f9b55d07ac924060d
+Date:   Thu Aug 13 15:22:29 2026 +0300
+
+    Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest
