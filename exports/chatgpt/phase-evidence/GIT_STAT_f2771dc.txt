@@ -1,0 +1,4 @@
+commit f2771dc6d0c409ff66443dc60d57fc5abecfdb6a
+Date:   Thu Aug 13 04:17:07 2026 +0300
+
+    Phase 4: generate the lockfile on Linux so npm ci reproduces it on the CI runner

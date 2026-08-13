@@ -1,7 +1,7 @@
 {
   "transition_id": "T0041",
   "seq": 41,
-  "timestamp": "2026-08-13T01:10:00Z",
+  "timestamp": "2026-08-13T01:00:00Z",
   "record_type": "PHASE_4_LAST_SOFTWARE_BLOCKERS_BEFORE_WS_L",
   "previous_state": {
     "phase": "4",

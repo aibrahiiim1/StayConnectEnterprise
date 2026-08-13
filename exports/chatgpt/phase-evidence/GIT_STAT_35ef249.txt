@@ -1,4 +1,0 @@
-commit 35ef249a583133f2ec1d5e977d96632aa4885ee3
-Date:   Thu Aug 13 01:52:30 2026 +0300
-
-    Phase 4 (delivery_head): regenerate packs and manifest for the final software head
