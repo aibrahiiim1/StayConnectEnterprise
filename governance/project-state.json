@@ -451,8 +451,8 @@
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
     "phase4_authoritative_ci_artifact_id": 9177140558,
     "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
-    "acceptance_candidate_head": "1f7607ff3cf20a8e047d15f55d779f7faa437d1b",
-    "inventory_head": "1f7607ff3cf20a8e047d15f55d779f7faa437d1b",
+    "acceptance_candidate_head": "38e94267a1827dadc6fcc3ec17ed014d7060e98f",
+    "inventory_head": "38e94267a1827dadc6fcc3ec17ed014d7060e98f",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -520,15 +520,17 @@
     "phase4_c35_receipt_reachability": "No DEPLOYED runtime, service or PUBLIC role is AUTHORIZED to call iam_v2.p4_record_compliance_receipt, and it is unreachable from the current runtime. Measured on the appliance: 0 of sc_payment_runtime, sc_payment_outcome, sc_commerce_runtime, sc_financial_operator, sc_financial_readonly, svc_edged, svc_scd, svc_acctd, svc_netd and PUBLIC hold EXECUTE. The controlled function EXISTS DELIBERATELY for a future real external archival authority. An earlier phrasing in T0043 and the WS-L report said 'no role at all' can execute it, which overstates a measurement into a permanent impossibility and makes an intentional capability read as dead code. Corrected FORWARD here under D19; T0043 is not rewritten.",
     "phase4_pr_state": "OPEN_AND_UNMERGED",
     "phase4_merged": false,
-    "phase4_merge_authorization": "NOT GRANTED. Merging the Phase-4 pull request requires a separate explicit Product-Owner decision."
+    "phase4_merge_authorization": "NOT GRANTED. Merging the Phase-4 pull request requires a separate explicit Product-Owner decision.",
+    "phase4_closure_inventory_head": "38e94267a1827dadc6fcc3ec17ed014d7060e98f",
+    "phase4_closure_head_note": "The D19/T0044 closure round is repository-only. Its inventory head 38e9426 and the delivery commit above it change governance, documentation, validation tooling, packs and the manifest ONLY: git diff from the ACCEPTED software candidate b94112d over data-plane/, hotel-admin/, control-plane/ and deploy/ is EMPTY, so the accepted software is byte-identical to what the appliance runs."
   },
   "latest_transition_id": "T0044",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "1f7607ff3cf20a8e047d15f55d779f7faa437d1b",
+  "acceptance_candidate_head": "38e94267a1827dadc6fcc3ec17ed014d7060e98f",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "1f7607ff3cf20a8e047d15f55d779f7faa437d1b",
+  "inventory_head": "38e94267a1827dadc6fcc3ec17ed014d7060e98f",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }

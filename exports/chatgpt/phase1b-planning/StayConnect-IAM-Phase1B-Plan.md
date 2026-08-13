@@ -1,14 +1,14 @@
 # StayConnect IAM — Phase 1B Implementation Plan (Credential/Portal Integration, DARK)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0043 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0044 -->
 **Current phase:** 4 — Financial: settlements, postings + outbox, payments, recovery, manual review
-**Current activity:** `PHASE_4_LIVE_DARK_DEPLOYED_ON_DEVELOPMENT_APPLIANCE__AWAITING_PRODUCT_OWNER_ACCEPTANCE`
+**Current activity:** `PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 IN_PROGRESS · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 63 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Obtain the Product Owner's acceptance decision on the WS-L controlled live-DARK result recorded in governance/transitions/T0043.json: WS-L was executed on the development appliance under the existing D18/T0029 authorization with every Phase-4 flag OFF and zero financial egress, and Phase 4 remains NEITHER accepted NOR closed until that decision is made, with no further live mutation, no flag enablement, no IAM-v2 cutover, no Production migration and no real financial traffic authorized in the meantime.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D18`.
+**Single next authorized action:** Product-Owner decision on merging the Phase-4 pull request, which is OPEN and UNMERGED by design: Phase 4 is ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity under decision D19 and closure transition T0044, and that acceptance authorizes no Phase-4 flag enablement, no IAM-v2 cutover, no Production migration or database contact, no real financial traffic and no merge.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D19`.
 <!-- END GENERATED PROJECT STATE -->
 
 
