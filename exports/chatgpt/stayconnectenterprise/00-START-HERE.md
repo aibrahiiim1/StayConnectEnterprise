@@ -1,7 +1,7 @@
 # StayConnect Enterprise — START HERE (ChatGPT Project entry point)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0045 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0046 -->
 **Current phase:** 4 — Financial: settlements, postings + outbox, payments, recovery, manual review
 **Current activity:** `PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
@@ -32,7 +32,7 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 - **Central Control Plane (cloud, `150.0.0.252`):** `ctrlapi` Go API + `cloud-admin` Next.js. Fleet/customer/site/license management, telemetry, backup health. Outbound-only from appliances; internal-CA mTLS.
 - **Ownership hierarchy (frozen):** Platform → Customer → Site (one physical property) → Appliance → guest VLANs/networks.
 - **Appliance NIC topology (approved, permanent): exactly two physical NICs — WAN and LAN.** **WAN is also the management interface** (Hotel Admin/SSH/outbound sync); **LAN** carries guest connectivity and guest VLAN/trunk. There is **no** separate management NIC and **no** approved third HA-sync NIC. (Older docs describing a separate `mgmt` IP or an optional `hasync` NIC are superseded.)
-- **PMS integration:** FIAS connector is **lookup-only today**; the financial **posting engine is a future component** (see phase status). Existing FIAS parse/framing lives in `data-plane/internal/pms/`.
+- **PMS integration:** the FIAS connector performs **lookup only in production**, and the financial **posting engine EXISTS and is ACCEPTED at LIVE-DARK maturity** (D19/T0044) — deployed on the development appliance with every Phase-4 flag OFF, every Phase-4 route returning 404 and zero financial egress. It is **disabled, not absent**: no PS has ever been transmitted, no folio debited and no provider charged. See the generated PROJECT STATE block above for the authoritative status. Existing FIAS parse/framing lives in `data-plane/internal/pms/`; the financial execution core lives in `data-plane/internal/{payment,posting}/` and migrations `0011`–`0026`.
 
 ## 3. Current project phase & status
 

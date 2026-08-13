@@ -30,6 +30,10 @@ COPY = [
     "docs/evidence/Phase3-Final-Live-Acceptance-Record.md",
     "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
     "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "docs/architecture/StayConnect-IAM-Phase1A-Plan.md",
+    "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
+    "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+    "exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md",
     "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
     "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
     "docs/context/StayConnect-IAM-Handoff.md",
@@ -448,6 +452,56 @@ def _(d):
     io.open(rp, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
 
 
+# ---- STATIC CURRENT-STATE PROSE OUTSIDE THE GENERATED BLOCK -------------------------------------------------
+#
+# Every one of these SHIPPED on b26f24a with all three GitHub workflows green. The generated blocks were
+# correct in each file; the hand-written prose around them was two to four phases stale, and no rule read it.
+# These are the verbatim sentences, reintroduced.
+
+@case("START-HERE calls the financial posting engine a future component", "static-current-prose")
+def _(d):
+    append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+               "- **PMS integration:** FIAS connector is **lookup-only today**; the financial **posting "
+               "engine is a future component** (see phase status).")
+
+
+@case("the Phase-4 plan presents the runtime as greenfield / nonexistent", "static-current-prose")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+               "## 3. What does not exist - the Phase-4 build\n\n**All seven financial tables have zero Go "
+               "references.** The execution runtime is greenfield:")
+
+
+@case("the Handoff restates a superseded phase as CURRENT outside the generated block",
+      "static-current-prose")
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "**CURRENT (see the generated block): Phase 2 (Commercial Packages) is authorized under "
+               "D12/T0012, implemented and live-dark deployed.**")
+
+
+@case("the Phase-0 contract carries a stale next authorized activity", "static-current-prose")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase0-Contract.md",
+               "| Next authorized activity | **Product-Owner acceptance of Phase 1A**, then **Phase 1B "
+               "planning under separate authorization**. |")
+
+
+@case("a plan says Phase 1B planning is the current activity", "static-current-prose")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
+               "Phase 1A is accepted and closed. Phase 1B planning is the current activity. All status "
+               "carriers corrected accordingly.")
+
+
+@case("a surface presents a CLOSED phase as awaiting acceptance", "static-current-prose")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase1A-Plan.md",
+               "The project is awaiting Product-Owner acceptance of Phase 1A before anything else may "
+               "proceed.")
+
+
+
 def main():
     print("== baseline: the real repository must PASS ==")
     d = sandbox()
@@ -479,6 +533,22 @@ def main():
             shutil.rmtree(d, ignore_errors=True)
 
     print("\n== history must still be allowed to be history ==")
+    # The same pre-build sentences the static-prose rule refuses, LABELLED. If this ever fails, the rule has
+    # stopped telling a record from a claim, and the Phase-4 plan could no longer keep its own history.
+    d = sandbox()
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+               "## HISTORICAL, as at authorization time (2026-08-11)\n\nAll seven financial tables had "
+               "zero Go references and the execution runtime was greenfield. This is NOT the current state.")
+    rc, out = run(d)
+    if rc == 0:
+        print("  PASS  labelled pre-build history is not treated as a current claim")
+        passed += 1
+    else:
+        print("  FAIL  labelled pre-build history was refused -> %s"
+              % sorted({c.get("rule") for c in out.get("checks", []) if c.get("status") == "FAIL"}))
+        failed += 1
+    shutil.rmtree(d, ignore_errors=True)
+
     d = sandbox()
     append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
                "At Phase-1B acceptance the schema was iam_v2 49 tables / 0 rows and migration 0010 was "

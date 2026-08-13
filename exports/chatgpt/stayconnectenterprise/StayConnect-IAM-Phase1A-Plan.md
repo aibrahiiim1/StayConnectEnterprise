@@ -1,7 +1,7 @@
 # StayConnect IAM — Phase 1A Execution Plan (Core Domain & Persistence Foundation)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0045 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0046 -->
 **Current phase:** 4 — Financial: settlements, postings + outbox, payments, recovery, manual review
 **Current activity:** `PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
@@ -246,7 +246,7 @@ Phase 1A is **clean-slate in the isolated `iam_v2` schema**; nothing in the live
 | `sessions`, `accounting_records` (current acctd/scd) | **Replace** | New entitlement-scoped sessions + watermark model; disposable live test sessions are reset at cutover (not migrated). |
 | `reserveDeviceSlot`, capacity/device advisory admission (`session.go`) | **Retain (absorb)** | Device/capacity admission semantics and namespace constants are lifted into the §5 lock strategy unchanged (renamed from "salts"). |
 | Max-devices / plan-edit / rate-limit logic | **Retain (re-home)** | Behavior preserved; re-expressed against new plan/package revisions. |
-| PMS lookup connector (`data-plane/internal/pms/protel_fias.go`) | **Retain, extend later** | Lookup-only today; posting engine is a **new** component in phase 4. Verified FIAS startup/single-slot/cleanup findings (contract §9b) become connector requirements. |
+| PMS lookup connector (`data-plane/internal/pms/protel_fias.go`) | **Retain, extend later** | *(HISTORICAL, as at Phase-1A planning:)* lookup-only, with the posting engine a **new** component planned for Phase 4. **That engine now EXISTS and is ACCEPTED at LIVE-DARK maturity (D19/T0044) — disabled, not absent.** Verified FIAS startup/single-slot/cleanup findings (contract §9b) become connector requirements. |
 | Portal/edged/scd/acctd services | **Retain, re-point at cutover** | 1A adds no service code path to `iam_v2` (dark). |
 
 **Removed in 1A:** nothing. **The old IAM schema and code remain fully in place and available for rollback during the entire initial cutover window.** Destructive removal of the old IAM tables/code happens **only** in a later, **separately approved cleanup phase** (§7a gate 8) — never during 1A and never during the initial cutover window.

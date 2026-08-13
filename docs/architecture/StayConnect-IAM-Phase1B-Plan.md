@@ -1,7 +1,7 @@
 # StayConnect IAM — Phase 1B Implementation Plan (Credential/Portal Integration, DARK)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0045 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0046 -->
 **Current phase:** 4 — Financial: settlements, postings + outbox, payments, recovery, manual review
 **Current activity:** `PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
@@ -453,7 +453,7 @@ This blueprint is a **proposal only** and is not executed by the current plannin
 | **D6** | **De-superuser all site-DB runtime services** (`scd`, `edged`, `acctd`, `netd`); `portald` + Hotel Admin get **no** DB role (no direct connection); **remove/retire** the unused `iam_v2_svc_portald`/`iam_v2_svc_hoteladm` skeleton roles; central-DB roles are a **separate future security-hardening item**. (§2) |
 | **D7** | OTP verification design = **keyed HMAC with a dedicated protected local key + constant-time compare** (Argon2id fallback if HMAC key-management cannot be safely supported); generation-pinned, rotatable; correct the stale "argon2id" comment in migration `0008` to match. Full design in §4c. (§4c) |
 | **D8** | **CONFIRMED OUT OF PHASE 1B** — no guest paid access implemented or implied. |
-| **D9** | Phase 1A is **formally Product-Owner ACCEPTED and CLOSED** at `SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER`. Phase 1B planning is the current activity. All status carriers corrected accordingly. |
+| **D9** | *(HISTORICAL decision record, as at 2026-07-16.)* Phase 1A is **formally Product-Owner ACCEPTED and CLOSED** at `SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER`. Phase 1B planning was the activity **at that time**; the current activity is the generated PROJECT STATE block. All status carriers corrected accordingly. |
 
 **Risks & stop conditions:** voucher plaintext→HMAC/AEAD re-encode transform (a cutover-time step) is non-trivial and must be proven in scratch; social defaults to Stub unless a real provider row (only Google impl real) — production must **refuse** Stub (§4d); OTP delivery / social exchange are online-dependent; empty production `iam_v2` means production 1B is **flags-OFF-only** (functional proof is scratch-bound — no live `iam_v2` credential check in 1B). **Halt + report (do not proceed) on:** any negative-permission failure; any guest-visible regression while dark; **any production `iam_v2` write**; failure of durable-throttle, OTP-secret, exact-grants, or Gate-P acceptance; any secret/PII leak; production accepting the social Stub.
 

@@ -1,4 +1,0 @@
-commit e427bcac7a489f57eb4bfbbc4cade06c11c30930
-Date:   Fri Aug 14 00:34:24 2026 +0300
-
-    Phase 4 closure correction: the PR-metadata gate must read the LIVE PR body, not the frozen event payload

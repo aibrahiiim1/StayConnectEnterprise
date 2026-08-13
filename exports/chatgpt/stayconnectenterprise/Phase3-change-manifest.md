@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `9b18484`
-- **Provenance (generation HEAD = inventory_head):** `9b1848488e2ffd38aa8ae0a4fb674ca0589ef656`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `e427bca`
+- **Provenance (generation HEAD = inventory_head):** `e427bcac7a489f57eb4bfbbc4cade06c11c30930`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/4-financial-execution`
 - **Remote branch:** `origin/phase/4-financial-execution`
 - **Changed files:** 426
@@ -293,14 +293,14 @@
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/GIT_STAT_9b18484.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_e427bca.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
@@ -433,7 +433,7 @@
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 4 closure correction: convert the last whitespace-pinned mutation fixture to json_set |
 | `tools/tests/tooling/run_control_chars.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Correct the Phase-4 current-state contradiction, and repair two silently-broken validator regexes |
 | `tools/validate-current-state-parity.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
-| `tools/validate-pr-metadata.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `tools/validate-pr-metadata.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 4 closure correction: the PR-metadata gate must read the LIVE PR body, not the frozen event payload |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
 | `tools/validate-state-parity-selftest.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | WS-L preflight: reconcile the stale Phase-4 current-state claims and make the same staleness impossible to pass again (T0042) |
 | `tools/validate-state-parity.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | WS-L preflight: reconcile the stale Phase-4 current-state claims and make the same staleness impossible to pass again (T0042) |
@@ -714,15 +714,15 @@
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
  docs/evidence/phase4/npm-audit-full.json           |   22 +
  docs/evidence/phase4/npm-audit-production.json     |   22 +
- docs/manifests/Phase3-change-manifest.md           | 1237 ++++++++
+ docs/manifests/Phase3-change-manifest.md           | 1240 ++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2044 +++++++++++++
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2047 +++++++++++++
  .../reports/StayConnect-IAM-Phase4-Final-Report.md |  158 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 301132 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 112987 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42032 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 301185 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 112996 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42030 bytes
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
- .../chatgpt/phase-evidence/GIT_STAT_9b18484.txt    |    4 +
+ .../chatgpt/phase-evidence/GIT_STAT_e427bca.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -740,7 +740,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      | 1237 ++++++++
+ .../Phase3-change-manifest.md                      | 1240 ++++++++
  .../stayconnectenterprise/SYSTEM_OVERVIEW.md       |    2 +-
  .../StayConnect-IAM-Handoff.md                     |   19 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   18 +-
@@ -862,12 +862,12 @@
  .../tests/project_state_validator/run_mutations.py |  406 ++-
  tools/tests/tooling/run_control_chars.py           |   58 +
  tools/validate-current-state-parity.py             |  760 +++++
- tools/validate-pr-metadata.sh                      |  275 ++
+ tools/validate-pr-metadata.sh                      |  295 ++
  tools/validate-project-state.sh                    |  184 +-
  tools/validate-state-parity-selftest.sh            |  121 +
  tools/validate-state-parity.py                     |  235 ++
  tools/validate-transition-times.sh                 |   86 +
- 426 files changed, 90273 insertions(+), 2214 deletions(-)
+ 426 files changed, 90302 insertions(+), 2214 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -875,11 +875,10 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_4cc01c1.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_9b18484.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_9b18484.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_e427bca.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/tools/project-state.py
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
@@ -890,6 +889,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: e427bca Phase 4 closure correction: the PR-metadata gate must read the LIVE PR body, not the frozen event payload
+HISTORICAL: 110f913 Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest
 HISTORICAL: 9b18484 Phase 4 closure correction: rule D must scan every phase maturity, not only 1B's
 HISTORICAL: f1b6c7e Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest
 HISTORICAL: 4cc01c1 Phase 4 closure correction: convert the last whitespace-pinned mutation fixture to json_set

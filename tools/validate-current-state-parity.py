@@ -737,6 +737,106 @@ def main():
         ok("no current surface presents an accepted/closed phase as unfinished (accepted: %s)"
            % ", ".join(accepted_phases))
 
+    # ---- 11. STATIC CURRENT-STATE PROSE OUTSIDE THE GENERATED BLOCK ------------------------------------------
+    #
+    # THE FALSE PASS THIS CLOSES. Every rule above reads either the machine-readable facts or the GENERATED
+    # block, and the generated blocks were all correct: each said Phase 4 was ACCEPTED_AND_CLOSED. The prose
+    # AROUND them was not, and nothing looked at it:
+    #
+    #   00-START-HERE.md      "FIAS connector is lookup-only today; the financial posting engine is a FUTURE
+    #                          COMPONENT" -- the engine exists and is accepted at LIVE-DARK maturity. It is
+    #                          disabled, not absent, and those are opposite claims to anyone planning work.
+    #   Handoff.md            "CURRENT (see the generated block): Phase 2 ... " -- a restatement that pointed
+    #                          at the block and then contradicted it, two phases later.
+    #   Phase0-Contract.md    "Next authorized activity: Product-Owner acceptance of Phase 1A, then Phase 1B
+    #                          planning" -- true in July, still present in the status table in August.
+    #   Phase4-Plan.md        "What does not exist -- the Phase-4 build ... the execution runtime is
+    #                          greenfield" -- authorization-time history reading as current status.
+    #
+    # A generated block cannot protect the document it sits in. So the highest-authority surfaces are read
+    # OUTSIDE their generated region, and prose that DENOTES CURRENT STATE must either agree with canonical
+    # state or admit to being history. The existing paragraph-level HISTORY_MARKERS excuse applies unchanged:
+    # this rule refuses unlabelled claims, never history that says so.
+    STATIC_SURFACES = [
+        "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+        "exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md",
+        "docs/context/StayConnect-IAM-Handoff.md",
+        "docs/architecture/StayConnect-IAM-Phase0-Contract.md",
+        "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+        "docs/architecture/StayConnect-IAM-Phase1A-Plan.md",
+        "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
+    ]
+    BEGIN_BLOCK = "<!-- BEGIN GENERATED PROJECT STATE"
+    END_BLOCK = "<!-- END GENERATED PROJECT STATE"
+
+    def outside_generated(text):
+        """The document minus its generated region. The block is machine-written and already validated;
+        what this rule is for is the hand-written prose that surrounds it."""
+        i = text.find(BEGIN_BLOCK)
+        if i < 0:
+            return text
+        j = text.find(END_BLOCK, i)
+        if j < 0:
+            return text[:i]
+        return text[:i] + text[j:].split("\n", 1)[-1] if "\n" in text[j:] else text[:i]
+
+    phases = state.get("phases") or {}
+    p4_closed = str((phases.get("4") or {}).get("status", "")).upper() in ("ACCEPTED_AND_CLOSED", "FINAL_CLOSED")
+
+    static_rules = []
+    if p4_closed:
+        # The financial posting engine EXISTS. "Future component", "does not exist", "greenfield" and
+        # "zero Go references" describe a repository that no longer exists.
+        static_rules.append((
+            re.compile(r"posting engine is a[^.\n]{0,20}(future|new) component|"
+                       r"financial[^.\n]{0,40}engine[^.\n]{0,30}\bfuture\b|"
+                       r"lookup-only today|"
+                       r"what does not exist\s*[-—]{0,2}\s*the phase-4 build|"
+                       r"execution runtime is greenfield|"
+                       r"runtime is greenfield|"
+                       r"all seven financial tables have zero go references", re.I),
+            "describes the Phase-4 financial runtime as future/nonexistent, but phase 4 is recorded "
+            "%s -- the engine exists and is DISABLED, which is not the same claim"
+            % (phases.get("4") or {}).get("status")))
+
+    # A next-authorized-activity or current-activity restatement outside the generated block is a second
+    # copy of the one fact that must have exactly one home.
+    static_rules.append((
+        re.compile(r"next authorized activity\s*[:|]|is the current activity|"
+                   r"\bCURRENT\b[^.\n]{0,30}:\s*Phase\s*\d", re.I),
+        "restates the current activity or next authorized activity outside the generated block, which is "
+        "the only surface allowed to carry it"))
+
+    # Awaiting acceptance of, or future authorization for, a phase that is already closed.
+    closed_nums = [k for k, v in phases.items()
+                   if str((v or {}).get("status", "")).upper() in ("ACCEPTED_AND_CLOSED", "FINAL_CLOSED")]
+    if closed_nums:
+        alt = "|".join(re.escape(k) for k in closed_nums)
+        static_rules.append((
+            re.compile(r"awaiting[^.\n]{0,40}acceptance of phase[- ]?(%s)\b|"
+                       r"phase[- ]?(%s)\b[^.\n]{0,40}(remains|is) under[^.\n]{0,20}future authorization" % (alt, alt),
+                       re.I),
+            "presents a closed phase as awaiting acceptance or as future work"))
+
+    for rel in STATIC_SURFACES:
+        text = load_surface(rel)
+        if text is None:
+            continue
+        body = outside_generated(text)
+        for para, _ in paragraphs(body):
+            if HISTORY_MARKERS.search(para):
+                continue
+            # A paragraph that quotes the wrong wording in order to correct it is not the wrong wording.
+            if re.search(r"the line this replaces|corrected forward|reads \"|read \"|overstat|"
+                         r"is the only surface allowed|carries none|does not carry", para, re.I):
+                continue
+            for pattern, why in static_rules:
+                if pattern.search(para):
+                    bad("static-current-prose", "%s: %s" % (why, " ".join(para.split())[:170]), rel)
+                    break
+    if not [f for f in failures if f[0] == "static-current-prose"]:
+        ok("no unlabelled current-state prose outside the generated blocks contradicts canonical state")
+
     # ---- report ----------------------------------------------------------------------------------------------------
     if as_json:
         print(json.dumps({

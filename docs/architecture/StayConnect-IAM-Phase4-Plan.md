@@ -36,9 +36,16 @@ Every design choice below is downstream of that sentence.
 - **Stay/Folio: exists.** Stays, folios, STRICT resolution, checkout grace (Phase 3).
 - **DARK host: exists.** `stayconnect-pmsd`, least-privilege, flags-OFF clean exit, reboot-verified.
 
-## 3. What does not exist — the Phase-4 build
+## 3. HISTORICAL — what did not exist AT AUTHORIZATION TIME (D18/T0029, 2026-08-11)
 
-**All seven financial tables have zero Go references.** The execution runtime is greenfield:
+> **THIS SECTION IS HISTORICAL AND IS NOT THE CURRENT STATE.** It records the pre-build position the
+> plan was written against, so the delivered scope can be checked against what was promised. Phase 4 is
+> now **ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity** (D19/T0044): the
+> execution runtime exists, migrations `0011`–`0026` are applied on the development appliance, and the
+> financial tables are referenced throughout `data-plane/internal/{payment,posting}` and
+> `data-plane/cmd/edged`. Read every "does not exist" and "greenfield" below **as of 2026-08-11**.
+
+**AS AT AUTHORIZATION TIME, all seven financial tables had zero Go references and the execution runtime was greenfield:**
 
 | WS | Workstream | Primary paths |
 |---|---|---|
@@ -58,7 +65,7 @@ Every design choice below is downstream of that sentence.
 ## 4. Traceability checklist — contract requirement → owner → DB enforcement → test → surface
 
 This is the checklist the delivery must reproduce from scratch at the end. **No row may silently disappear.**
-Status is the *current* state at authorization time; all are `NOT_IMPLEMENTED` because the runtime is greenfield.
+Status is the state **as at authorization time (2026-08-11)**; all read `NOT_IMPLEMENTED` because the runtime was greenfield then. **They are NOT current** — see the Gap Audit for the authoritative delivered status.
 
 **The C1–C38 matrix below has been SUPERSEDED by measurement and by delivery.** Its original statuses assumed the financial schema was empty; the disposable-PG16 rebuild proved otherwise, and migration 0011 plus the financial execution core have since closed every measured DB gap. The authoritative, layered matrix lives in [`Phase4-Financial-Schema-Gap-Audit.md`](Phase4-Financial-Schema-Gap-Audit.md), which records each requirement independently as DB_PRESENT_AND_BEHAVIOURALLY_VERIFIED / RUNTIME_IMPLEMENTED_AND_TESTED_DARK / RUNTIME_GAP / OPERATOR_SURFACE_GAP / NOT_APPLICABLE / BLOCKED_BY_PRODUCT_OWNER_DECISION. Read the table below as the ORIGINAL authorization-time scope list, retained so no row can silently disappear — never as the current status.
 
