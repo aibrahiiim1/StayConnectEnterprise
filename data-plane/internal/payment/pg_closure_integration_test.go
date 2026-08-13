@@ -343,8 +343,15 @@ func TestIntegrationClosure_C35ArchiveGatesTheCrossCustomerPurge(t *testing.T) {
 		`{"iam_v2.purchases":1}`).Scan(&id); err != nil {
 		t.Fatalf("recording a compliance archive: %v", err)
 	}
-	if _, err := p.Exec(ctx, `SELECT iam_v2.p4_assert_compliance_archived($1::uuid)`, s.tenant); err != nil {
-		t.Fatalf("the gate still refuses after an archive was recorded: %v", err)
+
+	// CORRECTED IN 0026. This test previously asserted that recording the archive OPENED the gate, which
+	// made the export the appliance wrote about itself sufficient to authorize deleting the data it was
+	// written from -- self-certification. The gate now requires an EXTERNAL acknowledgement of custody, so
+	// a local archive leaves it shut and says which of the two things is missing.
+	if _, err := p.Exec(ctx, `SELECT iam_v2.p4_assert_compliance_archived($1::uuid)`, s.tenant); err == nil {
+		t.Fatal("a local archive with no external receipt authorized a cross-customer purge")
+	} else if !strings.Contains(err.Error(), "COMPLIANCE_RECEIPT_UNVERIFIED") {
+		t.Fatalf("refused, but not for the missing receipt: %v", err)
 	}
 
 	// The EXTERNAL blocker is recorded honestly rather than defaulted away: no receipt authority exists,
@@ -358,4 +365,6 @@ func TestIntegrationClosure_C35ArchiveGatesTheCrossCustomerPurge(t *testing.T) {
 	if !strings.Contains(reason, "external archival receipt authority") {
 		t.Fatalf("the missing external capability is not recorded: %q", reason)
 	}
+	// The full fail-closed matrix -- forgery, privilege, scope, and the gate opening on real evidence --
+	// is in pg_c35_integration_test.go.
 }

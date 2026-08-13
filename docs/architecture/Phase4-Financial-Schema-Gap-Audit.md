@@ -196,11 +196,11 @@ is enabled anywhere, and no row in this table has been exercised against a real 
 | C28 | Server-pinned totals | **DB-OK** | **RT-OK** | — |
 | C29 | Entitlement only via approved atomic grant | **DB-OK** *(0024: ONE `p4_entitlement_grant_kernel`, unreachable from every runtime role; free and paid reach it through their own authorization)* | **RT-OK** *(exactly-once under duplicate commands, concurrent callbacks and restart replay)* | — |
 | C30 | Restore ⇒ FINANCIAL_RECOVERY_MODE, HELD_RECOVERY | **DB-OK** *(0019 + 0022 structural hold + 0023/0025 marker AHEAD/BEHIND/MISSING)* | **RT-OK** *(real pg_dump/pg_restore drill, 39/0)* | **UI-OK** |
-| C31 | Restore never auto-replays | **DB-OK** *(0022 outbox gate; 0025 zero-attempt path authorizes attempt 1 without manufacturing a history)* | **RT-OK** *(nothing is transmitted before OR after recovery release)* | **UI-OK** *(the screen offers no retry/replay control)* |
+| C31 | Restore never auto-replays | **DB-OK** *(0022 outbox gate; 0025 zero-attempt path authorizes attempt 1 without manufacturing a history; 0026 `v_zero_attempt_recovery_queue` is the read model that makes such postings findable at all)* | **RT-OK** *(nothing is transmitted before OR after recovery release; `edge/v1/financial-ops/recovery/zero-attempt` list + authorize, 8/8 API tests)* | **UI-OK** *(the recovery screen offers no retry/replay control AND now offers the one audited way out: 9 unit + 3 browser tests)* |
 | C32 | Freshness / stay eligibility before charge | **DB-OK** *(0012: all four runtime axes)* | **RT-OK** *(0012: only the stay half existed; the four axes were never consulted)* | UI |
 | C33 | Metrics: queue depth, oldest age, UNKNOWN count, backlog | **DB-OK** *(0020 `enqueued_at` makes AGE a real signal)* | **RT-OK** *(closed condition vocabulary; JSON + Prometheus)* | **UI-OK** *(financial health screen)* |
 | C34 | No PII/card/credentials/secrets in logs or evidence | **DB-OK** *(0025 screens review evidence for secret shapes)* | **RT-OK** *(redaction proven bidirectionally: the check FAILS against a build with one raw field added back)* | **UI-OK** |
-| C35 | Compliance archive before cross-customer purge | **DB-OK** *(0025 `p4_record_compliance_archive` + `p4_assert_compliance_archived`)* | **RT-OK for the ARCHIVE and the GATE** *(scd exports the departing tenant's financial record, records its digest, and the purge is refused without it)*; **`receipt_verified` BLOCKED — no external archival receipt authority exists in this product; recorded in `receipt_blocked_reason`, never defaulted to true** | — |
+| C35 | Compliance archive before cross-customer purge | **DB-OK for the ARCHIVE and the GATE** *(0025 recorder + gate; **0026 makes the gate FAIL CLOSED** — it requires `receipt_verified`, and `ca_receipt_evidence_matches_flag` makes that flag unsettable without a named external authority and reference, refused even for the table owner)* | **RT-OK for the ARCHIVE and the GATE, CAPABILITY BLOCKED** *(scd exports the record, digests it, and the purge is refused; scd reports the exact blocker). **No external archival receipt authority exists in this product — no service, no endpoint, no issued key — so `receipt_verified` is false everywhere and CROSS-CUSTOMER PURGE IS CONSEQUENTLY IMPOSSIBLE.** That is the delivered behaviour, not a defect and not a promise of one* | — |
 | C36 | Per-property onboarding gates posting | **DB-OK (G2)** | **RT-OK** | UI |
 | C37 | Flags OFF, no egress while DARK | — | **RT-OK** *(unchanged meaning: every Phase-4 flag OFF, no provider adapter, no socket in the financial core, delivered UI bundle hides the screens)* | — |
 | C38 | Real-financial acceptance (Contract §9c Tier-3 3C) | — | — | **PO** |
@@ -226,6 +226,20 @@ authority countersigning custody, and no such service, endpoint or key exists in
 false with the reason recorded in the row. **This is the external blocker for C35 and nothing about it was
 invented.**
 
+**MEASURED AND CORRECTED AT T0041.** The 0025 gate passed as soon as ANY archive row existed, regardless of
+`receipt_verified` — so the local export written by the same appliance that was about to delete the data was
+sufficient to authorize the deletion. That is self-certification: the party doing the deleting attests it
+kept a copy and nothing outside it agrees. 0026 makes the gate require a verified receipt, and makes the
+flag structurally unforgeable rather than merely unset by convention.
+
+The honest consequence, stated rather than softened: **cross-customer purge is now impossible.** There is no
+authority to receive a receipt from, so nothing can satisfy the gate. A capability that cannot be performed
+safely is unavailable rather than quietly available on weaker evidence; the appliance already fails closed
+when a tenant transition cannot complete, so the outcome is a held appliance with a visible reason, not a
+deletion nobody can vouch for. The gate is not simply "always refuse" — recording a receipt with real
+external evidence opens it, which is proved, so the refusal is a statement about the missing capability and
+not about the gate.
+
 **C29** changed for a reason worth recording: 0021 had created a SECOND grant implementation in SQL while
 the free Phase-2 path stayed in Go. Two implementations of one set of semantics is the drift the one-writer
 rule exists to prevent, so 0024 reduced them to one kernel with two authorizations.
@@ -237,10 +251,41 @@ rows. Genuine DB gaps remaining: **0**. Runtime implemented and verified DARK: *
 payment half of C26). `BLOCKED_BY_PRODUCT_OWNER_DECISION`: **1** (C38). Operator-surface gap: **21** rows.
 
 **RT-OK means implemented and verified DARK, by AUTHORITATIVE CI.** `Phase 4 Financial Core CI` runs on
-every push to this branch and gates the exact delivered head; the run id, head and artifact id of the
-latest are recorded in `governance/project-state.json` under `phase4_authoritative_ci_*`. RT-OK still does
-NOT mean live, deployed or accepted: no Phase-4 flag is enabled anywhere, nothing is deployed, and no row
-has been exercised against a real PMS or payment provider.
+every push to this branch; the run id, head and artifact id of the latest are recorded in
+`governance/project-state.json` under `phase4_authoritative_ci_*`. RT-OK still does NOT mean live, deployed
+or accepted: no Phase-4 flag is enabled anywhere, nothing is deployed, and no row has been exercised against
+a real PMS or payment provider.
+
+**Which head the CI evidence covers, stated exactly.** A CI run gates the commit it ran on. At T0040 that
+was run `31648910147` on `35ef249a583133f2ec1d5e977d96632aa4885ee3`, which was the SOFTWARE candidate; the
+branch head that followed it, `71d7ac05657ddf27f84f7e8649e10319206ffd09`, was a governance/documentation
+commit containing no software or runtime change. That distinction is what makes the earlier evidence still
+usable, and it is the distinction the T0040 record should have drawn instead of describing `35ef249a` as
+"the final delivery head". The current milestone's authoritative run and the head it covers are recorded in
+`phase4_authoritative_ci_*` alongside a measured diff proving no software path differs between the software
+candidate and any later governance-only head.
+
+### Re-measured at T0041 — what changed in this milestone
+
+Two rows moved, and the reason each moved is a test that did not exist before:
+
+- **C31 (Operator)** was recorded `UI-OK` at T0040 on the strength of the recovery screen offering *no*
+  retry control. That was half the requirement. The zero-attempt path — a posting restored with no surviving
+  attempts, which the attempt-keyed review queue structurally cannot list — existed as a proven database
+  function that **no surface could reach**. A safe path nobody can walk is not a path. 0026 adds the read
+  model, `edge/v1/financial-ops/recovery/zero-attempt` adds the list and the audited authorization behind
+  the existing tenant+site scope / session actor / password step-up / mandatory evidence model, and the
+  recovery screen surfaces it. Proven at all three layers: 8 API integration tests (scope isolation between
+  two sites of one tenant, step-up, evidence contract, exactly-once, restart durability, and that the
+  authorization is what lets recovery be released at all), 9 Hotel-Admin unit tests and 3 browser tests.
+  Nothing is transmitted by any of it.
+- **C35** moved in the opposite direction: from a gate that passed on self-certification to one that
+  **fails closed**, with the capability honestly unavailable. See the C35 note above.
+
+**Totals, re-measured.** Runtime still open reduces to **7** — C31 and C35 leave that list, C31 because the
+operator path is now genuinely reachable and C35 because the archive and gate are complete and the remaining
+half is an EXTERNAL capability that does not exist rather than unwritten code. `BLOCKED_BY_PRODUCT_OWNER_DECISION`
+remains **1** (C38). C37 is unchanged and means exactly what it meant: flags OFF, no egress, nothing live.
 
 ## 8. Verification of the delivered core
 

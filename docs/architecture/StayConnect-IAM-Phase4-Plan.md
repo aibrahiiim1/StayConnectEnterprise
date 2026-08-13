@@ -2,7 +2,7 @@
 
 **Status:** AUTHORIZED — **IMPLEMENTATION IN PROGRESS (DARK)**. Product-Owner decision **D18**, transition **T0029** (2026-08-11); implementation progress recorded in transition **T0030** (2026-08-12) under the SAME authorization — no new decision was created.
 **Delivered so far:** WS-A (migrations 0011 + **0012 hardening** + **0013 reversal ledger**), WS-B, WS-C, WS-D, WS-E and the financial-core half of WS-K, all verified DARK against disposable PostgreSQL 16 and wired into `.github/workflows/phase4-financial-core.yml`.
-**Still open:** WS-F/WS-J are DELIVERED (financial health, recovery, Manual Review, settlements). WS-G, WS-H and WS-I are complete in DARK with the restricted-role trust boundary closed, provider-outcome authority split from execution authority, one shared entitlement grant kernel, and the supported restore-generation model verified by a real pg_dump/pg_restore drill. **WS-L (the authorized controlled live-DARK deployment and the reboot/rollback drill) is NOT started** and is the next milestone. Two blockers stand outside Phase-4 DARK closure: the Next.js production advisories (the fix is a framework major that failed the browser regression suite and was reverted) and C35's external archival receipt authority, which does not exist in this product.
+**Still open:** WS-F/WS-J are DELIVERED (financial health, recovery, Manual Review, settlements). WS-G, WS-H and WS-I are complete in DARK with the restricted-role trust boundary closed, provider-outcome authority split from execution authority, one shared entitlement grant kernel, and the supported restore-generation model verified by a real pg_dump/pg_restore drill. **WS-L (the authorized controlled live-DARK deployment and the reboot/rollback drill) is NOT started** and is the next milestone. **The Next.js production advisory blocker is CLOSED** (T0041): the minimum patched state was `next@15.5.21`, not a framework major — the earlier "Next 16 is the only fix" reading came from npm's `fixAvailable` rather than from the advisory ranges. `next@15.5.23` keeps React at 18.3.1 and both dependency trees now report **zero** advisories. **One external blocker remains: C35's archival receipt authority, which does not exist in this product** — the gate fails closed on it, so cross-customer purge is unavailable rather than performed on self-certified evidence.
 **Not accepted, not closed.** Every Phase-4 flag is OFF and no real financial traffic has occurred.
 **Verification status:** AUTHORITATIVE CI EXISTS AND IS GREEN. `Phase 4 Financial Core CI` runs on every
 push to this branch and has passed on the delivered heads — see `phase4_authoritative_ci_*` in
@@ -200,13 +200,22 @@ identical schema fingerprint under `iam_v2_scratch/phase4_0011_financial.sh`.
 | `0023_phase4_restore_generation` | The supported restore-generation model: a management-partition marker the database cannot rewrite, plus the unsupported-raw-snapshot path |
 | `0024_phase4_outcome_authority_and_grant_kernel` | Provider-outcome authority split into its own role, so one stolen execution credential cannot also declare a capture; and ONE entitlement grant kernel shared by the free and paid entry points |
 | `0025_phase4_recovery_completion_and_compliance` | The zero-attempt restore's audited one-time retry, the marker-BEHIND case, C27 global merchant identity, and C35 archive-before-purge |
+| `0026_phase4_c35_failclosed_and_operator_retry` | C35 fails CLOSED — the purge gate requires an EXTERNAL verified receipt and the flag cannot be set without the evidence that gives it meaning; plus `v_zero_attempt_recovery_queue`, the read model that makes a never-transmitted held posting visible to an operator at all |
 
 ### Authoritative CI
 
 `.github/workflows/phase4-financial-core.yml` is the only authoritative Phase-4 gate. It runs, in order:
-gofmt, `go build`, `go vet`, the pre-0011 invariant suite on both chains, the migrations 0011–0025 DB gate,
+gofmt, `go build`, `go vet`, the pre-0011 invariant suite on both chains, the migrations 0011–0026 DB gate,
 the least-privilege role proof, the payment concurrency proof, the PG16 integration matrix (posting, review
 API, financial-ops API, payment runtime, recovery, restricted-role end-to-end, Phase-2 free grant, entitlement
 exactly-once), the DARK static assertion, and the Hotel-Admin typecheck, unit tests, flags-OFF production
 build and the FULL browser suite, the supported restore drill, the production dependency advisory gate,
 and a self-test that deliberately breaks a step and fails if the gate still reports success.
+
+The **dependency gate was rewritten at T0041**. It previously carried its own accepted-risk list inside the
+script, which let the delivery agent grant itself an exception and report PASS on a production tree with
+high-severity advisories in it. Acceptance now lives in `governance/dependency-acceptances.json`, names GHSA
+ids rather than packages, requires a named decider / decision reference / expiry, and is the ONLY thing that
+turns a production advisory into a pass; an advisory that is merely triaged fails. A self-test runs the same
+judgement file CI runs against synthetic audits and proves it refuses what it claims to refuse — because a
+gate observed only passing on a clean tree has not been shown to do anything.
