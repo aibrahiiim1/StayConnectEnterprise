@@ -7,7 +7,7 @@ name: Phase 4 Financial Core CI
 #   1. the financial core builds, vets and formats clean;
 #   2. its unit matrix passes, including the PS golden wire, the PA catalog and the DARK guard;
 #   3. it passes under the race detector, because the outbox lanes and the review path are concurrent;
-#   4. migrations 0011 through 0015 apply, re-apply as designed, reverse cleanly, and weaken nothing that
+#   4. migrations 0011 through 0026 apply, re-apply as designed, reverse cleanly, and weaken nothing that
 #      existed before them — the gate re-runs the ENTIRE pre-0011 financial invariant suite on both chains;
 #   5. the financial core behaves correctly against a real PostgreSQL: fail-closed creation, P# under
 #      contention, independent interface lanes, UNKNOWN that never auto-retries, and reviewer races;
@@ -101,8 +101,8 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh phase4-race
           -race ./internal/posting/ ./internal/pmsd/ -count=1
 
-      # ---------------------------------------------------------------- migration 0011
-      - name: Migrations 0011-0025 + financial DB invariant gate (disposable PG16)
+      # ---------------------------------------------------------------- migrations
+      - name: Migrations 0011-0026 + financial DB invariant gate (disposable PG16)
         # Includes the ENTIRE pre-0011 financial invariant suite, run on the pre-0011 chain and again after
         # the Phase-4 chain on a clean rebuild, so "nothing was weakened" is measured rather than asserted.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-migration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase4_0011_financial.sh"
@@ -192,6 +192,16 @@ jobs:
         # or guest-portal screens would still be a regression, and this is the gate that caught exactly that
         # when the Next 16 upgrade was attempted.
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-e2e -- npx playwright test --reporter=list"
+
+      # ---------------------------------------------------------------- governance parity
+      # The self-test first, for the same reason as the dependency gate: the parity validator passes on a
+      # corrected state file, which is also what a validator that does nothing looks like. This drives the
+      # real validator against the exact stale values found at T0041 and fails if it lets any of them pass.
+      - name: Current-state parity self-test
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh state-parity-selftest -- bash $GITHUB_WORKSPACE/tools/validate-state-parity-selftest.sh"
+
+      - name: Current-state claims match the repository
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh state-parity -- python3 $GITHUB_WORKSPACE/tools/validate-state-parity.py"
 
       # ---------------------------------------------------------------- dependency risk
       # The self-test runs FIRST. The gate itself passes on a clean tree, which is the state a gate that

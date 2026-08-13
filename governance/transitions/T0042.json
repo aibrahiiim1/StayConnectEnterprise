@@ -1,0 +1,61 @@
+{
+  "transition_id": "T0042",
+  "seq": 42,
+  "timestamp": "2026-08-13T09:15:00Z",
+  "record_type": "WS_L_PREFLIGHT_CURRENT_STATE_RECONCILIATION",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030 through T0041 are PRESERVED unchanged. This transition corrects the CURRENT-STATE surfaces only. The historical receipts recorded what was true when they were written and are not rewritten; the fault was that current-state fields were never re-measured as the work they described landed.",
+  "corrections": [
+    {
+      "id": "W-1",
+      "area": "stale Phase-4 build claims in governance/project-state.json",
+      "what_was_actually_true": "Six current-state fields still described the state as of T0030/T0031 and denied work that T0032 through T0041 delivered, proved and gated: phase4_manual_review_frontend=false, phase4_payments='...GO_DOMAIN_NOT_BUILT', phase4_manual_review_operator_workflow='...FRONTEND_NOT_BUILT', phase4_entitlement_grant_wired=false, phase4_financial_recovery_mode=false, phase4_operator_surface=false and phase4_runtime_integration=false. phase4_remaining_scope, blockers and next_authorized_action likewise still listed delivered work as outstanding. T0041 asserted ZERO_STALE_LEFTOVERS while these fields were live, so that claim was not true of the current-state surface even though every validator passed -- because no validator compared a claim to the repository.",
+      "correction": "Each field was re-measured from the code and the test matrix and corrected, with an evidence string naming what makes it true. phase4_observability was added for the same reason. blockers, next_authorized_action and pms_financial_state were rewritten to describe the actual position: Phase-4 SOFTWARE is complete and verified DARK, the remaining Phase-4 work is WS-L, C35's external receipt authority is an external limitation rather than a software task, and C38 remains PO-blocked.",
+      "proved": "tools/validate-state-parity.py, 11 checks, comparing every build claim to the file, function, route or migration that would have to exist for it to be true."
+    },
+    {
+      "id": "W-2",
+      "area": "stale migration-coverage wording in the Plan and the CI gate",
+      "what_was_actually_true": "The Phase-4 Plan's verification paragraph said the gate covered 'migrations 0011+0012+0013' and its delivered-so-far line stopped at WS-E; the CI workflow header said 'migrations 0011 through 0015' and the migration step was labelled 'Migrations 0011-0025'. The gate actually applies 0011 through 0026 and the delivered work reaches WS-K.",
+      "correction": "The Plan now states 0011 through 0026 and lists WS-A through WS-K as delivered; the workflow header and the step label say 0011-0026. The step's behaviour was already correct -- only the words a reader acts on were wrong, which is precisely the class of error that lets a reviewer believe a range was gated when it was not.",
+      "proved": "tools/validate-state-parity.py section E derives the highest Phase-4 migration from the tree and fails when the CI label disagrees with it."
+    },
+    {
+      "id": "W-3",
+      "area": "the validation gap that let W-1 and W-2 pass repeatedly",
+      "what_was_actually_true": "Every governance check asked whether the current-state surfaces agreed with EACH OTHER. A stale fact survives that perfectly: it is consistent with itself and with the documents generated from it. Nothing measured the repository, so a claim could stop being true and no gate would notice.",
+      "correction": "tools/validate-state-parity.py compares each build claim to a measurable fact about the tree and fails in BOTH directions -- a claim of something absent is unsupported, and a denial of something present is stale. It also checks that the migration inventory names every Phase-4 migration on disk and none that is missing, and that the CI gate label covers the range the tree actually contains. It is wired into tools/validate-project-state.sh as section 11 and into the authoritative CI workflow.",
+      "proved": "tools/validate-state-parity-selftest.sh, 13/13, driving the SAME validator file CI runs against synthetic state documents carrying the EXACT stale values found here -- not invented ones -- and asserting each is refused; plus the opposite direction (an unsupported claim) and the corrected state passing, so the validator is not simply 'always fail'."
+    }
+  ],
+  "software_delta": {
+    "vs_t0041_software_candidate": "f2771dc6d0c409ff66443dc60d57fc5abecfdb6a",
+    "runtime_paths_changed": 0,
+    "runtime_paths_measured": [
+      "data-plane/",
+      "hotel-admin/",
+      "control-plane/",
+      "deploy/"
+    ],
+    "note": "The preflight changes governance/, docs/, exports/, tools/ and .github/workflows/ only. tools/ and .github/workflows/ are validation surfaces that are never deployed to an appliance; no file that contributes to a deployed binary, bundle, migration or service unit differs from the accepted T0041 software candidate. No defect was discovered in the software during the preflight, so no software change was warranted and none was made."
+  },
+  "not_delivered_in_this_transition": [
+    "WS-L itself -- no appliance was contacted, no migration applied, no service deployed",
+    "any Phase-4 flag enablement",
+    "any change to the Phase-4 software"
+  ],
+  "acceptance_verdict": "NOT ACCEPTED AND NOT CLOSED. A current-state correction under the existing D18/T0029 authorization, recorded so that the WS-L preflight condition is genuinely met rather than asserted.",
+  "next_action": "WS-L: the authorized controlled live-DARK deployment on the development Hotel Appliance, with every Phase-4 feature flag OFF and zero financial egress."
+}

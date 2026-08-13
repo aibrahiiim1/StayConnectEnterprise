@@ -1,14 +1,15 @@
 # StayConnect IAM — Phase 4 Plan: Financial Execution Layer (DARK)
 
 **Status:** AUTHORIZED — **IMPLEMENTATION IN PROGRESS (DARK)**. Product-Owner decision **D18**, transition **T0029** (2026-08-11); implementation progress recorded in transition **T0030** (2026-08-12) under the SAME authorization — no new decision was created.
-**Delivered so far:** WS-A (migrations 0011 + **0012 hardening** + **0013 reversal ledger**), WS-B, WS-C, WS-D, WS-E and the financial-core half of WS-K, all verified DARK against disposable PostgreSQL 16 and wired into `.github/workflows/phase4-financial-core.yml`.
+**Delivered so far:** WS-A (migrations **0011 through 0026**), WS-B, WS-C, WS-D, WS-E, WS-F, WS-G, WS-H, WS-I, WS-J and WS-K — the financial execution core, the Go payment domain and settlement boundary, the one entitlement grant kernel, FINANCIAL_RECOVERY_MODE, observability, and the complete operator surface (financial health, Manual Review, settlements, recovery including the zero-attempt path). All verified DARK against disposable PostgreSQL 16 and gated by `.github/workflows/phase4-financial-core.yml`.
 **Still open:** WS-F/WS-J are DELIVERED (financial health, recovery, Manual Review, settlements). WS-G, WS-H and WS-I are complete in DARK with the restricted-role trust boundary closed, provider-outcome authority split from execution authority, one shared entitlement grant kernel, and the supported restore-generation model verified by a real pg_dump/pg_restore drill. **WS-L (the authorized controlled live-DARK deployment and the reboot/rollback drill) is NOT started** and is the next milestone. **The Next.js production advisory blocker is CLOSED** (T0041): the minimum patched state was `next@15.5.21`, not a framework major — the earlier "Next 16 is the only fix" reading came from npm's `fixAvailable` rather than from the advisory ranges. `next@15.5.23` keeps React at 18.3.1 and both dependency trees now report **zero** advisories. **One external blocker remains: C35's archival receipt authority, which does not exist in this product** — the gate fails closed on it, so cross-customer purge is unavailable rather than performed on self-certified evidence.
 **Not accepted, not closed.** Every Phase-4 flag is OFF and no real financial traffic has occurred.
 **Verification status:** AUTHORITATIVE CI EXISTS AND IS GREEN. `Phase 4 Financial Core CI` runs on every
 push to this branch and has passed on the delivered heads — see `phase4_authoritative_ci_*` in
 `governance/project-state.json` for the run id, head and artifact id of the latest. It covers gofmt, build,
 vet, the unit matrix, the **race detector** (which cannot run on the Windows development workstation),
-migrations 0011+0012+0013 with the full DB gate, the PG16 integration matrix, and the DARK assertion.
+migrations 0011 through 0026 with the full DB gate, the PG16 integration matrix, the Hotel-Admin unit and
+browser suites, the restore drill, the dependency gate and its self-test, and the DARK assertion.
 **Baseline:** master `a4e951972d8087f00a40d8b39eb1b87ea03144b6`; accepted Phase-3 runtime `7c8b8cf0…`.
 **Maturity target:** IMPLEMENTED + VERIFIED AT DARK / NO-FINANCIAL-TRAFFIC. Real-financial acceptance
 (Tier-3 3C live) is **out of scope** and requires separate explicit Product-Owner authorization.
