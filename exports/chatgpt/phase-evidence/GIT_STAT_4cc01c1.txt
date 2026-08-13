@@ -1,0 +1,4 @@
+commit 4cc01c117c42038312e1a21f82a74fd75ace8ebe
+Date:   Thu Aug 13 21:13:32 2026 +0300
+
+    Phase 4 closure correction: convert the last whitespace-pinned mutation fixture to json_set

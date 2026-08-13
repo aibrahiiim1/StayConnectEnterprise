@@ -456,8 +456,8 @@
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
     "phase4_authoritative_ci_artifact_id": 9177140558,
     "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
-    "acceptance_candidate_head": "a582e0e200a2497a28a5c068faa4bf9b6fb86d3f",
-    "inventory_head": "a582e0e200a2497a28a5c068faa4bf9b6fb86d3f",
+    "acceptance_candidate_head": "4cc01c117c42038312e1a21f82a74fd75ace8ebe",
+    "inventory_head": "4cc01c117c42038312e1a21f82a74fd75ace8ebe",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -540,15 +540,15 @@
     "phase4_closure_correction_transition": "T0045",
     "phase4_closure_correction_note": "T0045 is a repository-only FIX-FORWARD correction round under the EXISTING D19 acceptance. It removed six classes of false pass -- a phases map that disagreed with its own closure receipt, four current surfaces that still narrated an unfinished phase, a PR-metadata gate that demanded a Phase-3 maturity phrase, a Phase-3 regression gate that compiled Phase-4 tests against a schema that stops at migration 0010, and two governance self-tests that had silently drifted -- and strengthened the validators so each class now fails. Phase 4 was NOT reopened and T0044 is preserved unchanged.",
     "governance_tooling_isolation": "The adversarial mutation suite runs every mutation in a disposable sandbox built by `git clone --shared --no-checkout` plus a copy of the working tree and of .git/index, and it PROVES fidelity before mutating anything: `git status --porcelain` and `git ls-files -s` (blob ids, stage numbers, modes) must both match the checkout exactly. It fails closed if the sandbox cannot be built, digests the canonical governance/ before and after, and refuses to run at all under --require-full while the test-only MUTATION_MAX_CASES is set. Forced kills cannot run handlers, so sandbox cleanup after SIGKILL/TerminateProcess is NOT claimed; the canonical checkout is untouched regardless, and a startup sweep in the next run collects the leftover. Proved by tools/tests/project_state_validator/run_isolation_regression.py, 13/13.",
-    "phase4_closure_correction_inventory_head": "a582e0e200a2497a28a5c068faa4bf9b6fb86d3f"
+    "phase4_closure_correction_inventory_head": "4cc01c117c42038312e1a21f82a74fd75ace8ebe"
   },
   "latest_transition_id": "T0045",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "a582e0e200a2497a28a5c068faa4bf9b6fb86d3f",
+  "acceptance_candidate_head": "4cc01c117c42038312e1a21f82a74fd75ace8ebe",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "a582e0e200a2497a28a5c068faa4bf9b6fb86d3f",
+  "inventory_head": "4cc01c117c42038312e1a21f82a74fd75ace8ebe",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }
