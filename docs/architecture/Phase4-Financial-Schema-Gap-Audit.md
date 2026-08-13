@@ -265,6 +265,25 @@ usable, and it is the distinction the T0040 record should have drawn instead of 
 `phase4_authoritative_ci_*` alongside a measured diff proving no software path differs between the software
 candidate and any later governance-only head.
 
+### Measured LIVE at T0043 — the WS-L controlled live-DARK deployment
+
+Every row above was verified DARK against disposable PostgreSQL. At T0043 the whole chain was applied to the
+**real development appliance** and the security-relevant rows were re-measured there:
+
+| Row | Measured on the appliance |
+|---|---|
+| **C35** | `p4_assert_compliance_archived` refuses; an INSERT that tries to be born `receipt_verified` is refused by `ca_receipt_evidence_matches_flag` **even as the database superuser**; 0 archives, 0 verified receipts, no row names an authority. **Cross-customer purge is unavailable on the live appliance.** No external receipt verification exists and none is simulated. |
+| **C37** | 0 files under `/etc/stayconnect` and 0 systemd units mention any Phase-4 flag — DARK by absence. Every Phase-4 route on the running `edged` returns **404** while `/edge/v1/health` returns 200. No PMS socket, no provider socket, no financial worker. Verified before, after, across a reboot and after a rollback rehearsal. |
+| **C38** | Unchanged, PO-blocked. Nothing in WS-L advances it. |
+| least privilege | The five Phase-4 roles are NOLOGIN and hold no direct write on `entitlements`, `settlements`, `posting_review_actions` or `compliance_archives`; PUBLIC has EXECUTE on no Phase-4 definer function; the grant kernel is reachable by nobody; execution and outcome authorities are separated; and **no role at all** can execute `p4_record_compliance_receipt`. |
+
+Three things the live environment exposed that a disposable database could not, all fixed forward: the
+supported backup could not run at all (host `pg_dump` 14 against a 16 server, plus a `PGUSER` default that
+is a database name), the DOWN migrations cannot be run by the schema owner (each deletes its own ledger row,
+and `iam_v2_owner` holds only SELECT+INSERT there), and the catalog fingerprint cannot prove a rollback
+returned the same schema (dropped columns keep their attribute slots, so `ordinal_position` shifts while the
+structure is identical — see `iam_v2_scratch/schema_structure_fingerprint.sql`).
+
 ### Re-measured at T0041 — what changed in this milestone
 
 Two rows moved, and the reason each moved is a test that did not exist before:

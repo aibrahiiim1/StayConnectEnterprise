@@ -15,7 +15,7 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "4",
-  "current_activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+  "current_activity": "PHASE_4_LIVE_DARK_DEPLOYED_ON_DEVELOPMENT_APPLIANCE__AWAITING_PRODUCT_OWNER_ACCEPTANCE",
   "current_maturity": "Phase 1A/1B/2/3 all ACCEPTED_AND_CLOSED at DARK maturity. PHASE 3 IS ACCEPTED AND CLOSED AT VERIFIED DARK MATURITY (Product-Owner decision D16, transition T0024, 2026-08-11), against accepted runtime candidate 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4 -- the build the appliance runs. DARK and NOT CUT OVER: every Phase-3 feature flag is OFF, legacy public-schema IAM remains the sole production authority, and iam_v2 remains dark at 63 tables / 0 rows with migration 0010 applied and zero runtime iam_v2 grants to any service role. Accepted evidence: Phase 3 Software CI 31484446685 SUCCESS and Project Governance 31484446661 SUCCESS on the accepted HEAD, evidence artifact 9098688283 independently verified; current-render nft convergence, a NO-MUTATION normal netd restart, reboot reconstruction and idempotence, unapplied Hotel-Admin draft isolation, binary rollback and corrected-candidate redeployment, the fail-safe pre-nftconverge rollback boundary, and the DARK pmsd service (least-privilege, reboot-verified, no PMS socket, no Phase-3 SQL) all live-verified. ACCEPTED LIMITATION, not promoted to PASS: legacy live-session continuity is NOT PROVEN because no real legacy guest was available during the authorized live windows -- no test state was fabricated, and the populated-session behaviour is covered by the disposable real-kernel suite. Acceptance is at DARK maturity ONLY and authorizes no IAM-v2 cutover, no Phase-3 feature enablement, no PMS financial posting, no paid access, no PS or PA, no implicit FX, no programmatic reversal and no Gate-P runtime grants. PR #6 IS MERGED AND CLOSED: the Product Owner authorized the merge on 2026-08-11 (decision D17, transition T0025) and PR #6 was merged into master as merge commit 8a7230a7220e4c773bfb6399ce7774f31f20c906, whose second parent is the accepted delivery head fb25fd43bb83478c7b56d0ed18593ea89faaa4e5. It was a true merge commit that introduced no content: at the moment of the merge master's tree was identical to the merged head's tree, and the whole runtime tree -- data-plane, hotel-admin, control-plane, deploy, scripts and migrations -- was byte-for-byte identical to the accepted runtime candidate 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4. THAT WHOLE-TREE STATEMENT DESCRIBES THE MERGE, NOT TODAY: post-closure operational remediation (T0027) has since changed Caddy deployment material and operational tooling under deploy/ and scripts/. What remains unconditionally true is the part acceptance rests on -- the accepted Phase-3 APPLICATION/RUNTIME BINARIES and their functional behaviour are unchanged from 7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4, data-plane/, hotel-admin/, control-plane/ and every migration path still differ by zero files, and the six binaries on the appliance still hash-match the accepted build. Merging changed the repository only: it deployed nothing, enabled nothing and contacted no appliance, Production database or PMS. Phase 4 is AUTHORIZED under Product-Owner decision D18 / transition T0029 and its implementation is IN PROGRESS at DARK NO-FINANCIAL-TRAFFIC maturity. The financial execution core exists and is verified: migration 0011 (verified RN+G#, the immutable per-interface financial currency, the derived posting read model, atomic reviewer concurrency, the durable P# allocator and the structural no-blind-retry gate), the Posting domain with its fail-closed creation gate, the per-interface financial outbox lanes, DARK FIAS PS construction and PA correlation, and the terminal UNKNOWN state. Migration 0011 has been applied ONLY in disposable PostgreSQL: 0010 remains the latest migration applied in Production and on the appliance. No Phase-4 flag is enabled anywhere, no real PMS PS has been transmitted, no PA has been accepted, no guest folio has been debited and no payment provider has been called. Phase 4 is NOT accepted and NOT closed. Manual Review, payment execution, FINANCIAL_RECOVERY_MODE, operator UI/observability and the final controlled DARK deployment remain Phase-4 scope. Phases 5-7 remain NOT_STARTED and unauthorized.",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -270,12 +270,12 @@
     "standby": "none (an isolated second-site TEST db stayconnect_site_b exists for isolation tests; NOT a replication standby)"
   },
   "service_routing_state": "Legacy public-schema IAM is the SOLE production authority. No service is routed to iam_v2. All four site-DB daemons (scd/edged/acctd/netd) now connect under dedicated LEAST-PRIVILEGE Gate-P roles (svc_scd/svc_edged/svc_acctd/svc_netd; NOSUPERUSER, SCRAM) instead of superuser stayconnect — reboot-validated 2026-07-18. All new auth features (durable throttle, keyed-HMAC OTP, IAM-v2) remain OFF (dark).",
-  "pms_financial_state": "FIAS lookup-only in production. The Phase-4 Posting engine, payment domain, entitlement grant kernel, recovery mode and operator surface EXIST in the repository and are verified DARK against disposable PostgreSQL and by the authoritative CI gate. Nothing is enabled, no PS has ever been transmitted to a real PMS, no PA has been financially accepted, no folio has been debited and no provider CHARGE or REFUND has been issued. folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED.",
+  "pms_financial_state": "FIAS lookup-only in production. The Phase-4 financial layer is now DEPLOYED DARK on the development appliance: migrations 0011-0026 applied to iam_v2 (68 tables, 0 rows), five NOLOGIN restricted roles, and the Phase-4 binaries and Hotel-Admin bundle in service. Every Phase-4 flag is OFF, every Phase-4 route returns 404, and no PS has been transmitted, no PA financially accepted, no folio debited, no provider CHARGE or REFUND issued and no paid access granted. folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
-    "No governance blocker. Phases 0, 1A, 1B, 2 and 3 are ACCEPTED and CLOSED; Phase 3 is MERGED to master (D17/T0025, merge commit 8a7230a7220e4c773bfb6399ce7774f31f20c906). Phase 4 is AUTHORIZED (D18/T0029) and its SOFTWARE is complete and verified DARK: the financial execution core, payments and the settlement boundary, the entitlement grant kernel, FINANCIAL_RECOVERY_MODE, the operator surface, observability and the C35 fail-closed purge gate are all delivered and proven by the authoritative gate. The remaining Phase-4 work is WS-L, the authorized controlled live-DARK deployment with every flag OFF. No IAM-v2 cutover, Phase-3 or Phase-4 flag enablement, PMS financial posting, paid access or Gate-P runtime grant is authorized.",
-    "EXTERNAL LIMITATION, not a software blocker: no archival receipt authority exists for C35, so p4_assert_compliance_archived fails closed and cross-customer purge is unavailable. Nothing simulates a receipt and no external receipt verification is implemented or claimed.",
-    "ACCEPTED LIMITATION carried from Phase 3, not a blocker: legacy live-session continuity is NOT PROVEN because no real legacy guest was online during the authorized live windows. It may be observed opportunistically and does not reopen Phase 3."
+    "No governance blocker. Phase-4 SOFTWARE is complete and verified DARK, and as of T0043 it is DEPLOYED DARK on the development appliance with every flag OFF, zero financial egress, reboot persistence and a rehearsed rollback. What remains is the Product Owner's acceptance decision.",
+    "EXTERNAL LIMITATION, not a software blocker: no archival receipt authority exists for C35, so p4_assert_compliance_archived fails closed on the real appliance and cross-customer purge is unavailable. Nothing simulates a receipt and no external receipt verification is implemented or claimed.",
+    "ACCEPTED LIMITATION carried from Phase 3, not a blocker: legacy live-session continuity is NOT PROVEN because no real legacy guest was online during the authorized live windows."
   ],
   "allowed_actions": [
     "Execute the authorized Phase 4 (Financial Execution Layer: PMS Posting Engine, per-interface outbox lanes, UNKNOWN handling, Manual Review, payment/settlement foundations, restore Financial-Recovery) end-to-end as one Phase, DARK at NO-FINANCIAL-TRAFFIC maturity, per docs/architecture/StayConnect-IAM-Phase4-Plan.md under D18/T0029. Phase 3 is closed; its historical scope was (PMS Stay Domain, STRICT resolution, Room Move, Checkout Grace, Reinstatement) per docs/architecture/StayConnect-IAM-Phase3-Plan.md (additive migrations after 0009, dedicated read-only PMS connector, Stay/Event/Folio engine, STRICT resolver, PMS Auth Context, Commerce integration in test mode, Room Move, Checkout Grace + emergency fallback, Reinstatement, Guest Portal + Hotel Admin UI, automated tests)",
@@ -292,7 +292,7 @@
     "Central Control Plane changes; WAN/LAN/VLAN/DHCP changes; HA/appliance-topology changes",
     "Writing any Production Stay/Guest/Folio/Event/Auth-Context row to Production iam_v2 while dark (live PMS test persistence targets a disposable test DB only)"
   ],
-  "next_authorized_action": "WS-L under the EXISTING authorization (decision D18, transition T0029): the controlled live-DARK deployment of the accepted Phase-4 software candidate to the development Hotel Appliance, applying the additive migration chain 0011-0026 to iam_v2 and configuring the approved restricted roles, with every Phase-4 feature flag OFF, no IAM-v2 authentication cutover, no data migration and zero financial egress; then reboot persistence, the safe live-DARK portions of the backup/recovery procedure, and the rollback rehearsal followed by redeployment of the intended candidate. Acceptance remains the Product Owner's decision and is not taken by the implementer.",
+  "next_authorized_action": "Product-Owner review of the WS-L result recorded in governance/transitions/T0043.json. WS-L was executed on the development appliance under the existing D18/T0029 authorization and every acceptance proof it defines was measured live; Phase 4 is NOT accepted and NOT closed, and the implementer does not take that decision. No further live mutation, no flag enablement, no IAM-v2 cutover, no Production migration and no real financial traffic is authorized.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D18",
@@ -340,14 +340,14 @@
     "phase4_operator_surface": true,
     "phase4_runtime_integration": true,
     "phase4_migration_applied_in_production": false,
-    "phase4_migration_applied_on_appliance": false,
+    "phase4_migration_applied_on_appliance": true,
     "phase4_latest_applied_migration_in_production": "0010_phase3_stay_resolution",
     "phase4_financial_traffic_occurred": false,
-    "phase4_deployment_occurred": false,
+    "phase4_deployment_occurred": true,
     "phase4_remaining_scope": [
-      "WS-L: the authorized controlled live-DARK deployment on the development Hotel Appliance, reboot persistence and rollback rehearsal, with every Phase-4 flag OFF and zero financial egress",
+      "Product-Owner review and acceptance decision on the WS-L live-DARK result (T0043)",
       "EXTERNAL, not a software task: an archival receipt authority for C35. Until one exists the purge gate fails closed and cross-customer purge is unavailable",
-      "OUT OF SCOPE and PO-blocked: C38 real-financial acceptance (Contract §9c Tier-3 3C)"
+      "OUT OF SCOPE and PO-blocked: C38 real-financial acceptance (Contract 9c Tier-3 3C)"
     ],
     "phase_status": "ACCEPTED_AND_CLOSED",
     "dark": true,
@@ -391,7 +391,7 @@
       "scripts/ci/phase3_evidence.py (modified)"
     ],
     "post_closure_operational_changes_note": "Caddy deployment configuration, the Caddy systemd unit sources and CI/operational tooling changed AFTER Phase-3 closure, under T0026 and T0027. No Phase-3 application binary, migration, schema, IAM-v2 authority, PMS behaviour or financial behaviour changed. Do not claim the whole deploy/ or scripts/ tree is identical to the accepted candidate.",
-    "current_activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "current_activity": "PHASE_4_LIVE_DARK_DEPLOYED_ON_DEVELOPMENT_APPLIANCE__AWAITING_PRODUCT_OWNER_ACCEPTANCE",
     "live_increment9_executed": true,
     "live_increment9_executed_on": "2026-08-10",
     "live_increment9_item_verdicts": {
@@ -464,9 +464,33 @@
     "phase4_runtime_integration_evidence": "edged serves edge/v1/financial-review and edge/v1/financial-ops (health, settlements, recovery, holds, release, zero-attempt) behind the real router, RBAC and step-up middleware, exercised by the API integration matrix. Mounted only when the Phase-4 master and review flags are ON.",
     "phase4_observability": true,
     "phase4_observability_evidence": "0020 enqueued_at makes backlog AGE a real signal; edged exposes queue depth, oldest age, UNKNOWN count and settlement/payment counts as JSON and Prometheus with a closed condition vocabulary (C33).",
-    "phase4_stale_current_state_correction": "MEASURED AT T0042. phase4_manual_review_frontend, phase4_payments, phase4_entitlement_grant_wired, phase4_financial_recovery_mode, phase4_operator_surface and phase4_runtime_integration still described the state as of T0030/T0031 and claimed NOT_BUILT for work that T0032-T0041 delivered and proved. phase4_remaining_scope, blockers and next_authorized_action likewise still listed delivered work. They were corrected here from the code and the test matrix, not carried forward. The T0030-T0041 receipts are historical records of what was true when they were written and are NOT rewritten."
+    "phase4_stale_current_state_correction": "MEASURED AT T0042. phase4_manual_review_frontend, phase4_payments, phase4_entitlement_grant_wired, phase4_financial_recovery_mode, phase4_operator_surface and phase4_runtime_integration still described the state as of T0030/T0031 and claimed NOT_BUILT for work that T0032-T0041 delivered and proved. phase4_remaining_scope, blockers and next_authorized_action likewise still listed delivered work. They were corrected here from the code and the test matrix, not carried forward. The T0030-T0041 receipts are historical records of what was true when they were written and are NOT rewritten.",
+    "phase4_latest_applied_migration_on_appliance": "0026_phase4_c35_failclosed_and_operator_retry",
+    "phase4_live_dark_deployed": true,
+    "phase4_live_dark_deployed_on": "2026-08-13",
+    "phase4_live_dark_transition": "T0043",
+    "phase4_deployed_head_on_appliance": "f468dc099715bb8a9111cad5a1fc47134e6942ac",
+    "phase4_deployed_head_note": "The appliance runs binaries built from f468dc0. The commits above it change only iam_v2_scratch/ (disposable-database gate tooling), governance/, docs/ and exports/: git diff over data-plane/cmd, data-plane/internal, hotel-admin/, control-plane/ and deploy/ is EMPTY, so the deployed artefacts are the artefacts of the final head as well.",
+    "phase4_reboot_persistence_verified": true,
+    "phase4_rollback_rehearsed": true,
+    "phase4_appliance_iam_v2_tables": 68,
+    "phase4_appliance_iam_v2_rows": 0,
+    "phase4_appliance_roles": [
+      "sc_payment_runtime",
+      "sc_payment_outcome",
+      "sc_commerce_runtime",
+      "sc_financial_operator",
+      "sc_financial_readonly"
+    ],
+    "phase4_appliance_roles_note": "All five are NOLOGIN. NO Phase-4 login role and NO Phase-4 DSN exists: the approved design needs none while DARK, the roles exist only to hold grants, and nothing can authenticate as them.",
+    "phase4_c35_live_verdict": "FAIL-CLOSED ON THE REAL APPLIANCE. Local archive and purge gate implemented; runtime purge refused without a verified receipt; NO external archival receipt authority exists; external receipt verification is therefore NOT implemented and is not simulated or claimed. 0 archives, 0 verified receipts, cross-customer purge unavailable.",
+    "phase4_wsl_findings_fixed_forward": [
+      "the supported site backup could not run on this appliance (host pg_dump 14 vs server 16, a PGUSER default that is a database name rather than a role, and a least-privilege role that cannot dump) -- fixed",
+      "the DOWN migrations cannot be run by the schema owner, because each deletes its own ledger row and iam_v2_owner holds only SELECT+INSERT there -- recorded in the rollback procedure",
+      "the catalog fingerprint cannot prove a rollback returned the same schema, because dropped columns keep their attribute slots -- a structural fingerprint and a whole-chain DOWN/UP gate assertion were added"
+    ]
   },
-  "latest_transition_id": "T0042",
+  "latest_transition_id": "T0043",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
