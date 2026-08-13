@@ -22,9 +22,45 @@ set -euo pipefail
 
 OUT_DIR="${STAYCONNECT_BACKUP_DIR:-/var/backups/stayconnect}"
 ETC_DIR="${STAYCONNECT_ETC_DIR:-/etc/stayconnect}"
-PGUSER_SITE="${STAYCONNECT_PGUSER:-stayconnect_site}"
 PGDB_SITE="${STAYCONNECT_PGDB:-stayconnect_site}"
+PG_CONTAINER="${STAYCONNECT_PG_CONTAINER:-stayconnect-pg}"
 MARKER_NAME="financial-restore-generation.json"
+
+# WHERE pg_dump COMES FROM, and why this is not a detail.
+#
+# MEASURED ON THE DEVELOPMENT APPLIANCE (WS-L, 2026-08-13): PostgreSQL runs in the `stayconnect-pg`
+# container at 16.3, while the host carries the distribution client at 14.23. The earlier version of this
+# script called the host `pg_dump` directly and would have aborted:
+#
+#     pg_dump: error: server version: 16.3; pg_dump version: 14.23
+#     pg_dump: error: aborting because of server version mismatch
+#
+# A backup procedure that cannot run is worse than none, because the runbook says a backup was taken. It
+# also defaulted PGUSER to `stayconnect_site`, which is the DATABASE name on this appliance and not a role
+# that exists.
+#
+# So the dump is taken by the client that SHIPS WITH THE SERVER whenever the server is containerised, and
+# the host client is used only when there is no container. Either way the major versions are compared
+# before anything is written, because "the backup file exists" and "the backup file is a backup" are not
+# the same claim.
+# WHICH ROLE. A full backup has to read every schema, so a least-privilege SERVICE role is the wrong
+# credential: measured on the development appliance, dumping as svc_edged fails with
+# "permission denied for table schema_migrations" -- correctly, because that role is not supposed to read
+# the whole database. The DSN is therefore taken from the administrative entry that already points at the
+# site database, and an explicit STAYCONNECT_PGUSER always wins.
+PGUSER_SITE="${STAYCONNECT_PGUSER:-}"
+if [ -z "$PGUSER_SITE" ]; then
+  for envf in /etc/stayconnect/ctrlapi.env /etc/stayconnect/edged.env /etc/stayconnect/scd.env; do
+    [ -f "$envf" ] || continue
+    dsn="$(grep -oE "postgres://[^ ]*/$PGDB_SITE(\?[^ ]*)?" "$envf" | head -1)" || true
+    [ -n "${dsn:-}" ] || continue
+    PGUSER_SITE="$(printf '%s' "$dsn" | sed -E 's#postgres://([^:]+):.*#\1#')"
+    [ -n "${PGPASSWORD:-}" ] || PGPASSWORD="$(printf '%s' "$dsn" | sed -E 's#postgres://[^:]+:([^@]*)@.*#\1#')"
+    export PGPASSWORD
+    break
+  done
+fi
+[ -n "$PGUSER_SITE" ] || { echo "backup: FAILED — no database role to dump as (set STAYCONNECT_PGUSER)" >&2; exit 1; }
 
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 DUMP="$OUT_DIR/site-$STAMP.dump"
@@ -32,8 +68,36 @@ ETC_TAR="$OUT_DIR/site-$STAMP-etc.tgz"
 
 mkdir -p "$OUT_DIR"
 
-echo "backup: pg_dump -> $DUMP"
-pg_dump -Fc -U "$PGUSER_SITE" "$PGDB_SITE" -f "$DUMP"
+USE_CONTAINER=0
+if command -v docker >/dev/null 2>&1 && docker inspect "$PG_CONTAINER" >/dev/null 2>&1; then
+  USE_CONTAINER=1
+fi
+
+if [ "$USE_CONTAINER" = 1 ]; then
+  SRV_MAJOR="$(docker exec "$PG_CONTAINER" psql -U "$PGUSER_SITE" -d "$PGDB_SITE" -qAt                  -c 'SHOW server_version' </dev/null 2>/dev/null | cut -d. -f1)"
+  CLI_MAJOR="$(docker exec "$PG_CONTAINER" pg_dump --version </dev/null 2>/dev/null                  | grep -oE '[0-9]+' | head -1)"
+else
+  SRV_MAJOR="$(psql -U "$PGUSER_SITE" -d "$PGDB_SITE" -qAt -c 'SHOW server_version' 2>/dev/null | cut -d. -f1)"
+  CLI_MAJOR="$(pg_dump --version 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+fi
+if [ -z "$SRV_MAJOR" ] || [ -z "$CLI_MAJOR" ]; then
+  echo "backup: FAILED — could not establish the server and client versions" >&2; exit 1
+fi
+if [ "$CLI_MAJOR" -lt "$SRV_MAJOR" ]; then
+  echo "backup: FAILED — pg_dump $CLI_MAJOR cannot dump a PostgreSQL $SRV_MAJOR server." >&2
+  echo "backup: run this where the server's own client is available, or set STAYCONNECT_PG_CONTAINER." >&2
+  exit 1
+fi
+echo "backup: pg_dump $CLI_MAJOR -> server $SRV_MAJOR (container=$USE_CONTAINER) -> $DUMP"
+
+if [ "$USE_CONTAINER" = 1 ]; then
+  # Streamed to the host over stdout so the artefact lands in OUT_DIR and nothing is left inside the
+  # container to be forgotten about.
+  docker exec -e PGPASSWORD="${PGPASSWORD:-}" "$PG_CONTAINER"     pg_dump -Fc -U "$PGUSER_SITE" "$PGDB_SITE" </dev/null > "$DUMP"
+else
+  pg_dump -Fc -U "$PGUSER_SITE" "$PGDB_SITE" -f "$DUMP"
+fi
+[ -s "$DUMP" ] || { echo "backup: FAILED — the dump is empty" >&2; rm -f "$DUMP"; exit 1; }
 
 echo "backup: tar $ETC_DIR -> $ETC_TAR (EXCLUDING $MARKER_NAME)"
 tar czf "$ETC_TAR" --exclude="$MARKER_NAME" -C "$(dirname "$ETC_DIR")" "$(basename "$ETC_DIR")"
