@@ -135,66 +135,81 @@ BODYFILE="$(mktemp)"
 trap 'rm -f "$BODYFILE" "$BODYFILE.status"' EXIT
 printf '%s' "$body" > "$BODYFILE"
 
-# ---- the current candidate state, derived rather than hard-coded ------------------------------------------
+# ---- the current candidate state, DERIVED FROM CANONICAL STATE -------------------------------------------
 #
-# An UNRECOGNISED activity used to fall through to want="" — which silently disabled every check below. That
-# is the wrong default for a staleness gate: renaming the activity (exactly what a new correction round does)
-# would have turned the check off rather than making it fail, and the PR body could then say anything. An
-# activity this script does not know about is now a FAILURE that names itself.
-case "$activity" in
-  *ACCEPTED_AND_CLOSED*) want="ACCEPTED_AND_CLOSED AT DARK MATURITY"; superseded="DARK ACCEPTANCE CANDIDATE";;
-  *DARK_ACCEPTANCE_CANDIDATE*) want="DARK ACCEPTANCE CANDIDATE"; superseded="INCREMENT-9 DURABILITY CORRECTION CANDIDATE";;
-  *INCREMENT9_DURABILITY_CORRECTION*) want="INCREMENT-9 DURABILITY CORRECTION CANDIDATE"; superseded="PRE-LIVE SAFETY CANDIDATE";;
-  *PRE_LIVE_SAFETY*) want="PRE-LIVE SAFETY CANDIDATE"; superseded="DARK ACCEPTANCE CANDIDATE";;
-  *SOFTWARE_CANDIDATE*) want="DARK ACCEPTANCE CANDIDATE"; superseded="";;
-  *)
-    bad "activity '$activity' has no expected PR candidate-state mapping in this script; add one rather than leaving the PR-body check silently disabled"
-    want=""; superseded="";;
-esac
-
-if [ -n "$want" ]; then
-  if grep -qF -- "$want" "$BODYFILE"; then
-    note "PR body states the current candidate state: $want"
-  else
-    bad "the PR body does not state the current candidate state ($want); it is the most visible authoritative surface in the delivery"
-  fi
-  if [ -n "$superseded" ] && grep -qF -- "$superseded" "$BODYFILE"; then
-    # Historical mentions are legitimate; a STATUS line is not.
-    grep -iE "^[[:space:]]*(\*\*)?status" "$BODYFILE" > "$BODYFILE.status" 2>/dev/null || true
-    if grep -qF -- "$superseded" "$BODYFILE.status"; then
-      bad "the PR body's Status still announces the superseded state: $superseded"
-    else
-      note "the superseded state appears only outside the Status line (historical); allowed"
-    fi
-  fi
-fi
-
-# The PR body and the repository must agree about acceptance, in BOTH directions.
+# This used to be a `case` over current_activity mapping each activity to a hard-coded phrase, and the
+# ACCEPTED_AND_CLOSED arm demanded the literal string "ACCEPTED_AND_CLOSED AT DARK MATURITY". That phrase is
+# Phase-3's maturity. When Phase 4 closed at LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity, a PR body that stated
+# the true current state exactly and completely was reported as stale, and the only way to satisfy the gate
+# would have been to write a false maturity into the most visible surface in the delivery. A staleness check
+# that can only be satisfied by a wrong statement is worse than none.
 #
-# This check used to say only "the PR must not claim Phase 3 is accepted", which was correct for as long as
-# acceptance had not happened — and would have become wrong the moment it did, forbidding the PR from stating
-# the true final state. The direction is now taken from the recorded fact rather than assumed.
-accepted="$($PY3 -c "
+# So nothing about the expected wording is hard-coded now. Everything comes from canonical state:
+#
+#   phases[current_phase].status     the status TOKEN the body must carry (ACCEPTED_AND_CLOSED, IN_PROGRESS)
+#   phases[current_phase].maturity   the maturity the body must not contradict
+#   latest_accepted_po_decision      the decision id that granted the current status (D19)
+#   latest_transition_id             the receipt that recorded it (T0044)
+#
+# A phase closing at a maturity nobody has invented yet needs no edit here.
+META="$($PY3 -c "
 import json,sys
-try: f=json.load(open(sys.argv[1],encoding='utf-8')).get('current_state_facts') or {}
-except Exception: f={}
-print('yes' if (f.get('accepted') and f.get('closed')) else 'no')
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+cp=str(d.get('current_phase',''))
+ph=(d.get('phases') or {}).get(cp) or {}
+print(cp)
+print(str(ph.get('status') or ''))
+print(str(d.get('latest_accepted_po_decision') or ''))
+print(str(d.get('latest_transition_id') or ''))
 " "$STATE" 2>/dev/null)"
-case "$activity" in
-  *PHASE_3*)
-    if [ "$accepted" = "yes" ]; then
-      if grep -qiE "phase 3 (is )?accepted and closed|ACCEPTED_AND_CLOSED" "$BODYFILE"; then
-        note "the PR body states the accepted-and-closed state, matching the repository"
+cur_phase="$(printf '%s' "$META" | sed -n '1p')"
+cur_status="$(printf '%s' "$META" | sed -n '2p')"
+cur_decision="$(printf '%s' "$META" | sed -n '3p')"
+cur_transition="$(printf '%s' "$META" | sed -n '4p')"
+
+if [ -z "$cur_phase" ] || [ -z "$cur_status" ]; then
+  bad "current_phase / phases[current_phase].status could not be read; the PR-body check cannot be derived"
+else
+  note "derived from canonical state: phase $cur_phase is $cur_status (decision ${cur_decision:-none}, receipt ${cur_transition:-none})"
+
+  # 1. the body must carry the recorded STATUS TOKEN, in either spelling.
+  token_re="$(printf '%s' "$cur_status" | sed 's/_/[ _]/g')"
+  if grep -qiE -- "$token_re" "$BODYFILE"; then
+    note "PR body states the recorded status for phase $cur_phase: $cur_status"
+  else
+    bad "the PR body does not state the recorded status for phase $cur_phase ($cur_status); it is the most visible authoritative surface in the delivery"
+  fi
+
+  # 2. when a decision and a receipt granted that status, the body must cite them. A status without its
+  #    authority is a claim; with them it is checkable.
+  case "$cur_status" in
+    ACCEPTED_AND_CLOSED|FINAL_CLOSED)
+      for ref in "$cur_decision" "$cur_transition"; do
+        [ -n "$ref" ] || continue
+        if grep -qF -- "$ref" "$BODYFILE"; then
+          note "PR body cites $ref"
+        else
+          bad "the PR body states the phase is $cur_status but never cites $ref, the record that granted it"
+        fi
+      done
+      # 3. and its Status line must not simultaneously announce an unfinished state.
+      grep -iE "^[[:space:]]*[>*# ]*(\*\*)?status" "$BODYFILE" > "$BODYFILE.status" 2>/dev/null || true
+      if grep -qiE "in[ _-]progress|not accepted|not closed|acceptance candidate|awaiting (product[- ]owner )?acceptance" "$BODYFILE.status"; then
+        bad "the PR body's Status line announces an unfinished state while the repository records $cur_status"
       else
-        bad "the repository records Phase 3 as ACCEPTED AND CLOSED but the PR body does not say so"
+        note "the PR body's Status line does not contradict the recorded status"
       fi
-    else
-      if grep -qiE "phase 3 (is )?(accepted|closed|complete and accepted)" "$BODYFILE"; then
-        bad "the PR body claims Phase 3 is accepted or closed; the repository says it is not"
+      ;;
+    *)
+      # The mirror direction: an unfinished phase must not have a PR body announcing acceptance.
+      if grep -qiE "phase[- ]?$cur_phase (is )?(accepted and closed|accepted|closed)" "$BODYFILE"; then
+        bad "the PR body claims phase $cur_phase is accepted or closed; the repository records $cur_status"
+      else
+        note "the PR body does not claim an acceptance the repository has not recorded"
       fi
-    fi
-    ;;
-esac
+      ;;
+  esac
+fi
 
 # ---- the PR must not contradict the recorded current state -------------------------------------------------
 #

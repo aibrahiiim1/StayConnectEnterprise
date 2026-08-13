@@ -1,4 +1,11 @@
-//go:build integration
+//go:build integration && phase4
+
+// PHASE-4 TEST OWNERSHIP. The `phase4` tag is not decoration: these tests need the Phase-4 schema
+// (migrations 0011-0026), and the PHASE-3 regression gate builds a database that stops at 0010. With
+// only the `integration` tag they compiled into the Phase-3 gate's ./cmd/edged/ package and failed
+// against a schema in which `financial_base_currency` and `p4_declare_financial_recovery` cannot exist
+// -- a false failure that says nothing about Phase 3 and hides anything that would say something.
+// The tag is what makes the schema requirement structural rather than a naming convention.
 
 package main
 

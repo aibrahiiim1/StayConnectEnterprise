@@ -29,6 +29,7 @@ COPY = [
     "governance/decision-register.json",
     "docs/evidence/Phase3-Final-Live-Acceptance-Record.md",
     "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
     "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
     "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
     "docs/context/StayConnect-IAM-Handoff.md",
@@ -64,8 +65,17 @@ def sandbox():
             continue
         for ev in doc.get("evidence_files") or []:
             ev = str(ev).strip()
-            if ev and not ev.endswith("/") and ev not in rels:
-                rels.append(ev)
+            if not ev or ev.endswith("/"):
+                continue
+            # A receipt may cite a migration's two halves compactly as `...{up,down}.sql`. The validator
+            # expands that; so must the sandbox, or the baseline fails because the fixture copied a
+            # filename that never existed -- a fixture defect reported as a repository defect.
+            a, b = ev.find("{"), ev.find("}")
+            names = ([ev[:a] + part + ev[b + 1:] for part in ev[a + 1:b].split(",")]
+                     if 0 <= a < b else [ev])
+            for one in names:
+                if one not in rels:
+                    rels.append(one)
 
     for rel in rels:
         src = os.path.join(ROOT, rel)
@@ -368,6 +378,74 @@ def _(d):
     doc = json.load(io.open(p, encoding="utf-8"))
     doc["evidence_files"].append("docs/evidence/this-file-was-never-committed.md")
     io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+# ---- the closure-round false passes (D19/T0044) -------------------------------------------------------------
+#
+# Every case below ACTUALLY SHIPPED through a green Project Governance gate on 581daa05: the receipt said the
+# phase was closed, the phases map said IN_PROGRESS, and four current surfaces still narrated an unfinished
+# phase. The gate passed because no rule compared a receipt to the phases map, and no rule made "unfinished"
+# wrong RELATIVE TO A RECORDED STATUS.
+
+@case("the latest transition closed the phase while the phases map still says IN_PROGRESS",
+      "transition-phase-coherence")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    if doc["phases"]["4"]["status"] == "IN_PROGRESS":
+        raise AssertionError("mutation changed nothing: phases.4 is already IN_PROGRESS")
+    doc["phases"]["4"]["status"] = "IN_PROGRESS"
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("a closed phase's plan still says it is NOT accepted and NOT closed", "accepted-phase-semantics")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+               "## Status\n\nPhase 4 is NOT accepted and NOT closed - that decision is the Product Owner's.")
+
+
+@case("a closed phase's plan still carries the bare 'Not accepted, not closed' headline",
+      "accepted-phase-semantics")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+               "**Not accepted, not closed.** Every Phase-4 flag is OFF and no real financial traffic has "
+               "occurred.")
+
+
+@case("a current surface says a closed phase remains in progress", "accepted-phase-semantics")
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "## Current position\n\nPhase 4 remains IN_PROGRESS on branch phase/4-financial-execution; "
+               "implementation continues under D18/T0029.")
+
+
+@case("a current surface still awaits Product-Owner acceptance of a closed phase",
+      "accepted-phase-semantics")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase1A-Plan.md",
+               "- **Current position: awaiting Product-Owner acceptance of Phase 1A**, then Phase 1B "
+               "planning under separate authorization.")
+
+
+@case("allowed_actions still authorizes executing a phase that is closed", "accepted-phase-semantics")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    doc["allowed_actions"] = [
+        "Execute the authorized Phase 4 (Financial Execution Layer) end-to-end as one Phase, DARK at "
+        "NO-FINANCIAL-TRAFFIC maturity, per docs/architecture/StayConnect-IAM-Phase4-Plan.md under D18/T0029."
+    ]
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("the latest transition receipt records no new phase_status at all", "transition-phase-coherence")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    latest = json.load(io.open(p, encoding="utf-8"))["latest_transition_id"]
+    rp = os.path.join(d, "governance/transitions/%s.json" % latest)
+    doc = json.load(io.open(rp, encoding="utf-8"))
+    doc["new_state"].pop("phase_status", None)
+    io.open(rp, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
 
 
 def main():

@@ -713,7 +713,7 @@ MROWS = [
  ("StayConnect-IAM-Phase2-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md`","**Acceptance record — PRODUCT-OWNER ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014)**"),
  ("StayConnect-IAM-Phase2-Final-Report.md","`docs/reports/StayConnect-IAM-Phase2-Final-Report.md`","**Authoritative — Phase 2 final report (accepted)**"),
  ("Phase2-change-manifest.md","`docs/manifests/Phase2-change-manifest.md`","**Generated — complete Phase 2 changed-file manifest (base..delivery_head; inventory_head provenance)**"),
- ("StayConnect-IAM-Phase3-Plan.md","`docs/architecture/StayConnect-IAM-Phase3-Plan.md`","**Authoritative — Phase 3 plan (D14/T0015; IMPLEMENTATION IN PROGRESS, DARK)**"),
+ ("StayConnect-IAM-Phase3-Plan.md","`docs/architecture/StayConnect-IAM-Phase3-Plan.md`","**Authoritative — Phase 3 plan (D14/T0015; ACCEPTED_AND_CLOSED at DARK maturity, D16/T0024; merged D17/T0025)**"),
  ("Phase3-Privilege-Matrix.md","`docs/architecture/Phase3-Privilege-Matrix.md`","**Authoritative — Phase 3 privilege matrix (PRODUCTION_IAM_V2_DML: NONE; DARK)**"),
  ("Phase3-change-manifest.md","`docs/manifests/Phase3-change-manifest.md`","**Generated — complete Phase 3 changed-file manifest (base..delivery_head; inventory_head provenance)**"),
  ("StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`","**Authoritative (acceptance record)**"),

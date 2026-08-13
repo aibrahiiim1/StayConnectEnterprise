@@ -52,6 +52,41 @@ fi
 echo "  iam_v2 tables=$built + 0010 applied"
 
 export PHASE3_TEST_DSN="postgres://postgres:postgres@127.0.0.1:$PORT/$DB"
+# ---------------------------------------------------------------------------------------------------------
+# TEST OWNERSHIP GUARD.
+#
+# This gate builds a database that stops at migration 0010, because that is the schema Phase 3 ships. Phase-4
+# integration tests live in the SAME ./cmd/edged package and, while they carried only the `integration` tag,
+# they compiled into this run and failed against a schema in which `financial_base_currency` and
+# `p4_declare_financial_recovery` cannot exist. Seven red tests that said nothing about Phase 3, and would
+# have hidden anything that did.
+#
+# They now carry `//go:build integration && phase4`, so this build simply does not contain them. The check
+# below is the part that keeps it true: it asserts that no file compiled into THIS gate's packages mentions a
+# Phase-4-only object. A future test dropped into cmd/edged without the tag fails here, loudly, instead of
+# failing later as a mystery about a missing column.
+PKGS="./internal/pmsd/ ./internal/stayengine/ ./internal/authctx/ ./internal/checkout/ ./internal/staygrant/ ./internal/pmsresolve/ ./internal/enforce/ ./internal/writerguard/ ./cmd/edged/ ./cmd/acctd/ ./cmd/scd/"
+echo "== test-ownership guard: no Phase-4-schema test may compile into the Phase-3 gate =="
+leak=0
+while IFS= read -r gofile; do
+  [ -n "$gofile" ] || continue
+  # Phase-4-only database objects. A Phase-3 test cannot legitimately reference these: they do not exist
+  # until migration 0011 or later.
+  if grep -qE 'iam_v2\.p4_|financial_base_currency|p4_declare_financial_recovery|p4_entitlement_grant_kernel' "$gofile"; then
+    echo "  LEAK: $gofile compiles into the Phase-3 gate but references Phase-4-only schema"
+    leak=1
+  fi
+done <<EOF
+$( cd "$ROOT/data-plane" && go list -tags integration -f '{{$d := .Dir}}{{range .TestGoFiles}}{{$d}}/{{.}}
+{{end}}{{range .XTestGoFiles}}{{$d}}/{{.}}
+{{end}}' $PKGS 2>/dev/null )
+EOF
+if [ "$leak" != 0 ]; then
+  echo "  A Phase-4 test must carry //go:build integration && phase4 so this gate does not build it."
+  exit 1
+fi
+echo "  ok: every test compiled into this gate is Phase-3-owned"
+
 echo "== go test -tags integration ./internal/pmsd ./internal/stayengine ./internal/authctx ./internal/checkout ./internal/staygrant ./internal/pmsresolve ./internal/enforce ./internal/writerguard ./cmd/edged ./cmd/acctd ./cmd/scd (Integration) =="
 ( cd "$ROOT/data-plane" && go test -tags integration -run Integration ./internal/pmsd/ ./internal/stayengine/ ./internal/authctx/ ./internal/checkout/ ./internal/staygrant/ ./internal/pmsresolve/ ./internal/enforce/ ./internal/writerguard/ ./cmd/edged/ ./cmd/acctd/ ./cmd/scd/ -count=1 )
 rc=$?

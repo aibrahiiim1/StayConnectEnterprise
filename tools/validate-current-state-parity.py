@@ -580,10 +580,29 @@ def main():
     except Exception:  # noqa: BLE001
         tracked = None
 
+    def expand_braces(rel):
+        """Expand ONE level of {a,b} alternation in a cited path.
+
+        Receipts cite a migration's two halves compactly, as
+        `data-plane/migrations/0026_....{up,down}.sql`. That names two real, tracked files; treating the
+        literal string as a filename reported a citation of something that does exist, which is the
+        opposite of what this rule is for. Only a single simple alternation is expanded -- anything more
+        elaborate stays literal and fails loudly rather than being guessed at.
+        """
+        a = rel.find("{")
+        b = rel.find("}", a + 1)
+        if a < 0 or b < 0 or "{" in rel[a + 1:b]:
+            return [rel]
+        return [rel[:a] + part + rel[b + 1:] for part in rel[a + 1:b].split(",")]
+
     def cited_present(rel):
-        if tracked is not None:
-            return rel in tracked
-        return os.path.exists(os.path.join(ROOT, rel))
+        for one in expand_braces(rel):
+            if tracked is not None:
+                if one not in tracked:
+                    return False
+            elif not os.path.exists(os.path.join(ROOT, one)):
+                return False
+        return True
 
     if not os.path.isdir(tdir):
         bad("evidence-reference", "governance/transitions is missing, so cited evidence cannot be checked", ROOT)
@@ -608,6 +627,115 @@ def main():
                 "governance/transitions")
         if not missing:
             ok("every file cited as evidence by a transition receipt is %s" % how)
+
+    # ---- 9. TRANSITION / PHASE-STATUS COHERENCE --------------------------------------------------------------------
+    #
+    # THE FALSE PASS THIS CLOSES. T0044 recorded new_state.phase_status = ACCEPTED_AND_CLOSED for phase 4, and
+    # phases["4"].status stayed IN_PROGRESS. Every existing rule passed: the receipt was well formed, the facts
+    # block was coherent with itself, and no forbidden word appeared anywhere. The two records simply disagreed
+    # about the same thing, and the generated START-HERE / Handoff / Contract blocks then printed BOTH -- "Phase 4
+    # accepted and closed" and "4 IN_PROGRESS" -- in the same paragraph, because those blocks read the phases map
+    # while the prose read the receipt.
+    #
+    # A transition receipt is the instrument that MOVES the state. If the state it moved to is not the state the
+    # phases map records, one of them is a lie and there is no way to tell which from inside either.
+    latest_id = state.get("latest_transition_id")
+    cur_phase = str(state.get("current_phase", ""))
+    if latest_id and cur_phase:
+        rpath = os.path.join(TRANSITIONS_DIR, "%s.json" % latest_id)
+        try:
+            receipt = json.load(io.open(rpath, encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            receipt = None
+            bad("transition-phase-coherence",
+                "latest_transition_id is %s but %s.json is unreadable: %s" % (latest_id, latest_id, exc), STATE)
+        if receipt is not None:
+            recorded = ((receipt.get("new_state") or {}).get("phase_status") or "").strip()
+            affected = str(receipt.get("phase_affected") or receipt.get("new_state", {}).get("phase") or "").strip()
+            phases = state.get("phases") or {}
+            # The receipt speaks about the phase it names; fall back to current_phase when it names none.
+            target = affected if affected in phases else cur_phase
+            actual = ((phases.get(target) or {}).get("status") or "").strip()
+            if not recorded:
+                bad("transition-phase-coherence",
+                    "%s records no new_state.phase_status, so nothing constrains phases[%s].status"
+                    % (latest_id, target), rpath)
+            elif recorded != actual:
+                bad("transition-phase-coherence",
+                    "%s moved phase %s to %r but phases[%s].status is %r -- the receipt and the phases map "
+                    "disagree, and every generated block prints the phases map"
+                    % (latest_id, target, recorded, target, actual), STATE)
+            else:
+                ok("the latest transition (%s) and phases[%s].status agree (%s)" % (latest_id, target, actual))
+
+    # ---- 10. ACCEPTED-PHASE SEMANTICS ------------------------------------------------------------------------------
+    #
+    # THE FALSE PASS THIS CLOSES. With phase 4 recorded ACCEPTED_AND_CLOSED, four current surfaces still described
+    # it as unfinished: current_maturity narrated implementation-in-progress and remaining work, allowed_actions
+    # still authorized "Execute the authorized Phase 4 ... end-to-end", and the Phase-4 Plan carried both an
+    # accepted/closed header AND the sentences "Phase 4 is NOT accepted and NOT closed" and "Not accepted, not
+    # closed." A keyword gate cannot catch that, because in a repository where the phase really is unfinished
+    # every one of those sentences is correct. What makes them wrong is the recorded status, so the rule has to
+    # be relative to it.
+    #
+    # Generic over phases: it derives the set of accepted phases from the phases map and needs no new rule when
+    # phase 5, 6 or 7 closes. It is also deliberately two-sided in scope -- it fires on the STATE FILE's own
+    # narrative fields and on the plan/handoff surfaces, because that is where both halves of the contradiction
+    # actually lived.
+    phases = state.get("phases") or {}
+    accepted_phases = sorted(k for k, v in phases.items()
+                             if str((v or {}).get("status", "")).upper() in ("ACCEPTED_AND_CLOSED", "FINAL_CLOSED"))
+    PHASE_PLANS = {
+        "1A": "docs/architecture/StayConnect-IAM-Phase1A-Plan.md",
+        "1B": "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
+        "3": "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+        "4": "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    }
+    for pk in accepted_phases:
+        num = re.escape(pk)
+        # "phase 4 is not accepted", "phase-4 ... not closed", "phase 4 remains in progress", and the bare
+        # headline forms the Plan used.
+        unfinished = re.compile(
+            r"phase[- ]?" + num + r"\s+(?:is|remains)\s+(?:not\s+accepted|not\s+closed|in[_ -]?progress|"
+            r"not\s+started|unauthori[sz]ed|a\s+candidate)|"
+            r"phase[- ]?" + num + r"\s+is\s+NOT\s+accepted\s+and\s+NOT\s+closed|"
+            r"\bnot\s+accepted,\s+not\s+closed\b|"
+            r"phase[- ]?" + num + r"[^.\n]{0,40}awaiting\s+product[- ]owner\s+acceptance|"
+            r"awaiting\s+product[- ]owner\s+acceptance\s+of\s+phase[- ]?" + num,
+            re.I)
+        surfaces = list(DOC_SURFACES)
+        if pk in PHASE_PLANS:
+            surfaces.append(PHASE_PLANS[pk])
+        for rel in surfaces:
+            text = load_surface(rel)
+            if text is None:
+                continue
+            for para, _ in paragraphs(text):
+                if not unfinished.search(para):
+                    continue
+                if HISTORY_MARKERS.search(para):
+                    continue
+                # A sentence that quotes the wrong wording IN ORDER TO CORRECT IT is not the wrong wording.
+                if re.search(r"corrected|the line this replaces|read \"|reads \"|used to say|overstat", para, re.I):
+                    continue
+                bad("accepted-phase-semantics",
+                    "phases[%s].status is accepted/closed, but this presents phase %s as unfinished: %s"
+                    % (pk, pk, " ".join(para.split())[:180]), rel)
+
+        # allowed_actions must not still authorize EXECUTING a phase that is closed. Governance and
+        # documentation maintenance for a closed phase is legitimate and is not matched.
+        execute = re.compile(r"(execute|continue|deliver|implement)[^.\n]{0,60}phase[- ]?" + num + r"\b", re.I)
+        for i, act in enumerate(state.get("allowed_actions") or []):
+            if not isinstance(act, str) or not execute.search(act):
+                continue
+            if re.search(r"governance|documentation|maintenance|historical|closed", act, re.I):
+                continue
+            bad("accepted-phase-semantics",
+                "allowed_actions[%d] still authorizes executing phase %s, which is recorded %s: %s"
+                % (i, pk, phases[pk].get("status"), " ".join(act.split())[:160]), STATE)
+    if not [f for f in failures if f[0] == "accepted-phase-semantics"]:
+        ok("no current surface presents an accepted/closed phase as unfinished (accepted: %s)"
+           % ", ".join(accepted_phases))
 
     # ---- report ----------------------------------------------------------------------------------------------------
     if as_json:

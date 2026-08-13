@@ -142,7 +142,10 @@ run_step() {
   fi
 }
 
-GO=(go test -tags integration -count=1)
+# The `phase4` tag is what tells the compiler these tests need the Phase-4 schema. The Phase-3
+# regression gate builds a database that stops at migration 0010 and therefore builds WITHOUT it;
+# this harness applies 0011-0026 and asks for it explicitly.
+GO=(go test -tags "integration phase4" -count=1)
 
 run_step "posting core"            "${GO[@]}" -run IntegrationPosting ./internal/posting/ "$@"
 run_step "review + finops API"     "${GO[@]}" -run "IntegrationReviewAPI|IntegrationFinOpsAPI|IntegrationZeroAttemptAPI" ./cmd/edged/ "$@"

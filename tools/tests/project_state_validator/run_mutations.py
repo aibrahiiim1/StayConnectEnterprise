@@ -1,17 +1,221 @@
 #!/usr/bin/env python3
 """Adversarial mutation tests for the project-state governance validators.
 
-Each mutation injects exactly one defect into the real files, runs the structural validator
-(tools/project-state.py validate) and the keyword validator (tools/validate-project-state.sh),
-and asserts that AT LEAST ONE reports failure (non-zero). The original bytes are restored
-(try/finally) after every case. Finally the restored good state must PASS both validators.
+Each mutation injects exactly one defect, runs the structural validator (tools/project-state.py validate)
+and the keyword validator (tools/validate-project-state.sh), and asserts that AT LEAST ONE reports failure
+(non-zero). A validator that only passes the good state without failing these negative cases is NOT accepted.
 
-A validator that only passes the good state without failing these negative cases is NOT accepted.
+ISOLATION -- WHY THIS SUITE NO LONGER TOUCHES THE CHECKOUT.
+==========================================================
+It used to mutate the REAL governance/project-state.json in the active working tree and restore the original
+bytes in a `finally`. That is safe only while exactly one runner exists and nothing ever interrupts it, and
+neither held:
+
+  * a run that is killed -- timeout, Ctrl-C, a CI cancellation -- never reaches its `finally`, and leaves the
+    canonical state file mutated. Observed: `phases["1A"].status` left at NOT_STARTED, and
+    `latest_transition_id` left at the fixture value T0008;
+  * two runners overlap and each restores the bytes IT captured, so the second one's restore silently
+    reverts the first one's legitimate edits. Observed twice in one round: a detached runner that outlived
+    its wrapper wrote a stale project-state.json and a stale artifact-registry.json back over corrected
+    content, and the corruption looked like a validator failure rather than like a test harness.
+
+Mutating the authoritative file the whole governance model depends on, inside the working copy people are
+editing, is a defect in the TOOLING. So the mutations now run in a DISPOSABLE SANDBOX:
+
+    git clone --shared --no-checkout ROOT SANDBOX   objects are borrowed through objects/info/alternates --
+                                                    nothing is copied and nothing can be written back; the
+                                                    sandbox has its own index, refs and config
+    copy every git-known working-tree file           so UNCOMMITTED corrections are what gets tested
+    copy ROOT/.git/index                             so STAGED state is reproduced too, not just the files
+
+FIDELITY IS PROVED, NOT ASSUMED. After building, the sandbox must satisfy two exact equalities against the
+checkout, or the run aborts:
+
+    git status --porcelain   identical  -> staged, unstaged, deleted, renamed and untracked-added all match
+    git ls-files -s          identical  -> blob ids, stage numbers AND file modes (100644 vs 100755, and
+                                           120000 for a symlink) all match
+
+Those two together are the working state, not an approximation of it.
+
+COVERAGE IS UNCHANGED. The sandbox is a real git repository, so the two git-dependent checks (SOURCE_COMMIT
+existence and manifest-vs-git equality) run exactly as they do in the checkout instead of being skipped.
+
+FAIL CLOSED. If the sandbox cannot be built or cannot be proved faithful, the suite exits non-zero instead of
+falling back to the checkout.
+
+TERMINATION, STATED PRECISELY.
+  * Normal exit, exception, SIGINT and SIGTERM: the sandbox is removed by `finally` + atexit + handlers.
+  * SIGKILL, or Windows TerminateProcess: NO handler can run, so THIS PROCESS CANNOT PROMISE TO CLEAN UP.
+    What is guaranteed is the property that matters -- the canonical checkout is untouched either way,
+    because nothing was ever written to it. The leftover sandbox is swept by an INDEPENDENT mechanism: every
+    run, at startup, deletes `psmut-*` sandboxes older than SWEEP_AGE_S. That is a different process doing
+    the cleanup, which is the only kind of promise a killed process can keep.
+
+Finally, the suite verifies for itself that ROOT's governance/ directory is byte-identical before and after.
+If this harness ever writes to the canonical tree again it says so, instead of leaving somebody to find out.
+
 Run from anywhere:  python tools/tests/project_state_validator/run_mutations.py
+Flags:  --require-full   fail if MUTATION_MAX_CASES is set. The authoritative CI gate passes this, so a
+                         limited run can never be mistaken for the full matrix.
+Env:    MUTATION_MAX_CASES=N  TEST-ONLY. Runs the first N mutations. It exists so the isolation regression
+                         can launch short overlapping child runs; CI leaves it unset and passes
+                         --require-full.
 """
 import subprocess, os, sys, shutil, json, io as _io
+import atexit, hashlib, signal, tempfile, time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+SANDBOX_PREFIX = "psmut-"
+SWEEP_AGE_S = 2 * 60 * 60      # a sandbox older than this belongs to a run that is gone
+
+# WORK is where mutations happen. It is set to the sandbox before any mutation runs; the module-level
+# default is ROOT only so the fixture anchors below can be READ, and main() refuses to proceed without a
+# sandbox rather than falling back to it.
+WORK = ROOT
+_SANDBOX = None
+
+
+def _rmtree(path):
+    if path and os.path.isdir(path):
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _cleanup():
+    global _SANDBOX
+    p, _SANDBOX = _SANDBOX, None
+    _rmtree(p)
+
+
+def _on_signal(signum, _frame):
+    _cleanup()
+    os._exit(130)
+
+
+atexit.register(_cleanup)
+for _sig in (getattr(signal, "SIGINT", None), getattr(signal, "SIGTERM", None)):
+    if _sig is not None:
+        try:
+            signal.signal(_sig, _on_signal)
+        except (ValueError, OSError):      # not the main thread, or unsupported here
+            pass
+
+
+def sweep_stale_sandboxes():
+    """Delete sandboxes left behind by runs that were FORCE-KILLED.
+
+    A process killed with SIGKILL (or TerminateProcess on Windows) runs no handler and no atexit hook, so it
+    cannot clean up after itself -- claiming otherwise would be false. The cleanup therefore belongs to a
+    DIFFERENT process: every run sweeps old sandboxes before it builds its own. Age-based so a concurrent
+    run's live sandbox is never touched.
+    """
+    removed = []
+    base = tempfile.gettempdir()
+    now = time.time()
+    try:
+        names = os.listdir(base)
+    except OSError:
+        return removed
+    for name in names:
+        if not name.startswith(SANDBOX_PREFIX):
+            continue
+        p = os.path.join(base, name)
+        try:
+            if os.path.isdir(p) and (now - os.path.getmtime(p)) > SWEEP_AGE_S:
+                shutil.rmtree(p, ignore_errors=True)
+                removed.append(name)
+        except OSError:
+            continue
+    return removed
+
+
+def _git(*args, cwd=None):
+    return subprocess.run(["git", *args], cwd=cwd or ROOT, capture_output=True, text=True)
+
+
+def build_sandbox():
+    """A disposable, complete, writable copy of the repository, PROVED faithful. Returns (dir, repo, count)."""
+    d = tempfile.mkdtemp(prefix=SANDBOX_PREFIX)
+    target = os.path.join(d, "repo")
+    r = _git("clone", "--shared", "--no-checkout", "--quiet", ROOT, target)
+    if r.returncode != 0:
+        _rmtree(d)
+        raise RuntimeError("git clone --shared failed: %s" % (r.stderr or r.stdout).strip()[:300])
+
+    # The WORKING TREE, not HEAD: this suite must test the candidate state as it stands, including
+    # uncommitted corrections. Tracked + untracked-but-not-ignored is exactly "what git would show you",
+    # which also keeps node_modules and other ignored bulk out of the copy. A tracked file that has been
+    # DELETED in the checkout is simply not copied, and --no-checkout means the sandbox tree starts empty,
+    # so the deletion is reproduced rather than papered over.
+    listed = _git("ls-files", "-co", "--exclude-standard")
+    if listed.returncode != 0:
+        _rmtree(d)
+        raise RuntimeError("git ls-files failed: %s" % listed.stderr.strip()[:300])
+    n = 0
+    for rel in listed.stdout.splitlines():
+        rel = rel.strip()
+        if not rel:
+            continue
+        src = os.path.join(ROOT, rel)
+        if os.path.islink(src) or os.path.isfile(src):
+            dst = os.path.join(target, rel.replace("/", os.sep))
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            if os.path.islink(src):
+                link = os.readlink(src)
+                try:
+                    os.symlink(link, dst)
+                except (OSError, NotImplementedError):
+                    with open(dst, "w", encoding="utf-8", newline="") as f:
+                        f.write(link)      # how git materialises a symlink where they are unavailable
+            else:
+                shutil.copy2(src, dst)     # copy2 carries the mode bits
+            n += 1
+    if n == 0:
+        _rmtree(d)
+        raise RuntimeError("the sandbox copy is empty; refusing to run mutations against nothing")
+
+    # The INDEX, so STAGED state is reproduced and not merely the file contents. The sandbox borrows ROOT's
+    # object database, so every blob the index references resolves.
+    src_index = os.path.join(ROOT, ".git", "index")
+    dst_index = os.path.join(target, ".git", "index")
+    if os.path.isfile(src_index):
+        shutil.copy2(src_index, dst_index)
+
+    if _git("rev-parse", "--git-dir", cwd=target).returncode != 0:
+        _rmtree(d)
+        raise RuntimeError("the sandbox is not a usable git repository")
+
+    # ---- FIDELITY, PROVED --------------------------------------------------------------------------------
+    # Two exact equalities. `status --porcelain` covers staged vs unstaged vs deleted vs renamed vs
+    # untracked-added; `ls-files -s` covers blob ids, stage numbers and MODES (100644 / 100755 / 120000).
+    for what, args in (("git status --porcelain", ("status", "--porcelain")),
+                       ("git ls-files -s", ("ls-files", "-s"))):
+        a = _git(*args)
+        b = _git(*args, cwd=target)
+        if a.returncode != 0 or b.returncode != 0:
+            _rmtree(d)
+            raise RuntimeError("fidelity check could not run (%s)" % what)
+        if a.stdout.splitlines() != b.stdout.splitlines():
+            only_root = sorted(set(a.stdout.splitlines()) - set(b.stdout.splitlines()))[:3]
+            only_box = sorted(set(b.stdout.splitlines()) - set(a.stdout.splitlines()))[:3]
+            _rmtree(d)
+            raise RuntimeError("the sandbox does not reproduce the checkout (%s)\n"
+                               "  only in checkout: %s\n  only in sandbox: %s" % (what, only_root, only_box))
+    return d, target, n
+
+
+def canonical_digest():
+    """A digest of the CANONICAL governance directory, used to prove this suite never wrote to it."""
+    h = hashlib.sha256()
+    base = os.path.join(ROOT, "governance")
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames.sort()
+        for name in sorted(filenames):
+            p = os.path.join(dirpath, name)
+            h.update(os.path.relpath(p, ROOT).replace(os.sep, "/").encode("utf-8"))
+            with open(p, "rb") as f:
+                h.update(f.read())
+    return h.hexdigest()
 
 # The latest transition id changes every governance round, and M08 anchors on it. Hard-coding it meant the
 # suite broke -- in CI, after the work was already done -- on T0024, T0025, T0026 and T0027 in turn. Read it
@@ -25,8 +229,14 @@ CUR_NEXT_ACTION_PREFIX = _STATE_DOC["next_authorized_action"][:60]
 # Derived anchors. These two sentences are rewritten on every phase advance, so pinning their exact
 # wording made the suite drift silently: it kept passing its own fixtures until a run finally aborted
 # on "fixture drift". Deriving them means the suite follows the authoritative state file.
+# Matched on CONTENT, not on a prefix. Pinning the first words meant a legitimate rewording of the action
+# ("Repository-only governance and documentation maintenance for the closed phases ...") aborted the whole
+# suite with StopIteration -- a fixture failing as though the repository were broken.
 CUR_GOV_MAINT = next(a for a in _STATE_DOC["allowed_actions"]
-                    if a.startswith("Governance and documentation maintenance"))
+                    if "governance and documentation maintenance" in a.lower())
+# The blockers sentence is rewritten on every phase closure ("... Phase 3 is ACCEPTED and CLOSED" became
+# "... Phase 4 is ACCEPTED AND CLOSED"), so pinning its wording drifted the same way the other anchors did.
+CUR_BLOCKER_HEAD = _STATE_DOC["blockers"][0][:48]
 CUR_PHASE_BEYOND = next(a for a in _STATE_DOC["prohibited_actions"]
                        if a.startswith("Implementing any Phase beyond"))
 CUR_TRANSITION = json.load(_io.open(
@@ -50,22 +260,24 @@ def _find_bash():
 BASH = _find_bash()
 
 def run(cmd):
-    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    # cwd=WORK, never ROOT. The validators resolve their repository root from their own location,
+    # so invoking the SANDBOX copies makes them read and judge the sandbox.
+    return subprocess.run(cmd, cwd=WORK, capture_output=True, text=True)
 def structural():
-    return run([sys.executable, "tools/project-state.py", "validate"]).returncode
+    return run([sys.executable, os.path.join(WORK, "tools", "project-state.py"), "validate"]).returncode
 def keyword():
-    return run([BASH, "tools/validate-project-state.sh"]).returncode
+    return run([BASH, os.path.join(WORK, "tools", "validate-project-state.sh")]).returncode
 def both_status():
     return structural(), keyword()
 
 # mutation = (name, relpath, op) ; op = ("replace",[(find,repl),...]) | ("append", text)
 MUTATIONS = [
  ("M01 Phase 1A NOT_STARTED", "governance/project-state.json",
-   ("replace", [('"1A": { "status": "ACCEPTED_AND_CLOSED"', '"1A": { "status": "NOT_STARTED"')])),
+   ("json_set", [(["phases", "1A", "status"], "NOT_STARTED")])),
  ("M02 Phase 1A pending/planning", "governance/project-state.json",
-   ("replace", [('"1A": { "status": "ACCEPTED_AND_CLOSED"', '"1A": { "status": "PLANNING"')])),
+   ("json_set", [(["phases", "1A", "status"], "PLANNING")])),
  ("M03 two current phases", "governance/project-state.json",
-   ("replace", [('"5":  { "status": "NOT_STARTED"', '"5":  { "status": "IN_PROGRESS"')])),
+   ("json_set", [(["phases", "5", "status"], "IN_PROGRESS")])),
  ("M04 two next authorized actions", "governance/project-state.json",
    ("replace", [(f'"next_authorized_action": "{CUR_NEXT_ACTION_PREFIX}',
                  f'"next_authorized_action": "Also start Phase 9 now. Obtain a Product-Owner decision on the Increment-9 durability correction. {CUR_NEXT_ACTION_PREFIX}')])),
@@ -125,8 +337,8 @@ MUTATIONS = [
    ("replace", [(f'"current_activity": "{CUR_ACTIVITY}"',
                  '"current_activity": "PHASE_2_ACCEPTED_AND_CLOSED"')])),
  ("M30 gate_p cutover done but blocker says superuser", "governance/project-state.json",
-   ("replace", [("No governance blocker. Phase 3 is ACCEPTED and CLOSED",
-                 "Site-DB services still connect as superuser stayconnect and least-privilege roles are not yet applied. No governance blocker. Phase 3 is ACCEPTED and CLOSED")])),
+   ("replace", [(CUR_BLOCKER_HEAD,
+                 "Site-DB services still connect as superuser stayconnect and least-privilege roles are not yet applied. " + CUR_BLOCKER_HEAD)])),
  ("M31 stale 'Phase 3 not-started/unauthorized' in a current field after D14/T0015", "governance/project-state.json",
    ("replace", [(f'"{CUR_GOV_MAINT}"',
                  '"Phase 3 is NOT_STARTED and unauthorized; await explicit Product-Owner authorization"')])),
@@ -187,7 +399,7 @@ MUTATIONS = [
 
 def apply(relpath, op):
     # binary I/O so restore is BYTE-EXACT (preserves original line endings; no CRLF<->LF drift)
-    p = os.path.join(ROOT, relpath)
+    p = os.path.join(WORK, relpath)
     with open(p, "rb") as f: orig = f.read()
     kind = op[0]
     if kind == "remove":
@@ -200,6 +412,22 @@ def apply(relpath, op):
             text = text.replace(find, repl)
     elif kind == "append":
         text = text + op[1]
+    elif kind == "json_set":
+        # Formatting-independent. The textual fixtures below pinned the file's ONE-LINE serialisation
+        # (`"1A": { "status": "ACCEPTED_AND_CLOSED"`), so a later round that rewrote project-state.json with
+        # json.dumps(indent=2) expanded every object and those fixtures stopped matching. The suite then
+        # aborted on "fixture drift" -- a test failing as though the repository were broken -- and, because
+        # the Governance job had already stopped at an earlier step, nobody saw it for two rounds. Setting
+        # the value through the parsed document cannot drift with whitespace.
+        doc = json.loads(text)
+        for path, value in op[1]:
+            node = doc
+            for k in path[:-1]:
+                node = node[k]
+            if node.get(path[-1]) == value:
+                raise AssertionError("fixture drift: %s is already %r" % ("/".join(path), value))
+            node[path[-1]] = value
+        text = json.dumps(doc, indent=2, ensure_ascii=False) + chr(10)
     with open(p, "wb") as f: f.write(text.encode("utf-8"))
     return p, orig  # orig is raw bytes
 
@@ -207,6 +435,51 @@ def restore(p, orig):
     with open(p, "wb") as f: f.write(orig)
 
 def main():
+    global WORK, _SANDBOX
+    require_full = "--require-full" in sys.argv
+    limit = os.environ.get("MUTATION_MAX_CASES")
+    if require_full and limit:
+        # The authoritative gate must never be satisfied by a partial run.
+        print("=== case-limit check ===")
+        print("  FAIL: --require-full was requested but MUTATION_MAX_CASES=%s is set." % limit)
+        print("  MUTATION_MAX_CASES is TEST-ONLY (the isolation regression's short child runs). The")
+        print("  authoritative gate must run the complete matrix.")
+        return 2
+
+    print("=== isolation: mutations run in a disposable sandbox, never in the checkout ===")
+    swept = sweep_stale_sandboxes()
+    if swept:
+        print("  swept %d stale sandbox(es) from a previously force-killed run: %s"
+              % (len(swept), ", ".join(swept[:3])))
+    before = canonical_digest()
+    try:
+        _SANDBOX, WORK, copied = build_sandbox()
+    except Exception as exc:                                        # noqa: BLE001
+        # FAIL CLOSED. Falling back to the checkout is what made this harness dangerous.
+        print("  SANDBOX FAILED: %s" % exc)
+        print("  refusing to mutate the canonical checkout; nothing was changed")
+        return 2
+    print("  sandbox: %s" % WORK)
+    print("  fidelity: %d working-tree files; git status --porcelain and git ls-files -s (blobs, stages,"
+          " modes) both identical to the checkout" % copied)
+
+    try:
+        rc = _run_matrix(require_full)
+    finally:
+        _cleanup()
+        WORK = ROOT
+
+    after = canonical_digest()
+    if before != after:
+        print("=" * 60)
+        print("ISOLATION VIOLATED: governance/ in the checkout changed while the suite ran")
+        print("  before %s\n  after  %s" % (before[:16], after[:16]))
+        return 1
+    print("  isolation verified: canonical governance/ is byte-identical (%s)" % before[:16])
+    return rc
+
+
+def _run_matrix(require_full=False):
     print("=== baseline (good state) must PASS both validators ===")
     s0, k0 = both_status()
     if s0 != 0 or k0 != 0:
@@ -215,7 +488,17 @@ def main():
     print("=== mutation matrix (each must make validation FAIL non-zero) ===")
     results = []
     allok = True
-    for name, relpath, op in MUTATIONS:
+    limit = os.environ.get("MUTATION_MAX_CASES")
+    cases = MUTATIONS[:int(limit)] if (limit or "").isdigit() else MUTATIONS
+    if cases is MUTATIONS:
+        print("  case limit: NONE -- running the COMPLETE matrix, %d of %d cases%s"
+              % (len(cases), len(MUTATIONS), " (--require-full)" if require_full else ""))
+    else:
+        print("  NOTE: MUTATION_MAX_CASES=%s -- running %d of %d cases. TEST-ONLY knob for the isolation"
+              % (limit, len(cases), len(MUTATIONS)))
+        print("        regression's short overlapping child runs. The authoritative gate passes")
+        print("        --require-full, which refuses to run at all while this is set.")
+    for name, relpath, op in cases:
         p, orig = apply(relpath, op)
         try:
             s, k = both_status()
@@ -234,6 +517,9 @@ def main():
     print(f"  restored: structural={'PASS' if s1==0 else 'FAIL'} keyword={'PASS' if k1==0 else 'FAIL'}")
     print("=" * 60)
     ok = allok and restored_ok
+    # Machine-readable, so the count that actually ran is evidence rather than a claim in prose.
+    print("MUTATION_CASES_EXECUTED=%d MUTATION_CASES_TOTAL=%d MUTATION_CASE_LIMIT=%s"
+          % (len(cases), len(MUTATIONS), os.environ.get("MUTATION_MAX_CASES") or "none"))
     print("PROJECT_STATE_MUTATION_TESTS =", "PASS" if ok else "FAIL")
     return 0 if ok else 1
 
