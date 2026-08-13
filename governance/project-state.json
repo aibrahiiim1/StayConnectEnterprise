@@ -292,7 +292,7 @@
     "Central Control Plane changes; WAN/LAN/VLAN/DHCP changes; HA/appliance-topology changes",
     "Writing any Production Stay/Guest/Folio/Event/Auth-Context row to Production iam_v2 while dark (live PMS test persistence targets a disposable test DB only)"
   ],
-  "next_authorized_action": "Product-Owner review of the WS-L result recorded in governance/transitions/T0043.json. WS-L was executed on the development appliance under the existing D18/T0029 authorization and every acceptance proof it defines was measured live; Phase 4 is NOT accepted and NOT closed, and the implementer does not take that decision. No further live mutation, no flag enablement, no IAM-v2 cutover, no Production migration and no real financial traffic is authorized.",
+  "next_authorized_action": "Obtain the Product Owner's acceptance decision on the WS-L controlled live-DARK result recorded in governance/transitions/T0043.json: WS-L was executed on the development appliance under the existing D18/T0029 authorization with every Phase-4 flag OFF and zero financial egress, and Phase 4 remains NEITHER accepted NOR closed until that decision is made, with no further live mutation, no flag enablement, no IAM-v2 cutover, no Production migration and no real financial traffic authorized in the meantime.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D18",
@@ -325,11 +325,11 @@
       "unbypassable DARK guard"
     ],
     "phase4_authoritative_ci_run_on_head": true,
-    "phase4_authoritative_ci_run_id": 31657293520,
-    "phase4_authoritative_ci_head": "f2771dc6d0c409ff66443dc60d57fc5abecfdb6a",
+    "phase4_authoritative_ci_run_id": 31690016483,
+    "phase4_authoritative_ci_head": "b94112d8cb0ab63938b60f829ddd465c14491f97",
     "phase4_authoritative_ci_conclusion": "success",
-    "phase4_authoritative_ci_artifact": "phase4-financial-core-evidence-f2771dc6d0c409ff66443dc60d57fc5abecfdb6a",
-    "phase4_authoritative_ci_note": "Phase 4 Financial Core CI run 31657293520 succeeded 34/34 on f2771dc6d0c409ff66443dc60d57fc5abecfdb6a, which is the FINAL SOFTWARE DELIVERY CANDIDATE of this milestone (T0041): the last commit that changes any software or runtime path. Artifact 9164965342, digest sha256:ad4a4a58ecc1bc193b53530e3dfe60408c087387352cd9f2ca8c0080a3a182c4. The delivery commit that follows it changes only documentation, governance, packs and the manifest; the measured software diff between f2771dc and the delivery head is EMPTY across data-plane/, hotel-admin/, control-plane/, scripts/, .github/, deploy/ and iam_v2_scratch/, which is what makes this run evidence for the delivered head. Two earlier runs on this branch are deliberately NOT recorded as authoritative: 31656609770 on 713afcd failed `npm ci` with EUSAGE because the lockfile had been generated on Windows and omitted the hoisted @emnapi packages a Linux ideal-tree computes, and 31649545309 belongs to the previous milestone's head. SEPARATELY, and correcting T0040: run 31648910147 ran on 35ef249a, the SOFTWARE candidate of that milestone, NOT on its literal final head 71d7ac0; a different run, 31649545309, did succeed 33/33 on 71d7ac0. git diff 35ef249a..71d7ac0 touches only docs/, exports/ and governance/, so either run is valid evidence for that software -- but calling 35ef249a 'the FINAL DELIVERY HEAD' was imprecise.",
+    "phase4_authoritative_ci_artifact": "phase4-financial-core-evidence-b94112d8cb0ab63938b60f829ddd465c14491f97",
+    "phase4_authoritative_ci_note": "Phase 4 Financial Core CI run 31690016483 succeeded 36/36 on b94112d8cb0ab63938b60f829ddd465c14491f97, the final SOFTWARE candidate of the WS-L milestone. Artifact 9177140558, digest sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d. The gate now carries 36 steps: the two added at T0042 are the current-state parity self-test and the parity check itself. The delivery commit that follows changes only documentation, governance, packs and the manifest.\n\nPREFLIGHT (T0042): run 31686386021 succeeded 36/36 on 26d14de and the runtime delta versus the accepted T0041 software candidate f2771dc was measured EMPTY across data-plane/, hotel-admin/, control-plane/ and deploy/ -- the correction changed governance, documentation and validation surfaces only, and no defect was discovered in the software during it.\n\nOne WS-L run is deliberately NOT recorded as authoritative: 31689416147 on 2030647 failed the restore drill because the corrected backup asks pg_dump and psql for their version before writing anything and the drill's stubs answered no version question. Fixed forward in the drill fixture.",
     "phase4_manual_review_operator_workflow": "BACKEND_API_AND_FRONTEND_COMPLETE_AND_VERIFIED_DARK",
     "phase4_manual_review_api": "edge/v1/financial-review (queue, actions catalog, posting detail, decision); financial-review RBAC with payments_operator WRITE per Contract section 15 and READ for hotel_it_manager/front_office_operator/site_viewer (guest_relations_operator has NO financial-review access -- T0033 prose said otherwise and was wrong); actor bound to the authenticated session and unforgeable; password step-up on every action; mandatory reason; CLOSED structured evidence contract that refuses credentials/tokens/card data/raw frames; scoped by tenant AND site, with an out-of-scope posting indistinguishable from an absent one",
     "phase4_manual_review_frontend": true,
@@ -446,10 +446,10 @@
     "phase4_dependency_state": "next 15.5.23 (React unchanged at 18.3.1), postcss 8.5.26 and sharp 0.35.3 via npm overrides because next pins them, vitest 3.2.7. npm audit --omit=dev and npm audit both report 0 advisories. Evidence: docs/evidence/phase4/npm-audit-{production,full}.json.",
     "phase4_dependency_correction": "The T0040 triage read next's minimum fix off npm's fixAvailable (16.3.0, isSemVerMajor) instead of off the per-advisory ranges, whose highest upper bound is <15.5.21. No framework major was ever required and React 19 was never required. The seven PMS-Interfaces browser failures blamed on React 19 / Next 16 reproduce on Next 15.5 with React 18.3.1 and are not an application regression at all: Next 15.5 renders a floating Dev Tools panel in `next dev` that sits over the page and swallowed the click. devIndicators:false in next.config.mjs fixes it; the deployed bundle is unaffected either way.",
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
-    "phase4_authoritative_ci_artifact_id": 9164965342,
-    "phase4_authoritative_ci_artifact_digest": "sha256:ad4a4a58ecc1bc193b53530e3dfe60408c087387352cd9f2ca8c0080a3a182c4",
-    "acceptance_candidate_head": "f2771dc6d0c409ff66443dc60d57fc5abecfdb6a",
-    "inventory_head": "f2771dc6d0c409ff66443dc60d57fc5abecfdb6a",
+    "phase4_authoritative_ci_artifact_id": 9177140558,
+    "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
+    "acceptance_candidate_head": "b94112d8cb0ab63938b60f829ddd465c14491f97",
+    "inventory_head": "b94112d8cb0ab63938b60f829ddd465c14491f97",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -488,15 +488,18 @@
       "the supported site backup could not run on this appliance (host pg_dump 14 vs server 16, a PGUSER default that is a database name rather than a role, and a least-privilege role that cannot dump) -- fixed",
       "the DOWN migrations cannot be run by the schema owner, because each deletes its own ledger row and iam_v2_owner holds only SELECT+INSERT there -- recorded in the rollback procedure",
       "the catalog fingerprint cannot prove a rollback returned the same schema, because dropped columns keep their attribute slots -- a structural fingerprint and a whole-chain DOWN/UP gate assertion were added"
-    ]
+    ],
+    "phase4_preflight_ci_run_id": 31686386021,
+    "phase4_preflight_ci_head": "26d14def8cd7b2ce3464ca32c7929aee2361da61",
+    "phase4_preflight_runtime_delta_vs_t0041": 0
   },
   "latest_transition_id": "T0043",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "f2771dc6d0c409ff66443dc60d57fc5abecfdb6a",
+  "acceptance_candidate_head": "b94112d8cb0ab63938b60f829ddd465c14491f97",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "f2771dc6d0c409ff66443dc60d57fc5abecfdb6a",
+  "inventory_head": "b94112d8cb0ab63938b60f829ddd465c14491f97",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }
