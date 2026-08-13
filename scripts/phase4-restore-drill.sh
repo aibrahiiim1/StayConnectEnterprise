@@ -253,8 +253,13 @@ fi
 # database lives in a container -- so using it there would test the runner's socket rather than the thing
 # under test, which is whether the /etc archive excludes the financial marker.
 mkdir -p "$W/pgstub"
+# The stubs stand in for a real PostgreSQL. The backup script now asks BOTH tools for their version before
+# it writes anything -- because on the development appliance the host client is 14 while the server is 16,
+# and a dump taken by the wrong client is not a backup. A stub that answers no version question would make
+# this drill test a code path the appliance never takes.
 cat > "$W/pgstub/pg_dump" <<'PGSTUB'
 #!/usr/bin/env bash
+case "${1:-}" in --version) echo "pg_dump (PostgreSQL) 16.3"; exit 0;; esac
 prev=""
 for a in "$@"; do
   if [ "$prev" = "-f" ]; then printf 'stand-in dump' > "$a"; fi
@@ -262,7 +267,13 @@ for a in "$@"; do
 done
 exit 0
 PGSTUB
-chmod +x "$W/pgstub/pg_dump"
+cat > "$W/pgstub/psql" <<'PSQLSTUB'
+#!/usr/bin/env bash
+# Answers only the one question the backup asks before dumping.
+case "$*" in *server_version*) echo "16.3";; esac
+exit 0
+PSQLSTUB
+chmod +x "$W/pgstub/pg_dump" "$W/pgstub/psql"
 export PATH="$W/bin:$PATH"
 
 run_tool() {  # run_tool <anchor> <manifest> <extra args...>

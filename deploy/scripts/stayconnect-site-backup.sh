@@ -60,6 +60,12 @@ if [ -z "$PGUSER_SITE" ]; then
     break
   done
 fi
+# Off the appliance -- a CI runner, a workstation, a restore-drill fixture -- there are no StayConnect env
+# files to read, and the standard PostgreSQL conventions are the honest fallback. What is NOT a fallback is
+# the database name: the previous version defaulted PGUSER to `stayconnect_site`, which is the database, and
+# it produced an authentication failure that read like a password problem.
+[ -n "$PGUSER_SITE" ] || PGUSER_SITE="${PGUSER:-}"
+[ -n "$PGUSER_SITE" ] || PGUSER_SITE="$(id -un 2>/dev/null || true)"
 [ -n "$PGUSER_SITE" ] || { echo "backup: FAILED — no database role to dump as (set STAYCONNECT_PGUSER)" >&2; exit 1; }
 
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
