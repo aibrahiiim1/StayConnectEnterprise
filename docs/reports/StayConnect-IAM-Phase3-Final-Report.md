@@ -596,8 +596,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `CORRECTION`
-- **Provenance (generation HEAD = inventory_head):** `581daa05a87b0dcf71e9582d55af77aa6d2ef229`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `a582e0e`
+- **Provenance (generation HEAD = inventory_head):** `a582e0e200a2497a28a5c068faa4bf9b6fb86d3f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/4-financial-execution`
 - **Remote branch:** `origin/phase/4-financial-execution`
 - **Changed files:** 426
@@ -609,7 +609,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 |---|---|---|---|---|---|---|
 | `.github/workflows/phase3-software.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | Phase 3 Increment-9 correction (inventory_head): ruleset structure is reconciled from the current render, not a stored bundle |
 | `.github/workflows/phase4-financial-core.yml` | CREATED | `A` | configuration | CI | rollback REMOVES it | WS-L preflight: reconcile the stale Phase-4 current-state claims and make the same staleness impossible to pass again (T0042) |
-| `.github/workflows/project-governance.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | Correct the Phase-4 current-state contradiction, and repair two silently-broken validator regexes |
+| `.github/workflows/project-governance.yml` | MODIFIED | `M` | configuration | CI | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `.gitignore` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Phase 4: correct the C35 closure test, the C-matrix, the CI-head language and the project state (T0041) |
 | `data-plane/cmd/acctd/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 3: durable accounting, netd shaping control plane, controlled-writer boundary, guest vertical slice |
 | `data-plane/cmd/acctd/phase3.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
@@ -628,10 +628,10 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `data-plane/cmd/edged/phase3_grace_contract_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 corrections round 2 items 1-4 (inventory_head): mandatory grace package, ONE shared exact validator, typed package selector, mandatory DB-level preconditions: gate 320/320 |
 | `data-plane/cmd/edged/phase3_interfaces_api_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 Â§6 (backend): the PMS interface admin surface |
 | `data-plane/cmd/edged/phase3_selector_contract_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 corrections round 3 items 1-5 (inventory_head): required exact policy version, whole reserved catalog excluded, selector on the authoritative validator, complete metadata, honest reconcile + two-process evidence |
-| `data-plane/cmd/edged/phase4_finops_api_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 4: financial-ops API contract tests, extended DARK and authoritative CI, Plan sync |
-| `data-plane/cmd/edged/phase4_review_api_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 4: harden Manual Review audit inputs, and add payment/settlement governance (migration 0014) |
+| `data-plane/cmd/edged/phase4_finops_api_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `data-plane/cmd/edged/phase4_review_api_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `data-plane/cmd/edged/phase4_review_evidence.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 4: harden Manual Review audit inputs, and add payment/settlement governance (migration 0014) |
-| `data-plane/cmd/edged/phase4_zeroattempt_api_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 4: complete the zero-attempt recovery operator path (DB read model, edged API, Hotel-Admin UI) and extend the DB gate to 0026 |
+| `data-plane/cmd/edged/phase4_zeroattempt_api_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `data-plane/cmd/edged/resources_phase3.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 3 items 1-5 (inventory_head): required exact policy version, whole reserved catalog excluded, selector on the authoritative validator, complete metadata, honest reconcile + two-process evidence |
 | `data-plane/cmd/edged/resources_phase3_interfaces.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 Â§6 (backend): the PMS interface admin surface |
 | `data-plane/cmd/edged/resources_phase3_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Phase 3 Hotel-Admin surface (inventory_head): dark-gated stays/events/resolutions/grace/alerts API + RBAC + four UI pages: tsc clean, Vitest 48/48 |
@@ -864,61 +864,61 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `docs/architecture/Phase3-Privilege-Matrix.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/Phase4-Financial-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
 | `docs/architecture/Phase4-Readiness-Matrix.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Pre-Phase-4 baseline pass + Phase-4 authorization (D18 / T0029) |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `docs/architecture/StayConnect-IAM-Phase2-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/StayConnect-IAM-Phase3-Plan.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Ratify T0027 state, renew the appliance licence to 2027-08-08, make the Central reload contract honest (T0028) |
-| `docs/architecture/StayConnect-IAM-Phase4-Plan.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
+| `docs/architecture/StayConnect-IAM-Phase4-Plan.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `docs/architecture/adr/ADR-0001-pmsd-connector-ownership.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/adr/ADR-0002-phase3-single-shaping-owner.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
 | `docs/architecture/adr/ADR-0003-ruleset-structure-from-current-render.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 network lifecycle (inventory_head): unreadable is not empty, boot reconstructs the confirmed revision, and rollback has no destructive fallback |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Close five residual findings: cloned host identity, Central-only Edge vhosts, artifact-audit record (T0027) |
 | `docs/evidence/Phase3-Final-Live-Acceptance-Record.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Ratify T0027 state, renew the appliance licence to 2027-08-08, make the Central reload contract honest (T0028) |
 | `docs/evidence/Phase4-Final-Live-Acceptance-Record.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
 | `docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
 | `docs/evidence/phase4/npm-audit-full.json` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
 | `docs/evidence/phase4/npm-audit-production.json` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
-| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
+| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
+| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `docs/reports/StayConnect-IAM-Phase4-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
-| `exports/chatgpt/phase-evidence/GIT_STAT_581daa0.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
+| `exports/chatgpt/phase-evidence/GIT_STAT_a582e0e.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 authorization (delivery_head): manifest + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `exports/chatgpt/stayconnectenterprise/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
+| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): T0028 manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 3 (delivery_head): T0028 manifest + rebuilt packs + pointer + report-embedded manifest |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
 | `governance/dependency-acceptances.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `governance/transitions/T0016.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3: governance activity transition T0016 (software candidate awaiting Increment 9), doc sync |
 | `governance/transitions/T0017.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
@@ -949,7 +949,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `governance/transitions/T0042.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | WS-L preflight: reconcile the stale Phase-4 current-state claims and make the same staleness impossible to pass again (T0042) |
 | `governance/transitions/T0043.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | WS-L: record the live-DARK deployment result (T0043) and sync the current-state surfaces |
 | `governance/transitions/T0044.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
-| `governance/transitions/T0045.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | (no commit subject in range) |
+| `governance/transitions/T0045.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `hotel-admin/app/(app)/checkout-grace/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 3 corrections round 1 (inventory_head): controlled alert lifecycle + governed grace publication + NOT VALID boundary CHECK; real API+PG contract tests: gate 310/310 |
 | `hotel-admin/app/(app)/financial-health/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 4: FINANCIAL_RECOVERY_MODE (0019), observability (0020), financial-ops API and the Hotel-Admin operator surface |
 | `hotel-admin/app/(app)/financial-recovery/page.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Phase 4: FINANCIAL_RECOVERY_MODE (0019), observability (0020), financial-ops API and the Hotel-Admin operator surface |
@@ -1016,19 +1016,19 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `scripts/phase3-preflight.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 DARK acceptance (inventory_head): the dark pmsd env must not even MENTION a Phase-3 flag name |
 | `scripts/phase4-least-privilege.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 4 (0026): C35 fails closed on an external verified receipt; zero-attempt recovery read model |
 | `scripts/phase4-payment-concurrency.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 4 (0026): C35 fails closed on an external verified receipt; zero-attempt recovery read model |
-| `scripts/phase4-pg-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 4: complete the zero-attempt recovery operator path (DB read model, edged API, Hotel-Admin UI) and extend the DB gate to 0026 |
+| `scripts/phase4-pg-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `scripts/phase4-restore-drill.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | WS-L: make the restore drill exercise the version check the appliance actually performs |
-| `scripts/pmsd-pg-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 3 (D15 / Option C): accounting attribution, source binding, temporal order, class origin, generation authority |
+| `scripts/pmsd-pg-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `tools/embed-report-manifest.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3: accountable-before-forwarding class provisioning, and Zero-Stale documentation |
 | `tools/generate-change-manifest.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the current head |
-| `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase-3 governance guards must not switch off when the current phase moves past 3 |
-| `tools/tests/current_state_parity/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Close the reconciliation checkpoint: authorization model, fixture repair, behavioural DB proof |
+| `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `tools/tests/current_state_parity/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `tools/tests/evidence_artifact/run_artifact_staleness.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Evidence hygiene: sanitise EVERY metadata copy, not the one that was easiest to find |
-| `tools/tests/project_state_validator/run_isolation_regression.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | (no commit subject in range) |
-| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 4: financial execution core â€” migration 0011, Posting domain, P# allocator, outbox lanes, PS/PA, UNKNOWN |
+| `tools/tests/project_state_validator/run_isolation_regression.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `tools/tests/tooling/run_control_chars.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Correct the Phase-4 current-state contradiction, and repair two silently-broken validator regexes |
-| `tools/validate-current-state-parity.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Close the reconciliation checkpoint: authorization model, fixture repair, behavioural DB proof |
-| `tools/validate-pr-metadata.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Post-closure hygiene: stop two surfaces presenting superseded state as current (T0026) |
+| `tools/validate-current-state-parity.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
+| `tools/validate-pr-metadata.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
 | `tools/validate-state-parity-selftest.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | WS-L preflight: reconcile the stale Phase-4 current-state claims and make the same staleness impossible to pass again (T0042) |
 | `tools/validate-state-parity.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | WS-L preflight: reconcile the stale Phase-4 current-state claims and make the same staleness impossible to pass again (T0042) |
@@ -1309,15 +1309,15 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
  docs/evidence/phase4/npm-audit-full.json           |   22 +
  docs/evidence/phase4/npm-audit-production.json     |   22 +
- docs/manifests/Phase3-change-manifest.md           | 1231 ++++++++
+ docs/manifests/Phase3-change-manifest.md           | 1260 ++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2038 +++++++++++++
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2067 +++++++++++++
  .../reports/StayConnect-IAM-Phase4-Final-Report.md |  158 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 300960 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 112729 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 301313 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 112763 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42032 bytes
- .../chatgpt/phase-evidence/GIT_STAT_581daa0.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
+ .../chatgpt/phase-evidence/GIT_STAT_a582e0e.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -1335,7 +1335,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      | 1231 ++++++++
+ .../Phase3-change-manifest.md                      | 1260 ++++++++
  .../stayconnectenterprise/SYSTEM_OVERVIEW.md       |    2 +-
  .../StayConnect-IAM-Handoff.md                     |   19 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   18 +-
@@ -1347,7 +1347,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../StayConnect-IAM-Phase3-Plan.md                 |  260 ++
  governance/decision-register.json                  |  508 +++-
  governance/dependency-acceptances.json             |   23 +
- governance/project-state.json                      |  481 ++-
+ governance/project-state.json                      |  482 ++-
  governance/transitions/T0015.json                  |   18 +
  governance/transitions/T0016.json                  |   27 +
  governance/transitions/T0017.json                  |   30 +
@@ -1462,54 +1462,29 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  tools/validate-state-parity-selftest.sh            |  121 +
  tools/validate-state-parity.py                     |  235 ++
  tools/validate-transition-times.sh                 |   86 +
- 426 files changed, 90237 insertions(+), 2211 deletions(-)
+ 426 files changed, 90325 insertions(+), 2211 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  .github/workflows/project-governance.yml
-M  data-plane/cmd/edged/phase4_finops_api_integration_test.go
-M  data-plane/cmd/edged/phase4_review_api_integration_test.go
-M  data-plane/cmd/edged/phase4_zeroattempt_api_integration_test.go
-M  docs/architecture/StayConnect-IAM-Phase0-Contract.md
-M  docs/architecture/StayConnect-IAM-Phase1A-Plan.md
-M  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
-M  docs/architecture/StayConnect-IAM-Phase4-Plan.md
-M  docs/context/StayConnect-IAM-Handoff.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_43b5c29.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_581daa0.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_581daa0.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_a582e0e.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/tools/project-state.py
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
-M  exports/chatgpt/stayconnectenterprise/00-START-HERE.md
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md
 M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 M  governance/project-state.json
-A  governance/transitions/T0045.json
-M  scripts/phase4-pg-integration.sh
-M  scripts/pmsd-pg-integration.sh
-M  tools/project-state.py
-M  tools/tests/current_state_parity/run_negative.py
-A  tools/tests/project_state_validator/run_isolation_regression.py
-M  tools/tests/project_state_validator/run_mutations.py
-M  tools/validate-current-state-parity.py
-M  tools/validate-pr-metadata.sh
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: a582e0e Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them
 HISTORICAL: 581daa0 Phase 4: record PR #12 (open, unmerged) and the closure-head CI evidence
 HISTORICAL: 43b5c29 Phase 4 (delivery_head): D19/T0044 closure pointer, complete staged manifest, rebuilt packs and report-embedded manifest
 HISTORICAL: 38e9426 Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044)
