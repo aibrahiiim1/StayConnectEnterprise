@@ -280,7 +280,7 @@ if have_repo; then
     [ -f "$f" ] && grep -q "$MAT" "$f" && ok "maturity present in repo $(basename "$f")" || fail "maturity missing in repo $(basename "$f")"
   done
 else skipped "repo docs maturity presence"; fi
-na=$(grep -rhoiE "next authorized (activity|action|step)[^.]*" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" 2>/dev/null | grep -ciE "acceptance of Phase 1A|acceptance of the live-dark|review of the live-dark|review of the Phase 1A LIVE-DARK|approval or rejection of the .{0,30}Phase 1B plan|approval of the .{0,30}Phase 1B (implementation )?plan|approval[^.]{0,90}Phase 1B plan|complete Phase 1B execution|(review/?)?acceptance of[^.]{0,40}Phase 1B live-dark|no next-phase implementation is authorized|await explicit product-owner authorization|complete phase 2 execution|return the single final phase-2 report|final phase-2 report for one product-owner|(review/?)?acceptance of[^.]{0,40}Phase 2 live-dark|merge PR #4[^.]{0,80}post-merge|merge PR #4 to master|execute the authorized phase 3|final phase-3 acceptance report|authoriz[a-z]*[^.]{0,40}Live Increment 9|separate Product-Owner decision[^.]{0,80}Live Increment 9|await[^.]{0,60}Live Increment 9|Product-Owner decision on the Increment-9 durability correction|Product-Owner FINAL ACCEPTANCE decision for Phase 3|decision on merging PR #6|re-run[a-z]*[^.]{0,60}BLOCKED subset of Live Increment 9|None for Phase 3[^.]{0,80}(closed and merged|merged to master)|no further Phase-3 action is authorized|Execute the authorized Phase-4 implementation|Continue the authorized Phase-4 implementation")
+na=$(grep -rhoiE "next authorized (activity|action|step)[^.]*" "$PACK/StayConnect-IAM-Handoff.md" "$PACK/00-START-HERE.md" 2>/dev/null | grep -ciE "acceptance of Phase 1A|acceptance of the live-dark|review of the live-dark|review of the Phase 1A LIVE-DARK|approval or rejection of the .{0,30}Phase 1B plan|approval of the .{0,30}Phase 1B (implementation )?plan|approval[^.]{0,90}Phase 1B plan|complete Phase 1B execution|(review/?)?acceptance of[^.]{0,40}Phase 1B live-dark|no next-phase implementation is authorized|await explicit product-owner authorization|complete phase 2 execution|return the single final phase-2 report|final phase-2 report for one product-owner|(review/?)?acceptance of[^.]{0,40}Phase 2 live-dark|merge PR #4[^.]{0,80}post-merge|merge PR #4 to master|execute the authorized phase 3|final phase-3 acceptance report|authoriz[a-z]*[^.]{0,40}Live Increment 9|separate Product-Owner decision[^.]{0,80}Live Increment 9|await[^.]{0,60}Live Increment 9|Product-Owner decision on the Increment-9 durability correction|Product-Owner FINAL ACCEPTANCE decision for Phase 3|decision on merging PR #6|re-run[a-z]*[^.]{0,60}BLOCKED subset of Live Increment 9|None for Phase 3[^.]{0,80}(closed and merged|merged to master)|no further Phase-3 action is authorized|Execute the authorized Phase-4 implementation|Continue the authorized Phase-4 implementation|Obtain the Product Owner.{0,3}s acceptance decision on the WS-L|acceptance decision on the WS-L controlled live-DARK result")
 [ "$na" -ge 2 ] && ok "next-action consistent" || fail "next-action inconsistent ($na)"
 
 echo "== 3. conflicting maturity WITHIN a single pack file =="
@@ -389,6 +389,29 @@ done
 echo "== 10. no secrets / guest PII / credential DSNs in the packs =="
 sec=$(grep -rnE "BEGIN (RSA|OPENSSH) PRIVATE|ssh-ed25519 AAAA|sk_live|whsec_|POSTGRES_PASSWORD=[^ ]|postgres://[a-z_]+:[A-Za-z0-9]{6,}@|14215|262224|3c2ffe67|81a3edc5" "$PACK" "$EVID" --exclude=validate-project-state.sh 2>/dev/null | grep -viE "POSTGRES_PASSWORD assignments committed|redacted|«" | wc -l)
 [ "$sec" = "0" ] && ok "no secrets/PII/credential-DSNs in the packs" || { grep -rnE "sk_live|whsec_|14215|262224" "$PACK" "$EVID" --exclude=validate-project-state.sh | head; fail "$sec secret/PII hit(s) in packs"; }
+
+# ---------------------------------------------------------------------------------------------------
+# 11. CLAIM-VERSUS-CODE PARITY (repository mode only -- it measures the tree, which a pack does not carry).
+#
+# Everything above asks whether the current-state surfaces agree with each other. A stale fact survives that
+# happily: phase4_manual_review_frontend read `false` for ten transitions while the screen it denied was
+# built, tested and gated, and every check here passed the whole time because none of them looked at the
+# repository. This section closes that by comparing each build claim to the file, function or route that
+# would have to exist for it to be true.
+# ---------------------------------------------------------------------------------------------------
+echo "== 11. current-state claims match the repository (parity) =="
+if [ "$MODE" = "repository" ] && [ -f "$REPO_ROOT/tools/validate-state-parity.py" ]; then
+  PYP=python3; python3 --version >/dev/null 2>&1 || PYP=python
+  if PARITY_OUT="$("$PYP" "$REPO_ROOT/tools/validate-state-parity.py" 2>&1)"; then
+    ok "every current-state build claim is supported by the tree"
+  else
+    printf '%s
+' "$PARITY_OUT" | grep '  FAIL:' | sed 's/^/    /'
+    fail "current-state claims disagree with the repository (tools/validate-state-parity.py)"
+  fi
+else
+  echo "  SKIPPED (parity measures the repository tree)"; SKIP=$((SKIP+1))
+fi
 
 echo "=================================================="
 echo "mode: $MODE   repository-only checks skipped: $SKIP"
