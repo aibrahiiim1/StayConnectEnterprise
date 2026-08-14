@@ -90,6 +90,11 @@ type Consumed struct {
 	Stay      string
 	Interface string
 	Revision  string
+	// PostStayProfile is the server-pinned subject of a POST_STAY_PIN context. It is empty for every other
+	// method, and a caller acting on a post-stay context MUST read it rather than Stay: the origin Stay is
+	// lineage, not the subject, and treating it as the subject is how post-stay access would end up attached
+	// to a room again.
+	PostStayProfile string
 }
 
 // Presenter is the request-side identity a consumption is checked against. A context pinned to one
@@ -181,6 +186,93 @@ func (s *Store) IssuePMSTx(ctx context.Context, tx pgx.Tx, g PMSGrant) (string, 
 	return id, err
 }
 
+// PostStayGrant is the SERVER-DERIVED pin set for a POST_STAY_PIN Auth Context. It is deliberately NOT a
+// PMSGrant with fields left blank: a PMS context pins an interface, a Revision and the occupancy evidence
+// that proved the guest was in the room, and NONE of that is what a post-stay PIN proves. Sharing the struct
+// would have meant either lying about those pins or making them optional for everyone.
+//
+// The subject is the PROFILE. The origin Stay is reached through it and is never supplied by the caller —
+// that is what keeps post-stay identity off the room.
+type PostStayGrant struct {
+	Tenant, Site string
+	Profile      string
+	Device       string
+	GuestNetwork string
+	TTLSeconds   int
+}
+
+func (g PostStayGrant) valid() bool {
+	for _, v := range []string{g.Tenant, g.Site, g.Profile, g.Device, g.GuestNetwork} {
+		if !validPinUUID(strings.TrimSpace(v)) {
+			return false
+		}
+	}
+	return g.TTLSeconds > 0 && g.TTLSeconds <= maxTTLSeconds
+}
+
+// ErrPostStayNotAuthenticable is a typed, SANITIZED refusal for a post-stay context that must not exist: the
+// profile is revoked, past its validity window, or bound to an episode the Stay has already left. It carries
+// no PIN, no guest identifier and no hint about WHICH of those it was — the caller returns the same uniform
+// non-success either way, and an error that distinguished them would be an oracle.
+var ErrPostStayNotAuthenticable = errors.New("authctx: post-stay profile is not authenticable")
+
+// IssuePostStayTx issues a one-time, TTL-bounded POST_STAY_PIN Auth Context inside the caller's transaction —
+// ideally the same one that verified the PIN. It verifies NOTHING about the PIN itself (that is the caller's
+// job and happens before this); what it does is bind the context to the profile's CURRENT episode so that a
+// reinstatement between issue and consume invalidates it.
+//
+// It locks the origin Stay (L1 first, as everywhere else) and reads the episode AUTHORITATIVELY from that
+// locked row: the caller supplies the verified profile identity and never the counter. A profile that is not
+// authenticable at this instant yields ErrPostStayNotAuthenticable and NO row — a context that is already
+// dead the moment it is minted is never persisted.
+func (s *Store) IssuePostStayTx(ctx context.Context, tx pgx.Tx, g PostStayGrant) (string, error) {
+	if !g.valid() {
+		return "", ErrGrantIncomplete
+	}
+	if err := writerguard.Open(ctx, tx, writerguard.CapAuthContext); err != nil {
+		return "", err
+	}
+	var lifecycleVer int
+	err := tx.QueryRow(ctx, `SELECT st.lifecycle_version
+		FROM iam_v2.post_stay_profiles psp
+		JOIN iam_v2.stays st
+		  ON st.tenant_id=psp.tenant_id AND st.site_id=psp.site_id AND st.id=psp.origin_stay_id
+		WHERE psp.tenant_id=$1 AND psp.site_id=$2 AND psp.id=$3
+		  AND iam_v2.p5_post_stay_authenticable($1,$2,$3)
+		FOR UPDATE OF st`, g.Tenant, g.Site, g.Profile).Scan(&lifecycleVer)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrPostStayNotAuthenticable
+		}
+		return "", err
+	}
+	var id string
+	err = tx.QueryRow(ctx, `INSERT INTO iam_v2.auth_contexts
+		(tenant_id, site_id, method, post_stay_profile_id, device_id, guest_network_id,
+		 pinned_lifecycle_version, expires_at)
+		VALUES ($1,$2,'POST_STAY_PIN',$3,$4,$5,$6, now() + make_interval(secs => $7))
+		RETURNING id::text`,
+		g.Tenant, g.Site, g.Profile, g.Device, g.GuestNetwork, lifecycleVer, g.TTLSeconds).Scan(&id)
+	return id, err
+}
+
+// IssuePostStay is IssuePostStayTx in its own transaction, for a caller that has nothing else to commit.
+func (s *Store) IssuePostStay(ctx context.Context, g PostStayGrant) (string, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	id, err := s.IssuePostStayTx(ctx, tx, g)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 // Consume atomically consumes the context EXACTLY once against the FULL server pin set — it must be
 // un-consumed, unexpired, in the presenter's tenant/site, AND presented from the SAME device + guest network.
 // Runs in its own transaction (for a standalone session issuance). For commerce, use ConsumeTx so the
@@ -238,6 +330,10 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 		  AND ac.device_id=$4 AND ac.guest_network_id=$5
 		  AND ac.consumed_at IS NULL AND ac.expires_at > now()`,
 		id, p.Tenant, p.Site, p.Device, p.GuestNetwork).Scan(&method, &stayID)
+	// NOTE for anyone adding a method here: step (2) below re-verifies live subject state, and it is written
+	// PER METHOD. A method with no arm gets NO re-verification at all — the context stays usable for its whole
+	// TTL no matter what happens to its subject in the meantime. That is correct for a voucher (the subject is
+	// the voucher) and catastrophic for anything whose subject can be superseded underneath it.
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Consumed{}, ErrContextInvalid
@@ -288,6 +384,40 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 		}
 	}
 
+	// (2b) POST_STAY_PIN. This method CANNOT reuse the PMS arm above, and the difference is not cosmetic:
+	//
+	//   * the PMS arm demands IN_HOUSE, an interface Revision, occupancy evidence and freshness. A post-stay
+	//     guest has checked OUT, and their identity was never proven from occupancy evidence — every one of
+	//     those conditions is false for a perfectly valid post-stay context;
+	//   * what post-stay needs instead is the EPISODE check, and it needs it here rather than only at issue.
+	//     Without this arm the method would fall through with NO re-verification at all: a context minted
+	//     seconds before a reinstatement would stay usable for its whole TTL, which is precisely the
+	//     next-occupant leak the whole design exists to prevent.
+	//
+	// The Stay is locked FIRST, keeping the approved L1→L2 order, so this serializes against Checkout and
+	// Reinstatement exactly as the PMS arm does. The predicate itself is the single one the database, the
+	// tests and this code all share (p5_post_stay_authenticable), and the pinned episode must ALSO still match
+	// the context — a profile that is authenticable again for a LATER episode is not this context's subject.
+	if method == "POST_STAY_PIN" {
+		var one int
+		err := tx.QueryRow(ctx, `SELECT 1
+			FROM iam_v2.auth_contexts ac
+			JOIN iam_v2.post_stay_profiles psp
+			  ON psp.tenant_id=ac.tenant_id AND psp.site_id=ac.site_id AND psp.id=ac.post_stay_profile_id
+			JOIN iam_v2.stays st
+			  ON st.tenant_id=psp.tenant_id AND st.site_id=psp.site_id AND st.id=psp.origin_stay_id
+			WHERE ac.id=$1
+			  AND st.lifecycle_version IS NOT DISTINCT FROM ac.pinned_lifecycle_version
+			  AND iam_v2.p5_post_stay_authenticable(ac.tenant_id, ac.site_id, ac.post_stay_profile_id)
+			FOR UPDATE OF st`, id).Scan(&one)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return Consumed{}, ErrContextInvalid
+			}
+			return Consumed{}, err
+		}
+	}
+
 	// (3) L2: atomically flip the Auth Context unconsumed→consumed. The consumed_at IS NULL guard yields exactly
 	//     one concurrent winner even after the Stay lock is granted; presenter scope + expiry re-asserted.
 	var c Consumed
@@ -296,8 +426,10 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 		  AND ac.device_id=$4 AND ac.guest_network_id=$5
 		  AND ac.consumed_at IS NULL AND ac.expires_at > now()
 		RETURNING method, COALESCE(stay_id::text,''), COALESCE(pms_interface_id::text,''),
-		          COALESCE(authentication_interface_revision_id::text,'')`,
-		id, p.Tenant, p.Site, p.Device, p.GuestNetwork).Scan(&c.Method, &c.Stay, &c.Interface, &c.Revision)
+		          COALESCE(authentication_interface_revision_id::text,''),
+		          COALESCE(post_stay_profile_id::text,'')`,
+		id, p.Tenant, p.Site, p.Device, p.GuestNetwork).
+		Scan(&c.Method, &c.Stay, &c.Interface, &c.Revision, &c.PostStayProfile)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Consumed{}, ErrContextInvalid
