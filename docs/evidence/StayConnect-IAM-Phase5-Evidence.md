@@ -361,6 +361,8 @@ for the new delivery head and reported with every physical path listed separatel
 
 ### What this fix-forward did not change
 
+*As at T0052, and preserved as written — Phase 5 was later accepted and closed under D22/T0053 and merged
+under D23/T0054:*
 Phase 5 remains **IN_PROGRESS** and unaccepted; PR #13 remains **open and unmerged**; no flag was enabled
 anywhere; no IAM-v2 cutover was performed; Production was not contacted, migrated or read; no PMS, provider,
 financial or paid-access traffic occurred; no Phase-6 or Phase-7 work was started; and T0044 through T0051 are
@@ -397,9 +399,36 @@ is supposed to fail rather than pass quietly. Both are named here rather than hi
 claim. An acceptance round is exactly the moment at which a quiet code change is least likely to
 be noticed, because attention is on the paperwork, so the proof comes from Git.
 
+*As at the D22 closure, and preserved as written — the merge decision came afterwards, as D23/T0054:*
 **Pull request #13 remains OPEN and UNMERGED.** Acceptance and merge are separate Product-Owner decisions, as
 they were for Phases 2, 3 and 4. This closure authorizes no merge, no deployment or further appliance
 mutation, no Phase-5 or Phase-4 feature-flag enablement, no IAM-v2 cutover, no Production migration or
 contact, no PMS/provider or financial traffic, no paid access, and no Phase-6 or Phase-7 work.
+
+---
+
+## Merge to master · decision D23 / transition T0054
+
+Recorded **2026-08-14 UTC**. Pull request **#13 is MERGED and CLOSED**, merge commit
+`4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a` with parents `d49342c` (master) and `2568402` (the accepted head).
+The merge is a **delivery event, not an acceptance event**: Phase 5's maturity is unchanged at
+ACCEPTED_AND_CLOSED / verified LIVE-DARK under D22/T0053, and all nine limitations L5-1 through L5-9 remain
+accepted and unpromoted.
+
+**Every precondition was verified independently before merging**, read from its own source rather than
+inferred from the pull request's summary: the head against `origin/phase/5-poststay-transfer`, the base
+against the live `master` ref, ancestry against `git merge-base`, and each check conclusion against the
+check-runs for that exact SHA. Head `2568402…` matched; base was `master` at `d49342c…`, which was also the
+live master head, so the branch was up to date; `mergeable` was true; and Phase 5 `31844176152`, Phase 4
+`31844176124`, Phase 3 `31844175934` and Project Governance `31844176531` were all SUCCESS on that head.
+
+**The merge introduced no content.** master's tree after the merge is `1ed4c590172a8d7036eefaf245100ad73a263daa`,
+byte-identical to the accepted head's tree, and `git diff --name-only` between them returns **zero paths**.
+Against the accepted *software* candidate `aef848d`, zero shipped paths differ; the four non-shipped paths
+that differ are the T0052 acceptance-evidence fix-forward the Product Owner authorized after it.
+
+**Still not authorized by anything recorded here:** deployment, appliance mutation or contact, Phase-5 or
+Phase-4 feature-flag enablement, IAM-v2 cutover, Production migration or database contact, PMS/provider or
+financial traffic, paid access, and Phase 6 or Phase 7 work. No unrelated historical branch was deleted.
 
 ---

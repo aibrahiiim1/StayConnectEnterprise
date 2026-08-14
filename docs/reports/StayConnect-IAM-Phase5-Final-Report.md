@@ -13,8 +13,9 @@
 >
 > **Nine limitations are accepted and NOT promoted to PASS** — see §6.
 >
-> **The Phase-5 pull request #13 remains OPEN and UNMERGED.** Merging it is a separate Product-Owner
-> decision that has not been taken.
+> **The Phase-5 pull request has been MERGED** to master on 2026-08-14 UTC under the separate
+> Product-Owner merge decision **D23** (transition **T0054**), merge commit `4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a`.
+> The merge introduced no content and deployed nothing.
 
 ---
 
@@ -43,7 +44,7 @@
 - **Authorized:** Product-Owner decision **D21**, transition **T0050** (2026-08-14), as four milestones with automatic continuation while gates were green.
 - **Candidate complete:** transition **T0051** (2026-08-14). **Acceptance-evidence fix-forward:** transition **T0052** (2026-08-14).
 - **Accepted and closed:** decision **D22**, closure transition **T0053** (2026-08-14).
-- **Branch:** `phase/5-poststay-transfer`; **PR #13 — OPEN and UNMERGED**.
+- **Branch:** `phase/5-poststay-transfer`; **PR #13 — MERGED to master on 2026-08-14 UTC under the separate Product-Owner merge decision D23** (transition **T0054**), merge commit `4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a`. The merge introduced no content: master's tree is byte-identical to the accepted head's tree.
 - **Appliance:** `radius` / `172.21.60.23` — the **development** appliance. Production was never migrated or contacted.
 
 ---
@@ -176,7 +177,7 @@ None of the nine is promoted.
 
 ## 7. Explicitly NOT authorized by this acceptance
 
-No pull-request merge · no deployment or further appliance mutation · no Phase-5 or Phase-4 feature-flag
+No deployment or further appliance mutation · no Phase-5 or Phase-4 feature-flag
 enablement · no IAM-v2 authentication cutover · no Production migration or Production database contact · no
 PMS, provider or real financial traffic · no paid guest access · no Phase 6 or Phase 7 work.
 
@@ -190,7 +191,7 @@ promoted.
 `D21`/`T0050` authorized Phase 5. `T0051` records the completed acceptance candidate at verified LIVE-DARK.
 `T0052` records the acceptance-evidence fix-forward — the fail-closed CI evidence publication, the pmsd
 DARK-contract criterion, the head/CI reconciliation and the corrected inventory — and corrects the earlier
-statements **forward** rather than rewriting them. `D22`/`T0053` accept and close Phase 5. **No historical
+statements **forward** rather than rewriting them. `D22`/`T0053` accept and close Phase 5, and `D23`/`T0054` record the merge to master as a separate delivery decision. **No historical
 receipt was rewritten at any point**, and the closure round changes no product-runtime file — no path under
 `data-plane/`, `hotel-admin/`, `scripts/` or `.github/workflows/` — which is proven from Git rather than
 asserted. The only changes outside `governance/`, `docs/` and `exports/` are two governance validators,

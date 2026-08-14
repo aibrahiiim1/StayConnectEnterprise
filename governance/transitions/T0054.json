@@ -1,0 +1,105 @@
+{
+  "transition_id": "T0054",
+  "seq": 54,
+  "timestamp": "2026-08-14T22:20:00Z",
+  "record_type": "PHASE_5_PULL_REQUEST_MERGED_TO_MASTER",
+  "previous_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "5",
+  "decision": "D23",
+  "new_decision_created": true,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner decision authorizing the repository merge and final post-merge closure of Phase-5 PR #13, conditional on the head being exactly 2568402a3bdcdd7193a142a2402647164c9f81db, the pull request remaining based on the expected master and mergeable, and the required exact-head Phase 5, Phase 4, Phase 3 and Project Governance checks still being GREEN on that head. Explicitly scoped to the pull-request merge only, with no unrelated historical branch deleted.",
+  "history_note": "T0044 through T0053 are PRESERVED unchanged, byte for byte, including T0052 and T0053. Phase 5's acceptance maturity is unchanged; this receipt records the MERGE, not a new acceptance. The merge is a delivery event.",
+  "preconditions_verified_before_merging": {
+    "pr_head_required": "2568402a3bdcdd7193a142a2402647164c9f81db",
+    "pr_head_observed": "2568402a3bdcdd7193a142a2402647164c9f81db",
+    "head_matches": true,
+    "origin_branch_head_observed": "2568402a3bdcdd7193a142a2402647164c9f81db",
+    "base_ref": "master",
+    "base_sha_on_pr": "d49342c0707bc40c2833b3d7782589ed0e40317f",
+    "live_master_head_at_verification": "d49342c0707bc40c2833b3d7782589ed0e40317f",
+    "branch_up_to_date_with_master": true,
+    "base_is_ancestor_of_head": true,
+    "mergeable": true,
+    "required_checks_on_that_head": [
+      "Phase 5 Post-Stay and Transfer CI 31844176152 SUCCESS (artifact 9235343029, sha256:17e8013c9dca1148b0f63457025cb5d9621ec98a238277e6e90ee3ef85f15e47)",
+      "Phase 4 Financial Core CI 31844176124 SUCCESS (artifact 9235469417, sha256:2b5ffc2a38d9876d3a1e07c8b96376f7a3778f9c3f38b7b20f61ec46e7e4c072)",
+      "Phase 3 Software CI 31844175934 SUCCESS (artifact 9235425047, sha256:bd67b280888a1a6eeddf82bdb3f7358ac74f5c0c46e0ac1409b59e9920c66818)",
+      "Project Governance 31844176531 SUCCESS",
+      "Phase 5 Post-Stay and Transfer CI 31844159302 SUCCESS (push trigger)",
+      "Phase 4 Financial Core CI 31844159254 SUCCESS (push trigger)"
+    ],
+    "branch_protection_context_governance": "success",
+    "note": "Every condition the Product Owner set was observed to hold BEFORE the merge, and each was read independently rather than inferred from the pull request's own summary: the head was compared against origin/phase/5-poststay-transfer, the base against the live master ref, ancestry against git merge-base, and the check conclusions against the check-runs for that exact SHA. Nothing was pushed to the branch between the authorization and the merge, so the head the Product Owner named is exactly the head that was merged."
+  },
+  "merge": {
+    "pull_request": 13,
+    "base": "master",
+    "head": "2568402a3bdcdd7193a142a2402647164c9f81db",
+    "merge_method": "merge commit (two parents)",
+    "merge_commit": "4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a",
+    "parents": [
+      "d49342c0707bc40c2833b3d7782589ed0e40317f",
+      "2568402a3bdcdd7193a142a2402647164c9f81db"
+    ],
+    "merged_by": "aibrahiiim1",
+    "pr_state_after": "closed, merged=true",
+    "precedent": "Follows the Phase-2 (D13, PR #4, merge commit fe6a0d1), Phase-3 (D17/T0025, PR #6, merge commit 8a7230a7) and Phase-4 (D20/T0048, PR #12, merge commit 210154b) governance-safe merge precedent: a true merge commit rather than a squash or rebase, so the delivered history stays intact and every transition receipt keeps its own commit.",
+    "introduced_no_content": true,
+    "tree_equality_proof": "The merge commit's tree 1ed4c590172a8d7036eefaf245100ad73a263daa is IDENTICAL to the accepted head's tree, and `git diff --name-only 4f27b4d 2568402` returns zero paths. master gained exactly the reviewed content and nothing else."
+  },
+  "post_merge_runtime_comparison": {
+    "vs_accepted_software_candidate": "aef848d253e2c6efebe4f036b0369a22530a5a25",
+    "paths_measured": [
+      "data-plane/",
+      "hotel-admin/",
+      "control-plane/",
+      "deploy/"
+    ],
+    "changed_paths_shipped": 0,
+    "vs_accepted_delivery_head": "4142f5fe857787a745b186d8ac38edaad7b4d268",
+    "changed_paths_vs_delivery_head_runtime_and_ci": 0,
+    "note": "Zero shipped paths differ between master and the accepted software candidate. Four non-shipped paths differ from that candidate and they are the T0052 acceptance-evidence fix-forward the Product Owner authorized after it: the Phase-5 CI workflow, its fail-closed evidence assembler and self-test, and the LIVE-DARK deployment script's pmsd criterion. Against the accepted DELIVERY head 4142f5f, which already contains those, zero runtime or CI paths differ."
+  },
+  "what_this_merge_does_not_do": [
+    "it deploys nothing and enables nothing",
+    "no appliance mutation and no appliance contact",
+    "no Production database contact and no Production migration",
+    "no Phase-5 or Phase-4 feature flag enablement -- every flag remains OFF and ABSENT from every env file and unit",
+    "no IAM-v2 authentication cutover; legacy public-schema IAM remains the sole authentication authority",
+    "no PMS or payment-provider traffic, no real financial traffic, no folio debit, no paid guest access",
+    "no Phase 6 or Phase 7 work",
+    "no unrelated historical branch was deleted"
+  ],
+  "accepted_limitations_unchanged": [
+    "L5-1 POST_STAY_ACTIVE has no exit transition",
+    "L5-2 Post-Stay v1 is zero-price only",
+    "L5-3 post-stay requires a device authorized during the stay",
+    "L5-4 stay_links(reason='POST_STAY') is never written",
+    "L5-5 a transfer is not reversible by an inverse transfer",
+    "L5-6 the destination grant is a bounded window",
+    "L5-7 several Phase-3/Phase-4 integration tests are not repeatable against a reused database",
+    "L5-8 cmd/scd integration tests need migrations 0001-0006 the local harness does not build",
+    "L5-9 four pmsd DARK-contract arms were proven at the predicate level, not end-to-end"
+  ],
+  "evidence_files": [
+    "governance/transitions/T0050.json",
+    "governance/transitions/T0051.json",
+    "governance/transitions/T0052.json",
+    "governance/transitions/T0053.json",
+    "docs/acceptance/StayConnect-IAM-Phase5-Live-Dark-Acceptance.md",
+    "docs/evidence/StayConnect-IAM-Phase5-Evidence.md",
+    "docs/reports/StayConnect-IAM-Phase5-Final-Report.md"
+  ],
+  "acceptance_verdict": "NO CHANGE TO ACCEPTANCE. Phase 5 remains ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity under D22/T0053, and is now MERGED to master under D23. The merge is a delivery event, not an acceptance event.",
+  "next_action": "None for Phase 5: it is accepted, closed and merged to master. Any deployment, appliance mutation, flag enablement, IAM-v2 cutover, Production migration or contact, PMS/provider or financial traffic, paid access, or Phase 6/7 work requires its own separate Product-Owner authorization."
+}

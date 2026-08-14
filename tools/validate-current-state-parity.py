@@ -984,7 +984,10 @@ def main():
             merged_prs[val] = m.group(1) or "the project"
     for key, val in facts.items():
         m = re.match(r"^(?:(phase[0-9a-z]*)_)?pr_state$", key)
-        if not (m and isinstance(val, str) and re.search(r"\bMERGED\b", val, re.I)):
+        # NOT \bMERGED\b: the recorded values are of the form MERGED_AND_CLOSED, and underscore is a
+        # word character, so that pattern matched nothing and this whole branch was dead. A negative
+        # lookbehind for a letter keeps UNMERGED out while letting MERGED_AND_CLOSED in.
+        if not (m and isinstance(val, str) and re.search(r"(?<![A-Za-z])MERGED", val, re.I)):
             continue
         num = facts.get(("%s_pr_number" % m.group(1)) if m.group(1) else "pr_number")
         if isinstance(num, int):
@@ -997,6 +1000,9 @@ def main():
                 "exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md",
                 "docs/reports/StayConnect-IAM-Phase4-Final-Report.md",
                 "docs/acceptance/StayConnect-IAM-Phase4-Live-Dark-Acceptance.md",
+                "docs/reports/StayConnect-IAM-Phase5-Final-Report.md",
+                "docs/acceptance/StayConnect-IAM-Phase5-Live-Dark-Acceptance.md",
+                "docs/evidence/StayConnect-IAM-Phase5-Evidence.md",
             ]))
         for num, owner in sorted(merged_prs.items()):
             n = re.escape(str(num))

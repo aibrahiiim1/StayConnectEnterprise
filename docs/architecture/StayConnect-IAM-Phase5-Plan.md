@@ -5,8 +5,9 @@
 closure transition **T0053**, 2026-08-14), against accepted software/runtime candidate
 `aef848d253e2c6efebe4f036b0369a22530a5a25` and final verified delivery/evidence head
 `4142f5fe857787a745b186d8ac38edaad7b4d268`. Nine limitations (**L5-1**–**L5-9**) are accepted and **not**
-promoted to PASS. Pull request **#13 remains OPEN and UNMERGED**; merging it is a separate Product-Owner
-decision that has not been taken. The authoritative acceptance record is
+promoted to PASS. Pull request **#13 has been MERGED** to master under the separate Product-Owner
+merge decision **D23** (transition **T0054**), merge commit `4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a`; the merge introduced no
+content. The authoritative acceptance record is
 [`docs/acceptance/StayConnect-IAM-Phase5-Live-Dark-Acceptance.md`](../acceptance/StayConnect-IAM-Phase5-Live-Dark-Acceptance.md)
 and the final report is
 [`docs/reports/StayConnect-IAM-Phase5-Final-Report.md`](../reports/StayConnect-IAM-Phase5-Final-Report.md).

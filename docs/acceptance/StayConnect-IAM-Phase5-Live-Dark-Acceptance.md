@@ -1,12 +1,12 @@
 # StayConnect IAM Phase 5 — Live-Dark Acceptance
 
-**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED — VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC (decision D22, closure transition T0053, 2026-08-14). The single Phase-5 pull request #13 remains OPEN and UNMERGED by design; merging it is a separate Product-Owner decision that has not been taken.**
+**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED — VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC (decision D22, closure transition T0053, 2026-08-14 UTC). The single Phase-5 pull request #13 has since been MERGED to master under the separate Product-Owner merge decision D23 (transition T0054), merge commit `4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a`. The merge introduced no content and deployed nothing.**
 
 - Phase: 5 (Post-Stay PIN re-authentication + the Cross-PMS Transfer workflow) — one end-to-end Phase.
 - **Authorized** under Product-Owner decision **D21**, authorization transition **T0050**.
 - **Acceptance candidate complete** recorded by transition **T0051**; **acceptance-evidence fix-forward** recorded by transition **T0052**.
 - **Product-Owner ACCEPTED and CLOSED** by decision **D22**, closure transition **T0053** (`transition_accepted: true`) at verified **LIVE-DARK / NO-FINANCIAL-TRAFFIC** maturity.
-- Branch: `phase/5-poststay-transfer`; **PR #13 — OPEN and UNMERGED**.
+- Branch: `phase/5-poststay-transfer`; **PR #13 — MERGED to master on 2026-08-14 UTC under the separate Product-Owner merge decision D23** (transition **T0054**), merge commit `4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a`. The merge introduced no content: master's tree is byte-identical to the accepted head's tree.
 - Appliance: `radius` / `172.21.60.23` — the **development** appliance. Production was never contacted.
 - Dates are **UTC**, matching the transition ledger. The Product-Owner decision was taken on 2026-08-15 *local* time (UTC+03:00), which is 2026-08-14 in UTC.
 
@@ -87,7 +87,7 @@ Measured, not asserted: `git diff --name-only` between the accepted delivery/evi
 
 ## Explicitly NOT authorized by this acceptance
 
-No pull-request merge · no deployment or further appliance mutation · no Phase-5 or Phase-4 feature-flag enablement · no IAM-v2 authentication cutover · no Production migration or Production database contact · no PMS, provider or real financial traffic · no paid guest access · no Phase 6 or Phase 7 work.
+No deployment or further appliance mutation · no Phase-5 or Phase-4 feature-flag enablement · no IAM-v2 authentication cutover · no Production migration or Production database contact · no PMS, provider or real financial traffic · no paid guest access · no Phase 6 or Phase 7 work.
 
 Phases 0, 1A, 1B, 2, 3 and 4 are preserved unchanged, and the six accepted Phase-4 limitations are not promoted.
 
@@ -100,4 +100,4 @@ Phases 0, 1A, 1B, 2, 3 and 4 are preserved unchanged, and the six accepted Phase
 
 ## Product-Owner decision (recorded)
 
-Phase 5 is **ACCEPTED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity and CLOSED** by Product-Owner decision **D22** / closure transition **T0053** (2026-08-14). Acceptance is at LIVE-DARK maturity only. Pull request #13 remains **OPEN and UNMERGED**; merging it is a separate Product-Owner decision.
+Phase 5 is **ACCEPTED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity and CLOSED** by Product-Owner decision **D22** / closure transition **T0053** (2026-08-14). Acceptance is at LIVE-DARK maturity only. Pull request #13 has since been **MERGED** to master under the separate Product-Owner merge decision **D23** / transition **T0054**, merge commit `4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a`. The merge is a delivery event, not an acceptance event: the acceptance maturity above and the nine limitations are unchanged by it.
