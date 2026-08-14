@@ -1,0 +1,4 @@
+commit 2c2fc6af637061f5e904d8be2260b28354d87d7f
+Date:   Fri Aug 14 21:24:13 2026 +0300
+
+    Phase 5: the governance fixtures drift when the project advances, twice more

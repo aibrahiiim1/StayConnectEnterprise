@@ -1,4 +1,0 @@
-commit 0019d62bf0360774b49f9278dbf202c1c8b0e328
-Date:   Fri Aug 14 20:55:28 2026 +0300
-
-    Phase 5 M4: the LIVE-DARK acceptance candidate (T0051)
