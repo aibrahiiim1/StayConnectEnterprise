@@ -327,6 +327,12 @@ func main() {
 			if s.phase5Cfg.AdminOn() {
 				mountResource(r, s, "post-stay-profiles", s.postStayProfilesRoutes)
 			}
+			// Cross-PMS transfer is its OWN flag, not a child of the post-stay one: they are different
+			// operations with different blast radii, and a property that wants post-stay PINs has not
+			// thereby asked to be able to end a guest's access and move it.
+			if s.phase5Cfg.TransferOn() {
+				mountResource(r, s, "stay-transfers", s.stayTransfersRoutes)
+			}
 			// Phase 4 (DARK): Financial Manual Review. Mounted only when the Phase-4 master flag AND the
 			// review flag are both ON. The delivered configuration has both OFF, so this path does not
 			// exist on the appliance.

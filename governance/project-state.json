@@ -571,17 +571,22 @@
     "phase5_milestone1_status": "ACCEPTED (Product-Owner checkpoint)",
     "phase5_milestone2_head": "def9b8a7d3d439fec0a5dd2af693abb4a5e3ecd1",
     "phase5_milestone2_status": "COMPLETE",
-    "phase5_active_milestone": "3 (Cross-PMS Transfer)",
+    "phase5_active_milestone": "4 (hardening + final LIVE-DARK candidate)",
     "phase5_migrations": "0027 (guards) + 0028 (post-stay throttle method) + 0029 (one reveal per generation, at mint)",
     "phase5_gate_results_at_m2": "foundation 70/70; lifecycle 19/19; internal/poststay 13/13; internal/authctx post-stay 7/7 with the PMS suite unregressed; cmd/edged operator API 6/6; iamv2 flag gating 4/4; hotel-admin browser 5/5",
     "phase5_known_limitations": [
       "L5-1 POST_STAY_ACTIVE has no exit transition (the FINAL contract draws no arrow out of it). A reinstatement for a converted Stay is refused by the guard and lands in the operator queue. Recorded and tested as F8-i; the Product Owner confirmed the transition must not be invented in this phase.",
       "L5-2 Post-Stay v1 is zero-price only. A priced or settlement-requiring revision is refused rather than granted free.",
       "L5-3 Post-stay verification requires a device that was authorized during the stay; a wholly new device gets the uniform non-success. This is what removes the client-supplied-subject parameter altogether.",
-      "L5-4 stay_links(reason='POST_STAY') is never written: both its ends are NOT NULL Stays and post-stay has one. Enforced by the database guard."
+      "L5-4 stay_links(reason='POST_STAY') is never written: both its ends are NOT NULL Stays and post-stay has one. Enforced by the database guard.",
+      "L5-5 A transfer is not reversible by an inverse transfer: the source entitlement is terminated and from_entitlement_id is UNIQUE, so a return journey is a NEW transfer subject to every rule again.",
+      "L5-6 The destination grant is a bounded 4-hour window rather than an open-ended entitlement; the destination property's own authentication then applies."
     ],
     "phase5_m2_fix_forward": "The PUBLIC guest surface (portald) decoded permissively and would have SILENTLY DROPPED an identity-looking field such as stay, room, pms_interface_id or profile. scd's internal decoder already refused them, so nothing was exploitable, but a silently-ignoring surface is indistinguishable from one that honours the field. Now refused outright as the ordinary uniform non-success, before any hop to scd, with 20 refusal cases per endpoint plus browser proof that the page never sends one.",
-    "phase5_evidence_document": "docs/evidence/StayConnect-IAM-Phase5-Evidence.md"
+    "phase5_evidence_document": "docs/evidence/StayConnect-IAM-Phase5-Evidence.md",
+    "phase5_milestone3_status": "COMPLETE",
+    "phase5_gate_results_at_m3": "internal/transfer 11/11 (F9 incl. 24-way concurrency and a 16-pair opposite-direction deadlock proof); cmd/edged 11/11; cmd/portald 4/4; internal/poststay 13/13; internal/authctx 7/7; internal/iamv2 4/4; foundation 70/70; lifecycle 19/19; browser 12/12",
+    "phase5_transfer_lock_order_proof": "The two Stays are locked in deterministic id order. Proven load-bearing by mutation: replacing it with caller-order locking makes the 16-pair opposite-direction test fail with a real SQLSTATE 40P01 deadlock; with the fixed order it passes."
   },
   "latest_transition_id": "T0050",
   "phase3_delivery_evidence": {

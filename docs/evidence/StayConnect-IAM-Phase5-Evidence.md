@@ -118,6 +118,68 @@ The auth-context package was reconciled rather than reused. Two findings, both l
 
 ---
 
-## Milestone 3 — Cross-PMS Transfer · ACTIVE
+## Milestone 3 — Cross-PMS Transfer · COMPLETE
 
-Under way at the time of writing. Its inventory and gate results are appended below as it completes.
+### Verified gate results
+
+| Gate | Result |
+|---|---|
+| `internal/transfer` (F9 series) | **11 / 11** |
+| `cmd/edged` operator API (post-stay + transfer) | **11 / 11** |
+| `cmd/portald` guest surface (strict decoding + uniformity) | **4 / 4** |
+| `internal/poststay` | **13 / 13** |
+| `internal/authctx` | **7 / 7** |
+| `internal/iamv2` flag gating | **4 / 4** |
+| foundation / lifecycle DB gates | **70 / 70** · **19 / 19** |
+| browser: post-stay 5, transfer 4, guest panel 3 | **12 / 12** |
+
+### What M3 established
+
+* **A transfer is not a room move.** Two Stays on one interface satisfy "two different Stays", which is all
+  the original CHECK required — so the database now demands two different **interfaces**, and the operation
+  refuses a same-interface pair before anything is written.
+* **A transfer is not a supersession.** The destination entitlement carries no `supersedes_entitlement_id`;
+  the typed `entitlement_transfers` row is the relationship, because supersession is same-subject and the
+  Phase-1A engine rejects the cross-subject form outright.
+* **A transfer is never inferred.** The transfer package does not read `auth_resolutions` at all. Ambiguity
+  is surfaced as a labelled review signal whose payload says, in the words the screen renders, that it is not
+  evidence.
+* **The destination must already exist from verified PMS state**, and no Stay is ever created — asserted by
+  counting Stays across a refused transfer.
+* **Fail closed.** A transfer with nowhere to land refuses *without* terminating the source: taking access
+  away to say no would be worse than saying no.
+* **Seamless rebind.** The same session rows are re-pointed — no logout, no re-authentication — and the
+  destination grant is zero-price and non-posting.
+
+### Concurrency and isolation
+
+* 24 concurrent transfers of the same pair produce **exactly one** success and **one** lineage row.
+* Two operators transferring in **opposite directions** between the same pair must not deadlock. The Stays
+  are locked in deterministic id order, and that order is **proven load-bearing**: replacing it with
+  caller-order locking makes the 16-pair concurrent test fail with a real `SQLSTATE 40P01` deadlock.
+
+### Git-derived inventory — M2 fix-forward `dead716` → M3 (per path)
+
+| Change | Path | Purpose |
+|---|---|---|
+| A | `data-plane/internal/transfer/transfer.go` | the transfer operation: preview, deterministic lock order, atomic execute, typed lineage |
+| A | `data-plane/internal/transfer/transfer_integration_test.go` | the F9 series including concurrency and the opposite-direction deadlock proof |
+| A | `data-plane/cmd/edged/resources_phase5_transfer.go` | operator surface: review signal, preview, execute, lineage |
+| A | `data-plane/cmd/edged/phase5_transfer_api_integration_test.go` | API contract: signal-authorizes-nothing, preview-is-read-only, full-weight execute, RBAC |
+| M | `data-plane/cmd/edged/main.go` | transfer surface mounted behind its OWN flag, not as a child of post-stay |
+| M | `data-plane/cmd/edged/auth.go` | `stay-transfers` added to the role matrix |
+| A | `hotel-admin/components/phase5/stay-transfer-view.tsx` | operator screen; confirm controls do not exist until a preview succeeds |
+| A | `hotel-admin/app/(app)/stay-transfers/page.tsx` | route shell |
+| A | `hotel-admin/e2e/phase5-stay-transfer.spec.ts` | browser proof of the signal/preview/confirm ordering |
+| M | `hotel-admin/components/nav.tsx`, `hotel-admin/lib/roles.ts` | nav entry and client matrix mirroring edged |
+
+### Limitations added by M3
+
+| # | Limitation | Status |
+|---|---|---|
+| L5-5 | A transfer is **not reversible by an inverse transfer**: the source entitlement is terminated, and transferring back would need its own new grant. The lineage records what happened; it does not undo it. | By design. `from_entitlement_id` is UNIQUE, so a return journey is a new transfer between the same Stays in the other direction, subject to every rule again. |
+| L5-6 | The destination grant is a **bounded window** (4 hours), not an open-ended entitlement. The destination property's own authentication then applies. | By design: a transfer keeps a guest online across the change; it does not silently grant them a stay's worth of access on a property that never authenticated them. |
+
+---
+
+## Milestone 4 — Hardening + final LIVE-DARK candidate · ACTIVE

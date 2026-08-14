@@ -173,6 +173,9 @@ var rolePerms = map[string]map[string]perm{
 		// (end post-stay access for that stay episode) -- both additionally require password step-up and a
 		// bounded reason at the route. It is never a way to READ a PIN: no surface returns a stored one.
 		"post-stay-profiles": permWrite,
+		// Cross-PMS transfer: the IT manager owns the integration, and a transfer is an integration action as
+		// much as a guest one. WRITE means preview and execute, both under step-up and a bounded reason.
+		"stay-transfers": permWrite,
 		// The IT manager can SEE the financial review queue as integration evidence, and cannot decide it:
 		// section 15 gives the decision to payments_operator (and site_admin).
 		"financial-review": permRead,
@@ -195,6 +198,8 @@ var rolePerms = map[string]map[string]perm{
 		// so this role can rotate and revoke -- under step-up, a mandatory reason and audit like everyone
 		// else. Reset is a rotation; revoke is terminal for the episode.
 		"post-stay-profiles": permWrite,
+		// The front desk is where a guest moving between the group's properties actually presents.
+		"stay-transfers":     permWrite,
 		"financial-review":   permRead,
 		"financial-ops":      permRead,
 		"guest-access-plans": permRead, "pms-providers": permRead,
@@ -209,6 +214,7 @@ var rolePerms = map[string]map[string]perm{
 		// telling a guest to try again, but must not be able to publish or rotate anything.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		"post-stay-profiles": permWrite,
+		"stay-transfers":     permWrite,
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "payments": permRead, "reports": permRead,
 		"audit": permRead, "license": permRead, "backups": permRead, "walled-garden": permRead,
@@ -242,7 +248,9 @@ var rolePerms = map[string]map[string]perm{
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		// Phase 5 (DARK): a viewer sees WHETHER a post-stay identity can authenticate, and never acts on it.
 		"post-stay-profiles": permRead,
-		"financial-review":   permRead,
+		// A viewer reads the lineage and the review signals, and acts on neither.
+		"stay-transfers":   permRead,
+		"financial-review": permRead,
 		// financial-ops mirrors financial-review deliberately: it is the same readership looking at the
 		// same money from a different angle, and two permissions for one boundary is how they drift apart.
 		"financial-ops": permRead,

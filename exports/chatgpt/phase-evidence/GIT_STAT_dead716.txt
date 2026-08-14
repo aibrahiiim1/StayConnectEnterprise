@@ -1,0 +1,4 @@
+commit dead71631ff97acd13d5e8bb9bfbc81c0b7ba9a9
+Date:   Fri Aug 14 17:56:48 2026 +0300
+
+    Phase 5 (delivery_head): M2 fix-forward pointer, complete staged manifest, rebuilt packs and report-embedded manifest

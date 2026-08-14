@@ -68,6 +68,7 @@ const SECTIONS: Section[] = [
       { href: "/financial-settlements", label: "Settlements",     icon: Wallet, resource: "financial-review", enabled: PHASE4_ADMIN },
       { href: "/financial-recovery", label: "Financial recovery", icon: Shield, resource: "financial-review", enabled: PHASE4_ADMIN },
       { href: "/post-stay",          label: "Post-stay access",   icon: KeyRound, resource: "post-stay-profiles", enabled: PHASE5_ADMIN },
+      { href: "/stay-transfers",     label: "Cross-PMS transfer", icon: Send,     resource: "stay-transfers",     enabled: PHASE5_ADMIN },
       { href: "/notifications",    label: "Notifications", icon: Send,     resource: "notification-providers" },
       { href: "/social-providers", label: "Social login",  icon: KeyRound, resource: "social-providers" },
       { href: "/payments",         label: "Payments",      icon: Wallet,   resource: "payments" },
