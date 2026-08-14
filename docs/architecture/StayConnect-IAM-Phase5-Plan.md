@@ -2,7 +2,7 @@
 ## Post-Stay PIN re-authentication + Cross-PMS Transfer
 
 **Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED — VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC** (decision **D22**,
-closure transition **T0053**, 2026-08-15), against accepted software/runtime candidate
+closure transition **T0053**, 2026-08-14), against accepted software/runtime candidate
 `aef848d253e2c6efebe4f036b0369a22530a5a25` and final verified delivery/evidence head
 `4142f5fe857787a745b186d8ac38edaad7b4d268`. Nine limitations (**L5-1**–**L5-9**) are accepted and **not**
 promoted to PASS. Pull request **#13 remains OPEN and UNMERGED**; merging it is a separate Product-Owner

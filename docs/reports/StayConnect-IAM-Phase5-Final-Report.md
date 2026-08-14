@@ -1,7 +1,7 @@
 # StayConnect IAM — Phase 5 Final Report (Post-Stay PIN re-authentication + Cross-PMS Transfer)
 
 > **Status: ACCEPTED AND CLOSED — VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC.** Product-Owner decision
-> **D22**, closure transition **T0053**, 2026-08-15. Accepted software/runtime candidate
+> **D22**, closure transition **T0053**, 2026-08-14. Accepted software/runtime candidate
 > **`aef848d253e2c6efebe4f036b0369a22530a5a25`**; final verified delivery/evidence head
 > **`4142f5fe857787a745b186d8ac38edaad7b4d268`**; acceptance-evidence fix-forward **T0052**. Run and
 > artifact identifiers are in §3.
@@ -42,7 +42,7 @@
 - **Phase:** 5 — Post-Stay PIN re-authentication + the Cross-PMS Transfer workflow. **ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity.**
 - **Authorized:** Product-Owner decision **D21**, transition **T0050** (2026-08-14), as four milestones with automatic continuation while gates were green.
 - **Candidate complete:** transition **T0051** (2026-08-14). **Acceptance-evidence fix-forward:** transition **T0052** (2026-08-14).
-- **Accepted and closed:** decision **D22**, closure transition **T0053** (2026-08-15).
+- **Accepted and closed:** decision **D22**, closure transition **T0053** (2026-08-14).
 - **Branch:** `phase/5-poststay-transfer`; **PR #13 — OPEN and UNMERGED**.
 - **Appliance:** `radius` / `172.21.60.23` — the **development** appliance. Production was never migrated or contacted.
 
@@ -193,5 +193,6 @@ DARK-contract criterion, the head/CI reconciliation and the corrected inventory 
 statements **forward** rather than rewriting them. `D22`/`T0053` accept and close Phase 5. **No historical
 receipt was rewritten at any point**, and the closure round changes no product-runtime file — no path under
 `data-plane/`, `hotel-admin/`, `scripts/` or `.github/workflows/` — which is proven from Git rather than
-asserted. The one change outside `governance/`, `docs/` and `exports/` is a governance validator,
-`tools/validate-current-state-parity.py`, named here rather than hidden inside a broader claim.
+asserted. The only changes outside `governance/`, `docs/` and `exports/` are two governance validators,
+`tools/validate-current-state-parity.py` and `tools/validate-project-state.sh`, both named here rather
+than hidden inside a broader claim.

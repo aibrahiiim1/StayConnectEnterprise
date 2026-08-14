@@ -1,6 +1,6 @@
 # StayConnect IAM Phase 5 — Live-Dark Acceptance
 
-**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED — VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC (decision D22, closure transition T0053, 2026-08-15). The single Phase-5 pull request #13 remains OPEN and UNMERGED by design; merging it is a separate Product-Owner decision that has not been taken.**
+**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED — VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC (decision D22, closure transition T0053, 2026-08-14). The single Phase-5 pull request #13 remains OPEN and UNMERGED by design; merging it is a separate Product-Owner decision that has not been taken.**
 
 - Phase: 5 (Post-Stay PIN re-authentication + the Cross-PMS Transfer workflow) — one end-to-end Phase.
 - **Authorized** under Product-Owner decision **D21**, authorization transition **T0050**.
@@ -8,6 +8,7 @@
 - **Product-Owner ACCEPTED and CLOSED** by decision **D22**, closure transition **T0053** (`transition_accepted: true`) at verified **LIVE-DARK / NO-FINANCIAL-TRAFFIC** maturity.
 - Branch: `phase/5-poststay-transfer`; **PR #13 — OPEN and UNMERGED**.
 - Appliance: `radius` / `172.21.60.23` — the **development** appliance. Production was never contacted.
+- Dates are **UTC**, matching the transition ledger. The Product-Owner decision was taken on 2026-08-15 *local* time (UTC+03:00), which is 2026-08-14 in UTC.
 
 ---
 
@@ -80,7 +81,7 @@ None of the nine is promoted. Each remains a limitation of the accepted Phase-5 
 
 ## The closure round introduces zero product-runtime change
 
-Measured, not asserted: `git diff --name-only` between the accepted delivery/evidence head `4142f5f` and the closure delivery head returns **no path** under `data-plane/`, `hotel-admin/`, `scripts/` or `.github/workflows/`. Only `governance/`, `docs/`, `exports/` and one governance-validator file under `tools/` change — `validate-current-state-parity.py`, which gains the Phase-5 plan in its phase-plan map so the accepted-phase-semantics rule actually reads that surface. *Product runtime* here means the software the appliance runs and the gates that build it: `data-plane/`, `hotel-admin/`, `scripts/` and `.github/workflows/`. An acceptance round is exactly the moment at which a quiet code change is least likely to be noticed, because attention is on the paperwork — so the proof is derived from Git.
+Measured, not asserted: `git diff --name-only` between the accepted delivery/evidence head `4142f5f` and the closure delivery head returns **no path** under `data-plane/`, `hotel-admin/`, `scripts/` or `.github/workflows/`. Only `governance/`, `docs/`, `exports/` and two governance validators under `tools/` change: `validate-current-state-parity.py` gains the Phase-5 plan in its phase-plan map so the accepted-phase-semantics rule actually reads that surface, and `validate-project-state.sh` learns the post-closure next action, because an unrecognised next action is supposed to fail rather than pass quietly. *Product runtime* here means the software the appliance runs and the gates that build it: `data-plane/`, `hotel-admin/`, `scripts/` and `.github/workflows/`. An acceptance round is exactly the moment at which a quiet code change is least likely to be noticed, because attention is on the paperwork — so the proof is derived from Git.
 
 ---
 
@@ -99,4 +100,4 @@ Phases 0, 1A, 1B, 2, 3 and 4 are preserved unchanged, and the six accepted Phase
 
 ## Product-Owner decision (recorded)
 
-Phase 5 is **ACCEPTED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity and CLOSED** by Product-Owner decision **D22** / closure transition **T0053** (2026-08-15). Acceptance is at LIVE-DARK maturity only. Pull request #13 remains **OPEN and UNMERGED**; merging it is a separate Product-Owner decision.
+Phase 5 is **ACCEPTED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity and CLOSED** by Product-Owner decision **D22** / closure transition **T0053** (2026-08-14). Acceptance is at LIVE-DARK maturity only. Pull request #13 remains **OPEN and UNMERGED**; merging it is a separate Product-Owner decision.

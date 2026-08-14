@@ -370,7 +370,7 @@ unchanged.
 
 ## Product-Owner acceptance and closure · decision D22 / transition T0053
 
-Recorded **2026-08-15**. Phase 5 is **ACCEPTED AND CLOSED at VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC
+Recorded **2026-08-14**. Phase 5 is **ACCEPTED AND CLOSED at VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC
 maturity**, against accepted software/runtime candidate `aef848d253e2c6efebe4f036b0369a22530a5a25` and final
 verified delivery/evidence head `4142f5fe857787a745b186d8ac38edaad7b4d268`. Every milestone section above is
 preserved exactly as written; nothing in it is rewritten by this closure.
@@ -390,9 +390,11 @@ carried into the closure unchanged rather than being quietly upgraded by the acc
 **The closure round changes no product-runtime file, and that is measured rather than asserted.**
 `git diff --name-only` between the accepted delivery/evidence head and the closure delivery head returns no
 path under `data-plane/`, `hotel-admin/`, `scripts/` or `.github/workflows/`. Only `governance/`, `docs/`,
-`exports/` and one governance validator under `tools/` change — `validate-current-state-parity.py`, which
-gains the Phase-5 plan in its phase-plan map so the accepted-phase-semantics rule actually reads that
-surface, named here rather than hidden inside a broader claim. An acceptance round is exactly the moment at which a quiet code change is least likely to
+`exports/` and two governance validators under `tools/` change — `validate-current-state-parity.py` gains
+the Phase-5 plan in its phase-plan map so the accepted-phase-semantics rule actually reads that surface,
+and `validate-project-state.sh` learns the post-closure next action, because an unrecognised next action
+is supposed to fail rather than pass quietly. Both are named here rather than hidden inside a broader
+claim. An acceptance round is exactly the moment at which a quiet code change is least likely to
 be noticed, because attention is on the paperwork, so the proof comes from Git.
 
 **Pull request #13 remains OPEN and UNMERGED.** Acceptance and merge are separate Product-Owner decisions, as
