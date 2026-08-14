@@ -1,0 +1,4 @@
+commit 791a543bf47f6883b44e8c5f1c008445ea634fac
+Date:   Fri Aug 14 17:56:09 2026 +0300
+
+    Phase 5 M2 fix-forward: the PUBLIC guest surface refuses an identity it did not derive, plus the M2 evidence record

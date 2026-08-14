@@ -1,4 +1,0 @@
-commit def9b8a7d3d439fec0a5dd2af693abb4a5e3ecd1
-Date:   Fri Aug 14 17:35:06 2026 +0300
-
-    Phase 5 M2 (exposure): guest surface, operator surface, Portal, Hotel Admin, and the uniformity proof
