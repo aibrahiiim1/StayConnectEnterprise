@@ -1,0 +1,55 @@
+{
+  "transition_id": "T0047",
+  "seq": 47,
+  "timestamp": "2026-08-13T23:20:00Z",
+  "record_type": "PHASE_4_START_HERE_STRUCTURAL_CURRENT_STATE_CORRECTION_REPOSITORY_ONLY",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "4",
+  "decision": "D19",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-13: one final narrowly-scoped repository-only FIX-FORWARD correction under the EXISTING D19 acceptance, after an independent source-order review found a merge blocker in the FIRST authoritative source on a2a17dbe9864f4736bab7b8bdbc4f561f7b4b085. Phase 4 is NOT reopened.",
+  "history_note": "T0030 through T0046 are PRESERVED unchanged, including T0044, T0045 and T0046 byte-for-byte. No historical receipt was rewritten and no appliance, Production database or feature flag was touched.",
+  "false_passes_closed": [
+    {
+      "id": "Z-9",
+      "class": "A SECTION THAT CLAIMS TO CARRY MUTABLE CURRENT STATE",
+      "found": "exports/chatgpt/stayconnectenterprise/00-START-HERE.md -- the FIRST file a reader opens -- carried a correct generated block (Phase 4 ACCEPTED_AND_CLOSED, iam_v2 68/0, single next action = the PR #12 merge decision) and, below it, whole SECTIONS still announcing old current state: '## 8. Current approved plan (Phase 1A)', '## 9. Next authorized action' whose body read 'the single next authorized action is complete Phase 1B execution and live-dark verification' and 'Phase 1B implementation is Product-Owner authorized and IN_PROGRESS' and 'Gate P (in progress)', plus a document-role table still describing the Phase-1B plan as 'awaiting PO approval/rejection; not implemented' and a precedence list pinning the Phase-1A plan as the current approved phase plan.",
+      "why_it_passed": "T0046's static-current-prose rule reads PARAGRAPHS and refuses known stale assertions. The wording of an assertion changes every phase, so chasing it with more keywords always trails reality by one round. What these sections did was structural: a HEADING announced itself as the current plan or the next authorized action, and no rule objected to the CLAIM itself. accepted-phase-semantics also never read the pack entry points at all, so a Phase-1B-IN_PROGRESS section there was invisible to it.",
+      "fix": "STRUCTURAL, not another keyword. (1) The generated PROJECT STATE block is now the ONLY carrier of mutable current state in 00-START-HERE: section 8 is retitled 'HISTORICAL -- the Phase-1A approved plan, AS AT 2026-07-16' and section 9 'HISTORICAL -- the next authorized action AS AT 2026-07-17', each opening with a blockquote that says it is not current and names the generated block as the authority; the Gate-P paragraph is dated and marked COMPLETE since D11/T0011; the document-role table rows for the Phase-1A and Phase-1B plans now record their accepted/closed status instead of a superseded planning state; the precedence list gains a rank 0 naming the generated block for everything mutable, and its rank 3 no longer pins a plan filename. Nothing was deleted -- the Phase-1A build shape, rollback boundaries and resolved/open items all remain, as dated history. (2) A new STRUCTURAL rule reads HEADINGS outside the generated region and fails any section that purports to define the current approved plan, the current phase/status/activity, or the next authorized action, unless the heading or its opening lines mark it historical or explicitly defer to the generated block. It cannot be satisfied by rewording the body: the section either owns current state or admits it does not. (3) accepted-phase-semantics now also reads the pack entry points, and its pattern tolerates an intervening qualifier ('Phase 1B IMPLEMENTATION is ... authorized and IN_PROGRESS') while being forbidden from bridging a semicolon or a second phase mention, which would have made it fire on a governance-guard sentence that is correct.",
+      "proved": "tools/tests/current_state_parity/run_negative.py, 52 passed / 0 failed. Four new cases reproduce the surviving sections VERBATIM -- '## 8. Current approved plan (Phase 1A)', '## 9. Next authorized action', 'Phase 1B implementation is Product-Owner authorized and IN_PROGRESS', and a '## Current project phase & status' heading that does not defer -- and each is caught by the rule that should catch it. The retention half is proved too: labelled historical material, including the same pre-build sentences, still passes."
+    }
+  ],
+  "runtime_delta": {
+    "vs_accepted_software_candidate": "b94112d8cb0ab63938b60f829ddd465c14491f97",
+    "paths_measured": ["data-plane/", "hotel-admin/", "control-plane/", "deploy/"],
+    "changed_paths_total": 3,
+    "changed_paths_test_only": 3,
+    "changed_paths_shipped_non_test": 0,
+    "accepted_runtime_behaviour_unchanged": true,
+    "note": "Unchanged from T0046: the three differing paths are the Phase-4 _test.go build-tag files, which no shipped binary contains. This round changes no data-plane, hotel-admin, control-plane or deploy file at all."
+  },
+  "not_changed": [
+    "T0044, T0045 and T0046 -- byte-identical",
+    "decision D19 -- used as-is; no new Product-Owner decision was created or requested",
+    "the accepted software candidate b94112d8cb0ab63938b60f829ddd465c14491f97",
+    "the appliance, Production, every feature flag, and the merge state of PR #12"
+  ],
+  "evidence_files": [
+    "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+    "tools/validate-current-state-parity.py",
+    "tools/tests/current_state_parity/run_negative.py",
+    "governance/transitions/T0046.json"
+  ],
+  "acceptance_verdict": "NO CHANGE TO ACCEPTANCE. Phase 4 remains ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity under D19 / T0044. This is a repository-only fix-forward correction of a structural current-state class in the pack entry point and of the validator that could not see it.",
+  "next_action": "Product-Owner decision on merging the Phase-4 pull request."
+}

@@ -695,15 +695,25 @@ def main():
         num = re.escape(pk)
         # "phase 4 is not accepted", "phase-4 ... not closed", "phase 4 remains in progress", and the bare
         # headline forms the Plan used.
+        # A short intervening noun must not defeat the match: "Phase 1B IMPLEMENTATION is ... IN_PROGRESS"
+        # slipped through while "Phase 1B is IN_PROGRESS" was caught, and they say the same thing. Bounded to
+        # ~40 characters and stopped at a sentence end so it cannot reach across into an unrelated clause.
         unfinished = re.compile(
-            r"phase[- ]?" + num + r"\s+(?:is|remains)\s+(?:not\s+accepted|not\s+closed|in[_ -]?progress|"
+            r"phase[- ]?" + num + r"\b(?:(?!phase)[^.;\n]){0,40}?\b(?:is|remains|stays)\s+(?:(?!phase)[^.;\n]){0,30}?\b"
+            r"(?:not\s+accepted|not\s+closed|in[_ -]?progress|"
             r"not\s+started|unauthori[sz]ed|a\s+candidate)|"
             r"phase[- ]?" + num + r"\s+is\s+NOT\s+accepted\s+and\s+NOT\s+closed|"
             r"\bnot\s+accepted,\s+not\s+closed\b|"
             r"phase[- ]?" + num + r"[^.\n]{0,40}awaiting\s+product[- ]owner\s+acceptance|"
             r"awaiting\s+product[- ]owner\s+acceptance\s+of\s+phase[- ]?" + num,
             re.I)
-        surfaces = list(DOC_SURFACES)
+        # The PACK entry points are highest-authority surfaces too -- 00-START-HERE is the FIRST file a
+        # reader opens -- and this rule was reading neither, so a "Phase 1B implementation is authorized and
+        # IN_PROGRESS" section there was invisible to it.
+        surfaces = list(DOC_SURFACES) + [
+            "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+            "exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md",
+        ]
         if pk in PHASE_PLANS:
             surfaces.append(PHASE_PLANS[pk])
         for rel in surfaces:
@@ -836,6 +846,64 @@ def main():
                     break
     if not [f for f in failures if f[0] == "static-current-prose"]:
         ok("no unlabelled current-state prose outside the generated blocks contradicts canonical state")
+
+    # ---- 12. STRUCTURAL: A SECTION MAY NOT CLAIM TO CARRY MUTABLE CURRENT STATE ------------------------------
+    #
+    # THE FALSE PASS THIS CLOSES. Rule 11 above reads paragraphs and refuses known stale ASSERTIONS. It went
+    # green on 00-START-HERE while that file still contained, below a correct generated block:
+    #
+    #     ## 8. Current approved plan (Phase 1A)
+    #     ## 9. Next authorized action
+    #        "The single next authorized action is complete Phase 1B execution and live-dark verification."
+    #        "Phase 1B implementation is Product-Owner authorized and IN_PROGRESS"
+    #        "Gate P (in progress)"
+    #     | StayConnect-IAM-Phase1B-Plan.md | ... awaiting PO approval/rejection; not implemented |
+    #
+    # Chasing those with more keywords is a losing game -- the wording changes every phase. What does NOT
+    # change is the STRUCTURE: a heading that announces itself as the current plan, the current status or the
+    # next authorized action is claiming to carry mutable state, and exactly one surface is allowed to do
+    # that. So this rule reads HEADINGS, not sentences, and refuses the claim itself unless the heading or
+    # its opening lines say the section is historical.
+    #
+    # It cannot be satisfied by rewording the body: the section either owns current state or admits it does
+    # not.
+    heading_claim = re.compile(
+        r"^\s{0,3}#{1,6}\s+.*?("
+        r"current\s+(approved\s+)?(plan|phase|status|state|activity|position)|"
+        r"next\s+(authorized|approved)\s+(action|activity|step)|"
+        r"current\s+project\s+phase"
+        r")", re.I)
+    # A heading that says it is history, or whose first lines do, is a record and not a claim.
+    heading_history = re.compile(
+        r"historical|as at|as[- ]of|superseded|no longer|archive|"
+        r"is the generated project state block|generated project state block at the top",
+        re.I)
+
+    for rel in STATIC_SURFACES:
+        text = load_surface(rel)
+        if text is None:
+            continue
+        body = outside_generated(text)
+        lines = body.split("\n")
+        for i, line in enumerate(lines):
+            if not heading_claim.match(line):
+                continue
+            # The heading itself, plus the few lines under it, may carry the label.
+            window = "\n".join(lines[i:i + 6])
+            if heading_history.search(window):
+                continue
+            # A heading that explicitly DEFERS to the block is the correct pattern, not a violation:
+            # "## 3. Current project phase & status" whose body immediately says the block is authoritative.
+            if re.search(r"is the GENERATED PROJECT STATE block|"
+                         r"Do not maintain a second current-state description|"
+                         r"the only surface|carries them|carries it", window, re.I):
+                continue
+            bad("static-current-prose",
+                "a section heading claims to carry mutable current state without being marked historical "
+                "or deferring to the generated block: %s" % " ".join(line.split())[:120], rel)
+
+    if not [f for f in failures if f[0] == "static-current-prose"]:
+        ok("no section outside a generated block claims to carry the current plan, status or next action")
 
     # ---- report ----------------------------------------------------------------------------------------------------
     if as_json:

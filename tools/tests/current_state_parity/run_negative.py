@@ -502,6 +502,42 @@ def _(d):
 
 
 
+# ---- STRUCTURAL: a section claiming to carry mutable current state ------------------------------------------
+#
+# These are the sections that were STILL in 00-START-HERE on a2a17dbe with all three workflows green, below a
+# generated block that correctly said Phase 4 was accepted and closed. Rule 11 refuses known stale sentences;
+# it could not refuse a HEADING that announces itself as the current plan, because the sentence under it can
+# be reworded every phase while the claim survives. Reproduced verbatim.
+
+@case("a section heading claims to be the CURRENT APPROVED PLAN", "static-current-prose")
+def _(d):
+    append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+               "## 8. Current approved plan (Phase 1A)\n\nBuild the entire clean-slate IAM schema into an "
+               "isolated iam_v2 PostgreSQL schema inside the existing site database.")
+
+
+@case("a section heading claims to be the NEXT AUTHORIZED ACTION", "static-current-prose")
+def _(d):
+    append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+               "## 9. Next authorized action\n\nThe single next authorized action is complete Phase 1B "
+               "execution and live-dark verification.")
+
+
+@case("a section claims Phase 1B is authorized and IN_PROGRESS", "accepted-phase-semantics")
+def _(d):
+    append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+               "## Status\n\nPhase 1B implementation is Product-Owner authorized and IN_PROGRESS (decision "
+               "D10, 2026-07-17; W0 complete).")
+
+
+@case("a section heading claims to carry the CURRENT PROJECT PHASE without deferring",
+      "static-current-prose")
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "## Current project phase & status\n\nThe project is in Phase 1B, executing Gate P on branch "
+               "phase/1b-dark-auth.")
+
+
 def main():
     print("== baseline: the real repository must PASS ==")
     d = sandbox()

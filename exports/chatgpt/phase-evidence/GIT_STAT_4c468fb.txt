@@ -1,4 +1,0 @@
-commit 4c468fb92df81516a2de4b86ae173d727dbf0852
-Date:   Fri Aug 14 01:31:56 2026 +0300
-
-    Phase 4 closure correction: look the PR up by NUMBER, because GITHUB_REF_NAME is the merge ref

@@ -1,7 +1,7 @@
 # StayConnect Enterprise — START HERE (ChatGPT Project entry point)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0046 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0047 -->
 **Current phase:** 4 — Financial: settlements, postings + outbox, payments, recovery, manual review
 **Current activity:** `PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 NOT_STARTED · 6 NOT_STARTED · 7 NOT_STARTED
@@ -43,7 +43,7 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 - **Protel FIAS Gate 3A — PASS (2026-07-16):** one supervised, controlled **USD 1.00** folio debit against **Coral Sea Holiday Village / Hotel ID 3** was executed and **verified end-to-end** by Front Office: protocol accepted (`PA ASOK`, matched by PMS Interface + `P#`), correct **guest folio**, correct **`SO=WIFI` revenue mapping**, then **manually corrected** back to the **exact original balance**. (Guest identifiers redacted in this pack.)
 - Verified FIAS behavior: `LS→LD→LR→LA` startup sequence; live `GI/GC/GO` feed + read-only `DR` resync; mandatory `RN`+`G#` folio targeting; production-grounded `PS`/`PA` field order and `AS` statuses; **single active-client slot** per interface; `P#` is a **protocol-attempt reference, not business idempotency**.
 - Phase-0 IAM architecture contract fully specified and FINAL: domain model, canonical DDL, invariants, state machines, RBAC, financial safety, offline/restore.
-- **Phase 1A `iam_v2` — scratch-verified (99/99), offline-real-schema-verified, and PRODUCTION LIVE-DARK created + verified (18/18, 2026-07-16):** 49 tables (catalog fingerprint `bd75026f`, identical across scratch/offline/production), dark in `stayconnect_site`, public schema unchanged, services active. Not cut over.
+- **Phase 1A `iam_v2` — scratch-verified (99/99), offline-real-schema-verified, and PRODUCTION LIVE-DARK created + verified (18/18, 2026-07-16):** *(figures AS AT 2026-07-16; the live schema has since grown through migrations 0010 and 0011-0026 — see the generated block)* 49 tables (catalog fingerprint `bd75026f`, identical across scratch/offline/production), dark in `stayconnect_site`, public schema unchanged, services active. Not cut over.
 
 ## 5. Permanent architecture decisions (do not relitigate)
 
@@ -69,9 +69,16 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 - **Gate 3C (UNKNOWN / Manual-Review posting safety)** — **post-implementation** acceptance, testable only after the Posting Engine exists.
 - **Gate 3D (Checkout & Checkout-Grace)** — **post-implementation** acceptance, testable only after the PMS/Entitlement components exist.
 
-## 8. Current approved plan (Phase 1A)
+## 8. HISTORICAL — the Phase-1A approved plan, AS AT 2026-07-16
 
-Build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL schema inside the existing site database**, plus the core entitlement engine (validity-window, supersession, counters, watermarks), device registry, and lock strategy — **dark** (no service reads/writes it; no `search_path` cutover). Rollback before cutover = leave `iam_v2` dark / drop the schema; **no whole-database swap**. See `StayConnect-IAM-Phase1A-Plan.md` for migration groups MG-0…MG-9, per-object specs, the row-lock-first strategy, the replace/retain/migrate/remove matrix, disposable-data handling, and acceptance tests. **Cutover to `iam_v2` is a separate, later, explicitly gated event and an ATOMIC complete-domain switch of all IAM services together** (never per-flow or per-service; plan §7a); a single credential vertical slice does **not** authorize cutover, and build completion does **not** auto-promote.
+> **THIS SECTION IS HISTORICAL AND IS NOT THE CURRENT PLAN.** It is kept because the Phase-1A build
+> shape, its rollback boundaries and its resolved/open items are still the reference for how `iam_v2`
+> was constructed. Phase 1A was accepted and closed long ago, and Phases 1B, 2, 3 and 4 have since
+> been accepted and closed too. **The current phase, the current approved plan and the current next
+> action are the GENERATED PROJECT STATE block at the top of this file — the only surface in this
+> document that carries them.**
+
+*(As at 2026-07-16, the approved plan was to)* build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL schema inside the existing site database**, plus the core entitlement engine (validity-window, supersession, counters, watermarks), device registry, and lock strategy — **dark** (no service reads/writes it; no `search_path` cutover). Rollback before cutover = leave `iam_v2` dark / drop the schema; **no whole-database swap**. See `StayConnect-IAM-Phase1A-Plan.md` for migration groups MG-0…MG-9, per-object specs, the row-lock-first strategy, the replace/retain/migrate/remove matrix, disposable-data handling, and acceptance tests. **Cutover to `iam_v2` is a separate, later, explicitly gated event and an ATOMIC complete-domain switch of all IAM services together** (never per-flow or per-service; plan §7a); a single credential vertical slice does **not** authorize cutover, and build completion does **not** auto-promote.
 
 **Rollback boundaries (cutover):** a routing flip-back is safe **only before the first production write** to `iam_v2` (Boundary A). **After** the first production write (Boundary B) a direct flip-back is forbidden without a tested reverse-migration/replay; otherwise **forward-fix only**, and all durable writes must be reconciled before any return. The first production write is the explicit no-return boundary.
 
@@ -80,13 +87,18 @@ Build the **entire clean-slate IAM schema into an isolated `iam_v2` PostgreSQL s
 - **HA synchronization transport under the two-NIC rule — OPEN.** Single-appliance local-first/offline is current and supported; **HA failover under the two-NIC architecture is NOT designed/implemented/accepted**; the old third-NIC `hasync` design is superseded.
 - **Live `iam_v2` creation** is a separately authorized action **after** A-series acceptance in a scratch/test DB; **cutover** is a still-later separate approval.
 
-## 9. Next authorized action
+## 9. HISTORICAL — the next authorized action AS AT 2026-07-17
 
-The single **next authorized action** is **complete Phase 1B execution and live-dark verification.** Phase 1B implementation is Product-Owner **authorized and IN_PROGRESS** (decision `D10`, 2026-07-17; W0 complete). Execution proceeds in verified stages on branch `phase/1b-dark-auth` (PR #2, **not merged**): Gate P (least-privilege roles + credential rotation) → durable throttle + keyed-HMAC OTP → dark IAM-v2 credential/identity/auth-context code (scratch-tested) → controlled live-dark verification. This does **not** authorize cutover, Phase 2, production `iam_v2` reads/writes, bulk IAM migration, PMS posting, or legacy removal; **legacy public-schema authentication remains the sole production authority.**
+> **THIS SECTION IS HISTORICAL AND IS NOT THE CURRENT NEXT ACTION.** **The current next action is the
+> GENERATED PROJECT STATE block at the top of this file**, which is rendered from
+> `governance/project-state.json` and is the only carrier of it. What follows records the Phase-1B
+> position as it stood on 2026-07-17, retained for provenance.
+
+*(HISTORICAL, as at 2026-07-17.)* The single next authorized action **was** to complete Phase 1B execution and live-dark verification; Phase 1B implementation **was** Product-Owner authorized and in progress (decision `D10`, 2026-07-17; W0 complete). **Phase 1B has since been ACCEPTED AND CLOSED (D11/T0011), as have Phases 2, 3 and 4.** Execution proceeds in verified stages on branch `phase/1b-dark-auth` (PR #2, **not merged**): Gate P (least-privilege roles + credential rotation) → durable throttle + keyed-HMAC OTP → dark IAM-v2 credential/identity/auth-context code (scratch-tested) → controlled live-dark verification. This does **not** authorize cutover, Phase 2, production `iam_v2` reads/writes, bulk IAM migration, PMS posting, or legacy removal; **legacy public-schema authentication remains the sole production authority.**
 
 The **Phase 1A LIVE-DARK acceptance record** (`StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`, 18/18; authoritative production evidence `PROD_LIVE_DARK_EVIDENCE_V2.txt`, read-only — the earlier `PROD_LIVE_DARK_EVIDENCE.txt` is **superseded/erroneous**) stands unchanged. The dark `iam_v2` schema is created + verified in production but **NOT cut over**; no service reads/writes it, no DSN/`search_path` change. Cutover, IAM data migration, and legacy cleanup remain **separately gated** future events (plan §7a/§11 ladder) and are **not** authorized by Phase 1B.
 
-**Gate P (in progress).** Production services currently connect to `stayconnect_site` as the PostgreSQL superuser `stayconnect` (`rolsuper=true`); the schema's darkness rests on *zero code references + no `search_path` change*, not on grant isolation. Gate P — the first authorized Phase-1B execution step — replaces superuser use with least-privilege `svc_*` roles (per `Phase1B-Privilege-Matrix.md`) holding **zero** `iam_v2` privileges. Routing any service **to** `iam_v2` remains a later cutover event, out of Phase 1B scope.
+**Gate P — HISTORICAL, as at 2026-07-17; COMPLETE since Phase 1B closure (D11/T0011).** *At that time* production services connected to `stayconnect_site` as the PostgreSQL superuser `stayconnect` (`rolsuper=true`); the schema's darkness rests on *zero code references + no `search_path` change*, not on grant isolation. Gate P — the first authorized Phase-1B execution step — replaced superuser use with least-privilege `svc_*` roles (per `Phase1B-Privilege-Matrix.md`) holding **zero** `iam_v2` privileges. **That work is COMPLETE and reboot-verified; the four site-DB daemons run under `svc_*` roles today.** Routing any service **to** `iam_v2` remains a later cutover event, out of Phase 1B scope.
 
 ## 10. Forbidden until explicitly approved
 
@@ -97,9 +109,9 @@ Schema migrations; feature code; production connector/posting-engine development
 | File | Role |
 |---|---|
 | `StayConnect-IAM-Phase0-Contract.md` | **Authoritative** — FINAL Phase-0 architecture contract (DDL, invariants, state machines, FIAS findings §9). |
-| `StayConnect-IAM-Handoff.md` | **Authoritative** — current synchronized operational handoff. |
-| `StayConnect-IAM-Phase1A-Plan.md` | **Authoritative** — current approved phase plan (implemented through production live-dark; cutover/1B still gated). |
-| `StayConnect-IAM-Phase1B-Plan.md` | **Authoritative (planning-only)** — complete Phase 1B credential/portal implementation plan; awaiting PO approval/rejection; not implemented. |
+| `StayConnect-IAM-Handoff.md` | **Authoritative** — synchronized operational handoff. Its own generated block carries current state. |
+| `StayConnect-IAM-Phase1A-Plan.md` | **Authoritative for Phase 1A** — ACCEPTED_AND_CLOSED. Not the current plan; the generated PROJECT STATE block carries the current phase. |
+| `StayConnect-IAM-Phase1B-Plan.md` | **Authoritative for Phase 1B** — ACCEPTED_AND_CLOSED (D11/T0011); implemented and live-dark verified. *(It was planning-only and awaiting approval when this table was first written.)* |
 | `Protel-FIAS-Phase0-Spike.md` | **Authoritative** — live FIAS spike + Gate 3A PASS evidence (guest identifiers redacted). |
 | `SYSTEM_OVERVIEW.md` | Supporting — canonical current-system reference. |
 | `TARGET_ARCHITECTURE.md` | Supporting — target architecture. |
@@ -114,9 +126,10 @@ Schema migrations; feature code; production connector/posting-engine development
 
 ## 12. Source-of-truth precedence
 
+0. **The GENERATED PROJECT STATE block at the top of this file** for anything mutable — current phase, current activity, current maturity, next authorized action, and the live `iam_v2` figures. No prose in this pack overrides it, and no other section may restate it.
 1. Latest Product-Owner-approved **FINAL architecture contract** (`StayConnect-IAM-Phase0-Contract.md`).
 2. Current synchronized **Context Handoff** (`StayConnect-IAM-Handoff.md`).
-3. Current approved **phase plan** (`StayConnect-IAM-Phase1A-Plan.md`).
+3. The **phase plan** named as current by the generated block. *(This line previously named the Phase-1A plan; Phase 1A closed, and pinning a plan filename here is how that went stale.)*
 4. **Verified live spike / acceptance evidence** (`Protel-FIAS-Phase0-Spike.md`).
 5. Current **system & operations documentation** (SYSTEM_OVERVIEW, TARGET_ARCHITECTURE, operations manual, deployment, offline, migration).
 6. Historical project chats.
