@@ -1,0 +1,105 @@
+name: Phase 5 Post-Stay and Transfer CI
+
+# The authoritative automated gate for Phase 5 (Post-Stay PIN re-authentication and the Cross-PMS Transfer
+# workflow). It runs on the exact HEAD under test and produces machine-verifiable evidence — never a
+# hand-typed number and never a workstation result.
+#
+# What it proves, in order:
+#   1. the tree builds, vets and formats clean;
+#   2. the Phase-5 unit matrix passes, including the flag loader's dark default and its refusal of a child
+#      flag without its master;
+#   3. NOTHING in the deployment surface enables a Phase-5 flag;
+#   4. migrations 0027-0029 apply on the authoritative chain, and the Phase-5 database gates pass:
+#      foundation + security, the migration lifecycle (UP / erroring re-apply / DOWN / DOWN->UP judged on the
+#      STRUCTURAL fingerprint), and a DERIVED least-privilege proof;
+#   5. the Phase-5 integration matrix passes against a real PostgreSQL — F8 (post-stay, written as attacks),
+#      F9 (transfer, including 24-way concurrency and the opposite-direction deadlock proof), and the
+#      contractual F9-i race against the REAL Phase-3 checkout/grace conversion;
+#   6. the Phase-3 and Phase-4 suites still pass, because Phase 5 extends a Phase-3 guard and must not have
+#      weakened anything either phase established.
+#
+# It contacts no appliance, no Production database, no PMS and no payment provider. Every database it uses is
+# a disposable container it creates and destroys itself.
+
+# The phase branch is in the trigger list deliberately, for the same reason as Phase 4: workflow_dispatch
+# cannot reach a workflow that does not yet exist on the default branch, and the delivery rule is one branch
+# and ONE eventual PR — so without this the only way to obtain authoritative CI for work in progress would be
+# to open a PR early or to merge, and neither is authorized.
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master, 'phase/**' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phase5-post-stay-transfer-gate:
+    name: phase5-post-stay-transfer-gate
+    runs-on: ubuntu-latest
+    env:
+      EVID: ${{ github.workspace }}/.phase5-evidence
+    steps:
+      - name: Check out the HEAD under test
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: data-plane/go.sum
+
+      - name: Initialise evidence staging
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVID/counts" "$EVID/logs"
+          {
+            printf 'head\t%s\n' "$(git rev-parse HEAD)"
+            printf 'branch\t%s\n' "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+            printf 'run_id\t%s\n' "$GITHUB_RUN_ID"
+            printf 'go\t%s\n' "$(go version)"
+            printf 'postgres\t%s\n' "postgres:16-alpine (disposable, per gate)"
+            printf 'start_utc\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$EVID/env.tsv"
+
+      # ---------------------------------------------------------------- build / static
+      - name: gofmt
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh gofmt -- bash $GITHUB_WORKSPACE/scripts/ci/gofmt-check.sh"
+
+      - name: go build (./...)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-build -- go build ./..."
+
+      - name: go vet (./...)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet -- go vet ./..."
+
+      - name: go vet (integration && phase5)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet-phase5 -- go vet -tags 'integration phase5' ./..."
+
+      # ---------------------------------------------------------------- dark posture
+      - name: Phase-5 DARK guard
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase5-dark-guard -- bash $GITHUB_WORKSPACE/scripts/phase5-dark-guard.sh"
+
+      # ---------------------------------------------------------------- database gates + integration
+      - name: Phase-5 database gates and integration matrix
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase5-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase5-pg-integration.sh"
+
+      # ---------------------------------------------------------------- prior-phase regression
+      - name: Phase-4 financial-core regression
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-regression -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-pg-integration.sh"
+
+      - name: Publish the evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase5-evidence-${{ github.run_id }}
+          path: ${{ env.EVID }}
+          if-no-files-found: warn

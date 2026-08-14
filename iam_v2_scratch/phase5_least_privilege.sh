@@ -67,12 +67,16 @@ Q "CREATE ROLE p5_lp_probe NOLOGIN;
    GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.post_stay_profiles, iam_v2.entitlement_transfers,
          iam_v2.stay_links TO p5_lp_probe;" >/dev/null
 HASH='$argon2id$v=19$m=65536,t=1,p=4$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNo'
-STAY="$(Q "SELECT id::text FROM iam_v2.stays WHERE status='IN_HOUSE' LIMIT 1;")"
-T="$(Q "SELECT tenant_id::text FROM iam_v2.stays WHERE id='$STAY';")"
-S="$(Q "SELECT site_id::text FROM iam_v2.stays WHERE id='$STAY';")"
+# The ids are DELIBERATELY fictional. A BEFORE ROW trigger fires before foreign keys are checked, so the
+# controlled-writer guard answers first and this gate needs no fixture at all — which matters because it runs
+# on a freshly-built chain in CI where no Stay exists yet. Depending on another gate's leftovers would make
+# this one's result depend on execution order.
+FAKE_T=11111111-1111-1111-1111-111111111111
+FAKE_S=22222222-2222-2222-2222-222222222222
+FAKE_ST=eeee0000-0000-0000-0000-00000000dead
 out="$(AS p5_lp_probe "INSERT INTO iam_v2.post_stay_profiles
   (tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
-  VALUES ('$T','$S','$STAY',1,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now());")"
+  VALUES ('$FAKE_T','$FAKE_S','$FAKE_ST',1,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now());")"
 [[ "$out" == *"require an open controlled operation"* ]] \
   && ok "full table grants are NOT enough to write a post-stay profile" \
   || no "granted role is refused" "$(head -1 <<<"$out")"

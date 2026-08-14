@@ -47,6 +47,18 @@ docker exec "$C" psql -U postgres -d "$DB" -tAqc 'select 1' >/dev/null 2>&1 \
 echo "===== PHASE-5 MILESTONE 1 — FOUNDATION + SECURITY (db=$DB) ====="
 
 # ---------------------------------------------------------------------------------------------------------
+# BOOTSTRAP. This gate builds on the shared deterministic seed (tenant/site/interface/plans/packages). On a
+# long-lived scratch database that seed is already there; on the freshly-built chain CI produces it is NOT,
+# and every case below would fail against a missing tenant rather than against the code. So the seed is
+# applied when its anchor is absent — which makes the gate self-sufficient rather than dependent on whoever
+# ran before it.
+# ---------------------------------------------------------------------------------------------------------
+if [ "$(Q "SELECT count(*) FROM iam_v2.pms_interfaces WHERE id='aaaa0000-0000-0000-0000-000000000001';")" != "1" ]; then
+  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -q < "$ROOT/iam_v2_scratch/seed.sql" >/dev/null 2>&1     || { echo "INFRA: the base seed could not be applied"; exit 2; }
+fi
+eq "the base seed is present" "1"    "$(Q "SELECT count(*) FROM iam_v2.pms_interfaces WHERE id='aaaa0000-0000-0000-0000-000000000001';")"
+
+# ---------------------------------------------------------------------------------------------------------
 # RESET. This gate MUTATES: it checks a Stay out, reinstates it, converts it to POST_STAY_ACTIVE and records
 # transfers. A second run against the leftovers of the first measures a different database, and the failures
 # it then reports are its own history rather than the code under test. So it starts by destroying its own
