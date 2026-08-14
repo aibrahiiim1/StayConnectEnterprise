@@ -1,0 +1,49 @@
+{
+  "transition_id": "T0050",
+  "seq": 50,
+  "timestamp": "2026-08-14T03:00:00Z",
+  "record_type": "PHASE_5_AUTHORIZED_AND_STARTED",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "5",
+    "activity": "PHASE_5_IMPLEMENTATION_IN_PROGRESS_DARK",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "5",
+  "decision": "D21",
+  "new_decision_created": true,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner decision of 2026-08-14 authorizing Phase 5 for complete end-to-end implementation and VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC validation on the DEVELOPMENT appliance, executed as four substantial milestones with automatic continuation while gates are green.",
+  "history_note": "Phases 0, 1A, 1B, 2, 3 and 4 remain ACCEPTED_AND_CLOSED / FINAL_CLOSED and are unchanged. T0044 through T0049 are unchanged. The six accepted Phase-4 limitations are preserved and NOT promoted.",
+  "product_decisions_fixed_by_this_authorization": [
+    "Post-Stay v1 is INCLUDED / ZERO-PRICE ONLY. No financial enablement and no real settlement.",
+    "A Cross-PMS transfer REFUSES until the destination Stay already exists from verified PMS state. Synthetic PMS state is never created.",
+    "Post-Stay PIN issuance may occur ONLY from an already-authenticated guest context (before checkout or during Checkout Grace), with secure one-time reveal. Operator reset/re-issue requires authorization, step-up and audit. There is no anonymous room-number-based issuance.",
+    "Post-Stay v1 is STAY-EPISODE scoped exactly as the FINAL contract defines it. No per-sharer identities are invented.",
+    "stay_links(reason='POST_STAY') is NOT written: the FINAL contract does not ground both of its NOT NULL Stay ends for Post-Stay, and writing it would require synthetic PMS state. The post_stay_profiles origin lineage is the contract-grounded mechanism and is sufficient.",
+    "Multi-PMS ambiguity is a REVIEW SIGNAL ONLY, never proof of transfer. Transfer execution requires explicit verified source and destination Stays and a staff-confirmed atomic action.",
+    "No database roles and no commit count are pre-committed. Least privilege is derived from an actual privilege audit.",
+    "One Phase branch and one pull request."
+  ],
+  "what_this_authorization_does_not_authorize": [
+    "Real financial traffic, settlement, PMS posting, P# allocation or provider traffic.",
+    "Paid guest access or any non-zero Post-Stay price.",
+    "Phase-4 feature-flag enablement.",
+    "IAM-v2 authentication cutover.",
+    "Production database contact or migration.",
+    "Deployment to anything other than the DEVELOPMENT appliance.",
+    "Creation of any synthetic Stay or synthetic PMS state.",
+    "Any guest-facing PMS selector.",
+    "Phase 6 or Phase 7 work.",
+    "Merging the Phase-5 pull request."
+  ],
+  "evidence_files": [
+    "docs/architecture/StayConnect-IAM-Phase5-Plan.md",
+    "governance/decision-register.json"
+  ],
+  "next_action": "Execute Phase-5 Milestone 1 (foundation + security) on branch phase/5-poststay-transfer."
+}

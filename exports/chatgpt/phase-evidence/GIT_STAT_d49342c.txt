@@ -1,0 +1,4 @@
+commit d49342c0707bc40c2833b3d7782589ed0e40317f
+Date:   Fri Aug 14 04:33:53 2026 +0300
+
+    Phase 4 (delivery_head): housekeeping pointer, complete staged manifest, rebuilt packs and report-embedded manifest

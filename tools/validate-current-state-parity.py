@@ -132,13 +132,29 @@ def main():
     if facts.get("accepted") != facts.get("closed"):
         bad("facts-coherence", "accepted=%r and closed=%r disagree" % (facts.get("accepted"), facts.get("closed")), STATE)
     if facts.get("accepted") and facts.get("closed"):
-        ph = (state.get("phases") or {}).get("3") or {}
-        if ph.get("status") != "ACCEPTED_AND_CLOSED":
+        # WHICH phase these acceptance facts describe must be RECORDED, not assumed. This rule read phases["3"]
+        # literally and bound current_activity to the words ACCEPTED_AND_CLOSED — correct only while Phase 3 was
+        # the phase in flight. Once a LATER phase was authorized and in progress, a perfectly true
+        # current_activity of PHASE_5_IMPLEMENTATION_IN_PROGRESS_DARK failed a rule that was really asking about
+        # Phase 3. Acceptance facts belong to a phase, so the phase is now named and the rule follows it.
+        apk = str(facts.get("accepted_phase") or "").strip()
+        if not apk:
             bad("facts-coherence",
-                "facts say Phase 3 is accepted and closed but phases.3.status is %r" % ph.get("status"), STATE)
-        if "ACCEPTED_AND_CLOSED" not in state.get("current_activity", ""):
-            bad("facts-coherence",
-                "facts say Phase 3 is accepted and closed but current_activity is %r" % state.get("current_activity"), STATE)
+                "acceptance is recorded without accepted_phase, so no rule can tell WHICH phase it describes",
+                STATE)
+        else:
+            ph = (state.get("phases") or {}).get(apk) or {}
+            if ph.get("status") != "ACCEPTED_AND_CLOSED":
+                bad("facts-coherence",
+                    "facts say Phase %s is accepted and closed but phases.%s.status is %r"
+                    % (apk, apk, ph.get("status")), STATE)
+            # current_activity describes what is happening NOW. It must echo the acceptance only while the
+            # accepted phase is still the current one; a later in-progress phase legitimately says something else.
+            if str(state.get("current_phase") or "") == apk and \
+                    "ACCEPTED_AND_CLOSED" not in state.get("current_activity", ""):
+                bad("facts-coherence",
+                    "phase %s is the current phase and is accepted and closed, but current_activity is %r"
+                    % (apk, state.get("current_activity")), STATE)
         for k in ("accepted_decision", "accepted_transition", "accepted_runtime_head", "accepted_at_maturity"):
             if not facts.get(k):
                 bad("facts-coherence", "acceptance is recorded without %s" % k, STATE)
@@ -263,11 +279,20 @@ def main():
     # mechanism, the lower PR body said evidence was pending, and the rollback runbook promised that every previous
     # release carries authorization across. Each was a superseded statement wearing the present tense.
     if facts.get("accepted") and facts.get("closed"):
-        # (a) nothing current may still call Phase 3 a candidate / in progress / not accepted
+        # (a) nothing current may still call an ACCEPTED phase a candidate / in progress / not accepted.
+        # The "phase N is not accepted" form is now checked for EVERY accepted phase rather than the literal
+        # Phase 3 this rule was born with. The remaining literal phrases are Phase-3 status wording, and one of
+        # them needed a real distinction rather than a looser pattern: Phase 3's maturity was named DARK, while
+        # Phase 4 and Phase 5 are named LIVE-DARK. "the final LIVE-DARK acceptance candidate" is a true
+        # statement about a later phase, and the negative lookbehind separates the two named maturities exactly.
+        apks = sorted(k for k, v in (state.get("phases") or {}).items()
+                      if isinstance(v, dict) and v.get("status") == "ACCEPTED_AND_CLOSED")
+        alts = "|".join(r"phase[- ]?" + re.escape(k) + r" is (not accepted|in_progress|a candidate)"
+                        for k in apks)
         not_accepted = re.compile(
-            r"phase[- ]?3 is (not accepted|in_progress|a candidate)|"
+            (alts + "|" if alts else "") +
             r"\bNOT accepted\b|\bnot yet accepted\b|"
-            r"dark acceptance candidate|increment-9 durability correction candidate|"
+            r"(?<!live-)dark acceptance candidate|increment-9 durability correction candidate|"
             r"pending the product owner'?s? final",
             re.I)
         for rel in DOC_SURFACES:
@@ -275,9 +300,10 @@ def main():
             if text is None:
                 continue
             for hit in scan(text, not_accepted):
-                bad("acceptance-parity", "still presents Phase 3 as unaccepted/in-progress: %s" % hit, rel)
+                bad("acceptance-parity", "still presents an accepted phase as unaccepted/in-progress: %s" % hit, rel)
         if not [f for f in failures if f[0] == "acceptance-parity"]:
-            ok("no current surface still presents Phase 3 as unaccepted or in progress")
+            ok("no current surface still presents an accepted phase as unaccepted or in progress (accepted: %s)"
+               % ", ".join(apks))
 
         # (b) the corrected software IS deployed; nothing current may say otherwise
         undeployed = re.compile(

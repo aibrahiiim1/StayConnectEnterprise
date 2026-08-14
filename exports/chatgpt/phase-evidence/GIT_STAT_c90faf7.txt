@@ -1,4 +1,0 @@
-commit c90faf7fac6d0934dc2ed1d138a982544ac15626
-Date:   Fri Aug 14 04:33:15 2026 +0300
-
-    Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049)

@@ -484,6 +484,21 @@
         "docs/",
         "exports/"
       ]
+    },
+    {
+      "id": "D21",
+      "title": "PHASE 5 AUTHORIZED FOR COMPLETE END-TO-END IMPLEMENTATION AND VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC VALIDATION ON THE DEVELOPMENT APPLIANCE (2026-08-14). Scope: Post-Stay PIN re-authentication and the Cross-PMS Transfer workflow, delivered as FOUR substantial milestones with automatic continuation while gates are green (1: foundation + security, incl. correct reconciliation of the PMS-specific auth-context implementation rather than assuming reuse; 2: complete Post-Stay vertical slice with full F8/security evidence; 3: complete Cross-PMS Transfer vertical slice with full F9/concurrency evidence; 4: hardening, full Phase-3 and Phase-4 regression, least-privilege proof, authoritative CI and controlled DARK deployment on the DEVELOPMENT appliance with reboot, real scratch restore, rollback rehearsal and darkness re-verification). PRODUCT DECISIONS FIXED BY THIS AUTHORIZATION: Post-Stay v1 is INCLUDED / ZERO-PRICE ONLY; a Cross-PMS transfer REFUSES until the destination Stay already exists from verified PMS state and never creates synthetic PMS state; Post-Stay PIN issuance may occur ONLY from an already-authenticated guest context (before checkout or during Checkout Grace) with secure one-time reveal, and operator reset/re-issue requires authorization, step-up and audit, with no anonymous room-number-based issuance; Post-Stay v1 is STAY-EPISODE scoped per the FINAL contract with no invented per-sharer identities; stay_links(reason='POST_STAY') is NOT written because the FINAL contract does not ground both of its NOT NULL Stay ends for Post-Stay and writing it would require synthetic PMS state - the post_stay_profiles origin lineage is the contract-grounded mechanism; multi-PMS ambiguity is a REVIEW SIGNAL ONLY and never proof of transfer. Delivery: one Phase branch, one pull request, implementation-driven commit count, no pre-committed database roles (least privilege is derived from an actual privilege audit). THIS AUTHORIZATION DOES NOT AUTHORIZE: real financial traffic, settlement, PMS posting, provider traffic, paid guest access, Phase-4 feature-flag enablement, IAM-v2 authentication cutover, Production database contact or migration, any synthetic Stay, any guest-facing PMS selector, Phase 6 or Phase 7 work, or the merge of the Phase-5 pull request. All closed phases (0, 1A, 1B, 2, 3, 4) and the six accepted Phase-4 limitations are preserved unchanged and not promoted.",
+      "status": "ACTIVE",
+      "effective": "2026-08-14",
+      "supersedes": [],
+      "authoritative_document": "docs/architecture/StayConnect-IAM-Phase5-Plan.md",
+      "affected": [
+        "data-plane/",
+        "hotel-admin/",
+        "governance/",
+        "docs/",
+        "exports/"
+      ]
     }
   ]
 }
