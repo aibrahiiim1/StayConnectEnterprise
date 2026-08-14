@@ -339,3 +339,14 @@ func Open(ctx context.Context, db Exec, capability string) error {
 	}
 	return nil
 }
+
+// OpenPhase5 opens a PHASE-5 capability-scoped operation. It is a separate call, not a parameter, because the
+// two openers have separate ALLOWLISTS and that is the whole authorization decision: Phase 5 cannot open a
+// Phase-3 family and Phase 3 cannot open a Phase-5 one, so a caller cannot reach for the wrong boundary by
+// passing a different string. Both write the same unforgeable scope table.
+func OpenPhase5(ctx context.Context, db Exec, capability string) error {
+	if _, err := db.Exec(ctx, `SELECT iam_v2.p5_begin_controlled_operation($1)`, capability); err != nil {
+		return fmt.Errorf("phase5 writer boundary: cannot open a %q operation: %w", capability, err)
+	}
+	return nil
+}

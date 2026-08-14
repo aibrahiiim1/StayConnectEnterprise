@@ -106,6 +106,16 @@ else
   ok "the catalog fingerprint differs after the cycle, as expected — dropped columns do not free their attribute slots; the STRUCTURAL fingerprint above is the one that answers the rollback question"
 fi
 
+# 0027 does not exist alone in the chain: 0029 REPLACES the profile guard it creates, so re-applying 0027 by
+# itself leaves the database holding 0027's older rule. Cycling one migration must not silently roll a LATER
+# one back, so the chain head is restored and asserted before this script hands the database on.
+for LATER in 0029_phase5_reveal_is_at_mint; do
+  apply "$ROOT/data-plane/migrations/$LATER.up.sql" >/dev/null 2>&1
+done
+eq "the chain head is restored: 0029's rule is in force again, not 0027's" "1"    "$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+         WHERE n.nspname='iam_v2' AND p.proname='p5_post_stay_profile_guard'
+           AND pg_get_functiondef(p.oid) LIKE '%records its one-time reveal at mint%';")"
+
 echo "===== RESULT PASS=$pass FAIL=$fail ====="
 [ "$fail" -eq 0 ] || exit 1
 exit 0

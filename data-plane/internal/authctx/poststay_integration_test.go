@@ -48,8 +48,9 @@ func seedPostStay(t *testing.T, p *pgxpool.Pool, f fixture) psFixture {
 	}
 	var prof string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.post_stay_profiles
-		(tenant_id, site_id, origin_stay_id, origin_lifecycle_version, pin_hash, valid_until, issued_via)
-		SELECT $1,$2,$3, st.lifecycle_version, $4, now()+interval '1 day', 'GUEST_AUTHENTICATED_SESSION'
+		(tenant_id, site_id, origin_stay_id, origin_lifecycle_version, pin_hash, valid_until, issued_via,
+		 pin_revealed_at)
+		SELECT $1,$2,$3, st.lifecycle_version, $4, now()+interval '1 day', 'GUEST_AUTHENTICATED_SESSION', now()
 		  FROM iam_v2.stays st WHERE st.id=$3
 		RETURNING id::text`, f.tenant, f.site, f.stay, psHash).Scan(&prof); err != nil {
 		t.Fatalf("seed profile: %v", err)
@@ -155,6 +156,7 @@ func TestIntegration_PostStay_RevokedProfileCannotBeConsumed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.p5_begin_controlled_operation('post_stay_identity')`); err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -202,13 +204,15 @@ func TestIntegration_PostStay_IssueRefusesBeforeCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
 	if _, err := tx.Exec(ctx, `SELECT iam_v2.p5_begin_controlled_operation('post_stay_identity')`); err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	var prof string
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.post_stay_profiles
-		(tenant_id, site_id, origin_stay_id, origin_lifecycle_version, pin_hash, valid_until, issued_via)
-		VALUES ($1,$2,$3,1,$4, now()+interval '1 day','GUEST_AUTHENTICATED_SESSION') RETURNING id::text`,
+		(tenant_id, site_id, origin_stay_id, origin_lifecycle_version, pin_hash, valid_until, issued_via,
+		 pin_revealed_at)
+		VALUES ($1,$2,$3,1,$4, now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now()) RETURNING id::text`,
 		f.tenant, f.site, f.stay, psHash).Scan(&prof); err != nil {
 		t.Fatalf("seed profile: %v", err)
 	}

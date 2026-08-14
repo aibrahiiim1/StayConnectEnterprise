@@ -112,39 +112,39 @@ HASH='$argon2id$v=19$m=65536,t=1,p=4$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXN
 
 echo "== A. Post-Stay identity: the PIN column accepts exactly one shape =="
 refused "a raw PIN cannot be stored where a hash belongs" \
-  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via)
-     VALUES ('$T','$S','$STAY_P',1,'4821', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION');" \
+  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
+     VALUES ('$T','$S','$STAY_P',1,'4821', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now());" \
   "post_stay_profiles_pin_hash_check"
 refused "a bcrypt/sha hash is not an argon2id hash" \
-  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via)
-     VALUES ('$T','$S','$STAY_P',1,'\$2b\$12\$abcdefghijklmnopqrstuv', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION');" \
+  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
+     VALUES ('$T','$S','$STAY_P',1,'\$2b\$12\$abcdefghijklmnopqrstuv', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now());" \
   "post_stay_profiles_pin_hash_check"
 
 echo "== B. Issuance is bound to the CURRENT episode of a real, occupied Stay =="
 refused "a profile naming a stale episode is refused (I-1/I-2)" \
-  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via)
-     VALUES ('$T','$S','$STAY_P',7,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION');" \
+  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
+     VALUES ('$T','$S','$STAY_P',7,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now());" \
   "CURRENT Stay episode"
 Q "UPDATE iam_v2.stays SET status='CANCELLED' WHERE id='$STAY_Z';" >/dev/null
 refused "a profile issued from a CANCELLED Stay is refused (F8-c)" \
-  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via)
-     VALUES ('$T','$S','$STAY_Z',1,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION');" \
+  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
+     VALUES ('$T','$S','$STAY_Z',1,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now());" \
   "IN_HOUSE or CHECKED_OUT"
-refused "a profile created already-revealed is refused (the reveal is its own recorded act)" \
-  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,pin_revealed_at,issued_via)
-     VALUES ('$T','$S','$STAY_P',1,'$HASH', now()+interval '1 day', now(),'GUEST_AUTHENTICATED_SESSION');" \
-  "created unrevealed"
-refused "an operator-issued profile with no operator is refused" \
-  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via)
-     VALUES ('$T','$S','$STAY_P',1,'$HASH', now()+interval '1 day','OPERATOR_RESET');" \
-  "psp_issuer_coherent"
-accepted "a well-formed guest-authenticated issuance is accepted" \
-  "INSERT INTO iam_v2.post_stay_profiles(id,tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via)
-     VALUES ('7777aaaa-0000-0000-0000-000000000001','$T','$S','$STAY_P',1,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION');"
-PROF=7777aaaa-0000-0000-0000-000000000001
-refused "a SECOND profile for the same episode is refused (F8-e)" \
+refused "a profile created WITHOUT its reveal is refused -- nobody could ever be shown that PIN (0029)" \
   "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via)
      VALUES ('$T','$S','$STAY_P',1,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION');" \
+  "records its one-time reveal at mint"
+refused "an operator-issued profile with no operator is refused" \
+  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
+     VALUES ('$T','$S','$STAY_P',1,'$HASH', now()+interval '1 day','OPERATOR_RESET', now());" \
+  "psp_issuer_coherent"
+accepted "a well-formed guest-authenticated issuance is accepted" \
+  "INSERT INTO iam_v2.post_stay_profiles(id,tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
+     VALUES ('7777aaaa-0000-0000-0000-000000000001','$T','$S','$STAY_P',1,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now());"
+PROF=7777aaaa-0000-0000-0000-000000000001
+refused "a SECOND profile for the same episode is refused (F8-e)" \
+  "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
+     VALUES ('$T','$S','$STAY_P',1,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now());" \
   "post_stay_profiles_origin_stay_id_origin_lifecycle_version_key"
 
 echo "== C. The profile is immutable where it must be =="
@@ -164,17 +164,11 @@ refused "a generation bump with no new PIN is refused" \
   "UPDATE iam_v2.post_stay_profiles SET pin_generation=2 WHERE id='$PROF';" \
   "without a new PIN"
 
-echo "== D. One-time reveal =="
-accepted "the first reveal is recorded" \
-  "UPDATE iam_v2.post_stay_profiles SET pin_revealed_at=now() WHERE id='$PROF';"
-refused "a SECOND reveal of the same generation is refused (I-5)" \
-  "UPDATE iam_v2.post_stay_profiles SET pin_revealed_at=now()+interval '1 second' WHERE id='$PROF';" \
-  "revealed exactly once"
-accepted "re-issuing mints a new generation, unrevealed" \
-  "UPDATE iam_v2.post_stay_profiles SET pin_hash='${HASH}Z', pin_generation=2, pin_revealed_at=NULL, pin_set_at=now() WHERE id='$PROF';"
-refused "a newly minted PIN cannot arrive already revealed" \
-  "UPDATE iam_v2.post_stay_profiles SET pin_hash='${HASH}Q', pin_generation=3, pin_revealed_at=now() WHERE id='$PROF';" \
-  "starts unrevealed"
+echo "== D. One reveal per generation, recorded at MINT (0029) =="
+refused "a SECOND reveal of the same generation is refused (I-5)"   "UPDATE iam_v2.post_stay_profiles SET pin_revealed_at=now()+interval '1 second' WHERE id='$PROF';"   "revealed exactly once"
+refused "a new generation that INHERITS the previous reveal is refused"   "UPDATE iam_v2.post_stay_profiles SET pin_hash='${HASH}Z', pin_generation=2, pin_set_at=now() WHERE id='$PROF';"   "records its own reveal"
+refused "a new generation with NO reveal is refused"   "UPDATE iam_v2.post_stay_profiles SET pin_hash='${HASH}Z', pin_generation=2, pin_revealed_at=NULL WHERE id='$PROF';"   "records its own reveal"
+accepted "re-issuing mints a new generation carrying its OWN reveal"   "UPDATE iam_v2.post_stay_profiles SET pin_hash='${HASH}Z', pin_generation=2, pin_revealed_at=now()+interval '1 second', pin_set_at=now() WHERE id='$PROF';"
 
 echo "== E. Authenticability — invariant I-2, the next-occupant protection =="
 eq "an IN_HOUSE origin is NOT yet authenticable (post-stay means after checkout)" "f"    "$(Q "SELECT iam_v2.p5_post_stay_authenticable('$T','$S','$PROF');")"
@@ -187,8 +181,8 @@ Q "UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHE
 eq "and it stays dead once the NEW episode checks out — this is the room's next occupant" "f"    "$(Q "SELECT iam_v2.p5_post_stay_authenticable('$T','$S','$PROF');")"
 
 PROF2=7777aaaa-0000-0000-0000-000000000002
-accepted "the new episode may mint its OWN profile"   "INSERT INTO iam_v2.post_stay_profiles(id,tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via)
-     VALUES ('$PROF2','$T','$S','$STAY_P',2,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION');"
+accepted "the new episode may mint its OWN profile"   "INSERT INTO iam_v2.post_stay_profiles(id,tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
+     VALUES ('$PROF2','$T','$S','$STAY_P',2,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now());"
 eq "and THAT profile authenticates for THIS episode" "t"    "$(Q "SELECT iam_v2.p5_post_stay_authenticable('$T','$S','$PROF2');")"
 eq "while the previous occupant's profile still does not" "f"    "$(Q "SELECT iam_v2.p5_post_stay_authenticable('$T','$S','$PROF');")"
 Q "UPDATE iam_v2.post_stay_profiles SET status='REVOKED', revoked_at=now(), revoke_reason='test' WHERE id='$PROF2';" >/dev/null
@@ -336,8 +330,8 @@ Q "DROP ROLE IF EXISTS p5_raw_writer;" >/dev/null
 Q "CREATE ROLE p5_raw_writer NOLOGIN;
    GRANT USAGE ON SCHEMA iam_v2 TO p5_raw_writer;
    GRANT SELECT, INSERT, UPDATE, DELETE ON iam_v2.post_stay_profiles, iam_v2.entitlement_transfers, iam_v2.stay_links TO p5_raw_writer;" >/dev/null
-out="$(AS p5_raw_writer "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via)
-       VALUES ('$T','$S','$STAY_X',1,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION');")"
+out="$(AS p5_raw_writer "INSERT INTO iam_v2.post_stay_profiles(tenant_id,site_id,origin_stay_id,origin_lifecycle_version,pin_hash,valid_until,issued_via,pin_revealed_at)
+       VALUES ('$T','$S','$STAY_X',1,'$HASH', now()+interval '1 day','GUEST_AUTHENTICATED_SESSION', now());")"
 [[ "$out" == *"require an open controlled operation"* ]] \
   && ok "a role with full table grants STILL cannot write a profile outside a declared operation" \
   || no "non-owner raw profile write is refused" "$(head -1 <<<"$out")"
