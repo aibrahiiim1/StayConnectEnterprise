@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `2c2fc6a`
-- **Provenance (generation HEAD = inventory_head):** `2c2fc6af637061f5e904d8be2260b28354d87d7f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `34f09e9`
+- **Provenance (generation HEAD = inventory_head):** `34f09e9b818122e3f8642c0684bfa9c4c1fa0d0b`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/5-poststay-transfer`
 - **Remote branch:** `origin/phase/5-poststay-transfer`
 - **Changed files:** 473
@@ -313,33 +313,33 @@
 | `docs/evidence/StayConnect-IAM-Phase5-Evidence.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 5 M4: the LIVE-DARK acceptance candidate (T0051) |
 | `docs/evidence/phase4/npm-audit-full.json` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
 | `docs/evidence/phase4/npm-audit-production.json` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
-| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `docs/reports/StayConnect-IAM-Phase4-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 closure: record the merge of PR #12 into master (D20 / T0048) |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_2c2fc6a.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase-evidence/GIT_STAT_34f09e9.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 M1: post-stay identity, transfer invariants and the Phase-5 controlled-writer boundary (0027) |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 M4: the LIVE-DARK acceptance candidate (T0051) |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 M4: the LIVE-DARK acceptance candidate (T0051) |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 M4: the LIVE-DARK acceptance candidate (T0051) |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 M4: the LIVE-DARK acceptance candidate (T0051) |
 | `exports/chatgpt/stayconnectenterprise/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 5 M4: the LIVE-DARK acceptance candidate (T0051) |
+| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): T0028 manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 M4: the LIVE-DARK acceptance candidate (T0051) |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 5 M4: the LIVE-DARK acceptance candidate (T0051) |
@@ -351,7 +351,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049) |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 5 M1: post-stay identity, transfer invariants and the Phase-5 controlled-writer boundary (0027) |
 | `governance/dependency-acceptances.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `governance/transitions/T0016.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3: governance activity transition T0016 (software candidate awaiting Increment 9), doc sync |
 | `governance/transitions/T0017.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
@@ -474,7 +474,7 @@
 | `tools/embed-report-manifest.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 3: accountable-before-forwarding class provisioning, and Zero-Stale documentation |
 | `tools/generate-change-manifest.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 4: point the authoritative CI facts at the current head |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 4 closure correction: rule D must scan every phase maturity, not only 1B's |
-| `tools/tests/current_state_parity/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049) |
+| `tools/tests/current_state_parity/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 5: three more negative-test fixtures that drifted when the project advanced |
 | `tools/tests/evidence_artifact/run_artifact_staleness.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Evidence hygiene: sanitise EVERY metadata copy, not the one that was easiest to find |
 | `tools/tests/project_state_validator/run_isolation_regression.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 4 closure correction (T0045): remove the stale current-state contradictions and close the false-pass classes that hid them |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 5: the governance fixtures drift when the project advances, twice more |
@@ -789,14 +789,14 @@
  docs/evidence/StayConnect-IAM-Phase5-Evidence.md   |  266 ++
  docs/evidence/phase4/npm-audit-full.json           |   22 +
  docs/evidence/phase4/npm-audit-production.json     |   22 +
- docs/manifests/Phase3-change-manifest.md           | 1359 +++++++++
+ docs/manifests/Phase3-change-manifest.md           | 1362 +++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2166 +++++++++++++
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2169 ++++++++++++++
  .../reports/StayConnect-IAM-Phase4-Final-Report.md |  159 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 305744 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 114424 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42169 bytes
- .../chatgpt/phase-evidence/GIT_STAT_2c2fc6a.txt    |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 305801 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 114428 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42173 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_34f09e9.txt    |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
@@ -815,7 +815,7 @@
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      | 1359 +++++++++
+ .../Phase3-change-manifest.md                      | 1362 +++++++++
  .../stayconnectenterprise/SYSTEM_OVERVIEW.md       |    2 +-
  .../StayConnect-IAM-Handoff.md                     |   25 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   26 +-
@@ -950,7 +950,7 @@
  tools/embed-report-manifest.py                     |   49 +
  tools/generate-change-manifest.py                  |    8 +-
  tools/project-state.py                             |   96 +-
- tools/tests/current_state_parity/run_negative.py   |  664 ++++
+ tools/tests/current_state_parity/run_negative.py   |  692 +++++
  .../evidence_artifact/run_artifact_staleness.py    |  230 ++
  .../run_isolation_regression.py                    |  235 ++
  .../tests/project_state_validator/run_mutations.py |  436 ++-
@@ -961,7 +961,7 @@
  tools/validate-state-parity-selftest.sh            |  121 +
  tools/validate-state-parity.py                     |  235 ++
  tools/validate-transition-times.sh                 |   86 +
- 473 files changed, 100376 insertions(+), 2245 deletions(-)
+ 473 files changed, 100413 insertions(+), 2245 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -969,8 +969,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_0019d62.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_2c2fc6a.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_2c2fc6a.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_34f09e9.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -983,6 +983,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 34f09e9 Phase 5: three more negative-test fixtures that drifted when the project advanced
+HISTORICAL: edcc60a Phase 5 (delivery_head): candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest
 HISTORICAL: 2c2fc6a Phase 5: the governance fixtures drift when the project advances, twice more
 HISTORICAL: f99a3d0 Phase 5 (delivery_head): acceptance-candidate pointer, complete staged manifest, rebuilt packs and report-embedded manifest
 HISTORICAL: 0019d62 Phase 5 M4: the LIVE-DARK acceptance candidate (T0051)

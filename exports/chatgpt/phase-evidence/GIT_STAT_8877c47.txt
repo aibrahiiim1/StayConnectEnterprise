@@ -1,0 +1,4 @@
+commit 8877c47a6f1df25fab075f1dfda6f01e32846a75
+Date:   Fri Aug 14 23:00:14 2026 +0300
+
+    Phase 5 (T0052): the CI gate published nothing, and the pmsd posture was never measured
