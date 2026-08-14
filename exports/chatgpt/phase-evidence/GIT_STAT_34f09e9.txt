@@ -1,0 +1,4 @@
+commit 34f09e9b818122e3f8642c0684bfa9c4c1fa0d0b
+Date:   Fri Aug 14 21:53:09 2026 +0300
+
+    Phase 5: three more negative-test fixtures that drifted when the project advanced
