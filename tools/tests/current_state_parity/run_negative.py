@@ -538,6 +538,50 @@ def _(d):
                "phase/1b-dark-auth.")
 
 
+# ---- A MERGED PULL REQUEST STILL DESCRIBED AS OPEN ---------------------------------------------------------
+#
+# Merge state goes stale in silence: the merge happens on GitHub and nothing in the repository changes, so
+# every prose surface keeps whatever it said the day before. These are the sentences that were STILL on master
+# at 573cf814 with all three workflows green and every other parity rule passing. Reproduced verbatim.
+
+@case("current_maturity calls the merged PR the only open item", "merged-pr-state")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    doc["current_maturity"] = (
+        "Phases 0, 1A, 1B, 2, 3 and 4 are ALL ACCEPTED_AND_CLOSED. THE ONLY OPEN ITEM is the Product Owner's "
+        "separate decision on merging Phase-4 pull request #12, which is OPEN and UNMERGED.")
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("the Phase-4 Plan status line says the pull request is open and unmerged", "merged-pr-state")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+               "**Status:** ACCEPTED AND CLOSED. The Phase-4 pull request is OPEN and UNMERGED; merging "
+               "requires a separate explicit Product-Owner decision.")
+
+
+@case("a surface still carries the standing DO NOT MERGE instruction for a merged PR", "merged-pr-state")
+def _(d):
+    append_doc(d, "docs/reports/StayConnect-IAM-Phase4-Final-Report.md",
+               "> **Status:** ACCEPTED_AND_CLOSED (D19/T0044). **DO NOT MERGE** PR #12 — merging requires a "
+               "separate explicit Product-Owner decision.")
+
+
+@case("the Phase-3 Plan still says PR #6 is not merged", "merged-pr-state")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+               "Delivered DARK: all Phase-3 flags default OFF; PR #6 is not merged before the single final "
+               "Product-Owner acceptance decision.")
+
+
+@case("a pack entry point describes the merged pull request as still open", "merged-pr-state")
+def _(d):
+    append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+               "## Delivery\n\nThe Phase-4 branch is delivered to GitHub and PR #12 remains open and unmerged "
+               "pending a separate Product-Owner merge decision.")
+
+
 def main():
     print("== baseline: the real repository must PASS ==")
     d = sandbox()

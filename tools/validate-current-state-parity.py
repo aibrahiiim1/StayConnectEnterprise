@@ -65,6 +65,29 @@ def scan(text, pattern):
             yield " ".join(para.split())[:180]
 
 
+def load_json(rel):
+    path = os.path.join(ROOT, rel)
+    try:
+        return json.load(io.open(path, encoding="utf-8"))
+    except Exception:  # noqa: BLE001 -- a malformed JSON surface is the schema validator's failure to report
+        return None
+
+
+def json_strings(node):
+    """Every string VALUE in a JSON document. A JSON file has no blank lines, so its paragraph is the whole
+    file; the unit a reader actually reads -- and the unit a history label can honestly cover -- is the value."""
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for v in node.values():
+            for s in json_strings(v):
+                yield s
+    elif isinstance(node, list):
+        for v in node:
+            for s in json_strings(v):
+                yield s
+
+
 def load_surface(rel):
     path = os.path.join(ROOT, rel)
     if not os.path.exists(path):
@@ -904,6 +927,88 @@ def main():
 
     if not [f for f in failures if f[0] == "static-current-prose"]:
         ok("no section outside a generated block claims to carry the current plan, status or next action")
+
+    # ---- 12. A MERGED PULL REQUEST DESCRIBED AS OPEN -----------------------------------------------------------
+    #
+    # THE FALSE PASS THIS CLOSES. After PR #12 was merged under D20/T0048, two current surfaces still said it
+    # was not:
+    #
+    #   project-state.json    current_maturity: "THE ONLY OPEN ITEM is the Product Owner's separate decision on
+    #                         merging Phase-4 pull request #12, which is OPEN and UNMERGED."
+    #   Phase4-Plan.md        "The Phase-4 pull request is OPEN and UNMERGED; merging requires a separate
+    #                         explicit Product-Owner decision."
+    #
+    # Every rule above passed on that tree. The phase status was right, the generated blocks were right, and
+    # the prose was PLAUSIBLE -- it had been true for a day. Merge state is exactly the kind of fact that goes
+    # stale silently, because merging happens on GitHub and nothing in the repository changes.
+    #
+    # So the merged PR numbers are DERIVED from the recorded facts rather than hardcoded (any `*merged_pr`, or
+    # a `*pr_state` recording a merge alongside its `*pr_number`), and no current surface may describe one of
+    # them as open, unmerged or not-to-be-merged. Labelled history is excused exactly as everywhere else: the
+    # decision register's D16 and D19 entries record what was authorized AT THE TIME and are dated records, so
+    # they are not read here, and a paragraph that says it is historical is skipped.
+    merged_prs = {}
+    for key, val in facts.items():
+        m = re.match(r"^(?:(phase[0-9a-z]*)_)?merged_pr$", key)
+        if m and isinstance(val, int):
+            merged_prs[val] = m.group(1) or "the project"
+    for key, val in facts.items():
+        m = re.match(r"^(?:(phase[0-9a-z]*)_)?pr_state$", key)
+        if not (m and isinstance(val, str) and re.search(r"\bMERGED\b", val, re.I)):
+            continue
+        num = facts.get(("%s_pr_number" % m.group(1)) if m.group(1) else "pr_number")
+        if isinstance(num, int):
+            merged_prs.setdefault(num, m.group(1) or "the project")
+
+    if merged_prs:
+        merge_surfaces = sorted(set(
+            list(DOC_SURFACES) + list(STATIC_SURFACES) + list(PHASE_PLANS.values()) + [
+                "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+                "exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md",
+                "docs/reports/StayConnect-IAM-Phase4-Final-Report.md",
+                "docs/acceptance/StayConnect-IAM-Phase4-Live-Dark-Acceptance.md",
+            ]))
+        for num, owner in sorted(merged_prs.items()):
+            n = re.escape(str(num))
+            # Either the PR is named and then called open, or the "do not merge" instruction is still standing
+            # within reach of its number. Bounded so it cannot bridge a sentence end into an unrelated clause.
+            stale = re.compile(
+                r"(?:pull\s+request|\bPR\b)[^.;\n]{0,60}?#?" + n + r"\b(?:[^.;\n]{0,80}?)"
+                r"(?:is|remains|stays|left|be)\s+(?:[^.;\n]{0,30}?)"
+                r"(?:open\s+and\s+unmerged|unmerged|not\s+merged|open,\s*unmerged)|"
+                r"#" + n + r"\b[^.;\n]{0,60}?\bDO\s+NOT\s+MERGE\b|"
+                r"\bDO\s+NOT\s+MERGE\b[^.;\n]{0,60}?#" + n + r"\b",
+                re.I)
+            # ...and the un-numbered form the Plan used, on a surface that is ABOUT that phase, where "the
+            # Phase-4 pull request" can only mean this one.
+            bare = re.compile(
+                r"(?:the\s+)?phase[- ]?" + re.escape(str(owner).replace("phase", "")) +
+                r"\s+pull\s+request[^.;\n]{0,40}?\b(?:is|remains|stays)\b[^.;\n]{0,30}?"
+                r"(?:open\s+and\s+unmerged|unmerged|not\s+merged)", re.I) if owner.startswith("phase") else None
+            for rel in merge_surfaces:
+                text = load_surface(rel)
+                if text is None:
+                    continue
+                # project-state.json is ONE paragraph -- it has no blank lines -- and it contains the words
+                # "AS AT". Paragraph-level history excusing therefore excuses the ENTIRE file, which is how a
+                # stale `current_maturity` sentence sat inside the canonical state document and passed. The
+                # unit of labelling in a JSON document is the VALUE, so it is scanned value by value.
+                if rel.endswith(".json"):
+                    units = [v for v in json_strings(load_json(rel))]
+                else:
+                    units = [p for p, _ in paragraphs(text)]
+                for para in units:
+                    if HISTORY_MARKERS.search(para):
+                        continue
+                    hit = stale.search(para) or (bare.search(para) if bare else None)
+                    if not hit:
+                        continue
+                    bad("merged-pr-state",
+                        "the recorded facts say PR #%d is MERGED, but this presents it as open/unmerged: %s"
+                        % (num, " ".join(para.split())[:180]), rel)
+    if not [f for f in failures if f[0] == "merged-pr-state"]:
+        ok("no current surface describes a merged pull request as open or unmerged (merged: %s)"
+           % (", ".join("#%d" % n for n in sorted(merged_prs)) or "none recorded"))
 
     # ---- report ----------------------------------------------------------------------------------------------------
     if as_json:

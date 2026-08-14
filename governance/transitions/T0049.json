@@ -1,0 +1,93 @@
+{
+  "transition_id": "T0049",
+  "seq": 49,
+  "timestamp": "2026-08-14T01:30:00Z",
+  "record_type": "PHASE_4_POST_MERGE_HOUSEKEEPING_MERGE_STATE_PARITY",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "4",
+  "decision": "D20",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-14 for one final Phase-4 post-merge housekeeping pass: correct the remaining stale statement that PR #12 is OPEN and UNMERGED, make the closed PR #12 metadata reflect MERGED under D20/T0048 rather than DO NOT MERGE, delete the already-merged remote branch phase/4-financial-execution following the Phase-3 precedent, and keep the pass to repository and GitHub housekeeping only. This transition creates no new decision and changes no phase status; it records housekeeping performed under the existing D20 authorization.",
+  "history_note": "T0044 through T0048 are unchanged by this transition. Nothing here reopens Phase 4, alters its acceptance basis, promotes any accepted limitation, or authorizes any action.",
+  "false_pass_class_closed": {
+    "id": "Z-10",
+    "name": "MERGE STATE RECORDED IN PROSE, WHICH GOES STALE IN SILENCE",
+    "why_it_survived_every_gate": "A merge happens on GitHub. Nothing in the repository changes when it does, so every hand-written sentence keeps saying whatever was true the day before, and it stays PLAUSIBLE because it was correct until the merge. Phase status was right, every generated block was right, and all three workflows were green on master 573cf814 while three current surfaces still said the pull request was not merged.",
+    "additional_gap_found_while_closing_it": "governance/project-state.json contains no blank line, so the whole document is ONE paragraph to any paragraph-level rule, and it contains the words 'AS AT'. The paragraph-level historical-marker excuse therefore excused the ENTIRE canonical state document. The stale current_maturity sentence was invisible for that reason, not because no rule looked at the file. Fixed by scanning JSON surfaces value by value: in a JSON document the unit a reader reads, and the unit a history label can honestly cover, is the value.",
+    "stale_statements_corrected": [
+      {
+        "where": "governance/project-state.json :: current_maturity",
+        "was": "THE ONLY OPEN ITEM is the Product Owner's separate decision on merging Phase-4 pull request #12, which is OPEN and UNMERGED. Acceptance authorizes no flag enablement, no IAM-v2 cutover, no Production migration or database contact, no real financial traffic and no merge.",
+        "now": "records the D20/T0048 merge, the merge commit, the no-content tree-equality proof, that no Phase-4 item remains open, and that neither the D19 acceptance nor the D20 merge authorizes enablement, cutover, Production migration, financial traffic, onboarding or deployment"
+      },
+      {
+        "where": "docs/architecture/StayConnect-IAM-Phase4-Plan.md :: status line",
+        "was": "The Phase-4 pull request is OPEN and UNMERGED; merging requires a separate explicit Product-Owner decision.",
+        "now": "records PR #12 as MERGED under D20/T0048 at merge commit 210154b5ba72178bae715e7c8e4a1398ca629257, introducing no content and enabling nothing"
+      },
+      {
+        "where": "docs/architecture/StayConnect-IAM-Phase3-Plan.md :: authorization line",
+        "was": "PR #6 is not merged before the single final Product-Owner acceptance decision.",
+        "now": "the same constraint, explicitly dated AS AT 2026-07-18 and recorded as HONOURED AND DISCHARGED, with the D16/T0024 acceptance and the D17/T0025 merge named. Found by the new rule, not reported in the instruction; history retained and labelled rather than deleted."
+      }
+    ],
+    "new_rule": {
+      "name": "merged-pr-state",
+      "file": "tools/validate-current-state-parity.py",
+      "what_it_does": "Derives the merged pull-request numbers FROM THE RECORDED FACTS rather than hardcoding them - any *merged_pr fact, or any *pr_state recording a merge alongside its *pr_number - and refuses any current surface that describes one of them as open, unmerged, not merged, or subject to a standing DO NOT MERGE instruction. Labelled history is excused exactly as in every other rule, and the dated transition receipts and decision register are not read.",
+      "generic_not_instance_specific": "It caught PR #6 on the Phase-3 Plan as well as PR #12, from the same facts, without either number appearing in the rule.",
+      "checks_after": 23,
+      "negative_cases": {
+        "added": 5,
+        "total_passing": 57,
+        "note": "Each new case reproduces a sentence that was actually on master at 573cf814, verbatim."
+      }
+    }
+  },
+  "pull_request_metadata_corrected": {
+    "pull_request": 12,
+    "state": "closed",
+    "merged": true,
+    "title_was": "Phase 4 - Financial Execution Layer (ACCEPTED AND CLOSED at verified LIVE-DARK, D19/T0044) - DO NOT MERGE",
+    "title_now": "Phase 4 - Financial Execution Layer (ACCEPTED AND CLOSED at verified LIVE-DARK, D19/T0044) - MERGED under D20/T0048",
+    "body_was": "> DO NOT MERGE. Merging requires a separate explicit Product-Owner decision.",
+    "body_now": "records the D20/T0048 authorization, the exact head condition that was verified before merging, the merge commit, the no-content tree-equality proof, and that the merge deploys and enables nothing",
+    "original_instruction_retained": "The body keeps the original DO NOT MERGE wording as an explicitly labelled note - it was the correct delivery instruction until D20 - rather than erasing it."
+  },
+  "branch_deletion": {
+    "branch": "phase/4-financial-execution",
+    "precedent": "Phase 3: the phase/3-stay-resolution-grace branch was deleted after PR #6 was merged under D17/T0025.",
+    "safe_because": "The branch was fully merged: its tip 0d0b6dea5a2e303d1bf665d6c63b9bddcf9239f9 is the second parent of merge commit 210154b5ba72178bae715e7c8e4a1398ca629257 and is therefore an ancestor of master. Deleting the ref removes a name, not history; every commit remains reachable from master and the SHA is recorded here, in T0048, in the decision register and on the closed pull request.",
+    "verified_merged_before_deletion": true
+  },
+  "what_this_transition_does_not_do": [
+    "It does not reopen Phase 4 or alter the D19/T0044 acceptance.",
+    "It does not promote any of the six accepted limitations to PASS.",
+    "It does not authorize any deployment, appliance action or Production change.",
+    "It does not apply any migration or contact any Production database.",
+    "It does not enable any feature flag, and every Phase-4 flag remains OFF.",
+    "It does not cut over IAM-v2 authentication.",
+    "It does not permit PMS or payment-provider traffic, real financial traffic or paid guest access.",
+    "It does not onboard any property for financial operation.",
+    "It does not begin Phase 5, 6 or 7.",
+    "It changes no runtime code: the change set is governance, documentation, validator and test material only."
+  ],
+  "evidence_files": [
+    "tools/validate-current-state-parity.py",
+    "tools/tests/current_state_parity/run_negative.py",
+    "governance/project-state.json",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "docs/architecture/StayConnect-IAM-Phase3-Plan.md"
+  ],
+  "next_action": "None. Phase 4 is ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity (D19/T0044) and MERGED to master (D20/T0048). Any deployment, feature-flag enablement, IAM-v2 authentication cutover, Production migration, real financial traffic, per-property financial onboarding or Phase 5/6/7 work requires its own separate Product-Owner authorization."
+}

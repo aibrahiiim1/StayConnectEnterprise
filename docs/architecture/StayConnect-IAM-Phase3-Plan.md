@@ -3,7 +3,7 @@
 > Machine sentinel (governance): `PHASE_3_PRODUCTION_RUNTIME: DARK`
 > `PHASE_3_NO_FINANCIAL_POSTING: TRUE` · `PHASE_3_LIVE_PMS: READ_ONLY` · `PHASE_3_TEST_PERSISTENCE: DISPOSABLE_DB_ONLY`
 
-**Authorization:** Product-Owner decision **D14**, start transition **T0015** (2026-07-18). Base master HEAD `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`. Branch `phase/3-stay-resolution-grace`, PR #6 → `master`. One end-to-end Phase; **not** split into separately-approved mini-phases. Delivered **DARK**: all Phase-3 flags default OFF; PR #6 is not merged before the single final Product-Owner acceptance decision.
+**Authorization:** Product-Owner decision **D14**, start transition **T0015** (2026-07-18). Base master HEAD `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`. Branch `phase/3-stay-resolution-grace`, PR #6 → `master`. One end-to-end Phase; **not** split into separately-approved mini-phases. Delivered **DARK**: all Phase-3 flags default OFF. The authorization-time delivery constraint, AS AT 2026-07-18, was that PR #6 would not be merged before the single final Product-Owner acceptance decision; that constraint was honoured and has since been discharged — Phase 3 was accepted under **D16**/**T0024** and PR #6 was then merged under the separate decision **D17**/**T0025**, merge commit `8a7230a7220e4c773bfb6399ce7774f31f20c906`.
 
 This plan governs implementation, tests, live-dark deployment and rollback. It is synchronized with the Phase-0 Contract (`docs/architecture/StayConnect-IAM-Phase0-Contract.md`, §1, §2, §3 ERD, §4 canonical DDL, §5–§8, §9 FIAS) and the accepted Phase-1A/1B/2 baselines. Where the Contract is the design authority and the as-built schema/code differs, the **as-built reconciliation** (§2 below) governs the smallest additive delta.
 
