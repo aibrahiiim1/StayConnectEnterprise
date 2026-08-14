@@ -378,22 +378,34 @@ type VerifyRequest struct {
 //
 // The throttle is charged BEFORE the hash is computed, so an attacker cannot use the argon2 cost as an
 // amplifier, and it fails closed: a throttle store that cannot be reached denies the attempt.
+// chargeThrottle charges one ATTEMPT against every dimension. It is shared by the profile-named path (used by
+// operators and tests) and the device-derived guest path, so both are limited identically — a second entry
+// point with its own weaker limits would be a way around the first.
+func (s *Store) chargeThrottle(ctx context.Context, req VerifyRequest) error {
+	rules := []throttle.Rule{
+		{Kind: throttle.ScopeDevice, Value: req.Device, Method: ThrottleMethod, Limit: 10,
+			Block: 15 * time.Minute},
+		{Kind: throttle.ScopeEndpoint, Value: "post-stay-pin", Method: ThrottleMethod, Limit: 200},
+	}
+	if strings.TrimSpace(req.Profile) != "" {
+		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIdentity, Value: req.Profile,
+			Method: ThrottleMethod, Limit: 5, Block: 15 * time.Minute})
+	}
+	if strings.TrimSpace(req.IP) != "" {
+		rules = append(rules, throttle.Rule{Kind: throttle.ScopeIP, Value: req.IP,
+			Method: ThrottleMethod, Limit: 20, Block: 15 * time.Minute})
+	}
+	d, err := s.thr.Allow(ctx, rules...)
+	if err != nil || !d.Allowed {
+		return ErrThrottled
+	}
+	return nil
+}
+
 func (s *Store) Verify(ctx context.Context, req VerifyRequest) (string, error) {
 	if s.thr != nil {
-		rules := []throttle.Rule{
-			{Kind: throttle.ScopeIdentity, Value: req.Profile, Method: ThrottleMethod, Limit: 5,
-				Block: 15 * time.Minute},
-			{Kind: throttle.ScopeDevice, Value: req.Device, Method: ThrottleMethod, Limit: 10,
-				Block: 15 * time.Minute},
-			{Kind: throttle.ScopeEndpoint, Value: "post-stay-pin", Method: ThrottleMethod, Limit: 200},
-		}
-		if strings.TrimSpace(req.IP) != "" {
-			rules = append(rules, throttle.Rule{Kind: throttle.ScopeIP, Value: req.IP,
-				Method: ThrottleMethod, Limit: 20, Block: 15 * time.Minute})
-		}
-		d, err := s.thr.Allow(ctx, rules...)
-		if err != nil || !d.Allowed {
-			return "", ErrThrottled
+		if err := s.chargeThrottle(ctx, req); err != nil {
+			return "", err
 		}
 	}
 

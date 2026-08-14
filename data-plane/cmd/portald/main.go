@@ -327,6 +327,12 @@ func (h *handler) routes() http.Handler {
 	// proxy — scd does not mount its Phase-3 endpoints while dark, so this path answers with the same uniform
 	// non-success a wrong room gets. A guest can therefore never tell whether the feature exists here.
 	r.Post("/auth/pms/phase3", h.authPMSPhase3)
+	// Phase 5 (DARK): the post-stay flow, mounted unconditionally for the same reason as Phase 3 above --
+	// these are pure proxies, scd does not mount its Phase-5 endpoints while dark, and the hop failing
+	// produces the SAME uniform non-success a wrong PIN gets. A guest can therefore never tell whether
+	// post-stay access exists on this appliance.
+	r.Post("/poststay/issue", h.postStayIssue)
+	r.Post("/auth/post-stay-pin", h.postStayAuth)
 	r.Get("/api/auth-methods", h.authMethods)
 
 	// Phase 2 (DARK): guest commerce bridge routes are mounted ONLY when the portal surface is ON. While

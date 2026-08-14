@@ -363,7 +363,7 @@ func TestIntegration_ZeroPriceOnly(t *testing.T) {
 	}
 	cid := mintContext(t, ac, s, f, got)
 	_, err := s.Convert(ctx, ConvertRequest{Tenant: f.tenant, Site: f.site, Context: cid,
-		Presenter: authctx.Presenter{Tenant: f.tenant, Site: f.site, Device: f.device, GuestNetwork: f.network},
+		Presenter:       authctx.Presenter{Tenant: f.tenant, Site: f.site, Device: f.device, GuestNetwork: f.network},
 		PackageRevision: priced}, ac)
 	if !errors.Is(err, ErrSettlementRequired) {
 		t.Fatalf("a priced post-stay package was not refused: err = %v", err)
@@ -406,7 +406,7 @@ func TestIntegration_ConversionIsZeroPriceAndNonPosting(t *testing.T) {
 	got := issue(t, s, f)
 
 	out, err := s.Convert(ctx, ConvertRequest{Tenant: f.tenant, Site: f.site, Context: mintContext(t, ac, s, f, got),
-		Presenter: authctx.Presenter{Tenant: f.tenant, Site: f.site, Device: f.device, GuestNetwork: f.network},
+		Presenter:       authctx.Presenter{Tenant: f.tenant, Site: f.site, Device: f.device, GuestNetwork: f.network},
 		PackageRevision: f.pkg}, ac)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
@@ -444,7 +444,7 @@ func TestIntegration_ConversionIsZeroPriceAndNonPosting(t *testing.T) {
 
 	// The context is one-time: the same one cannot convert twice.
 	if _, err := s.Convert(ctx, ConvertRequest{Tenant: f.tenant, Site: f.site, Context: out.Purchase,
-		Presenter: authctx.Presenter{Tenant: f.tenant, Site: f.site, Device: f.device, GuestNetwork: f.network},
+		Presenter:       authctx.Presenter{Tenant: f.tenant, Site: f.site, Device: f.device, GuestNetwork: f.network},
 		PackageRevision: f.pkg}, ac); err == nil {
 		t.Fatalf("a replayed conversion succeeded")
 	}
@@ -463,7 +463,7 @@ func TestIntegration_F8_ReinstatementOfAConvertedStayFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	got := issue(t, s, f)
 	if _, err := s.Convert(ctx, ConvertRequest{Tenant: f.tenant, Site: f.site, Context: mintContext(t, ac, s, f, got),
-		Presenter: authctx.Presenter{Tenant: f.tenant, Site: f.site, Device: f.device, GuestNetwork: f.network},
+		Presenter:       authctx.Presenter{Tenant: f.tenant, Site: f.site, Device: f.device, GuestNetwork: f.network},
 		PackageRevision: f.pkg}, ac); err != nil {
 		t.Fatalf("convert: %v", err)
 	}
