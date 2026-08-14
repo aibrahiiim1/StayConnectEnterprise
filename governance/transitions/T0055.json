@@ -1,0 +1,74 @@
+{
+  "transition_id": "T0055",
+  "seq": 55,
+  "timestamp": "2026-08-14T23:05:00Z",
+  "record_type": "MERGE_RECEIPT_TIMESTAMP_CORRECTION_FORWARD",
+  "previous_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "5",
+  "decision": "D23",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "scope_note": "THIS TRANSITION CHANGES NO STATE. Phase 5 remains ACCEPTED_AND_CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity under D22/T0053 and MERGED to master under D23/T0054. The phase is not reopened, no acceptance is revisited, no limitation is promoted or added, no product behaviour changes and no runtime or deployment surface is touched. It records one governance defect in a receipt and the rule that now prevents its class.",
+  "po_authorization_ref": "Product-Owner instruction: perform one narrow post-merge governance fix-forward only, preserving T0054 byte-for-byte as historical evidence, correcting forward with a new no-state-change transition under D23, and strengthening governance so future PR-merge receipts cannot pass if their event timestamp precedes the authoritative GitHub merged_at / merge-commit time.",
+  "history_note": "T0054 is PRESERVED BYTE-FOR-BYTE and is not rewritten, and neither is any earlier receipt. Rewriting T0054 to satisfy a rule invented after it would manufacture exactly the tidiness the new rule exists to detect: the ledger would then contain no trace that the defect ever occurred, which is the opposite of evidence. T0044 through T0054 are unchanged.",
+  "defect": {
+    "id": "G-1",
+    "receipt": "T0054",
+    "receipt_record_type": "PHASE_5_PULL_REQUEST_MERGED_TO_MASTER",
+    "recorded_timestamp": "2026-08-14T22:20:00Z",
+    "authoritative_merge_time": "2026-08-14T22:25:11Z",
+    "merge_commit": "4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a",
+    "discrepancy_seconds": 311,
+    "statement": "T0054 records that pull request #13 was MERGED TO MASTER, and carries a timestamp 311 seconds EARLIER than the merge it records. A receipt asserting an event it pre-dates is not evidence of that event, and for 311 seconds the document asserted a merge that had not happened.",
+    "authoritative_sources": {
+      "github_pull_request_merged_at": "2026-08-14T22:25:11Z",
+      "github_pull_request_closed_at": "2026-08-14T22:25:11Z",
+      "merge_commit_committer_date_utc": "2026-08-14T22:25:11Z",
+      "agreement_note": "GitHub's merged_at and the merge commit's committer date are identical to the second, for this merge and for the Phase-4 merge before it. That is what makes the rule checkable from the repository alone, with no network call and no API token: the merge commit named inside a receipt carries the authoritative time."
+    },
+    "why_it_passed_every_existing_check": "tools/validate-transition-times.sh bounded a receipt only from ABOVE -- a timestamp may not be later than the commit that INTRODUCED the file. T0054 satisfied that comfortably. Nothing compared a receipt against the event it DESCRIBES, so a merge receipt could be dated arbitrarily early and still pass.",
+    "what_is_NOT_affected": "Only the recorded timestamp is wrong. Every substantive claim in T0054 is unchanged and remains verified: the merge commit, its two parents, the tree-equality proof, the pre-merge conditions, the check runs, and the nine preserved limitations."
+  },
+  "authoritative_merge_record": {
+    "pull_request": 13,
+    "merged": true,
+    "merged_at": "2026-08-14T22:25:11Z",
+    "merge_commit": "4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a",
+    "parents": [
+      "d49342c0707bc40c2833b3d7782589ed0e40317f",
+      "2568402a3bdcdd7193a142a2402647164c9f81db"
+    ],
+    "merged_by": "aibrahiiim1",
+    "introduced_no_content": true,
+    "tree_equality_proof": "master's tree after the merge is 1ed4c590172a8d7036eefaf245100ad73a263daa, byte-identical to the accepted head's tree, with zero paths differing. Unchanged by this correction."
+  },
+  "governance_strengthened": {
+    "rule": "A receipt that records a pull-request merge may not be dated BEFORE the merge it records. The authoritative time is the committer date of the merge commit the receipt itself names, which equals GitHub's merged_at. A receipt whose record_type says a pull request was merged MUST name its merge commit; without one it is unfalsifiable and is refused rather than skipped. Equality is accepted -- a receipt stamped at exactly the merge time is not describing the future.",
+    "implemented_in": "tools/validate-transition-times.sh (second rule, alongside the existing cannot-be-later-than-its-introducing-commit rule)",
+    "grandfathered": "T0054 only, listed explicitly with its measured 311s discrepancy, printed on every run. The rule is enforced for every merge receipt written from this point on.",
+    "counter_proof": "tools/validate-merge-receipt-times-selftest.sh drives the REAL validator -- never a copy -- with the grandfather list emptied, against real historical data rather than invented fixtures: T0054 must FAIL with its exact 311s discrepancy named, and T0048 (the Phase-4 merge receipt, written 17 seconds AFTER its merge) must PASS. Without the second case the first would also pass for a validator that refuses every merge receipt ever written. It further proves that equality is not treated as early, that a merge receipt naming no merge commit is refused as unfalsifiable, and that on the real ledger T0054 is reported as a visible grandfathered exception rather than silently skipped. 5/5.",
+    "wired_into": [
+      ".github/workflows/project-governance.yml (its own step, before the transition-timestamp check)",
+      "tools/validate-project-state.sh (section 1d, alongside the existing transition-timestamp gate)"
+    ]
+  },
+  "unchanged_by_this_transition": [
+    "Phase 5 remains ACCEPTED_AND_CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity (D22/T0053).",
+    "Phase 5 remains MERGED to master (D23/T0054), merge commit 4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a.",
+    "The nine accepted limitations L5-1 through L5-9 are preserved and none is promoted.",
+    "No product behaviour, runtime file or deployment surface is touched.",
+    "No deployment, appliance mutation or contact, feature-flag enablement, IAM-v2 cutover, Production migration or contact, PMS/provider or financial traffic, paid access, or Phase 6/7 work is authorized or performed.",
+    "No branch was deleted.",
+    "T0054 is preserved byte-for-byte."
+  ],
+  "next_action": "None for Phase 5: it is accepted, closed and merged, and this correction changes none of that. Any deployment, appliance mutation, flag enablement, IAM-v2 cutover, Production migration or contact, PMS/provider or financial traffic, paid access, or Phase 6/7 work requires its own separate Product-Owner authorization."
+}

@@ -664,9 +664,11 @@
     "phase5_merge_introduced_no_content": true,
     "phase5_merge_tree_equality_proof": "master's tree after the merge is 1ed4c590172a8d7036eefaf245100ad73a263daa, byte-identical to the accepted head's tree, and git diff --name-only between them returns zero paths. The merge is a delivery event, not an acceptance event: acceptance maturity and the nine limitations are unchanged.",
     "phase5_merge_shipped_paths_vs_accepted_candidate": 0,
-    "phase5_merged_pr": 13
+    "phase5_merged_pr": 13,
+    "phase5_merge_recorded_at": "2026-08-14T22:25:11Z",
+    "phase5_merge_receipt_timestamp_correction": "T0054 records PHASE_5_PULL_REQUEST_MERGED_TO_MASTER with timestamp 2026-08-14T22:20:00Z, which is 311 seconds EARLIER than the merge it records: GitHub's merged_at and the merge commit's committer date are both 2026-08-14T22:25:11Z. A receipt asserting an event it pre-dates is not evidence of that event. CORRECTED FORWARD by T0055 under D23; T0054 is preserved BYTE-FOR-BYTE and is not rewritten, because editing it to satisfy a rule invented afterwards would erase the only trace that the defect occurred. Only the timestamp was wrong -- the merge commit, its parents, the tree-equality proof, the pre-merge conditions and the check runs are unchanged and remain verified. tools/validate-transition-times.sh now refuses any merge receipt dated before the merge commit it names, and refuses a merge receipt that names none at all; tools/validate-merge-receipt-times-selftest.sh proves the rule catches this exact defect (311s) while still accepting T0048, the Phase-4 merge receipt written 17 seconds AFTER its merge."
   },
-  "latest_transition_id": "T0054",
+  "latest_transition_id": "T0055",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"

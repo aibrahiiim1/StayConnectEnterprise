@@ -36,10 +36,19 @@ jobs:
       - name: Generated-block consistency
         run: python tools/project-state.py check-generated
 
+      # The merge-timing rule is grandfathered for T0054 on the real ledger, so a normal run reports it as a
+      # listed exception and passes -- which is correct, and also indistinguishable from a rule that does
+      # nothing. This drives the real validator with the grandfather list emptied and fails if the historical
+      # defect gets through, so the rule is proven to bite BEFORE its verdict on the ledger is worth anything.
+      - name: Merge-receipt timing self-test (does the rule catch the T0054 defect?)
+        run: bash tools/validate-merge-receipt-times-selftest.sh
+
       - name: Transition-receipt timestamps
-        # A receipt that claims a moment AFTER the commit that introduced it is describing its own future.
-        # Checked here as well as in the Zero-Stale validator because it needs git history, which the
-        # extracted-pack mode of that validator deliberately does not have.
+        # Two rules. A receipt that claims a moment AFTER the commit that introduced it is describing its
+        # own future. A receipt that records a pull-request merge and is dated BEFORE that merge is asserting
+        # an event that had not happened -- which is what T0054 did, by 311 seconds. Checked here as well as
+        # in the Zero-Stale validator because both need git history, which the extracted-pack mode of that
+        # validator deliberately does not have.
         run: bash tools/validate-transition-times.sh
 
       - name: PR-metadata Zero-Stale (the one authoritative surface that is not committed)
