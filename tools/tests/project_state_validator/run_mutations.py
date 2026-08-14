@@ -232,8 +232,34 @@ CUR_NEXT_ACTION_PREFIX = _STATE_DOC["next_authorized_action"][:60]
 # Matched on CONTENT, not on a prefix. Pinning the first words meant a legitimate rewording of the action
 # ("Repository-only governance and documentation maintenance for the closed phases ...") aborted the whole
 # suite with StopIteration -- a fixture failing as though the repository were broken.
-CUR_GOV_MAINT = next(a for a in _STATE_DOC["allowed_actions"]
-                    if "governance and documentation maintenance" in a.lower())
+# ...and it drifted AGAIN, on word order: "maintain project governance and documentation" does not contain
+# the phrase "governance and documentation maintenance". Matching on the two WORDS rather than on a phrase
+# removes the last ordering assumption. The explicit failure matters as much as the match: StopIteration
+# aborts the whole suite with a traceback that reads like the repository is broken, when the truth is that a
+# fixture anchor no longer matches -- which is a different problem with a different fix.
+def _anchor(actions, *words):
+    for a in actions:
+        low = a.lower()
+        if all(w in low for w in words):
+            return a
+    raise SystemExit(
+        "FIXTURE ANCHOR DRIFT: no allowed_action mentions all of {}.\n"
+        "  allowed_actions currently: {!r}\n"
+        "  This is a TEST-FIXTURE problem, not a repository defect: the suite derives its anchors from the\n"
+        "  authoritative state file so it follows rewording, and this wording moved beyond what it follows."
+        .format(", ".join(words), actions))
+
+CUR_GOV_MAINT = _anchor(_STATE_DOC["allowed_actions"], "governance", "documentation")
+# The first phase the state file records as NOT_STARTED. Used by the "two current phases" mutation, which
+# needs a phase that is genuinely not current in order to make a second one.
+CUR_NOT_STARTED_PHASE = next(
+    (k for k, v in sorted(_STATE_DOC["phases"].items())
+     if isinstance(v, dict) and v.get("status") == "NOT_STARTED"),
+    None)
+if CUR_NOT_STARTED_PHASE is None:
+    raise SystemExit(
+        "FIXTURE ANCHOR DRIFT: every phase is started, so the 'two current phases' mutation has no target. "
+        "That is a real change in the project, not a defect: the case needs rewriting when it happens.")
 # The blockers sentence is rewritten on every phase closure ("... Phase 3 is ACCEPTED and CLOSED" became
 # "... Phase 4 is ACCEPTED AND CLOSED"), so pinning its wording drifted the same way the other anchors did.
 CUR_BLOCKER_HEAD = _STATE_DOC["blockers"][0][:48]
@@ -276,8 +302,12 @@ MUTATIONS = [
    ("json_set", [(["phases", "1A", "status"], "NOT_STARTED")])),
  ("M02 Phase 1A pending/planning", "governance/project-state.json",
    ("json_set", [(["phases", "1A", "status"], "PLANNING")])),
+ # The phase this marks IN_PROGRESS is DERIVED: the case exists to create a SECOND concurrently-current
+ # phase, and it was pinned to phase 5 -- which became the real current phase, making the mutation a no-op
+ # and aborting the suite with "fixture drift: phases/5/status is already 'IN_PROGRESS'". Picking the first
+ # NOT_STARTED phase recreates the intended condition whatever the project has reached.
  ("M03 two current phases", "governance/project-state.json",
-   ("json_set", [(["phases", "5", "status"], "IN_PROGRESS")])),
+   ("json_set", [(["phases", CUR_NOT_STARTED_PHASE, "status"], "IN_PROGRESS")])),
  ("M04 two next authorized actions", "governance/project-state.json",
    ("replace", [(f'"next_authorized_action": "{CUR_NEXT_ACTION_PREFIX}',
                  f'"next_authorized_action": "Also start Phase 9 now. Obtain a Product-Owner decision on the Increment-9 durability correction. {CUR_NEXT_ACTION_PREFIX}')])),
