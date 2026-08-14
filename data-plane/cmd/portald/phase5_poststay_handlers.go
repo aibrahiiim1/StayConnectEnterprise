@@ -68,8 +68,7 @@ func (h *handler) postStayIssue(w http.ResponseWriter, r *http.Request) {
 	b := h.newPhase3Budget(r)
 	defer b.cancel()
 	var in postStayIn
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
-		h.phase3Fail(w, r, b, "poststay_malformed_request")
+	if !decodePostStayStrict(w, r, b, h, &in) {
 		return
 	}
 	device, ok := h.postStayDevice(w, r, b)
@@ -98,8 +97,7 @@ func (h *handler) postStayAuth(w http.ResponseWriter, r *http.Request) {
 	b := h.newPhase3Budget(r)
 	defer b.cancel()
 	var in postStayIn
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&in); err != nil {
-		h.phase3Fail(w, r, b, "poststay_malformed_request")
+	if !decodePostStayStrict(w, r, b, h, &in) {
 		return
 	}
 	device, ok := h.postStayDevice(w, r, b)
@@ -150,4 +148,28 @@ func (h *handler) postStayDevice(w http.ResponseWriter, r *http.Request, b *phas
 		return nil, false
 	}
 	return map[string]string{"ip": ipString(ip), "mac": mac.String()}, true
+}
+
+// decodePostStayStrict is the PUBLIC guest surface's decoder, and it is strict for a reason that only shows
+// up from outside.
+//
+// scd's internal handlers already refuse unknown fields, so a stray `stay` or `room` never reached the
+// server's own logic. But portald is the process a guest's browser actually talks to, and a permissive
+// decoder there SILENTLY DROPS such a field: the request succeeds, the guest is served from their real
+// device-derived identity, and nothing anywhere says the parameter was ignored. That is the worst version of
+// the behaviour -- not exploitable, but indistinguishable from a surface that honours it, which is exactly
+// what invites someone to build against it and eventually to argue it should work.
+//
+// Refusing outright makes the absence of those parameters an OBSERVABLE fact rather than an internal one.
+// The refusal is the ordinary uniform non-success: a guest cannot learn from it either.
+func decodePostStayStrict(w http.ResponseWriter, r *http.Request, b *phase3Budget, h *handler, dst any) bool {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		// One reason code for every decode failure, including an identity-looking field. Logging WHICH field
+		// was sent would be useful to an operator and is deliberately not returned to the guest.
+		h.phase3Fail(w, r, b, "poststay_malformed_request: "+strings.TrimSpace(err.Error()))
+		return false
+	}
+	return true
 }
