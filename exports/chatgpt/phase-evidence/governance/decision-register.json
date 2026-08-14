@@ -484,6 +484,34 @@
         "docs/",
         "exports/"
       ]
+    },
+    {
+      "id": "D21",
+      "title": "PHASE 5 AUTHORIZED FOR COMPLETE END-TO-END IMPLEMENTATION AND VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC VALIDATION ON THE DEVELOPMENT APPLIANCE (2026-08-14). Scope: Post-Stay PIN re-authentication and the Cross-PMS Transfer workflow, delivered as FOUR substantial milestones with automatic continuation while gates are green (1: foundation + security, incl. correct reconciliation of the PMS-specific auth-context implementation rather than assuming reuse; 2: complete Post-Stay vertical slice with full F8/security evidence; 3: complete Cross-PMS Transfer vertical slice with full F9/concurrency evidence; 4: hardening, full Phase-3 and Phase-4 regression, least-privilege proof, authoritative CI and controlled DARK deployment on the DEVELOPMENT appliance with reboot, real scratch restore, rollback rehearsal and darkness re-verification). PRODUCT DECISIONS FIXED BY THIS AUTHORIZATION: Post-Stay v1 is INCLUDED / ZERO-PRICE ONLY; a Cross-PMS transfer REFUSES until the destination Stay already exists from verified PMS state and never creates synthetic PMS state; Post-Stay PIN issuance may occur ONLY from an already-authenticated guest context (before checkout or during Checkout Grace) with secure one-time reveal, and operator reset/re-issue requires authorization, step-up and audit, with no anonymous room-number-based issuance; Post-Stay v1 is STAY-EPISODE scoped per the FINAL contract with no invented per-sharer identities; stay_links(reason='POST_STAY') is NOT written because the FINAL contract does not ground both of its NOT NULL Stay ends for Post-Stay and writing it would require synthetic PMS state - the post_stay_profiles origin lineage is the contract-grounded mechanism; multi-PMS ambiguity is a REVIEW SIGNAL ONLY and never proof of transfer. Delivery: one Phase branch, one pull request, implementation-driven commit count, no pre-committed database roles (least privilege is derived from an actual privilege audit). THIS AUTHORIZATION DOES NOT AUTHORIZE: real financial traffic, settlement, PMS posting, provider traffic, paid guest access, Phase-4 feature-flag enablement, IAM-v2 authentication cutover, Production database contact or migration, any synthetic Stay, any guest-facing PMS selector, Phase 6 or Phase 7 work, or the merge of the Phase-5 pull request. All closed phases (0, 1A, 1B, 2, 3, 4) and the six accepted Phase-4 limitations are preserved unchanged and not promoted.",
+      "status": "ACTIVE",
+      "effective": "2026-08-14",
+      "supersedes": [],
+      "authoritative_document": "docs/architecture/StayConnect-IAM-Phase5-Plan.md",
+      "affected": [
+        "data-plane/",
+        "hotel-admin/",
+        "governance/",
+        "docs/",
+        "exports/"
+      ]
+    },
+    {
+      "id": "D22",
+      "title": "PHASE 5 IS ACCEPTED AND CLOSED AT VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC MATURITY (2026-08-14 UTC; 2026-08-15 local, UTC+03:00). The Product Owner accepts the Phase-5 Post-Stay PIN re-authentication and Cross-PMS Transfer work on the already-established verified basis and closes the phase. ACCEPTED BASIS: software/runtime candidate aef848d253e2c6efebe4f036b0369a22530a5a25; final verified delivery/evidence head 4142f5fe857787a745b186d8ac38edaad7b4d268; the T0052 acceptance-evidence fix-forward; exact-head CI on the delivery head with Phase 5 Post-Stay and Transfer CI 31836130617 SUCCESS (evidence artifact 9232578379, sha256:ed9da35202574f6c93713753153c1cc53ff7084e9e5765a69c34adf232d7383b), Phase 4 Financial Core CI 31836130580 SUCCESS (artifact 9232732340, sha256:6d0e343f16f51f51e47214c6049580abf6e1379a9879e825fbd5d46358163404), Phase 3 Software CI 31836130394 SUCCESS (artifact 9232717163, sha256:2bde46c2c54461d3a7d2f937cec76f8920f3f3cdca963035d926fa001cf7be7c) and Project Governance 31836130544 SUCCESS re-confirmed by 31837196633; and the verified DEVELOPMENT-appliance LIVE-DARK evidence including the pmsd DARK-contract criterion. ACCEPTANCE IS AT LIVE-DARK MATURITY ONLY: every Phase-5 flag is OFF and ABSENT from every env file and unit, every Phase-5 scd route returns 404 on the running appliance, every Phase-5 table holds 0 rows, no role besides the schema owner holds any privilege on them, legacy public-schema IAM remains the sole authentication authority, and no post-stay PIN, transfer, PMS message, provider call, folio debit or paid access has ever occurred. NINE RECORDED LIMITATIONS (L5-1 through L5-9) ARE PRESERVED EXACTLY AS LIMITATIONS AND NONE IS PROMOTED TO PASS. THE ACCEPTANCE AND CLOSURE ROUND IS REPOSITORY-ONLY AND INTRODUCES ZERO PRODUCT-RUNTIME CHANGE: no file under data-plane/, hotel-admin/ or scripts/ is modified by it, which is proven from Git rather than asserted. THIS DECISION DOES NOT AUTHORIZE: merging pull request #13, which remains OPEN and UNMERGED by design; any deployment or further appliance mutation; any Phase-5 or Phase-4 feature-flag enablement; IAM-v2 authentication cutover; Production migration or Production database contact; any PMS, provider or real financial traffic; paid guest access; or Phase 6 or Phase 7 work. All closed phases (0, 1A, 1B, 2, 3, 4) and the six accepted Phase-4 limitations are preserved unchanged and not promoted.",
+      "status": "ACTIVE",
+      "effective": "2026-08-14",
+      "supersedes": [],
+      "authoritative_document": "docs/acceptance/StayConnect-IAM-Phase5-Live-Dark-Acceptance.md",
+      "affected": [
+        "governance/",
+        "docs/",
+        "exports/"
+      ]
     }
   ]
 }

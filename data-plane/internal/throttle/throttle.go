@@ -50,7 +50,9 @@ const MethodAny = "*"
 
 func validMethod(m string) bool {
 	switch m {
-	case "account", "otp", "voucher", "social", "pms", MethodAny:
+	// post_stay_pin is its own method deliberately: a post-stay brute force must not consume (or be masked
+	// by) the budget the same guest, IP or device has for ordinary portal authentication.
+	case "account", "otp", "voucher", "social", "pms", "post_stay_pin", MethodAny:
 		return true
 	}
 	return false

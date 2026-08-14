@@ -1,0 +1,97 @@
+{
+  "transition_id": "T0051",
+  "seq": 51,
+  "timestamp": "2026-08-14T17:50:00Z",
+  "record_type": "PHASE_5_ACCEPTANCE_CANDIDATE_COMPLETE_AT_VERIFIED_LIVE_DARK",
+  "previous_state": {
+    "phase": "5",
+    "activity": "PHASE_5_IMPLEMENTATION_IN_PROGRESS_DARK",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTANCE_CANDIDATE_COMPLETE_AT_VERIFIED_LIVE_DARK_AWAITING_PO_DECISION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "5",
+  "decision": "D21",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner authorization D21 of 2026-08-14 for the complete four-milestone Phase 5, executed with automatic continuation between milestones.",
+  "history_note": "Phases 0, 1A, 1B, 2, 3 and 4 are unchanged. T0044 through T0050 are unchanged. Phase 5 is NOT accepted by this transition: it records that the acceptance candidate is complete and that a Product-Owner decision is the next step.",
+  "milestones": [
+    {
+      "id": "M1",
+      "name": "Foundation + security",
+      "status": "ACCEPTED (PO checkpoint)",
+      "head": "50e641bafe6bc94cb6823493c3738af9bbbaaab2"
+    },
+    {
+      "id": "M2",
+      "name": "Post-Stay vertical slice",
+      "status": "COMPLETE",
+      "head": "def9b8a7d3d439fec0a5dd2af693abb4a5e3ecd1"
+    },
+    {
+      "id": "M3",
+      "name": "Cross-PMS Transfer vertical slice",
+      "status": "COMPLETE",
+      "head": "f874e21ac80c1ebf8bdc2908ab81183960d0c679"
+    },
+    {
+      "id": "M4",
+      "name": "Hardening + final LIVE-DARK candidate",
+      "status": "COMPLETE"
+    }
+  ],
+  "defects_found_and_fixed": [
+    "D5-1 the transfer left the source's device authorization intervals OPEN against a terminated entitlement. Found by the contractual F9-i race; fixed at the durable boundary and proven load-bearing by mutation.",
+    "D5-2 a transfer accepted a source Stay that had already checked out, which would have moved checkout GRACE to a property that never granted it. The source must now be IN_HOUSE, re-checked under the lock.",
+    "D5-3 (self-inflicted, caught by CI) the post-stay tab displaced the room form as the portal's default panel; fourteen Phase-3 portal tests timed out on an invisible field.",
+    "D5-4 the darkness grant check excluded current_user rather than the table's owner, so on the Gate-P-separated appliance the owner's own rights read as 21 non-owner grants and condemned a correct deployment."
+  ],
+  "f9i_fix_forward": {
+    "finding": "The test carrying the F9-i label proved that two TRANSFERS cannot deadlock. The Plan defines F9-i as a transfer racing CHECKOUT/GRACE.",
+    "resolution": "The deadlock test is KEPT as additional concurrency evidence. The contractual race was added against the REAL Phase-3 ConvertAtCheckout.",
+    "test_validity_finding": "The first version of the race was not racing anything: seedEvent leaves the boundary event unapplied, checkout correctly refuses it, and the transfer won twelve times against nothing. Using the applied-event helper made it real, and it failed immediately.",
+    "coherence_definition_corrected": "The first assertion demanded the source hold no live entitlement after a transfer. That was wrong: checkout legitimately creates grace afterwards because the Stay DID hold an active entitlement at the boundary. Measurement showed the grace is an EMPTY shell, so the assertion is now that nothing is ATTACHED to it."
+  },
+  "authoritative_ci": {
+    "head": "ffdeef598d478ada650080c9a567c3c6dec19bee",
+    "phase5": "run 31824484043 SUCCESS",
+    "phase4": "run 31824484134 SUCCESS",
+    "phase3": "run 31825068831 dispatched on the branch"
+  },
+  "live_dark_deployment": {
+    "host": "radius (172.21.60.23) DEVELOPMENT appliance",
+    "database": "stayconnect_site",
+    "production_contacted": false,
+    "backup": "/opt/stayconnect/backups/phase5-iam-20260814T174052Z/site.dump 6260737 bytes sha256 cf1bda432c82c7007976d3f51972c225aea862be370264764a3a80163255c07a",
+    "migrations": "0027, 0028, 0029 each applied once and recorded exactly once",
+    "iam_v2_base_tables": "68 -> 68 (Phase 5 creates no tables)",
+    "public_tables": "44 -> 44",
+    "structural_fingerprint": "71dde7dc871b935ae555bcab2e5c1252 -> 07e08329beebef509e811a147524cdc5",
+    "darkness": "every Phase-5 table 0 rows; no role besides the schema owner holds any privilege on them; 13 Phase-5 objects; no Phase-5 flag in any env file or unit; all three scd Phase-5 routes 404 (ABSENT, not present-and-refusing)",
+    "services": "scd, edged, netd, acctd all active",
+    "reboot": "rebooted 2026-08-14T17:41:53Z; migrations, services and darkness all intact afterwards",
+    "restore_drill": "backup sha256 verified and really restored into phase5_restore_drill: 68 base tables, 0 Phase-5 migrations (the pre-deployment state)",
+    "rollback_rehearsal": "0029->0028->0027 down on the LIVE database returned the structural fingerprint to exactly 71dde7dc871b935ae555bcab2e5c1252 with 0 Phase-5 objects, 0 ledger rows and the Phase-3 guard restored INCLUDING its refusal message; re-applied to 07e08329beebef509e811a147524cdc5",
+    "final_darkness": "re-verified after every drill"
+  },
+  "what_this_transition_does_not_do": [
+    "It does not accept or close Phase 5; that is a Product-Owner decision.",
+    "It does not enable any feature flag; every Phase-5 flag remains OFF and absent.",
+    "It does not cut over IAM-v2 authentication.",
+    "It does not migrate or contact any Production database.",
+    "It does not permit PMS, payment-provider or real financial traffic, or paid guest access.",
+    "It does not begin Phase 6 or Phase 7.",
+    "It does not merge the Phase-5 pull request."
+  ],
+  "evidence_files": [
+    "docs/evidence/StayConnect-IAM-Phase5-Evidence.md",
+    "docs/architecture/StayConnect-IAM-Phase5-Plan.md",
+    "scripts/phase5-iam-live-dark-deploy.sh",
+    ".github/workflows/phase5-post-stay-transfer.yml"
+  ],
+  "next_action": "Obtain the Product Owner's acceptance decision on the Phase-5 LIVE-DARK acceptance candidate. The pull request is OPEN and UNMERGED by design."
+}

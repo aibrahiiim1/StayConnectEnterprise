@@ -1,0 +1,73 @@
+{
+  "transition_id": "T0052",
+  "seq": 52,
+  "timestamp": "2026-08-14T19:55:00Z",
+  "record_type": "PHASE_5_ACCEPTANCE_EVIDENCE_FIX_FORWARD",
+  "previous_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTANCE_CANDIDATE_COMPLETE_AT_VERIFIED_LIVE_DARK_AWAITING_PO_DECISION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTANCE_CANDIDATE_COMPLETE_AT_VERIFIED_LIVE_DARK_AWAITING_PO_DECISION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "5",
+  "decision": "D21",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-14: one final, narrow Phase-5 acceptance-evidence fix-forward from aef848d253e2c6efebe4f036b0369a22530a5a25. No product behaviour is added or redesigned; the Phase-5 implementation and the contractual F9-i fix-forward are accepted as the software basis.",
+  "scope_note": "THIS TRANSITION CHANGES NO STATE. Phase 5 remains IN_PROGRESS and unaccepted, the pull request remains OPEN and UNMERGED, and the software basis is unchanged. It records four acceptance-EVIDENCE corrections and exists so that the corrections are auditable rather than silently applied.",
+  "history_note": "T0051 and every earlier transition and evidence document are PRESERVED AS WRITTEN. Nothing in this receipt rewrites a historical record: the stale statements it corrects are corrected FORWARD, here, in the same way T0043's compliance-receipt phrasing was corrected forward under D19 rather than edited in place.",
+  "evidence_gaps_closed": [
+    {
+      "id": "E5-1",
+      "title": "The Phase-5 CI gate was green and published no evidence at all",
+      "finding": "The exact-head Phase-5 workflow reported success for all four milestones while producing NO GitHub artifact. Three independent causes: the evidence staging directory is dot-prefixed and actions/upload-artifact@v4 silently skips hidden files; if-no-files-found was set to 'warn', which demoted 'the evidence does not exist' to a log line nobody reads; and nothing assembled or checked the evidence before uploading it. A green run with no artifact is indistinguishable from a green run whose evidence was never produced.",
+      "resolution": "Publication is now fail-closed. scripts/ci/phase5_evidence.py assembles the artifact from files the gate's own runners wrote and REFUSES to publish a partial one -- a missing env record, a missing required step outcome, or a missing/typeless machine count each exit non-zero. The upload sets include-hidden-files, if-no-files-found: error and a 90-day retention, and is named for the head under test. A final step reads the upload action's own artifact-id and artifact-digest outputs back and fails the job if either is absent, so 'there is a downloadable artifact with this ID and this digest' is a measurement rather than an assumption.",
+      "counter_proof": "scripts/ci/phase5-evidence-selftest.sh drives the REAL assembler (never a copy) against a complete staging directory and against six deliberately damaged ones, and fails if it accepts any of them. It runs FIRST in the workflow, before any gate can make the staging directory look complete. 9/9 locally.",
+      "a_gate_that_only_passes": "The self-test exists because a fail-closed component that has only ever been watched succeeding has not been shown to fail closed. The control case is included precisely so the six refusals cannot all be passing for the trivial reason that the assembler refuses everything."
+    },
+    {
+      "id": "E5-2",
+      "title": "The LIVE-DARK health check never covered pmsd",
+      "finding": "The deployment's service-health loop covered scd, edged, netd and acctd and said nothing about pmsd, the dedicated PMS connector. Its posture was therefore unmeasured on the very appliance whose darkness the deployment claims.",
+      "resolution": "A pmsd DARK-contract criterion was added to scripts/phase5-iam-live-dark-deploy.sh, deliberately OUTSIDE the is-active loop. pmsd is the one StayConnect daemon that is healthy when dead: with no Phase-3 flag set, LoadPMSConfigFromEnv resolves every flag OFF and pmsd.Run returns immediately without loading an assignment, building a database pool, decrypting a secret, starting a worker or opening a PMS socket. The criterion measures that contract in six arms -- installed and enabled (not missing or masked); inactive/dead by way of Result=success and exit 0 (a crash is also 'not running'); no restart storm (NRestarts=0, exactly one start this boot, zero storm indicators); the daemon's OWN journal statement that it took the flags-OFF path and stopped cleanly; no process and no socket belonging to it; and no database backend attributable to it.",
+      "explicitly_not_done": "The criterion does NOT require a live PMS worker. Demanding 'active' would have exactly two outcomes: it fails a correct appliance, or somebody makes it green by starting a live connector -- real PMS traffic that no Phase-5 authorization covers.",
+      "measured": "On the development appliance radius (172.21.60.23): LoadState=loaded, UnitFileState=enabled, inactive (dead), Result=success, ExecMainStatus=0, NRestarts=0, starts-this-boot=1, storm-indicators=0, the dark statement and the clean stop both present in this boot's journal, 0 processes, 0 sockets, 0 attributable database backends.",
+      "counter_proof": "PHASE5_PMSD_UNIT exists so the criterion can be shown to FAIL, and defaults to the real unit. Pointed at stayconnect-scd it aborts on the active-state arm; pointed at stayconnect-ctrlapi it aborts on the enabled arm. The remaining four arms were demonstrated at the predicate level against real appliance data that violates them (a unit with no pmsd start line, no dark statement, a running service user with 209 processes and 7 sockets, and the same database query shape with a pattern that matches 12 live backends). No enabled-and-inactive substitute unit exists on this appliance, so those four were not demonstrated end-to-end through the script."
+    },
+    {
+      "id": "E5-3",
+      "title": "The recorded authoritative CI pointed at an intermediate head",
+      "finding": "project-state.phase5_authoritative_ci and T0051.authoritative_ci recorded runs against ffdeef598d478ada650080c9a567c3c6dec19bee -- a mid-M4 head -- and described the Phase-3 run only as 'dispatched'. The final acceptance candidate aef848d253e2c6efebe4f036b0369a22530a5a25 had four green exact-head runs that no governance surface named.",
+      "resolution": "Corrected forward in this receipt and in project-state.phase5_authoritative_ci. T0051 is not rewritten."
+    },
+    {
+      "id": "E5-4",
+      "title": "The final report's inventory was 87 paths and one filename was wrong",
+      "finding": "GitHub reports 88 changed physical paths at aef848d. The 87 in the M4 report came from grouping paths with brace shorthand, and the added evidence-pack file was named GIT_STAT_2c2fc6a.txt when the file actually added is GIT_STAT_34f09e9.txt (the pack is stamped with the source commit it was built from, which is the implementation commit, not the delivery commit above it).",
+      "resolution": "The inventory is regenerated from Git for the new delivery head and reported with every physical path listed separately, with no brace or grouped-path shorthand."
+    }
+  ],
+  "authoritative_ci_at_the_previous_delivery_head": {
+    "head": "aef848d253e2c6efebe4f036b0369a22530a5a25",
+    "phase5": "run 31831004671 SUCCESS (no artifact published -- this is the defect E5-1 records)",
+    "phase4": "run 31831004746 SUCCESS",
+    "phase3": "run 31831007345 SUCCESS",
+    "governance": "run 31831007337 SUCCESS"
+  },
+  "delivery_head_ci_protocol": "The CI runs for the delivery head introduced by THIS receipt cannot be named inside the receipt: the delivery-only commit sits one commit above the head the packs and manifest were generated at, and a commit cannot contain the run identifiers of workflows that only start once it exists. They are recorded in the PR #13 body and in the final report, which is the same self-reference protocol already applied to the delivery head's own SHA (see delivery_head_note and docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md).",
+  "unchanged_by_this_transition": [
+    "Phase 5 remains IN_PROGRESS and is NOT accepted.",
+    "PR #13 remains OPEN and UNMERGED.",
+    "No product behaviour was added, removed or redesigned.",
+    "No feature flag was enabled anywhere.",
+    "No IAM-v2 cutover was performed.",
+    "Production was not contacted, migrated or read.",
+    "No PMS, provider, financial or paid-access traffic occurred.",
+    "No Phase-6 or Phase-7 work was started.",
+    "Phases 0, 1A, 1B, 2, 3 and 4 are unchanged, and T0044 through T0051 are unchanged."
+  ]
+}

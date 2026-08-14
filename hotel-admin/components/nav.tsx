@@ -21,6 +21,10 @@ const PHASE3_ADMIN = process.env.NEXT_PUBLIC_PHASE3_ADMIN === "1";
 // Phase 4 is DARK: the financial operator screens are hidden unless this build was explicitly told the
 // financial surface exists, exactly as edged refuses to mount the routes behind them.
 const PHASE4_ADMIN = process.env.NEXT_PUBLIC_PHASE4_ADMIN === "1";
+// Phase 5 (DARK): the post-stay identity screen is hidden unless the deployment sets
+// NEXT_PUBLIC_PHASE5_ADMIN=1, mirroring the edged STAYCONNECT_PHASE5_* flags. Hiding the link is a
+// convenience, not the boundary: edged does not mount the routes at all while dark.
+const PHASE5_ADMIN = process.env.NEXT_PUBLIC_PHASE5_ADMIN === "1";
 
 // Each item names the edged resource that gates its visibility. Items the
 // operator's roles cannot read are hidden (edged still enforces server-side).
@@ -63,6 +67,8 @@ const SECTIONS: Section[] = [
       { href: "/financial-review",   label: "Manual review",      icon: Shield, resource: "financial-review", enabled: PHASE4_ADMIN },
       { href: "/financial-settlements", label: "Settlements",     icon: Wallet, resource: "financial-review", enabled: PHASE4_ADMIN },
       { href: "/financial-recovery", label: "Financial recovery", icon: Shield, resource: "financial-review", enabled: PHASE4_ADMIN },
+      { href: "/post-stay",          label: "Post-stay access",   icon: KeyRound, resource: "post-stay-profiles", enabled: PHASE5_ADMIN },
+      { href: "/stay-transfers",     label: "Cross-PMS transfer", icon: Send,     resource: "stay-transfers",     enabled: PHASE5_ADMIN },
       { href: "/notifications",    label: "Notifications", icon: Send,     resource: "notification-providers" },
       { href: "/social-providers", label: "Social login",  icon: KeyRound, resource: "social-providers" },
       { href: "/payments",         label: "Payments",      icon: Wallet,   resource: "payments" },

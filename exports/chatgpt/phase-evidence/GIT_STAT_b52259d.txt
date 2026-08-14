@@ -1,0 +1,4 @@
+commit b52259d31f5f4c6c87cc9cc870b993d686971dfc
+Date:   Sat Aug 15 00:47:07 2026 +0300
+
+    Phase 5 closure correction: the receipt described its own future, and the next action was unrecognised

@@ -203,7 +203,8 @@ type server struct {
 
 	// Phase 3 (DARK): the PMS auth vertical slice. nil while dark, and its routes are not mounted at all —
 	// an absent surface cannot be probed for behaviour the way a present-but-refusing one can.
-	p3auth *phase3Auth
+	p3auth     *phase3Auth
+	p5poststay *phase5PostStay
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -832,6 +833,28 @@ func main() {
 		r.Post("/v1/phase3/auth/pms/resolve", s.p3auth.resolveHandler)
 		r.Post("/v1/phase3/auth/pms/grant", s.p3auth.grantHandler)
 		slog.Info("phase3 pms auth routes mounted", "flags", pmsCfg3.SafeFlagSummary())
+	}
+
+	// PHASE 5 (DARK): the guest post-stay surface. It depends on the Phase-3 arm for device identity, so it
+	// cannot be mounted without it -- and a Phase-5 guest flag set while Phase-3 auth is off is a deployment
+	// mistake that must be loud, exactly like a child flag without its master.
+	p5cfg, err := iamv2.LoadPhase5ConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("phase-5 flags are incoherent", "err", err)
+		os.Exit(1)
+	}
+	if p5cfg.GuestOn() && s.p3auth == nil {
+		slog.Error("phase5 post-stay guest surface is enabled but the Phase-3 auth arm is off",
+			"phase5", p5cfg.SafeFlagSummary())
+		os.Exit(1)
+	}
+	if s.p5poststay = newPhase5PostStay(p5cfg, s, s.p3auth); s.p5poststay != nil {
+		r.Post("/v1/phase5/poststay/issue", s.p5poststay.issueHandler)
+		r.Post("/v1/phase5/auth/post-stay-pin", s.p5poststay.verifyHandler)
+		r.Post("/v1/phase5/poststay/convert", s.p5poststay.convertHandler)
+		slog.Info("phase5 post-stay guest routes mounted", "flags", p5cfg.SafeFlagSummary())
+	} else {
+		slog.Info("phase5 post-stay guest surface is DARK (routes absent)", "flags", p5cfg.SafeFlagSummary())
 	}
 
 	_ = os.MkdirAll("/run/stayconnect", 0o755)

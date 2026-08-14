@@ -89,7 +89,8 @@ type server struct {
 
 	// Phase 3 DARK Hotel-Admin PMS/Stay surface. pmsCfg gates whether ANY Phase-3 route is mounted; while
 	// the master flag is OFF the routes do not exist at all and edged issues zero Phase-3 SQL.
-	pmsCfg iamv2.PMSConfig
+	pmsCfg    iamv2.PMSConfig
+	phase5Cfg iamv2.Phase5Config
 
 	// Phase 4 DARK financial surface. financialCfg gates whether the Manual Review routes are mounted at
 	// all; while dark they do not exist, so an unmounted route cannot leak a financial schema that is not
@@ -226,6 +227,16 @@ func main() {
 		os.Exit(2)
 	}
 	s.pmsCfg = pmsCfg
+
+	// Phase 5 DARK post-stay surface. Same rule as every phase before it: a child flag set while the master
+	// is off is a startup failure, not a quiet no-op.
+	p5cfg, err := iamv2.LoadPhase5ConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("phase-5 flags are incoherent", "err", err)
+		os.Exit(2)
+	}
+	s.phase5Cfg = p5cfg
+	slog.Info("phase5 dark post-stay admin surface", "flags", p5cfg.SafeFlagSummary())
 	slog.Info("phase3 dark pms admin surface", "flags", pmsCfg.SafeFlagSummary())
 	// Before any Phase-3 admin surface is served, prove the controlled-writer boundary is actually in force
 	// for this process. An operator publishing a grace policy through a UI that turns out to be writing raw
@@ -310,6 +321,17 @@ func main() {
 				mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 				mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 				mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
+			}
+			// Phase 5 (DARK): the operator post-stay surface. Mounted only when the Phase-5 master flag
+			// AND its admin flag are both ON; while dark this path does not exist.
+			if s.phase5Cfg.AdminOn() {
+				mountResource(r, s, "post-stay-profiles", s.postStayProfilesRoutes)
+			}
+			// Cross-PMS transfer is its OWN flag, not a child of the post-stay one: they are different
+			// operations with different blast radii, and a property that wants post-stay PINs has not
+			// thereby asked to be able to end a guest's access and move it.
+			if s.phase5Cfg.TransferOn() {
+				mountResource(r, s, "stay-transfers", s.stayTransfersRoutes)
 			}
 			// Phase 4 (DARK): Financial Manual Review. Mounted only when the Phase-4 master flag AND the
 			// review flag are both ON. The delivered configuration has both OFF, so this path does not

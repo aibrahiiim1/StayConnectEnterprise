@@ -1,0 +1,151 @@
+{
+  "transition_id": "T0053",
+  "seq": 53,
+  "timestamp": "2026-08-14T21:30:00Z",
+  "record_type": "PHASE_5_PRODUCT_OWNER_ACCEPTANCE_AND_CLOSURE_AT_VERIFIED_LIVE_DARK",
+  "previous_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTANCE_CANDIDATE_COMPLETE_AT_VERIFIED_LIVE_DARK_AWAITING_PO_DECISION",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "5",
+  "decision": "D22",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner decision of 2026-08-14 (UTC): 'ACCEPT and CLOSE Phase 5 at VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity.' It names the accepted software/runtime basis, the final verified delivery/evidence head, the T0052 acceptance-evidence fix-forward, the exact-head CI and artifacts, and the verified development-appliance LIVE-DARK and pmsd DARK-contract evidence; requires every recorded limitation to be preserved without promotion; requires the directly related state, acceptance/final report, plan, evidence, PR metadata and generated exports to be synchronized; requires proof that the closure round introduces zero product-runtime change; and requires PR #13 to remain OPEN and UNMERGED.",
+  "history_note": "T0044 through T0052 are PRESERVED unchanged, and so is every earlier receipt. This transition records the Product Owner's acceptance and closure of Phase 5 and the repository-only synchronization that follows it. No historical receipt was rewritten, no historical evidence was restated, no appliance was contacted, and no product-runtime file was changed.",
+  "accepted_basis": {
+    "separation_note": "Three kinds of evidence are deliberately kept apart and must not be conflated. SOFTWARE-CI evidence says the delivered code passes its own authoritative gate on disposable databases. LIVE evidence says that same code, deployed to a real development appliance, behaved as specified with every flag OFF. The PRODUCT-OWNER DECISION is neither: it is the judgement that the two together are sufficient for LIVE-DARK maturity, and it was taken by the Product Owner, not by the implementer.",
+    "software_runtime_candidate": "aef848d253e2c6efebe4f036b0369a22530a5a25",
+    "final_delivery_and_evidence_head": "4142f5fe857787a745b186d8ac38edaad7b4d268",
+    "inventory_head": "8877c47a6f1df25fab075f1dfda6f01e32846a75",
+    "acceptance_evidence_fix_forward": "T0052 -- fail-closed Phase-5 CI evidence publication (E5-1), the pmsd DARK-contract health criterion (E5-2), the head/CI reconciliation (E5-3) and the corrected 88-path inventory and GIT_STAT filename (E5-4).",
+    "exact_head_ci": {
+      "head": "4142f5fe857787a745b186d8ac38edaad7b4d268",
+      "phase5": {
+        "run": 31836130617,
+        "conclusion": "SUCCESS",
+        "artifact": 9232578379,
+        "digest": "sha256:ed9da35202574f6c93713753153c1cc53ff7084e9e5765a69c34adf232d7383b",
+        "digest_verification": "the artifact was downloaded and hashed locally; the computed SHA-256 is byte-identical to the digest GitHub reports."
+      },
+      "phase4": {
+        "run": 31836130580,
+        "conclusion": "SUCCESS",
+        "artifact": 9232732340,
+        "digest": "sha256:6d0e343f16f51f51e47214c6049580abf6e1379a9879e825fbd5d46358163404"
+      },
+      "phase3": {
+        "run": 31836130394,
+        "conclusion": "SUCCESS",
+        "artifact": 9232717163,
+        "digest": "sha256:2bde46c2c54461d3a7d2f937cec76f8920f3f3cdca963035d926fa001cf7be7c"
+      },
+      "governance": {
+        "run": 31836130544,
+        "conclusion": "SUCCESS",
+        "artifact": null,
+        "note": "The governance workflow publishes no artifact by design. It ran the COMPLETE adversarial mutation matrix with no case limit, its isolation regression, zero-stale keyword validation, semantic parity, negative parity and the clean-tree assertion. Re-confirmed as run 31837196633 after the PR body was updated."
+      },
+      "duplicate_runs_note": "A push to the phase branch with an open pull request fires both push and pull_request runs. The push copies (Phase 4 31836122047, Phase 5 31836122169) and a manual Phase-3 dispatch (31836130899) are also SUCCESS on the same head; the pull_request set above is the authoritative one."
+    },
+    "live_dark_evidence": {
+      "host": "radius (172.21.60.23) DEVELOPMENT appliance",
+      "database": "stayconnect_site",
+      "production_contacted": false,
+      "backup": "/opt/stayconnect/backups/phase5-iam-20260814T174052Z/site.dump 6260737 bytes sha256 cf1bda432c82c7007976d3f51972c225aea862be370264764a3a80163255c07a, taken and verified BEFORE any change",
+      "migrations": "0027, 0028, 0029 each applied once and recorded exactly once",
+      "schema_effect": "iam_v2 base tables 68 -> 68 (Phase 5 creates no tables); public tables 44 -> 44; structural fingerprint 71dde7dc871b935ae555bcab2e5c1252 -> 07e08329beebef509e811a147524cdc5",
+      "darkness": "every Phase-5 table 0 rows; 13 Phase-5 objects; no role besides the schema owner holds any privilege on a Phase-5 table; no Phase-5 flag in any env file or unit; all three scd Phase-5 routes 404 (ABSENT, not present-and-refusing)",
+      "service_health": "scd, edged, netd and acctd all active",
+      "pmsd_dark_contract": "VERIFIED under T0052 in six arms: loaded and enabled; inactive/dead with Result=success and ExecMainStatus=0; NRestarts=0 with exactly one start this boot and zero restart-storm indicators; the daemon's own dark statement and clean stop present in this boot's journal; 0 processes and 0 sockets; 0 database backends attributable to it. The criterion deliberately does NOT require a live PMS worker.",
+      "reboot": "rebooted 2026-08-14T17:41:53Z; migrations, services and darkness all intact afterwards",
+      "restore_drill": "the backup was really restored into phase5_restore_drill: 68 base tables, 0 Phase-5 migrations -- the pre-deployment state",
+      "rollback_rehearsal": "0029->0028->0027 down on the LIVE database returned the structural fingerprint to exactly 71dde7dc871b935ae555bcab2e5c1252 with 0 Phase-5 objects, 0 ledger rows and the Phase-3 guard restored INCLUDING its refusal message; re-applied to 07e08329beebef509e811a147524cdc5 and re-verified"
+    }
+  },
+  "maturity": "ACCEPTED_AND_CLOSED -- VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC",
+  "zero_product_runtime_change": {
+    "claim": "The acceptance and closure round changes no product-runtime file.",
+    "measurement": "git diff --name-only between the accepted delivery/evidence head 4142f5fe857787a745b186d8ac38edaad7b4d268 and the closure delivery head returns no path under data-plane/, hotel-admin/, scripts/ or .github/workflows/. Only governance/, docs/, exports/ and two governance validators under tools/ change: validate-current-state-parity.py gains the Phase-5 plan in its phase-plan map so the accepted-phase-semantics rule actually reads that surface, and validate-project-state.sh learns the post-closure next action, because an unrecognised next action is supposed to fail rather than pass quietly.",
+    "why_it_is_measured_and_not_asserted": "An acceptance round is exactly the moment at which a quiet code change is least likely to be noticed, because attention is on the paperwork. The proof is derived from Git.",
+    "scope_note": "'Product runtime' means the software the appliance runs and the gates that build it: data-plane/, hotel-admin/, scripts/ and .github/workflows/. Governance validators under tools/ are not product runtime, and the one change there is named explicitly above rather than hidden inside a broader claim."
+  },
+  "accepted_limitations": [
+    {
+      "id": "L5-1",
+      "subject": "POST_STAY_ACTIVE has no exit transition",
+      "statement": "The FINAL contract draws no arrow out of POST_STAY_ACTIVE. A reinstatement for a converted Stay is refused by p3_stay_lifecycle_guard and lands in the operator queue. Recorded and tested as F8-i; the Product Owner confirmed the transition must not be invented in this phase.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L5-2",
+      "subject": "Post-Stay v1 is zero-price only",
+      "statement": "A priced or settlement-requiring revision is REFUSED rather than granted free. Paid post-stay access remains outside this phase and requires a separate future authorization.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L5-3",
+      "subject": "post-stay requires a device authorized during the stay",
+      "statement": "Verification derives its candidate profiles from the device's own authorization lineage, so a wholly new device receives the uniform non-success. This is what removes the client-supplied-subject parameter altogether, and it is a deliberate trade rather than a gap to close silently.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L5-4",
+      "subject": "stay_links(reason='POST_STAY') is never written",
+      "statement": "Both of its ends are NOT NULL Stays and post-stay has one, so writing it would require synthetic PMS state. Enforced by the database guard; the enum value stays reserved and unused.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L5-5",
+      "subject": "a transfer is not reversible by an inverse transfer",
+      "statement": "The source entitlement is terminated and from_entitlement_id is UNIQUE. Reversal is an operator/PMS-level correction, not a Phase-5 capability.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L5-6",
+      "subject": "the destination grant is a bounded window",
+      "statement": "A transfer grants a bounded window at the destination rather than an open-ended entitlement. This is the delivered behaviour and is not to be read as an equivalence between source and destination access.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L5-7",
+      "subject": "several Phase-3/Phase-4 integration tests are not repeatable against a reused database",
+      "statement": "They count across the whole database rather than their own site. Two were fixed; the rest are unchanged. CI builds a fresh database per run, which is the documented contract; re-engineering those suites was outside D21.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L5-8",
+      "subject": "cmd/scd integration tests need migrations 0001-0006",
+      "statement": "The local Phase-5 harness does not build them, so those tests run in CI, which builds the full chain. The local harness is scoped to the Phase-5 surface deliberately.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L5-9",
+      "subject": "four pmsd DARK-contract arms were proven at the predicate level, not end-to-end",
+      "statement": "The restart-storm, journal-statement, process/socket-footprint and database-backend arms were demonstrated by running the same expressions against real appliance data that violates them, rather than end-to-end through the deployment script, because no enabled-and-inactive substitute unit exists on the development appliance and manufacturing one would have meant installing a unit on it. The installed/enabled and clean-disabled-exit arms were proven end-to-end. Recorded rather than claimed as a full end-to-end negative proof.",
+      "not_promoted_to_pass": true
+    }
+  ],
+  "pull_request": {
+    "number": 13,
+    "state": "OPEN and UNMERGED by design",
+    "note": "Acceptance and merge are separate Product-Owner decisions, as they were for Phases 2, 3 and 4. This closure authorizes no merge, and the PR body records the accepted-and-closed status together with an explicit DO NOT MERGE."
+  },
+  "explicitly_not_authorized_by_this_acceptance": [
+    "Merging pull request #13.",
+    "Any deployment or further appliance mutation.",
+    "Any Phase-5 or Phase-4 feature-flag enablement.",
+    "IAM-v2 authentication cutover.",
+    "Production migration or Production database contact.",
+    "Any PMS, provider or real financial traffic.",
+    "Paid guest access.",
+    "Phase 6 or Phase 7 work."
+  ],
+  "timestamp_note": "Recorded in UTC, as every receipt in this ledger is. The Product-Owner decision was taken on 2026-08-15 LOCAL time (UTC+03:00), which is 2026-08-14 in UTC. An earlier draft of this receipt carried 2026-08-15T06:40:00Z -- a time roughly nine hours after the commit that introduced it -- and tools/validate-transition-times.sh refused it. Corrected before the round was verified, which is what that rule exists to force: a receipt that describes its own future is not evidence."
+}

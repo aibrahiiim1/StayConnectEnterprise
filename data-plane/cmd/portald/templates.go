@@ -95,6 +95,21 @@ const landingHTML = `<!doctype html>
     <div id="pms-choices" role="group" aria-label="Internet packages" style="display:none"></div>
   </div>
 
+  <!-- Post-stay panel (Phase 5, DARK) — ONE field.
+       A departing guest is proving an identity for the SECOND time, and the first proof left a durable
+       record on this device. So there is no room, no name and no reservation number here: the appliance
+       already knows which stay this device belonged to, and asking again would only create a field an
+       attacker could put someone else's answer in. -->
+  <div class="panel" id="panel-poststay">
+    <form id="form-poststay" autocomplete="off">
+      <label for="ps-pin">Post-stay PIN</label>
+      <input id="ps-pin" name="pin" type="text" inputmode="text" autocapitalize="characters"
+             required placeholder="The PIN you were given at checkout">
+      <button type="submit">Reconnect</button>
+    </form>
+    <div class="err" id="ps-err" role="alert" aria-live="polite"></div>
+  </div>
+
   <!-- Social panel -->
   <div class="panel" id="panel-social">
     <div id="social-providers"></div>
@@ -128,6 +143,7 @@ const landingHTML = `<!doctype html>
       sms:     { id:'sms',     label:'Phone',   panel:'panel-sms' },
       pms:     { id:'pms',     label:'Room',    panel:'panel-pms' },
       social:  { id:'social',  label:'Social',  panel:'panel-social' },
+      poststay:{ id:'poststay',label:'Post-stay',panel:'panel-poststay' },
     };
     const ProviderLabels = { google: 'Continue with Google', apple: 'Continue with Apple', facebook: 'Continue with Facebook' };
     const PMSPrompts = {
@@ -159,6 +175,12 @@ const landingHTML = `<!doctype html>
         const sec = document.getElementById('pms-secondary');
         sec.placeholder = PMSPrompts[cfg.pms.mode] || sec.placeholder;
         sec.dataset.mode = cfg.pms.mode || 'either';
+        // Post-stay is offered wherever PMS stay auth is, and is pushed AFTER it so the ORDER is unchanged:
+        // setTab(enabled[0]) opens the first tab, and a guest arriving to authenticate for the first time
+        // must land on Room, not on a PIN they do not have yet. Adding it before pms silently made post-stay
+        // the default panel and hid the room form -- which the Phase-3 portal suite caught as every one of
+        // its tests timing out on a field that was no longer visible.
+        enabled.push('poststay');
       }
       // Render social provider buttons.
       if (cfg.social) {
@@ -274,6 +296,53 @@ const landingHTML = `<!doctype html>
         PMS_REQUEST_ID = newRequestID();
       }
       return PMS_REQUEST_ID;
+    }
+
+    // POST-STAY. The body is {pin} and nothing else. The server refuses unknown fields outright, so a page
+    // that tried to "helpfully" include a room or a stay would break loudly instead of being quietly ignored
+    // -- which is the entire point of that strictness.
+    document.addEventListener('DOMContentLoaded', function () {
+      const f = document.getElementById('form-poststay');
+      if (!f) return;
+      f.addEventListener('submit', function (e) {
+        e.preventDefault();
+        const errEl = document.getElementById('ps-err');
+        errEl.textContent = '';
+        submitPostStay(document.getElementById('ps-pin').value, errEl);
+      });
+    });
+
+    async function submitPostStay(pin, errEl) {
+      let j = {};
+      try {
+        const r = await fetch('/auth/post-stay-pin', {
+          method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pin: pin })
+        });
+        j = await r.json().catch(function(){ return {}; });
+      } catch (e) { j = {}; }
+      if (j.ok && j.session_id) {
+        window.location = (j.redirect_to || '/success') + '?s=' + encodeURIComponent(j.session_id);
+        return;
+      }
+      if (j.ok && j.auth_context_id) {
+        // Verified. The conversion is a second call carrying the context the server just issued -- never a
+        // subject the page chose.
+        let k = {};
+        try {
+          const r2 = await fetch('/auth/post-stay-pin', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ auth_context_id: j.auth_context_id })
+          });
+          k = await r2.json().catch(function(){ return {}; });
+        } catch (e) { k = {}; }
+        if (k.ok && k.session_id) {
+          window.location = (k.redirect_to || '/success') + '?s=' + encodeURIComponent(k.session_id);
+          return;
+        }
+      }
+      // Every other answer is the same message -- wrong PIN, expired, revoked, locked out, the room re-let,
+      // or post-stay not being offered here at all.
+      errEl.textContent = PHASE3_FAIL;
     }
 
     async function submitPhase3(body, errEl) {
