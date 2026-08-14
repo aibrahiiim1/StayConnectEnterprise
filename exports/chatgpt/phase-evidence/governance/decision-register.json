@@ -512,6 +512,19 @@
         "docs/",
         "exports/"
       ]
+    },
+    {
+      "id": "D23",
+      "title": "PHASE 5 PULL REQUEST #13 AUTHORIZED FOR MERGE AND MERGED (2026-08-14 UTC; 2026-08-15 local, UTC+03:00). The Product Owner authorized merging PR #13 into master, conditional on the PR head being exactly 2568402a3bdcdd7193a142a2402647164c9f81db, the pull request remaining based on the expected master and mergeable, and the required exact-head Phase 5, Phase 4, Phase 3 and Project Governance checks still being GREEN on that exact head. Every condition was independently verified before the merge: the head matched, the base was master at d49342c0707bc40c2833b3d7782589ed0e40317f which was also the live master head so the branch was up to date, mergeable was true, and runs 31844176152 (Phase 5 Post-Stay and Transfer CI), 31844176124 (Phase 4 Financial Core CI), 31844175934 (Phase 3 Software CI) and 31844176531 (Project Governance) were all SUCCESS on it. Merged as a true merge commit 4f27b4d0ea4de57f9bbf6a062d9bb9d294ec6e6a with parents d49342c (master) and 2568402 (the accepted head), following the Phase-2 (D13), Phase-3 (D17) and Phase-4 (D20) governance-safe merge precedent. THE MERGE INTRODUCED NO CONTENT: master's tree after the merge is byte-identical to the accepted head's tree 1ed4c590172a8d7036eefaf245100ad73a263daa, and zero paths differ between them. THIS AUTHORIZATION IS FOR THE PULL-REQUEST MERGE ONLY. It deploys nothing and enables nothing, and explicitly does NOT authorize deployment, any appliance mutation or contact, any migration, any feature-flag enablement, IAM-v2 authentication cutover, Production migration or database contact, PMS or payment-provider traffic, real financial traffic, paid guest access, or Phase 6 or Phase 7 work. Phase 5's acceptance maturity is unchanged by this decision: ACCEPTED_AND_CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D22/T0053), with the nine accepted limitations L5-1 through L5-9 preserved and not promoted. No unrelated historical branch was deleted.",
+      "status": "ACTIVE",
+      "effective": "2026-08-14",
+      "supersedes": [],
+      "authoritative_document": "docs/acceptance/StayConnect-IAM-Phase5-Live-Dark-Acceptance.md",
+      "affected": [
+        "governance/",
+        "docs/",
+        "exports/"
+      ]
     }
   ]
 }
