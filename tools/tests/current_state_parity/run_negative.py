@@ -346,16 +346,34 @@ def _(d):
                 "charge retry, financial UNKNOWN handling")
 
 
+# The phase named here is DERIVED. It was written as "Phase 5" while Phase 5 was a future phase, and Phase 5
+# then became authorized -- so the validator correctly stopped flagging the sentence and the NEGATIVE case
+# failed, reporting a validator regression that had not happened. A case about "an unauthorized future phase"
+# has to ask the state file which phase that currently is.
+def _first_not_started():
+    doc = json.load(io.open(os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))
+    for k, v in sorted((doc.get("phases") or {}).items()):
+        if isinstance(v, dict) and v.get("status") == "NOT_STARTED":
+            return k
+    raise SystemExit("FIXTURE DRIFT: every phase is started, so there is no unauthorized future phase to name")
+
+
 @case("an unauthorized future phase appears in allowed_actions", "authorization-model-parity")
 def _(d):
-    _patch_list(d, "allowed_actions", "Execute the authorized Phase 5 end-to-end")
+    _patch_list(d, "allowed_actions",
+                "Execute the authorized Phase %s end-to-end" % _first_not_started())
 
 
 @case("current_phase_plan belongs to a different phase", "authorization-model-parity")
 def _(d):
-    patch_state(d, lambda s: s.replace(
-        '"current_phase_plan": "docs/architecture/StayConnect-IAM-Phase4-Plan.md"',
-        '"current_phase_plan": "docs/architecture/StayConnect-IAM-Phase3-Plan.md"', 1))
+    # Also derived: the plan path moves with the phase, and pinning both ends made this a silent no-op the
+    # moment the current phase changed.
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    cur = str(doc.get("current_phase"))
+    other = next(k for k in sorted((doc.get("phases") or {}).keys()) if k != cur)
+    doc["current_phase_plan"] = "docs/architecture/StayConnect-IAM-Phase%s-Plan.md" % other
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
 
 
 @case("current_state_facts.phase disagrees with current_phase", "authorization-model-parity")
@@ -391,14 +409,24 @@ def _(d):
 # phase. The gate passed because no rule compared a receipt to the phases map, and no rule made "unfinished"
 # wrong RELATIVE TO A RECORDED STATUS.
 
-@case("the latest transition closed the phase while the phases map still says IN_PROGRESS",
+@case("the phases map disagrees with the status the latest transition recorded",
       "transition-phase-coherence")
 def _(d):
+    # DERIVED from the latest receipt. This was pinned to phase 4 with the value IN_PROGRESS, which
+    # contradicted the T0044 closure receipt at the time. Once the latest receipt moved on to a different
+    # phase, setting phase 4 contradicted nothing and the rule correctly stayed silent -- so the negative case
+    # failed and reported a validator regression that had not happened. What the case is really about is that
+    # the map must agree with the receipt, whichever phase and whichever status those currently are.
     p = os.path.join(d, "governance/project-state.json")
     doc = json.load(io.open(p, encoding="utf-8"))
-    if doc["phases"]["4"]["status"] == "IN_PROGRESS":
-        raise AssertionError("mutation changed nothing: phases.4 is already IN_PROGRESS")
-    doc["phases"]["4"]["status"] = "IN_PROGRESS"
+    tid = doc["latest_transition_id"]
+    rec = json.load(io.open(os.path.join(d, "governance/transitions/%s.json" % tid), encoding="utf-8"))
+    phase = str(rec.get("phase_affected") or rec.get("new_state", {}).get("phase"))
+    recorded = rec.get("new_state", {}).get("phase_status")
+    contradiction = "IN_PROGRESS" if recorded != "IN_PROGRESS" else "ACCEPTED_AND_CLOSED"
+    if doc["phases"][phase]["status"] == contradiction:
+        raise AssertionError("mutation changed nothing: phases.%s is already %s" % (phase, contradiction))
+    doc["phases"][phase]["status"] = contradiction
     io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
 
 
