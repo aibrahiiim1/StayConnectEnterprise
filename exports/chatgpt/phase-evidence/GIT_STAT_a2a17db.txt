@@ -1,4 +1,0 @@
-commit a2a17dbe9864f4736bab7b8bdbc4f561f7b4b085
-Date:   Fri Aug 14 01:32:40 2026 +0300
-
-    Phase 4 (delivery_head): correction pointer, complete staged manifest, rebuilt packs and report-embedded manifest
