@@ -168,10 +168,6 @@ const landingHTML = `<!doctype html>
       if (cfg.email   && cfg.email.enabled)   enabled.push('email');
       if (cfg.sms     && cfg.sms.enabled)     enabled.push('sms');
       PHASE3_PMS = !!cfg.phase3_pms;
-      // Post-stay is offered whenever the site offers PMS stay auth at all. The portal cannot know whether
-      // Phase 5 is enabled -- and must not: scd answers a dark appliance with the same uniform non-success a
-      // wrong PIN gets, so a tab that is present-but-always-refusing reveals nothing either way.
-      if (cfg.pms && cfg.pms.enabled) { enabled.push('poststay'); }
       if (cfg.pms     && cfg.pms.enabled) {
         enabled.push('pms');
         document.getElementById('pms-prompt').textContent = PMSPrompts[cfg.pms.mode] || PMSPrompts.either;
@@ -179,6 +175,12 @@ const landingHTML = `<!doctype html>
         const sec = document.getElementById('pms-secondary');
         sec.placeholder = PMSPrompts[cfg.pms.mode] || sec.placeholder;
         sec.dataset.mode = cfg.pms.mode || 'either';
+        // Post-stay is offered wherever PMS stay auth is, and is pushed AFTER it so the ORDER is unchanged:
+        // setTab(enabled[0]) opens the first tab, and a guest arriving to authenticate for the first time
+        // must land on Room, not on a PIN they do not have yet. Adding it before pms silently made post-stay
+        // the default panel and hid the room form -- which the Phase-3 portal suite caught as every one of
+        // its tests timing out on a field that was no longer visible.
+        enabled.push('poststay');
       }
       // Render social provider buttons.
       if (cfg.social) {
