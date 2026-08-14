@@ -1,10 +1,25 @@
 # StayConnect IAM — Phase 5 Plan
 ## Post-Stay PIN re-authentication + Cross-PMS Transfer
 
-**Status:** AUTHORIZED and IN_PROGRESS under Product-Owner decision **D21**, start transition **T0050**
-(2026-08-14). Base master HEAD `d49342c0707bc40c2833b3d7782589ed0e40317f`. Branch
-`phase/5-poststay-transfer`, one pull request → `master`. Delivered **DARK**: every Phase-5 flag defaults OFF.
-Target acceptance maturity: **VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC** on the **development** appliance.
+**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED — VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC** (decision **D22**,
+closure transition **T0053**, 2026-08-15), against accepted software/runtime candidate
+`aef848d253e2c6efebe4f036b0369a22530a5a25` and final verified delivery/evidence head
+`4142f5fe857787a745b186d8ac38edaad7b4d268`. Nine limitations (**L5-1**–**L5-9**) are accepted and **not**
+promoted to PASS. Pull request **#13 remains OPEN and UNMERGED**; merging it is a separate Product-Owner
+decision that has not been taken. The authoritative acceptance record is
+[`docs/acceptance/StayConnect-IAM-Phase5-Live-Dark-Acceptance.md`](../acceptance/StayConnect-IAM-Phase5-Live-Dark-Acceptance.md)
+and the final report is
+[`docs/reports/StayConnect-IAM-Phase5-Final-Report.md`](../reports/StayConnect-IAM-Phase5-Final-Report.md).
+
+*Authorized under Product-Owner decision **D21**, start transition **T0050** (2026-08-14). Base master HEAD
+`d49342c0707bc40c2833b3d7782589ed0e40317f`. Branch `phase/5-poststay-transfer`, one pull request → `master`.
+Delivered **DARK**: every Phase-5 flag defaults OFF. The target acceptance maturity stated when this plan was
+written — **VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC** on the **development** appliance — is the maturity
+the phase was accepted at.*
+
+**This document is preserved as the plan it was.** The sections below describe what was planned and why; they
+are not rewritten to match the delivery. Where implementation disproved a planning assumption, the correction
+is recorded in the evidence document and in the transition receipts, not by editing this file.
 
 **Explicitly NOT in scope (fail-closed, governance-enforced):** paid Post-Stay, settlement or any price other
 than zero; PMS financial posting, `PS`/`PA`, `P#` allocation; payment-provider traffic, refunds or reversals;

@@ -367,3 +367,37 @@ financial or paid-access traffic occurred; no Phase-6 or Phase-7 work was starte
 unchanged.
 
 ---
+
+## Product-Owner acceptance and closure · decision D22 / transition T0053
+
+Recorded **2026-08-15**. Phase 5 is **ACCEPTED AND CLOSED at VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC
+maturity**, against accepted software/runtime candidate `aef848d253e2c6efebe4f036b0369a22530a5a25` and final
+verified delivery/evidence head `4142f5fe857787a745b186d8ac38edaad7b4d268`. Every milestone section above is
+preserved exactly as written; nothing in it is rewritten by this closure.
+
+The accepted basis is the one already established and is deliberately kept in three separable parts —
+software-CI evidence, live development-appliance evidence, and the Product-Owner judgement that the two
+together are sufficient. Collapsing them is how a green pipeline starts being read as a business decision.
+The authoritative record is
+[`docs/acceptance/StayConnect-IAM-Phase5-Live-Dark-Acceptance.md`](../acceptance/StayConnect-IAM-Phase5-Live-Dark-Acceptance.md);
+the final report is
+[`docs/reports/StayConnect-IAM-Phase5-Final-Report.md`](../reports/StayConnect-IAM-Phase5-Final-Report.md).
+
+**All nine recorded limitations — L5-1 through L5-9 — are preserved exactly as limitations. None is promoted
+to PASS.** L5-9, the four pmsd DARK-contract arms proven at the predicate level rather than end-to-end, is
+carried into the closure unchanged rather than being quietly upgraded by the acceptance that followed it.
+
+**The closure round changes no product-runtime file, and that is measured rather than asserted.**
+`git diff --name-only` between the accepted delivery/evidence head and the closure delivery head returns no
+path under `data-plane/`, `hotel-admin/`, `scripts/` or `.github/workflows/`. Only `governance/`, `docs/`,
+`exports/` and one governance validator under `tools/` change — `validate-current-state-parity.py`, which
+gains the Phase-5 plan in its phase-plan map so the accepted-phase-semantics rule actually reads that
+surface, named here rather than hidden inside a broader claim. An acceptance round is exactly the moment at which a quiet code change is least likely to
+be noticed, because attention is on the paperwork, so the proof comes from Git.
+
+**Pull request #13 remains OPEN and UNMERGED.** Acceptance and merge are separate Product-Owner decisions, as
+they were for Phases 2, 3 and 4. This closure authorizes no merge, no deployment or further appliance
+mutation, no Phase-5 or Phase-4 feature-flag enablement, no IAM-v2 cutover, no Production migration or
+contact, no PMS/provider or financial traffic, no paid access, and no Phase-6 or Phase-7 work.
+
+---

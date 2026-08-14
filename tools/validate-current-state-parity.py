@@ -739,6 +739,10 @@ def main():
         "1B": "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
         "3": "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
         "4": "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+        # Phase 5 is listed for the reason the rule exists: the map is what makes a phase's PLAN readable to
+        # this check, and a closed phase whose plan is unreadable is exactly where the contradiction that
+        # created rule 10 lived. Adding the entry at closure keeps the coverage honest rather than nominal.
+        "5": "docs/architecture/StayConnect-IAM-Phase5-Plan.md",
     }
     for pk in accepted_phases:
         num = re.escape(pk)
