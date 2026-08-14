@@ -234,6 +234,8 @@ func transferOpErr(w http.ResponseWriter, err error) {
 		jsonErr(w, http.StatusConflict, "room_move_not_transfer", err.Error())
 	case errors.Is(err, transfer.ErrDestinationMissing):
 		jsonErr(w, http.StatusConflict, "destination_missing", err.Error())
+	case errors.Is(err, transfer.ErrSourceNotInHouse):
+		jsonErr(w, http.StatusConflict, "source_checked_out", err.Error())
 	case errors.Is(err, transfer.ErrDestinationNotEligible):
 		jsonErr(w, http.StatusConflict, "destination_not_in_house", err.Error())
 	case errors.Is(err, transfer.ErrDestinationOccupied):

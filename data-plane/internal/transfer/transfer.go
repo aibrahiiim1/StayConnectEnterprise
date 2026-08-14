@@ -47,6 +47,10 @@ var (
 	// This is the refusal that keeps the operation from inventing a Stay: an operator who knows the guest has
 	// checked in on the other property must wait for that Stay to arrive.
 	ErrDestinationMissing = errors.New("transfer: the destination stay does not exist yet from verified PMS state")
+	// ErrSourceNotInHouse — the source Stay has already checked out. What such a guest holds is CHECKOUT
+	// GRACE, a courtesy window granted by the property they left; moving it to another property would extend
+	// that courtesy across a boundary nobody authorized. The destination authenticates them normally instead.
+	ErrSourceNotInHouse = errors.New("transfer: the source stay has already checked out; grace access is not transferable")
 	// ErrDestinationNotEligible — the destination Stay exists but is not IN_HOUSE, so there is nobody there
 	// to give access to.
 	ErrDestinationNotEligible = errors.New("transfer: the destination stay is not currently in house")
@@ -158,10 +162,15 @@ func (s *Store) blocker(ctx context.Context, tenant, site, fromStay, toStay, fro
 	if fromIface == toIface {
 		return ErrSameInterface.Error()
 	}
-	var toStatus string
-	if err := s.pool.QueryRow(ctx, `SELECT status FROM iam_v2.stays
-		WHERE tenant_id=$1 AND site_id=$2 AND id=$3`, tenant, site, toStay).Scan(&toStatus); err != nil {
+	var fromStatus, toStatus string
+	if err := s.pool.QueryRow(ctx, `SELECT f.status, t.status FROM iam_v2.stays f, iam_v2.stays t
+		WHERE f.tenant_id=$1 AND f.site_id=$2 AND f.id=$3
+		  AND t.tenant_id=$1 AND t.site_id=$2 AND t.id=$4`,
+		tenant, site, fromStay, toStay).Scan(&fromStatus, &toStatus); err != nil {
 		return ErrDestinationMissing.Error()
+	}
+	if fromStatus != "IN_HOUSE" {
+		return ErrSourceNotInHouse.Error()
 	}
 	if toStatus != "IN_HOUSE" {
 		return ErrDestinationNotEligible.Error()
@@ -222,16 +231,24 @@ func (s *Store) Execute(ctx context.Context, req Request) (Result, error) {
 		return Result{}, ErrDestinationMissing
 	}
 
-	var fromIface, toIface, toStatus string
-	if err := tx.QueryRow(ctx, `SELECT f.pms_interface_id::text, t.pms_interface_id::text, t.status
+	var fromIface, toIface, fromStatus, toStatus string
+	if err := tx.QueryRow(ctx, `SELECT f.pms_interface_id::text, t.pms_interface_id::text, f.status, t.status
 		  FROM iam_v2.stays f, iam_v2.stays t
 		 WHERE f.tenant_id=$1 AND f.site_id=$2 AND f.id=$3
 		   AND t.tenant_id=$1 AND t.site_id=$2 AND t.id=$4`,
-		req.Tenant, req.Site, req.FromStay, req.ToStay).Scan(&fromIface, &toIface, &toStatus); err != nil {
+		req.Tenant, req.Site, req.FromStay, req.ToStay).
+		Scan(&fromIface, &toIface, &fromStatus, &toStatus); err != nil {
 		return Result{}, ErrDestinationMissing
 	}
 	if fromIface == toIface {
 		return Result{}, ErrSameInterface
+	}
+	// Re-checked UNDER THE LOCK, and this is the check the checkout race found missing: a checkout that
+	// commits first leaves the guest holding GRACE, and grace is a courtesy the departed property granted.
+	// Transferring it would carry that courtesy to a property that never agreed to it, and would do so
+	// invisibly because no money and no authentication is involved either way.
+	if fromStatus != "IN_HOUSE" {
+		return Result{}, ErrSourceNotInHouse
 	}
 	if toStatus != "IN_HOUSE" {
 		// Re-checked under the lock: the destination may have checked out between preview and confirmation,
@@ -332,13 +349,47 @@ func (s *Store) Execute(ctx context.Context, req Request) (Result, error) {
 	// SEAMLESS REBIND. The devices and their live sessions move to the new entitlement in place: no logout,
 	// no re-authentication, and no nft churn, because the enforcement state is keyed on the session rather
 	// than on which entitlement row it points at.
+	//
+	// The AUTHORIZATION INTERVAL is the part that is easy to get wrong, and the F9-i race is what found it.
+	// entitlement_device_authorizations is an append-only INTERVAL model, not a flag: an interval left open
+	// against a TERMINATED entitlement says the device is still authorized under an authority that no longer
+	// exists. It is not merely untidy — every later question that reads the interval history (which
+	// entitlement was this device under at time T, what does the boundary see, which sessions are
+	// attributable to what) gets a wrong answer from it, and the accounting attribution is built on exactly
+	// that. So the source's open intervals are CLOSED at the same instant the destination's are opened, in
+	// this transaction, the same way checkout closes them at its boundary.
+	movedAt := time.Now().UTC()
 	devices, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_devices
 		(tenant_id, site_id, entitlement_id, device_id, status, grandfathered, first_authorized, last_authorized)
-		SELECT $1,$2,$3, ed.device_id, 'AUTHORIZED', ed.grandfathered, ed.first_authorized, now()
+		SELECT $1,$2,$3, ed.device_id, 'AUTHORIZED', ed.grandfathered, ed.first_authorized, $5
 		  FROM iam_v2.entitlement_devices ed
 		 WHERE ed.entitlement_id=$4 AND ed.status='AUTHORIZED'`,
-		req.Tenant, req.Site, toEnt, fromEnt)
+		req.Tenant, req.Site, toEnt, fromEnt, movedAt)
 	if err != nil {
+		return Result{}, err
+	}
+	// Open the destination's intervals for exactly those devices.
+	if err := writerguard.Open(ctx, tx, "device_auth"); err != nil {
+		return Result{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlement_device_authorizations
+		(tenant_id, site_id, entitlement_id, device_id, seq, authorized_at)
+		SELECT $1,$2,$3, ed.device_id, 1, $4
+		  FROM iam_v2.entitlement_devices ed WHERE ed.entitlement_id=$3`,
+		req.Tenant, req.Site, toEnt, movedAt); err != nil {
+		return Result{}, err
+	}
+	// ...and close the source's, marking the current view with a bounded machine reason. GREATEST keeps an
+	// interval from ending before it began if the clock or an earlier write disagrees.
+	if _, err := tx.Exec(ctx, `WITH closed AS (
+		UPDATE iam_v2.entitlement_device_authorizations a
+		   SET deauthorized_at = GREATEST($2::timestamptz, a.authorized_at)
+		 WHERE a.entitlement_id=$1 AND a.deauthorized_at IS NULL
+		 RETURNING a.entitlement_id, a.device_id)
+		UPDATE iam_v2.entitlement_devices ed
+		   SET status='DISCONNECTED', disconnected_reason='CROSS_PMS_TRANSFER'
+		  FROM closed WHERE ed.entitlement_id=closed.entitlement_id AND ed.device_id=closed.device_id`,
+		fromEnt, movedAt); err != nil {
 		return Result{}, err
 	}
 	sessions, err := tx.Exec(ctx, `UPDATE iam_v2.sessions

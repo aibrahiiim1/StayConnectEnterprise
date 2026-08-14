@@ -362,10 +362,19 @@ refused "a POST_STAY_PIN context without a pinned episode is refused (I-2 at the
      VALUES ('$T','$S','POST_STAY_PIN','$PROF','44444444-4444-4444-4444-444444444444','55555555-5555-5555-5555-555555555555', now()+interval '10 minutes');" \
   "ac_post_stay_pins"
 
+# The probe role is dropped as soon as its cases are done. Leaving it behind made the DARK claim measurably
+# FALSE for the next gate that looked -- the least-privilege proof reported a non-owner role holding INSERT on
+# every Phase-5 table, which was this test's own leftover rather than anything the migration granted. A test
+# that pollutes the property it is asserting about is worse than no test.
+Q "REVOKE ALL ON iam_v2.post_stay_profiles, iam_v2.entitlement_transfers, iam_v2.stay_links FROM p5_raw_writer;
+   REVOKE USAGE ON SCHEMA iam_v2 FROM p5_raw_writer;
+   DROP ROLE IF EXISTS p5_raw_writer;" >/dev/null
+eq "the probe role is dropped, so the DARK posture is measurable afterwards" "0"    "$(Q "SELECT count(*) FROM pg_roles WHERE rolname='p5_raw_writer';")"
+
 echo "== L. Privilege posture: DARK =="
 G="$(Q "SELECT count(*) FROM information_schema.role_table_grants
         WHERE table_schema='iam_v2' AND table_name IN ('post_stay_profiles','entitlement_transfers','stay_links')
-          AND grantee NOT IN (current_user,'PUBLIC','p5_raw_writer');")"
+          AND grantee NOT IN (current_user,'PUBLIC');")"
 eq "no service role holds any privilege on a Phase-5 table (dark)" "0" "$G"
 eq "PUBLIC cannot execute the Phase-5 opener" "f" \
    "$(Q "SELECT has_function_privilege('public','iam_v2.p5_begin_controlled_operation(text)','EXECUTE');")"

@@ -119,7 +119,10 @@ func TestIntegration_StayLifecycle(t *testing.T) {
 	if st, lv, room := stayState(t, p, s, res); st != "IN_HOUSE" || lv != 1 || room != "1408" {
 		t.Fatalf("after GI: status=%s lv=%d room=%s, want IN_HOUSE/1/1408", st, lv, room)
 	}
-	if n := scalar(t, p, `SELECT count(*) FROM iam_v2.stay_guests g JOIN iam_v2.stays s ON s.id=g.stay_id WHERE s.external_reservation_id=$1 AND g.is_primary`, res); n != 1 {
+	// SCOPED to this test's own interface: the reservation id is not unique across sites, and an unscoped
+	// count makes the assertion depend on whether the database has seen this test before.
+	if n := scalar(t, p, `SELECT count(*) FROM iam_v2.stay_guests g JOIN iam_v2.stays s ON s.id=g.stay_id
+		WHERE s.external_reservation_id=$1 AND s.pms_interface_id=$2 AND g.is_primary`, res, s.iface); n != 1 {
 		t.Fatalf("primary guest count=%d, want 1", n)
 	}
 	if n := scalar(t, p, `SELECT count(*) FROM iam_v2.folios WHERE pms_interface_id=$1 AND external_folio_id='F900'`, s.iface); n != 1 {

@@ -476,8 +476,11 @@ func TestIntegration_FolioSourceConflictGoesToReview(t *testing.T) {
 		t.Fatalf("status=%s code=%s, want MANUAL_REVIEW/%s", status, code, CodeFolioStayConflict)
 	}
 	// the first Stay keeps the folio, and the conflicting event wrote nothing
+	// SCOPED to this test's own interface, for the same reason: 'FSHARED' is an external folio id, unique
+	// only within an interface, so an unscoped count grows with every previous run.
 	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
-		WHERE f.external_folio_id='FSHARED' AND sf.is_default_posting_target`); n != 1 {
+		WHERE f.external_folio_id='FSHARED' AND f.pms_interface_id=$1 AND sf.is_default_posting_target`,
+		s.iface); n != 1 {
 		t.Fatal("the folio's default posting target was stolen or duplicated")
 	}
 	if n := countRows(t, p, `SELECT count(*) FROM iam_v2.stay_folios sf JOIN iam_v2.folios f ON f.id=sf.folio_id
