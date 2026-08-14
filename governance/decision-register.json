@@ -471,6 +471,19 @@
         "iam_v2_scratch/",
         "tools/"
       ]
+    },
+    {
+      "id": "D20",
+      "title": "PHASE 4 PULL REQUEST #12 AUTHORIZED FOR MERGE AND MERGED (2026-08-14). The Product Owner authorized merging PR #12 into master, conditional on the PR head being exactly 0d0b6dea5a2e303d1bf665d6c63b9bddcf9239f9 and the required Phase 4 Financial Core, Project Governance and Phase 3 Software checks still being GREEN on that exact head. Both conditions were verified before the merge: the head matched, and runs 31756222233 (Phase 4 Financial Core CI), 31756222276 (Project Governance) and 31756222185 (Phase 3 Software CI) were all SUCCESS on it. Merged as a true merge commit 210154b5ba72178bae715e7c8e4a1398ca629257 with parents a835b18 (master) and 0d0b6de (the accepted head), following the Phase-2 (D13) and Phase-3 (D17) governance-safe merge precedent. THE MERGE INTRODUCED NO CONTENT: master's tree after the merge is byte-identical to the accepted head's tree (711845c915df640ac19453a5256cb3b8282b3d8d). THIS AUTHORIZATION IS FOR THE PULL-REQUEST MERGE ONLY. It deploys nothing and enables nothing, and explicitly does NOT authorize deployment, any appliance or Production change, any migration, any feature-flag enablement, IAM-v2 authentication cutover, PMS or payment-provider traffic, real financial traffic, paid guest access, Hotel ID 2 financial onboarding, C38 execution, or Phase 5/6/7 work. Phase 4's acceptance maturity is unchanged by this decision: ACCEPTED_AND_CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19/T0044), with the six accepted limitations preserved and not promoted.",
+      "status": "ACTIVE",
+      "effective": "2026-08-14",
+      "supersedes": [],
+      "authoritative_document": "docs/acceptance/StayConnect-IAM-Phase4-Live-Dark-Acceptance.md",
+      "affected": [
+        "governance/",
+        "docs/",
+        "exports/"
+      ]
     }
   ]
 }

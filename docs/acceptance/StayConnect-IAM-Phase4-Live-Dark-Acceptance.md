@@ -1,12 +1,12 @@
 # StayConnect IAM Phase 4 — Live-Dark Acceptance
 
-**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED — VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC (decision D19, closure transition T0044, 2026-08-13). The single Phase-4 pull request is OPEN and UNMERGED; merging requires a separate explicit Product-Owner decision.**
+**Status: PRODUCT-OWNER ACCEPTED_AND_CLOSED — VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC (decision D19, closure transition T0044, 2026-08-13). The single Phase-4 pull request has been MERGED to master on 2026-08-14 under the separate Product-Owner merge decision **D20** (transition **T0048**), merge commit `210154b5ba72178bae715e7c8e4a1398ca629257`.**
 
 - Phase: 4 (Financial Execution Layer) — one end-to-end Phase.
 - **Authorized** under Product-Owner decision **D18**, authorization transition **T0029**.
 - **Live WS-L deployment** recorded by transition **T0043** (controlled live-DARK deployment, reboot, recovery and rollback drill).
 - **Product-Owner ACCEPTED and CLOSED** by decision **D19**, closure transition **T0044** (`transition_accepted: true`) at verified **LIVE-DARK / NO-FINANCIAL-TRAFFIC** maturity.
-- Branch: `phase/4-financial-execution`; **PR #12 — OPEN and UNMERGED**.
+- Branch: `phase/4-financial-execution`; **PR #12 — MERGED to master on 2026-08-14 under the separate Product-Owner merge decision **D20** (transition **T0048**), merge commit `210154b5ba72178bae715e7c8e4a1398ca629257`**.
 - Appliance: `radius` / `172.21.60.23`, site `7acf26a7-5ad2-4c65-aef7-651107484636`, serial `APP-DEV-0001` — the **development** appliance.
 
 ---
@@ -79,4 +79,4 @@ No further appliance mutation · no Production migration or Production database 
 
 ## Product-Owner decision (recorded)
 
-Phase 4 is **ACCEPTED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity and CLOSED** by Product-Owner decision **D19** / closure transition **T0044** (2026-08-13). Acceptance is at LIVE-DARK maturity only. The Phase-4 pull request is **OPEN and UNMERGED**; merging requires a separate explicit Product-Owner decision.
+Phase 4 is **ACCEPTED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity and CLOSED** by Product-Owner decision **D19** / closure transition **T0044** (2026-08-13). Acceptance is at LIVE-DARK maturity only. The Phase-4 pull request has been MERGED to master on 2026-08-14 under the separate Product-Owner merge decision **D20** (transition **T0048**), merge commit `210154b5ba72178bae715e7c8e4a1398ca629257`.

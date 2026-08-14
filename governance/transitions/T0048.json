@@ -1,0 +1,85 @@
+{
+  "transition_id": "T0048",
+  "seq": 48,
+  "timestamp": "2026-08-14T00:26:00Z",
+  "record_type": "PHASE_4_PULL_REQUEST_MERGED_TO_MASTER",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "4",
+  "decision": "D20",
+  "new_decision_created": true,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner decision of 2026-08-14 authorizing the merge of Phase-4 PR #12 into master, conditional on the head being exactly 0d0b6dea5a2e303d1bf665d6c63b9bddcf9239f9 with the required Phase 4 Financial Core, Project Governance and Phase 3 Software checks still GREEN on that exact head. Explicitly scoped to the pull-request merge only.",
+  "history_note": "T0030 through T0047 are PRESERVED unchanged, including T0044, T0045, T0046 and T0047 byte-for-byte. Phase 4's acceptance maturity is unchanged; this receipt records the MERGE, not a new acceptance.",
+  "preconditions_verified_before_merging": {
+    "pr_head_required": "0d0b6dea5a2e303d1bf665d6c63b9bddcf9239f9",
+    "pr_head_observed": "0d0b6dea5a2e303d1bf665d6c63b9bddcf9239f9",
+    "head_matches": true,
+    "required_checks_on_that_head": [
+      "Phase 4 Financial Core CI 31756222233 SUCCESS",
+      "Project Governance 31756222276 SUCCESS",
+      "Phase 3 Software CI 31756222185 SUCCESS",
+      "Phase 4 Financial Core CI 31756218531 SUCCESS (branch trigger)"
+    ],
+    "branch_protection_context_governance": "success",
+    "branch_up_to_date_with_master": true,
+    "note": "The merge was performed only after both conditions the Product Owner set were observed to hold. Nothing was pushed to the branch between the authorization and the merge, so the head the Product Owner named is exactly the head that was merged."
+  },
+  "merge": {
+    "pull_request": 12,
+    "base": "master",
+    "head": "0d0b6dea5a2e303d1bf665d6c63b9bddcf9239f9",
+    "merge_method": "merge commit (two parents)",
+    "merge_commit": "210154b5ba72178bae715e7c8e4a1398ca629257",
+    "parents": ["a835b18", "0d0b6de"],
+    "merged_by": "aibrahiiim1",
+    "merged_at": "2026-08-14T00:25:43Z",
+    "pr_state_after": "closed, merged=true",
+    "precedent": "Follows the Phase-2 (D13, PR #4, merge commit fe6a0d1) and Phase-3 (D17/T0025, PR #6, merge commit 8a7230a7) governance-safe merge precedent: a true merge commit rather than a squash or rebase, so the delivered history stays intact and every transition receipt keeps its own commit.",
+    "introduced_no_content": true,
+    "tree_equality_proof": "The merge commit's tree 711845c915df640ac19453a5256cb3b8282b3d8d is IDENTICAL to the accepted head's tree. master gained exactly the reviewed content and nothing else."
+  },
+  "post_merge_runtime_comparison": {
+    "vs_accepted_software_candidate": "b94112d8cb0ab63938b60f829ddd465c14491f97",
+    "paths_measured": ["data-plane/", "hotel-admin/", "control-plane/", "deploy/"],
+    "changed_paths_total": 3,
+    "changed_paths_test_only": 3,
+    "changed_paths_shipped_non_test": 0,
+    "note": "Unchanged by the merge. The three differing paths are the Phase-4 _test.go build-tag files, which no shipped binary contains."
+  },
+  "what_this_merge_does_not_do": [
+    "it deploys nothing and enables nothing",
+    "no appliance change and no appliance contact",
+    "no Production database contact and no Production migration",
+    "no Phase-4 feature flag enablement -- every flag remains OFF and ABSENT from every env file and unit",
+    "no IAM-v2 authentication cutover; legacy public-schema IAM remains the sole authentication authority",
+    "no PMS or payment-provider traffic, no real financial traffic, no folio debit, no paid guest access",
+    "no Hotel ID 2 financial onboarding and no C38 execution",
+    "no Phase 5, 6 or 7 work"
+  ],
+  "accepted_limitations_unchanged": [
+    "C35: no external archival receipt authority exists; the archive and purge gate are accepted BECAUSE they fail closed; cross-customer purge remains unavailable",
+    "C38: real-financial acceptance remains outside Phase 4 and requires separate future authorization",
+    "the financial restore management marker is NOT installed on the development appliance -- a PRE-FINANCIAL-ENABLE PREREQUISITE",
+    "legacy live-session continuity remains NOT PROVEN from Phase 3",
+    "no real payment-provider adapter or real-provider behaviour is accepted",
+    "per-property Tier-2 financial onboarding remains mandatory before any property can be financially enabled"
+  ],
+  "evidence_files": [
+    "governance/transitions/T0044.json",
+    "governance/transitions/T0047.json",
+    "docs/acceptance/StayConnect-IAM-Phase4-Live-Dark-Acceptance.md",
+    "docs/evidence/Phase4-Final-Live-Acceptance-Record.md",
+    "docs/reports/StayConnect-IAM-Phase4-Final-Report.md"
+  ],
+  "acceptance_verdict": "NO CHANGE TO ACCEPTANCE. Phase 4 remains ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity under D19/T0044, and is now MERGED to master under D20. The merge is a delivery event, not an acceptance event.",
+  "next_action": "None for Phase 4: it is accepted, closed and merged to master. Any deployment, flag enablement, IAM-v2 cutover, real financial traffic or Phase 5/6/7 work requires its own separate Product-Owner authorization."
+}
