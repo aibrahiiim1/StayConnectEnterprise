@@ -1,4 +1,0 @@
-commit ffdeef598d478ada650080c9a567c3c6dec19bee
-Date:   Fri Aug 14 20:31:39 2026 +0300
-
-    Phase 5 M4 fix: the post-stay tab must not displace the room form
