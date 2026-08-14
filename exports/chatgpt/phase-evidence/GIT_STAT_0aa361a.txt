@@ -1,0 +1,4 @@
+commit 0aa361ad2c8dfc278c7c0fde8afe9f6dba167b29
+Date:   Fri Aug 14 18:13:32 2026 +0300
+
+    Phase 5 M3: Cross-PMS Transfer â€” typed, staff-confirmed, never inferred

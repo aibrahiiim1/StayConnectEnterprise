@@ -455,8 +455,8 @@
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
     "phase4_authoritative_ci_artifact_id": 9177140558,
     "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
-    "acceptance_candidate_head": "791a543bf47f6883b44e8c5f1c008445ea634fac",
-    "inventory_head": "791a543bf47f6883b44e8c5f1c008445ea634fac",
+    "acceptance_candidate_head": "0aa361ad2c8dfc278c7c0fde8afe9f6dba167b29",
+    "inventory_head": "0aa361ad2c8dfc278c7c0fde8afe9f6dba167b29",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -586,15 +586,16 @@
     "phase5_evidence_document": "docs/evidence/StayConnect-IAM-Phase5-Evidence.md",
     "phase5_milestone3_status": "COMPLETE",
     "phase5_gate_results_at_m3": "internal/transfer 11/11 (F9 incl. 24-way concurrency and a 16-pair opposite-direction deadlock proof); cmd/edged 11/11; cmd/portald 4/4; internal/poststay 13/13; internal/authctx 7/7; internal/iamv2 4/4; foundation 70/70; lifecycle 19/19; browser 12/12",
-    "phase5_transfer_lock_order_proof": "The two Stays are locked in deterministic id order. Proven load-bearing by mutation: replacing it with caller-order locking makes the 16-pair opposite-direction test fail with a real SQLSTATE 40P01 deadlock; with the fixed order it passes."
+    "phase5_transfer_lock_order_proof": "The two Stays are locked in deterministic id order. Proven load-bearing by mutation: replacing it with caller-order locking makes the 16-pair opposite-direction test fail with a real SQLSTATE 40P01 deadlock; with the fixed order it passes.",
+    "phase5_milestone3_head": "0aa361ad2c8dfc278c7c0fde8afe9f6dba167b29"
   },
   "latest_transition_id": "T0050",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "791a543bf47f6883b44e8c5f1c008445ea634fac",
+  "acceptance_candidate_head": "0aa361ad2c8dfc278c7c0fde8afe9f6dba167b29",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD recorded in docs/manifests/Phase3-change-manifest.md. The manifest's complete path/status set describes base..delivery_head (the current Phase-3 PR HEAD); the delivery-only commit that adds the regenerated manifest + rebuilt export packs + this pointer sits one commit above inventory_head and therefore cannot appear inside its own generated manifest. Updated per Phase-3 increment. See docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md (manifest self-reference protocol).",
-  "inventory_head": "791a543bf47f6883b44e8c5f1c008445ea634fac",
+  "inventory_head": "0aa361ad2c8dfc278c7c0fde8afe9f6dba167b29",
   "delivery_head_note": "delivery_head (the current Phase-3 PR HEAD) = inventory_head + one delivery-only commit; its SHA is recorded in the PR #6 body and the Phase-3 report, not self-referenced inside a committed artifact."
 }
