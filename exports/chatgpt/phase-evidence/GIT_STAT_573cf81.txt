@@ -1,4 +1,0 @@
-commit 573cf814d0ac452591ed9fc93599036eec19ac00
-Date:   Fri Aug 14 03:38:27 2026 +0300
-
-    Phase 4 (delivery_head): post-merge pointer, complete staged manifest, rebuilt packs and report-embedded manifest

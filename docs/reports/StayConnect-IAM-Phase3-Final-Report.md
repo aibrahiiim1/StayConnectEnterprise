@@ -596,8 +596,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `312c555`
-- **Provenance (generation HEAD = inventory_head):** `312c5559c82c20eed6fa91e92b5de94592499ba3`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `c90faf7`
+- **Provenance (generation HEAD = inventory_head):** `c90faf7fac6d0934dc2ed1d138a982544ac15626`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `master`
 - **Remote branch:** `origin/master`
 - **Changed files:** 430
@@ -880,15 +880,15 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `docs/evidence/StayConnect-IAM-Phase3-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 increment 3 coordinated pmsd rewrite (inventory_head): assignment scoping + typed secret/revision + atomic generation + axis CAS + real injectable FIAS adapter + write chokepoint + bounded typed events + PG16 integration + software CI; gate 121/121, race-green |
 | `docs/evidence/phase4/npm-audit-full.json` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
 | `docs/evidence/phase4/npm-audit-production.json` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
-| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 (delivery_head): post-merge pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049) |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 (delivery_head): post-merge pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049) |
 | `docs/reports/StayConnect-IAM-Phase4-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 closure: record the merge of PR #12 into master (D20 / T0048) |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049) |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049) |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_312c555.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
+| `exports/chatgpt/phase-evidence/GIT_STAT_c90faf7.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049) |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049) |
@@ -1313,15 +1313,15 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../StayConnect-IAM-Phase3-Schema-Gap-Audit.md     |  109 +
  docs/evidence/phase4/npm-audit-full.json           |   22 +
  docs/evidence/phase4/npm-audit-production.json     |   22 +
- docs/manifests/Phase3-change-manifest.md           | 1255 ++++++++
+ docs/manifests/Phase3-change-manifest.md           | 1259 ++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2062 +++++++++++++
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2066 +++++++++++++
  .../reports/StayConnect-IAM-Phase4-Final-Report.md |  159 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 303307 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 113510 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42155 bytes
- .../chatgpt/phase-evidence/GIT_STAT_312c555.txt    |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 303406 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 113509 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42152 bytes
  .../chatgpt/phase-evidence/GIT_STAT_9a1f356.txt    |    4 -
+ .../chatgpt/phase-evidence/GIT_STAT_c90faf7.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   16 +-
  .../phase-evidence/Phase2-change-manifest.md       |   13 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -1339,7 +1339,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      | 1255 ++++++++
+ .../Phase3-change-manifest.md                      | 1259 ++++++++
  .../stayconnectenterprise/SYSTEM_OVERVIEW.md       |    2 +-
  .../StayConnect-IAM-Handoff.md                     |   25 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   26 +-
@@ -1386,7 +1386,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  governance/transitions/T0046.json                  |   82 +
  governance/transitions/T0047.json                  |   55 +
  governance/transitions/T0048.json                  |   85 +
- governance/transitions/T0049.json                  |   99 +
+ governance/transitions/T0049.json                  |   93 +
  hotel-admin/app/(app)/checkout-grace/page.tsx      |   19 +
  hotel-admin/app/(app)/financial-health/page.tsx    |   10 +
  hotel-admin/app/(app)/financial-recovery/page.tsx  |   21 +
@@ -1470,7 +1470,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  tools/validate-state-parity-selftest.sh            |  121 +
  tools/validate-state-parity.py                     |  235 ++
  tools/validate-transition-times.sh                 |   86 +
- 430 files changed, 91212 insertions(+), 2244 deletions(-)
+ 430 files changed, 91218 insertions(+), 2244 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -1478,8 +1478,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_312c555.txt
 D  exports/chatgpt/phase-evidence/GIT_STAT_573cf81.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_c90faf7.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -1491,7 +1491,7 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 312c555 Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049)
+HISTORICAL: c90faf7 Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049)
 HISTORICAL: 573cf81 Phase 4 (delivery_head): post-merge pointer, complete staged manifest, rebuilt packs and report-embedded manifest
 HISTORICAL: d04044a Phase 4 closure: record the merge of PR #12 into master (D20 / T0048)
 HISTORICAL: 210154b Merge PR #12: Phase 4 (Financial Execution Layer) â€” Product-Owner ACCEPTED_AND_CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity (D19/T0044)
