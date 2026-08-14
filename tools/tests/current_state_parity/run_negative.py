@@ -29,6 +29,11 @@ COPY = [
     "governance/decision-register.json",
     "docs/evidence/Phase3-Final-Live-Acceptance-Record.md",
     "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "docs/architecture/StayConnect-IAM-Phase1A-Plan.md",
+    "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
+    "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+    "exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md",
     "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
     "docs/reports/StayConnect-IAM-Phase3-Final-Report.md",
     "docs/context/StayConnect-IAM-Handoff.md",
@@ -64,8 +69,17 @@ def sandbox():
             continue
         for ev in doc.get("evidence_files") or []:
             ev = str(ev).strip()
-            if ev and not ev.endswith("/") and ev not in rels:
-                rels.append(ev)
+            if not ev or ev.endswith("/"):
+                continue
+            # A receipt may cite a migration's two halves compactly as `...{up,down}.sql`. The validator
+            # expands that; so must the sandbox, or the baseline fails because the fixture copied a
+            # filename that never existed -- a fixture defect reported as a repository defect.
+            a, b = ev.find("{"), ev.find("}")
+            names = ([ev[:a] + part + ev[b + 1:] for part in ev[a + 1:b].split(",")]
+                     if 0 <= a < b else [ev])
+            for one in names:
+                if one not in rels:
+                    rels.append(one)
 
     for rel in rels:
         src = os.path.join(ROOT, rel)
@@ -291,6 +305,75 @@ def _(d):
     patch_facts(d, "accepted_runtime_binaries_head", "0" * 40)
 
 
+# ---- phase status: the contradiction that shipped inside one file ------------------------------------------
+
+@case("a started phase is still called NOT_STARTED in the state narrative", "phase-status-parity")
+def _(d):
+    # Exactly what shipped after PR #11: phases.4 recorded as PLANNING while current_maturity still ended
+    # "Phase 4 remains NOT_STARTED and unauthorized". Both sentences were written in the same round.
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    doc["current_maturity"] = doc["current_maturity"] + " Phase 4 remains NOT_STARTED and unauthorized."
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("a started phase is called unauthorized in a blocker", "phase-status-parity")
+def _(d):
+    # The SECOND instance, which the first (broken) version of the rule missed entirely.
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    doc["blockers"] = list(doc.get("blockers") or []) + ["Phase 4 is not authorized."]
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+# ---- authorization model: allowed and prohibited must agree ------------------------------------------------
+
+def _patch_list(d, key, value, front=True):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    lst = list(doc.get(key) or [])
+    lst.insert(0, value) if front else lst.append(value)
+    doc[key] = lst
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("the Posting Engine is authorized and prohibited at the same time", "authorization-model-parity")
+def _(d):
+    # The exact contradiction that shipped: allowed_actions authorized the Phase-4 Posting Engine while
+    # prohibited_actions, written for Phase 3, still forbade it by name.
+    _patch_list(d, "prohibited_actions",
+                "Any PMS financial posting, FIAS PS transaction, Posting Engine, posting outbox/worker, "
+                "charge retry, financial UNKNOWN handling")
+
+
+@case("an unauthorized future phase appears in allowed_actions", "authorization-model-parity")
+def _(d):
+    _patch_list(d, "allowed_actions", "Execute the authorized Phase 5 end-to-end")
+
+
+@case("current_phase_plan belongs to a different phase", "authorization-model-parity")
+def _(d):
+    patch_state(d, lambda s: s.replace(
+        '"current_phase_plan": "docs/architecture/StayConnect-IAM-Phase4-Plan.md"',
+        '"current_phase_plan": "docs/architecture/StayConnect-IAM-Phase3-Plan.md"', 1))
+
+
+@case("current_state_facts.phase disagrees with current_phase", "authorization-model-parity")
+def _(d):
+    patch_facts(d, "phase", "3")
+
+
+@case("the phase-4 authorization cites the wrong decision", "authorization-model-parity")
+def _(d):
+    patch_facts(d, "phase4_decision", "D99")
+
+
+@case("a next-step demands an authorization that already exists", "authorization-model-parity")
+def _(d):
+    patch_facts(d, "next_step",
+                "Phase 4 requires a separate explicit Product-Owner authorization before implementation.")
+
+
 @case("a transition receipt cites evidence that is not in the repository", "evidence-reference")
 def _(d):
     # The sandbox is a copy, so "not tracked in git" is asserted against the REAL repo index; citing a path
@@ -299,6 +382,160 @@ def _(d):
     doc = json.load(io.open(p, encoding="utf-8"))
     doc["evidence_files"].append("docs/evidence/this-file-was-never-committed.md")
     io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+# ---- the closure-round false passes (D19/T0044) -------------------------------------------------------------
+#
+# Every case below ACTUALLY SHIPPED through a green Project Governance gate on 581daa05: the receipt said the
+# phase was closed, the phases map said IN_PROGRESS, and four current surfaces still narrated an unfinished
+# phase. The gate passed because no rule compared a receipt to the phases map, and no rule made "unfinished"
+# wrong RELATIVE TO A RECORDED STATUS.
+
+@case("the latest transition closed the phase while the phases map still says IN_PROGRESS",
+      "transition-phase-coherence")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    if doc["phases"]["4"]["status"] == "IN_PROGRESS":
+        raise AssertionError("mutation changed nothing: phases.4 is already IN_PROGRESS")
+    doc["phases"]["4"]["status"] = "IN_PROGRESS"
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("a closed phase's plan still says it is NOT accepted and NOT closed", "accepted-phase-semantics")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+               "## Status\n\nPhase 4 is NOT accepted and NOT closed - that decision is the Product Owner's.")
+
+
+@case("a closed phase's plan still carries the bare 'Not accepted, not closed' headline",
+      "accepted-phase-semantics")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+               "**Not accepted, not closed.** Every Phase-4 flag is OFF and no real financial traffic has "
+               "occurred.")
+
+
+@case("a current surface says a closed phase remains in progress", "accepted-phase-semantics")
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "## Current position\n\nPhase 4 remains IN_PROGRESS on branch phase/4-financial-execution; "
+               "implementation continues under D18/T0029.")
+
+
+@case("a current surface still awaits Product-Owner acceptance of a closed phase",
+      "accepted-phase-semantics")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase1A-Plan.md",
+               "- **Current position: awaiting Product-Owner acceptance of Phase 1A**, then Phase 1B "
+               "planning under separate authorization.")
+
+
+@case("allowed_actions still authorizes executing a phase that is closed", "accepted-phase-semantics")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    doc["allowed_actions"] = [
+        "Execute the authorized Phase 4 (Financial Execution Layer) end-to-end as one Phase, DARK at "
+        "NO-FINANCIAL-TRAFFIC maturity, per docs/architecture/StayConnect-IAM-Phase4-Plan.md under D18/T0029."
+    ]
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("the latest transition receipt records no new phase_status at all", "transition-phase-coherence")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    latest = json.load(io.open(p, encoding="utf-8"))["latest_transition_id"]
+    rp = os.path.join(d, "governance/transitions/%s.json" % latest)
+    doc = json.load(io.open(rp, encoding="utf-8"))
+    doc["new_state"].pop("phase_status", None)
+    io.open(rp, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+# ---- STATIC CURRENT-STATE PROSE OUTSIDE THE GENERATED BLOCK -------------------------------------------------
+#
+# Every one of these SHIPPED on b26f24a with all three GitHub workflows green. The generated blocks were
+# correct in each file; the hand-written prose around them was two to four phases stale, and no rule read it.
+# These are the verbatim sentences, reintroduced.
+
+@case("START-HERE calls the financial posting engine a future component", "static-current-prose")
+def _(d):
+    append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+               "- **PMS integration:** FIAS connector is **lookup-only today**; the financial **posting "
+               "engine is a future component** (see phase status).")
+
+
+@case("the Phase-4 plan presents the runtime as greenfield / nonexistent", "static-current-prose")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+               "## 3. What does not exist - the Phase-4 build\n\n**All seven financial tables have zero Go "
+               "references.** The execution runtime is greenfield:")
+
+
+@case("the Handoff restates a superseded phase as CURRENT outside the generated block",
+      "static-current-prose")
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "**CURRENT (see the generated block): Phase 2 (Commercial Packages) is authorized under "
+               "D12/T0012, implemented and live-dark deployed.**")
+
+
+@case("the Phase-0 contract carries a stale next authorized activity", "static-current-prose")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase0-Contract.md",
+               "| Next authorized activity | **Product-Owner acceptance of Phase 1A**, then **Phase 1B "
+               "planning under separate authorization**. |")
+
+
+@case("a plan says Phase 1B planning is the current activity", "static-current-prose")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase1B-Plan.md",
+               "Phase 1A is accepted and closed. Phase 1B planning is the current activity. All status "
+               "carriers corrected accordingly.")
+
+
+@case("a surface presents a CLOSED phase as awaiting acceptance", "static-current-prose")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase1A-Plan.md",
+               "The project is awaiting Product-Owner acceptance of Phase 1A before anything else may "
+               "proceed.")
+
+
+
+# ---- STRUCTURAL: a section claiming to carry mutable current state ------------------------------------------
+#
+# These are the sections that were STILL in 00-START-HERE on a2a17dbe with all three workflows green, below a
+# generated block that correctly said Phase 4 was accepted and closed. Rule 11 refuses known stale sentences;
+# it could not refuse a HEADING that announces itself as the current plan, because the sentence under it can
+# be reworded every phase while the claim survives. Reproduced verbatim.
+
+@case("a section heading claims to be the CURRENT APPROVED PLAN", "static-current-prose")
+def _(d):
+    append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+               "## 8. Current approved plan (Phase 1A)\n\nBuild the entire clean-slate IAM schema into an "
+               "isolated iam_v2 PostgreSQL schema inside the existing site database.")
+
+
+@case("a section heading claims to be the NEXT AUTHORIZED ACTION", "static-current-prose")
+def _(d):
+    append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+               "## 9. Next authorized action\n\nThe single next authorized action is complete Phase 1B "
+               "execution and live-dark verification.")
+
+
+@case("a section claims Phase 1B is authorized and IN_PROGRESS", "accepted-phase-semantics")
+def _(d):
+    append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+               "## Status\n\nPhase 1B implementation is Product-Owner authorized and IN_PROGRESS (decision "
+               "D10, 2026-07-17; W0 complete).")
+
+
+@case("a section heading claims to carry the CURRENT PROJECT PHASE without deferring",
+      "static-current-prose")
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "## Current project phase & status\n\nThe project is in Phase 1B, executing Gate P on branch "
+               "phase/1b-dark-auth.")
 
 
 def main():
@@ -332,6 +569,22 @@ def main():
             shutil.rmtree(d, ignore_errors=True)
 
     print("\n== history must still be allowed to be history ==")
+    # The same pre-build sentences the static-prose rule refuses, LABELLED. If this ever fails, the rule has
+    # stopped telling a record from a claim, and the Phase-4 plan could no longer keep its own history.
+    d = sandbox()
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+               "## HISTORICAL, as at authorization time (2026-08-11)\n\nAll seven financial tables had "
+               "zero Go references and the execution runtime was greenfield. This is NOT the current state.")
+    rc, out = run(d)
+    if rc == 0:
+        print("  PASS  labelled pre-build history is not treated as a current claim")
+        passed += 1
+    else:
+        print("  FAIL  labelled pre-build history was refused -> %s"
+              % sorted({c.get("rule") for c in out.get("checks", []) if c.get("status") == "FAIL"}))
+        failed += 1
+    shutil.rmtree(d, ignore_errors=True)
+
     d = sandbox()
     append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
                "At Phase-1B acceptance the schema was iam_v2 49 tables / 0 rows and migration 0010 was "

@@ -32,10 +32,29 @@ the last active revision's bundle on hand ([EDGE_NETWORKING.md](EDGE_NETWORKING.
 A backup agent (cron/systemd timer on the appliance) runs:
 
 ```sh
-OUT=/var/backups/stayconnect/site-$(date +%Y%m%d-%H%M%S).dump
-pg_dump -Fc -U stayconnect_site stayconnect_site > "$OUT"
-tar czf "${OUT%.dump}-etc.tgz" /etc/stayconnect
+deploy/scripts/stayconnect-site-backup.sh
 ```
+
+which is the two commands this section always described, implemented, plus the one exclusion that only
+matters once Phase 4 exists:
+
+```sh
+OUT=/var/backups/stayconnect/site-$(date +%Y%m%d-%H%M%S).dump
+pg_dump -Fc -U stayconnect_site stayconnect_site -f "$OUT"
+tar czf "${OUT%.dump}-etc.tgz" --exclude=financial-restore-generation.json /etc/stayconnect
+```
+
+> **The financial restore marker is deliberately NOT backed up.**
+> `/etc/stayconnect/financial-restore-generation.json` counts how many times THIS appliance has been
+> restored. Its whole purpose is to survive a database restore and keep counting forward, so that a restored
+> database can be recognised as older than the appliance knows it should be. An `/etc` archive that
+> contained it would roll it back on restore, and the restored database would then match it perfectly — the
+> rollback detector would go quiet at exactly the moment it is needed. The backup script verifies the
+> exclusion rather than trusting the flag, and refuses to produce an archive that contains it.
+>
+> Migration 0025 also detects the opposite direction. If an `/etc` archive taken before this change is ever
+> restored, the marker will be BEHIND the database, the two records will disagree about this appliance's
+> restore history, and money movement is held until an operator establishes which is right.
 
 Every run is recorded in the site DB's **`backup_records`** table
 (`status running→ok/failed`, `kind scheduled|manual|pre_migration`, path,
@@ -56,14 +75,43 @@ site whose backups are failing. Manual runs: `POST /edge/v1/backups`.
 
 ### Restore (site)
 
+**Once Phase 4 is deployed, use the supported tool rather than the raw commands:**
+
 ```sh
-systemctl stop stayconnect-edged stayconnect-acctd stayconnect-portald stayconnect-scd
+deploy/scripts/stayconnect-financial-restore.sh   --dump     /var/backups/stayconnect/site-<stamp>.dump   --manifest /var/backups/stayconnect/site-<stamp>.manifest.json   --tenant   <tenant-uuid> --site <site-uuid>
+```
+
+It does what the raw commands below do, plus the three things that make a financial restore trustworthy:
+
+1. **Verifies the manifest against this appliance's pinned registry root anchor**
+   (`/etc/stayconnect/assignment-registry-root.pub`, the same anchor the assignment registry uses). There is
+   no `--pubkey` option, and passing one is an error: a verification key supplied by whoever runs the
+   restore proves only that they have a key.
+2. **Proves every financial writer is stopped** — `stayconnect-edged`, `-pmsd`, `-acctd`, `-portald`,
+   `-scd` — by checking `systemctl is-active` after stopping each one, and aborts if any cannot be proven
+   stopped. It does not swallow a failed stop.
+3. **Advances the management marker BEFORE restoring**, so that even a crash mid-restore leaves the
+   appliance able to detect that its database is older than it should be, and then records the restore and
+   enters `FINANCIAL_RECOVERY_MODE`.
+
+After it completes, guest internet access runs normally and **money movement is held** until an operator
+reconciles every item that was in flight when the backup was taken. Nothing is replayed automatically.
+
+The underlying commands, for reference and for a pre-Phase-4 appliance:
+
+```sh
+systemctl stop stayconnect-edged stayconnect-pmsd stayconnect-acctd stayconnect-portald stayconnect-scd
 dropdb  -U postgres stayconnect_site
 createdb -U postgres -O stayconnect_site stayconnect_site
 pg_restore -U stayconnect_site -d stayconnect_site /var/backups/stayconnect/site-<stamp>.dump
-tar xzf site-<stamp>-etc.tgz -C /            # identity + license + env
-systemctl start stayconnect-scd stayconnect-portald stayconnect-acctd stayconnect-edged
+tar xzf site-<stamp>-etc.tgz -C /            # identity + license + env; contains NO financial marker
+systemctl start stayconnect-scd stayconnect-portald stayconnect-acctd stayconnect-pmsd stayconnect-edged
 ```
+
+> Restoring the `/etc` archive never rewrites `financial-restore-generation.json`, because the backup
+> excludes it. If an older archive that predates that exclusion is restored, the marker ends up BEHIND the
+> database; migration 0025 detects the disagreement and holds money movement rather than assuming which
+> record is right.
 
 Post-restore checks: scd health; voucher login from the netns client; license
 evaluation (`GET /edge/v1/license`) — note the license store's high-water mark

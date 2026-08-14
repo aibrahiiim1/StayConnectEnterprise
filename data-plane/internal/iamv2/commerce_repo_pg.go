@@ -396,28 +396,20 @@ func (t *pgCommerceTx) InsertSettlement(ctx context.Context, tenantID, siteID, p
 // the read and the transition — the same lock the controlled operation takes, taken in the same order.
 func (t *pgCommerceTx) TerminateLiveEntitlementForSubject(ctx context.Context, tenantID, siteID string, subj CommerceSubject) (string, error) {
 	v, a, p := subjectCols(subj)
-	var id string
+	// Locking the live entitlement requires UPDATE privilege, which is exactly what the restricted runtime
+	// role must not hold -- so the SELECT ... FOR UPDATE and the termination both live inside the controlled
+	// function. A NULL result means the subject held nothing, which is ordinary, not an error.
+	var id *string
 	err := t.tx.QueryRow(ctx,
-		`SELECT id::text FROM iam_v2.entitlements
-		  WHERE tenant_id=$1 AND site_id=$2 AND status IN ('PENDING','ACTIVE','SUSPENDED')
-		    AND ( ($3::uuid IS NOT NULL AND voucher_id=$3::uuid)
-		       OR ($4::uuid IS NOT NULL AND guest_account_id=$4::uuid)
-		       OR ($5::uuid IS NOT NULL AND guest_principal_id=$5::uuid) )
-		  ORDER BY activated_at DESC NULLS LAST, id
-		  LIMIT 1
-		  FOR UPDATE`,
+		`SELECT iam_v2.p4_terminate_live_entitlement_for_subject($1,$2,$3::uuid,$4::uuid,$5::uuid)::text`,
 		tenantID, siteID, v, a, p).Scan(&id)
-	if err == pgx.ErrNoRows {
-		return "", nil // no live entitlement to supersede
-	}
 	if err != nil {
 		return "", err
 	}
-	if _, err := t.tx.Exec(ctx,
-		`SELECT iam_v2.apply_entitlement_transition($1::uuid, 'TERMINATED', now(), 'SUPERSEDED')`, id); err != nil {
-		return "", err
+	if id == nil {
+		return "", nil
 	}
-	return id, nil
+	return *id, nil
 }
 
 func (t *pgCommerceTx) InsertEntitlement(ctx context.Context, e EntitlementSpec) (string, error) {
@@ -427,23 +419,100 @@ func (t *pgCommerceTx) InsertEntitlement(ctx context.Context, e EntitlementSpec)
 	if e.SupersedesID != "" {
 		supersedes = &e.SupersedesID
 	}
-	endMode := e.EndMode
-	if endMode == "" {
-		endMode = "MANUAL_END"
-	}
+	// The row and its opening ACTIVE transition are created together by p4_insert_entitlement.
+	//
+	// This is still ONE writer -- this method -- but its statement is now a controlled function rather than
+	// direct DML. That is what lets a restricted runtime role complete a paid grant while holding no INSERT
+	// or UPDATE privilege on entitlements at all: it can call the sanctioned operation and nothing else.
+	// It also keeps the row and its transition inseparable, which is the T0037 defect made structural.
 	var id string
 	err := t.tx.QueryRow(ctx,
-		`INSERT INTO iam_v2.entitlements
-		   (tenant_id, site_id, voucher_id, guest_account_id, guest_principal_id, purchase_id,
-		    policy_snapshot, service_plan_revision_id, package_revision_id, time_accounting_mode,
-		    end_mode, window_ends_at, status, supersedes_entitlement_id, activated_at)
-		 VALUES ($1,$2,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,'ACTIVE',$13::uuid, now())
-		 RETURNING id::text`,
-		e.TenantID, e.SiteID, v, a, p, e.PurchaseID, snap, e.ServicePlanRevID, e.PackageRevID, e.TimeAccountingMode, endMode, e.WindowEndsAt, supersedes).Scan(&id)
+		`SELECT iam_v2.p4_insert_entitlement($1,$2,$3::uuid,$4::uuid,$5::uuid,$6,$7,$8,$9,$10,$11,$12,$13::uuid)::text`,
+		e.TenantID, e.SiteID, v, a, p, e.PurchaseID, snap, e.ServicePlanRevID, e.PackageRevID,
+		e.TimeAccountingMode, e.EndMode, e.WindowEndsAt, supersedes).Scan(&id)
 	return id, err
 }
 
+// GrantQuotedEntitlement performs the FREE grant through the shared kernel. There is deliberately no
+// parameter for a subject, a package revision or a policy snapshot: the operation re-resolves all of it
+// from the purchase's own pinned quote and auth context, so a caller cannot substitute anyone else's
+// evidence -- exactly as the paid entry point cannot.
+func (t *pgCommerceTx) GrantQuotedEntitlement(ctx context.Context, tenantID, siteID, purchaseID string) (string, string, error) {
+	var eid string
+	var already bool
+	var superseded *string
+	err := t.tx.QueryRow(ctx,
+		`SELECT entitlement_id::text, already_granted, superseded::text
+		   FROM iam_v2.p4_grant_quoted_entitlement($1::uuid,$2::uuid,$3::uuid)`,
+		tenantID, siteID, purchaseID).Scan(&eid, &already, &superseded)
+	if err != nil {
+		return "", "", err
+	}
+	if superseded == nil {
+		return eid, "", nil
+	}
+	return eid, *superseded, nil
+}
+
 func (t *pgCommerceTx) MarkPurchaseGranted(ctx context.Context, purchaseID string) error {
-	_, err := t.tx.Exec(ctx, `UPDATE iam_v2.purchases SET state='GRANTED' WHERE id=$1`, purchaseID)
+	// GRANTED is reached through the controlled function, which locks the row and refuses any origin state
+	// the approved machine does not permit. A raw UPDATE could drive a CANCELLED or FAILED purchase to
+	// GRANTED, and nothing in the schema would have objected.
+	_, err := t.tx.Exec(ctx, `SELECT iam_v2.p4_mark_purchase_granted($1)`, purchaseID)
 	return err
+}
+
+// LoadSettledPurchaseGrant resolves a settled purchase's pinned grant evidence.
+//
+// Every value comes from a row the purchase already references: the package revision from the purchase, the
+// grant snapshot and subject from the quote and auth context it was created against, and the settlement
+// status from the settlement that owns it. There is no parameter through which a caller could substitute a
+// different package, price or subject -- which is what makes the paid grant path as tamper-proof as the
+// free one.
+func (t *pgCommerceTx) LoadSettledPurchaseGrant(ctx context.Context, tenantID, siteID, purchaseID string) (SettledPurchaseGrant, error) {
+	var g SettledPurchaseGrant
+	var snap []byte
+	var voucher, account, principal, existing *string
+	var method string
+	err := t.tx.QueryRow(ctx, `
+SELECT p.id::text, p.state, p.package_revision_id::text,
+       se.status, se.method,
+       q.grant_snapshot,
+       ac.method,
+       ac.voucher_id::text, ac.guest_account_id::text, ac.guest_principal_id::text,
+       (SELECT e.id::text FROM iam_v2.entitlements e WHERE e.purchase_id = p.id LIMIT 1)
+  FROM iam_v2.purchases p
+  JOIN iam_v2.settlements se ON se.tenant_id = p.tenant_id AND se.site_id = p.site_id AND se.purchase_id = p.id
+  JOIN iam_v2.offer_quotes q ON q.tenant_id = p.tenant_id AND q.site_id = p.site_id AND q.id = p.offer_quote_id
+  JOIN iam_v2.auth_contexts ac ON ac.tenant_id = p.tenant_id AND ac.site_id = p.site_id AND ac.id = q.auth_context_id
+ WHERE p.tenant_id = $1 AND p.site_id = $2 AND p.id = $3`,
+		tenantID, siteID, purchaseID).
+		Scan(&g.PurchaseID, &g.PurchaseState, &g.PackageRevisionID, &g.SettlementStatus, &g.SettlementMethod,
+			&snap, &method, &voucher, &account, &principal, &existing)
+	if err == pgx.ErrNoRows {
+		return SettledPurchaseGrant{}, &Error{Code: ErrSubjectResolve, Msg: "no such settled purchase in this tenant/site"}
+	}
+	if err != nil {
+		return SettledPurchaseGrant{}, err
+	}
+	parsed, perr := ParseGrantSnapshot(snap)
+	if perr != nil {
+		return SettledPurchaseGrant{}, &Error{Code: ErrRepo, Msg: "grant snapshot is unreadable"}
+	}
+	g.GrantSnapshot = parsed
+	g.Subject = CommerceSubject{Method: Method(method)}
+	switch {
+	case voucher != nil:
+		g.Subject.Kind, g.Subject.VoucherID = SubjectVoucher, *voucher
+	case account != nil:
+		g.Subject.Kind, g.Subject.AccountID = SubjectAccount, *account
+	case principal != nil:
+		g.Subject.Kind, g.Subject.PrincipalID = SubjectPrincipal, *principal
+	default:
+		return SettledPurchaseGrant{}, &Error{Code: ErrSubjectResolve, Msg: "purchase has no grantable subject"}
+	}
+	if existing != nil {
+		g.ExistingEntitlementID = *existing
+	}
+	return g, nil
 }

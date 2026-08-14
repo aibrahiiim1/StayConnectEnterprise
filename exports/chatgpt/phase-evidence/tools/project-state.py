@@ -174,7 +174,14 @@ def cmd_validate(deep=True, manifest_equality=True):
                 fail("stale-state contradiction: next action is Product-Owner acceptance but allowed_actions still say execute Phase 1B")
     # D: after T0010, no current-state field may present the stale authoritative HEAD or "Production unchanged/untouched".
     if str(st.get("latest_transition_id", "")) >= "T0010":
-        cur_blob = " ".join([act, st.get("current_maturity", ""), p1b_mat, st.get("service_routing_state", ""),
+        # EVERY phase's maturity string is a current-state field too. This list used to name only 1B's, so a
+        # stale HEAD or a "Production unchanged" claim sitting in phases["3"].maturity -- or 1A's, or 4's --
+        # passed the rule untouched. The adversarial suite caught it the moment a correction round moved the
+        # last occurrence of that sentence out of current_maturity and into phases["3"].maturity: mutation
+        # M32 injected the stale HEAD there and NEITHER validator objected.
+        phase_maturities = " ".join(str((v or {}).get("maturity", "")) for v in (st.get("phases") or {}).values())
+        cur_blob = " ".join([act, st.get("current_maturity", ""), p1b_mat, phase_maturities,
+                             st.get("service_routing_state", ""),
                              " ".join(str(x) for x in blockers), " ".join(str(x) for x in allowed), na_txt])
         if "1844da2" in cur_blob:
             fail("stale-state contradiction: stale HEAD 1844da2 present in a current-state field after T0010")
@@ -713,7 +720,7 @@ MROWS = [
  ("StayConnect-IAM-Phase2-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md`","**Acceptance record — PRODUCT-OWNER ACCEPTED_AND_CLOSED at DARK maturity (D13/T0014)**"),
  ("StayConnect-IAM-Phase2-Final-Report.md","`docs/reports/StayConnect-IAM-Phase2-Final-Report.md`","**Authoritative — Phase 2 final report (accepted)**"),
  ("Phase2-change-manifest.md","`docs/manifests/Phase2-change-manifest.md`","**Generated — complete Phase 2 changed-file manifest (base..delivery_head; inventory_head provenance)**"),
- ("StayConnect-IAM-Phase3-Plan.md","`docs/architecture/StayConnect-IAM-Phase3-Plan.md`","**Authoritative — Phase 3 plan (D14/T0015; IMPLEMENTATION IN PROGRESS, DARK)**"),
+ ("StayConnect-IAM-Phase3-Plan.md","`docs/architecture/StayConnect-IAM-Phase3-Plan.md`","**Authoritative — Phase 3 plan (D14/T0015; ACCEPTED_AND_CLOSED at DARK maturity, D16/T0024; merged D17/T0025)**"),
  ("Phase3-Privilege-Matrix.md","`docs/architecture/Phase3-Privilege-Matrix.md`","**Authoritative — Phase 3 privilege matrix (PRODUCTION_IAM_V2_DML: NONE; DARK)**"),
  ("Phase3-change-manifest.md","`docs/manifests/Phase3-change-manifest.md`","**Generated — complete Phase 3 changed-file manifest (base..delivery_head; inventory_head provenance)**"),
  ("StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md","`docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`","**Authoritative (acceptance record)**"),

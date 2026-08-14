@@ -1,0 +1,85 @@
+{
+  "transition_id": "T0032",
+  "seq": 32,
+  "timestamp": "2026-08-12T07:40:00Z",
+  "record_type": "PHASE_4_CONSTRUCTION_BOUNDARY_AND_CONTRACT_CORRECT_REVERSAL_LEDGER",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030 and T0031 are PRESERVED unchanged. This receipt records a further correction found inside the same authorization; migration 0012 is corrected ADDITIVELY by 0013 rather than rewritten.",
+  "findings_absorbed": [
+    {
+      "id": "F-1",
+      "area": "production financial construction boundary",
+      "what_was_true": "T0031 made every Engine and DarkGuard field unexported, which closed the MUTATION hole. It did not close the CONSTRUCTION hole: NewEngine remained exported and accepted a caller-supplied Config and a caller-supplied Transport, so production code could still have built an independently configured, independently transported financial sender in one struct literal.",
+      "correction": "NewProductionEngine(repo, getenv) is now the ONLY exported constructor and takes neither. Config comes from the fail-closed environment loader; the transport comes from an internal factory which in this build returns nothing, and which REFUSES TO START if transmission is enabled against a build with no transport. The deterministic test seam moved to export_test.go, which the Go toolchain compiles only for this package's own tests, so a production binary does not contain it. The DARK CI check asserts the wrap, the absence of exported fields, the constructor signature, the absence of any other exported constructor taking a Transport, and the presence of the compile-time-only seam."
+    },
+    {
+      "id": "F-2",
+      "area": "CREATE_REVERSAL vs programmatic reversal",
+      "what_was_true": "Migration 0012 read 'programmatic reversal is capability=false' and refused REVERSAL posting rows outright. That over-constrained the contract and made a required workflow unimplementable. The FINAL Phase-0 Contract states BOTH halves: section 9a rule 5 and Gate 3B make the EXECUTABLE reversal unsupported in v1 with PT=C and negative TA unverified and never transmissible; sections 15 and 16 require CREATE_REVERSAL to produce 'a new ledger row referencing the original' and state that 'reversal is a new REVERSAL row'. 0012 forbade the row as well as the sender, which would also have removed the audited record that Gate 3B requires in exchange for deferring the capability.",
+      "correction": "Migration 0013 separates them. The passive ledger row is permitted and is written ONLY by the audited CREATE_REVERSAL review action, referencing an in-scope original CHARGE, in the same currency and exponent, with a POSITIVE amount (direction is carried by posting_type, never by a negative TA), bounded so cumulative reversals can never exceed the charge. The row is structurally inert: p4_reversal_never_queued and p4_reversal_never_attempted make it impossible for it to acquire an outbox row or an attempt, so it can never allocate a P# or produce a byte. No executable reversal sender exists, no PT=C appears anywhere, and no negative TA is ever stored. The transmission-protecting gates (freshness, lifecycle, FIAS exponent) are correctly not applied to a record that never transmits, so a correction can still be recorded while the interface is down -- which is when corrections happen."
+    }
+  ],
+  "delivered": [
+    "data-plane/migrations/0013_phase4_reversal_ledger.{up,down}.sql",
+    "data-plane/internal/posting/engine.go - NewProductionEngine as the sole exported constructor, plus the internal productionTransport factory that fails closed",
+    "data-plane/internal/posting/export_test.go - the compile-time test-only seam",
+    "record_posting_review_action gains the reversal amount argument and the CREATE_REVERSAL applicability matrix; the superseded six-argument signature is dropped so exactly one review writer exists"
+  ],
+  "verification": {
+    "migration_and_db_gate": "iam_v2_scratch/phase4_0011_financial.sh - 112 PASS / 0 FAIL, including 0013 UP/DOWN/DOWN-UP and that 0013 DOWN restores the 0012 posture.",
+    "pre_0011_invariants": "31/31 on the pre-0011 chain and 31/31 after 0011+0012+0013 on a clean rebuild.",
+    "financial_core_unit": "76 PASS / 0 FAIL",
+    "financial_core_integration": "51 PASS / 0 FAIL against disposable PostgreSQL 16",
+    "dark_static_assertion": "PASS (7/7), now including the construction boundary and the reversal safety model",
+    "authoritative_ci": "see phase4_authoritative_ci_* in governance/project-state.json for the run recorded against this HEAD"
+  },
+  "not_delivered_in_this_milestone": [
+    "Item 2: the Manual Review OPERATOR WORKFLOW (financial-review permission, authenticated actor binding, password step-up, HTTP surface) is NOT implemented. Only the database decision boundary exists.",
+    "Item 3: Payments and Settlement execution are NOT implemented.",
+    "Item 4: FINANCIAL_RECOVERY_MODE is NOT implemented.",
+    "Item 5: the operator UI and observability are NOT implemented.",
+    "Item 6: the Posting engine is NOT wired into a runtime service owner.",
+    "Item 7: Phase-4 least-privilege runtime grants are NOT designed or applied.",
+    "Item 9: the controlled LIVE-DARK deployment has NOT been performed.",
+    "Item 10: reboot and rollback acceptance for a Phase-4 candidate has NOT been performed."
+  ],
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only."
+  },
+  "no_financial_traffic": {
+    "real_pms_ps_transmitted": false,
+    "real_pa_accepted": false,
+    "guest_folio_debited": false,
+    "payment_provider_charge_or_refund": false,
+    "programmatic_pms_reversal": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "deployment_performed": false
+  },
+  "evidence_files": [
+    "data-plane/migrations/0013_phase4_reversal_ledger.up.sql",
+    "data-plane/migrations/0013_phase4_reversal_ledger.down.sql",
+    "data-plane/internal/posting/export_test.go",
+    "scripts/ci/phase4-dark-check.sh",
+    "docs/architecture/Phase4-Financial-Schema-Gap-Audit.md",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. Phase 4 remains IN_PROGRESS at DARK maturity with the majority of the operator-facing, payment, recovery, runtime-integration and deployment scope outstanding.",
+  "next_action": "Implement the Manual Review operator workflow with least-privilege runtime roles, authenticated actor binding and password step-up, then payments, recovery, observability, runtime integration and the controlled DARK deployment."
+}

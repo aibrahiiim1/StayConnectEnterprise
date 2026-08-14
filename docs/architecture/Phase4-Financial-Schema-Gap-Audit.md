@@ -1,0 +1,530 @@
+# Phase 4 — Financial Schema-Gap Audit and Financial-Core Verification (machine-grounded)
+
+**Measured, not assumed.** Every statement below was produced by rebuilding the authoritative chain in a
+disposable PostgreSQL 16 container and querying `pg_catalog` / `information_schema`, then by *executing* the
+forbidden writes. Catalog presence alone is never recorded as acceptance evidence.
+
+**Original audit baseline:** branch `phase/4-financial-execution`, commit `3ea775c` (pre-0011 measurement).
+**Revised three times:** after migration 0011 and the financial execution core landed, and again after the migration-0012 hardening pass, which CORRECTED five rows this document had marked RT-OK too early (see section 11). Sections 1-2
+record the pre-0011 measurement unchanged; sections 3-10 record what closed the gaps and how it was verified.
+**Authorization:** D18 / T0029. **Phase 4 is ACCEPTED AND CLOSED at VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity** (D19 / T0044, 2026-08-13) against software candidate `b94112d8cb0ab63938b60f829ddd465c14491f97` and live evidence T0043. Six limitations are accepted and NOT promoted to PASS — see `docs/acceptance/StayConnect-IAM-Phase4-Live-Dark-Acceptance.md`.
+
+---
+
+## 1. Reproducible pre-0011 chain
+
+```
+postgres:16-alpine   (disposable, loopback 127.0.0.1:55432, db iam_scratch)
+  public   0001_edge_init, 0002_edge_networking, 0005_appliance_service_health,
+           0007_auth_throttle_buckets, 0008_otp_hmac_keys, 0009_phase2_commerce
+           (the exact set present in the live ledger — 0003/0004/0006 are NOT applied on the site DB)
+  MG-0     public.guest_networks_tsi_anchor  UNIQUE(tenant_id,site_id,id) CONCURRENTLY
+  iam_v2   mg1_pms_interface_core, mg2_plans_packages, mg3_identities_credentials, mg4_stay_domain,
+           mg5_auth_commerce, mg6_entitlements_devices_sessions, mg7_postings_payments,
+           mg8_resolution_aux, mg9_engine                                            -> 49 tables
+  public   0010_phase3_stay_resolution                                               -> 63 tables
+```
+
+**Result: 63 `iam_v2` tables — identical to Production.** Reproduced twice, deterministically.
+Harness: `iam_v2_scratch/run.sh fresh` + `data-plane/migrations/0010_*.up.sql` + `iam_v2_scratch/seed.sql`.
+
+## 2. Existing enforcement — measured catalog
+
+| Table | Triggers | Key constraints / indexes |
+|---|---|---|
+| `pms_postings` | `ao_postings` → `trg_reject_update_delete`; `charge_gate` → `trg_posting_charge_gate` | UNIQUE `idempotency_key`; UNIQUE `(id,pms_interface_id)`, `(tenant,site,id)`, `(tenant,site,interface,id)`; CHECK `posting_type ∈ {CHARGE,REVERSAL}`; CHECK `posting_reversal_link`; composite FKs to purchases, settlements, folios, stays, revisions, secret generations |
+| `posting_attempts` | `pa_oneway` → `trg_posting_attempt_oneway` | CHECK `outcome ∈ {SENDING,ACKED,UNKNOWN,FAILED}`; CHECK `pa_as_status ∈ {OK,NG,NA,NP,NR,RY,UR}`; UNIQUE `(tenant,site,interface,p_number)`; UNIQUE `(internal_posting_id,attempt_no)` |
+| `posting_attempt_events` | `ao_pa_events` → `trg_reject_update_delete` | FK to attempts |
+| `posting_review_actions` | `ao_review` → `trg_reject_update_delete` | CHECK `action ∈ {CONFIRM_POSTED, CONFIRM_NOT_POSTED_RETRY, CONFIRM_NOT_POSTED_ABANDON, CREATE_REVERSAL, ESCALATE}` |
+| `posting_outbox` | — | partial UNIQUE `outbox_one_active (posting_id) WHERE state IN (QUEUED,IN_FLIGHT,HELD_RECOVERY)`; CHECK `state ∈ {QUEUED,IN_FLIGHT,DONE,HELD_RECOVERY}` |
+| `pms_interface_pnumber_seq` | — | PK `(pms_interface_id)`, `next_p_number bigint NOT NULL DEFAULT 1`, FK to interface |
+| `stays` (financial-relevant) | `p3_stay_lifecycle_guard` | CHECK `posting_only_in_house (posting_allowed=false OR status='IN_HOUSE')`; CHECK `stays_checkedout_needs_boundary` |
+
+`charge_gate` body (measured): rejects a `CHARGE` when the pinned revision's `folio_identity_strategy` is
+`NULL` or `'UNSET'` (`FOLIO_STRATEGY_UNSET`), and when the pinned stay is not `IN_HOUSE` or not
+`posting_allowed` (`POSTING_NOT_ALLOWED`).
+
+## 3. Behavioural proof of the pre-0011 baseline — `iam_v2_scratch/phase4_db_invariants.sh`, **31/31**
+
+Each check performs the forbidden write and asserts rejection, against a freshly rebuilt chain. The suite is
+now run **twice** by the migration gate: once on the pre-0011 chain, and again on a clean rebuild carrying
+0011 — so "0011 weakened nothing" is a measured result rather than a claim. Both runs are **31/31**.
+
+| C-row | Proven behaviourally |
+|---|---|
+| C1 | CHARGE accepted when all pinned objects are in scope; a folio outside the pinned tenant/site/interface is **rejected** |
+| C5 | `UNSET` folio strategy **blocks** CHARGE (`FOLIO_STRATEGY_UNSET`) |
+| C8 | duplicate `attempt_no` for one posting **rejected** |
+| C9 | first `P#` accepted; duplicate `P#` within the same interface **rejected** |
+| C12 | invented PA `AS` status **rejected** |
+| C15 | `SENDING→UNKNOWN` allowed; `UNKNOWN→SENDING` **rejected**; DELETE **rejected** |
+| C16 | attempt-event INSERT accepted; UPDATE and DELETE **rejected** |
+| C17 | `CONFIRM_POSTED` accepted; generic `APPROVE` **rejected** |
+| C19 | review-action UPDATE and DELETE **rejected** |
+| C22 | second ACTIVE outbox row **rejected**; a `DONE` row may coexist |
+| C26 | duplicate `idempotency_key` **rejected** |
+| C32 | `posting_allowed=false` **blocks** CHARGE; a `CHECKED_OUT` stay **blocks** CHARGE |
+| C-AO1 | `pms_postings` UPDATE and DELETE **rejected** |
+| P3-LC | checkout leaving `posting_allowed=true` rejected; checkout without `effective_checkout_at` rejected |
+| GUARDS | every `iam_v2` trigger still ENABLED (0 disabled) — nothing was weakened to make the suite pass |
+
+### 3a. What the C32 database check does and does **not** prove
+
+The C32 row reaches `CHECKED_OUT` with a direct SQL `UPDATE` that satisfies every structural rule
+(`posting_only_in_house`, `stays_checkedout_needs_boundary`, the one-way lifecycle guard). That makes it a
+sound **structural** proof: the stay genuinely is not `IN_HOUSE`, and `charge_gate` genuinely refuses the
+CHARGE.
+
+It is **not** evidence of a trusted Stay-domain transition. Migration 0010 states the separation explicitly:
+the triggers are structural state-machine guards, and the *authorization* boundary — trusted normalized PMS
+event application, or privileged Hotel-Admin reinstatement with RBAC, step-up, reason and immutable audit —
+is a different mechanism that a raw `UPDATE` does not pass through.
+
+The end-to-end half of that claim is therefore proved separately, in
+`TestIntegrationPosting_CheckoutAfterQueueingStopsTheCharge`: a posting is authorized and queued, the stay
+then checks out, and the running engine stops the charge with **no P# consumed, no attempt written and no
+wire bytes produced**.
+
+## 4. The measured DB gaps — and how 0011 closed them
+
+| # | Gap (measured pre-0011) | 0011 |
+|---|---|---|
+| **G1** | `posting_attempts.rn` and `g_number` both `is_nullable=YES`; **0** CHECKs mentioned `g_number` | `attempt_rn_verified`, `attempt_gnumber_verified` (mandatory, non-blank, bounded) plus `attempt_rn_wire_safe`, `attempt_gnumber_wire_safe`, `attempt_pnumber_wire_safe` |
+| **G2** | **0** columns matching `%currenc%` on `pms_interfaces` or `pms_interface_revisions`; the revision `config` jsonb carried no currency key; **0** CHECKs on `pms_postings` mentioned currency | `financial_base_currency` + `financial_base_currency_exponent` on the **immutable** `pms_interface_revisions`, plus the `p4_posting_currency_gate` trigger enforcing exact three-way equality |
+| **G3** | `pms_postings` had **no** status/state column; **0** views named `%posting%` | the DERIVED view `iam_v2.posting_execution_state` |
+| **C21** | no concurrency mechanism of any kind on the review path | `posting_review_state` + `record_posting_review_action()` (advisory lock → row lock → optimistic version → compatibility check) |
+
+**G2 was larger than the Phase-4 Plan assumed.** The contract requires "package currency must equal the
+pinned PMS Interface base currency", but the interface had **no currency to compare against**. Currency
+equality could not be enforced at all until the base currency existed on the revision.
+
+**Where G2 lives, and why.** The currency a property posts in is Tier-2 property configuration pinned for
+the life of a revision — not guest input, not global site state. `pms_interface_revisions` is already fully
+immutable (`imm_pms_rev`), so recording it there makes it historical evidence by construction: financial
+onboarding means publishing a **new revision**, and every posting that pinned an older revision keeps
+pointing at exactly the currency it was authorized under. `NULL` is the un-onboarded state and is
+fail-closed. Nothing is defaulted, inferred or hardcoded.
+
+## 5. G3 is a read model, and what it is actually for
+
+`pms_postings` is append-only, and a posting's true state lives in its attempt ledger. A mutable `status`
+column would create a second writer for the same fact and a new way for the two to disagree. The projection
+is therefore **derived**: `execution_state` comes from the **single highest-numbered attempt**, which is
+what makes its precedence unambiguous — there is never a tie to break and never a rule about which of two
+states wins. Anything that cannot be derived that way is exposed as its **own** column (`outbox_state`,
+`terminal_review_action`, `has_unknown_history`, `awaiting_manual_review`) rather than folded into a
+composite.
+
+There is deliberately **no generic `REVIEWED` state**. "Reviewed" would have to mean at least four different
+financial situations — confirmed posted, confirmed not posted and abandoned, confirmed not posted and
+requeued, reversal created — and an operator cannot act on a label that does not say which. The committed
+terminal decision is exposed verbatim instead.
+
+**Correction to the previous revision of this audit.** G3 was attributed to **C3**. That was wrong. C3 is
+"Room Number is evidence, never identity", and it was already satisfied before 0011 — there is no unique
+index, key or lookup path on `rn`, and 0011 adds none. G3 serves the requirements that need a *state* an
+operator or a metric can read:
+
+| Requirement | What G3 provides |
+|---|---|
+| C13 | `transmitted PS without PA ⇒ UNKNOWN` is readable as a state, not reconstructed per query |
+| C20 | the retry decision and the attempt it authorized (`terminal_review_action`, `retry_authorized_attempt_no`) |
+| C30 | the recovery posture (`outbox_state = HELD_RECOVERY`) |
+| C33 | the operator/metrics surface: queue depth, oldest age, UNKNOWN count, backlog |
+
+## 6. C21 is a concurrency invariant, not a column
+
+A version column on its own is not evidence of anything: two concurrent writers can both read version 3,
+both write version 4, and both believe they won. The mechanism is therefore layered, in this order:
+
+1. `pg_advisory_xact_lock` on the posting — serializes every reviewer of that posting for the whole
+   transaction, including the create-if-absent race on the state row itself. Different postings never contend.
+2. `SELECT … FOR UPDATE` on `posting_review_state` — the row lock, held to commit.
+3. an optimistic `expected_version` check — so a reviewer acting on a stale screen is refused even when the
+   two decisions do not overlap in time.
+4. a compatibility check — a second, *different* terminal decision is refused outright.
+
+`posting_review_actions` remains **fully append-only** and is still the authoritative history; the new row
+carries only the decision pointer and the version. A direct INSERT into the ledger is refused by
+`p4_review_writer_only`, so the concurrency mechanism cannot be walked around — that guard holds even for
+the schema owner, which is what makes it testable at all in a disposable database where everything runs as
+one role.
+
+**Proved under real concurrency, twice.** In the DB gate, reviewer A holds its transaction open while
+reviewer B blocks and is then refused with `REVIEW_CONFLICT`. In the Go matrix, four goroutines submit four
+mutually incompatible terminal decisions simultaneously; exactly one commits, the other three are refused as
+conflicts, and the append-only ledger holds exactly one action.
+
+## 7. C1–C38 — layered status after 0011 and the financial core
+
+Legend: **DB-OK** `DB_PRESENT_AND_BEHAVIOURALLY_VERIFIED` · **RT-OK** `RUNTIME_IMPLEMENTED_AND_TESTED_DARK`
+· **RT** `RUNTIME_GAP` · **UI** `OPERATOR_SURFACE_GAP` · **N/A** `NOT_APPLICABLE`
+· **PO** `BLOCKED_BY_PRODUCT_OWNER_DECISION`
+
+**RT-OK means implemented and verified DARK.** It does not mean live, deployed or accepted: no Phase-4 flag
+is enabled anywhere, and no row in this table has been exercised against a real PMS or payment provider.
+
+| # | Requirement | DB | Runtime | Operator |
+|---|---|---|---|---|
+| C1 | Posting pinned to tenant/site/interface/revisions/secret gen/stay/folio/purchase/settlement/amount | **DB-OK** | **RT-OK** | UI |
+| C2 | Never re-resolve pinned objects on retry | **DB-OK** | **RT-OK** | — |
+| C3 | Room number is evidence, never identity | **DB-OK** | **RT-OK** | UI |
+| C4 | RN + G# verified before outbox/transmission | **DB-OK (G1)** | **RT-OK** | UI |
+| C5 | `UNSET` strategy blocks charge before outbox/P#/wire | **DB-OK** | **RT-OK** | UI |
+| C6 | Package currency = pinned interface currency | **DB-OK (G2)** | **RT-OK** | UI |
+| C7 | ISO-4217 minor units, integer `TA`, no currency on wire | **DB-OK** | **RT-OK** | — |
+| C8 | `P#` is a protocol-attempt reference, not idempotency | **DB-OK** | **RT-OK** | UI |
+| C9 | `P#` unique per interface | **DB-OK** | **RT-OK** | — |
+| C10 | `PA` matched by interface + `P#`, never RN | **DB-OK** | **RT-OK** *(0012: the core verifies the answer against the ALLOCATED `P#`; parsing alone was not correlation)* | — |
+| C11 | `PS` field order and fixed values, `CT` ≤ 20, exponent 2 | N/A (wire) | **RT-OK** *(0012: `CT` was bounded at 32, and the FIAS path is exponent-2-only)* | — |
+| C12 | `AS` catalog only | **DB-OK** | **RT-OK** | UI |
+| C13 | Transmitted `PS` without `PA` ⇒ UNKNOWN | **DB-OK (G3)** | **RT-OK** | UI |
+| C14 | UNKNOWN never auto-retried, no auto second `P#` | **DB-OK** | **RT-OK** | UI |
+| C15 | Immutable attempt identity + one-way outcome | **DB-OK** | **RT-OK** | — |
+| C16 | Attempt events fully append-only | **DB-OK** | **RT-OK** | UI |
+| C17 | Exact §15 review catalog, no generic approve | **DB-OK** | **RT-OK** *(API serves the catalog; no generic approve)* | UI (frontend) |
+| C18 | `financial-review` write + step-up + reason + evidence | **DB-OK** *(evidence + actor/reason mandatory)* | **RT-OK** *(financial-review RBAC, password step-up on every action, actor bound to the authenticated session and unforgeable, tenant-scoped)* | UI (frontend) |
+| C19 | Review actions immutable | **DB-OK** | **RT-OK** | — |
+| C20 | `CONFIRM_NOT_POSTED_RETRY` requeues once, same key | **DB-OK** *(0012: the authorization is now CONSUMED, and an ACKed-OK charge can never be retried)* | **RT-OK** | UI |
+| C21 | Concurrent reviewers cannot both win | **DB-OK (C21)** | **RT-OK** *(stale version → 409, second incompatible decision → 409)* | UI (frontend) |
+| C22 | Per-interface SERIALIZED lanes; no duplicate attempts | **DB-OK** *(0012 `outbox_one_inflight_per_interface`)* | **RT-OK** *(0012: 0011 only proved duplicate-claim protection on ONE posting)* | UI |
+| C23 | Interfaces are independent namespaces | **DB-OK** | **RT-OK** | UI |
+| C24 | Interface lifecycle / decommission guard | **DB-OK** *(0012)* | **RT-OK** *(0012: refusing every non-ACTIVE state was wrong; AUTH_DISABLED posts, DRAINING drains)* | UI |
+| C25 | Programmatic reversal disabled; CREATE_REVERSAL ledger row required | **DB-OK** *(0013: the PASSIVE row is permitted and audited; the SENDER is structurally impossible — see §12)* | **RT-OK** | UI |
+| C26 | No duplicate CHARGE/REFUND/callback | **DB-OK** | **RT-OK** *(0015 unique index + 0016 dedupe; 0021 records a provider retry as NOOP rather than dropping it)* | **UI-OK** |
+| C27 | No cross-tenant merchant reuse | **DB-OK** *(0025 `ppa_merchant_ref_globally_unique`. MEASURED before it: 0018's uniqueness was per (tenant, site), so the same external merchant account could be configured under two customers)* | **RT-OK** *(identity is resolved from configuration, never supplied)* | — |
+| C28 | Server-pinned totals | **DB-OK** | **RT-OK** | — |
+| C29 | Entitlement only via approved atomic grant | **DB-OK** *(0024: ONE `p4_entitlement_grant_kernel`, unreachable from every runtime role; free and paid reach it through their own authorization)* | **RT-OK** *(exactly-once under duplicate commands, concurrent callbacks and restart replay)* | — |
+| C30 | Restore ⇒ FINANCIAL_RECOVERY_MODE, HELD_RECOVERY | **DB-OK** *(0019 + 0022 structural hold + 0023/0025 marker AHEAD/BEHIND/MISSING)* | **RT-OK** *(real pg_dump/pg_restore drill, 39/0)* | **UI-OK** |
+| C31 | Restore never auto-replays | **DB-OK** *(0022 outbox gate; 0025 zero-attempt path authorizes attempt 1 without manufacturing a history; 0026 `v_zero_attempt_recovery_queue` is the read model that makes such postings findable at all)* | **RT-OK** *(nothing is transmitted before OR after recovery release; `edge/v1/financial-ops/recovery/zero-attempt` list + authorize, 8/8 API tests)* | **UI-OK** *(the recovery screen offers no retry/replay control AND now offers the one audited way out: 9 unit + 3 browser tests)* |
+| C32 | Freshness / stay eligibility before charge | **DB-OK** *(0012: all four runtime axes)* | **RT-OK** *(0012: only the stay half existed; the four axes were never consulted)* | UI |
+| C33 | Metrics: queue depth, oldest age, UNKNOWN count, backlog | **DB-OK** *(0020 `enqueued_at` makes AGE a real signal)* | **RT-OK** *(closed condition vocabulary; JSON + Prometheus)* | **UI-OK** *(financial health screen)* |
+| C34 | No PII/card/credentials/secrets in logs or evidence | **DB-OK** *(0025 screens review evidence for secret shapes)* | **RT-OK** *(redaction proven bidirectionally: the check FAILS against a build with one raw field added back)* | **UI-OK** |
+| C35 | Compliance archive before cross-customer purge | **DB-OK for the ARCHIVE and the GATE** *(0025 recorder + gate; **0026 makes the gate FAIL CLOSED** — it requires `receipt_verified`, and `ca_receipt_evidence_matches_flag` makes that flag unsettable without a named external authority and reference, refused even for the table owner)* | **RT-OK for the ARCHIVE and the GATE, CAPABILITY BLOCKED** *(scd exports the record, digests it, and the purge is refused; scd reports the exact blocker). **No external archival receipt authority exists in this product — no service, no endpoint, no issued key — so `receipt_verified` is false everywhere and CROSS-CUSTOMER PURGE IS CONSEQUENTLY IMPOSSIBLE.** That is the delivered behaviour, not a defect and not a promise of one* | — |
+| C36 | Per-property onboarding gates posting | **DB-OK (G2)** | **RT-OK** | UI |
+| C37 | Flags OFF, no egress while DARK | — | **RT-OK** *(unchanged meaning: every Phase-4 flag OFF, no provider adapter, no socket in the financial core, delivered UI bundle hides the screens)* | — |
+| C38 | Real-financial acceptance (Contract §9c Tier-3 3C) | — | — | **PO** |
+
+### Measured status at the final software closure (T0040)
+
+Re-measured from code and tests rather than carried forward. Every row above whose status changed did so
+because a test now proves it, and the two that did NOT change are the two that must not:
+
+- **C37 remains DARK flags / no egress.** Its meaning is unchanged: every Phase-4 flag is OFF, no provider
+  adapter exists, the financial core imports no network package, and the delivered Hotel-Admin bundle does
+  not expose the financial screens. It is not a claim that anything is live.
+- **C38 remains Tier-3 3C real-financial acceptance and remains BLOCKED_BY_PRODUCT_OWNER_DECISION.** No part
+  of this milestone advances it, and nothing in Phase 4 may.
+
+**C27** was `partial` and is now closed: 0018 scoped merchant uniqueness to (tenant, site), so the same
+external merchant account could be configured under two customers — one customer's guests paying into
+another's account. 0025 makes it globally unique for CONFIGURED accounts.
+
+**C35** is delivered in the half that can exist and blocked in the half that cannot. The archive, its
+digest, and the purge gate are real and enforced; `receipt_verified` describes an EXTERNAL archival
+authority countersigning custody, and no such service, endpoint or key exists in this product. It stays
+false with the reason recorded in the row. **This is the external blocker for C35 and nothing about it was
+invented.**
+
+**MEASURED AND CORRECTED AT T0041.** The 0025 gate passed as soon as ANY archive row existed, regardless of
+`receipt_verified` — so the local export written by the same appliance that was about to delete the data was
+sufficient to authorize the deletion. That is self-certification: the party doing the deleting attests it
+kept a copy and nothing outside it agrees. 0026 makes the gate require a verified receipt, and makes the
+flag structurally unforgeable rather than merely unset by convention.
+
+The honest consequence, stated rather than softened: **cross-customer purge is now impossible.** There is no
+authority to receive a receipt from, so nothing can satisfy the gate. A capability that cannot be performed
+safely is unavailable rather than quietly available on weaker evidence; the appliance already fails closed
+when a tenant transition cannot complete, so the outcome is a held appliance with a visible reason, not a
+deletion nobody can vouch for. The gate is not simply "always refuse" — recording a receipt with real
+external evidence opens it, which is proved, so the refusal is a statement about the missing capability and
+not about the gate.
+
+**C29** changed for a reason worth recording: 0021 had created a SECOND grant implementation in SQL while
+the free Phase-2 path stayed in Go. Two implementations of one set of semantics is the drift the one-writer
+rule exists to prevent, so 0024 reduced them to one kernel with two authorizations.
+
+**Totals after the 0012 hardening pass.** Database enforcement present and behaviourally verified: **34**
+rows. Genuine DB gaps remaining: **0**. Runtime implemented and verified DARK: **28** rows, five of which
+(C10, C11, C22, C24, C32) reached that status only after 0012 — see section 11. Runtime still open: **9**
+(C18 step-up/RBAC/operator binding, C27, C29, C30 recovery mode, C31, C33 metrics surface, C35, and the
+payment half of C26). `BLOCKED_BY_PRODUCT_OWNER_DECISION`: **1** (C38). Operator-surface gap: **21** rows.
+
+**RT-OK means implemented and verified DARK, by AUTHORITATIVE CI.** `Phase 4 Financial Core CI` runs on
+every push to this branch; the run id, head and artifact id of the latest are recorded in
+`governance/project-state.json` under `phase4_authoritative_ci_*`. RT-OK still does NOT mean live, deployed
+or accepted: no Phase-4 flag is enabled anywhere, nothing is deployed, and no row has been exercised against
+a real PMS or payment provider.
+
+**Which head the CI evidence covers, stated exactly.** A CI run gates the commit it ran on. At T0040 that
+was run `31648910147` on `35ef249a583133f2ec1d5e977d96632aa4885ee3`, which was the SOFTWARE candidate; the
+branch head that followed it, `71d7ac05657ddf27f84f7e8649e10319206ffd09`, was a governance/documentation
+commit containing no software or runtime change. That distinction is what makes the earlier evidence still
+usable, and it is the distinction the T0040 record should have drawn instead of describing `35ef249a` as
+"the final delivery head". The current milestone's authoritative run and the head it covers are recorded in
+`phase4_authoritative_ci_*` alongside a measured diff proving no software path differs between the software
+candidate and any later governance-only head.
+
+### Measured LIVE at T0043 — the WS-L controlled live-DARK deployment
+
+Every row above was verified DARK against disposable PostgreSQL. At T0043 the whole chain was applied to the
+**real development appliance** and the security-relevant rows were re-measured there:
+
+| Row | Measured on the appliance |
+|---|---|
+| **C35** | `p4_assert_compliance_archived` refuses; an INSERT that tries to be born `receipt_verified` is refused by `ca_receipt_evidence_matches_flag` **even as the database superuser**; 0 archives, 0 verified receipts, no row names an authority. **Cross-customer purge is unavailable on the live appliance.** No external receipt verification exists and none is simulated. |
+| **C37** | 0 files under `/etc/stayconnect` and 0 systemd units mention any Phase-4 flag — DARK by absence. Every Phase-4 route on the running `edged` returns **404** while `/edge/v1/health` returns 200. No PMS socket, no provider socket, no financial worker. Verified before, after, across a reboot and after a rollback rehearsal. |
+| **C38** | Unchanged, PO-blocked. Nothing in WS-L advances it. |
+| least privilege | The five Phase-4 roles are NOLOGIN and hold no direct write on `entitlements`, `settlements`, `posting_review_actions` or `compliance_archives`; PUBLIC has EXECUTE on no Phase-4 definer function; the grant kernel is reachable by nobody; execution and outcome authorities are separated; and **no deployed runtime, service or PUBLIC role is authorized** to execute `p4_record_compliance_receipt` — 0 of the ten roles measured hold EXECUTE and it is unreachable from the current runtime; the controlled function exists deliberately for a future real external archival authority. |
+
+Three things the live environment exposed that a disposable database could not, all fixed forward: the
+supported backup could not run at all (host `pg_dump` 14 against a 16 server, plus a `PGUSER` default that
+is a database name), the DOWN migrations cannot be run by the schema owner (each deletes its own ledger row,
+and `iam_v2_owner` holds only SELECT+INSERT there), and the catalog fingerprint cannot prove a rollback
+returned the same schema (dropped columns keep their attribute slots, so `ordinal_position` shifts while the
+structure is identical — see `iam_v2_scratch/schema_structure_fingerprint.sql`).
+
+### Re-measured at T0041 — what changed in this milestone
+
+Two rows moved, and the reason each moved is a test that did not exist before:
+
+- **C31 (Operator)** was recorded `UI-OK` at T0040 on the strength of the recovery screen offering *no*
+  retry control. That was half the requirement. The zero-attempt path — a posting restored with no surviving
+  attempts, which the attempt-keyed review queue structurally cannot list — existed as a proven database
+  function that **no surface could reach**. A safe path nobody can walk is not a path. 0026 adds the read
+  model, `edge/v1/financial-ops/recovery/zero-attempt` adds the list and the audited authorization behind
+  the existing tenant+site scope / session actor / password step-up / mandatory evidence model, and the
+  recovery screen surfaces it. Proven at all three layers: 8 API integration tests (scope isolation between
+  two sites of one tenant, step-up, evidence contract, exactly-once, restart durability, and that the
+  authorization is what lets recovery be released at all), 9 Hotel-Admin unit tests and 3 browser tests.
+  Nothing is transmitted by any of it.
+- **C35** moved in the opposite direction: from a gate that passed on self-certification to one that
+  **fails closed**, with the capability honestly unavailable. See the C35 note above.
+
+**Totals, re-measured.** Runtime still open reduces to **7** — C31 and C35 leave that list, C31 because the
+operator path is now genuinely reachable and C35 because the archive and gate are complete and the remaining
+half is an EXTERNAL capability that does not exist rather than unwritten code. `BLOCKED_BY_PRODUCT_OWNER_DECISION`
+remains **1** (C38). C37 is unchanged and means exactly what it meant: flags OFF, no egress, nothing live.
+
+## 8. Verification of the delivered core
+
+| Gate | Result |
+|---|---|
+| `iam_v2_scratch/phase4_0011_financial.sh` | **80 PASS / 0 FAIL** — 0011 UP, raw re-apply errors and rolls back, DOWN returns the catalog byte-identical to pre-0011, DOWN→UP reproduces the first UP, and every 0011 invariant is exercised behaviourally |
+| pre-0011 invariant suite, pre-0011 chain | **31 / 31** |
+| pre-0011 invariant suite, after 0011 (clean rebuild) | **31 / 31** — nothing that existed before 0011 was weakened |
+| `go test ./internal/posting/` | **61 PASS / 0 FAIL** |
+| `go test -tags integration -run IntegrationPosting ./internal/posting/` | **32 PASS / 0 FAIL** against disposable PostgreSQL 16 |
+| `scripts/ci/phase4-dark-check.sh` | **PASS (6/6)** |
+
+**P# under contention:** 8 concurrent clients × 25 allocations on one interface produce 200 distinct values
+forming one gapless range, while a second interface's sequence is untouched. A rolled-back allocation gives
+its number back, proving the allocator is transactional rather than a clock or a counter file.
+
+**Positive no-egress evidence.** "The tables stayed empty" is not evidence. The DARK test runs a real worker
+against a real queued posting, five times, with an inner transport that *would* accept a send. It asserts
+that the worker claimed the work, re-verified the evidence, built a complete valid PS, and was refused at
+the wire — five recorded refusals — while the inner transport was reached **zero** times, **no** P# was
+consumed, **no** attempt row was written, and the work stayed `QUEUED` rather than being lost.
+
+## 9. Scope discipline
+
+0011 contains **only** G1, G2, G3, C21, the P# allocator and the structural no-blind-retry gate. It does not
+create, replace, rename or weaken anything in §2: `charge_gate`, `pa_oneway`, `ao_postings`, `ao_review`,
+`ao_pa_events`, `trg_secret_gen_guard`, `outbox_one_active` and the `idempotency_key` uniqueness are all
+untouched, and the gate asserts that each is still present, still enabled, and — for `charge_gate` — that
+its body is unchanged. The new currency trigger is named so that it fires **after** `charge_gate`, so the
+fail-closed reason an operator sees for an un-onboarded interface is exactly what it was before.
+
+## 10. Where 0011 has been applied
+
+Disposable PostgreSQL 16 containers only, created and destroyed on loopback by the gate scripts.
+**`0010_phase3_stay_resolution` remains the latest migration applied in Production and on the appliance.**
+No Phase-4 flag is enabled anywhere, no real PMS `PS` has been transmitted, no `PA` has been accepted, no
+guest folio has been debited and no payment provider has been called.
+
+## 11. The 0012 hardening pass — what section 7 claimed too early
+
+A hardening review of the same code found five rows this document had marked `RT-OK`, and one design
+property it had described as structural, that did not survive being looked at properly. They are listed
+here rather than quietly corrected in the table above, because a status that was wrong once is worth being
+able to find later.
+
+| # | What was claimed | What was actually true | What 0012 does |
+|---|---|---|---|
+| C22 | per-interface lanes | `outbox_one_active` stops two ACTIVE rows for the SAME posting. Two DIFFERENT postings could be in flight on one interface at once. The test raced six workers over ONE posting, so it could only ever have proved duplicate-claim protection | partial unique `outbox_one_inflight_per_interface`; the test now queues six different postings and MEASURES observed peak concurrency per lane |
+| C24 | lifecycle guard | the gate refused every non-`ACTIVE` state, which is not the contract — `AUTH_DISABLED` posts, `DRAINING` drains | `Gate.CheckFor(Purpose)` plus DB triggers implementing §10 exactly, and the contractual zero-pending precondition for `DECOMMISSIONED` |
+| C32 | freshness before charge | only the STAY half existed. The four PMS runtime axes were never consulted | `p4_interface_freshness_block` over the SAME Phase-3 runtime state and thresholds, enforced at creation AND at transmission |
+| C11 | wire contract | `CT` was bounded at 32; §9a says 20. The exponent was generalized to 0..4 where §9a and the Gate-3A evidence fix it at 2 | `maxCTLen` 20; exponent-2 enforced for `protel-fias` only, so the currency MODEL keeps its real ISO range |
+| C10 | PA correlation | `ParsePA` correlated when PARSING, but the engine accepted whatever the transport returned. A valid OK answer for another `P#` would have ACKed the wrong attempt | `SendPS` takes the allocated `P#`; guard and engine both verify; a mismatch never ACKs and becomes UNKNOWN |
+| — | "the DARK guard is the chokepoint" | true only by convention — `Engine` and `DarkGuard` had EXPORTED fields, so a caller could build an unwrapped engine | every field unexported; `NewEngine` is the only constructor and always wraps; the CI check asserts both |
+
+Two further defects in the same review: the retry authorization was never consumed, and
+`CONFIRM_NOT_POSTED_RETRY` could be recorded against a charge the PMS had already ACKed `OK` — the exact
+duplicate debit the UNKNOWN design exists to prevent. Both are now refused, and terminal review actions
+require real evidence rather than the `{}` default.
+
+## 12. The 0013 correction — 0012 over-constrained the reversal
+
+Section 11 recorded five rows this document had claimed too early. A further review of the same code found
+a sixth problem, of the opposite kind: **0012 was too strict, and it contradicted the contract.**
+
+0012 read "programmatic reversal is `capability=false`" and refused `REVERSAL` posting rows outright. The
+FINAL contract states *both* halves, and they have to be held apart:
+
+| Contract | Says |
+|---|---|
+| §9a rule 5, Gate 3B | the **executable** reversal is unsupported in v1. `PT=C` and a negative `TA` are **unverified** and must never be transmitted. Corrections are manual Front Office operations. |
+| §15, §16 | `CREATE_REVERSAL` produces "**a new ledger row referencing the original**", and "reversal is a new REVERSAL row". |
+
+So the row is **required** and the sender is **forbidden**. 0012 forbade both — which would have made the
+§15 action unimplementable and removed the audited record that Gate 3B requires in exchange for deferring
+the capability at all.
+
+**0013 separates them, additively.** 0012 and receipt T0031 are unchanged.
+
+The passive row is written **only** by the audited `CREATE_REVERSAL` action, must reference an in-scope
+original `CHARGE`, carries the same currency and exponent, records a **positive** amount (direction is
+carried by `posting_type`, never by a negative `TA`), and is bounded so cumulative reversals can never
+exceed the charge. It is then **structurally inert**: `p4_reversal_never_queued` and
+`p4_reversal_never_attempted` make it impossible for it to acquire an outbox row or an attempt, so it can
+never allocate a `P#` or produce a byte.
+
+The transmission-protecting gates — freshness, lifecycle, FIAS exponent — are deliberately **not** applied
+to a record that never transmits. Requiring a fresh, `ACTIVE` interface to write an audit row would make
+the audit trail unavailable exactly when corrections happen, which is while the interface is down.
+
+`CREATE_REVERSAL` is also refused where it would be meaningless: the latest attempt must be `UNKNOWN` or
+`ACKED`/`OK` — something the PMS is believed to hold. A rejected or never-sent charge has nothing to
+reverse, and `CONFIRM_NOT_POSTED_ABANDON` is the right action there.
+
+## 13. The production construction boundary
+
+Section 11 recorded that `Engine` and `DarkGuard` had exported fields. Making them private closed the
+*mutation* hole and left the *construction* hole: `NewEngine` still accepted a caller-supplied `Config` and
+`Transport`, so production code could have built an independently configured financial sender in one struct
+literal.
+
+`NewProductionEngine(repo, getenv)` is now the only exported constructor and takes neither. Config comes
+from the fail-closed environment loader; the transport comes from an internal factory that returns nothing
+in this build and **refuses to start** if transmission is enabled against a build with no transport. The
+deterministic test seam lives in `export_test.go`, which the Go toolchain compiles only for this package's
+own tests — a production binary does not contain it and cannot call it.
+
+## 14. Manual Review — where each guarantee lives
+
+§15 asks for two different kinds of thing, and it is worth being explicit about which layer answers which,
+because a reviewer of this system should not have to guess.
+
+| Guarantee | Enforced by | Why there |
+|---|---|---|
+| exact action catalog, no generic approve | database + API | the API refuses an unknown action before the database sees it; the database refuses it again for any other writer |
+| action/state applicability (no retry of an ACKed-OK charge) | database | it is a property of the ledger, so it must hold for every writer, forever |
+| reviewer concurrency, single-use retry authorization | database | only a lock can decide a race |
+| immutable history | database | append-only trigger |
+| **`financial-review` write permission** | **API** | authorization is about the caller, and the database has no caller |
+| **authenticated actor binding** | **API** | the actor is the session; the request schema has no actor field at all |
+| **password step-up** | **API** | §15 requires re-authentication, which only the operator's own session can perform |
+| mandatory reason and evidence | both | the API rejects early with a usable message; the database guarantees it for every writer |
+| tenant/site scope | API + composite keys | a valid operator of one property must not decide another's money |
+
+The `available_actions` field the detail view returns is a **convenience**, not the enforcement: it narrows
+the catalog so the UI never offers a decision the database would refuse. The database re-checks all of it,
+and its answer is the one that decides.
+
+**What is NOT yet built:** the Hotel-Admin frontend. The operator API exists, is tested against real HTTP
+and a real database, and is DARK by default — the routes are mounted only when the Phase-4 master and
+review flags are both ON, and the delivered configuration has both OFF.
+
+## 15. Manual Review corrections — scope, evidence, and a role claim that was never true
+
+Three corrections, recorded rather than quietly applied.
+
+**Scope was tenant-only.** Every financial query in the review API filtered on `tenant_id` alone. The test
+that was supposed to cover this gave each fixture a fresh tenant *and* a fresh site, so it proved
+cross-TENANT isolation and proved nothing about two sites under one tenant — which is exactly how a
+multi-property customer is arranged. T0033's "another site's posting" claim was therefore stronger than its
+evidence. Every path now filters `tenant_id AND site_id`: queue, detail, pinned evidence, attempts, review
+history, the ownership pre-check and the decision itself. The test now builds **two sites under one
+tenant**, and it was verified to **fail** against the old tenant-only query before being trusted.
+
+The out-of-scope response is `404`, byte-identical to a genuinely absent posting, so the API does not
+confirm that another site's posting exists. That equality is asserted.
+
+**Evidence was an open blob.** The endpoint accepted any non-empty JSON object and wrote it verbatim into
+the append-only review ledger. That satisfied §15 and violated §11: an immutable ledger is the worst place
+to discover a credential later, because it cannot be redacted. Evidence is now a **closed structured
+shape** — `source_type` from a fixed allowlist, a bounded `reference`, a bounded single-line `note`, an
+optional `verified_at` — and the API refuses anything shaped like a credential, token, key literal, card
+number, CVV, raw FIAS frame or raw JSON/XML payload. Fourteen adversarial cases are covered, each
+additionally asserting that the refused evidence reached **no** ledger row.
+
+**A role claim that was never true.** T0033 stated that `guest_relations_operator` holds `financial-review`
+READ. The code never granted it, and §15 does not list Guest Relations among the financial roles at all.
+The **code is correct**; the receipt's prose was wrong. Nothing was broadened to match it. The delivered
+matrix is: `payments_operator` WRITE (§15), `site_admin` implicit, and READ for `hotel_it_manager`,
+`front_office_operator` and `site_viewer`.
+
+**C18** is promoted to `RT-OK` only now, with its whole backend security boundary proven: permission,
+session-bound actor, step-up, mandatory reason, structured evidence, and tenant+site scope. Its operator
+UI remains open.
+
+## 16. Migration 0014 — payment and settlement governance
+
+**Measured first.** On the 0011+0012+0013 chain: `payment_transactions` triggers **NONE**, `settlements`
+triggers **NONE**, callback/webhook ledger **NONE**. mg7 supplied the shape — `amount_minor > 0`, unique
+idempotency key, unique (tenant, provider, merchant, provider_ref), the status and type enums, `ptx_parent`,
+composite FKs — and **nothing that governs how money moves through it**.
+
+0014 adds only that governance, and duplicates none of the above:
+
+| Rule | Enforced by |
+|---|---|
+| duplicate callback can never be applied twice | UNIQUE (payment_transaction_id, provider_event_id) on an append-only ledger |
+| identity immutable; status one-way; terminal is terminal; no deletes | `p4_payment_status_machine` |
+| ONLINE_PAYMENT rail only | `p4_payment_creation_gate` |
+| server-pinned amount/currency/exponent from the pinned Purchase | same |
+| one live CHARGE per settlement | same |
+| refunds: CAPTURED parent, same settlement/merchant/provider/currency, cumulative bound | same |
+| Settlement lifecycle, and SETTLED requires evidence **on its own rail** | `p4_settlement_state_machine` |
+| reversal states must match the child arithmetic | same |
+| UNKNOWN provider outcome routes to MANUAL_REVIEW and is never retried | `apply_payment_callback` |
+
+**Separate rails, enforced.** A PMS passive REVERSAL is not a provider REFUND: different tables, different
+rules, and `SETTLEMENT_REVERSAL_WRONG_RAIL` refuses a PMS settlement being reversed by provider refunds.
+
+**What 0014 is not.** It is the durable enforcement, not the application. No Go payment domain, provider
+abstraction or callback handler exists yet, and nothing wires a settled payment to the Phase-2 atomic
+Entitlement grant. Sixteen behavioural assertions in the DB gate prove the rules; no C-row moves to RT-OK on
+the strength of them, because the runtime that would use them has not been written.
+
+## 17. Migration 0015 — 0014 was not concurrency-safe
+
+0014 established the payment governance and got six things wrong. The most serious was that **neither of
+its two bounds was a constraint**: "one live CHARGE per settlement" and the cumulative refund bound were
+both SELECT-then-decide inside a BEFORE INSERT trigger, where two concurrent transactions each read the
+pre-state, each pass, and both commit. The sequential tests that covered them could not tell a constraint
+from a lucky ordering.
+
+| 0014 defect | 0015 |
+|---|---|
+| duplicate-charge count() in a trigger | partial unique index `ptx_one_live_charge_per_settlement` |
+| refund SUM without serialization | advisory lock on the PARENT (ns 47) before the sum |
+| REQUIRED → FAILED / MANUAL_REVIEW directly | REQUIRED → IN_PROGRESS only (§16) |
+| arbitrary `p_detail` jsonb in an append-only ledger | closed flat key set, bounded, screened, as a CHECK |
+| caller supplies the internal transaction id | resolved from provider + merchant + echoed client reference |
+| dedupe on (internal id, event id) | UNIQUE (tenant, provider, merchant, provider_event_id) |
+| refund capture left Settlement untouched | same-transaction PARTIALLY_REVERSED / REVERSED from child sums |
+| `provider_ref` NOT NULL + immutable ⇒ no durable pre-call row | `provider_ref` = local intent root; new write-once `provider_txn_ref` |
+
+**Proved with real concurrent sessions** (`scripts/phase4-payment-concurrency.sh`, 7/7): two racing CHARGEs
+leave exactly one live charge with the loser naming the index; two individually-valid 60-unit refunds
+against a captured 100 do not both commit, with the loser naming the bound *while the winner is still
+uncommitted*; an unrelated settlement neither fails nor waits.
+
+**Provider assumption, stated not assumed.** The correlation model needs a provider that echoes a
+client-supplied reference on every callback. Common, not universal, and unverified against any real
+endpoint here.
+
+**Still not a runtime.** No Go payment domain, provider double or callback handler exists, and nothing
+wires a settled payment to the Phase-2 atomic grant. No C-row moves to RT-OK.

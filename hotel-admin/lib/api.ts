@@ -841,3 +841,188 @@ export type PmsSourceConflict = {
   interface_b: string; interface_b_label?: string;
   severity?: string; resolution?: string;
 };
+
+// ---------------------------------------------------------------- Phase 4 (DARK): financial operations
+//
+// These mirror the edged financial-ops surface exactly. Note what the types CANNOT express: there is no
+// provider reference, no idempotency key and no guest field anywhere. The API does not send them, and the
+// client cannot invent a place to put them.
+
+export type FinancialHealth = {
+  outbox_queued: number;
+  outbox_in_flight: number;
+  outbox_held_recovery: number;
+  outbox_oldest_age_seconds: number;
+  postings_unknown: number;
+  review_queue_open: number;
+  review_oldest_age_seconds: number;
+  payments_created: number;
+  payments_pending: number;
+  payments_unknown: number;
+  payments_oldest_age_seconds: number;
+  settlements_required: number;
+  settlements_in_progress: number;
+  settlements_manual_review: number;
+  settlements_failed: number;
+  recovery_active: boolean;
+  recovery_epoch: number;
+  recovery_holds_open: number;
+  payment_account_configured: boolean;
+  provider_egress_enabled: boolean;
+  status: "OK" | "DEGRADED" | "ATTENTION_REQUIRED" | "HELD";
+  reasons: string[];
+};
+
+export type FinancialSettlement = {
+  settlement_id: string;
+  purchase_id: string;
+  method: string;
+  status: string;
+  purchase_state: string;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+};
+
+export type FinancialPayment = {
+  payment_id: string;
+  transaction_type: "CHARGE" | "REFUND" | "CHARGEBACK";
+  status: string;
+  provider: string;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  parent_transaction_id: string | null;
+};
+
+export type RecoveryStatus = {
+  Epoch: number;
+  Reason: string;
+  Active: boolean;
+  HeldTotal: number;
+  HeldOpen: number;
+  EnteredAt: string;
+  ReleasedAt: string;
+};
+
+export type RecoveryHold = {
+  hold_id: string;
+  work_kind: "POSTING_OUTBOX" | "PAYMENT_TRANSACTION" | "SETTLEMENT";
+  work_id: string;
+  held_status: string;
+  amount_minor: number | null;
+  currency: string;
+  held_at: string;
+};
+
+// The four conclusions an operator may reach about a held item. Held deliberately in one place so the UI
+// and the database cannot drift into offering different words for the same decision.
+export const RECOVERY_RESOLUTIONS = [
+  "CONFIRMED_COMPLETED",
+  "CONFIRMED_NOT_COMPLETED",
+  "ABANDONED",
+  "ESCALATED",
+] as const;
+export type RecoveryResolution = (typeof RECOVERY_RESOLUTIONS)[number];
+
+// Postings held by recovery that were NEVER transmitted. They cannot appear in the Manual Review queue,
+// which keys on attempts, so before this they were reachable from no operator surface at all -- the one
+// state a restore can produce that nobody could decide.
+//
+// eligible_for_retry_authorization is SERVED, not computed here. The screen must not be able to disagree
+// with the database about what is allowed.
+export type ZeroAttemptRow = {
+  posting_id: string;
+  outbox_id: string;
+  pms_interface_id: string;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  hold_id: string | null;
+  hold_resolution: string | null;
+  retry_authorized_attempt_no: number | null;
+  eligible_for_retry_authorization: boolean;
+};
+
+export type ZeroAttemptQueue = {
+  queue: ZeroAttemptRow[];
+  limit: number;
+  evidence_contract?: { source_types: string[] };
+  note: string;
+  eligibility: string;
+};
+
+// ---------------------------------------------------------------- Phase 4 (DARK): Manual Review
+//
+// The action catalog and the evidence contract are SERVED, not declared here. §15's rules live in the
+// database; a second copy in the frontend would drift, and the first symptom would be an operator offered
+// an action the backend refuses.
+
+export type ReviewActionDoc = {
+  action: string;
+  terminal: boolean;
+  needs_evidence: boolean;
+  accepts_amount: boolean;
+  summary: string;
+};
+
+export type ReviewQueueRow = {
+  posting_id: string;
+  pms_interface_id: string;
+  execution_state: string;
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  latest_attempt_no: number | null;
+  latest_p_number: string | null;
+  latest_pa_as_status: string | null;
+  outbox_state: string | null;
+  review_version: number | null;
+  terminal_review_action: string | null;
+  awaiting_manual_review: boolean;
+  created_at: string;
+};
+
+export type ReviewAttempt = {
+  attempt_no: number;
+  p_number: string;
+  rn: string;
+  g_number: string;
+  outcome: string;
+  pa_as_status: string | null;
+  sent_at: string;
+  response_at: string | null;
+};
+
+export type ReviewPostingDetail = {
+  posting: ReviewQueueRow;
+  pinned_evidence: {
+    settlement_id: string;
+    purchase_id: string;
+    stay_id: string | null;
+    folio_id: string | null;
+    connector_kind: string;
+    folio_identity_strategy: string;
+    interface_lifecycle_state: string;
+    settlement_status: string;
+    purchase_state: string;
+  };
+  attempts: ReviewAttempt[];
+  review: {
+    history: { action: string; actor: string; reason: string; created_at: string }[];
+    version: number | null;
+    terminal_action: string | null;
+    escalation_count: number;
+    retry_authorized_attempt_no: number | null;
+    retry_authorization_consumed: boolean;
+  };
+  diagnostics: {
+    attempt_count: number;
+    unknown_attempt_count: number;
+    has_unknown_history: boolean;
+    interface_freshness_block: string | null;
+  };
+  available_actions: string[];
+  evidence_contract?: { source_types: string[] };
+  limitations: string[];
+};

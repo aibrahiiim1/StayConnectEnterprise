@@ -37,7 +37,18 @@ INSERT INTO iam_v2.settlements(id,tenant_id,site_id,purchase_id,method,status) V
  ('99990000-0000-0000-0000-0000000000d1','11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','99990000-0000-0000-0000-000000000001','PMS_POSTING','REQUIRED');
 
 INSERT INTO iam_v2.entitlements(id,tenant_id,site_id,voucher_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,package_revision_id,time_accounting_mode,end_mode,window_ends_at,status,activated_at) VALUES
- ('12340000-0000-0000-0000-000000000001','11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','ffff0000-0000-0000-0000-0000000000d1','aaaa0000-0000-0000-0000-000000000001','99990000-0000-0000-0000-000000000001','{}','bbbb0000-0000-0000-0000-0000000000d1','cccc0000-0000-0000-0000-0000000000d1','VALIDITY_WINDOW','VALIDITY_WINDOW', now()+interval '1 hour','ACTIVE', now());
+ ('12340000-0000-0000-0000-000000000001','11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','ffff0000-0000-0000-0000-0000000000d1','aaaa0000-0000-0000-0000-000000000001','99990000-0000-0000-0000-000000000001','{}','bbbb0000-0000-0000-0000-0000000000d1','cccc0000-0000-0000-0000-0000000000d1','VALIDITY_WINDOW','VALIDITY_WINDOW', now()+interval '1 hour','PENDING', NULL);
+
+-- Migration 0010 added p3_entitlement_status_coherent: an entitlement's status must be backed by its latest
+-- recorded transition. This seed predates that and inserted status='ACTIVE' with no history at all, so every
+-- fresh scratch build has failed since 0010 landed -- which is why no financial scenario could be seeded.
+--
+-- The repair goes THROUGH the approved mechanism rather than around it. The row is created PENDING (the real
+-- initial state) and then moved to ACTIVE by iam_v2.apply_entitlement_transition, which writes the matching
+-- entitlement_state_transitions row and sets activated_at itself. No trigger is disabled, no guard bypassed,
+-- no history fabricated: the resulting entitlement has exactly the history a real activation would leave.
+SELECT iam_v2.apply_entitlement_transition(
+  '12340000-0000-0000-0000-000000000001', 'ACTIVE', now(), 'SEED');
 
 INSERT INTO iam_v2.devices(id,tenant_id,site_id,appliance_id,mac) VALUES
  ('d1d10000-0000-0000-0000-000000000001','11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222','ab000000-0000-0000-0000-000000000001','02:00:00:00:00:01'),

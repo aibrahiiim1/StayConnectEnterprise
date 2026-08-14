@@ -79,7 +79,16 @@ type CommerceTx interface {
 	InsertSettlement(ctx context.Context, tenantID, siteID, purchaseID string) error
 	TerminateLiveEntitlementForSubject(ctx context.Context, tenantID, siteID string, subj CommerceSubject) (supersededID string, err error)
 	InsertEntitlement(ctx context.Context, e EntitlementSpec) (string, error)
+
+	// GrantQuotedEntitlement is the FREE grant entry point: one call into the shared kernel that both the
+	// free and the paid path use (migration 0024). It returns the entitlement and whatever it superseded.
+	GrantQuotedEntitlement(ctx context.Context, tenantID, siteID, purchaseID string) (string, string, error)
 	MarkPurchaseGranted(ctx context.Context, purchaseID string) error
+
+	// --- GrantSettledPurchase (money already moved; see commerce_settled_grant.go) ---
+	// A READ that resolves everything the grant needs from rows the purchase already points at, so the
+	// paid entry point pins exactly what the free one pins and a caller supplies nothing.
+	LoadSettledPurchaseGrant(ctx context.Context, tenantID, siteID, purchaseID string) (SettledPurchaseGrant, error)
 }
 
 // CommerceSubject is the non-PMS authenticated subject a free purchase is pinned to (exactly one id).

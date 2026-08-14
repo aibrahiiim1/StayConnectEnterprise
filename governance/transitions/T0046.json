@@ -1,0 +1,82 @@
+{
+  "transition_id": "T0046",
+  "seq": 46,
+  "timestamp": "2026-08-13T22:00:00Z",
+  "record_type": "PHASE_4_STATIC_CURRENT_STATE_PROSE_CORRECTION_REPOSITORY_ONLY",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "4",
+  "decision": "D19",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-13: one narrowly-scoped repository-only FIX-FORWARD correction under the EXISTING D19 acceptance, after an independent source-order review found a remaining zero-stale false-pass class on b26f24a74666b146fd87efbdcc59ca0282c85b25. Phase 4 is NOT reopened.",
+  "history_note": "T0030 through T0045 are PRESERVED unchanged, including T0044 and T0045 byte-for-byte. This receipt records a correction to STATIC CURRENT-STATE PROSE and one forward wording correction to evidence recorded in T0045. No historical receipt was rewritten and no appliance, Production database or feature flag was touched.",
+  "false_passes_closed": [
+    {
+      "id": "Z-8",
+      "class": "STATIC CURRENT-STATE PROSE OUTSIDE THE GENERATED BLOCK",
+      "found": "Every generated PROJECT STATE block was correct and said Phase 4 was ACCEPTED_AND_CLOSED. The hand-written prose AROUND those blocks was two to four phases stale, and no rule read it, so all three GitHub workflows went green on b26f24a with these sentences in the highest-authority surfaces.",
+      "verified_examples": [
+        "exports/chatgpt/stayconnectenterprise/00-START-HERE.md -- 'FIAS connector is lookup-only today; the financial posting engine is a future component'. The engine EXISTS and is accepted at LIVE-DARK maturity. Disabled and absent are opposite claims to anyone planning work against it.",
+        "docs/context/StayConnect-IAM-Handoff.md -- three '**CURRENT (see the generated block): Phase 2 ...**' restatements that pointed AT the block and then contradicted it, two phases later.",
+        "docs/architecture/StayConnect-IAM-Phase0-Contract.md -- 'Next authorized activity: Product-Owner acceptance of Phase 1A, then Phase 1B planning under separate authorization' in the status table and in three closing paragraphs; true in July 2026, still present in August.",
+        "docs/architecture/StayConnect-IAM-Phase4-Plan.md -- section 3 'What does not exist -- the Phase-4 build', 'All seven financial tables have zero Go references', 'The execution runtime is greenfield'. Authorization-time history reading as current status under an accepted/closed header.",
+        "docs/architecture/StayConnect-IAM-Phase1A-Plan.md -- 'Lookup-only today; posting engine is a NEW component in phase 4' (found by sweep).",
+        "docs/architecture/StayConnect-IAM-Phase1B-Plan.md -- decision D9 'Phase 1B planning is the current activity' (found by sweep)."
+      ],
+      "why_it_passed": "Every existing rule read either the machine-readable facts or the GENERATED block. A generated block cannot protect the document it sits in, and nothing compared the surrounding prose to canonical state.",
+      "fix": "All six corrected. Nothing useful was deleted: authorization-time and phase-era material is RETAINED and explicitly labelled HISTORICAL / 'as at <date>' / 'NOT the current state', and each surface now points at the generated block as the single current-state carrier instead of restating it. The Phase-4 plan's section 3 is retitled 'HISTORICAL -- what did not exist AT AUTHORIZATION TIME (D18/T0029, 2026-08-11)' with a blockquote stating that the runtime now exists and where it lives.",
+      "rule_added": "static-current-prose in tools/validate-current-state-parity.py. It reads the highest-authority surfaces OUTSIDE their generated region and refuses, paragraph by paragraph: prose describing the Phase-4 financial runtime as future/nonexistent/greenfield while phase 4 is recorded accepted; any restatement of the current activity or the next authorized activity outside the generated block; and any presentation of a CLOSED phase as awaiting acceptance or as future work. Derived from the phases map, so it needs no edit when phase 5, 6 or 7 closes. The existing paragraph-level HISTORY_MARKERS excuse applies unchanged -- it refuses unlabelled claims, never history that says so.",
+      "proved": "tools/tests/current_state_parity/run_negative.py, 48 passed / 0 failed. Six new cases reintroduce the VERBATIM sentences above and each is caught by static-current-prose specifically, not by some other rule. A seventh assertion proves the opposite direction: the same pre-build sentences, LABELLED historical, are still accepted -- otherwise the rule would have stopped telling a record from a claim and the Phase-4 plan could no longer keep its own history."
+    }
+  ],
+  "forward_corrections": [
+    {
+      "id": "Y-2",
+      "area": "T0045 runtime_delta.changed",
+      "what_was_recorded": "T0045 records runtime_delta.changed = 0 with a note that the only data-plane files touched are three //go:build lines in _test.go files.",
+      "why_it_is_wrong": "As a GIT PATH COUNT the figure 0 is inaccurate and the field is ambiguous: three paths under the measured runtime directories do differ. The note beside it was right, but a reader diffing the repository sees three changed paths and a field that says zero.",
+      "accurate_statement": "Measured from the accepted software candidate b94112d8cb0ab63938b60f829ddd465c14491f97 over data-plane/, hotel-admin/, control-plane/ and deploy/: THREE changed paths, ALL THREE _test.go files carrying Phase-4 test-ownership build-tag changes (data-plane/cmd/edged/phase4_finops_api_integration_test.go, phase4_review_api_integration_test.go, phase4_zeroattempt_api_integration_test.go); ZERO shipped, non-test runtime paths changed; and the accepted runtime behaviour and binaries are therefore unchanged, because a _test.go file is excluded from every shipped binary by construction.",
+      "method": "Corrected FORWARD. T0045 is NOT rewritten -- it records what was written when it was written; this entry and current_state_facts.phase4_runtime_delta_vs_accepted_candidate record what is accurate now."
+    }
+  ],
+  "runtime_delta": {
+    "vs_accepted_software_candidate": "b94112d8cb0ab63938b60f829ddd465c14491f97",
+    "paths_measured": ["data-plane/", "hotel-admin/", "control-plane/", "deploy/"],
+    "changed_paths_total": 3,
+    "changed_paths_test_only": 3,
+    "changed_paths_shipped_non_test": 0,
+    "changed_paths": [
+      "data-plane/cmd/edged/phase4_finops_api_integration_test.go",
+      "data-plane/cmd/edged/phase4_review_api_integration_test.go",
+      "data-plane/cmd/edged/phase4_zeroattempt_api_integration_test.go"
+    ],
+    "accepted_runtime_behaviour_unchanged": true,
+    "note": "All three carry only the added `//go:build integration && phase4` line and its rationale comment. A _test.go file is not compiled into any shipped binary, so the accepted runtime is unchanged. This round itself changes no data-plane, hotel-admin, control-plane or deploy file at all."
+  },
+  "not_changed": [
+    "T0044 and T0045 -- byte-identical",
+    "decision D19 -- used as-is; no new Product-Owner decision was created or requested",
+    "the accepted software candidate b94112d8cb0ab63938b60f829ddd465c14491f97",
+    "the appliance, Production, every feature flag, and the merge state of PR #12"
+  ],
+  "evidence_files": [
+    "tools/validate-current-state-parity.py",
+    "tools/tests/current_state_parity/run_negative.py",
+    "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+    "docs/context/StayConnect-IAM-Handoff.md",
+    "docs/architecture/StayConnect-IAM-Phase0-Contract.md",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "governance/transitions/T0045.json"
+  ],
+  "acceptance_verdict": "NO CHANGE TO ACCEPTANCE. Phase 4 remains ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity under D19 / T0044. This is a repository-only fix-forward correction of static current-state prose and of the validator that failed to read it; it neither reopens implementation nor alters what was accepted.",
+  "next_action": "Product-Owner decision on merging the Phase-4 pull request."
+}

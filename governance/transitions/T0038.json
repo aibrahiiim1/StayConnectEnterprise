@@ -1,0 +1,155 @@
+{
+  "transition_id": "T0038",
+  "seq": 38,
+  "timestamp": "2026-08-12T15:40:00Z",
+  "record_type": "PHASE_4_FINANCIAL_BACKEND_FINALIZATION_RECOVERY_OBSERVABILITY_AND_OPERATOR_SURFACE",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030 through T0037 are PRESERVED unchanged. Migrations 0011 through 0017 are preserved; 0018, 0019 and 0020 correct and extend them additively.",
+  "corrections": [
+    {
+      "id": "R-1",
+      "area": "financial identity",
+      "what_was_actually_true": "CreateChargeIntent accepted merchantAccountID from its caller, and T0037 claimed otherwise. Worse, payment_transactions.merchant_account_id referenced nothing at all, so any uuid was accepted, and the DARK build persisted provider='none' because productionProvider returned a placeholder adapter. The financial record therefore described a managed identity that did not exist.",
+      "correction": "0018 adds iam_v2.payment_provider_accounts as authoritative per-site configuration (identifiers only, never credentials), a foreign key and an identity gate on payment_transactions, and p4_resolve_payment_account. CreateChargeIntent now takes a settlement and an idempotency key and NOTHING else: provider and merchant account are resolved server-side. productionProvider returns nil, so a build with no adapter fails closed at intent creation instead of inventing an identity. The provider CHECK forbids placeholder names outright.",
+      "proved": "DB gate: a placeholder provider identity cannot be configured; an unconfigured merchant account cannot appear in the financial record; a payment cannot name a provider its configured account does not use. Go integration: TestIntegrationPayment_IdentityIsResolvedNotSupplied (resolution, no-account fail-closed, disabled-account fail-closed) and TestIntegrationPayment_ProductionBuildCannotPersistAFakeProvider."
+    },
+    {
+      "id": "R-2",
+      "area": "migration safety of the new constraint",
+      "what_was_actually_true": "Adding the merchant-account foreign key to a database that already held payment rows failed, because those rows name accounts that predate the configuration table. Measured on the gate's own fixture.",
+      "correction": "0018 backfills every merchant account the financial record already references, DISABLED and non-default, from the rows themselves. It refuses to run at all if any historical row carries a placeholder provider, because legitimising an invented identity in the same migration that exists to eliminate them would defeat the purpose.",
+      "proved": "The DB gate applies 0018 to a database already carrying the full payment fixture, and the UP/DOWN/re-UP cycle produces an identical schema fingerprint."
+    },
+    {
+      "id": "R-3",
+      "area": "NOT_SENT preflight",
+      "what_was_actually_true": "Provider/config/capability checks ran AFTER the durable execution transition, so a DARK build left every intent permanently PENDING with its settlement stuck IN_PROGRESS -- describing an execution that had never begun and never would. A stuck IN_PROGRESS settlement is indistinguishable from one whose provider call is still outstanding, so it silently became manual-review work that nobody created.",
+      "correction": "The guard is split. preflight() is provably side-effect-free (configuration and adapter capability only) and runs BEFORE begin_payment_execution; a refusal there is NOT_SENT and leaves the intent CREATED and the settlement REQUIRED. Everything past the adapter boundary keeps the UNKNOWN / no-blind-retry rule exactly as it was.",
+      "proved": "TestIntegrationPayment_DarkNeverReachesTheProvider asserts CREATED / REQUIRED / zero recorded events after three refused executions, and that the provider double was never entered. The UNKNOWN tests are unchanged and still pass."
+    },
+    {
+      "id": "R-4",
+      "area": "callback trust",
+      "what_was_actually_true": "ApplyCallback took an asserted status from its caller. Any component that could reach it could manufacture a CAPTURED for someone else's payment; correlating the client reference correctly does not help, because the reference is not a secret.",
+      "correction": "The forgeable entry point is gone. HandleProviderNotification takes a RAW delivery, hands it to the adapter's NotificationAuthenticator to verify against the provider's signing scheme, and only then mints an unexported trustedNotification. There is no exported constructor for that type. Tenant and site are resolved from the durable row the client reference names, so a delivery cannot nominate whose money it is about. An adapter that does not implement the interface cannot deliver an outcome at all.",
+      "proved": "TestIntegrationPayment_ForgedNotificationsAreRefused drives four forgeries (no signature, wrong signature, a valid signature over a different body, an empty body correctly signed for itself) and asserts zero recorded events, an unmoved intent and no grant -- then shows the correctly signed delivery IS accepted, so the refusals are about the forgery. TestIntegrationPayment_AdapterWithoutAuthenticationCannotDeliverAnOutcome covers the deaf adapter and the absent adapter."
+    },
+    {
+      "id": "R-5",
+      "area": "paid Purchase state machine",
+      "what_was_actually_true": "GrantSettledPurchase accepted a PENDING purchase as a paid-grant origin. PENDING is the state a purchase is in before it has committed to a settlement path, and accepting it let a settled payment grant against a purchase that never declared it was awaiting money.",
+      "correction": "The paid entry point requires AWAITING_SETTLEMENT and nothing else. p4_mark_purchase_granted additionally locks the purchase and refuses any origin state the approved machine does not permit, so the rule is enforced rather than conventional.",
+      "proved": "TestIntegrationGrant_SubstitutionFailsClosed now drives the purchase to PENDING with a SETTLED settlement in front of it and asserts the grant is refused."
+    },
+    {
+      "id": "R-6",
+      "area": "enforcement triggers and least privilege",
+      "what_was_actually_true": "Measured: the restricted runtime role could not create a payment intent at all. 0016's admission gate is SECURITY INVOKER and does SELECT ... FOR UPDATE on settlements, so a trigger whose entire purpose is to stop the caller writing a settlement was demanding the right to write settlements. A SECURITY INVOKER enforcement trigger silently turns its own internal reads into privileges the caller must hold, which pushes every least-privilege design toward granting more than the operation needs.",
+      "correction": "0018 recreates the admission gate and the identity gate as SECURITY DEFINER with a fixed search_path, and re-revokes PUBLIC EXECUTE over both.",
+      "proved": "DB gate: every Phase-4 enforcement trigger runs as the owner. Least-privilege gate: PUBLIC holds EXECUTE on no SECURITY DEFINER function (18/18)."
+    },
+    {
+      "id": "R-7",
+      "area": "operational roles",
+      "what_was_actually_true": "sc_financial_readonly held SELECT on ALL TABLES in iam_v2 -- every voucher hash, every guest principal, every stay. sc_financial_operator held EXECUTE on nothing and could not perform a review at all. Both were negative-test artefacts rather than operational boundaries.",
+      "correction": "0018 revokes the blanket grant and gives reporting three explicit redacted views (no provider reference, no idempotency key, no guest identity). The operator gets EXECUTE on record_posting_review_action and read access to the financial projections, and still holds no direct write anywhere.",
+      "proved": "TestIntegrationRestricted_OperatorCanReviewAndOnlyReview asserts the operator CAN execute the sanctioned review and holds no INSERT or UPDATE on any of seven financial tables. DB gate asserts the redacted view exposes no correlation handle."
+    }
+  ],
+  "delivered": {
+    "restricted_runtime_end_to_end": "The complete journey -- resolve identity, create the intent, cross the durable boundary, apply an authenticated outcome, settle, and grant the entitlement through the existing Phase-2 writer -- now runs as a login role holding ONLY sc_payment_runtime, with NO entitlement DML and no schema-owner DSN. 0018 moves the Phase-2 writer's three statements behind SECURITY DEFINER functions; the Go writer keeps its single implementation, so this is one writer reached differently, not a second one.",
+    "financial_recovery_mode": "0019. A financial epoch per site, keyed on the database's own control-file identity so a restored copy detects itself; non-terminal financial work held in an append-only ledger; NO automatic replay of anything; PMS and payment ambiguity both routed to operator reconciliation; release refused while any hold is unreconciled, with no force path. Guest access is explicitly untouched.",
+    "observability": "0020 plus internal/payment/health.go. Counts, ages in seconds and a CLOSED vocabulary of condition codes -- there is no field of type 'string supplied by something else', so guest data, credentials and provider payloads are unrepresentable rather than filtered. Rendered as JSON and as Prometheus text with no identifier-bearing labels.",
+    "operator_surface": "edged financial-ops routes (health, settlements with payment history, recovery state, holds, resolve, release) behind the same financial permission as Manual Review, with password step-up and session-derived authorship on both write paths. Hotel-Admin financial health and financial recovery screens, hidden unless NEXT_PUBLIC_PHASE4_ADMIN is set, which no delivered configuration sets.",
+    "no_implied_capability": "The settlement detail response returns an empty available_actions list and says why: the backend can record a refund but no provider adapter exists and no operator-initiated refund path is authorized, so offering the button would imply a capability that is not there. No real provider is named anywhere in the UI, asserted by both the unit and the browser tests."
+  },
+  "verification": {
+    "financial_db_gate": "190 PASS / 0 FAIL (iam_v2_scratch/phase4_0011_financial.sh), migrations 0011-0020 with UP/DOWN/re-UP and identical schema fingerprints",
+    "least_privilege": "18 PASS / 0 FAIL as the real restricted roles",
+    "payment_concurrency": "9 PASS / 0 FAIL, real concurrent PostgreSQL sessions with a genuinely held parent advisory lock",
+    "payment_runtime_integration": "14 PASS / 0 FAIL (IntegrationPayment)",
+    "recovery": "6 PASS / 0 FAIL (IntegrationRecovery), including restart idempotency, restore detection, no-replay, guest-access independence and release refusal",
+    "observability": "2 PASS / 0 FAIL (IntegrationHealth), redaction proven bidirectionally -- the check FAILS against a build with one raw field added back",
+    "restricted_role_end_to_end": "3 PASS / 0 FAIL (IntegrationRestricted), including seven negative bypass attempts",
+    "entitlement_exactly_once": "5 PASS / 0 FAIL (IntegrationGrant) against the real CommerceEngine",
+    "financial_ops_api": "6 PASS / 0 FAIL (IntegrationFinOpsAPI), including byte-identical out-of-scope versus absent responses across two sites of ONE tenant",
+    "posting_and_review_api": "PASS",
+    "phase2_free_path_on_this_schema": "PASS",
+    "hotel_admin_unit": "12 PASS / 0 FAIL",
+    "hotel_admin_e2e": "5 PASS / 0 FAIL in a real browser",
+    "dark_static_assertion": "PASS, extended to the payment runtime and the delivered UI bundle; the new construction check was proven to FAIL against a planted caller-configurable constructor",
+    "unit": "PASS across the whole data-plane module"
+  },
+  "not_delivered_in_this_milestone": [
+    "No real provider adapter exists. The provider model is a capability contract this build cannot satisfy, and it fails closed rather than degrading. No provider network integration, credentials or verification of any kind.",
+    "The runtime DSN is unchanged. The restricted-role path is proven end to end against a disposable database with a purpose-built login role; no Production DSN or grant was touched, as the milestone requires.",
+    "WS-J is partial: financial health and financial recovery are delivered. The Manual Review QUEUE screen, the settlement browser and the posting/attempt history screen are not built -- their APIs exist and are tested, the pages do not.",
+    "Refund and chargeback INITIATION have no operator path. The backend records them and the tests exercise them; nothing in the UI offers them, deliberately.",
+    "WS-L (the authorized controlled live-DARK deployment) and the reboot/rollback drill are not started."
+  ],
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only.",
+    "migrations_added_this_round": "0018_phase4_financial_identity_and_privilege, 0019_phase4_financial_recovery, 0020_phase4_financial_observability"
+  },
+  "no_financial_traffic": {
+    "real_provider_charge_or_refund": false,
+    "real_provider_network_integration": false,
+    "real_pms_ps_transmitted": false,
+    "guest_folio_debited": false,
+    "paid_guest_access": false,
+    "programmatic_pms_reversal": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "production_dsn_or_grant_changed": false,
+    "deployment_performed": false
+  },
+  "evidence_files": [
+    "data-plane/migrations/0018_phase4_financial_identity_and_privilege.up.sql",
+    "data-plane/migrations/0018_phase4_financial_identity_and_privilege.down.sql",
+    "data-plane/migrations/0019_phase4_financial_recovery.up.sql",
+    "data-plane/migrations/0019_phase4_financial_recovery.down.sql",
+    "data-plane/migrations/0020_phase4_financial_observability.up.sql",
+    "data-plane/migrations/0020_phase4_financial_observability.down.sql",
+    "data-plane/internal/payment/engine.go",
+    "data-plane/internal/payment/provider.go",
+    "data-plane/internal/payment/recovery.go",
+    "data-plane/internal/payment/health.go",
+    "data-plane/internal/payment/testdouble.go",
+    "data-plane/internal/payment/pg_integration_test.go",
+    "data-plane/internal/payment/pg_recovery_integration_test.go",
+    "data-plane/internal/payment/pg_restricted_integration_test.go",
+    "data-plane/internal/payment/pg_health_integration_test.go",
+    "data-plane/internal/iamv2/commerce_repo_pg.go",
+    "data-plane/internal/iamv2/commerce_settled_grant.go",
+    "data-plane/cmd/edged/resources_phase4_finops.go",
+    "data-plane/cmd/edged/phase4_finops_api_integration_test.go",
+    "hotel-admin/components/phase4/financial-health-view.tsx",
+    "hotel-admin/components/phase4/financial-recovery-view.tsx",
+    "hotel-admin/test/phase4-financial-pages.test.tsx",
+    "hotel-admin/e2e/phase4-financial-operator.spec.ts",
+    "iam_v2_scratch/phase4_0011_financial.sh",
+    "iam_v2_scratch/phase4_least_privilege.sh",
+    "scripts/ci/phase4-dark-check.sh",
+    ".github/workflows/phase4-financial-core.yml",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. Phase 4 remains IN_PROGRESS at DARK maturity. No cutover, no enablement, no deployment, no PR and no merge.",
+  "next_action": "Build the remaining WS-J operator screens (Manual Review queue, settlement browser, posting/attempt history), then prepare the authorized controlled live-DARK deployment and the reboot/rollback drill."
+}

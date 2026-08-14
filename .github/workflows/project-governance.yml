@@ -51,8 +51,29 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash tools/validate-pr-metadata.sh
 
-      - name: Adversarial mutation suite
-        run: python tools/tests/project_state_validator/run_mutations.py
+      # --require-full makes a case-limited run IMPOSSIBLE here: MUTATION_MAX_CASES is a test-only knob for
+      # the isolation regression's short child runs, and the authoritative gate must never be satisfiable by
+      # a partial matrix. The suite prints MUTATION_CASES_EXECUTED/TOTAL/LIMIT, and the step below asserts
+      # from that output that the complete matrix ran with no limit active.
+      - name: Adversarial mutation suite (COMPLETE matrix, no case limit)
+        run: |
+          set -euo pipefail
+          python tools/tests/project_state_validator/run_mutations.py --require-full | tee /tmp/mutations.out
+          line="$(grep -E '^MUTATION_CASES_EXECUTED=' /tmp/mutations.out || true)"
+          [ -n "$line" ] || { echo "the suite printed no case-count line"; exit 1; }
+          echo "  $line"
+          ran="$(sed -E 's/.*MUTATION_CASES_EXECUTED=([0-9]+).*/\1/' <<<"$line")"
+          total="$(sed -E 's/.*MUTATION_CASES_TOTAL=([0-9]+).*/\1/' <<<"$line")"
+          limit="$(sed -E 's/.*MUTATION_CASE_LIMIT=([^ ]+).*/\1/' <<<"$line")"
+          [ "$limit" = "none" ] || { echo "a case limit was active: $limit"; exit 1; }
+          [ "$ran" = "$total" ] || { echo "only $ran of $total cases ran"; exit 1; }
+          echo "  the complete matrix ran: $ran of $total cases, no limit"
+
+      # The harness itself is adversarial software that used to mutate the canonical checkout. This proves
+      # it cannot: concurrent runs, SIGTERM, a forced kill, and a failed sandbox all leave
+      # governance/project-state.json byte-identical and the working tree unchanged.
+      - name: Mutation-suite isolation regression (concurrency, forced kill, fail-closed)
+        run: python tools/tests/project_state_validator/run_isolation_regression.py
 
       - name: Zero-stale keyword validation
         run: bash tools/validate-project-state.sh
@@ -77,6 +98,12 @@ jobs:
         # facts, in BOTH directions: patched facts that say work remains must still produce an artifact that
         # says so, or "nothing remains" would just be hard-coded.
         run: python tools/tests/evidence_artifact/run_artifact_staleness.py
+
+      - name: Tooling must carry no control characters
+        # A heredoc turned an escape into a literal 0x08 inside two validator regexes. The file looked
+        # correct, both regexes still compiled, the suite still reported PASS - and the alternatives they
+        # guarded could never match. Only the bytes give that away, so the bytes are checked.
+        run: python tools/tests/tooling/run_control_chars.py
 
       - name: Working tree must remain clean
         run: |

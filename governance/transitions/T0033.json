@@ -1,0 +1,95 @@
+{
+  "transition_id": "T0033",
+  "seq": 33,
+  "timestamp": "2026-08-12T08:50:00Z",
+  "record_type": "PHASE_4_CONSTRUCTION_BOUNDARY_CLOSED_AND_MANUAL_REVIEW_OPERATOR_SURFACE",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030, T0031 and T0032 are PRESERVED unchanged. This receipt records that T0032's construction-boundary claim was still too strong, and what closed it.",
+  "corrections": [
+    {
+      "id": "C-1",
+      "claim_in_T0032": "the production financial construction boundary is closed",
+      "what_was_actually_true": "It was not. NewProductionEngine still took a caller-supplied getenv, so a production caller could feed the fail-closed loader any environment it liked. NewDarkGuard remained EXPORTED and took an arbitrary Config AND an arbitrary Transport, which is precisely an independently configured financial sender. Worse, the DARK check EXCLUDED NewDarkGuard from its own exported-Transport-constructor rule, so it could not have failed on the real hole -- the check had been written around the gap rather than onto it.",
+      "correction": "NewProductionEngine(repo) now takes NOTHING: config comes from the real process environment, transport from the internal factory. newDarkGuard is unexported. The compile-time-only export_test.go carries every test seam. The DARK check was rewritten to assert the PROPERTY rather than a list of names: it derives the exported surface with `go doc` and refuses ANY exported function whose PARAMETERS mention Config or Transport, with no exclusions.",
+      "check_proved_bidirectional": "The rewritten check was verified in BOTH directions before being trusted: it passes on the clean tree, FAILS on a deliberately planted exported constructor taking (Config, Transport), and passes again once that is removed. Two earlier drafts of the same check were silently vacuous -- one anchored on '^func' and so skipped every constructor (go doc indents them under their type), the other matched the whole signature and flagged DefaultConfig()/LoadConfigFromEnv(), whose NAMES contain Config and which accept none."
+    },
+    {
+      "id": "C-2",
+      "area": "stale current-state documentation",
+      "what_was_actually_true": "The Phase-4 Plan and the Financial Schema-Gap Audit both still said verification was LOCAL/DISPOSABLE and that no authoritative CI run existed, which had been false since run 31571581211.",
+      "correction": "Both now state that authoritative CI exists, runs on every push to the branch, and gates the exact delivered head, with the run/head/artifact recorded in project-state. project-state additionally records HOW the construction boundary is enforced and that its previous claim was premature."
+    }
+  ],
+  "delivered": [
+    "data-plane/internal/posting: NewProductionEngine(repo) as the only exported financial constructor; newDarkGuard unexported; export_test.go seams.",
+    "scripts/ci/phase4-dark-check.sh: property-based construction-boundary assertion, proved bidirectional.",
+    "data-plane/cmd/edged/resources_phase4_review.go: the Manual Review OPERATOR surface -- GET queue, GET action catalog, GET posting detail with pinned evidence + attempt history + review history, POST decision.",
+    "financial-review resource key added to the role matrix: payments_operator WRITE (Contract section 15), hotel_it_manager / front_office_operator / guest_relations_operator / site_viewer READ, site_admin implicit.",
+    "data-plane/cmd/edged/phase4_review_api_integration_test.go: real HTTP + real PostgreSQL contract tests for the authorization half."
+  ],
+  "manual_review_properties_enforced_at_the_api": [
+    "financial-review write permission, through the existing resourcePermission middleware and role matrix.",
+    "the actor is the AUTHENTICATED session operator. The request schema has no actor field and decoding is strict, so a body naming someone else is rejected outright; the immutable ledger records the session operator.",
+    "password re-authentication on EVERY action, including ESCALATE, against the operator's own stored hash.",
+    "mandatory non-empty reason; mandatory non-empty JSON-object evidence for every terminal action.",
+    "tenant scoping on every read and before every decision: another site's posting is 404, not 403, and no ledger row is written.",
+    "the exact section-15 catalog and nothing else; there is no generic approve action.",
+    "available_actions narrows the catalog to what is applicable, so the UI never offers a decision the database will refuse -- while the database remains the enforcement.",
+    "database refusals are mapped onto HTTP: stale version and second incompatible decision are 409, inapplicable actions are 422.",
+    "the surface states the v1 limitation in words: CREATE_REVERSAL records an audited ledger row only and the folio correction is a manual Front Office operation."
+  ],
+  "verification": {
+    "db_gate": "iam_v2_scratch/phase4_0011_financial.sh - 112 PASS / 0 FAIL",
+    "pre_0011_invariants": "31/31 on the pre-0011 chain and 31/31 after 0011+0012+0013",
+    "financial_core_unit": "76 PASS / 0 FAIL",
+    "integration": "65 PASS / 0 FAIL (51 posting core + 14 Manual Review API) against disposable PostgreSQL 16",
+    "dark_static_assertion": "PASS, and the construction check is proved to fail on a planted hole",
+    "authoritative_ci": "see phase4_authoritative_ci_* in governance/project-state.json"
+  },
+  "not_delivered_in_this_milestone": [
+    "Item 3: Online Payment and Settlement execution (payment_transactions, idempotent CHARGE, callbacks, REFUND ledger, merchant scoping) is NOT implemented.",
+    "Item 4: the approved Phase-2 atomic Entitlement grant is NOT wired to payment success, because payments are not implemented.",
+    "Item 5: the Phase-4 least-privilege DB grant model is NOT designed or applied. Runtime privileges remain as Phase 3 left them, which is zero iam_v2 DML for service roles.",
+    "Item 6: the Hotel-Admin Manual Review FRONTEND is NOT built. The operator API exists and is tested; no React/Next page consumes it yet.",
+    "FINANCIAL_RECOVERY_MODE, financial observability, runtime service ownership integration, live-DARK deployment and reboot/rollback all remain outstanding."
+  ],
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only."
+  },
+  "no_financial_traffic": {
+    "real_pms_ps_transmitted": false,
+    "real_pa_accepted": false,
+    "guest_folio_debited": false,
+    "payment_provider_charge_or_refund": false,
+    "programmatic_pms_reversal": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "deployment_performed": false
+  },
+  "evidence_files": [
+    "data-plane/cmd/edged/resources_phase4_review.go",
+    "data-plane/cmd/edged/phase4_review_api_integration_test.go",
+    "data-plane/internal/posting/export_test.go",
+    "scripts/ci/phase4-dark-check.sh",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. Phase 4 remains IN_PROGRESS at DARK maturity.",
+  "next_action": "Implement Online Payment and Settlement execution with the approved Phase-2 atomic Entitlement grant, then the Phase-4 least-privilege grant model, then the Manual Review frontend, then recovery, observability, runtime integration and the controlled DARK deployment."
+}

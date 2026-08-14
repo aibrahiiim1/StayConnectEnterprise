@@ -1,0 +1,23 @@
+{
+  "$comment": [
+    "PRODUCT-OWNER ACCEPTANCES OF PRODUCTION DEPENDENCY RISK.",
+    "",
+    "This file is the ONLY place a production vulnerability may be called 'accepted'. It records a decision",
+    "the Product Owner actually made, not an assessment the delivery agent made about itself. A finding that",
+    "has been investigated and understood but not accepted is TRIAGED, which is a different word and a",
+    "different outcome: the gate fails on it.",
+    "",
+    "An acceptance names the exact advisories it covers. A package-level acceptance would silently absorb",
+    "the next, unrelated advisory published against the same package -- which is how a real risk becomes",
+    "invisible.",
+    "",
+    "Every entry requires: package, advisories (GHSA ids), severity, rationale, decided_by, decision_ref (the",
+    "governance transition that carries the decision), decided_on and expires_on. An expired acceptance is",
+    "treated as no acceptance at all.",
+    "",
+    "The list is EMPTY, and that is a measured state rather than an omission: as of 2026-08-13 the production",
+    "dependency tree of hotel-admin reports zero advisories (npm audit --omit=dev), so there is nothing to",
+    "accept. See docs/PHASE4_DEPENDENCY_TRIAGE.md for how it got there."
+  ],
+  "acceptances": []
+}

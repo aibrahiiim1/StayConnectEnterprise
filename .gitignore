@@ -40,3 +40,7 @@ __pycache__/
 # Phase-3 software-gate staging + artifact (produced in CI, never committed)
 .phase3-evidence/
 .phase3-artifact/
+
+# CI evidence scratch: the gates write here on every run. The DELIVERED copy of the audit
+# evidence lives in docs/evidence/phase4/, which is what a reviewer should read.
+.phase4-evidence/

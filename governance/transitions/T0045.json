@@ -1,0 +1,98 @@
+{
+  "transition_id": "T0045",
+  "seq": 45,
+  "timestamp": "2026-08-13T13:05:00Z",
+  "record_type": "PHASE_4_CLOSURE_CORRECTION_REPOSITORY_ONLY",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "4",
+  "decision": "D19",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner instruction of 2026-08-13: one repository-only FIX-FORWARD closure-correction round under the EXISTING D19 acceptance. No new decision was required and none was created. Phase 4 is NOT reopened; T0044 is preserved unchanged.",
+  "history_note": "T0030 through T0044 are PRESERVED unchanged. This receipt records corrections to CURRENT-STATE surfaces and to the validators that failed to catch their contradictions. No historical receipt was rewritten and no appliance, Production database or feature flag was touched.",
+  "false_passes_closed": [
+    {
+      "id": "Z-1",
+      "found": "governance/project-state.json recorded phases[\"4\"].status = IN_PROGRESS while T0044's new_state.phase_status was ACCEPTED_AND_CLOSED. The generated START-HERE / Handoff / Contract blocks read the phases map, so every one of them printed 'Phase 4 accepted and closed' and '4 IN_PROGRESS' in the same paragraph.",
+      "why_it_passed": "No rule compared a transition receipt to the phases map. Each record was internally well formed; they were only wrong about each other.",
+      "fix": "phases[\"4\"].status set to ACCEPTED_AND_CLOSED with a full maturity string naming D19/T0044, the accepted candidate, the live evidence and the six accepted limitations. New rule `transition-phase-coherence` in tools/validate-current-state-parity.py asserts that the latest transition's new_state.phase_status equals phases[the phase it names].status, and fails when the receipt records no phase_status at all."
+    },
+    {
+      "id": "Z-2",
+      "found": "current_maturity still narrated Phase-4 implementation-in-progress and listed remaining work; allowed_actions still authorized 'Execute the authorized Phase 4 ... end-to-end' and historical Phase-3 live deployment; the Phase-4 Plan carried an accepted/closed header AND the sentences 'Phase 4 is NOT accepted and NOT closed' and 'Not accepted, not closed.'",
+      "why_it_passed": "Every existing zero-stale rule is either a keyword ban or a Phase-3-specific comparison. In a repository where the phase really is unfinished, each of those sentences is correct; what makes them wrong is the RECORDED STATUS, and no rule was relative to it.",
+      "fix": "current_maturity rewritten to describe the actual state; allowed_actions reduced to the merge decision plus repository-only governance maintenance; both Plan sentences corrected. New rule `accepted-phase-semantics` derives the accepted phases from the phases map and fails any current surface -- state file, plan, handoff, report -- that presents such a phase as not accepted, not closed, in progress, not started, a candidate, or awaiting acceptance, and fails allowed_actions that still authorize EXECUTING it. Generic over phases: phase 5, 6 and 7 need no new rule."
+    },
+    {
+      "id": "Z-3",
+      "found": "Further stale current claims, found by sweeping rather than by patching the reported examples: phases[\"3\"].maturity still said 'PR #6 remains OPEN and UNMERGED' although it merged on 2026-08-11 (D17/T0025); phase3_execution.stage and .increment_status still read as an open increment; database_schema_state still recorded iam_v2 at 63 tables although WS-L took the appliance to 68; the Phase-1A Plan still said 'Current position: awaiting Product-Owner acceptance of Phase 1A'; the Handoff's Next Authorized Step still said 'execute the authorized Phase 3 ... IMPLEMENTATION IN PROGRESS ... no Phase 4'; and the generated pack MANIFEST still labelled the Phase-3 plan 'IMPLEMENTATION IN PROGRESS, DARK'.",
+      "why_it_passed": "Same reason as Z-2 for the prose, plus: the iam_v2 count rule only knew the specific superseded value 49, so 63-versus-68 was invisible to it.",
+      "fix": "All corrected, with the superseded values kept as explicitly labelled history rather than deleted."
+    },
+    {
+      "id": "Z-4",
+      "found": "tools/validate-pr-metadata.sh mapped current_activity to a HARD-CODED expected phrase, and its ACCEPTED_AND_CLOSED arm demanded the literal 'ACCEPTED_AND_CLOSED AT DARK MATURITY' -- which is Phase 3's maturity. The Phase-4 PR body stated the true state exactly and was reported stale. Project Governance run 31700775657 failed on precisely this.",
+      "why_it_passed": "It did not pass; it FAILED, and it failed the correct wording. A gate that can only be satisfied by writing a false maturity into the most visible surface in the delivery is worse than no gate.",
+      "fix": "The expected state is now DERIVED from canonical state: phases[current_phase].status supplies the token the body must carry, and latest_accepted_po_decision plus latest_transition_id supply the records it must cite. The mirror direction is kept -- an unfinished phase must not have a PR body announcing acceptance -- and the Phase-3-only acceptance block, which could never say anything about phase 4 or later, is removed in favour of the derived check. A phase closing at a maturity nobody has invented yet needs no edit."
+    },
+    {
+      "id": "Z-5",
+      "found": "Phase 3 Software CI (run 31700775612) failed with 'column financial_base_currency does not exist' and 'function iam_v2.p4_declare_financial_recovery does not exist'. The Phase-3 gate builds a schema that stops at migration 0010 and runs `go test -tags integration ./cmd/edged/`; the three Phase-4 API test files live in that same package and carried only the `integration` tag, so they compiled into the Phase-3 run and failed against a schema in which those objects cannot exist.",
+      "why_it_passed": "Nothing tied a test to the schema it needs. Seven red tests that said nothing about Phase 3 and would have masked anything that did.",
+      "fix": "The three Phase-4 files now carry `//go:build integration && phase4`, and scripts/phase4-pg-integration.sh asks for that tag; the Phase-3 gate simply does not build them. Coverage is NOT reduced: the Phase-4 harness still runs the same tests against the 0011-0026 schema, verified green. scripts/pmsd-pg-integration.sh additionally gained a TEST-OWNERSHIP GUARD that lists the Go test files actually compiled into its own package set and fails if any references a Phase-4-only object -- proven to fire by removing a tag and observing the guard reject the build."
+    },
+    {
+      "id": "Z-6",
+      "found": "Two latent failures in the governance suite itself, invisible because the Governance job aborted at the PR-metadata step and never reached them: the adversarial mutation suite's fixtures pinned project-state.json's ONE-LINE serialisation and stopped matching after an earlier round rewrote the file with json.dumps(indent=2), aborting the whole suite on 'fixture drift'; and the evidence-reference rule treated a receipt's compact two-file citation `...{up,down}.sql` as a literal filename and reported a citation of files that do exist.",
+      "why_it_passed": "A failing step hides every step after it. Neither was reached.",
+      "fix": "The mutation suite gained a formatting-independent `json_set` mutation kind and its three drifted fixtures use it; its CUR_GOV_MAINT anchor now matches on content rather than a sentence prefix. The evidence-reference rule and the negative-test sandbox both expand a single {a,b} alternation."
+    },
+    {
+      "id": "Z-7",
+      "found": "The adversarial mutation suite MUTATED THE AUTHORITATIVE governance/project-state.json IN THE ACTIVE WORKING TREE and relied on a `finally` to restore it. That is safe only while exactly one runner exists and nothing ever interrupts it, and neither held during this round: a runner that outlived its wrapper kept mutating while a second run started, and each restored the bytes IT had captured, so the later restore silently reverted legitimate corrections. The canonical file was left with latest_transition_id=T0008 on one occasion and phases[\"1A\"].status=NOT_STARTED plus an artifact-registry entry with its removal_gate blanked on another. The corruption did not look like a broken test; it looked like a broken repository.",
+      "why_it_passed": "Nothing checked the harness itself. It was treated as a test rather than as adversarial software that writes to the one file the whole governance model depends on.",
+      "fix": "The suite now runs every mutation in a DISPOSABLE SANDBOX: `git clone --shared --no-checkout` (objects borrowed through objects/info/alternates, so nothing can be written back and the sandbox has its own index, refs and config), plus a copy of every git-known working-tree file AND of ROOT/.git/index so the candidate's staged state is reproduced and not only its file contents. FIDELITY IS PROVED, NOT ASSUMED: the sandbox must match the checkout exactly on `git status --porcelain` (staged, unstaged, deleted, renamed and untracked-added) and on `git ls-files -s` (blob ids, stage numbers and MODES -- 100644 vs 100755, and 120000 for a symlink), or the run aborts. COVERAGE IS UNCHANGED because the sandbox is a real git repository, so the two git-dependent checks (SOURCE_COMMIT existence and manifest-vs-git equality) run exactly as they do in the checkout instead of being skipped. FAIL CLOSED: if the sandbox cannot be built or proved faithful the suite exits non-zero rather than falling back to the checkout. The suite also digests ROOT's governance/ before and after and reports ISOLATION VIOLATED if it ever differs.",
+      "termination_claims_stated_precisely": "Normal exit, exception, SIGINT and SIGTERM are covered by finally + atexit + handlers. SIGKILL, and Windows TerminateProcess (which is what Popen.kill and Popen.terminate do there), run NO handler, so THIS PROCESS CANNOT PROMISE TO CLEAN UP AFTER A FORCED KILL and no such promise is made. What is guaranteed is the property that matters: the canonical checkout is untouched either way, because nothing is ever written to it. The leftover sandbox is collected by an INDEPENDENT mechanism -- every run sweeps psmut-* sandboxes older than two hours at startup, which is a different process doing the cleanup, the only kind of promise a killed process can keep.",
+      "case_limit_is_test_only": "MUTATION_MAX_CASES exists so the isolation regression can launch short overlapping child runs. It is TEST-ONLY: the suite accepts --require-full and REFUSES TO RUN AT ALL (exit 2) while the variable is set, and it prints MUTATION_CASES_EXECUTED / MUTATION_CASES_TOTAL / MUTATION_CASE_LIMIT. The authoritative Project Governance step passes --require-full and then asserts from that output that the limit was 'none' and that executed == total, so a partial matrix cannot be mistaken for the full one.",
+      "proved": "tools/tests/project_state_validator/run_isolation_regression.py, 13/13 PASS. A: three suites run CONCURRENTLY -- the exact shape that corrupted the tree -- all exit 0, each builds its own sandbox, and the canonical project-state.json digest and the full `git status --porcelain` are unchanged. B1: SIGTERM; checkout unchanged (on Windows the sandbox survived, and the test SAYS SO rather than claiming cleanup). B2: forced kill; checkout unchanged, sandbox survives exactly as documented. B3: a stale sandbox aged past the threshold is removed by the next run's startup sweep, which reports what it collected. C: with sandbox creation forced to fail the suite exits 2 with 'refusing to mutate the canonical checkout' and changes nothing. Every case asserts BOTH the project-state digest AND the whole working-tree status, because a suite that restored the file but left an unrelated path dirty would still have written to a tree somebody is working in."
+    }
+  ],
+  "not_changed": [
+    "T0044 and every earlier receipt — preserved byte-for-byte",
+    "decision D19 — used as-is; no new Product-Owner decision was created or requested",
+    "the accepted software candidate b94112d8cb0ab63938b60f829ddd465c14491f97 — zero runtime diff",
+    "the appliance, Production, every feature flag, and the merge state of PR #12"
+  ],
+  "runtime_delta": {
+    "vs_accepted_software_candidate": "b94112d8cb0ab63938b60f829ddd465c14491f97",
+    "paths_measured": [
+      "data-plane/",
+      "hotel-admin/",
+      "control-plane/",
+      "deploy/"
+    ],
+    "changed": 0,
+    "note": "The only data-plane files this round touches are three //go:build lines in _test.go files, which are excluded from every shipped binary by construction. Everything else is governance, documentation, validation tooling and CI harnesses."
+  },
+  "evidence_files": [
+    "tools/validate-current-state-parity.py",
+    "tools/tests/current_state_parity/run_negative.py",
+    "tools/validate-pr-metadata.sh",
+    "tools/tests/project_state_validator/run_mutations.py",
+    "scripts/pmsd-pg-integration.sh",
+    "scripts/phase4-pg-integration.sh",
+    "governance/transitions/T0044.json",
+    "tools/tests/project_state_validator/run_isolation_regression.py"
+  ],
+  "acceptance_verdict": "NO CHANGE TO ACCEPTANCE. Phase 4 remains ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity under D19 / T0044. This is a repository-only fix-forward correction of current-state surfaces and of the validators that let them contradict each other; it neither reopens implementation nor alters what was accepted.",
+  "next_action": "Product-Owner decision on merging the Phase-4 pull request."
+}

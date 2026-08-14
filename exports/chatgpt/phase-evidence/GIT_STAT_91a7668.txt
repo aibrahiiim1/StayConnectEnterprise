@@ -1,4 +1,0 @@
-commit 91a766840db7df6eed2598bde258d55725c71638
-Date:   Tue Aug 11 23:23:42 2026 +0300
-
-    Phase-3 governance guards must not switch off when the current phase moves past 3

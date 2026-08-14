@@ -1,0 +1,232 @@
+name: Phase 4 Financial Core CI
+
+# The authoritative automated gate for the Phase-4 financial execution core. It runs on the exact HEAD under
+# test and produces machine-verifiable evidence — never a hand-typed number and never a workstation result.
+#
+# What it proves, in order:
+#   1. the financial core builds, vets and formats clean;
+#   2. its unit matrix passes, including the PS golden wire, the PA catalog and the DARK guard;
+#   3. it passes under the race detector, because the outbox lanes and the review path are concurrent;
+#   4. migrations 0011 through 0026 apply, re-apply as designed, reverse cleanly, and weaken nothing that
+#      existed before them — the gate re-runs the ENTIRE pre-0011 financial invariant suite on both chains;
+#   5. the financial core behaves correctly against a real PostgreSQL: fail-closed creation, P# under
+#      contention, independent interface lanes, UNKNOWN that never auto-retries, and reviewer races;
+#   6. NOTHING in the tree enables a Phase-4 flag, and no financial record can leave a Phase-3 connector.
+#
+# It contacts no appliance, no Production database, no PMS and no payment provider. Every database it uses
+# is a disposable container it creates and destroys itself, and every transport in the tests is an
+# in-process stub.
+
+# The phase branch is in the trigger list deliberately. workflow_dispatch cannot reach a workflow that does
+# not yet exist on the default branch, and the Phase-4 delivery rule is one branch and ONE eventual PR -- so
+# without this, the only way to obtain authoritative CI for the work in progress would be to open a PR early
+# or to merge, and neither is authorized. A push trigger uses the workflow file from the pushed branch, so
+# the branch gates itself on the exact HEAD under test.
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master, 'phase/**' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  phase4-financial-core-gate:
+    name: phase4-financial-core-gate
+    runs-on: ubuntu-latest
+    env:
+      EVID: ${{ github.workspace }}/.phase4-evidence
+    steps:
+      - name: Check out the PR HEAD
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: data-plane/go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Initialise evidence staging
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVID/counts" "$EVID/logs"
+          {
+            printf 'head\t%s\n' "$(git rev-parse HEAD)"
+            printf 'branch\t%s\n' "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+            printf 'run_id\t%s\n' "$GITHUB_RUN_ID"
+            printf 'go\t%s\n' "$(go version)"
+            printf 'postgres\t%s\n' "postgres:16-alpine (disposable, per gate)"
+            printf 'start_utc\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > "$EVID/env.tsv"
+
+      # ---------------------------------------------------------------- build / static
+      - name: gofmt
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh gofmt -- bash $GITHUB_WORKSPACE/scripts/ci/gofmt-check.sh"
+
+      - name: go build (./...)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-build -- go build ./..."
+
+      - name: go vet (./...)
+        working-directory: data-plane
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet -- go vet ./..."
+
+      # ---------------------------------------------------------------- financial core: unit + race
+      - name: Financial-core unit matrix
+        working-directory: data-plane
+        # PS golden wire, contract field order, no currency on the wire, the AS catalog, ambiguous-PA
+        # refusal, the DARK guard, and the fail-closed gate matrix on synthetic snapshots.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-unit --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh phase4-unit
+          ./internal/posting/ -count=1
+
+      - name: Financial-core race detector
+        working-directory: data-plane
+        # The outbox lanes, the P# allocator and the review path are all concurrent. A data race in a money
+        # path is a defect regardless of whether a test happened to observe it.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-race --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh phase4-race
+          -race ./internal/posting/ ./internal/pmsd/ -count=1
+
+      # ---------------------------------------------------------------- migrations
+      - name: Migrations 0011-0026 + financial DB invariant gate (disposable PG16)
+        # Includes the ENTIRE pre-0011 financial invariant suite, run on the pre-0011 chain and again after
+        # the Phase-4 chain on a clean rebuild, so "nothing was weakened" is measured rather than asserted.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-migration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh iam_v2_scratch/phase4_0011_financial.sh"
+
+      # ---------------------------------------------------------------- payment concurrency
+      - name: Payment concurrency proof (real concurrent PG16 sessions)
+        # Its own gate rather than a step inside the DB gate: the proof backgrounds psql sessions, and
+        # nesting it in a command substitution changes their scheduling -- exactly the timing dependence
+        # this proof exists to rule out.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-payment-concurrency -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-payment-concurrency.sh"
+
+      # ---------------------------------------------------------------- least privilege
+      - name: Least-privilege boundary as real PostgreSQL roles (disposable PG16)
+        # Runs AS sc_payment_runtime / sc_financial_operator / sc_financial_readonly and shows the refusals.
+        # A grant file is a claim; this is the measurement.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-least-privilege -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-least-privilege.sh"
+
+      # ---------------------------------------------------------------- restore
+      - name: Supported restore drill (real pg_dump / pg_restore, disposable PG16)
+        # Performs an ACTUAL dump-and-restore rather than faking the signal. It is the step that would have
+        # caught the T0038 defect: the supported restore goes into the same cluster, so system_identifier
+        # never changes and an identity-only detector sees nothing.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-restore-drill -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-restore-drill.sh"
+
+      # ---------------------------------------------------------------- financial core against real PG
+      - name: Financial-core PG16 integration matrix (disposable PG16)
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-pg-integration.sh"
+
+      # ---------------------------------------------------------------- DARK
+      # The gate must be able to FAIL. A suite nobody has watched fail is a suite nobody has tested, and a
+      # deterministic command error sitting inside a green run is worse than a red one.
+      - name: Prove the integration gate reports a broken step
+        env:
+          PHASE4_SELFTEST_BREAK: recovery
+        run: |
+          if bash "$GITHUB_WORKSPACE/scripts/phase4-pg-integration.sh"; then
+            echo "the integration gate PASSED with a deliberately broken step; it cannot be trusted"
+            exit 1
+          fi
+          echo "the integration gate correctly failed on the broken step"
+
+      - name: DARK assertion — no Phase-4 flag is enabled anywhere in the tree
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dark -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dark-check.sh"
+
+      # ---------------------------------------------------------------- Hotel-Admin financial operator UI
+      # The operator screens are part of the Phase-4 software boundary: a recovery screen that grew a
+      # "retry" button would be a way to double-charge a guest, and only a UI test catches that.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: hotel-admin/package-lock.json
+
+      - name: Install the Hotel-Admin toolchain
+        working-directory: hotel-admin
+        # package-lock.json is generated by a real `npm install` on LINUX (node:20-bookworm), not on the
+        # Windows development host. sharp and the SWC binaries are optional platform packages, and npm's
+        # ideal-tree differs per platform: a Windows-generated lock omits the hoisted @emnapi/core and
+        # @emnapi/runtime that a Linux `npm ci` computes, and fails EUSAGE here. The Linux-generated lock is
+        # a superset -- it carries every platform's binaries -- and `npm ci` reproduces it on both.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-npm-ci -- npm ci"
+
+      - name: Hotel-Admin typecheck
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-typecheck -- npx tsc --noEmit"
+
+      - name: Hotel-Admin unit tests (financial operator surface)
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-vitest -- npx vitest run --reporter=default"
+
+      - name: Hotel-Admin production build with Phase-4 flags OFF
+        working-directory: hotel-admin
+        # The DELIVERED bundle. Building it with the flags off is what proves the financial screens are
+        # absent from the shipped navigation rather than merely hidden by a runtime check.
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-build -- npx next build"
+
+      - name: Install Chrome for the browser tests
+        working-directory: hotel-admin
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh playwright-install -- npx playwright install --with-deps chrome"
+
+      - name: Hotel-Admin E2E — the FULL browser suite
+        working-directory: hotel-admin
+        # The whole suite, not only the Phase-4 spec: a financial milestone that regressed the PMS-interface
+        # or guest-portal screens would still be a regression, and this is the gate that caught exactly that
+        # when the Next 16 upgrade was attempted.
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-e2e -- npx playwright test --reporter=list"
+
+      # ---------------------------------------------------------------- governance parity
+      # The self-test first, for the same reason as the dependency gate: the parity validator passes on a
+      # corrected state file, which is also what a validator that does nothing looks like. This drives the
+      # real validator against the exact stale values found at T0041 and fails if it lets any of them pass.
+      - name: Current-state parity self-test
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh state-parity-selftest -- bash $GITHUB_WORKSPACE/tools/validate-state-parity-selftest.sh"
+
+      - name: Current-state claims match the repository
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh state-parity -- python3 $GITHUB_WORKSPACE/tools/validate-state-parity.py"
+
+      # ---------------------------------------------------------------- dependency risk
+      # The self-test runs FIRST. The gate itself passes on a clean tree, which is the state a gate that
+      # does nothing is also in; this proves it refuses an unaccepted production advisory before its verdict
+      # on the real tree is worth anything.
+      - name: Dependency gate self-test
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dependency-gate-selftest -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dependency-gate-selftest.sh"
+
+      - name: Production dependency advisory gate
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-dependency-gate -- bash $GITHUB_WORKSPACE/scripts/ci/phase4-dependency-gate.sh"
+
+      - name: Assemble the Phase-4 financial-core evidence artifact
+        if: always()
+        run: python3 scripts/ci/phase4_evidence.py
+
+      - name: Record the HEAD for the artifact name
+        id: head
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the Phase-4 financial-core evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-financial-core-evidence-${{ steps.head.outputs.sha }}
+          path: ${{ github.workspace }}/.phase4-evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90

@@ -1,0 +1,156 @@
+{
+  "transition_id": "T0039",
+  "seq": 39,
+  "timestamp": "2026-08-12T19:35:00Z",
+  "record_type": "PHASE_4_FINANCIAL_TRUST_BOUNDARY_RECOVERY_SAFETY_AND_COMPLETE_OPERATOR_UI",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030 through T0038 are PRESERVED unchanged. Migrations 0011 through 0020 are preserved; 0021, 0022 and 0023 correct and extend them additively.",
+  "corrections": [
+    {
+      "id": "S-1",
+      "area": "restricted-role trust boundary",
+      "what_was_actually_true": "sc_payment_runtime held no direct table DML, and T0038 reported that honestly -- but it also held EXECUTE on the low-level SECURITY DEFINER primitives, and a definer function is a privilege escalation by design. apply_payment_callback_v2 asserts ANY status for any correlated intent; p4_insert_entitlement creates an entitlement from thirteen caller-supplied parameters including the subject, the package revision and the policy snapshot; p4_mark_purchase_granted marks a purchase GRANTED with no reference to whether it was paid. A compromised runtime could therefore settle a settlement and grant free access without a provider ever being contacted, and without touching a table. The 'no DML' property was true and almost meaningless.",
+      "correction": "0021 replaces the primitives with two high-level operations that re-derive their own evidence. p4_grant_paid_entitlement takes a tenant, a site and a SETTLEMENT, and re-resolves the purchase, quote, auth context, subject, package revision, plan revision and policy snapshot itself under FOR UPDATE, enforcing ONLINE_PAYMENT + SETTLED + AWAITING_SETTLEMENT under the same subject advisory lock the Go path uses. p4_apply_provider_outcome takes no tenant, site or merchant parameter, accepts only the three contractual outcomes, and refuses unless the intent is genuinely PENDING. EXECUTE on apply_payment_callback_v2, p4_insert_entitlement, p4_terminate_live_entitlement_for_subject, p4_mark_purchase_granted and apply_entitlement_transition is revoked from the runtime.",
+      "proved": "A new definer-abuse matrix (7 tests) attacks through the door as the real restricted role: it ENUMERATES every definer function the role can execute and fails on any unreviewed grant, then attempts entitlement fabrication, unpaid GRANTED, cross-tenant and cross-site substitution, an invented settlement, the wrong rail, and a manufactured CAPTURED. All refused, with the entitlement and settlement counts asserted afterwards."
+    },
+    {
+      "id": "S-2",
+      "area": "the honest limit of a database trust boundary",
+      "what_was_actually_true": "No database privilege can prove a provider said CAPTURED. The signature check that establishes that runs in the payment process against a secret the database never holds.",
+      "correction": "The trusted-computing boundary for provider authenticity is stated explicitly as the edged/payment process, not the DB role, in both 0021's header and the code. What the database now guarantees is narrower and real: no unrelated runtime surface holds a generic assert-CAPTURED primitive, and the one remaining path requires the intent to be executing, so a compromised role's blast radius is bounded to payments it already started.",
+      "proved": "TestIntegrationDefinerAbuse_TheResidualBlastRadiusIsBoundedAndKnown records what a compromised role CAN still do -- lie about a payment it started -- and then shows it cannot reach any other payment, with the unrelated settlement asserted unchanged. The limitation is measured rather than asserted."
+    },
+    {
+      "id": "S-3",
+      "area": "FINANCIAL_RECOVERY_MODE structural hold",
+      "what_was_actually_true": "0019 COPIED non-terminal posting work into financial_recovery_holds and blocked new INSERTs. It did nothing to the rows already in posting_outbox: a QUEUED row was still QUEUED, and the worker's claim -- an UPDATE to IN_FLIGHT -- was never gated. The ledger said 'held' while the underlying command remained fully sendable, which is the exact failure recovery exists to prevent.",
+      "correction": "0022 adds p4_hold_financial_rails, called by BOTH recovery entry points, which takes FOR UPDATE on the outbox rows and moves them to HELD_RECOVERY so the worker's claim predicate no longer matches. A trigger refuses any transition into IN_FLIGHT while the site is held, and refuses to move work OUT of HELD_RECOVERY except through a recovery reconciliation decision or the EXISTING audited retry authorization.",
+      "proved": "TestIntegrationRecoveryClosure_ExistingPostingWorkBecomesNonSendable (with a baseline claim first, so the fixture is known to work) and TestIntegrationRecoveryClosure_AWorkerRacingRecoveryEntryCannotEscape, which runs the claim and the recovery entry concurrently TWELVE times and asserts that neither ordering leaves a sendable posting."
+    },
+    {
+      "id": "S-4",
+      "area": "reconciliation consequences and release verification",
+      "what_was_actually_true": "A resolution had no rail-specific consequence: CONFIRMED_COMPLETED -- 'the folio already has this' -- left the original command exactly as sendable as before. And release checked only that every hold row had a non-null resolution, which is a claim ABOUT a record rather than a fact about it.",
+      "correction": "0022 gives each rail its own consequence. POSTING_OUTBOX + CONFIRMED_COMPLETED or ABANDONED becomes DONE; CONFIRMED_NOT_COMPLETED and ESCALATED stay HELD_RECOVERY and are never re-queued -- retry remains available only through record_posting_review_action. A PAYMENT conclusion is never turned into a capture: it goes to UNKNOWN with its settlement to MANUAL_REVIEW, because recording a capture would settle and grant on an operator's say-so, bypassing the authenticated provider boundary. Release now interrogates the records: no sendable posting, no live payment, no IN_PROGRESS settlement.",
+      "proved": "TestIntegrationRecoveryClosure_ReconciliationHasRailSpecificConsequences (three sub-cases) and TestIntegrationRecoveryClosure_ReleaseVerifiesTheUnderlyingState, which resolves every hold and THEN stages a real divergence -- the outbox row put back in the queue -- and asserts release is refused while the ledger still reads fully reconciled."
+    },
+    {
+      "id": "S-5",
+      "area": "restore detection against the ACTUAL supported workflow",
+      "what_was_actually_true": "0019 detected a restore by comparing pg_control's system_identifier. The repository's supported restore (docs/BACKUP_AND_RESTORE.md) is `pg_restore -d stayconnect_site <dump>` INTO THE EXISTING DATABASE of the EXISTING CLUSTER -- so system_identifier does not change and the supported restore was precisely the case the detector could not see. T0038's drill could not have found this: it 'proved restore' by UPDATEing the stored identity to a fake value, which exercises the comparison and nothing else.",
+      "correction": "0023 adds restore_generation in the database and compares it against a MANAGEMENT-PARTITION marker at /etc/stayconnect that pg_dump cannot read and pg_restore cannot write. deploy/scripts/stayconnect-financial-restore.sh verifies a signed manifest and the dump digest BEFORE anything is touched, advances the marker BEFORE restoring so a crash mid-restore still fails towards the hold, then stamps the database and enters recovery. system_identifier is kept as a second signal for the cases the marker cannot see. A detected restore no manifest explains is recorded as UNSUPPORTED_RAW_SNAPSHOT, and a vanished marker is treated the same way.",
+      "proved": "scripts/phase4-restore-drill.sh, 26 PASS / 0 FAIL, performing a REAL pg_dump and pg_restore. It asserts the finding directly: the restore brings a captured payment back as CREATED, system_identifier is unchanged, the identity-only signal reports UNCHANGED, and the marker-based detector fires, holds every rail and refuses re-execution."
+    },
+    {
+      "id": "S-6",
+      "area": "TPM and anti-rollback claims",
+      "what_was_actually_true": "There is no TPM, secure element or monotonic counter in this appliance profile.",
+      "correction": "None is claimed. The marker is protected by file ownership and permissions only; root can rewrite it and so can a restore performed without the tool. It defends against the ordinary operational restore and against accident, not against a privileged adversary, and the UNSUPPORTED_RAW_SNAPSHOT path exists because someone will eventually restore without it. Recorded in 0023's header, in the tool, and asserted by the drill.",
+      "proved": "The drill asserts the tool states its own limitation rather than implying protection it does not have."
+    },
+    {
+      "id": "S-7",
+      "area": "actor and scope authority",
+      "what_was_actually_true": "The recovery decision functions accepted an actor uuid as a parameter. The API never let a request supply one, but the DATABASE would accept any uuid from any caller holding EXECUTE, so the audit trail's authorship rested entirely on the application.",
+      "correction": "0021 adds p4_assert_financial_actor, and 0022 calls it from every recovery decision. The recorded author must be an ACTIVE operator of THAT tenant, which turns a forged actor from 'recorded as fact' into 'refused'. Session-derived authorship at the API is unchanged.",
+      "proved": "TestIntegrationRecoveryClosure_AForgedActorIsRefused: an invented uuid is refused, ANOTHER TENANT'S REAL OPERATOR is refused, nothing is recorded, and the site's own operator then succeeds -- so the check discriminates rather than simply refusing everything."
+    },
+    {
+      "id": "S-8",
+      "area": "legacy identity representation",
+      "what_was_actually_true": "0018's backfill wrote merchant_account_ref = 'legacy:<internal uuid>' into a column documented as the PROVIDER'S OWN account identifier. No provider ever issued that string, and a later reader could not tell it from a real one.",
+      "correction": "0022 adds a provenance column. Backfilled rows become BACKFILLED_UNVERIFIED with a NULL reference -- 'we do not know it' rather than an invented value -- and two CHECK constraints make an unverified account structurally unable to be ACTIVE or default. Converting such a row also DISABLES it, because an account already activated without a real reference would otherwise violate the constraint and the migration would fail to apply; that case is real and the gate's own fixture exhibits it.",
+      "proved": "DB gate: an unverified legacy account cannot be activated; a CONFIGURED account still needs a real external reference; and the 0021-0023 UP/DOWN/re-UP cycle produces an identical schema fingerprint, which is what forced the idempotency fix in the provenance backfill."
+    },
+    {
+      "id": "S-9",
+      "area": "the CI gate itself",
+      "what_was_actually_true": "scripts/phase4-pg-integration.sh embedded a quoted phrase inside an already-quoted echo and put a comment after a `&&`, producing a real `No such file or directory` INSIDE an otherwise green run. A deterministic command error sitting quietly in a passing gate trains a reader to ignore the output.",
+      "correction": "The runner is a run_step helper: each label is quoted once in a variable, the first failure stops the suite and is reported BY NAME, and PHASE4_SELFTEST_BREAK deliberately breaks a named step so the gate can be shown to fail.",
+      "proved": "CI now runs the self-test as its own step and FAILS if the gate reports success with a broken step. Verified locally: PHASE4_SELFTEST_BREAK=recovery produces 'STEP FAILED: recovery' and rc=1."
+    }
+  ],
+  "delivered": {
+    "operator_surface": "WS-J completed: the Manual Review queue and posting/attempt history with pinned evidence and the served action catalog (never a second hard-coded copy), and the settlement browser with per-settlement payment history. Both behind the financial permission, with password step-up and session-derived authorship on the write path.",
+    "no_implied_capability": "The review screen offers only the actions the API's available_actions list contains, and the settlement screen offers no refund or chargeback affordance at all -- the backend can record one, but no provider adapter exists and no operator flow is authorized. Asserted by unit and browser tests, including that no real provider is ever named.",
+    "dependency_triage": "docs/PHASE4_DEPENDENCY_TRIAGE.md. next 14.2.5 -> 14.2.35 resolves the CRITICAL Cache Poisoning advisory; postcss 8.4.41 -> 8.5.26 resolves the build-time XSS and file-read advisories. 17 -> 16 advisories, no `npm audit fix --force`. The rest are triaged by actual reachability, and the two needing a major upgrade (Next 16, Vitest 4) are named as separate authorized work."
+  },
+  "verification": {
+    "financial_db_gate": "218 PASS / 0 FAIL, migrations 0011-0023 with UP/DOWN/re-UP and identical schema fingerprints",
+    "definer_abuse_matrix": "7 PASS / 0 FAIL as the real restricted role, including a closed-surface enumeration that fails on any unreviewed grant",
+    "recovery_closure": "6 PASS / 0 FAIL, including a 12-round concurrent claim-versus-recovery race",
+    "restore_drill": "26 PASS / 0 FAIL with a real pg_dump and pg_restore",
+    "least_privilege": "18 PASS / 0 FAIL",
+    "payment_concurrency": "9 PASS / 0 FAIL",
+    "integration_suite": "all steps green (posting, review + finops API, payment runtime, phase-2 free grant, observability, recovery, definer abuse, restricted role, entitlement grant)",
+    "hotel_admin_unit": "20 PASS / 0 FAIL",
+    "hotel_admin_e2e": "7 PASS / 0 FAIL in a real browser",
+    "dark_static_assertion": "PASS",
+    "unit": "PASS across the whole data-plane module"
+  },
+  "not_delivered_in_this_milestone": [
+    "No real provider adapter exists, and the residual trust boundary for provider authenticity is the payment process rather than the database. That is stated and measured, not resolved.",
+    "The Next.js advisory (high, image-optimizer DoS) is NOT fixed: the patch is in Next 16, two majors ahead. Exposure is assessed in docs/PHASE4_DEPENDENCY_TRIAGE.md and it is named as a remaining blocker needing its own authorized upgrade.",
+    "The runtime DSN is unchanged. The restricted-role path is proven end to end against a disposable database with a purpose-built login role; no Production DSN or grant was touched.",
+    "WS-L (the authorized controlled live-DARK deployment) and the reboot/rollback drill are NOT started, as this milestone required.",
+    "Refund and chargeback INITIATION still have no operator path, deliberately."
+  ],
+  "migration_application": {
+    "production": "NOT APPLIED. 0010_phase3_stay_resolution remains the latest migration applied in Production.",
+    "appliance": "NOT APPLIED.",
+    "where_applied": "Disposable PostgreSQL 16 containers only.",
+    "migrations_added_this_round": "0021_phase4_trust_boundary, 0022_phase4_recovery_closure, 0023_phase4_restore_generation"
+  },
+  "no_financial_traffic": {
+    "real_provider_charge_or_refund": false,
+    "real_provider_network_integration": false,
+    "real_pms_ps_transmitted": false,
+    "guest_folio_debited": false,
+    "paid_guest_access": false,
+    "programmatic_pms_reversal": false,
+    "phase4_flags_enabled_anywhere": false,
+    "appliance_contacted": false,
+    "production_database_contacted": false,
+    "production_dsn_or_grant_changed": false,
+    "deployment_performed": false
+  },
+  "evidence_files": [
+    "data-plane/migrations/0021_phase4_trust_boundary.up.sql",
+    "data-plane/migrations/0021_phase4_trust_boundary.down.sql",
+    "data-plane/migrations/0022_phase4_recovery_closure.up.sql",
+    "data-plane/migrations/0022_phase4_recovery_closure.down.sql",
+    "data-plane/migrations/0023_phase4_restore_generation.up.sql",
+    "data-plane/migrations/0023_phase4_restore_generation.down.sql",
+    "data-plane/internal/payment/granter.go",
+    "data-plane/internal/payment/recovery.go",
+    "data-plane/internal/payment/pg_definer_abuse_integration_test.go",
+    "data-plane/internal/payment/pg_recovery_closure_integration_test.go",
+    "deploy/scripts/stayconnect-financial-restore.sh",
+    "scripts/phase4-restore-drill.sh",
+    "scripts/phase4-pg-integration.sh",
+    "iam_v2_scratch/phase4_0011_financial.sh",
+    "hotel-admin/components/phase4/manual-review-view.tsx",
+    "hotel-admin/components/phase4/settlements-view.tsx",
+    "hotel-admin/test/phase4-review-settlements.test.tsx",
+    "hotel-admin/e2e/phase4-financial-operator.spec.ts",
+    "docs/PHASE4_DEPENDENCY_TRIAGE.md",
+    ".github/workflows/phase4-financial-core.yml",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md",
+    "governance/project-state.json"
+  ],
+  "timestamp_evidence": "Recorded from the system clock in UTC after the verification matrix completed.",
+  "acceptance_verdict": "NOT ACCEPTED and NOT CLOSED. Phase 4 remains IN_PROGRESS at DARK maturity. No cutover, no enablement, no deployment, no PR and no merge.",
+  "next_action": "Resolve the Next.js major upgrade as its own authorized change, then prepare the authorized controlled live-DARK deployment (WS-L) and the reboot/rollback drill."
+}

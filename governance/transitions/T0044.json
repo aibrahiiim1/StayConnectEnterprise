@@ -1,0 +1,120 @@
+{
+  "transition_id": "T0044",
+  "seq": 44,
+  "timestamp": "2026-08-13T12:05:00Z",
+  "record_type": "PHASE_4_PRODUCT_OWNER_ACCEPTANCE_AND_CLOSURE_AT_VERIFIED_LIVE_DARK",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_LIVE_DARK_DEPLOYED_ON_DEVELOPMENT_APPLIANCE__AWAITING_PRODUCT_OWNER_ACCEPTANCE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "4",
+  "decision": "D19",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner decision of 2026-08-13, 'D19 — PHASE 4 IS ACCEPTED AND CLOSED at VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity.' It names the accepted software candidate, both CI runs and both evidence artifacts, accepts the T0043 live evidence, requires repository-only acceptance and closure, requires six limitations to be preserved without promotion, requires one wording correction to be made FORWARD rather than by rewriting T0043, and requires the single Phase-4 pull request to be opened and left OPEN and UNMERGED.",
+  "history_note": "T0030 through T0043 are PRESERVED unchanged. This transition records the Product Owner's acceptance and closure of Phase 4 and the repository-only synchronization that follows it. No historical receipt was rewritten, no historical evidence was restated, and no appliance was contacted.",
+  "accepted_basis": {
+    "live_evidence": "T0043 — the WS-L controlled live-DARK deployment on the development appliance",
+    "software_candidate": "b94112d8cb0ab63938b60f829ddd465c14491f97",
+    "software_ci_run": 31690016483,
+    "software_ci_conclusion": "SUCCESS",
+    "software_evidence_artifact": 9177140558,
+    "software_evidence_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
+    "pre_acceptance_delivery_head": "105af49b9a0b44e6eda131b08f7d5fa6a37a2bbc",
+    "delivery_head_ci_run": 31691250489,
+    "delivery_head_ci_conclusion": "SUCCESS",
+    "delivery_head_evidence_artifact": 9177645571,
+    "delivery_head_evidence_digest": "sha256:1b03e9863d5a8b7ec79a01b89574ad82e8fc9822d06c5561bc29366f6d098200",
+    "separation_note": "Three kinds of evidence are deliberately kept apart and must not be conflated. SOFTWARE-CI evidence says the delivered code passes its own authoritative gate on a disposable database. T0043 LIVE evidence says that same code, deployed to a real appliance, behaved as specified with every flag OFF. The PRODUCT-OWNER DECISION is neither of those: it is the judgement that the two together are sufficient for LIVE-DARK maturity, made by the Product Owner and not by the implementer."
+  },
+  "maturity": "ACCEPTED_AND_CLOSED — VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC",
+  "accepted_limitations": [
+    {
+      "id": "L-1",
+      "subject": "C35 external archival receipt authority",
+      "statement": "No external archival receipt authority exists. The implemented compliance archive, its digest and the purge gate are ACCEPTED BECAUSE THEY FAIL CLOSED: p4_assert_compliance_archived refuses without a verified receipt, and the receipt flag cannot be set without external evidence even by the database superuser. Cross-customer purge is consequently UNAVAILABLE and remains so until a real external receipt authority exists.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L-2",
+      "subject": "C38 real-financial acceptance",
+      "statement": "Real-financial acceptance (Contract §9c Tier-3 3C) remains OUTSIDE Phase 4 and requires a separate future Product-Owner authorization. Nothing in this closure advances it.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L-3",
+      "subject": "financial restore management marker",
+      "statement": "/etc/stayconnect/financial-restore-generation.json is NOT installed on the development appliance. This is recorded as a PRE-FINANCIAL-ENABLE PREREQUISITE: it must be initialized/installed and verified through the supported process before any future real financial traffic is authorized. It is not a defect in the delivered software and it is not satisfied by anything in this closure.",
+      "not_promoted_to_pass": true,
+      "prerequisite_for": "any future authorization of real financial traffic"
+    },
+    {
+      "id": "L-4",
+      "subject": "legacy live-session continuity",
+      "statement": "Still NOT PROVEN, carried unchanged from Phase 3: no real legacy guest was online during the authorized live windows. It must NOT be inferred as PASS from WS-L row counts — the public-schema row growth observed during WS-L is ordinary legacy activity and says nothing about session continuity across a change.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L-5",
+      "subject": "payment providers",
+      "statement": "No real payment-provider adapter exists and no real-provider behaviour has been accepted by this DARK closure. The payment domain was verified against deterministic in-process doubles only; the provider-reference model is a capability contract, not an integration with any named provider.",
+      "not_promoted_to_pass": true
+    },
+    {
+      "id": "L-6",
+      "subject": "per-property financial onboarding",
+      "statement": "Per-property Tier-2 financial onboarding remains MANDATORY before any property can be financially enabled. Hotel ID 2 remains financially UNAPPROVED.",
+      "not_promoted_to_pass": true
+    }
+  ],
+  "forward_corrections": [
+    {
+      "id": "Y-1",
+      "area": "wording about p4_record_compliance_receipt",
+      "what_was_said": "T0043 and the WS-L report stated that 'no role at all' can execute iam_v2.p4_record_compliance_receipt.",
+      "why_it_is_wrong": "It overstates a measurement into a permanent impossibility. What was measured is that no DEPLOYED runtime, service or PUBLIC role holds EXECUTE on it. The function exists deliberately, so that the day a real external archival authority exists the shape is already correct and auditable; the owner of the schema can still reach it, and a future authorized grant is exactly how the capability would be turned on. Saying 'no role at all' would make the C35 design read as permanently dead code rather than as a capability that is intentionally unreachable from the current runtime.",
+      "accurate_statement": "No deployed runtime, service or PUBLIC role is AUTHORIZED to call iam_v2.p4_record_compliance_receipt, and it is unreachable from the current runtime. The controlled function exists for a future real external archival authority. Measured on the appliance: 0 of sc_payment_runtime, sc_payment_outcome, sc_commerce_runtime, sc_financial_operator, sc_financial_readonly, svc_edged, svc_scd, svc_acctd, svc_netd and PUBLIC hold EXECUTE.",
+      "method": "Corrected FORWARD in the current-state surfaces and in the Phase-4 closure documents. T0043 is NOT rewritten: it records what was said when it was written, and this entry records what is accurate now."
+    }
+  ],
+  "repository_only": {
+    "appliance_contact": false,
+    "production_db_contact": false,
+    "production_migration": false,
+    "appliance_mutation": false,
+    "note": "This closure round touched the repository only. The appliance was left exactly as WS-L left it: the Phase-4 schema and binaries deployed, every flag OFF, zero financial egress."
+  },
+  "scope_prohibited": [
+    "no further appliance mutation",
+    "no Production migration and no Production database contact",
+    "no Phase-4 flag enablement",
+    "no IAM-v2 authentication cutover",
+    "no real PMS PS or PA",
+    "no real payment-provider CHARGE or REFUND",
+    "no folio debit",
+    "no paid guest access",
+    "no Hotel ID 2 financial onboarding",
+    "no implicit FX",
+    "no executable PMS reversal",
+    "no C38 execution",
+    "no Phase 5/6/7 implementation",
+    "NO PULL-REQUEST MERGE — the Phase-4 PR is opened and left OPEN and UNMERGED; merging requires a separate explicit Product-Owner decision"
+  ],
+  "evidence_files": [
+    "docs/acceptance/StayConnect-IAM-Phase4-Live-Dark-Acceptance.md",
+    "docs/evidence/Phase4-Final-Live-Acceptance-Record.md",
+    "docs/reports/StayConnect-IAM-Phase4-Final-Report.md",
+    "governance/transitions/T0043.json",
+    "governance/transitions/T0042.json",
+    "docs/architecture/Phase4-Financial-Schema-Gap-Audit.md",
+    "docs/architecture/StayConnect-IAM-Phase4-Plan.md"
+  ],
+  "acceptance_verdict": "ACCEPTED_AND_CLOSED — Phase 4 is ACCEPTED AND CLOSED AT VERIFIED LIVE-DARK / NO-FINANCIAL-TRAFFIC MATURITY (decision D19). LIVE-DARK and NOT ENABLED: every Phase-4 feature flag is OFF, every Phase-4 route returns 404 on the running appliance, legacy public-schema IAM remains the sole authentication authority, iam_v2 holds 68 tables and ZERO rows, and no PS, PA, folio debit, provider CHARGE/REFUND, paid access or reversal has ever occurred. Six limitations are accepted and preserved without promotion. Acceptance authorizes no enablement, no cutover, no Production change and no merge.",
+  "next_action": "Product-Owner decision on merging the Phase-4 pull request."
+}

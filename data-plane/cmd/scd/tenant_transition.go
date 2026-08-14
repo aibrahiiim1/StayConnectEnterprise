@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -93,6 +94,27 @@ func (s *server) reconcileTenantOwnership(ctx context.Context) error {
 	slog.Warn("tenant-transition: foreign-tenant data present — securely purging previous tenant before guest auth resumes",
 		"current_tenant", s.tenID, "current_site", s.siteID)
 
+	// C35 — ARCHIVE BEFORE PURGE.
+	//
+	// This runs before the purge transaction opens, and a failure here aborts the whole reconciliation: the
+	// caller holds the appliance fail-closed, which is the correct direction. Keeping a departed customer's
+	// data one boot longer is recoverable; deleting it with no archive is not.
+	//
+	// The archive is also gated in the database (p4_assert_compliance_archived), so a future purge path
+	// that forgot to call this would still be refused rather than silently succeeding.
+	departing, err := s.departingTenants(ctx)
+	if err != nil {
+		return fmt.Errorf("identify departing tenants: %w", err)
+	}
+	for _, dt := range departing {
+		if err := s.archiveTenantBeforePurge(ctx, dt); err != nil {
+			return fmt.Errorf("compliance archive for departing tenant %s: %w", dt, err)
+		}
+		slog.Warn("tenant-transition: compliance archive written before purge",
+			"departing_tenant", dt,
+			"receipt", "NOT countersigned — no external archival authority exists in this product")
+	}
+
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin purge tx: %w", err)
@@ -106,6 +128,27 @@ func (s *server) reconcileTenantOwnership(ctx context.Context) error {
 		  WHERE tenant_id IS DISTINCT FROM $1 OR site_id IS DISTINCT FROM $2`,
 		s.tenID, s.siteID); err != nil {
 		return fmt.Errorf("repoint guest_networks: %w", err)
+	}
+
+	// The database's own gate (C35). It refuses the purge unless an EXTERNAL authority has acknowledged
+	// custody of the archive -- not merely that this appliance wrote one, which would be the party doing the
+	// deleting certifying its own copy.
+	//
+	// No archival receipt authority exists in this product, so in practice this ALWAYS refuses and the
+	// cross-customer purge cannot complete. That is the correct failure mode and the caller holds the
+	// appliance fail-closed, exactly as it does for any other incomplete transition. What matters here is
+	// that the operator is told WHICH thing is missing: "cleanup failed" would send someone looking for a
+	// database fault that does not exist.
+	for _, dt := range departing {
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.p4_assert_compliance_archived($1::uuid)`, dt); err != nil {
+			if strings.Contains(err.Error(), "COMPLIANCE_RECEIPT_UNVERIFIED") {
+				return fmt.Errorf("compliance receipt for departing tenant %s is not verified: the archive "+
+					"exists and its digest is recorded, but no external archival authority has acknowledged "+
+					"custody of it. Cross-customer purge is blocked until one does; the appliance stays "+
+					"fail-closed and no guest is authorized: %w", dt, err)
+			}
+			return fmt.Errorf("compliance gate for %s: %w", dt, err)
+		}
 	}
 
 	purged := map[string]int64{}

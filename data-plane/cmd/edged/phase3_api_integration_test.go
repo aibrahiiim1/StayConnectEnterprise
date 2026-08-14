@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -53,17 +54,28 @@ type apiFixture struct {
 
 // newAPI builds the REAL Phase-3 routes with the real auth middleware, backed by a disposable database and a
 // site/tenant seeded for this test.
-func newAPI(t *testing.T, roles ...string) *apiFixture {
+func newAPI(t *testing.T, roles ...string) *apiFixture { return newAPIIn(t, "", roles...) }
+
+// newAPIIn builds a fixture for a NEW site. When tenant is non-empty the site is created under that
+// EXISTING tenant, which is how a multi-property customer is actually arranged — and the arrangement
+// a tenant-only scope check silently fails to cover.
+func newAPIIn(t *testing.T, tenant string, roles ...string) *apiFixture {
 	t.Helper()
 	p := testPool(t)
 	ctx := context.Background()
 	f := &apiFixture{pool: p, password: "operator-step-up-pw"}
 
-	if err := p.QueryRow(ctx, `WITH
-	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id)
-	SELECT (SELECT tenant_id FROM si)::text, (SELECT id FROM si)::text`).Scan(&f.tenant, &f.site); err != nil {
-		t.Fatalf("seed tenant/site: %v", err)
+	if tenant == "" {
+		if err := p.QueryRow(ctx, `WITH
+		  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
+		  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id)
+		SELECT (SELECT tenant_id FROM si)::text, (SELECT id FROM si)::text`).Scan(&f.tenant, &f.site); err != nil {
+			t.Fatalf("seed tenant/site: %v", err)
+		}
+	} else if err := p.QueryRow(ctx,
+		`INSERT INTO public.sites(id,tenant_id) VALUES (gen_random_uuid(), $1) RETURNING tenant_id::text, id::text`,
+		tenant).Scan(&f.tenant, &f.site); err != nil {
+		t.Fatalf("seed second site under the same tenant: %v", err)
 	}
 	// The disposable fixture builds the iam_v2 schema only. The appliance's own operator identity tables come
 	// from migration 0001; they are provisioned here (same shape) because the controlled operations validate a
@@ -131,11 +143,46 @@ func newAPI(t *testing.T, roles ...string) *apiFixture {
 			mountResource(r, s, "pms-interfaces", s.pmsInterfacesRoutes)
 			mountResource(r, s, "pms-routing", s.pmsRoutingRoutes)
 			mountResource(r, s, "pms-source-conflicts", s.pmsSourceConflictsRoutes)
+			// Phase 4 (DARK): the Manual Review surface. Mounted here so the API contract tests exercise the
+			// real router and the real RBAC/step-up middleware, exactly as the appliance would when enabled.
+			mountResource(r, s, "financial-review", s.financialReviewRoutes)
+			// ...and the financial OPERATIONS surface, which shares that permission.
+			mountResource(r, s, "financial-ops", s.financialOpsRoutes)
 		})
 	})
 	f.srv = httptest.NewServer(r)
 	t.Cleanup(func() { f.srv.Close(); p.Close() })
 	return f
+}
+
+// doRaw returns the status AND the exact response bytes. A non-enumeration claim -- "an out-of-scope
+// resource is indistinguishable from an absent one" -- can only be proved from raw bodies: two responses
+// can share a status code and still differ in a message that confirms the resource exists.
+func (f *apiFixture) doRaw(t *testing.T, method, path string, body any) (int, string) {
+	t.Helper()
+	var rdr *bytes.Reader
+	if body != nil {
+		raw, _ := json.Marshal(body)
+		rdr = bytes.NewReader(raw)
+	} else {
+		rdr = bytes.NewReader(nil)
+	}
+	req, err := http.NewRequest(method, f.srv.URL+"/edge/v1"+path, rdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: f.sessTok})
+	resp, err := f.srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, string(raw)
 }
 
 func (f *apiFixture) do(t *testing.T, method, path string, body any) (int, map[string]any) {

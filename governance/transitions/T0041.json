@@ -1,0 +1,124 @@
+{
+  "transition_id": "T0041",
+  "seq": 41,
+  "timestamp": "2026-08-13T01:00:00Z",
+  "record_type": "PHASE_4_LAST_SOFTWARE_BLOCKERS_BEFORE_WS_L",
+  "previous_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "4",
+    "activity": "PHASE_4_IMPLEMENTATION_IN_PROGRESS_DARK__PHASE_3_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "4",
+  "decision": "D18",
+  "new_decision_created": false,
+  "history_note": "T0030 through T0040 are PRESERVED unchanged. Migrations 0011 through 0025 are preserved; 0026 corrects and extends them additively. No C-row was renamed or repurposed. This transition corrects three claims T0040 recorded more strongly than its evidence supported, and closes one blocker T0040 had recorded as external when it was not.",
+  "corrections": [
+    {
+      "id": "V-1",
+      "area": "C35 — archive before cross-customer purge",
+      "what_was_actually_true": "p4_assert_compliance_archived passed as soon as ANY archive row existed for the tenant, regardless of receipt_verified. The consequence was that the local export written by the SAME appliance that was about to delete the data was sufficient to authorize the deletion. That is self-certification: the party doing the deleting attests that it kept a copy, and nothing outside it agrees. The T0040 record described C35 as 'delivered in the half that can exist', which was true of the archive and the digest but not of the gate, because the gate was passing on evidence that does not mean what a compliance archive means.",
+      "correction": "0026 makes the gate require receipt_verified. Because receipt_verified is a claim about an EXTERNAL party, the CHECK constraint ca_receipt_evidence_matches_flag makes it unsettable without a named authority, a reference and a timestamp -- so the flag cannot be set by a direct UPDATE even as the table owner, and a row cannot be INSERTed already verified. p4_record_compliance_receipt requires both evidence fields, refuses a second acknowledgement, and is granted to NO role, because there is no authority to receive a receipt from and granting it would create the capability by the back door. scd's tenant-transition purge reports the exact blocker rather than a generic gate failure. No receipt, authority, key, service or managed state was fabricated.",
+      "consequence_stated_plainly": "CROSS-CUSTOMER PURGE IS NOW IMPOSSIBLE, and that is the intended state rather than a defect. No external archival receipt authority exists in this product, so nothing can satisfy the gate. A capability that cannot be performed safely is unavailable rather than quietly available on weaker evidence; the appliance already fails closed when a tenant transition cannot complete, so the outcome is a held appliance with a visible reason and no guest authorized -- not a deletion nobody can vouch for.",
+      "proved": "data-plane/internal/payment/pg_c35_integration_test.go, 5/5: a local archive with a real digest is refused with COMPLIANCE_RECEIPT_UNVERIFIED; the flag cannot be forged by a direct owner UPDATE, by a blank authority, or by a born-verified INSERT; no runtime role and not PUBLIC can record a receipt; a receipt with FULL external evidence DOES open the same gate (so the refusal is about the missing capability, not a gate that refuses everything) and custody cannot be acknowledged twice; one tenant's receipt does not clear another. The DB gate adds 11 further assertions including DOWN keeping the recorded external evidence, because an outside party's acknowledgement is a fact about the world and a migration rolling back is not a reason to forget it."
+    },
+    {
+      "id": "V-2",
+      "area": "the zero-attempt recovery operator path",
+      "what_was_actually_true": "T0040 delivered p4_authorize_zero_attempt_retry and proved it at the database layer, and the C-matrix recorded C31's operator column as UI-OK on the strength of the recovery screen offering no retry control. That was half the requirement. NOTHING could reach the safe function: the review queue keys on attempts, and a posting restored with no surviving attempts has none, so it appeared on no surface at all. A safe path nobody can walk is not a path, and a posting in that state was still stuck in practice.",
+      "correction": "0026 adds iam_v2.v_zero_attempt_recovery_queue -- held postings with zero attempts, carrying the hold's resolution and an eligibility flag computed in the database so the screen cannot disagree with the function about what is allowed. edged adds GET /financial-ops/recovery/zero-attempt and POST /financial-ops/recovery/zero-attempt/{id}/authorize, using the EXISTING financial-review authorization model: tenant+site scope, the actor taken from the session and never from the request, a password step-up, and a mandatory bounded reason plus screened evidence. The Hotel-Admin recovery screen surfaces the queue and the authorization. No automatic replay, no manufactured attempt, no manufactured P#, exactly one authorization per posting, and nothing transmitted.",
+      "proved": "8 API integration tests (data-plane/cmd/edged/phase4_zeroattempt_api_integration_test.go): the queue lists what the review queue structurally cannot; step-up, evidence and scope are all required and an actor cannot even be offered; another SITE of the SAME tenant gets 404 and cannot distinguish it from an absent posting; the authorization happens exactly once, transmits nothing and manufactures no attempt; an unreconciled posting is listed but refused, with the reason visible rather than discovered by being refused; a role without the financial permission cannot read the surface. Restart and release behaviour: the authorization survives a process restart with a fresh session store and transmits nothing, and it is what allows recovery to be RELEASED at all -- an undecided item holds recovery shut. Hotel-Admin: 9 unit tests and 3 browser tests, including that the section offers no bulk action and no way to send."
+    },
+    {
+      "id": "V-3",
+      "area": "the production dependency blocker, and the gate that accepted it",
+      "what_was_actually_true": "TWO faults. First, scripts/ci/phase4-dependency-gate.sh carried ACCEPTED='next postcss' inside the script itself, written by the same agent delivering the code, and therefore reported PASS on a production tree containing high-severity advisories. A gate that can grant itself an exception measures nothing, and 'accepted' was the wrong word: the Product Owner had accepted nothing. Second, the triage recorded next@16.3.0 as the minimum fixing version, read off npm's fixAvailable and the aggregated range. The per-advisory ranges in the same JSON top out at <15.5.21. No framework major was ever required, and neither was React 19.",
+      "correction": "next 15.5.23 (peer range ^18.2.0 || ^19.0.0, so React stays at 18.3.1); postcss 8.5.26 and sharp 0.35.3 forced by npm overrides because next pins postcss 8.4.31 as a hard dependency and sharp ^0.34.3 as an optional one; vitest 3.2.7 clearing the vite/esbuild/@vitest-mocker chain. BOTH trees now report ZERO advisories, so nothing is accepted by anybody and governance/dependency-acceptances.json is empty as a measured state rather than an omission. The gate was rewritten: acceptance lives in that governance file, names GHSA ids rather than packages so an exception cannot absorb the next unrelated advisory, and requires decided_by, decision_ref, decided_on and expires_on; an expired acceptance is no acceptance and a stale one fails. TRIAGED and ACCEPTED are now different verdicts, and triaged-only fails.",
+      "the_regression_that_was_misdiagnosed": "T0040 recorded seven e2e/phase3-pms-interfaces failures as 'the PMS-interfaces page renders its layout but no page content at all ... the fetch or its effect is not completing under React 19 / Next 16', and used that to justify keeping the vulnerable tree. The same seven tests fail on Next 15.5.23 with React 18.3.1. A page snapshot shows the page rendering its data correctly with the Next 15.5 Dev Tools panel open on top of it: the panel is bottom-left, above the page, and swallowed Playwright's click on the Open button. It was a development-tooling overlay, not an application regression. devIndicators:false in next.config.mjs fixes it and affects `next dev` only, so the deployed appliance bundle is unchanged either way.",
+      "proved": "scripts/ci/phase4-dependency-gate-selftest.sh, 7/7, running the SAME judgement file CI runs against synthetic audits: a triaged-but-unaccepted production advisory is refused and named as triaged; an acceptance with no decider, reference or expiry is refused; an expired acceptance is refused; an acceptance of one advisory does not absorb a different one in the same package; a complete current Product-Owner acceptance passes; a stale acceptance is refused; a clean tree passes. It runs BEFORE the gate in CI, because a gate observed only passing on a clean tree has not been shown to do anything."
+    },
+    {
+      "id": "V-4",
+      "area": "CI evidence language",
+      "what_was_actually_true": "T0040 recorded run 31648910147 as having succeeded 'on the FINAL DELIVERY HEAD 35ef249a'. It ran on 35ef249a, which was that milestone's SOFTWARE candidate; the literal final branch head was 71d7ac05657ddf27f84f7e8649e10319206ffd09. A separate run, 31649545309, DID run on 71d7ac and also succeeded 33/33 -- so the evidence for the literal final head exists; it simply was not the run the record cited, and a reader could not have checked the claim as written.",
+      "correction": "The distinction is now stated exactly wherever the evidence is cited. 71d7ac is a governance/documentation commit over 35ef249a with no software or runtime change, which is precisely why the earlier run remains valid evidence for that head's software -- but 'final-head CI' was the wrong phrase for it and a reader could not have checked the claim from the record. This milestone records its authoritative run against the head it actually ran on, plus a measured diff proving no software path differs between the software candidate and any later governance-only head.",
+      "proved": "phase4_authoritative_ci_* in governance/project-state.json, and the no-software-difference diff recorded alongside it.",
+      "measured_difference": "git diff 35ef249a..71d7ac0 touches ONLY docs/, exports/ and governance/. Zero paths under data-plane/, hotel-admin/, control-plane/, scripts/, .github/, deploy/ or iam_v2_scratch/ differ. That is why run 31648910147 remains valid evidence for the software of 71d7ac."
+    }
+  ],
+  "external_blockers": [
+    {
+      "id": "B-1",
+      "blocker": "C35 receipt_verified — no external archival receipt authority exists in this product",
+      "status": "OPEN, and it now FAILS CLOSED",
+      "consequence": "Cross-customer purge is unavailable. The archive, its digest and the gate are complete; what is missing is a party outside this appliance that can acknowledge custody. Nothing was fabricated to stand in for one, and the verification path exists and is unusable until something real can satisfy it.",
+      "what_would_close_it": "A real archival service, endpoint or issued key, delivered as its own authorized change, whose acknowledgement is recorded through p4_record_compliance_receipt."
+    }
+  ],
+  "closed_blockers": [
+    {
+      "id": "B-2",
+      "was": "Next.js production advisories — recorded at T0040 as requiring a framework major that failed the browser regression suite and was reverted",
+      "status": "CLOSED at T0041",
+      "how": "The minimum patched state, read from the advisory ranges rather than from fixAvailable, was next@15.5.21. next@15.5.23 clears all 22 advisories with React unchanged. postcss and sharp moved by overrides. Both dependency trees report zero advisories. The browser failures that were blamed on React 19 were a Next 15.5 dev-tools overlay intercepting clicks."
+    }
+  ],
+  "verification": {
+    "financial_db_gate": "266 PASS / 0 FAIL (migrations 0011-0026, UP/DOWN/re-UP, identical schema fingerprints; includes the 11-assertion C35 fail-closed block and the zero-attempt read model's grants)",
+    "c35_fail_closed_matrix": "5 PASS / 0 FAIL (local-archive refusal, owner-level forgery attempts, privilege, the gate opening on real external evidence, tenant scope)",
+    "zero_attempt_api_matrix": "8 PASS / 0 FAIL (queue visibility, step-up/evidence/scope, cross-site isolation, exactly-once, unreconciled refusal, permission, restart durability, release unblocking)",
+    "restore_drill": "39 PASS / 0 FAIL, real pg_dump + pg_restore, pinned-anchor verification, proven quiesce, /etc exclusion",
+    "least_privilege": "18 PASS / 0 FAIL",
+    "payment_concurrency": "9 PASS / 0 FAIL",
+    "integration_suite": "all steps green (posting, review + finops + zero-attempt API, payment runtime, phase-2 free grant, observability, recovery, definer abuse, restricted role, entitlement grant, C35, final closure)",
+    "hotel_admin": "tsc clean, next build clean (flags OFF), standalone bundle boots and serves, 92/92 unit, 64/64 browser",
+    "dependency_gate": "PASS — 0 production advisories, 0 full-tree advisories, 0 Product-Owner acceptances",
+    "dependency_gate_selftest": "7 PASS / 0 FAIL",
+    "dark_static_assertion": "PASS",
+    "zero_stale_leftovers": "PASS"
+  },
+  "c_matrix": {
+    "C31": "DB-OK / RT-OK / UI-OK — corrected: UI-OK now means the operator can BOTH not replay and reach the one audited way out of a zero-attempt restore. At T0040 only the first half was true.",
+    "C35": "DB-OK and RT-OK for the ARCHIVE and the GATE; the gate FAILS CLOSED and the external receipt capability does not exist, so cross-customer purge is impossible. Not promoted beyond the receipt evidence.",
+    "C37": "unchanged — every Phase-4 flag OFF, no provider adapter, no socket in the financial core, delivered Hotel-Admin bundle hides the screens. Not a claim that anything is live.",
+    "C38": "unchanged — BLOCKED_BY_PRODUCT_OWNER_DECISION. Nothing in this milestone advances it and nothing in Phase 4 may."
+  },
+  "not_delivered_in_this_milestone": [
+    "WS-L: the authorized controlled live-DARK deployment, reboot persistence and rollback rehearsal",
+    "any Phase-4 flag enablement",
+    "any migration applied to Production or to the appliance",
+    "any real PMS PS/PA, folio debit, provider CHARGE/REFUND or paid guest access",
+    "any external archival receipt authority (see B-1)",
+    "any pull request or merge"
+  ],
+  "migration_application": {
+    "production": false,
+    "appliance": false,
+    "note": "0026 was applied only to disposable PostgreSQL 16 containers created and destroyed by the harnesses. The Production and appliance ledgers still stop at 0010_phase3_stay_resolution."
+  },
+  "no_financial_traffic": {
+    "pms_ps_pa": false,
+    "folio_debit": false,
+    "provider_charge_or_refund": false,
+    "paid_guest_access": false,
+    "note": "The only thing that ever 'executes' in these harnesses is a write the database is expected to refuse."
+  },
+  "evidence_files": [
+    "data-plane/migrations/0026_phase4_c35_failclosed_and_operator_retry.{up,down}.sql",
+    "data-plane/internal/payment/pg_c35_integration_test.go",
+    "data-plane/cmd/edged/phase4_zeroattempt_api_integration_test.go",
+    "hotel-admin/e2e/auth-middleware.spec.ts",
+    "scripts/ci/dependency-judgement.py",
+    "scripts/ci/phase4-dependency-gate-selftest.sh",
+    "governance/dependency-acceptances.json",
+    "docs/PHASE4_DEPENDENCY_TRIAGE.md",
+    "docs/evidence/phase4/npm-audit-production.json",
+    "docs/evidence/phase4/npm-audit-full.json"
+  ],
+  "acceptance_verdict": "NOT ACCEPTED AND NOT CLOSED. This is an implementation record under the existing D18/T0029 authorization. Phase 4 remains DARK, every flag remains OFF, nothing is deployed, and no row has been exercised against a real PMS or payment provider.",
+  "next_action": "WS-L: the authorized controlled live-DARK deployment and the reboot/rollback drill. One external blocker remains outside Phase-4 DARK closure and is not a software task: C35's archival receipt authority does not exist, so the purge gate fails closed and cross-customer purge is unavailable."
+}
