@@ -1,0 +1,4 @@
+commit 3da826cf1ea73b2e58dd1979aa0b8038d6623ef3
+Date:   Sat Aug 15 02:11:34 2026 +0300
+
+    Governance fix-forward: a merge receipt cannot pre-date the merge it records (T0055 under D23)

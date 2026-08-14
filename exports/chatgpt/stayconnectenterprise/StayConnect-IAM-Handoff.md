@@ -1,7 +1,7 @@
 # StayConnect IAM — Context Handoff
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0054 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0055 -->
 **Current phase:** 5 — Post-stay (PIN re-auth); cross-PMS transfer workflow
 **Current activity:** `PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 NOT_STARTED · 7 NOT_STARTED

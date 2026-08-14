@@ -261,13 +261,21 @@ fi
 
 [ "$p3drift" = "0" ] && ok "no Phase-3 enforcement/evidence phrase drift" || fail "$p3drift Phase-3 phrase drift hit(s)"
 
-echo "== 1d. transition receipts cannot be dated after the commit that introduced them =="
+echo "== 1d. transition receipts cannot be dated after their introducing commit, nor before the merge they record =="
 if have_repo; then
   if bash "$REPO_ROOT/tools/validate-transition-times.sh" >/dev/null 2>&1; then
-    ok "no transition receipt is dated after its introducing commit"
+    ok "no receipt is dated after its introducing commit, and no merge receipt pre-dates its own merge"
   else
     bash "$REPO_ROOT/tools/validate-transition-times.sh" 2>&1 | grep -E "^  (FAIL|grandfathered)" | sed 's/^/  /'
-    fail "a transition receipt describes its own future"
+    fail "a transition receipt describes its own future, or a merge receipt pre-dates the merge it records"
+  fi
+  # The rule above is grandfathered for T0054, so watching it pass proves nothing on its own. This drives it
+  # against the historical defect with the grandfather list emptied.
+  if bash "$REPO_ROOT/tools/validate-merge-receipt-times-selftest.sh" >/dev/null 2>&1; then
+    ok "the merge-timing rule provably catches the T0054 defect and still accepts a valid merge receipt"
+  else
+    bash "$REPO_ROOT/tools/validate-merge-receipt-times-selftest.sh" 2>&1 | grep -E "^  \[FAIL\]" | sed 's/^/  /'
+    fail "the merge-timing rule cannot be shown to catch the defect it exists for"
   fi
 else skipped "transition timestamps (no repository)"; fi
 
