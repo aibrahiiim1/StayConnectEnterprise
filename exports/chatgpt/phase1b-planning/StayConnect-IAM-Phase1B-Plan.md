@@ -1,13 +1,13 @@
 # StayConnect IAM — Phase 1B Implementation Plan (Credential/Portal Integration, DARK)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0050 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0051 -->
 **Current phase:** 5 — Post-stay (PIN re-auth); cross-PMS transfer workflow
-**Current activity:** `PHASE_5_IMPLEMENTATION_IN_PROGRESS_DARK`
+**Current activity:** `PHASE_5_ACCEPTANCE_CANDIDATE_COMPLETE_AT_VERIFIED_LIVE_DARK_AWAITING_PO_DECISION`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 IN_PROGRESS · 6 NOT_STARTED · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Execute Phase 5 (Post-Stay PIN re-authentication and the Cross-PMS Transfer workflow) end to end on branch phase/5-poststay-transfer as four milestones under decision D21 and transition T0050, delivered DARK and zero-price, stopping with the pull request OPEN and UNMERGED after the final LIVE-DARK acceptance candidate is complete.
+**Single next authorized action:** Obtain the Product Owner's acceptance decision on the Phase-5 LIVE-DARK acceptance candidate, whose pull request is OPEN and UNMERGED by design: Phase 5 is implemented, verified and deployed DARK on the DEVELOPMENT appliance under D21/T0050, and nothing about that candidate authorizes any feature-flag enablement, IAM-v2 cutover, Production migration or database contact, real financial traffic, per-property financial onboarding, Phase 6/7 work or a merge.
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D21`.
 <!-- END GENERATED PROJECT STATE -->
 

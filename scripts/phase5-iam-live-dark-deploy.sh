@@ -42,9 +42,15 @@ SELECT md5(string_agg(line, E'\n' ORDER BY line)) FROM (
       FROM pg_proc pr JOIN pg_namespace n ON n.oid=pr.pronamespace WHERE n.nspname='iam_v2') x;
 EOSQL
 
+VERIFY_ONLY="${PHASE5_VERIFY_ONLY:-0}"
+
 echo "===== PHASE-5 IAM LIVE-DARK DEPLOYMENT (development appliance) $STAMP ====="
+[ "$VERIFY_ONLY" = "1" ] && echo "     (VERIFY ONLY: no backup, no migration, no write of any kind)"
 
 # ---------------------------------------------------------------- preconditions
+if [ "$VERIFY_ONLY" = "1" ]; then
+  say "SKIPPING preconditions, backup and migration (verify-only)"
+else
 say "PRECONDITIONS"
 [ -d "$ROOT/data-plane/migrations" ] || die "no migrations directory under $ROOT"
 docker exec "$CT" pg_isready -U "$PGU" -d "$DB" >/dev/null 2>&1 || die "the site database is not ready"
@@ -96,15 +102,20 @@ say "  after: iam_v2 structural fingerprint=$AFTER_STRUCT"
 [ "$AFTER_PUBLIC" = "$BEFORE_PUBLIC" ] || die "the public schema gained or lost a table"
 [ "$AFTER_STRUCT" != "$BEFORE_STRUCT" ] || die "the structural fingerprint did not change; the migrations did nothing"
 
+fi
 # ---------------------------------------------------------------- darkness
 say "DARKNESS"
 ROWS="$(P "SELECT (SELECT count(*) FROM iam_v2.post_stay_profiles)+(SELECT count(*) FROM iam_v2.entitlement_transfers)+(SELECT count(*) FROM iam_v2.stay_links)")"
 [ "$ROWS" = "0" ] || die "the Phase-5 tables hold $ROWS row(s); a dark deployment creates none"
 say "  every Phase-5 table holds 0 rows"
 
-GRANTS="$(P "SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema='iam_v2' AND table_name IN ('post_stay_profiles','entitlement_transfers','stay_links') AND grantee NOT IN (current_user,'PUBLIC')")"
-[ "$GRANTS" = "0" ] || die "$GRANTS non-owner grant(s) exist on Phase-5 tables"
-say "  no non-owner role holds any privilege on a Phase-5 table"
+# The exclusion is the TABLE'S OWNER, resolved from the catalog -- not current_user. They are the same role
+# on a scratch database and DIFFERENT on this appliance, where Gate P gives iam_v2 its own owner: the owner's
+# implicit rights then appear as 21 "non-owner" grants and the check condemns a correct deployment. What the
+# darkness claim actually means is that no role BESIDES the owner can touch these tables.
+GRANTS="$(P "SELECT count(*) FROM information_schema.role_table_grants g JOIN pg_class c ON c.relname=g.table_name JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname=g.table_schema WHERE g.table_schema='iam_v2' AND g.table_name IN ('post_stay_profiles','entitlement_transfers','stay_links') AND g.grantee <> pg_get_userbyid(c.relowner) AND g.grantee <> 'PUBLIC'")"
+[ "$GRANTS" = "0" ] || die "$GRANTS grant(s) to a role other than the table owner exist on Phase-5 tables"
+say "  no role besides the schema owner holds any privilege on a Phase-5 table"
 
 OBJ="$(P "SELECT (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname LIKE 'p5!_%' ESCAPE '!') + (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='iam_v2' AND NOT t.tgisinternal AND t.tgname LIKE 'p5!_%' ESCAPE '!')")"
 say "  Phase-5 database objects present: $OBJ (7 functions + 6 triggers = 13, plus the 0029 replacement in place)"

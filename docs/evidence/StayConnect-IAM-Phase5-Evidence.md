@@ -182,4 +182,85 @@ The auth-context package was reconciled rather than reused. Two findings, both l
 
 ---
 
-## Milestone 4 — Hardening + final LIVE-DARK candidate · ACTIVE
+## Milestone 4 — Hardening + final LIVE-DARK candidate · COMPLETE
+
+### M4 fix-forward: the contractual F9-i, and the two defects it found
+
+The test carrying the F9-i label proved that two TRANSFERS cannot deadlock. The Plan defines F9-i as a
+transfer racing **checkout/grace**. The deadlock test is kept; the contractual one was added, driving the real
+`ConvertAtCheckout` against a real transfer on the same Stay.
+
+Writing it showed the first version was **not racing anything**: `seedEvent` leaves the boundary event
+unapplied, checkout correctly refuses that, and the transfer "won" twelve times against nothing. With a real
+applied event the race failed immediately and exposed two defects:
+
+| # | Defect | Fix |
+|---|---|---|
+| D5-1 | The transfer left the source's device **authorization intervals open** against a TERMINATED entitlement. The interval model is append-only, not a flag: every later question that reads it — which entitlement was this device under at time T, what does the checkout boundary see, which accounting samples attribute where — gets a wrong answer. | The source's intervals are closed in the same transaction that opens the destination's, as checkout does at its boundary. **Proven load-bearing:** removing the closure makes the race fail with 2 attachments left on the source. |
+| D5-2 | A transfer accepted a source Stay that had **already checked out** — moving checkout *grace*, a courtesy the departed property granted, to a property that never agreed to it. | The source must be `IN_HOUSE`, re-checked under the lock. |
+
+**A corrected assertion.** My first version demanded the source hold no live entitlement after a transfer.
+That was wrong: when checkout commits afterwards it legitimately creates grace, because the Stay *did* hold an
+active entitlement at the boundary. Measurement showed the grace is an **empty shell** — zero devices, zero
+intervals, zero sessions — so the assertion is now that nothing is *attached* to it, which is the property
+that actually matters.
+
+The checkout-wins branch was never reached by the unbiased race (the transfer takes both Stay locks in one
+statement and finishes first, even with a head start). Rather than tune a sleep until the scheduler
+cooperated, that outcome is exercised explicitly by letting checkout commit first.
+
+### Other M4 findings
+
+* **The gates were not self-sufficient.** Run the way CI runs them — on a freshly built chain — the foundation
+  gate failed 47 of 71 assertions and the least-privilege gate one, because both silently depended on fixture
+  state someone else had created. Both are now self-seeding or fixture-free.
+* **Both gates leaked their probe role**, because `DROP ROLE` fails *silently* while grants exist. Each then
+  reported the other's leftover as a privilege defect, making the DARK claim measurably false for whichever
+  ran second.
+* **Two Phase-3 test-scoping fixes** (assertions counted across the whole database rather than their own
+  site), so the suite is repeatable against a reused database.
+* **A regression I introduced and CI caught:** adding the post-stay tab *before* the PMS one made it
+  `enabled[0]`, so the portal's default panel became a PIN field and the room form a first-time guest needs
+  was hidden. Fourteen Phase-3 portal tests timed out on an invisible field.
+* **The darkness grant check was wrong on the real target.** It excluded `current_user`, which equals the
+  table owner only on a scratch database; on the appliance, where Gate P gives `iam_v2` its own owner, the
+  owner's implicit rights appeared as 21 "non-owner" grants and condemned a correct deployment. It now
+  excludes the table's actual owner, resolved from the catalog.
+
+### Authoritative CI
+
+| Workflow | Run | Head | Result |
+|---|---|---|---|
+| Phase 5 Post-Stay and Transfer CI | 31824484043 | `ffdeef5` | **success** |
+| Phase 4 Financial Core CI | 31824484134 | `ffdeef5` | **success** |
+| Phase 3 Software CI | 31825068831 | `ffdeef5` | dispatched on the branch |
+
+A Phase-5 workflow did not exist before M4. It builds its own disposable PostgreSQL, proves the dark posture,
+applies 0027–0029 on the authoritative chain, runs the three database gates and the integration matrix, and
+re-runs the Phase-4 financial core.
+
+### Controlled LIVE-DARK deployment — development appliance only
+
+Host `radius` (172.21.60.23), database `stayconnect_site`. **Production was never contacted.**
+
+| Area | Evidence |
+|---|---|
+| Backup before any change | `/opt/stayconnect/backups/phase5-iam-20260814T174052Z/site.dump`, 6,260,737 bytes, sha256 `cf1bda432c82c7007976d3f51972c225aea862be370264764a3a80163255c07a` |
+| Migration integrity | 0027, 0028, 0029 each applied once and recorded exactly once |
+| Schema effect | iam_v2 base tables 68 → **68** (Phase 5 creates no tables); public tables 44 → **44**; structural fingerprint `71dde7dc871b935ae555bcab2e5c1252` → `07e08329beebef509e811a147524cdc5` |
+| Least privilege | no role besides the schema owner holds any privilege on a Phase-5 table |
+| Darkness | every Phase-5 table 0 rows; 13 Phase-5 objects present; no Phase-5 flag in any env file or unit; all three scd Phase-5 routes **404** (absent, not present-and-refusing) |
+| Service health | `scd`, `edged`, `netd`, `acctd` all active |
+| Reboot persistence | rebooted 17:41:53 UTC; migrations still recorded, services active, darkness re-verified |
+| Real restore | backup sha256 verified, restored into `phase5_restore_drill`: 68 base tables, **0** Phase-5 migrations — the pre-deployment state, which is the rollback path proven |
+| Rollback rehearsal | 0029→0028→0027 down on the live database: fingerprint returned to exactly `71dde7dc871b935ae555bcab2e5c1252`, 0 Phase-5 objects, 0 ledger rows, Phase-3 guard restored **including its refusal message**; re-applied to `07e08329beebef509e811a147524cdc5` |
+| Final darkness | re-verified after every drill |
+
+### Limitations added by M4
+
+| # | Limitation | Status |
+|---|---|---|
+| L5-7 | Several Phase-3/Phase-4 integration tests are **not repeatable against a reused database** (they count across the whole database rather than their own site). Two were fixed; the rest are unchanged. | Recorded. CI builds a fresh database per run, which is the documented contract; re-engineering those suites is outside D21. |
+| L5-8 | `cmd/scd` integration tests require migrations 0001–0006, which the Phase-5 local harness does not build. They pass in CI, which builds the full chain. | Recorded. The local harness is scoped to the Phase-5 surface deliberately. |
+
+---
