@@ -16,7 +16,10 @@ name: Phase 5 Post-Stay and Transfer CI
 #      F9 (transfer, including 24-way concurrency and the opposite-direction deadlock proof), and the
 #      contractual F9-i race against the REAL Phase-3 checkout/grace conversion;
 #   6. the Phase-3 and Phase-4 suites still pass, because Phase 5 extends a Phase-3 guard and must not have
-#      weakened anything either phase established.
+#      weakened anything either phase established;
+#   7. and it PUBLISHES the evidence, fail-closed. The first four milestones of this gate were green and
+#      produced no artifact at all, which is a measured defect and not a hypothetical one -- see the
+#      evidence-publication block at the end of this file.
 #
 # It contacts no appliance, no Production database, no PMS and no payment provider. Every database it uses is
 # a disposable container it creates and destroys itself.
@@ -54,6 +57,17 @@ jobs:
           go-version: '1.25'
           cache-dependency-path: data-plane/go.sum
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The publisher is fail-closed, and a fail-closed component that has only ever been watched succeeding
+      # has not been shown to fail-close. This runs FIRST, before any gate can make the staging directory
+      # look complete, and drives the real assembler against deliberately incomplete inputs.
+      - name: Evidence-publication self-test (does the publisher refuse an incomplete run?)
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/phase5-evidence-selftest.sh"
+
       - name: Initialise evidence staging
         run: |
           set -euo pipefail
@@ -84,6 +98,19 @@ jobs:
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-vet-phase5 -- go vet -tags 'integration phase5' ./..."
 
+      # ---------------------------------------------------------------- unit matrix (counted)
+      - name: Phase-5 unit matrix
+        working-directory: data-plane
+        # The flag loader's dark default and its refusal of a child flag without its master, and the strict
+        # guest decoder. internal/codegen carries no tests of its own -- it is listed because the PIN
+        # alphabet is exercised through the packages that use it, and a package that stops compiling must
+        # fail here rather than at deployment. Run through the counted wrapper so the evidence artifact
+        # carries a machine test total produced by the SAME run that gated -- never a second, weaker one.
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase5-unit --
+          bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh phase5-unit
+          ./cmd/portald/ ./internal/iamv2/ ./internal/codegen/ -count=1
+
       # ---------------------------------------------------------------- dark posture
       - name: Phase-5 DARK guard
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase5-dark-guard -- bash $GITHUB_WORKSPACE/scripts/phase5-dark-guard.sh"
@@ -96,10 +123,56 @@ jobs:
       - name: Phase-4 financial-core regression
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh phase4-regression -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/phase4-pg-integration.sh"
 
-      - name: Publish the evidence artifact
+      # ---------------------------------------------------------------- evidence publication (fail-closed)
+      # This gate ran green for four milestones and published NOTHING. Three things conspired: the staging
+      # directory is dot-prefixed and upload-artifact@v4 skips hidden files; `if-no-files-found: warn`
+      # demoted "the evidence does not exist" to a log line; and nothing assembled or checked the evidence
+      # before uploading it. A green run with no artifact is indistinguishable from a green run whose
+      # evidence was never produced, so every one of those three is closed below.
+      - name: Assemble the Phase-5 evidence artifact
         if: always()
+        run: python3 scripts/ci/phase5_evidence.py
+
+      - name: Record the HEAD for the artifact name
+        if: always()
+        id: head
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the Phase-5 evidence artifact
+        if: always()
+        id: publish
         uses: actions/upload-artifact@v4
         with:
-          name: phase5-evidence-${{ github.run_id }}
-          path: ${{ env.EVID }}
-          if-no-files-found: warn
+          name: phase5-post-stay-transfer-evidence-${{ steps.head.outputs.sha }}
+          path: ${{ github.workspace }}/.phase5-evidence
+          # The staging dir is dot-prefixed, so upload-artifact v4 treats its contents as hidden and would
+          # otherwise skip them ("No files were found") -- which is exactly what happened. The files inside
+          # are derived, PII-free summaries; including them is correct.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+
+      # The upload action's own outputs, asserted. `if-no-files-found: error` covers an empty upload, but the
+      # claim this project makes to the Product Owner is "there is a downloadable artifact with this ID and
+      # this digest" -- so the ID and the digest are read back from the action that created them and the job
+      # fails if either is absent.
+      - name: Prove the artifact really exists
+        if: always()
+        env:
+          ART_ID: ${{ steps.publish.outputs.artifact-id }}
+          ART_DIGEST: ${{ steps.publish.outputs.artifact-digest }}
+          ART_URL: ${{ steps.publish.outputs.artifact-url }}
+        run: |
+          set -euo pipefail
+          echo "artifact_id=${ART_ID:-<none>}"
+          echo "artifact_sha256=${ART_DIGEST:-<none>}"
+          echo "artifact_url=${ART_URL:-<none>}"
+          [ -n "${ART_ID:-}" ]     || { echo "the evidence artifact has no ID: nothing was published"; exit 1; }
+          [ -n "${ART_DIGEST:-}" ] || { echo "the evidence artifact has no digest: nothing was published"; exit 1; }
+          {
+            echo "### Phase-5 evidence artifact"
+            echo ""
+            echo "- head: \`${{ steps.head.outputs.sha }}\`"
+            echo "- artifact id: \`$ART_ID\`"
+            echo "- sha256: \`$ART_DIGEST\`"
+          } >> "$GITHUB_STEP_SUMMARY"

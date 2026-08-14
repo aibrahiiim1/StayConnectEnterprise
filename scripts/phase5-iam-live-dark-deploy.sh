@@ -131,6 +131,77 @@ for svc in stayconnect-scd stayconnect-edged stayconnect-netd stayconnect-acctd;
   [ "$state" = "active" ] || die "$svc is $state"
 done
 
+# ---------------------------------------------------------------- pmsd, whose healthy state is NOT running
+# pmsd is the one StayConnect daemon that is HEALTHY WHEN DEAD. Its established Phase-3 DARK contract is: no
+# Phase-3 flag is set, so LoadPMSConfigFromEnv resolves every flag OFF, pmsd.Run returns immediately without
+# loading an assignment, building a database pool, decrypting a secret, starting a worker or opening a PMS
+# socket -- it says so and exits 0. `Restart=on-failure` (not always) means that clean exit does not restart.
+#
+# So this must NOT be added to the loop above. `systemctl is-active` reads "inactive" on a perfectly correct
+# appliance, and a criterion that demands "active" has exactly two outcomes: it fails a correct deployment,
+# or somebody makes it green by starting a LIVE PMS worker -- which is real PMS traffic that no Phase-5
+# authorization covers. The criterion is therefore the DARK contract itself, measured.
+# PMSD_UNIT exists so this criterion can be shown to FAIL. A check that has only ever been watched passing
+# has not been shown to check anything, and every arm below is an equality against a value this appliance
+# happens to hold. Pointing it at a unit that violates one arm is the only honest way to demonstrate the arm
+# bites, and it defaults to the real unit so a deployment run is unaffected.
+PMSD_UNIT="${PHASE5_PMSD_UNIT:-stayconnect-pmsd}"
+say "PMSD DARK CONTRACT ($PMSD_UNIT)"
+pm(){ systemctl show "$PMSD_UNIT" -p "$1" --value 2>/dev/null || true; }
+
+# 1. Installed and would start at boot. "Dark" must mean a deliberately quiescent daemon, not a missing or
+#    masked unit -- those are indistinguishable from an appliance that lost its connector entirely.
+PM_LOAD="$(pm LoadState)"; PM_FILE="$(pm UnitFileState)"
+say "  unit: LoadState=$PM_LOAD UnitFileState=$PM_FILE"
+[ "$PM_LOAD" = "loaded" ] || die "$PMSD_UNIT is $PM_LOAD; a dark daemon is installed, not absent"
+[ "$PM_FILE" = "enabled" ] || die "$PMSD_UNIT is $PM_FILE; the dark contract is enabled-and-quiescent"
+
+# 2. Clean disabled behaviour: inactive/dead by way of a SUCCESSFUL exit. A failed unit is also "not
+#    running", and the difference between "it decided it had nothing to do" and "it crashed" is the whole
+#    claim being made here.
+PM_ACT="$(pm ActiveState)"; PM_SUB="$(pm SubState)"; PM_RES="$(pm Result)"; PM_EXIT="$(pm ExecMainStatus)"
+say "  state: $PM_ACT ($PM_SUB) Result=$PM_RES ExecMainStatus=$PM_EXIT"
+[ "$PM_ACT" = "inactive" ] || die "$PMSD_UNIT is $PM_ACT; the dark contract is a clean exit, and an active pmsd means a live connector"
+[ "$PM_SUB" = "dead" ]     || die "$PMSD_UNIT substate is $PM_SUB, expected dead"
+[ "$PM_RES" = "success" ]  || die "$PMSD_UNIT Result=$PM_RES; it did not exit cleanly, it failed"
+[ "$PM_EXIT" = "0" ]       || die "$PMSD_UNIT exited $PM_EXIT; a flags-OFF exit is 0"
+
+# 3. No restart storm. Restart=on-failure plus a clean exit should mean the unit starts once per boot and
+#    stays down. A loop would burn CPU, spam the journal and -- once the connector is eventually enabled --
+#    hammer a real PMS.
+PM_NR="$(pm NRestarts)"
+STARTS="$(journalctl -u "$PMSD_UNIT" -b --no-pager 2>/dev/null | grep -c 'Started StayConnect PMS' || true)"
+STORM="$(journalctl -u "$PMSD_UNIT" -b --no-pager 2>/dev/null | grep -Eic 'scheduled restart|start request repeated too quickly|failed with result' || true)"
+say "  restarts: NRestarts=$PM_NR starts-this-boot=$STARTS storm-indicators=$STORM"
+[ "${PM_NR:-0}" = "0" ] || die "$PMSD_UNIT restarted $PM_NR time(s); a clean flags-OFF exit must not restart"
+[ "${STARTS:-0}" = "1" ] || die "$PMSD_UNIT started ${STARTS:-0} time(s) this boot; the dark contract is exactly one start"
+[ "${STORM:-0}" = "0" ] || die "$PMSD_UNIT shows $STORM restart-storm indicator(s) in this boot's journal"
+
+# 4. The daemon's OWN statement of what it did not do, read from its journal rather than asserted here. This
+#    is the difference between "the process is gone" and "the process reached its dark path and took it".
+if journalctl -u "$PMSD_UNIT" -b --no-pager 2>/dev/null \
+     | grep -q 'no assignment, DB, secret, worker or PMS socket'; then
+  say "  journal: pmsd logged the dark path — no assignment, DB, secret, worker or PMS socket"
+else
+  die "$PMSD_UNIT: the pmsd dark statement is absent from this boot's journal; it did not take the flags-OFF path"
+fi
+journalctl -u "$PMSD_UNIT" -b --no-pager 2>/dev/null | grep -q 'stopped cleanly' \
+  || die "$PMSD_UNIT never logged a clean stop this boot"
+
+# 5. No PMS socket and no PMS traffic. Measured as absence of the process and of any socket owned by it,
+#    rather than inferred from the flags.
+PM_PROCS="$(pgrep -c -u stayconnect-pmsd 2>/dev/null || true)"
+PM_SOCKS="$(ss -tanp 2>/dev/null | grep -c 'pmsd' || true)"
+say "  footprint: processes=${PM_PROCS:-0} sockets=${PM_SOCKS:-0}"
+[ "${PM_PROCS:-0}" = "0" ] || die "${PM_PROCS} process(es) are running as the pmsd user; the dark contract runs none"
+[ "${PM_SOCKS:-0}" = "0" ] || die "${PM_SOCKS} socket(s) belong to pmsd; the dark contract opens none"
+
+# 6. No database activity. pmsd builds no pool at all when its flags are off, so no backend in the site
+#    database may be attributable to it.
+PM_DB="$(P "SELECT count(*) FROM pg_stat_activity WHERE usename ILIKE '%pms%' OR application_name ILIKE '%pms%'")"
+say "  database backends attributable to pmsd: $PM_DB"
+[ "$PM_DB" = "0" ] || die "$PM_DB database backend(s) are attributable to pmsd; the dark contract opens no pool"
+
 # The routes must be ABSENT, not present-and-refusing. 404 is the dark posture; anything else means the
 # surface exists on a deployment that never enabled it.
 for probe in /v1/phase5/poststay/issue /v1/phase5/auth/post-stay-pin /v1/phase5/poststay/convert; do
