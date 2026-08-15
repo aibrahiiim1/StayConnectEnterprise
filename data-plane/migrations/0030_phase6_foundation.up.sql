@@ -42,6 +42,15 @@
 BEGIN;
 
 -- ---------------------------------------------------------------------------------------------------------
+-- 0. Scope anchor on the platform's appliance table
+-- ---------------------------------------------------------------------------------------------------------
+-- A foreign key to public.appliances(id) alone proves the appliance EXISTS. It does not prove the row was
+-- filed under the RIGHT tenant and site: a settings row could pair a real appliance with somebody else's
+-- scope, and the composite primary key would happily accept it. The anchor makes the whole triple
+-- referential, which is the same technique MG-0 uses on public.guest_networks and for the same reason.
+CREATE UNIQUE INDEX IF NOT EXISTS appliances_tsi_anchor ON public.appliances (id, tenant_id, site_id);
+
+-- ---------------------------------------------------------------------------------------------------------
 -- 1. Per-appliance product settings (local-first)
 -- ---------------------------------------------------------------------------------------------------------
 CREATE TABLE iam_v2.appliance_product_settings (
@@ -59,7 +68,8 @@ CREATE TABLE iam_v2.appliance_product_settings (
   -- scope is therefore anchored to the enrolled appliance record itself, and the runtime derives the id from
   -- the appliance's own trusted local identity rather than accepting it from a caller.
   CONSTRAINT aps_appliance_must_exist
-    FOREIGN KEY (appliance_id) REFERENCES public.appliances (id) ON DELETE CASCADE
+    FOREIGN KEY (appliance_id, tenant_id, site_id) REFERENCES public.appliances (id, tenant_id, site_id)
+    ON DELETE CASCADE
 );
 
 COMMENT ON TABLE iam_v2.appliance_product_settings IS
@@ -94,7 +104,8 @@ CREATE TABLE iam_v2.appliance_product_setting_changes (
   change_reason text,
   -- The audit is scoped to a real appliance for the same reason the settings row is.
   CONSTRAINT apsc_appliance_must_exist
-    FOREIGN KEY (appliance_id) REFERENCES public.appliances (id) ON DELETE CASCADE
+    FOREIGN KEY (appliance_id, tenant_id, site_id) REFERENCES public.appliances (id, tenant_id, site_id)
+    ON DELETE CASCADE
 );
 CREATE INDEX aps_changes_lookup
   ON iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, changed_at DESC);
@@ -177,8 +188,10 @@ CREATE TABLE iam_v2.entitlement_termination_evidence (
   -- The contract's terminal_reason, copied here so evidence and entitlement can be compared without a join
   -- back through the lifecycle. It is CHECKed against the same set the entitlements table admits, so this
   -- table can never introduce a reason the contract does not define.
-  terminal_reason text NOT NULL CHECK (terminal_reason IN ('TIME','DATA','HARD_EXPIRY','CHECKOUT','ADMIN',
-    'REVOKED','SUPERSEDED','CONVERTED','TRANSFERRED','CANCELLED','OTHER')),
+  -- CONSTRAINED TO 'TIME'. This table explains a TIME-mode termination and nothing else; a row claiming
+  -- DATA, CHECKOUT or any other outcome would be evidence about a termination it does not describe. The
+  -- column is kept rather than implied so the evidence can be read without knowing that rule.
+  terminal_reason text NOT NULL CHECK (terminal_reason = 'TIME'),
   -- WHICH rule inside that reason ran out. This is implementation detail about the cause, not new contract
   -- vocabulary about the outcome, and the distinction is the whole point of putting it here.
   cause_detail text NOT NULL CHECK (cause_detail IN ('VALIDITY_WINDOW_ELAPSED','AGGREGATE_ONLINE_TIME_EXHAUSTED')),
@@ -205,6 +218,46 @@ COMMENT ON TABLE iam_v2.entitlement_termination_evidence IS
   'never widened here: an aggregate-budget exhaustion terminates with reason TIME, and THIS row says it was '
   'the online-minute budget rather than the wall-clock window, which budget it was, and what had been '
   'consumed when it crossed.';
+
+-- EVIDENCE MUST DESCRIBE A TERMINATION THAT ACTUALLY HAPPENED, and must agree with it. Without this the
+-- table is a place to write claims: a row could exist for a live entitlement, name a reason the entitlement
+-- did not terminate with, a time mode it does not have, or an instant it did not end at. The trigger reads
+-- the entitlement inside the same transaction, so the evidence and the transition either agree or neither
+-- exists.
+CREATE OR REPLACE FUNCTION iam_v2.p6_termination_evidence_matches_transition() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE e record;
+BEGIN
+  SELECT status, terminal_reason, terminated_at, time_accounting_mode, window_ends_at
+    INTO e FROM iam_v2.entitlements
+   WHERE id = NEW.entitlement_id AND tenant_id = NEW.tenant_id AND site_id = NEW.site_id
+   FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'termination evidence for an entitlement that does not exist in this scope (%)',
+      NEW.entitlement_id USING ERRCODE = 'foreign_key_violation';
+  END IF;
+  IF e.status <> 'TERMINATED' THEN
+    RAISE EXCEPTION 'termination evidence for entitlement % which is % , not TERMINATED: evidence may not describe a transition that did not occur',
+      NEW.entitlement_id, e.status USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF e.terminal_reason IS DISTINCT FROM NEW.terminal_reason THEN
+    RAISE EXCEPTION 'termination evidence claims reason % but the entitlement terminated with %',
+      NEW.terminal_reason, e.terminal_reason USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF e.terminated_at IS DISTINCT FROM NEW.terminated_at THEN
+    RAISE EXCEPTION 'termination evidence claims % but the entitlement terminated at %',
+      NEW.terminated_at, e.terminated_at USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF e.time_accounting_mode IS DISTINCT FROM NEW.time_mode THEN
+    RAISE EXCEPTION 'termination evidence claims time mode % but the entitlement is %',
+      NEW.time_mode, e.time_accounting_mode USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER p6_termination_evidence_matches_transition
+  BEFORE INSERT ON iam_v2.entitlement_termination_evidence
+  FOR EACH ROW EXECUTE FUNCTION iam_v2.p6_termination_evidence_matches_transition();
 
 CREATE OR REPLACE FUNCTION iam_v2.p6_termination_evidence_append_only() RETURNS trigger
 LANGUAGE plpgsql AS $$

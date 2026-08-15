@@ -5,6 +5,8 @@
 -- having widened it in the first place: vocabulary you never changed needs no reversal.
 BEGIN;
 
+DROP TRIGGER IF EXISTS p6_termination_evidence_matches_transition ON iam_v2.entitlement_termination_evidence;
+DROP FUNCTION IF EXISTS iam_v2.p6_termination_evidence_matches_transition();
 DROP TRIGGER IF EXISTS p6_termination_evidence_append_only ON iam_v2.entitlement_termination_evidence;
 DROP FUNCTION IF EXISTS iam_v2.p6_termination_evidence_append_only();
 DROP TABLE IF EXISTS iam_v2.entitlement_termination_evidence;
@@ -20,6 +22,9 @@ DROP FUNCTION IF EXISTS iam_v2.p6_setting_changes_append_only();
 DROP TABLE IF EXISTS iam_v2.appliance_product_setting_changes;
 
 DROP TABLE IF EXISTS iam_v2.appliance_product_settings;
+
+-- The scope anchor is dropped last, because the settings tables reference it.
+DROP INDEX IF EXISTS public.appliances_tsi_anchor;
 
 DELETE FROM public.schema_migrations WHERE version = '0030_phase6_foundation';
 

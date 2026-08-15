@@ -94,8 +94,10 @@ A device is **offline** when it holds no session in `active` or `PENDING_ENFORCE
 4. **preserves** the `devices` row, every `accounting_records` row, every authorization interval and every
    audit row. The slot is freed; the evidence is not touched.
 
-`PENDING_ENFORCEMENT` counts as online deliberately: a grant still converging at the edge is not yet safe to
-release, and treating it as offline would let a guest free a slot whose kernel authorization is still landing.
+`PENDING_ENFORCEMENT` counts as **non-removable** deliberately: a grant still converging at the edge is not
+yet safe to release, and treating it as offline would let a guest free a slot whose kernel authorization is
+still landing. This is the *removal-safety* predicate and it is deliberately **not** the accounting one —
+`PENDING_ENFORCEMENT` never consumes online-time budget. See §3.2z.
 
 ---
 
@@ -122,6 +124,23 @@ in one transaction per entitlement:
 A replayed tick charges zero because the watermark already moved. A reboot charges only the real elapsed
 interval. A late sample cannot reopen a terminal entitlement — the same rule §6.4 already states for bytes.
 
+### 3.2z Two different predicates, and they are not interchangeable
+
+**`PENDING_ENFORCEMENT` is not proof of network access.** It means a grant whose kernel authorization is
+still converging at the edge — the guest may have no forwarding at all yet. Charging it would bill a guest
+for minutes during which the network did not carry their traffic.
+
+So Phase 6 uses **two separate predicates**, and never one as a proxy for the other:
+
+| Predicate | Includes | Used for | Why |
+|---|---|---|---|
+| **Accounting eligibility** | `active` only | consuming the aggregate budget | only `active` states that enforcement is applied and the network is carrying the session. Time is charged for access delivered, not access intended. |
+| **Removal safety** | `active` **and** `PENDING_ENFORCEMENT` | refusing guest self-service removal | a grant still converging must not have its slot released underneath it; the kernel authorization is still landing, and releasing it would create a device whose enforcement outlives its binding. |
+
+The asymmetry is deliberate. For *charging*, an unproven state must not count. For *removing*, an unproven
+state must count — because in each case the unproven state is resolved in the direction that cannot harm the
+guest. A single "is it live?" predicate could not do both, and using one would have been the bug.
+
 ### 3.2a A watermark proves idempotency — it does NOT prove the time was online
 
 **The gap, stated plainly.** `accounted_through` makes a replayed tick charge zero. It says nothing about
@@ -136,18 +155,22 @@ the accounting service last *observed* the session:
   of the tick interval;
 * a gap larger than the bound means the service was not running, so the unobserved remainder is **not
   charged** — it is re-baselined and recorded as a skipped interval, which is evidence rather than silence;
-* the session must still be eligible *now*: `active` or `PENDING_ENFORCEMENT`, its entitlement live. A session
-  that was idle-reaped or ended while the service was down stops at its `ended` instant, not at `now`.
+* the session must be **accounting-eligible now**: state `active` (never `PENDING_ENFORCEMENT` — see §3.2z)
+  with its entitlement live. A session that was idle-reaped or ended while the service was down stops at its
+  `ended` instant, not at `now`; a session still converging has not started consuming at all.
 
 The failure this rules out is asymmetric on purpose. Charging unobserved time takes minutes from a guest who
 was not using them and cannot be undone without an audited adjustment; declining to charge it gives away at
 most one bound's worth per outage, to a guest who may genuinely have been online. **Given the choice, the
 system under-charges.**
 
-**Adversarial proof required before M3 is implemented:** clean restart mid-session · crash/reboot with the
-session row left `active` · a gap far longer than the bound · idle reap during the gap · restoration from
-backup to an older watermark (the monotonic trigger refuses the backwards move) · and the ordinary case, where
-a continuously observed session accrues exactly the elapsed time.
+**Adversarial proof required before M3 is implemented:** nothing is charged while a session is
+`PENDING_ENFORCEMENT` · nothing is charged for the interval *before* enforcement became active · nothing is
+charged if enforcement never succeeds and the session ends from `PENDING_ENFORCEMENT` · nothing is charged
+after enforcement ends · clean restart mid-session · crash/reboot with the session row left `active` · a gap
+far longer than the bound · idle reap during the gap · restoration from backup to an older watermark (the
+monotonic trigger refuses the backwards move) · and the ordinary case, where a continuously observed active
+session accrues exactly the elapsed time.
 
 ### 3.3 Exhaustion at the true time
 
@@ -156,9 +179,13 @@ stamped at sweep time: with *n* eligible sessions consuming, the remaining budge
 faster, so exhaustion lands at `accounted_through + remaining/n`. This matches the existing rule that a data
 crossing is recorded at the sample that crossed it, not when the sweep noticed.
 
-Termination goes through the **existing** `terminate_entitlement_at_boundary` path with a new reason, so the
-precedence rule in §6.1 — the first reached of {window end, data cap, hard expiry, checkout, admin,
-aggregate} triggers **one** atomic terminal transition — stays a single code path.
+Termination goes through the **existing** `terminate_entitlement_at_boundary` path with the contract's
+**existing `TIME` reason** — no new terminal vocabulary is introduced, because AGGREGATE_ONLINE_TIME is a
+*time mode* and exhausting its budget is a time termination. §6.1's precedence rule — the first reached of
+{window end, data cap, hard expiry, checkout, admin} triggers **one** atomic terminal transition — is
+unchanged and stays a single code path. Which time rule ran out is recorded in append-only
+`entitlement_termination_evidence`, which is bound by trigger to the entitlement's actual terminal
+transition, so it can neither describe a termination that did not happen nor disagree with the one that did.
 
 ### 3.4 Immutability
 

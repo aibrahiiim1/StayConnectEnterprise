@@ -73,6 +73,15 @@ refuses "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_i
 # ---------------------------------------------------------------- no fake or orphan managed state
 refuses "INSERT INTO iam_v2.appliance_product_settings (tenant_id, site_id, appliance_id) VALUES ('$T','$S','$FAKE')" \
         "a settings row for an appliance that does not exist is refused -- no fake managed state" "aps_appliance_must_exist"
+# A REAL appliance filed under the WRONG scope is the subtler hole: existence is not enough, because the
+# composite primary key would accept somebody else's tenant or site beside a genuine appliance id.
+refuses "INSERT INTO iam_v2.appliance_product_settings (tenant_id, site_id, appliance_id) VALUES ('$FAKE','$S','$A')" \
+        "a REAL appliance under the WRONG TENANT is refused -- existence is not scope" "aps_appliance_must_exist"
+refuses "INSERT INTO iam_v2.appliance_product_settings (tenant_id, site_id, appliance_id) VALUES ('$T','$FAKE','$A')" \
+        "a REAL appliance under the WRONG SITE is refused" "aps_appliance_must_exist"
+refuses "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, setting_key, new_value, changed_by_operator_id, changed_by)
+         VALUES ('$FAKE','$S','$A','guest_device_self_service', true, '$OP', 'gate-selftest')" \
+        "an audit row for a REAL appliance under the WRONG TENANT is refused" "apsc_appliance_must_exist"
 refuses "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, setting_key, new_value, changed_by_operator_id, changed_by)
          VALUES ('$T','$S','$FAKE','guest_device_self_service', true, '$OP', 'gate-selftest')" \
         "an audit row for an appliance that does not exist is refused" "apsc_appliance_must_exist"
@@ -126,17 +135,60 @@ case "$d" in
   *) no "contract terminal reasons intact" "constraint: $d" ;;
 esac
 
-# ...and the distinction is carried by EVIDENCE, which must be checkable and self-consistent.
+# ...and the distinction is carried by EVIDENCE. Note the ORDER these are proven in: the BEFORE INSERT
+# trigger runs before the table's CHECK constraints, so a row naming an entitlement that does not exist is
+# refused by the trigger and never reaches the CHECKs at all. The trigger therefore enforces a SUPERSET, and
+# the CHECK-only properties are exercised below against a real terminated entitlement, where they are
+# actually reachable. Asserting them here would have proven only that the trigger fires first.
 E=$(q "SELECT gen_random_uuid()")
 refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, terminated_at)
-         VALUES ('$E','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_ONLINE_TIME', now())" \
-        "aggregate-exhaustion evidence without the budget numbers is refused -- evidence without the number is an assertion" "ete_aggregate_carries_its_budget"
-refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, terminated_at)
-         VALUES ('$E','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','VALIDITY_WINDOW', 7200, 7200, now())" \
-        "evidence whose cause and time mode disagree is refused" "ete_detail_matches_mode"
-refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, terminated_at)
-         VALUES ('$E','$T','$S','AGGREGATE_TIME','VALIDITY_WINDOW_ELAPSED','VALIDITY_WINDOW', now())" \
-        "evidence may not introduce a terminal_reason the contract does not define" "terminal_reason"
+         VALUES ('$E','$T','$S','TIME','VALIDITY_WINDOW_ELAPSED','VALIDITY_WINDOW', now())"         "evidence for an entitlement that does not exist is refused" "does not exist in this scope"
+
+# ---------------------------------------------------------------- evidence is bound to the real transition
+# Seed one entitlement so the binding can be exercised in both directions: while it is LIVE, evidence must be
+# refused; once it is TERMINATED, evidence that disagrees with the recorded transition must still be refused,
+# and only the agreeing row is accepted.
+ENT2=$(q "SELECT gen_random_uuid()")
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -q >/dev/null 2>&1 <<SQL
+BEGIN;
+SET LOCAL session_replication_role = replica;
+ALTER TABLE iam_v2.entitlements DISABLE TRIGGER ALL;
+INSERT INTO iam_v2.entitlements (id, tenant_id, site_id, voucher_id, purchase_id, policy_snapshot,
+    service_plan_revision_id, package_revision_id, time_accounting_mode, end_mode, status)
+  VALUES ('$ENT2','$T','$S','$(q "SELECT gen_random_uuid()")','$(q "SELECT gen_random_uuid()")','{}'::jsonb,
+    '$(q "SELECT gen_random_uuid()")','$(q "SELECT gen_random_uuid()")','AGGREGATE_ONLINE_TIME','VALIDITY_WINDOW','ACTIVE');
+ALTER TABLE iam_v2.entitlements ENABLE TRIGGER ALL;
+COMMIT;
+SQL
+if [ "$(q "SELECT count(*) FROM iam_v2.entitlements WHERE id='$ENT2'")" != "1" ]; then
+  no "an entitlement could be seeded for the evidence-binding checks" "seed failed"
+else
+  ok "an entitlement was seeded for the evidence-binding checks"
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, terminated_at)
+           VALUES ('$ENT2','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_ONLINE_TIME', 7200, 7200, now())" \
+          "evidence for a LIVE entitlement is refused -- evidence may not describe a transition that did not occur" "not TERMINATED"
+  TAT=$(q "SELECT (now() - interval '5 minutes')::text")
+  docker exec -i "$C" psql -U postgres -d "$DB" -q >/dev/null 2>&1 <<SQL
+BEGIN;
+SET LOCAL session_replication_role = replica;
+ALTER TABLE iam_v2.entitlements DISABLE TRIGGER ALL;
+UPDATE iam_v2.entitlements SET status='TERMINATED', terminal_reason='TIME', terminated_at='$TAT'
+ WHERE id='$ENT2';
+ALTER TABLE iam_v2.entitlements ENABLE TRIGGER ALL;
+COMMIT;
+SQL
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, terminated_at)
+           VALUES ('$ENT2','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_ONLINE_TIME', 7200, 7200, now())" \
+          "evidence whose instant disagrees with the recorded termination is refused" "terminated at"
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, terminated_at)
+           VALUES ('$ENT2','$T','$S','TIME','VALIDITY_WINDOW_ELAPSED','VALIDITY_WINDOW', '$TAT')" \
+          "evidence whose time mode disagrees with the entitlement is refused" "time mode"
+  accepts "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, terminated_at)
+           VALUES ('$ENT2','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_ONLINE_TIME', 7200, 7200, '$TAT')" \
+          "evidence that AGREES with the recorded termination is accepted"
+  refuses "UPDATE iam_v2.entitlement_termination_evidence SET consumed_online_seconds = 1 WHERE entitlement_id='$ENT2'" \
+          "termination evidence is append-only" "append-only"
+fi
 
 # ---------------------------------------------------------------- nothing was granted
 g="$(q "SELECT count(*) FROM information_schema.role_table_grants g
@@ -152,9 +204,13 @@ g="$(q "SELECT count(*) FROM information_schema.role_table_grants g
 docker exec -i "$C" psql -U postgres -d "$DB" -q >/dev/null 2>&1 <<SQL
 BEGIN;
 SET LOCAL session_replication_role = replica;
+ALTER TABLE iam_v2.entitlement_termination_evidence DISABLE TRIGGER p6_termination_evidence_append_only;
+DELETE FROM iam_v2.entitlement_termination_evidence WHERE tenant_id='$T';
+ALTER TABLE iam_v2.entitlement_termination_evidence ENABLE TRIGGER p6_termination_evidence_append_only;
 DELETE FROM iam_v2.session_online_watermarks WHERE tenant_id='$T';
 DELETE FROM iam_v2.sessions WHERE tenant_id='$T';
 DELETE FROM iam_v2.devices WHERE tenant_id='$T';
+DELETE FROM iam_v2.entitlements WHERE tenant_id='$T';
 ALTER TABLE iam_v2.appliance_product_setting_changes DISABLE TRIGGER p6_setting_changes_append_only;
 DELETE FROM iam_v2.appliance_product_setting_changes WHERE tenant_id='$T';
 ALTER TABLE iam_v2.appliance_product_setting_changes ENABLE TRIGGER p6_setting_changes_append_only;
@@ -163,7 +219,9 @@ COMMIT;
 SQL
 left="$(q "SELECT (SELECT count(*) FROM iam_v2.appliance_product_settings WHERE tenant_id='$T')
               + (SELECT count(*) FROM iam_v2.appliance_product_setting_changes WHERE tenant_id='$T')
-              + (SELECT count(*) FROM iam_v2.sessions WHERE tenant_id='$T')")"
+              + (SELECT count(*) FROM iam_v2.sessions WHERE tenant_id='$T')
+              + (SELECT count(*) FROM iam_v2.entitlements WHERE tenant_id='$T')
+              + (SELECT count(*) FROM iam_v2.entitlement_termination_evidence WHERE tenant_id='$T')")"
 [ "$left" = "0" ] && ok "the gate left no rows behind" || no "the gate cleaned up after itself" "$left row(s) remain"
 
 echo "------------------------------------------------------------"
