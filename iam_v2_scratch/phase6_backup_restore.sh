@@ -86,6 +86,18 @@ for trg in p6_session_requires_authorized_binding p6_guest_device_actions_append
   eqv "the $trg guard survived the restore" "$(q "SELECT count(*) FROM pg_trigger WHERE tgname='$trg'")" "1"
 done
 
+# ---- leave the database as we found it --------------------------------------------------------------------
+#
+# The marker row is written into the FIXTURE appliance's audit history, which other suites assert on -- and it
+# made one of them fail by being the second row where exactly one was expected. A gate that leaves state
+# behind breaks its neighbours, so it removes its own row. The table is append-only by trigger, which is
+# exactly why this is done deliberately and only for the row this script created.
+q "ALTER TABLE iam_v2.appliance_product_setting_changes DISABLE TRIGGER p6_setting_changes_append_only" >/dev/null
+q "DELETE FROM iam_v2.appliance_product_setting_changes WHERE change_reason='$marker'" >/dev/null
+q "ALTER TABLE iam_v2.appliance_product_setting_changes ENABLE TRIGGER p6_setting_changes_append_only" >/dev/null
+eqv "the gate removed its own marker row"    "$(q "SELECT count(*) FROM iam_v2.appliance_product_setting_changes WHERE change_reason='$marker'")" "0"
+eqv "...and the append-only guard is armed again"    "$(q "SELECT tgenabled FROM pg_trigger WHERE tgname='p6_setting_changes_append_only'")" "O"
+
 echo "------------------------------------------------------------"
 printf 'PHASE6_BACKUP_RESTORE pass=%d fail=%d\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -1435,45 +1435,6 @@ func TestIntegration_Phase6_CrossingIsTheAdjustmentThatActuallyExhausted(t *test
 	}
 }
 
-// A BUDGET CUT IS A CROSSING TOO, and is dated at the cut rather than at whenever consumption last moved.
-func TestIntegration_Phase6_LoweringTheBudgetUnderConsumptionIsTheCrossing(t *testing.T) {
-	p := pool(t)
-	f, ent, _ := seedAggregate(t, p, 600, 5*time.Minute)
-	adjust(t, p, f, ent, "consumed_online_seconds", 0, 500, 3*time.Hour) // still under 600
-	if _, err := p.Exec(context.Background(),
-		`UPDATE iam_v2.entitlements SET consumed_online_seconds = 500 WHERE id=$1`, ent); err != nil {
-		t.Fatal(err)
-	}
-	// A budget cut is a REPOINT to another immutable revision -- revisions themselves never change -- and the
-	// repoint is what the audit records.
-	var oldRev, newRev string
-	if err := p.QueryRow(context.Background(),
-		`SELECT service_plan_revision_id::text FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&oldRev); err != nil {
-		t.Fatal(err)
-	}
-	if err := p.QueryRow(context.Background(), `INSERT INTO iam_v2.service_plan_revisions
-		 (id, tenant_id, site_id, service_plan_id, revision_no, down_kbps, up_kbps, max_concurrent_devices,
-		  device_limit_policy, time_accounting_mode, time_quota_seconds)
-		 SELECT gen_random_uuid(), r.tenant_id, r.site_id, r.service_plan_id, r.revision_no + 10,
-		        r.down_kbps, r.up_kbps, r.max_concurrent_devices, r.device_limit_policy,
-		        r.time_accounting_mode, 400
-		   FROM iam_v2.service_plan_revisions r WHERE r.id = $1 RETURNING id::text`, oldRev).Scan(&newRev); err != nil {
-		t.Fatalf("publish the smaller revision: %v", err)
-	}
-	adjustRaw(t, p, f, ent, "service_plan_revision_id", oldRev, newRev, 20*time.Minute)
-	if _, err := p.Exec(context.Background(),
-		`UPDATE iam_v2.entitlements SET service_plan_revision_id=$2 WHERE id=$1`, ent, newRev); err != nil {
-		t.Fatal(err)
-	}
-	at := exhaustionInstant(t, p, ent)
-	if at == nil {
-		t.Fatal("a budget cut below existing consumption was not recognised as a crossing")
-	}
-	if age := time.Since(*at); age < 15*time.Minute || age > 25*time.Minute {
-		t.Fatalf("dated %s ago; the crossing was the budget cut 20 minutes ago", age)
-	}
-}
-
 // A HISTORY THAT NEVER CROSSES LEAVES IT UNDATABLE, however exhausted the entitlement looks now.
 func TestIntegration_Phase6_UnaccountedExhaustionStaysUndatable(t *testing.T) {
 	p := pool(t)
@@ -1519,5 +1480,170 @@ func TestIntegration_Phase6_TheTicksStampOutranksAdjustmentHistory(t *testing.T)
 	at := exhaustionInstant(t, p, ent)
 	if at == nil || !at.Equal(stamped) {
 		t.Fatalf("the stamp %s was overridden by adjustment history (%v)", stamped, at)
+	}
+}
+
+// ---- the adjustment history is a LOWER BOUND, not a reconstruction ----------------------------------------
+//
+// Ordinary accrual advances consumption inside the tick and writes no adjustment row. So the history says
+// what somebody last wrote down, not what consumption WAS at a historical instant. The one conclusion it
+// licenses is the safe one: a recorded value that has ALREADY reached the budget proves the true value had
+// too, because consumption only ever increases outside an audited adjustment. Below the budget it proves
+// nothing at all -- and a budget cut under an unrecorded accrued value is therefore undatable.
+//
+// These are the four supported cases, and the point of each is which way it must fail.
+
+// accrueSilently advances consumption the way the tick does: no adjustment row, because the tick writes none.
+func accrueSilently(t *testing.T, p *pgxpool.Pool, ent string, to int64) {
+	t.Helper()
+	if _, err := p.Exec(context.Background(),
+		`UPDATE iam_v2.entitlements SET consumed_online_seconds = $2 WHERE id = $1`, ent, to); err != nil {
+		t.Fatalf("silent accrual: %v", err)
+	}
+}
+
+// repointBudget publishes a smaller immutable revision and records the audited repoint, which is how a budget
+// cut actually happens.
+func repointBudget(t *testing.T, p *pgxpool.Pool, f fixture, ent string, budget int64, ago time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+	var oldRev, newRev string
+	if err := p.QueryRow(ctx, `SELECT service_plan_revision_id::text FROM iam_v2.entitlements WHERE id=$1`,
+		ent).Scan(&oldRev); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.service_plan_revisions
+		 (id, tenant_id, site_id, service_plan_id, revision_no, down_kbps, up_kbps, max_concurrent_devices,
+		  device_limit_policy, time_accounting_mode, time_quota_seconds)
+		 SELECT gen_random_uuid(), r.tenant_id, r.site_id, r.service_plan_id, r.revision_no + 20,
+		        r.down_kbps, r.up_kbps, r.max_concurrent_devices, r.device_limit_policy,
+		        r.time_accounting_mode, $2
+		   FROM iam_v2.service_plan_revisions r WHERE r.id = $1 RETURNING id::text`,
+		oldRev, budget).Scan(&newRev); err != nil {
+		t.Fatalf("publish the smaller revision: %v", err)
+	}
+	adjustRaw(t, p, f, ent, "service_plan_revision_id", oldRev, newRev, ago)
+	if _, err := p.Exec(ctx,
+		`UPDATE iam_v2.entitlements SET service_plan_revision_id=$2 WHERE id=$1`, ent, newRev); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// CASE 1: consumption entirely from ordinary accrual, still under the original budget, then a lower-budget
+// repoint. NOTHING recorded the accrual, so the cut cannot be shown to be the crossing -- and must not be
+// claimed as one.
+func TestIntegration_Phase6_AccruedConsumptionThenBudgetCutIsUndatable(t *testing.T) {
+	p := pool(t)
+	f, ent, _ := seedAggregate(t, p, 600, 5*time.Minute)
+	accrueSilently(t, p, ent, 500)                   // invisible to the audit, as the tick's accrual is
+	repointBudget(t, p, f, ent, 400, 20*time.Minute) // now 500 >= 400
+
+	if at := exhaustionInstant(t, p, ent); at != nil {
+		t.Fatalf("a budget cut under silently-accrued consumption was dated %s; the history cannot show "+
+			"what consumption was at the cut", at)
+	}
+	due, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(context.Background(), f.tenant, f.site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range due {
+		if x.EntitlementID == ent {
+			t.Fatalf("it was terminated anyway, at %s", x.At)
+		}
+	}
+}
+
+// CASE 2: mixed history -- an audited adjustment that ALREADY reaches the later budget, then silent accrual,
+// then the cut. Here the bound is sufficient: consumption was at least 450 when the adjustment recorded it,
+// and 450 >= 400, so the cut found it over budget whatever accrual did in between.
+func TestIntegration_Phase6_RecordedFloorAtOrOverTheNewBudgetIsDatable(t *testing.T) {
+	p := pool(t)
+	f, ent, _ := seedAggregate(t, p, 600, 5*time.Minute)
+	adjust(t, p, f, ent, "consumed_online_seconds", 0, 450, 3*time.Hour) // recorded floor
+	accrueSilently(t, p, ent, 520)                                       // invisible, and irrelevant
+	repointBudget(t, p, f, ent, 400, 25*time.Minute)
+
+	at := exhaustionInstant(t, p, ent)
+	if at == nil {
+		t.Fatal("a cut below a RECORDED consumption floor should be datable at the cut")
+	}
+	if age := time.Since(*at); age < 20*time.Minute || age > 30*time.Minute {
+		t.Fatalf("dated %s ago; the crossing is the cut ~25 minutes ago", age)
+	}
+}
+
+// CASE 3: several budget changes around several consumption changes. The crossing is the FIRST instant at
+// which the recorded floor had already reached the budget then in force -- not the first budget change and
+// not the last.
+func TestIntegration_Phase6_MultipleBudgetAndConsumptionChangesPickTheFirstRealCrossing(t *testing.T) {
+	p := pool(t)
+	f, ent, _ := seedAggregate(t, p, 1000, 5*time.Minute)
+	adjust(t, p, f, ent, "consumed_online_seconds", 0, 300, 5*time.Hour)   // 300 < 1000
+	repointBudget(t, p, f, ent, 800, 4*time.Hour)                          // 300 < 800
+	adjust(t, p, f, ent, "consumed_online_seconds", 300, 700, 3*time.Hour) // 700 < 800
+	repointBudget(t, p, f, ent, 600, 2*time.Hour)                          // 700 >= 600  <-- here
+	repointBudget(t, p, f, ent, 500, 1*time.Hour)                          // later, irrelevant
+	accrueSilently(t, p, ent, 700)
+
+	at := exhaustionInstant(t, p, ent)
+	if at == nil {
+		t.Fatal("a history with a genuine crossing was reported as undatable")
+	}
+	if age := time.Since(*at); age < 105*time.Minute || age > 135*time.Minute {
+		t.Fatalf("dated %s ago; the first real crossing was the cut to 600, two hours ago", age)
+	}
+}
+
+// CASE 4: a history that records a budget but never a consumption value. There is no lower bound at all, so
+// nothing is claimable however exhausted the entitlement looks now.
+func TestIntegration_Phase6_NoRecordedConsumptionMeansNoCrossing(t *testing.T) {
+	p := pool(t)
+	f, ent, _ := seedAggregate(t, p, 600, 5*time.Minute)
+	accrueSilently(t, p, ent, 590)
+	repointBudget(t, p, f, ent, 500, 30*time.Minute)
+	if at := exhaustionInstant(t, p, ent); at != nil {
+		t.Fatalf("dated %s from a history that never records a consumption value", at)
+	}
+}
+
+// MALFORMED SEED HISTORY FAILS SAFE, and does not abort the sweep. A raise here would take down the whole
+// site's expiry pass over one unreadable row.
+func TestIntegration_Phase6_MalformedAdjustmentHistoryFailsSafe(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+
+	for name, seed := range map[string]func(f fixture, ent string){
+		"unparseable budget seed": func(f fixture, ent string) {
+			adjustRaw(t, p, f, ent, "time_quota_seconds", "not-a-number", "400", 30*time.Minute)
+		},
+		"unparseable revision seed": func(f fixture, ent string) {
+			adjustRaw(t, p, f, ent, "service_plan_revision_id", "not-a-uuid", "also-not-a-uuid", 30*time.Minute)
+		},
+		"unparseable consumption value": func(f fixture, ent string) {
+			adjustRaw(t, p, f, ent, "consumed_online_seconds", "0", "six hundred", 30*time.Minute)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, ent, _ := seedAggregate(t, p, 600, 5*time.Minute)
+			accrueSilently(t, p, ent, 600) // exhausted, so the function reaches the history at all
+			seed(f, ent)
+
+			// It answers, rather than raising.
+			var at *time.Time
+			if err := p.QueryRow(ctx, `SELECT iam_v2.p6_exhaustion_instant($1)`, ent).Scan(&at); err != nil {
+				t.Fatalf("a malformed history raised instead of failing safe: %v", err)
+			}
+			if at != nil {
+				t.Fatalf("a malformed history produced an instant: %s", at)
+			}
+			// ...and the sweep completes for the whole site rather than aborting on this one entitlement.
+			if _, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+				t.Fatalf("the sweep aborted because one entitlement's history was unreadable: %v", err)
+			}
+			status, _, _, _ := terminalState(t, p, ent)
+			if status == "TERMINATED" {
+				t.Fatal("terminated on an unreadable history")
+			}
+		})
 	}
 }

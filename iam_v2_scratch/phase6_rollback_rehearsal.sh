@@ -74,7 +74,7 @@ forbidden="$(q "SELECT count(*) FROM iam_v2.entitlement_devices ed
 eqv "no released binding is carrying a live session before the guard is removed" "$forbidden" "0"
 
 # ---- 2. down, newest first ------------------------------------------------------------------------------
-for m in 0043_phase6_exhaustion_instant_from_the_real_crossing \
+for m in 0044_phase6_exhaustion_instant_lower_bound \n         0043_phase6_exhaustion_instant_from_the_real_crossing \
          0042_phase6_exhaustion_instant_must_be_provable \
          0041_phase6_expiry_writer_derives_the_condition \
          0040_phase6_acctd_expiry_writer \
@@ -123,7 +123,7 @@ for m in 0030_phase6_foundation \
          0040_phase6_acctd_expiry_writer \
          0041_phase6_expiry_writer_derives_the_condition \
          0042_phase6_exhaustion_instant_must_be_provable \
-         0043_phase6_exhaustion_instant_from_the_real_crossing; do
+         0043_phase6_exhaustion_instant_from_the_real_crossing \n         0044_phase6_exhaustion_instant_lower_bound; do
   out="$(apply "$m.up.sql")"
   case "$out" in *ERROR*) no "$m re-up" "$(echo "$out" | head -1)";; *) ok "$m re-up";; esac
 done

@@ -376,16 +376,31 @@ seen them:
 
 | Gate | What it proves |
 |---|---|
-| `phase6_rollback_rehearsal.sh` (24) | every Phase-6 down and re-up **in the order a rollback must be performed**, with the quiescence precondition checked rather than assumed — it refuses while a live aggregate entitlement remains, and has demonstrably refused |
-| `phase6_backup_restore.sh` (16) | pg_dump → **DROP** → pg_restore, then functions, privileges, guards and a marker row verified on the restored copy |
+| `phase6_rollback_rehearsal.sh` (54) | **the whole slice**, 0044 → 0030 down and back up, crossing the 0032 boundary the plan records as load-bearing; the quiescence preconditions are checked rather than assumed — no live aggregate entitlement, no appliance still offering the device capability, no released binding carrying a live session — and they have demonstrably refused |
+| `phase6_backup_restore.sh` (18) | pg_dump → **DROP** → pg_restore with pg_restore's own exit status and error lines checked, then functions, privileges, guards and a marker row verified on the restored copy, and the gate removes the row it wrote |
 | `phase6-flag-coherence.sh` (6) | scd/acctd/edged agree on every Phase-6 flag, no child without its master, and the accounting prerequisite: an appliance may not offer online-time budgets with its accounting daemon inactive |
 | foundation / device / aggregate / least-privilege (50 / 22 / 49 / 54) | the durable invariants, measured as the real roles |
 | the integration matrix | green **twice consecutively on one database**, which is what makes it a regression suite rather than a one-shot |
 
-**What is still appliance-bound** and cannot be established from the repository: the controlled
-DEVELOPMENT-appliance LIVE-DARK validation itself, the flag-coherence check run against the appliance's own
-units, real reboot verification, and restoring every Phase-6 deployment flag OFF afterwards and confirming
-that state survives a reboot. Those are the remaining M4 gates.
+### What the DEVELOPMENT appliance has proven, and what it has not
+
+**Proven** (see [the appliance evidence](../acceptance/StayConnect-IAM-Phase6-Development-Appliance-Evidence.md)):
+
+* **pre-runtime flag coherence, 6/6**, read from the appliance's own systemd units — every Phase-6 flag OFF
+  and agreeing across scd, acctd and edged;
+* a **pre-Phase-6 backup**, taken and read back (1187 TOC entries);
+* the **Phase-6 schema applied DARK**: 75 → 81 tables, 0 → 16 `p6_` functions, and `iam_v2` still holding
+  **zero rows**, with the 0032 guard present and no service errors;
+* **a real reboot**, after which all five services are active, coherence is 6/6 again, the schema is unchanged
+  at zero rows and no appliance setting row exists.
+
+**Not yet proven, and required before acceptance.** The Phase-6 **runtime binaries are not deployed**, so the
+schema is inert rather than merely unused. That leaves outstanding: the controlled LIVE-DARK validation of the
+authorized gate/setting combinations across both product slices; the local-first proof with Central
+unavailable, on the appliance; runtime flag coherence with the new binaries; appliance-side backup/restore and
+rollback evidence; and — after the validation — restoring every flag OFF, cleaning the controlled synthetic
+state, and **re-verifying that across a second reboot**. The reboot proof recorded above is of the
+*schema-dark* state, and is not a substitute for it.
 
 ### M4 rollback prerequisite — recorded now, because it is easy to discover too late
 
