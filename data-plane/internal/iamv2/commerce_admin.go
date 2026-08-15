@@ -517,3 +517,8 @@ func (a *CommerceAdmin) SetActive(ctx context.Context, tenantID, siteID, package
 	}
 	return AdminResult{PackageID: packageID, Reason: "ok"}, nil
 }
+
+// AggregateOnlineTimeAllowed reports whether this admin may publish AGGREGATE_ONLINE_TIME plan revisions.
+// It exists so composition tests can assert what the REAL startup wiring produced, rather than asserting
+// against a validator called directly with a flag the test chose itself.
+func (a *CommerceAdmin) AggregateOnlineTimeAllowed() bool { return a != nil && a.aggregateOnlineTime }

@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -40,11 +41,29 @@ var (
 
 // Store performs atomic stay grants.
 type Store struct {
-	pool *pgxpool.Pool
-	ctxs *authctx.Store
+	// aggregateOnlineTime gates NEW acquisition of the Phase-6 time mode. See WithAggregateOnlineTime.
+	aggregateOnlineTime bool
+	pool                *pgxpool.Pool
+	ctxs                *authctx.Store
 }
 
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool, ctxs: authctx.NewStore(pool)} }
+
+// WithAggregateOnlineTime declares whether this process may create NEW entitlements whose effective time
+// mode is AGGREGATE_ONLINE_TIME. Default OFF, and off means REFUSE the grant.
+//
+// The reason is not policy, it is arithmetic: acctd performs no aggregate accrual while the Phase-6
+// aggregate flag is off, so an entitlement created in that mode would never consume its budget and never
+// exhaust -- an unlimited package by accident, on a build that cannot account for it. Refusing to create it
+// is the only honest answer.
+//
+// It deliberately does NOT touch anything already durable. An immutable AGGREGATE_ONLINE_TIME plan revision
+// keeps existing and keeps its meaning; entitlements already granted under it are not reinterpreted,
+// re-moded or deleted. Only NEW acquisition is closed.
+func (s *Store) WithAggregateOnlineTime(on bool) *Store {
+	s.aggregateOnlineTime = on
+	return s
+}
 
 // Request is what a guest-side grant needs. Everything that decides ACCESS is server-derived: the caller
 // supplies only the one-time Auth Context id, the presenter identity it must match, and which package was
@@ -184,6 +203,21 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 	if windowSecs > 0 {
 		w := activatedAt.Add(time.Duration(windowSecs) * time.Second)
 		window = &w
+	}
+	// FAIL CLOSED ON A MODE THIS BUILD CANNOT ACCOUNT FOR. The revision is immutable and may legitimately
+	// carry AGGREGATE_ONLINE_TIME; what must not happen is a NEW entitlement in that mode on a process whose
+	// accrual is dark, because nothing would ever consume its budget.
+	if !s.aggregateOnlineTime {
+		var mode string
+		if err := tx.QueryRow(ctx,
+			`SELECT COALESCE(time_accounting_mode,'VALIDITY_WINDOW') FROM iam_v2.service_plan_revisions WHERE id=$1`,
+			svcRev).Scan(&mode); err != nil {
+			return res, err
+		}
+		if mode == "AGGREGATE_ONLINE_TIME" {
+			return res, fmt.Errorf("aggregate online-time accounting is not enabled on this appliance: "+
+				"refusing to grant plan revision %s, whose budget nothing would consume", svcRev)
+		}
 	}
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlements
 		(tenant_id, site_id, stay_id, pms_interface_id, purchase_id, policy_snapshot, service_plan_revision_id,

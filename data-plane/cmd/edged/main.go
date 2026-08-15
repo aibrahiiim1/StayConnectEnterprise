@@ -194,6 +194,23 @@ func main() {
 	// Phase 2 DARK Hotel-Admin commerce. Config from env (all flags default OFF); nil repository while the
 	// master flag is OFF (zero Phase-2 SQL). Fail closed if the master flag is set without a wired repo
 	// (cutover only) — edged holds ZERO iam_v2 privileges under its Gate-P role while dark.
+	// PHASE 6 (DARK) CONFIGURATION IS LOADED FIRST, BEFORE ANY COMPONENT CONSUMES IT.
+	//
+	// The ordering is the point. This block used to sit forty lines further down, after the commerce admin
+	// had already been handed s.phase6.AggregateTimeOn() -- reading a zero-value config nothing had assigned
+	// yet. The capability was therefore OFF whatever the environment said, and no unit test could see it,
+	// because every unit test called the validator directly with a flag it chose itself.
+	//
+	// The operator setting surface is mounted under its own admin flag; the per-appliance PRODUCT setting it
+	// edits is a different control entirely, lives in the database, and defaults OFF.
+	p6cfg, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("phase6 configuration", "err", err)
+		os.Exit(1)
+	}
+	s.phase6 = p6cfg
+	slog.Info("phase6 dark guest-device surface", "flags", p6cfg.SafeFlagSummary())
+
 	commCfg, err := iamv2.LoadCommerceConfigFromEnv(os.Getenv)
 	if err != nil {
 		slog.Error("phase2 commerce config", "err", err)
@@ -213,7 +230,7 @@ func main() {
 	// off -- every environment today -- the admin path refuses the mode exactly as it did before Phase 6, and
 	// every revision published stays VALIDITY_WINDOW. Existing revisions are immutable and are unaffected
 	// either way.
-	commAdmin.AllowAggregateOnlineTime(s.phase6.AggregateTimeOn())
+	applyAggregateTimeCapability(commAdmin, p6cfg)
 	s.commerce = commAdmin
 	s.commerceCfg = commCfg
 	slog.Info("phase2 dark commerce admin constructed", "flags", commCfg.SafeFlagSummary())
@@ -244,15 +261,6 @@ func main() {
 	s.phase5Cfg = p5cfg
 	slog.Info("phase5 dark post-stay admin surface", "flags", p5cfg.SafeFlagSummary())
 
-	// Phase 6 (DARK). The operator setting surface is mounted under its own admin flag; the per-appliance
-	// PRODUCT setting it edits is a different control entirely, lives in the database, and defaults OFF.
-	p6cfg, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv)
-	if err != nil {
-		slog.Error("phase6 configuration", "err", err)
-		os.Exit(1)
-	}
-	s.phase6 = p6cfg
-	slog.Info("phase6 dark guest-device surface", "flags", p6cfg.SafeFlagSummary())
 	slog.Info("phase3 dark pms admin surface", "flags", pmsCfg.SafeFlagSummary())
 	// Before any Phase-3 admin surface is served, prove the controlled-writer boundary is actually in force
 	// for this process. An operator publishing a grace policy through a UI that turns out to be writing raw
