@@ -209,6 +209,11 @@ func main() {
 		slog.Error("phase2 commerce admin new", "err", err)
 		os.Exit(2)
 	}
+	// PHASE 6 (DARK by default): may this build PUBLISH AGGREGATE_ONLINE_TIME plan revisions? With the flag
+	// off -- every environment today -- the admin path refuses the mode exactly as it did before Phase 6, and
+	// every revision published stays VALIDITY_WINDOW. Existing revisions are immutable and are unaffected
+	// either way.
+	commAdmin.AllowAggregateOnlineTime(s.phase6.AggregateTimeOn())
 	s.commerce = commAdmin
 	s.commerceCfg = commCfg
 	slog.Info("phase2 dark commerce admin constructed", "flags", commCfg.SafeFlagSummary())

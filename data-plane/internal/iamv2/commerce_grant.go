@@ -137,18 +137,24 @@ func BuildGrantSnapshot(tier GrantTier, plan PlanRevisionRow, pkg PackageRevisio
 		}
 		g.DeviceLimitPolicy = strings.ToUpper(strings.TrimSpace(s))
 	}
-	if v, ok := tier.Value["time_accounting_mode"]; ok {
-		s, _ := v.(string)
-		g.TimeAccountingMode = strings.ToUpper(strings.TrimSpace(s))
-	}
-	// AGGREGATE_ONLINE_TIME is capability-disabled in Phase 2 (fail closed).
-	if strings.ToUpper(g.TimeAccountingMode) == "AGGREGATE_ONLINE_TIME" {
-		return GrantSnapshot{}, &Error{Code: ErrInvalidInput, Msg: "AGGREGATE_ONLINE_TIME accounting is capability-disabled in Phase 2"}
+	// A TIER MAY NOT CHOOSE THE ACCOUNTING MODE. The mode belongs to the IMMUTABLE plan revision -- that is
+	// what "selectable per immutable revision" means -- and an offer-time override would let the same
+	// revision be granted under two different accounting rules, which is precisely the retroactive
+	// reinterpretation immutability exists to prevent. Overrides of rates and quotas remain allowed; this
+	// one is refused whatever the Phase-6 capability says.
+	if _, ok := tier.Value["time_accounting_mode"]; ok {
+		return GrantSnapshot{}, &Error{Code: ErrInvalidInput,
+			Msg: "time_accounting_mode belongs to the plan revision and cannot be overridden by a tier"}
 	}
 	if g.TimeAccountingMode == "" {
+		// An omitted mode is VALIDITY_WINDOW, which is what every revision published before Phase 6 carries.
 		g.TimeAccountingMode = "VALIDITY_WINDOW"
 	}
-	if g.TimeAccountingMode != "VALIDITY_WINDOW" {
+	switch strings.ToUpper(g.TimeAccountingMode) {
+	case "VALIDITY_WINDOW", "AGGREGATE_ONLINE_TIME":
+		// The revision's own mode is honoured. It could only have become AGGREGATE_ONLINE_TIME by being
+		// published that way, which the admin path allows only with the Phase-6 capability on.
+	default:
 		return GrantSnapshot{}, &Error{Code: ErrInvalidInput, Msg: "unsupported time_accounting_mode " + g.TimeAccountingMode}
 	}
 	// required plan constraints a tier may never violate
