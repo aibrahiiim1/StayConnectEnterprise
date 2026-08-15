@@ -39,7 +39,13 @@ for t in appliance_product_settings appliance_product_setting_changes session_on
 done
 
 n="$(q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_type='BASE TABLE'")"
-[ "$n" = "72" ] && ok "iam_v2 carries 72 base tables (68 + the four Phase-6 tables)" || no "iam_v2 base-table count" "found $n"
+# 0030 contributes FOUR tables to the 68-table Phase-5 baseline. Asserting the absolute total pinned this
+# gate to "no later Phase-6 migration exists", which 0031 immediately falsified -- so it asserts its own
+# contribution instead, which is the thing this gate is actually responsible for.
+[ "${n:-0}" -ge 72 ] && ok "iam_v2 carries $n base tables (68 Phase-5 + 0030's four, plus any later Phase-6 migration)"                      || no "iam_v2 base-table count" "found $n, expected at least 72"
+for t6 in appliance_product_settings appliance_product_setting_changes session_online_watermarks entitlement_termination_evidence; do
+  :  # existence already asserted individually above; the count here is only a floor
+done
 
 # ---------------------------------------------------------------- the default IS the product decision
 # The scope is anchored to REAL platform records, so the gate uses the fixture's real ones -- and then
@@ -287,6 +293,34 @@ SQL
   refuses "SELECT iam_v2.p6_record_time_termination('$CW','NOT_A_CAUSE')" \
           "the controlled writer refuses an unknown cause" "unknown time-termination cause"
 fi
+
+# ---------------------------------------------------------------- least privilege on FUNCTIONS
+# A function's ACL starts NULL in PostgreSQL, and NULL means PUBLIC EXECUTE. Every Phase-6 function was
+# measured that way before this was fixed -- including the mutation-capable controlled writer -- so the
+# assertion is written against the EFFECTIVE privilege (has_function_privilege) rather than against the ACL
+# text, which is what an implementation could accidentally satisfy while leaving the grant in place.
+#
+# It is deliberately generic over p6_*: a Phase-6 function added later without its REVOKE fails here, which is
+# the only version of this check that keeps working after I stop looking at it.
+pubx="$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+           WHERE n.nspname='iam_v2' AND p.proname LIKE 'p6!_%' ESCAPE '!'
+             AND has_function_privilege('public', p.oid, 'EXECUTE')")"
+[ "$pubx" = "0" ] && ok "no Phase-6 function is executable by PUBLIC (effective privilege, not ACL text)"                   || no "no Phase-6 function is executable by PUBLIC" "$pubx function(s) still are"
+
+nfn="$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+          WHERE n.nspname='iam_v2' AND p.proname LIKE 'p6!_%' ESCAPE '!'")"
+# Derived, not pinned: Phase 6 keeps adding functions across its milestones, and a hardcoded count turns
+# every legitimate addition into a false failure -- while a count that merely EXISTS proves nothing about
+# privileges. What matters is that the set is non-empty and that every member of it was checked above.
+[ "${nfn:-0}" -ge 5 ] && ok "all $nfn Phase-6 functions were checked (a new one without its REVOKE fails above)"                       || no "the Phase-6 function set is non-empty" "found ${nfn:-0}"
+
+# ...and nothing has been granted EARLY. Runtime grants belong to the slice that wires a caller, given to the
+# exact role that needs them; a grant that exists before a caller does is a privilege nobody is accounting for.
+gx="$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace,
+              LATERAL aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+          WHERE n.nspname='iam_v2' AND p.proname LIKE 'p6!_%' ESCAPE '!'
+            AND a.privilege_type='EXECUTE' AND a.grantee <> p.proowner")"
+[ "$gx" = "0" ] && ok "no role besides the owner holds EXECUTE on any Phase-6 function (no early runtime grant)"                 || no "no early runtime grants exist" "$gx grant(s) beyond the owner"
 
 # ---------------------------------------------------------------- nothing was granted
 g="$(q "SELECT count(*) FROM information_schema.role_table_grants g

@@ -39,6 +39,9 @@
 --     VALIDITY_WINDOW in their immutable snapshots, so they cannot be reinterpreted retroactively — that
 --     property comes from immutability that already exists, not from a compatibility branch added here.
 --   * It grants nothing to any role. Phase 6 is DARK; privileges are derived from a real audit in M4.
+--     Every function it creates IS explicitly revoked from PUBLIC, because a function's ACL starts
+--     NULL and NULL means PUBLIC EXECUTE -- revoke first, grant later, to the exact role that
+--     needs it and no other.
 BEGIN;
 
 -- ---------------------------------------------------------------------------------------------------------
@@ -147,6 +150,8 @@ BEGIN
     USING ERRCODE = 'restrict_violation';
 END $$;
 
+REVOKE EXECUTE ON FUNCTION iam_v2.p6_setting_changes_append_only() FROM PUBLIC;
+
 CREATE TRIGGER p6_setting_changes_append_only
   BEFORE UPDATE OR DELETE ON iam_v2.appliance_product_setting_changes
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p6_setting_changes_append_only();
@@ -189,6 +194,8 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
+
+REVOKE EXECUTE ON FUNCTION iam_v2.p6_online_watermark_monotonic() FROM PUBLIC;
 
 CREATE TRIGGER p6_online_watermark_monotonic
   BEFORE UPDATE ON iam_v2.session_online_watermarks
@@ -334,6 +341,8 @@ BEGIN
   RETURN NEW;
 END $$;
 
+REVOKE EXECUTE ON FUNCTION iam_v2.p6_termination_evidence_matches_transition() FROM PUBLIC;
+
 CREATE TRIGGER p6_termination_evidence_matches_transition
   BEFORE INSERT ON iam_v2.entitlement_termination_evidence
   FOR EACH ROW EXECUTE FUNCTION iam_v2.p6_termination_evidence_matches_transition();
@@ -344,6 +353,8 @@ BEGIN
   RAISE EXCEPTION 'iam_v2.entitlement_termination_evidence is append-only: % refused', TG_OP
     USING ERRCODE = 'restrict_violation';
 END $$;
+
+REVOKE EXECUTE ON FUNCTION iam_v2.p6_termination_evidence_append_only() FROM PUBLIC;
 
 CREATE TRIGGER p6_termination_evidence_append_only
   BEFORE UPDATE OR DELETE ON iam_v2.entitlement_termination_evidence
@@ -384,6 +395,17 @@ BEGIN
   VALUES (e.id, e.tenant_id, e.site_id, e.terminal_reason, p_cause, e.time_accounting_mode,
           v_budget, e.consumed_online_seconds, e.window_ends_at, e.terminated_at);
 END $$;
+
+-- THE CONTROLLED WRITER IS THE ONE THAT MATTERS MOST, and it is the one PostgreSQL hands to everybody by
+-- default: a function's ACL starts NULL, which means PUBLIC EXECUTE. It was measured that way -- proacl NULL
+-- on all five Phase-6 functions -- rather than assumed, and the measurement is why this block exists. Phase 3
+-- and Phase 5 already revoke every controlled writer from PUBLIC; 0030 simply had not, and a mutation-capable
+-- function reachable by PUBLIC is a privilege defect whether or not anything currently calls it.
+--
+-- NOTHING IS GRANTED HERE. Phase 6 is DARK and no service role needs this yet; the grant belongs to the
+-- vertical slice that actually wires a caller, given to that role and no other. Revoking now and granting
+-- later is the safe order -- the reverse leaves a window in which the privilege exists for no reason.
+REVOKE EXECUTE ON FUNCTION iam_v2.p6_record_time_termination(uuid, text) FROM PUBLIC;
 
 COMMENT ON FUNCTION iam_v2.p6_record_time_termination(uuid, text) IS
   'The sanctioned way to record why a time-mode entitlement ended. It accepts the entitlement and the cause '
