@@ -238,6 +238,14 @@ func TestIntegration_Acct_AttributionFollowsTheBindingAtSampleTime(t *testing.T)
 		t.Fatalf("terminate at the boundary: %v", err)
 	}
 	second := f.grantEntitlement(t, boundary, nil)
+	// The device is admitted to the successor entitlement BEFORE its session is rebound onto it. That is
+	// what the production checkout-grace path does -- it only rebinds sessions whose device it has already
+	// grandfathered onto the new entitlement -- and Phase-6 migration 0032 now makes the alternative
+	// unrepresentable: a live session may not sit on an entitlement it has no authorization binding for.
+	if _, err := f.pool.Exec(ctx,
+		`SELECT iam_v2.authorize_entitlement_device($1,$2,$3)`, second, f.device, boundary); err != nil {
+		t.Fatalf("admit the device to the successor entitlement: %v", err)
+	}
 	if _, err := f.pool.Exec(ctx,
 		`SELECT iam_v2.rebind_session_entitlement($1,$2,$3)`, sess, second, boundary); err != nil {
 		t.Fatalf("rebind: %v", err)
@@ -574,6 +582,12 @@ func TestIntegration_Acct_SessionWithoutAnInterfaceIsNotMeasurable(t *testing.T)
 	ctx := context.Background()
 	started := time.Now().Add(-time.Hour)
 	ent := f.grantEntitlement(t, started, nil)
+	// Admitted first, for the same reason as everywhere else: a live session with no authorization binding
+	// is a state the product cannot produce and migration 0032 refuses.
+	if _, err := f.pool.Exec(ctx,
+		`SELECT iam_v2.authorize_entitlement_device($1,$2,$3)`, ent, f.device, started); err != nil {
+		t.Fatalf("authorize the device: %v", err)
+	}
 	var sess string
 	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.sessions
 		(tenant_id,site_id,entitlement_id,device_id,state,started,ip)

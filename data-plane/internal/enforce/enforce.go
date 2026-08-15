@@ -51,9 +51,27 @@ type Plan struct {
 }
 
 // Enforcer derives plans and applies expiry enforcement.
-type Enforcer struct{ pool *pgxpool.Pool }
+type Enforcer struct {
+	pool *pgxpool.Pool
+	// aggregateTimeMaxCharge, when positive, turns on the Phase-6 AGGREGATE_ONLINE_TIME accrual tick inside
+	// the expiry sweep, bounded by this many seconds per tick. Zero -- the default, and the only value any
+	// existing caller produces -- means the mode is DARK: no accrual runs, no watermark is written, and the
+	// sweep behaves exactly as it did before Phase 6.
+	aggregateTimeMaxCharge int
+}
 
 func New(pool *pgxpool.Pool) *Enforcer { return &Enforcer{pool: pool} }
+
+// WithAggregateOnlineTime enables the Phase-6 accrual tick with the given per-tick charge bound.
+//
+// THE BOUND IS THE WHOLE SAFETY PROPERTY, so it is a required argument rather than a default: it is what
+// stops an appliance that was switched off for six hours from billing six hours the moment it comes back.
+// It should be a small multiple of the sweep interval -- large enough that an ordinary slow tick is charged
+// in full, small enough that an outage is obviously an outage.
+func (e *Enforcer) WithAggregateOnlineTime(maxChargeSeconds int) *Enforcer {
+	e.aggregateTimeMaxCharge = maxChargeSeconds
+	return e
+}
 
 // Pool exposes the database handle so a composition root can call the controlled Phase-3 operations directly
 // without opening a second pool. The operations themselves remain the authority on what is allowed.
@@ -121,6 +139,37 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// PHASE 6 (DARK unless the flag is on): accrue online time first, IN THIS TRANSACTION.
+	//
+	// The tick charges every accounting-eligible session, advances its durable watermark and reports the
+	// entitlements whose budget ran out, with the instant it ran out. It terminates nothing itself: those
+	// entitlements join the ordinary candidate list below and end through the SAME boundary path as a window
+	// elapse or a data crossing. One termination path, one set of rules.
+	var exhausted []Expiry
+	if e.aggregateTimeMaxCharge > 0 {
+		trows, err := tx.Query(ctx,
+			`SELECT entitlement_id::text, exhausted_at FROM iam_v2.p6_tick_online_time($1,$2,now(),$3)`,
+			tenant, site, e.aggregateTimeMaxCharge)
+		if err != nil {
+			return nil, err
+		}
+		for trows.Next() {
+			var x Expiry
+			if err := trows.Scan(&x.EntitlementID, &x.At); err != nil {
+				trows.Close()
+				return nil, err
+			}
+			// The contract's existing TIME reason: aggregate exhaustion is a time termination, and which
+			// time rule ran out is recorded as evidence rather than as new terminal vocabulary.
+			x.Reason = "TIME"
+			exhausted = append(exhausted, x)
+		}
+		trows.Close()
+		if err := trows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
 	// Candidates: live entitlements whose window has elapsed, or whose attributed usage has reached the plan
 	// quota. For a quota crossing, the effective time is the SAMPLE that crossed it — the moment the guest
 	// actually used up the allowance, not the moment this sweep ran.
@@ -159,6 +208,27 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 		return nil, err
 	}
 
+	// MERGE, KEEPING THE EARLIEST INSTANT. An entitlement can reach two terminal conditions in one sweep --
+	// its outer window elapsed AND its online-time budget ran out -- and section 6.1 says the FIRST reached
+	// triggers ONE atomic terminal transition. Terminating twice is not merely untidy: the second would
+	// re-date the ending, and the ending is what every downstream record is attributed against.
+	for _, x := range exhausted {
+		found := false
+		for i := range due {
+			if due[i].EntitlementID == x.EntitlementID {
+				found = true
+				if x.At.Before(due[i].At) {
+					due[i].At = x.At
+					due[i].Reason = x.Reason
+				}
+				break
+			}
+		}
+		if !found {
+			due = append(due, x)
+		}
+	}
+
 	for i := range due {
 		x := &due[i]
 		// the controlled boundary termination records the ending at its TRUE time and invalidates any
@@ -167,6 +237,34 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 			x.EntitlementID, x.At, x.Reason); err != nil {
 			return nil, err
 		}
+		// PHASE 6: WHICH time rule ran out, recorded as append-only evidence bound to the transition that
+		// just happened. The terminal_reason set is untouched -- 'TIME' covers both -- so this is the only
+		// place the difference between "the week ran out" and "the minutes ran out" is answerable.
+		if e.aggregateTimeMaxCharge > 0 && x.Reason == "TIME" {
+			var mode string
+			if err := tx.QueryRow(ctx,
+				`SELECT COALESCE(time_accounting_mode,'VALIDITY_WINDOW') FROM iam_v2.entitlements WHERE id=$1`,
+				x.EntitlementID).Scan(&mode); err != nil {
+				return nil, err
+			}
+			cause := "VALIDITY_WINDOW_ELAPSED"
+			if mode == "AGGREGATE_ONLINE_TIME" {
+				// An aggregate entitlement reported by the tick ran out of MINUTES; one that reached this
+				// sweep through the window branch ran out of CALENDAR.
+				cause = "AGGREGATE_OUTER_WINDOW_EXPIRED"
+				for _, ex := range exhausted {
+					if ex.EntitlementID == x.EntitlementID && !ex.At.After(x.At) {
+						cause = "AGGREGATE_ONLINE_TIME_EXHAUSTED"
+						break
+					}
+				}
+			}
+			if _, err := tx.Exec(ctx, `SELECT iam_v2.p6_record_time_termination($1,$2)`,
+				x.EntitlementID, cause); err != nil {
+				return nil, err
+			}
+		}
+
 		d, s, err := revoke(ctx, tx, x.EntitlementID, x.At)
 		if err != nil {
 			return nil, err

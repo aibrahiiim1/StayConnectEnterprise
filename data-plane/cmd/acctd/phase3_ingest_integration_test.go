@@ -111,6 +111,18 @@ func (f *ingestFixture) openSession(t *testing.T, ent, device string, startedAt 
 
 func (f *ingestFixture) openSessionOn(t *testing.T, ent, device string, startedAt time.Time, ip, bridge string) string {
 	t.Helper()
+	// THE DEVICE IS AUTHORIZED FIRST, through the same primitive the grant path uses.
+	//
+	// This fixture used to insert a session straight into the table, which produced a state the product
+	// cannot: a live session on an entitlement with no authorization binding at all. Phase-6 migration 0032
+	// made that state unrepresentable -- a live session requires an AUTHORIZED binding, so that a released
+	// or revoked device can never keep forwarding traffic -- and these fixtures were the first thing to hit
+	// it. The guard is right and the fixture was wrong: every real session exists because a device was
+	// admitted first.
+	if _, err := f.pool.Exec(context.Background(),
+		`SELECT iam_v2.authorize_entitlement_device($1,$2,$3)`, ent, device, startedAt); err != nil {
+		t.Fatalf("authorize the device before opening its session: %v", err)
+	}
 	var sess string
 	if err := f.pool.QueryRow(context.Background(), `INSERT INTO iam_v2.sessions
 		(tenant_id,site_id,entitlement_id,device_id,state,started,ip,ingress_interface)

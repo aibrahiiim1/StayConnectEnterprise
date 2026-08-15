@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"time"
 
@@ -58,12 +59,44 @@ func newPhase3(cfg iamv2.PMSConfig, a *acctd, tenant, site string, scope planSco
 	if !cfg.CheckoutGraceOn() {
 		return nil
 	}
+	enf := enforce.New(a.db)
+	// PHASE 6 (DARK by default): the AGGREGATE_ONLINE_TIME accrual tick rides inside the expiry sweep, so
+	// accrual and termination are one transaction. With the flag off -- which is every environment today --
+	// WithAggregateOnlineTime is never called and the sweep is byte-for-byte the Phase-3 behaviour.
+	//
+	// The bound is deliberately a few sweep intervals rather than one: a tick delayed by ordinary load is
+	// still real observed time and should be charged in full, while a gap that long means the service was
+	// not running and must not be.
+	if p6, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv); err == nil && p6.AggregateTimeOn() {
+		enf = enf.WithAggregateOnlineTime(aggregateChargeBoundSeconds(envInt("ACCTD_TICK_SECONDS", 1)))
+	} else if err != nil {
+		// A malformed flag is a configuration error, and Phase-6 config fails closed: log and stay dark
+		// rather than guessing which way the operator meant it.
+		slog.Error("phase6 configuration is unreadable; aggregate online time stays OFF", "err", err)
+	}
 	if plans == nil {
 		// An in-memory counter is only correct for a test: it restarts at 1, and netd would then refuse every
 		// plan this process produced. Callers that mean it pass a durable one.
 		plans = newPlanCounter("")
 	}
-	return &phase3{cfg: cfg, enf: enforce.New(a.db), tenant: tenant, site: site, scope: scope, plans: plans}
+	return &phase3{cfg: cfg, enf: enf, tenant: tenant, site: site, scope: scope, plans: plans}
+}
+
+// aggregateChargeBoundSeconds turns the sweep interval into the per-tick charge bound.
+//
+// FOUR TICKS, with a floor of a minute. The multiple absorbs an ordinary slow or delayed sweep -- that is
+// real observed time and a guest should be charged for it -- while still being short enough that an outage
+// is unmistakably an outage rather than a long tick. The floor exists because a one-second sweep would
+// otherwise produce a four-second bound, and then a single slow pass would start recording skipped intervals
+// for time the service actually was watching.
+func aggregateChargeBoundSeconds(tickSeconds int) int {
+	if tickSeconds < 1 {
+		tickSeconds = 1
+	}
+	if b := tickSeconds * 4; b > 60 {
+		return b
+	}
+	return 60
 }
 
 // enforce runs one expiry pass. It is idempotent: an Entitlement already terminated is not re-terminated, so

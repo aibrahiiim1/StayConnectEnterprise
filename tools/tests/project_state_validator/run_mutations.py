@@ -378,8 +378,12 @@ MUTATIONS = [
    ("replace", [(f'"{CUR_GOV_MAINT}"',
                  '"Phase 3 is NOT_STARTED and unauthorized; await explicit Product-Owner authorization"')])),
  ("M32 stale HEAD / production-unchanged in current state after T0010", "governance/project-state.json",
-   ("replace", [("legacy public-schema IAM remains the sole production authority",
-                 "legacy public-schema IAM remains the sole production authority. HEAD 1844da2 Production unchanged.")])),
+   # Anchored on the SHORT stable prefix. The full phrase used to end "the sole production authority", which
+   # D24/T0056 corrected to "the sole CONFIGURED authentication/routing baseline" -- and this case then
+   # stopped running as fixture drift, so nothing was proving that a stale HEAD / production-unchanged claim
+   # is caught. The mutation only needs somewhere in a current-state string to plant the stale claim.
+   ("replace", [("legacy public-schema IAM remains the sole",
+                 "legacy public-schema IAM remains the sole. HEAD 1844da2 Production unchanged. Also")])),
  ("M33 phase 1B marked closed without recorded PO acceptance", "governance/project-state.json",
    ("replace", [('"transition_accepted": true', '"transition_accepted": false')])),
  ("M34 closed but evidence still says PENDING PO acceptance", "governance/project-state.json",
