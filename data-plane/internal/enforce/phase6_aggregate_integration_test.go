@@ -626,16 +626,14 @@ func TestIntegration_Phase6_SvcAcctdGainedNoOtherMutation(t *testing.T) {
 	refused("end sessions directly",
 		`UPDATE iam_v2.sessions SET state='ended' WHERE entitlement_id=$1`, ent)
 
-	// ...and the sanctioned writer refuses the reasons that are not its business, even to the role that may
-	// call it. The boundary is in the function, not in the caller's good manners.
-	if _, err := acctd.Exec(ctx,
-		`SELECT iam_v2.p6_expire_entitlement($1, now(), 'ADMIN', NULL)`, ent); err == nil {
-		t.Error("svc_acctd ended an entitlement for ADMIN through the expiry writer")
+	// ...and the sanctioned writer takes no reason and no instant to argue about: it refuses a HEALTHY
+	// entitlement outright, because it establishes the condition itself. The boundary is in the function,
+	// not in the caller's good manners.
+	if _, err := acctd.Exec(ctx, `SELECT * FROM iam_v2.p6_expire_entitlement($1)`, ent); err == nil {
+		t.Error("svc_acctd ended a healthy entitlement through the expiry writer")
 	}
-	if _, err := acctd.Exec(ctx,
-		`SELECT iam_v2.p6_expire_entitlement($1, now() + interval '1 hour', 'TIME', NULL)`, ent); err == nil {
-		t.Error("the expiry writer accepted a terminal instant in the future")
-	}
+	refused("establish the terminal condition itself",
+		`SELECT * FROM iam_v2.p6_due_terminal($1)`, ent)
 	// The entitlement is untouched by all of that.
 	status, _, _, _ := terminalState(t, owner, ent)
 	if status == "TERMINATED" {
@@ -773,85 +771,6 @@ func TestIntegration_Phase6_RestartChargesNothingTwice(t *testing.T) {
 	}
 }
 
-// THE WRITER IS ATOMIC WITH ITS CALLER. If anything after the terminal transition fails, the transition must
-// not survive -- an entitlement recorded as ended whose devices are still authorized would keep forwarding
-// traffic for access that the record says is over.
-func TestIntegration_Phase6_ExpiryWriterRollsBackWholly(t *testing.T) {
-	p := pool(t)
-	ctx := context.Background()
-	_, ent, _ := seedAggregate(t, p, 86400, 5*time.Minute)
-
-	tx, err := p.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A cause the evidence table refuses: the write fails INSIDE the writer, after the transition.
-	var devices, sessions int
-	err = tx.QueryRow(ctx, `SELECT devices, sessions FROM iam_v2.p6_expire_entitlement($1, now(), 'TIME', $2)`,
-		ent, "NOT_A_REAL_CAUSE").Scan(&devices, &sessions)
-	if err == nil {
-		_ = tx.Rollback(ctx)
-		t.Fatal("the writer accepted an unknown time cause")
-	}
-	_ = tx.Rollback(ctx)
-
-	status, _, _, _ := terminalState(t, p, ent)
-	if status == "TERMINATED" {
-		t.Fatal("the terminal transition survived a failure inside the same writer call")
-	}
-	var authorized int
-	if err := p.QueryRow(ctx,
-		`SELECT count(*) FROM iam_v2.entitlement_devices WHERE entitlement_id=$1 AND status='AUTHORIZED'`,
-		ent).Scan(&authorized); err != nil {
-		t.Fatal(err)
-	}
-	if authorized == 0 {
-		t.Fatal("the revocation survived a rolled-back writer call")
-	}
-}
-
-// A POSITIVE CONTROL FOR THE REFUSAL TEST. Every "svc_acctd cannot do X" assertion passes trivially for a
-// role that can do nothing at all -- which is exactly the state the role was in before this work granted it
-// USAGE on the schema. So the same role must be shown DOING its sanctioned operation.
-func TestIntegration_Phase6_SvcAcctdCanStillDoItsOwnJob(t *testing.T) {
-	owner := pool(t)
-	ctx := context.Background()
-	_, ent, _ := seedAggregate(t, owner, 86400, 5*time.Minute)
-	acctd := acctdPool(t)
-
-	var devices, sessions int
-	if err := acctd.QueryRow(ctx,
-		`SELECT devices, sessions FROM iam_v2.p6_expire_entitlement($1, now() - interval '1 minute', 'DATA', NULL)`,
-		ent).Scan(&devices, &sessions); err != nil {
-		t.Fatalf("svc_acctd could not perform its own sanctioned operation: %v", err)
-	}
-	if sessions == 0 {
-		t.Fatal("the sanctioned operation ended no sessions, so the refusals above prove nothing")
-	}
-	status, reason, _, _ := terminalState(t, owner, ent)
-	if status != "TERMINATED" || reason != "DATA" {
-		t.Fatalf("durable state after the sanctioned operation: %s/%s", status, reason)
-	}
-	// ...and re-running it is a no-op rather than a second ending.
-	if err := acctd.QueryRow(ctx,
-		`SELECT devices, sessions FROM iam_v2.p6_expire_entitlement($1, now() - interval '1 minute', 'DATA', NULL)`,
-		ent).Scan(&devices, &sessions); err != nil {
-		t.Fatalf("the writer is not idempotent: %v", err)
-	}
-	if devices != 0 || sessions != 0 {
-		t.Fatalf("a repeat call revoked %d devices and %d sessions", devices, sessions)
-	}
-	var transitions int
-	if err := owner.QueryRow(ctx,
-		`SELECT count(*) FROM iam_v2.entitlement_state_transitions WHERE entitlement_id=$1 AND to_state='TERMINATED'`,
-		ent).Scan(&transitions); err != nil {
-		t.Fatal(err)
-	}
-	if transitions != 1 {
-		t.Fatalf("%d terminal transitions after a repeated call", transitions)
-	}
-}
-
 // ---- safe operational disable semantics -------------------------------------------------------------------
 //
 // THE FAILURE THIS PREVENTS IS WORSE THAN THE FEATURE BEING OFF. If accrual were gated by the Phase-6
@@ -938,5 +857,393 @@ func TestIntegration_Phase6_NoAggregateEntitlementsMeansNoWritesAtAll(t *testing
 	}
 	if status == "TERMINATED" {
 		t.Fatal("a validity-window entitlement with no expiry was terminated")
+	}
+}
+
+// ---- the writer establishes the condition itself ----------------------------------------------------------
+//
+// THE AUTHORIZATION QUESTION IS NOT "is this reason spelled correctly". Until now the writer accepted an
+// entitlement id, an instant and a reason, and checked only the vocabulary -- so a role holding EXECUTE could
+// end ANY live entitlement it could name by calling it DATA. That is generic destructive termination
+// authority wearing an approved label.
+//
+// The writer now takes only an id and derives the condition from authoritative state. These tests are the
+// proof, and they are written from the attacker's side: every one of the refusals below is a real
+// entitlement, healthy, whose id svc_acctd knows.
+
+// seedValidityWindow builds an ordinary healthy VALIDITY_WINDOW entitlement with a live session.
+func seedValidityWindow(t *testing.T, p *pgxpool.Pool, window *time.Time) (fixture, string, string) {
+	t.Helper()
+	f := seed(t, p, 1000, 1000, 0)
+	ent, ses := grant(t, p, f, window, time.Now().Add(-30*time.Minute))
+	return f, ent, ses
+}
+
+// A HEALTHY VALIDITY_WINDOW ENTITLEMENT CANNOT BE ENDED, by anyone holding the writer.
+func TestIntegration_Phase6_WriterRefusesAHealthyValidityWindowEntitlement(t *testing.T) {
+	owner := pool(t)
+	ctx := context.Background()
+	future := time.Now().Add(24 * time.Hour)
+	_, ent, ses := seedValidityWindow(t, owner, &future)
+	acctd := acctdPool(t)
+
+	if _, err := acctd.Exec(ctx, `SELECT * FROM iam_v2.p6_expire_entitlement($1)`, ent); err == nil {
+		t.Fatal("a healthy entitlement was terminated by the expiry writer")
+	}
+	status, _, _, _ := terminalState(t, owner, ent)
+	if status == "TERMINATED" {
+		t.Fatal("the refusal still terminated it")
+	}
+	var live int
+	if err := owner.QueryRow(ctx,
+		`SELECT count(*) FROM iam_v2.sessions WHERE id=$1 AND state IN ('active','PENDING_ENFORCEMENT')`,
+		ses).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if live != 1 {
+		t.Fatal("the refused call still ended the guest's session")
+	}
+}
+
+// A HEALTHY AGGREGATE ENTITLEMENT -- budget intact, window open -- likewise.
+func TestIntegration_Phase6_WriterRefusesAnUnexhaustedAggregateEntitlement(t *testing.T) {
+	owner := pool(t)
+	ctx := context.Background()
+	_, ent, _ := seedAggregate(t, owner, 86400, 5*time.Minute) // hours of budget, minutes observed
+	acctd := acctdPool(t)
+
+	if _, err := acctd.Exec(ctx, `SELECT * FROM iam_v2.p6_expire_entitlement($1)`, ent); err == nil {
+		t.Fatal("an unexhausted aggregate entitlement was terminated")
+	}
+	status, _, consumed, _ := terminalState(t, owner, ent)
+	if status == "TERMINATED" {
+		t.Fatal("the refusal still terminated it")
+	}
+	if consumed != 0 {
+		t.Fatalf("the refused call charged %ds", consumed)
+	}
+}
+
+// AN ENTITLEMENT WITH A DATA QUOTA IT HAS NOT CROSSED cannot be ended as DATA either -- the writer computes
+// the crossing rather than believing in one.
+func TestIntegration_Phase6_WriterRefusesWhenTheQuotaIsNotCrossed(t *testing.T) {
+	owner := pool(t)
+	ctx := context.Background()
+	f, ent, ses := seedAggregate(t, owner, 86400, 5*time.Minute)
+	// A quota of a gigabyte, and one small sample nowhere near it.
+	seedDataQuotaOnly(t, owner, f, ent, ses, 1_000_000_000, 1_000)
+	acctd := acctdPool(t)
+
+	if _, err := acctd.Exec(ctx, `SELECT * FROM iam_v2.p6_expire_entitlement($1)`, ent); err == nil {
+		t.Fatal("an entitlement below its data quota was terminated as DATA")
+	}
+	status, _, _, _ := terminalState(t, owner, ent)
+	if status == "TERMINATED" {
+		t.Fatal("the refusal still terminated it")
+	}
+}
+
+// THE POSITIVE CONTROLS, one per condition. A refusal test proves nothing unless the same role, through the
+// same call, can end something that genuinely IS due -- and is given the right reason and instant.
+func TestIntegration_Phase6_WriterExpiresWhatIsGenuinelyDue(t *testing.T) {
+	owner := pool(t)
+	ctx := context.Background()
+	acctd := acctdPool(t)
+
+	t.Run("elapsed window", func(t *testing.T) {
+		past := time.Now().Add(-45 * time.Minute)
+		_, ent, _ := seedValidityWindow(t, owner, &past)
+		var reason string
+		var at time.Time
+		var devices, sessions int
+		if err := acctd.QueryRow(ctx, `SELECT reason, at, devices, sessions FROM iam_v2.p6_expire_entitlement($1)`,
+			ent).Scan(&reason, &at, &devices, &sessions); err != nil {
+			t.Fatalf("a genuinely expired entitlement was not expired: %v", err)
+		}
+		if reason != "TIME" {
+			t.Fatalf("reason %q", reason)
+		}
+		if d := at.Sub(past).Abs(); d > time.Minute {
+			t.Fatalf("ended at %s, not at the window instant %s", at, past)
+		}
+		if sessions == 0 {
+			t.Fatal("no session was ended")
+		}
+	})
+
+	t.Run("crossed data quota", func(t *testing.T) {
+		f, ent, ses := seedAggregate(t, owner, 86400, 30*time.Minute)
+		seedDataCrossing(t, owner, f, ent, ses, 1_000_000, 12*time.Minute)
+		var reason string
+		var at time.Time
+		var devices, sessions int
+		if err := acctd.QueryRow(ctx, `SELECT reason, at, devices, sessions FROM iam_v2.p6_expire_entitlement($1)`,
+			ent).Scan(&reason, &at, &devices, &sessions); err != nil {
+			t.Fatalf("a crossed quota was not expired: %v", err)
+		}
+		if reason != "DATA" {
+			t.Fatalf("reason %q", reason)
+		}
+		if age := time.Since(at); age < 10*time.Minute || age > 14*time.Minute {
+			t.Fatalf("ended %s ago, not at the crossing ~12 minutes ago", age)
+		}
+	})
+
+	t.Run("exhausted aggregate budget", func(t *testing.T) {
+		f, ent, _ := seedAggregate(t, owner, 60, 30*time.Minute)
+		// The tick is what stamps the crossing instant and caps consumption; the writer then finds it.
+		if _, err := New(owner).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+			t.Fatal(err)
+		}
+		status, reason, consumed, _ := terminalState(t, owner, ent)
+		if status != "TERMINATED" || reason != "TIME" || consumed != 60 {
+			t.Fatalf("state after the sweep: %s/%s consumed=%d", status, reason, consumed)
+		}
+		var cause string
+		if err := owner.QueryRow(ctx,
+			`SELECT cause_detail FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id=$1`,
+			ent).Scan(&cause); err != nil {
+			t.Fatalf("no evidence: %v", err)
+		}
+		if cause != "AGGREGATE_ONLINE_TIME_EXHAUSTED" {
+			t.Fatalf("evidence says %q", cause)
+		}
+	})
+}
+
+// THE WRITER IS ATOMIC WITH ITS CALLER. If the caller's transaction does not commit, neither the transition
+// nor the revocation may survive -- an entitlement recorded as ended whose devices are still authorized would
+// keep forwarding traffic for access the record says is over.
+func TestIntegration_Phase6_ExpiryWriterRollsBackWithItsCaller(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	past := time.Now().Add(-30 * time.Minute)
+	_, ent, ses := seedValidityWindow(t, p, &past)
+
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reason string
+	var at time.Time
+	var devices, sessions int
+	if err := tx.QueryRow(ctx, `SELECT reason, at, devices, sessions FROM iam_v2.p6_expire_entitlement($1)`,
+		ent).Scan(&reason, &at, &devices, &sessions); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("the writer failed on a genuinely due entitlement: %v", err)
+	}
+	if sessions == 0 {
+		_ = tx.Rollback(ctx)
+		t.Fatal("the writer ended nothing, so the rollback would prove nothing")
+	}
+	// The caller fails after the write, which is the case that matters: a crash between the two.
+	_ = tx.Rollback(ctx)
+
+	status, _, _, _ := terminalState(t, p, ent)
+	if status == "TERMINATED" {
+		t.Fatal("the terminal transition survived its caller's rollback")
+	}
+	var live, authorized int
+	if err := p.QueryRow(ctx, `SELECT
+		 (SELECT count(*) FROM iam_v2.sessions WHERE id=$1 AND state IN ('active','PENDING_ENFORCEMENT')),
+		 (SELECT count(*) FROM iam_v2.entitlement_devices WHERE entitlement_id=$2 AND status='AUTHORIZED')`,
+		ses, ent).Scan(&live, &authorized); err != nil {
+		t.Fatal(err)
+	}
+	if live != 1 || authorized == 0 {
+		t.Fatalf("the revocation survived the rollback: live=%d authorized=%d", live, authorized)
+	}
+}
+
+// seedDataQuotaOnly gives the entitlement a quota it has NOT crossed, plus one small sample -- the shape of
+// an ordinary guest partway through their allowance.
+func seedDataQuotaOnly(t *testing.T, p *pgxpool.Pool, f fixture, ent, ses string, quota, used int64) {
+	t.Helper()
+	ctx := context.Background()
+	var rev string
+	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.service_plan_revisions
+		 (id, tenant_id, site_id, service_plan_id, revision_no, down_kbps, up_kbps, max_concurrent_devices,
+		  device_limit_policy, time_accounting_mode, time_quota_seconds, data_quota_bytes)
+		 SELECT gen_random_uuid(), r.tenant_id, r.site_id, r.service_plan_id, r.revision_no + 1,
+		        r.down_kbps, r.up_kbps, r.max_concurrent_devices, r.device_limit_policy,
+		        r.time_accounting_mode, r.time_quota_seconds, $2
+		   FROM iam_v2.service_plan_revisions r
+		  WHERE r.id = (SELECT service_plan_revision_id FROM iam_v2.entitlements WHERE id=$1)
+		 RETURNING id::text`, ent, quota).Scan(&rev); err != nil {
+		t.Fatalf("publish a revision with the quota: %v", err)
+	}
+	if _, err := p.Exec(ctx,
+		`UPDATE iam_v2.entitlements SET service_plan_revision_id=$2 WHERE id=$1`, ent, rev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.accounting_records
+		 (tenant_id, site_id, session_id, sample_seq, sampled_at, bytes_up, bytes_down)
+		 VALUES ($1,$2,$3, 1, now() - interval '1 minute', $4, 0)`,
+		f.tenant, f.site, ses, used); err != nil {
+		t.Fatalf("seed a small sample: %v", err)
+	}
+}
+
+// ---- restore from backup: an OLDER watermark -------------------------------------------------------------
+//
+// A RESTART IS NOT A RESTORE, and conflating them is how a system that looks idempotent starts charging twice.
+// A restart keeps every durable row: the watermark still says what was already charged, so the next tick
+// charges nothing. A RESTORE rewinds the database -- the watermark goes backwards, consumption goes
+// backwards, and the interval between the restored point and now is time the system has NO record of and NO
+// evidence about. It may have been delivered; it may not.
+//
+// The plan's rule for uncertain intervals is to fail toward the guest: rebaseline, record what was skipped,
+// undercharge. Never charge time nobody observed, and never charge an interval twice because a backup made it
+// look unaccounted.
+//
+// The bound is what enforces that, so this test uses the bound acctd actually computes (a minute for the
+// default one-second tick) rather than a generous test value -- a proof that only holds at 86400 would be a
+// proof about the test.
+func TestIntegration_Phase6_RestoreToAnOlderWatermarkDoesNotRecharge(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	f, ent, ses := seedAggregate(t, p, 86400, 20*time.Minute)
+
+	const bound = 60 // what aggregateChargeBoundSeconds gives for the default tick interval
+
+	// Normal operation: the sweep charges what it observed, bounded.
+	if _, err := New(p).WithAggregateOnlineTime(bound).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+		t.Fatal(err)
+	}
+	var beforeRestore int64
+	if err := p.QueryRow(ctx,
+		`SELECT consumed_online_seconds FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&beforeRestore); err != nil {
+		t.Fatal(err)
+	}
+
+	// THE RESTORE. A backup taken fifteen minutes ago is put back: the watermark and the consumption both
+	// rewind. This is done by replacing the rows, exactly as restoring a dump does -- the monotonic trigger
+	// guards UPDATEs by a running system, and a restore is not one.
+	// The CONSUMPTION counter cannot be rewound in place, and that is a pre-existing invariant worth stating
+	// here rather than working around: a decrease is only expressible through entitlement_adjustments, which
+	// is audited. A physical restore replaces the whole file and runs no trigger; what it leaves behind that
+	// this system can observe is a watermark pointing into the past, which is exactly what drives charging
+	// and therefore exactly what this test rewinds.
+	if _, err := p.Exec(ctx,
+		`UPDATE iam_v2.entitlements SET consumed_online_seconds=0 WHERE id=$1`, ent); err == nil {
+		t.Fatal("consumption was rewound in place, with no adjustment record")
+	}
+	restoredConsumption := beforeRestore
+	if _, err := p.Exec(ctx, `DELETE FROM iam_v2.session_online_watermarks WHERE session_id=$1`, ses); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.session_online_watermarks
+		 (tenant_id, site_id, session_id, accounted_through, accounted_seconds)
+		 VALUES ($1,$2,$3, now() - interval '15 minutes', 0)`, f.tenant, f.site, ses); err != nil {
+		t.Fatal(err)
+	}
+	skippedBefore := countRows(t, p, `SELECT count(*) FROM iam_v2.online_time_skipped_intervals WHERE entitlement_id=$1`, ent)
+
+	// The sweep runs against the restored state.
+	if _, err := New(p).WithAggregateOnlineTime(bound).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+		t.Fatal(err)
+	}
+
+	var afterRestore int64
+	if err := p.QueryRow(ctx,
+		`SELECT consumed_online_seconds FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&afterRestore); err != nil {
+		t.Fatal(err)
+	}
+	// AT MOST ONE BOUND. The fifteen unaccounted minutes are not evidence of anything, so they are not
+	// charged -- the guest is under-charged, which is the direction that cannot be undone unfairly.
+	if afterRestore > restoredConsumption+bound+2 {
+		t.Fatalf("a restore charged %ds for an interval nobody observed (bound is %ds)",
+			afterRestore-restoredConsumption, bound)
+	}
+	// ...and what was not charged is RECORDED, so the under-charge is visible rather than silent.
+	skippedAfter := countRows(t, p, `SELECT count(*) FROM iam_v2.online_time_skipped_intervals WHERE entitlement_id=$1`, ent)
+	if skippedAfter <= skippedBefore {
+		t.Fatal("the unobserved post-restore interval was neither charged nor recorded as skipped")
+	}
+
+	// A SECOND SWEEP DOES NOT CATCH UP. The watermark moved to the ceiling, so the skipped interval stays
+	// skipped instead of being charged one bound at a time on every subsequent tick.
+	if _, err := New(p).WithAggregateOnlineTime(bound).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+		t.Fatal(err)
+	}
+	var settled int64
+	if err := p.QueryRow(ctx,
+		`SELECT consumed_online_seconds FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&settled); err != nil {
+		t.Fatal(err)
+	}
+	if settled-afterRestore > 2 {
+		t.Fatalf("a later sweep charged another %ds of the restored gap", settled-afterRestore)
+	}
+}
+
+// A RUNNING SYSTEM STILL CANNOT REWIND A WATERMARK. The restore above works by replacing rows, which is what
+// a dump does; an UPDATE that moves one backwards is a bug or an attack and stays refused.
+func TestIntegration_Phase6_ARunningSystemCannotRewindAWatermark(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	f, _, ses := seedAggregate(t, p, 86400, 10*time.Minute)
+	if _, err := New(p).WithAggregateOnlineTime(60).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.session_online_watermarks
+		   SET accounted_through = accounted_through - interval '1 hour' WHERE session_id=$1`, ses); err == nil {
+		t.Fatal("a watermark was moved backwards by an ordinary update")
+	}
+}
+
+func countRows(t *testing.T, p *pgxpool.Pool, sql string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := p.QueryRow(context.Background(), sql, args...).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// A CRASH BETWEEN THE STAMP AND THE TERMINATION MUST NOT STRAND THE ENTITLEMENT. The tick stamps the
+// crossing instant durably and reports it; if the process dies before the writer runs, the stamp is all that
+// survives -- and the next sweep has to find it. This runs a sweep with NO accrual at all (the tick disabled
+// entirely, which is what a crashed or misconfigured accrual arm looks like) and proves the stamped
+// entitlement is still ended, at its original instant.
+func TestIntegration_Phase6_AStrandedExhaustionIsFoundByTheNextSweep(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	f, ent, _ := seedAggregate(t, p, 60, 30*time.Minute)
+
+	// Stamp it the way the tick does, then leave it live -- the state a crash between the two would leave.
+	if _, err := p.Exec(ctx, `UPDATE iam_v2.entitlements
+		   SET consumed_online_seconds = 60, online_time_exhausted_at = now() - interval '20 minutes'
+		 WHERE id=$1`, ent); err != nil {
+		t.Fatal(err)
+	}
+
+	// A sweep with the accrual arm OFF: only the candidate query and the writer run.
+	due, err := New(p).EnforceExpiries(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	found := false
+	for _, x := range due {
+		if x.EntitlementID == ent {
+			found = true
+			if x.Reason != "TIME" {
+				t.Fatalf("reason %q", x.Reason)
+			}
+			if age := time.Since(x.At); age < 18*time.Minute || age > 22*time.Minute {
+				t.Fatalf("ended %s ago, not at the stamped crossing ~20 minutes ago", age)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("an entitlement stamped exhausted was left live by the sweep")
+	}
+	var cause string
+	if err := p.QueryRow(ctx,
+		`SELECT cause_detail FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id=$1`,
+		ent).Scan(&cause); err != nil {
+		t.Fatalf("no evidence: %v", err)
+	}
+	if cause != "AGGREGATE_ONLINE_TIME_EXHAUSTED" {
+		t.Fatalf("evidence says %q", cause)
 	}
 }

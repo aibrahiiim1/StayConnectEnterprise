@@ -235,9 +235,15 @@ eqv "svc_acctd holds NO write anywhere in iam_v2"    "$(q "SELECT count(*) FROM 
 eqv "svc_acctd cannot write consumption directly"    "$(q "SELECT has_table_privilege('svc_acctd','iam_v2.entitlements','UPDATE')")" "f"
 eqv "svc_acctd cannot move a watermark directly"    "$(q "SELECT has_table_privilege('svc_acctd','iam_v2.session_online_watermarks','UPDATE')")" "f"
 eqv "svc_acctd cannot write skipped-interval evidence directly"    "$(q "SELECT has_table_privilege('svc_acctd','iam_v2.online_time_skipped_intervals','INSERT')")" "f"
-for fn in authorize_entitlement_device deauthorize_entitlement_device p6_record_time_termination           p6_guest_release_device p6_set_guest_device_self_service; do
+for fn in authorize_entitlement_device deauthorize_entitlement_device p6_record_time_termination           p6_guest_release_device p6_set_guest_device_self_service terminate_entitlement_at_boundary           begin_controlled_operation p6_due_terminal; do
   eqv "svc_acctd cannot execute $fn (another boundary owns it)"      "$(q "SELECT bool_or(has_function_privilege('svc_acctd', p.oid, 'EXECUTE')) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='$fn'")" "f"
 done
+# The sanctioned expiry writer, which takes ONLY an entitlement id and establishes the terminal condition
+# from authoritative state. It is the single write capability this role has.
+eqv "svc_acctd can execute the sanctioned expiry writer"    "$(q "SELECT has_function_privilege('svc_acctd','iam_v2.p6_expire_entitlement(uuid)','EXECUTE')")" "t"
+eqv "PUBLIC cannot execute the expiry writer"    "$(q "SELECT has_function_privilege('public','iam_v2.p6_expire_entitlement(uuid)','EXECUTE')")" "f"
+eqv "the old caller-supplied-reason writer is gone"    "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_expire_entitlement' AND pg_get_function_arguments(p.oid) <> 'p_entitlement uuid'")" "0"
+
 # ...and the required POSITIVE privileges, because a gate that only asserts absences passes for a role that
 # cannot do its job either.
 for tbl in entitlements service_plan_revisions sessions session_online_watermarks; do

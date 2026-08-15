@@ -318,12 +318,39 @@ quote/confirm — through one shared rule, because two entry points each carryin
 come to disagree. Confirm re-checks, above the consume step, so a quote minted while the capability was on
 and presented after it went off is refused **without** consuming the quote or the guest's auth context.
 
-The reason is arithmetic rather than policy: acctd performs no aggregate accrual while the flag is off, so an
-entitlement created in that mode would never consume its budget and never exhaust — an unlimited package by
-accident, on a runtime that cannot account for it. Nothing already durable is touched: an immutable
-aggregate revision keeps existing and keeps its meaning, and entitlements granted earlier under it are not
-reinterpreted, re-moded or deleted. Safe operational disable semantics for **already-live** aggregate
-entitlements are an M4 deployment prerequisite, not something this gate invents.
+The reason is arithmetic rather than policy: acctd creates no aggregate accrual **for entitlements that do
+not exist**, so an entitlement created in that mode on a build that never accounts for it would never consume
+its budget and never exhaust — an unlimited package by accident. Nothing already durable is touched: an
+immutable aggregate revision keeps existing and keeps its meaning, and entitlements granted earlier under it
+are not reinterpreted, re-moded or deleted.
+
+### 3.3b Accounting for what already exists is a safety invariant, not feature activation
+
+**Accrual is DATA-DRIVEN, and deliberately not gated on the deployment flag.** The obvious wiring — accrue
+only while the aggregate flag is on — has a failure mode worse than the feature being off. An appliance that
+had already granted aggregate entitlements, whose flag then went away through a rollback, a config change or
+a half-applied deployment, would stop consuming their budgets. Nothing would exhaust. **A guest holding a
+finite two-hour package would silently hold unlimited access**, with consumption frozen and no evidence that
+anything had stopped.
+
+So the three concerns are separated, and only the first two are feature activation:
+
+| Concern | Gated by the flag? | Why |
+|---|---|---|
+| Publishing a revision in the mode | **Yes** | offering something new is activation |
+| Acquiring a NEW quote/purchase/entitlement in it | **Yes** | the same, from the guest's side |
+| Guest and operator surfaces | **Yes** | screens and routes are the product |
+| **Accounting an entitlement that already exists** | **No** | not accounting it is what creates unlimited access |
+
+**An empty aggregate set produces no writes.** The tick runs every sweep and iterates over live entitlements
+in that mode; where there are none — every appliance today, because the acquisition gate makes creating one
+impossible while the flag is off — it writes no consumption, no watermark, no skipped interval and no
+evidence. That is what dark means here: no Phase-6 *behaviour*, rather than "the accounting for existing
+entitlements is switched off".
+
+Both halves are proven at the sweep level: a live aggregate entitlement still consumes, exhausts and is
+terminated with **no Phase-6 flag set anywhere**, and a validity-window appliance is untouched by the same
+sweep.
 
 ### 3.4 Immutability
 

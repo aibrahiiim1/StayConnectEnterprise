@@ -49,6 +49,15 @@ CREATE TABLE IF NOT EXISTS public.operators (
   tenant_id uuid,
   email text,
   name text);
+-- The edged API integration suites seed operators the way the real appliance schema shapes them. The stub
+-- carried only id/tenant/email/name, so every one of those suites failed at fixture time on a missing column
+-- and could not run here at all -- which is not the same thing as passing. These columns are additive and
+-- match the appliance's own operators table.
+ALTER TABLE public.operators ADD COLUMN IF NOT EXISTS display_name text;
+ALTER TABLE public.operators ADD COLUMN IF NOT EXISTS password_hash text;
+ALTER TABLE public.operators ADD COLUMN IF NOT EXISTS status text DEFAULT 'active';
+ALTER TABLE public.operators ADD COLUMN IF NOT EXISTS site_id uuid;
+ALTER TABLE public.operators ADD COLUMN IF NOT EXISTS created_at timestamptz DEFAULT now();
 INSERT INTO public.appliances(id, tenant_id, site_id, serial, name) VALUES
   ('44444444-4444-4444-4444-444444444444','11111111-1111-1111-1111-111111111111',
    '22222222-2222-2222-2222-222222222222','APP-FIXTURE-0001','fixture-appliance')
