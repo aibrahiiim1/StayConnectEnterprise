@@ -187,6 +187,11 @@ eqv "the guest release policy is back in its non-caller-selectable form" \
    "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_guest_release_device_policy'")" "1"
 eqv "the guest action set is narrowed again to RELEASE" \
    "$(q "SELECT count(*) FROM pg_constraint WHERE conname='guest_device_actions_action_check'")" "1"
+# 0047's grants must come back with it: without them the guest surface cannot resolve the device that is
+# asking, and every request answers UNAVAILABLE while looking perfectly configured.
+eqv "the guest surface can resolve a device again"    "$(q "SELECT has_table_privilege('svc_scd','iam_v2.devices','INSERT')")" "t"
+eqv "...and read the entitlement it belongs to"    "$(q "SELECT has_table_privilege('svc_scd','iam_v2.entitlements','SELECT')")" "t"
+eqv "...while still not being able to write one"    "$(q "SELECT has_table_privilege('svc_scd','iam_v2.entitlements','UPDATE')")" "f"
 eqv "suspension closes children as SUSPENDED, not ENDED" \
    "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_suspend_over_budget' AND pg_get_functiondef(p.oid) LIKE '%ENTITLEMENT_SUSPENDED%'")" "1"
 eqv "the fail-closed suspension writer is back" \

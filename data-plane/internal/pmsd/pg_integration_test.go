@@ -625,8 +625,19 @@ func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 	// The exact Phase-6 grants, by role and table. EXECUTE on the controlled writers is audited separately
 	// by the Phase-6 privilege gate; this is about table reach.
 	allowed := map[string]bool{
-		"svc_scd|appliance_product_settings|SELECT":   true,
-		"svc_scd|devices|SELECT":                      true,
+		"svc_scd|appliance_product_settings|SELECT": true,
+		"svc_scd|devices|SELECT":                    true,
+		// 0047. The guest surface resolves the requesting device before it does anything else, and that
+		// resolution is an upsert -- a device row is created the first time the appliance sees it. SELECT
+		// alone made every request fail on its first line under the real service role, which is how this was
+		// found. The UPDATE is column-level (mac, last_seen, last_ip) and does not appear here, because
+		// information_schema reports column grants separately; there is no table-level UPDATE to allow.
+		"svc_scd|devices|INSERT": true,
+		// ...and the two reads the same path makes: whose entitlement this device belongs to, and the pinned
+		// plan revision the listing reports remaining time from. Read-only: svc_scd never writes either, and
+		// the Phase-6 privilege gate asserts that refusal directly.
+		"svc_scd|entitlements|SELECT":                 true,
+		"svc_scd|service_plan_revisions|SELECT":       true,
 		"svc_scd|entitlement_devices|SELECT":          true,
 		"svc_scd|sessions|SELECT":                     true,
 		"svc_scd|sessions|INSERT":                     true,
