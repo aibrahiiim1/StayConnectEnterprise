@@ -85,7 +85,8 @@ capture_baseline() {
   # guess about what "off" meant here.
   docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -tAqc \
     "SELECT tenant_id||' '||site_id||' '||appliance_id||' '||guest_device_self_service
-       FROM iam_v2.appliance_product_settings ORDER BY 1,2,3" > "$STATE_DIR/settings" 2>/dev/null
+       FROM iam_v2.appliance_product_settings
+      ORDER BY tenant_id, site_id, appliance_id" > "$STATE_DIR/settings" 2>/dev/null
   local u
   for u in $UNITS; do
     cp -p "$ENV_DIR/${u#stayconnect-}.env" "$STATE_DIR/${u}.env.baseline" 2>/dev/null || true
@@ -116,6 +117,7 @@ restore_flags() {
     fi
   done
   systemctl restart $UNITS >/dev/null 2>&1 || true
+  wait_for_scd || true
 }
 
 restore_hotel_admin() {
@@ -208,10 +210,10 @@ verify_dark() {
   fi
 
   # THE ROUTE ITSELF. A flag file records an intention; this records what the running process will answer.
-  local code
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "$SCD_SOCK" \
-          -X POST http://localhost/v1/phase6/devices/list -H 'Content-Type: application/json' \
-          -d '{}' 2>/dev/null || echo 000)"
+  # It goes through route_code rather than a second copy of the same curl -- the duplicate is how one of the
+  # two probes kept the bug after the other was fixed.
+  wait_for_scd || no "scd is not answering at all" "darkness cannot be established from silence"
+  local code; code="$(route_code /v1/phase6/devices/list)"
   case "$code" in
     404) ok "the guest device route is ABSENT in the running scd (404)" ;;
     *)   no "the guest device route answered $code" "while dark it must not exist"; bad=1 ;;
@@ -258,7 +260,8 @@ verify_dark() {
   # The settings table matches the captured baseline row for row.
   local nowset
   nowset="$(q "SELECT tenant_id||' '||site_id||' '||appliance_id||' '||guest_device_self_service
-                 FROM iam_v2.appliance_product_settings ORDER BY 1,2,3")"
+                 FROM iam_v2.appliance_product_settings
+                ORDER BY tenant_id, site_id, appliance_id")"
   if [ "$nowset" = "$(cat "$STATE_DIR/settings" 2>/dev/null)" ]; then
     ok "the per-appliance product settings match the captured baseline exactly"
   else
@@ -285,15 +288,37 @@ finish() {
 }
 
 # ---- enabling -------------------------------------------------------------------------------------------------
-set_flags() {   # set_flags "<FLAG> <FLAG> ..."   -- exactly this set, on every unit; anything else removed
-  local wanted="$1" u f n
+set_flags() {   # set_flags FLAG [FLAG ...]  -- exactly this set, on every unit; anything else removed
+  # EVERY TOKEN IS CHECKED BEFORE IT IS WRITTEN. Not defensive habit: the first version of the caller wrapped
+  # its flag list across two lines with a backslash INSIDE double quotes, where a backslash-newline is not a
+  # continuation but two literal characters. The lone "\" was then word-split into its own token and written
+  # as the line `\=true`, systemd refused the file, and scd did not come back. A flag file nobody can parse
+  # must never be produced by the script whose job is proving the flags are off.
+  #
+  # STAYCONNECT_PHASE3_MASTER and STAYCONNECT_PHASE3_PMS_AUTH are accepted too, and nothing else is. The
+  # Phase-6 guest surface has a prerequisite the appliance itself enforces -- scd refuses to start with the
+  # guest child on while the Phase-3 auth arm is off, which is fail-closed and correct -- so validating the
+  # Phase-6 surface means turning that accepted, already-merged arm on for the duration. It comes back with
+  # everything else, because restoration copies whole env files rather than undoing a list of names somebody
+  # remembered to write down.
+  local u f n
+  for n in "$@"; do
+    case "$n" in
+      STAYCONNECT_PHASE6_[A-Z_]*|STAYCONNECT_PHASE3_MASTER|STAYCONNECT_PHASE3_PMS_AUTH) : ;;
+      *) no "refusing to write an unrecognised flag token" "'$n'"; return 1 ;;
+    esac
+  done
   for u in $UNITS; do
     f="$ENV_DIR/${u#stayconnect-}.env"
-    sed -i '/^STAYCONNECT_PHASE6_/d' "$f"
-    for n in $wanted; do printf '%s=true\n' "$n" >> "$f"; done
+    sed -i '/^STAYCONNECT_PHASE6_/d; /^STAYCONNECT_PHASE3_MASTER=/d; /^STAYCONNECT_PHASE3_PMS_AUTH=/d' "$f"
+    for n in "$@"; do printf '%s=true\n' "$n" >> "$f"; done
   done
   systemctl restart $UNITS >/dev/null 2>&1
-  sleep 2
+  # It REPORTS rather than judges. One step deliberately configures a combination the appliance must refuse to
+  # start on, and a helper that recorded that refusal as a failure would turn the fail-closed proof upside
+  # down. The callers that need scd up notice through the route they then ask for.
+  wait_for_scd || return 1
+  return 0
 }
 
 setting_on() {  # setting_on <true|false> -- the REAL appliance, through the audited writer
@@ -326,9 +351,25 @@ seed_scope() {
     < "$VALIDATION_DIR/phase6-validation-scope.sql" 2>&1
 }
 
-route_code() {  # route_code <path> -> HTTP status from the running scd
-  curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "$SCD_SOCK" \
-    -X POST "http://localhost$1" -H 'Content-Type: application/json' -d "${2:-\{\}}" 2>/dev/null || echo 000
+route_code() {  # route_code <path> -> ONE HTTP status from the running scd
+  # `curl ... || echo 000` prints BOTH curl's own "000" and the fallback, and the caller then compares
+  # "000000" against "404" and reports a failure that never happened. One value, whatever occurs.
+  local c
+  c="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 --unix-socket "$SCD_SOCK" \
+        -X POST "http://localhost$1" -H 'Content-Type: application/json' -d '{}' 2>/dev/null)"
+  case "$c" in [1-5][0-9][0-9]) printf '%s' "$c" ;; *) printf '000' ;; esac
+}
+
+# wait_for_scd blocks until the restarted scd answers at all. A service takes a moment to bind its socket, and
+# a probe fired into that gap answers 000 -- which is not a proof of darkness, it is an absence of evidence.
+# Reading it as "the route is gone" would let a genuinely-enabled appliance pass the final check.
+wait_for_scd() {
+  local i=0
+  while [ "$i" -lt 30 ]; do
+    [ "$(route_code /v1/phase6/devices/list)" != "000" ] && return 0
+    i=$((i+1)); sleep 1
+  done
+  return 1
 }
 
 guard_environment
@@ -350,18 +391,18 @@ case "${1:-run}" in
     case "${2:-body-failure}" in
       body-failure)
         trap finish EXIT INT TERM
-        set_flags "STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME"
+        set_flags STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME
         ok "capability enabled; the body is about to fail"
         false; exit 1 ;;
       signal)
         trap finish EXIT INT TERM
-        set_flags "STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME"
+        set_flags STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME
         ok "capability enabled; this run is about to be signalled"
         kill -TERM $$; sleep 10; exit 1 ;;
       partial)
         trap finish EXIT INT TERM
-        set_flags "STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST \
-                   STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_ADMIN STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME"
+        set_flags STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST \
+                  STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_ADMIN STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME
         setting_on true
         appliance_identity && seed_scope >/dev/null 2>&1
         ok "every flag on, the product setting on, and synthetic state seeded; abandoning mid-way"

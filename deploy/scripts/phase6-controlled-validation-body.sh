@@ -25,14 +25,31 @@ appliance_identity \
 # ---- 1. the deployment gate is one control, and it is not the setting -----------------------------------------
 say "1. the deployment gate"
 
-set_flags "STAYCONNECT_PHASE6_MASTER"
+set_flags STAYCONNECT_PHASE6_MASTER
 [ "$(route_code /v1/phase6/devices/list)" = "404" ] \
   && ok "the master flag alone does not mount the guest route" \
   || no "the master flag mounted the guest surface" "the child gate is not doing anything"
 
-set_flags "STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST"
+# THE PREREQUISITE, PROVEN RATHER THAN ASSUMED. The Phase-6 guest surface needs the Phase-3 auth arm, because
+# that arm is what resolves a requesting device to a durable identity. An appliance configured for one without
+# the other must refuse to run rather than serve a half-wired guest path -- so this is checked against
+# systemctl, not against a route: scd exits at startup and there is nothing left to ask.
+set_flags STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST
+systemctl is-active --quiet stayconnect-scd \
+  && no "scd started with the guest surface on and the Phase-3 auth arm off" "it must fail closed" \
+  || ok "the guest surface without its Phase-3 prerequisite refuses to start at all"
+
+# With the prerequisite satisfied but the Phase-6 child still off, the route must STILL be absent -- otherwise
+# the Phase-3 arm, not the Phase-6 gate, would be what decides the surface exists.
+set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH STAYCONNECT_PHASE6_MASTER
+[ "$(route_code /v1/phase6/devices/list)" = "404" ] \
+  && ok "with the prerequisite satisfied and the guest child off, the route is still absent" \
+  || no "the route appeared without its own gate" ""
+
+set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH \
+          STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST
 [ "$(route_code /v1/phase6/devices/list)" = "200" ] \
-  && ok "master + the guest child mounts the route" \
+  && ok "master + the guest child, with the prerequisite, mounts the route" \
   || no "the route did not appear" "$(route_code /v1/phase6/devices/list)"
 
 # ---- 2. and the setting is the other, read from the local database on every request ---------------------------
@@ -117,8 +134,9 @@ fi
 # ---- 5. accrual, exhaustion and termination, by the real accounting daemon -----------------------------------
 say "5. aggregate online time, accounted by the running acctd"
 
-set_flags "STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST \
-           STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME"
+set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH \
+          STAYCONNECT_PHASE6_MASTER STAYCONNECT_PHASE6_DEVICE_SELFSERVICE_GUEST \
+          STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME
 
 before="$(q "SELECT COALESCE(consumed_online_seconds,0) FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
 n=0; after="$before"
@@ -180,7 +198,7 @@ q "INSERT INTO iam_v2.session_online_watermarks (tenant_id,site_id,session_id,ac
    VALUES ('$TEN','$SITE','$SYN_SESS', now() - interval '2 minutes', 0)
    ON CONFLICT (session_id) DO UPDATE SET accounted_through = now() - interval '2 minutes'" >/dev/null
 
-set_flags "STAYCONNECT_PHASE6_MASTER"     # the aggregate capability is OFF; the entitlement still exists
+set_flags STAYCONNECT_PHASE3_MASTER STAYCONNECT_PHASE3_PMS_AUTH STAYCONNECT_PHASE6_MASTER   # the aggregate capability is OFF; the entitlement still exists
 before="$(q "SELECT COALESCE(consumed_online_seconds,0) FROM iam_v2.entitlements WHERE id='$SYN_ENT'")"
 n=0; after="$before"
 while [ "$n" -lt 24 ]; do
