@@ -104,8 +104,12 @@ func newHandler(c cfg) (*handler, error) {
 	}, nil
 }
 
-// clientIP extracts the real IP from the connection. nftables DNAT preserves
-// the original source address, so RemoteAddr is authoritative on this path.
+// clientIP extracts the source address from the CONNECTION, and only from the connection.
+//
+// nftables DNAT preserves the original source address, so RemoteAddr is the real peer on this path. Nothing
+// here consults X-Forwarded-For, X-Real-IP or True-Client-IP, and no middleware may rewrite RemoteAddr from
+// them either -- see the note on the middleware stack in routes(). This address becomes a device and then an
+// entitlement, so anything that can influence it can influence whose devices a request operates on.
 func clientIP(r *http.Request) net.IP {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -308,7 +312,21 @@ func (h *handler) windowsProbe(w http.ResponseWriter, r *http.Request) {
 func (h *handler) routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	// middleware.RealIP IS DELIBERATELY ABSENT, and removing it was a security fix rather than a cleanup.
+	//
+	// RealIP overwrites r.RemoteAddr from X-Forwarded-For / X-Real-IP / True-Client-IP. On a fronted service
+	// that is correct, because a trusted proxy sets those headers and strips any the client sent. THIS
+	// SERVICE HAS NO SUCH PROXY: guests reach the portal directly through nftables DNAT, which preserves the
+	// original source address, so every one of those headers arrives entirely under the guest's control.
+	//
+	// With RealIP installed, clientIP() returned whatever the guest typed into a header. That address is then
+	// resolved to a device through the ARP/neighbour table and from the device to an entitlement -- so a
+	// header could redirect the derived SUBJECT. A guest could list, and attempt to release, another guest's
+	// devices by naming their IP. The Phase-6 surface takes no subject parameter precisely so that identity
+	// comes from the connection; a rewritten RemoteAddr silently gave the parameter back.
+	//
+	// If a real reverse proxy is ever introduced, the fix is not to re-add this line: it is to trust exactly
+	// that proxy's address and strip client-supplied forwarding headers at the edge.
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(15 * time.Second))

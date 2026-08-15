@@ -348,9 +348,13 @@ func main() {
 			// Phase-6 master AND its admin flag are on; while dark this path does not exist. Note the two
 			// controls are independent -- this mounts the SCREEN, and the screen edits a database setting
 			// that is OFF by default and governs the guest surface separately.
+			// It is mounted through mountResource like every other management surface, which is what puts it
+			// behind resourcePermission and therefore behind the role matrix. The earlier version registered
+			// the two routes directly, so they sat inside requireAuth with NO authorization boundary at all --
+			// every logged-in operator, including read-only desk roles, could change a guest-facing appliance
+			// capability. Authentication is not authorization.
 			if s.phase6.DeviceAdminOn() {
-				r.Get("/phase6/settings/guest-device-self-service", s.getGuestDeviceSetting)
-				r.Put("/phase6/settings/guest-device-self-service", s.setGuestDeviceSetting)
+				mountResource(r, s, "guest-device-self-service", s.guestDeviceSelfServiceRoutes)
 			}
 			// Phase 4 (DARK): Financial Manual Review. Mounted only when the Phase-4 master flag AND the
 			// review flag are both ON. The delivered configuration has both OFF, so this path does not

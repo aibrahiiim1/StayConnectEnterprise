@@ -28,6 +28,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/deviceselfservice"
@@ -138,4 +140,16 @@ func (s *server) setGuestDeviceSetting(w http.ResponseWriter, r *http.Request) {
 	})
 	writeJSON(w, http.StatusOK, guestDeviceSettingResp{
 		Enabled: *in.Enabled, Changed: before != *in.Enabled, PhaseGateEnabled: s.phase6.DeviceGuestOn()})
+}
+
+// guestDeviceSelfServiceRoutes is the resource router. It is mounted through mountResource, which is what
+// places it behind resourcePermission and therefore behind the role matrix: reads need permRead on
+// "guest-device-self-service", writes need permWrite. hotel_it_manager (and site_admin implicitly) hold
+// write; the desk roles hold read, because "does this property offer device self-service" is a question they
+// are asked and a capability they do not own.
+func (s *server) guestDeviceSelfServiceRoutes() http.Handler {
+	r := chi.NewRouter()
+	r.Get("/", s.getGuestDeviceSetting)
+	r.Put("/", s.setGuestDeviceSetting)
+	return r
 }

@@ -184,6 +184,11 @@ var rolePerms = map[string]map[string]perm{
 		"financial-ops": permRead,
 		"payments":      permRead, "operators": permRead, "audit": permRead,
 		"reports": permRead, "backups": permRead, "license": permRead,
+		// Phase 6 (DARK): the per-appliance Guest Device Self-Service setting. WRITE belongs here for the
+		// same reason auth-methods does -- it decides which capabilities the property offers its guests,
+		// which is a configuration decision rather than a daily desk action. No new ROLE is introduced: the
+		// existing matrix already expresses this ownership.
+		"guest-device-self-service": permWrite,
 		// Health & diagnostics: managers may run Recheck/Restart (write, step-up).
 		"diagnostics": permWrite,
 	},
@@ -205,7 +210,11 @@ var rolePerms = map[string]map[string]perm{
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "walled-garden": permRead, "payments": permRead,
 		"reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
-		"diagnostics": permRead,
+		// Phase 6 (DARK): the desk may SEE whether the property offers guest device self-service -- it is
+		// the answer to "why can't I remove my old phone" -- but changing a property capability is not a
+		// desk action.
+		"guest-device-self-service": permRead,
+		"diagnostics":               permRead,
 	},
 	"guest_relations_operator": {
 		"voucher-batches": permWrite, "guest-accounts": permWrite, "vouchers": permWrite, "sessions": permWrite,
@@ -218,7 +227,10 @@ var rolePerms = map[string]map[string]perm{
 		"guest-access-plans": permRead, "pms-providers": permRead,
 		"auth-methods": permRead, "payments": permRead, "reports": permRead,
 		"audit": permRead, "license": permRead, "backups": permRead, "walled-garden": permRead,
-		"diagnostics": permRead,
+		// Phase 6 (DARK): same readership as the front desk, for the same reason -- guest relations answers
+		// the same question and changes no property capability.
+		"guest-device-self-service": permRead,
+		"diagnostics":               permRead,
 	},
 	"voucher_operator": {
 		"voucher-batches": permWrite, "guest-accounts": permWrite, "vouchers": permWrite,
