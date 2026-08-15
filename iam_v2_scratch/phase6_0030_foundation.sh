@@ -314,13 +314,18 @@ nfn="$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronames
 # privileges. What matters is that the set is non-empty and that every member of it was checked above.
 [ "${nfn:-0}" -ge 5 ] && ok "all $nfn Phase-6 functions were checked (a new one without its REVOKE fails above)"                       || no "the Phase-6 function set is non-empty" "found ${nfn:-0}"
 
-# ...and nothing has been granted EARLY. Runtime grants belong to the slice that wires a caller, given to the
-# exact role that needs them; a grant that exists before a caller does is a privilege nobody is accounting for.
-gx="$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace,
-              LATERAL aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+# ...and nothing UNINTENDED has been granted. Runtime grants belong to the slice that wires a caller,
+# given to the exact role that needs them. The assertion used to be "nobody but the owner", which was
+# right while Phase 6 was fully ungranted and became wrong the moment 0033 wired the slice -- so it
+# names the intended set, and phase6_least_privilege.sh remains the authority on what those roles may do.
+gx="$(q "SELECT coalesce(string_agg(DISTINCT a.grantee::regrole::text, ','),'') FROM pg_proc p
+          JOIN pg_namespace n ON n.oid=p.pronamespace,
+          LATERAL aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
           WHERE n.nspname='iam_v2' AND p.proname LIKE 'p6!_%' ESCAPE '!'
-            AND a.privilege_type='EXECUTE' AND a.grantee <> p.proowner")"
-[ "$gx" = "0" ] && ok "no role besides the owner holds EXECUTE on any Phase-6 function (no early runtime grant)"                 || no "no early runtime grants exist" "$gx grant(s) beyond the owner"
+            AND a.privilege_type='EXECUTE' AND a.grantee <> p.proowner
+            AND a.grantee::regrole::text NOT IN ('svc_scd','svc_edged')")"
+[ -z "$gx" ] && ok "no UNINTENDED role holds EXECUTE on a Phase-6 function (svc_scd/svc_edged are 0033's)" \
+             || no "no unintended EXECUTE grants exist" "granted to: $gx"
 
 # ---------------------------------------------------------------- nothing was granted
 g="$(q "SELECT count(*) FROM information_schema.role_table_grants g
@@ -328,7 +333,8 @@ g="$(q "SELECT count(*) FROM information_schema.role_table_grants g
         JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname=g.table_schema
         WHERE g.table_schema='iam_v2'
           AND g.table_name IN ('appliance_product_settings','appliance_product_setting_changes','session_online_watermarks','entitlement_termination_evidence')
-          AND g.grantee <> pg_get_userbyid(c.relowner) AND g.grantee <> 'PUBLIC'")"
+          AND g.grantee <> pg_get_userbyid(c.relowner) AND g.grantee <> 'PUBLIC'
+          AND g.grantee NOT IN ('svc_scd','svc_edged')")"
 [ "$g" = "0" ] && ok "no role besides the owner holds any privilege on a Phase-6 table (DARK)" \
                || no "Phase-6 tables are ungranted" "$g grant(s) exist"
 

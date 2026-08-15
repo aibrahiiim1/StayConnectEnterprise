@@ -84,15 +84,34 @@ validated wrongly.
 
 ### 2.4 Offline-only removal, re-checked atomically
 
-A device is **offline** when it holds no session in `active` or `PENDING_ENFORCEMENT`. Removal:
+A device is **offline** when it holds no session in `active` or `PENDING_ENFORCEMENT`.
 
-1. locks the entitlement row, then the device's session rows;
-2. **re-reads** the offline state inside that lock — an offline→online race therefore loses safely, because
-   the winner is decided by the database, not by the check that preceded it;
-3. sets `entitlement_devices.status='DISCONNECTED'` with a distinct `disconnected_reason` naming guest
-   self-service, closes the open `entitlement_device_authorizations` interval, and writes an audit row;
-4. **preserves** the `devices` row, every `accounting_records` row, every authorization interval and every
-   audit row. The slot is freed; the evidence is not touched.
+**The as-built design (migration 0032).** An earlier draft of this section described the release as "lock the
+entitlement row, then the device's session rows". That was wrong in a way worth recording: *`FOR UPDATE` locks
+rows, and it cannot lock the absence of a row* — so locking the sessions that already exist says nothing about
+the one a concurrent admission is about to insert. The real design has three parts:
+
+1. **A shared L3 serialization boundary.** The release takes the entitlement row lock first, in the global
+   lock order, and then performs the release **through `iam_v2.deauthorize_entitlement_device`** — the
+   primitive migration 0010 declares to be one of only two approved ways to close an authorization interval,
+   and the counterpart of the `authorize_entitlement_device` the production grant path calls. Release and
+   admission therefore serialize on the *same* lock, taken by the *same* primitives. No release-only lock is
+   invented: a lock the session writer does not also acquire synchronises nothing.
+2. **No hand-written interval mutation.** The release does not write `entitlement_devices` or
+   `entitlement_device_authorizations` itself. A second implementation of an invariant is a second place for
+   it to drift, and the first one already had — it never declared the `device_auth` scope and skipped the
+   "an interval may not close before it opened" rule.
+3. **A structural guard.** A session may not be `active` or `PENDING_ENFORCEMENT` while its binding is not
+   `AUTHORIZED`. This makes `DISCONNECTED + live session` **unrepresentable** rather than merely unlikely, so
+   the invariant does not depend on any writer getting its lock ordering right.
+
+**Reconnect after release goes through normal authorization.** A released device cannot simply resume: the
+guard refuses a live session on its binding, so it must pass through `authorize_entitlement_device` again,
+which re-checks the device limit under the entitlement lock and opens a **new** interval. The closed interval
+stays closed, and the history shows two intervals rather than one revived one.
+
+Throughout, the release **preserves** the `devices` row, every `accounting_records` row, every authorization
+interval and every audit row. The slot is freed; the evidence is not touched.
 
 `PENDING_ENFORCEMENT` counts as **non-removable** deliberately: a grant still converging at the edge is not
 yet safe to release, and treating it as offline would let a guest free a slot whose kernel authorization is
@@ -203,6 +222,19 @@ and are therefore untouched by construction, not by a compatibility branch.
 | **M2** | the complete Guest Device Self-Service vertical slice — setting, Hotel Admin, guest surface, offline-only removal, authorization, race safety, auditing, throttling, adversarial tests |
 | **M3** | the complete AGGREGATE_ONLINE_TIME vertical slice — immutable configuration, consumption semantics, outer window, entitlement/session integration, guest/admin presentation, concurrency/replay/reboot/accounting regression |
 | **M4** | hardening: full Phase-3/4/5/6 regression, adversarial matrix, least-privilege and local-first verification, backup, real scratch restore, rollback rehearsal, reboot verification, zero-stale governance, authoritative CI and evidence artifacts, controlled DEVELOPMENT-appliance LIVE-DARK validation |
+
+### M4 rollback prerequisite — recorded now, because it is easy to discover too late
+
+**Before migration 0032 is rolled back, the Phase-6 capability must be OFF and its routes fail-closed.**
+
+0032's down migration is *faithful*: it restores the pre-fix schema, which means it removes the structural
+session-binding guard and returns the release to its own hand-written deauthorization. In that state the
+release/admission defect is **representable again** — a `DISCONNECTED` binding can carry a live session. A
+rollback performed while the guest surface is still serving would therefore reintroduce the exact defect the
+migration exists to prevent, on live traffic.
+
+This is not an argument for a dishonest down migration. A rollback that quietly kept the fix would make the
+pair untrustworthy in both directions. It is an argument for ordering: **disable, then roll back.**
 
 ---
 
