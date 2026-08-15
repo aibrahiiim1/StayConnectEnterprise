@@ -84,11 +84,43 @@ After restarting scd, acctd, edged and portald:
 So the runtime is deployed and **inert**: the code is present, every capability is off, and nothing has been
 written.
 
-## 6. What is NOT yet done, and is required before acceptance
+## 6. The corrected runtime, the Hotel Admin bundle, and the safety harness
 
-* the **controlled flag-on validation** of the authorized gate/setting combinations, across both product
-  slices, using controlled synthetic state only. **No synthetic state has been created**, and no Phase-6 flag
-  has been enabled;
+**Migration `0045`** (over-budget fail-closed) was applied, and the four binaries were rebuilt from the
+corrected branch, checksum-verified on the appliance and installed. After the restart: all five services
+active, no errors, flag coherence **6/6**, `iam_v2` still empty.
+
+**The Hotel Admin bundle** was built off-appliance with the approved
+`deploy/scripts/deploy-hotel-admin.sh package`, shipped, and installed with its `install` phase:
+
+* new release `20260815-204927`, current symlink flipped **atomically**;
+* the previous release `20260813-094434` retained, and `hotel-admin.previous` points at it — verified to
+  contain a runnable `server.js`, so the rollback is executable rather than nominal;
+* bundle sha256 begins `6145584ff5930d2dfe22c7923afcc3ed`, matching what was sent;
+* `stayconnect-hotel-admin` **active**, answering `307` (the redirect to login) on :3100.
+
+**`NEXT_PUBLIC_PHASE6_ADMIN` is build-time state**, and this bundle was built **without** it. So the Phase-6
+operator screens are compiled out of the deployed UI: the dark state of the admin surface is a property of
+the artifact, not of a runtime check. A controlled UI validation would need its own bundle built with the flag
+set, and the appliance must finish on this dark one.
+
+**The fail-safe acceptance harness** (`deploy/scripts/phase6-controlled-validation.sh`) exists before any flag
+is turned on. Its cleanup is a **trap** — it runs on success, failure, error, Ctrl-C and SIGTERM — and it then
+**verifies itself**, refusing to report success unless every flag is off, the product setting is off, no
+synthetic state remains and every service is active. Proven on the appliance:
+
+* the cleanup path runs green (7/7) and leaves the appliance dark and clean;
+* it refuses a host that is not the development appliance, and refuses a Production-looking database name.
+
+Two harness defects were found by running it rather than by reading it, and both were in the cleanup itself:
+a `local a=… f="${a#…}"` one-liner that died with *unbound variable* **inside the trap**, and a flag count
+built from per-file `grep -c` summed with `bc` — which is not installed here — that reported flags set when
+none were. A cleanup that fails, or a verification that misreports, is worse than not having one.
+
+## 7. What is NOT yet done, and is required before acceptance
+
+* the **controlled flag-on validation** itself — the harness is in place and proven, but its validation body
+  has not been run. **No Phase-6 flag has been enabled and no synthetic state has been created**;
 * the appliance-side **local-first proof** with Central unavailable;
 * the appliance-side **backup/restore and rollback** exercises, against this appliance's own backup rather
   than only the scratch database;
