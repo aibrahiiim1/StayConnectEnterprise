@@ -204,50 +204,6 @@ func TestIntegration_Phase6_OuterWindowEndsAnAggregateEntitlement(t *testing.T) 
 	}
 }
 
-// WITH THE FLAG OFF NOTHING ACCRUES. This is what "DARK" has to mean for a sweep that every appliance already
-// runs: same query, same terminations, and no watermark, no consumption and no evidence anywhere.
-func TestIntegration_Phase6_SweepIsUnchangedWhileDark(t *testing.T) {
-	p := pool(t)
-	ctx := context.Background()
-	f, ent, ses := seedAggregate(t, p, 60, 10*time.Minute)
-	tenant, site := f.tenant, f.site
-
-	// The ordinary constructor -- no WithAggregateOnlineTime, which is every caller today.
-	due, err := New(p).EnforceExpiries(ctx, tenant, site)
-	if err != nil {
-		t.Fatalf("sweep: %v", err)
-	}
-	for _, x := range due {
-		if x.EntitlementID == ent {
-			t.Fatal("a dark sweep terminated an aggregate entitlement")
-		}
-	}
-	var consumed int64
-	if err := p.QueryRow(ctx,
-		`SELECT consumed_online_seconds FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&consumed); err != nil {
-		t.Fatal(err)
-	}
-	if consumed != 0 {
-		t.Fatalf("a dark sweep charged %d seconds", consumed)
-	}
-	var wm time.Time
-	if err := p.QueryRow(ctx,
-		`SELECT accounted_through FROM iam_v2.session_online_watermarks WHERE session_id=$1`, ses).Scan(&wm); err != nil {
-		t.Fatal(err)
-	}
-	if time.Since(wm) < 9*time.Minute {
-		t.Fatal("a dark sweep advanced a watermark")
-	}
-	var evidence int
-	if err := p.QueryRow(ctx,
-		`SELECT count(*) FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id=$1`, ent).Scan(&evidence); err != nil {
-		t.Fatal(err)
-	}
-	if evidence != 0 {
-		t.Fatal("a dark sweep wrote Phase-6 evidence")
-	}
-}
-
 // ---- first terminal condition: DATA against aggregate TIME ------------------------------------------------
 //
 // The sweep now evaluates three terminal conditions and the contract says the FIRST reached ends the
@@ -893,5 +849,94 @@ func TestIntegration_Phase6_SvcAcctdCanStillDoItsOwnJob(t *testing.T) {
 	}
 	if transitions != 1 {
 		t.Fatalf("%d terminal transitions after a repeated call", transitions)
+	}
+}
+
+// ---- safe operational disable semantics -------------------------------------------------------------------
+//
+// THE FAILURE THIS PREVENTS IS WORSE THAN THE FEATURE BEING OFF. If accrual were gated by the Phase-6
+// aggregate flag, an appliance that had already granted aggregate entitlements and then lost the flag -- a
+// rollback, a config change, a half-applied deployment -- would stop consuming their budgets. Nothing would
+// exhaust. A guest holding a finite two-hour package would silently hold unlimited access, and the durable
+// record would show consumption frozen with no evidence that anything had stopped.
+//
+// So the flag gates ACQUISITION and the SURFACES; accrual is data-driven. These prove both halves: an
+// appliance with no aggregate entitlements is untouched, and one that HAS them keeps accounting for them.
+
+// A live aggregate entitlement keeps consuming and still exhausts, with no Phase-6 flag set anywhere in the
+// environment. This is the regression that would fail if accrual were ever re-gated on the flag.
+func TestIntegration_Phase6_DisablingTheCapabilityDoesNotMakeLiveAccessUnlimited(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	// Granted earlier, while the capability was on: 60 seconds of budget, half an hour observed.
+	f, ent, ses := seedAggregate(t, p, 60, 30*time.Minute)
+
+	// The environment now has NO Phase-6 flags at all -- which is what a rollback looks like.
+	for _, k := range []string{"STAYCONNECT_PHASE6_MASTER", "STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME"} {
+		t.Setenv(k, "")
+	}
+	// acctd's wiring, reproduced: the bound comes from the tick interval, and the flag does NOT decide
+	// whether accrual happens.
+	due, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	found := false
+	for _, x := range due {
+		if x.EntitlementID == ent {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("with the capability disabled, a finite aggregate entitlement was never exhausted: " +
+			"its holder now has effectively unlimited access")
+	}
+	status, reason, consumed, _ := terminalState(t, p, ent)
+	if status != "TERMINATED" || reason != "TIME" || consumed != 60 {
+		t.Fatalf("durable state after the disabled-capability sweep: %s/%s consumed=%d", status, reason, consumed)
+	}
+	var live int
+	if err := p.QueryRow(ctx,
+		`SELECT count(*) FROM iam_v2.sessions WHERE id=$1 AND state IN ('active','PENDING_ENFORCEMENT')`,
+		ses).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if live != 0 {
+		t.Fatal("the session outlived its exhausted budget")
+	}
+}
+
+// THE OTHER HALF: an appliance with no aggregate entitlements is untouched, which is what dark means in
+// practice. Every appliance today is this one, because the acquisition gate makes creating such an
+// entitlement impossible while the capability is off.
+func TestIntegration_Phase6_NoAggregateEntitlementsMeansNoWritesAtAll(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	// An ordinary VALIDITY_WINDOW fixture with a live session -- the shape of every appliance today.
+	f := seed(t, p, 1000, 1000, 0)
+	ent, ses := grant(t, p, f, nil, time.Now().Add(-30*time.Minute))
+
+	if _, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+
+	var consumed int64
+	var watermarks, skipped, evidence int
+	var status string
+	if err := p.QueryRow(ctx, `SELECT
+		 (SELECT consumed_online_seconds FROM iam_v2.entitlements WHERE id=$1),
+		 (SELECT status FROM iam_v2.entitlements WHERE id=$1),
+		 (SELECT count(*) FROM iam_v2.session_online_watermarks WHERE session_id=$2),
+		 (SELECT count(*) FROM iam_v2.online_time_skipped_intervals WHERE entitlement_id=$1),
+		 (SELECT count(*) FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id=$1)`,
+		ent, ses).Scan(&consumed, &status, &watermarks, &skipped, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if consumed != 0 || watermarks != 0 || skipped != 0 || evidence != 0 {
+		t.Fatalf("a validity-window entitlement was touched by aggregate accounting: "+
+			"consumed=%d watermarks=%d skipped=%d evidence=%d", consumed, watermarks, skipped, evidence)
+	}
+	if status == "TERMINATED" {
+		t.Fatal("a validity-window entitlement with no expiry was terminated")
 	}
 }

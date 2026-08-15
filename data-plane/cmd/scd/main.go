@@ -206,6 +206,10 @@ type server struct {
 	p3auth     *phase3Auth
 	p5poststay *phase5PostStay
 	p6devices  *phase6Devices
+	// p6cfg is the Phase-6 flag set, kept so surfaces that are mounted UNCONDITIONALLY (the status endpoint)
+	// can still tell whether the aggregate mode may be reported at all. It is not a second gate: the routes
+	// Phase 6 owns are still absent while dark.
+	p6cfg iamv2.Phase6Config
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -487,11 +491,23 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusInternalServerError, "lookup failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"ip":         ip.String(),
 		"session_id": id,
 		"active":     active,
-	})
+	}
+	// PHASE 6 (DARK by default): a guest on an aggregate package needs both of their clocks. With the flag
+	// off nothing is queried and nothing is added, so this endpoint answers byte-for-byte as it did before.
+	if s.p6cfg.AggregateTimeOn() {
+		if agg := s.aggregateStatusFor(r.Context(), id); agg != nil {
+			out["time_mode"] = agg.TimeMode
+			out["remaining_online_seconds"] = agg.RemainingOnlineSeconds
+			if agg.HardExpiry != "" {
+				out["hard_expiry"] = agg.HardExpiry
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -867,6 +883,7 @@ func main() {
 		slog.Error("phase6 configuration", "err", err)
 		os.Exit(1)
 	}
+	s.p6cfg = p6cfg
 	if p6cfg.DeviceGuestOn() && s.p3auth == nil {
 		slog.Error("phase6 guest device surface is enabled but the Phase-3 auth arm is off",
 			"phase6", p6cfg.SafeFlagSummary())

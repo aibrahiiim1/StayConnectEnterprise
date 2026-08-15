@@ -60,25 +60,33 @@ func newPhase3(cfg iamv2.PMSConfig, a *acctd, tenant, site string, scope planSco
 		return nil
 	}
 	enf := enforce.New(a.db)
-	// PHASE 6 (DARK by default): the AGGREGATE_ONLINE_TIME accrual tick rides inside the expiry sweep, so
-	// accrual and termination are one transaction. With the flag off -- which is every environment today --
-	// WithAggregateOnlineTime is never called and the sweep is byte-for-byte the Phase-3 behaviour.
+
+	// PHASE 6: ACCRUAL IS NOT GATED BY THE FLAG, AND THAT IS THE SAFETY PROPERTY.
+	//
+	// The obvious wiring -- accrue only while the aggregate flag is on -- has a failure mode that is worse
+	// than the feature being off: an appliance that has ALREADY granted aggregate entitlements, whose flag is
+	// then turned off by a rollback, a config change or a partially applied deployment, would stop consuming
+	// their budgets. Nothing would ever exhaust. A guest holding a finite two-hour package would silently
+	// hold unlimited access, and the durable record would show consumption frozen at whatever it was, with no
+	// evidence that anything had stopped.
+	//
+	// So the flag gates ACQUISITION (no new aggregate entitlement can be created while it is off -- see
+	// iamv2.TimeModeAcquirable) and the SURFACES, while accrual is DATA-DRIVEN: the tick runs every sweep and
+	// finds nothing to do unless an aggregate entitlement actually exists. On every appliance today that is
+	// zero rows and zero writes, which is what "dark" has to mean -- no Phase-6 BEHAVIOUR -- rather than
+	// "the accounting for existing entitlements is switched off".
 	//
 	// The bound is deliberately a few sweep intervals rather than one: a tick delayed by ordinary load is
 	// still real observed time and should be charged in full, while a gap that long means the service was
 	// not running and must not be.
-	if p6, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv); err == nil && p6.AggregateTimeOn() {
-		enf = enf.WithAggregateOnlineTime(aggregateChargeBoundSeconds(envInt("ACCTD_TICK_SECONDS", 1)))
-	} else if err != nil {
-		// A malformed flag is a configuration error, and Phase-6 config fails closed: log and stay dark
-		// rather than guessing which way the operator meant it.
-		slog.Error("phase6 configuration is unreadable; aggregate online time stays OFF", "err", err)
+	enf = enf.WithAggregateOnlineTime(aggregateChargeBoundSeconds(envInt("ACCTD_TICK_SECONDS", 1)))
+	if p6, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv); err != nil {
+		slog.Error("phase6 configuration is unreadable; aggregate ACQUISITION stays OFF, "+
+			"but accrual for any entitlement already in that mode continues", "err", err)
+	} else if !p6.AggregateTimeOn() {
+		slog.Info("phase6 aggregate acquisition is OFF; accrual still runs for entitlements already in that mode")
 	}
-	if plans == nil {
-		// An in-memory counter is only correct for a test: it restarts at 1, and netd would then refuse every
-		// plan this process produced. Callers that mean it pass a durable one.
-		plans = newPlanCounter("")
-	}
+
 	return &phase3{cfg: cfg, enf: enf, tenant: tenant, site: site, scope: scope, plans: plans}
 }
 

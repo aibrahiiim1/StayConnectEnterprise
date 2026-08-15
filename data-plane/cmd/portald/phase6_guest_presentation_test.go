@@ -155,3 +155,70 @@ func TestGuestDevicePanelUsesOnlyThePublicRoutes(t *testing.T) {
 		}
 	}
 }
+
+// ---- the two clocks an aggregate guest needs --------------------------------------------------------------
+
+func timePanel(t *testing.T, page string) string {
+	t.Helper()
+	i := strings.Index(page, `<div id="timeleft"`)
+	if i < 0 {
+		t.Fatal("the success page has no remaining-time panel")
+	}
+	j := strings.Index(page[i:], `<!-- YOUR DEVICES`)
+	if j < 0 {
+		return page[i:]
+	}
+	return page[i : i+j]
+}
+
+// HIDDEN UNLESS THE PACKAGE HAS AN ONLINE-TIME BUDGET. Every package today is VALIDITY_WINDOW, and their
+// success page must be exactly what it was.
+func TestRemainingTimePanelIsHiddenForOrdinaryPackages(t *testing.T) {
+	panel := timePanel(t, renderSuccess(t))
+	head := panel[:strings.Index(panel, ">")+1]
+	if !strings.Contains(head, "hidden") {
+		t.Fatalf("the remaining-time panel is not hidden by default: %s", head)
+	}
+	if !strings.Contains(panel, "st.time_mode !== 'AGGREGATE_ONLINE_TIME'") {
+		t.Fatal("the panel is revealed without checking the package's time mode")
+	}
+	if !strings.Contains(panel, "box.hidden = false") {
+		t.Fatal("nothing ever reveals the panel")
+	}
+}
+
+// BOTH CLOCKS, AND WHAT EACH ONE MEANS. Remaining minutes without the hard expiry is the comfortable
+// half-truth: a guest with ninety minutes left and a window closing in ten would plan around a number that
+// is about to stop mattering.
+func TestRemainingTimePanelShowsBothClocks(t *testing.T) {
+	panel := timePanel(t, renderSuccess(t))
+	if !strings.Contains(panel, "of internet time left") {
+		t.Fatal("the remaining online time is not shown")
+	}
+	if !strings.Contains(panel, "counts down only while you are connected") {
+		t.Fatal("the panel does not say that the budget only runs while connected")
+	}
+	if !strings.Contains(panel, "st.hard_expiry") || !strings.Contains(panel, "Your access ends on") {
+		t.Fatal("the immutable hard expiry is not shown")
+	}
+	if !strings.Contains(panel, "whether or not the time is used") {
+		t.Fatal("the panel does not say the expiry arrives regardless of use")
+	}
+}
+
+// It reads the status endpoint and nothing else, and exposes no internal identity.
+func TestRemainingTimePanelUsesOnlyTheStatusEndpoint(t *testing.T) {
+	panel := timePanel(t, renderSuccess(t))
+	if !strings.Contains(panel, "'/status'") {
+		t.Fatal("the panel does not read the status endpoint")
+	}
+	for _, forbidden := range []string{"entitlement", "plan_revision", "service_plan", "package_revision", "tenant", "site_id"} {
+		if strings.Contains(strings.ToLower(panel), forbidden) {
+			t.Fatalf("the remaining-time panel exposes %q", forbidden)
+		}
+	}
+	// A budget of zero is shown as "no time", never as a negative or a bare 0.
+	if !strings.Contains(panel, "if(s <= 0) return 'no time'") {
+		t.Fatal("an exhausted budget has no honest rendering")
+	}
+}

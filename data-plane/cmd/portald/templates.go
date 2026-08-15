@@ -461,6 +461,9 @@ const successHTML = `<!doctype html>
   .pkg button[disabled], #cx-confirm[disabled] { opacity:.5; cursor:default; }
   #cx-note { color:#666; font-size:.85rem; margin-top:8px; }
   .cx-err { color:#b00020; }
+  #timeleft { margin-top:20px; padding:12px 14px; border:1px solid #ddd; border-radius:10px; text-align:left; }
+  #timeleft .tl-main { font-size:1.05rem; font-weight:600; }
+  #timeleft .tl-note { color:#666; font-size:.85rem; margin-top:4px; }
   #devices { margin-top:28px; text-align:left; border-top:1px solid #eee; padding-top:18px; }
   #devices h2 { font-size:1.05rem; }
   #devices p.lead { margin:.2rem 0 .9rem; }
@@ -563,6 +566,56 @@ const successHTML = `<!doctype html>
   })();
   </script>
   {{end}}
+
+
+  <!-- YOUR TIME (Phase 6, DARK).
+       Hidden until the appliance answers with an aggregate package, so on every other package -- which is
+       all of them today -- the page is unchanged.
+
+       TWO CLOCKS, BOTH SHOWN. Remaining online time counts down only while the guest is connected; the hard
+       expiry is a calendar instant that arrives whether they used the minutes or not. Showing only the
+       minutes would be the comfortable half-truth: a guest with ninety minutes left and a window closing in
+       ten would plan their evening around a number that is about to stop mattering. -->
+  <div id="timeleft" hidden>
+    <div class="tl-main"><span id="tl-remaining"></span> of internet time left</div>
+    <div class="tl-note">This counts down only while you are connected.</div>
+    <div class="tl-note" id="tl-expiry" hidden></div>
+  </div>
+  <script>
+  (function(){
+    var box = document.getElementById('timeleft');
+    var main = document.getElementById('tl-remaining');
+    var exp = document.getElementById('tl-expiry');
+    function human(s){
+      if(s <= 0) return 'no time';
+      var h = Math.floor(s/3600), m = Math.round((s%3600)/60);
+      if(h > 0) return h + ' hour' + (h===1?'':'s') + (m ? ' ' + m + ' min' : '');
+      if(m > 0) return m + ' minute' + (m===1?'':'s');
+      return 'less than a minute';
+    }
+    function day(iso){
+      var t = Date.parse(iso);
+      if(isNaN(t)) return '';
+      var d = new Date(t);
+      return d.toLocaleString();
+    }
+    fetch('/status', {headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(st){
+        if(!st || st.time_mode !== 'AGGREGATE_ONLINE_TIME') return;  // every other package: nothing changes
+        main.textContent = human(st.remaining_online_seconds);
+        if(st.hard_expiry){
+          var when = day(st.hard_expiry);
+          if(when){
+            exp.textContent = 'Your access ends on ' + when + ', whether or not the time is used.';
+            exp.hidden = false;
+          }
+        }
+        box.hidden = false;
+      })
+      .catch(function(){ /* the ordinary page is the fallback */ });
+  })();
+  </script>
 
   <!-- YOUR DEVICES (Phase 6, DARK).
        The panel starts HIDDEN and is only ever shown after the appliance answers with a list. On an
