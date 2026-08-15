@@ -60,15 +60,42 @@ The appliance was rebooted and came back. Read after the reboot:
 * `appliance_product_settings`: **0 rows**, and none with the capability ON;
 * no service errors since boot.
 
-## 5. What is NOT yet done, and is required before acceptance
+## 5. The Phase-6 runtime, deployed and inert
 
-* the Phase-6 **binaries** are not deployed — the appliance runs the pre-Phase-6 build, which is why the
-  schema is inert rather than merely unused;
-* the **controlled flag-on validation** of the authorized combinations has therefore not been performed;
-* restoring every flag OFF afterwards and re-verifying across a reboot follows that validation;
-* the appliance-side restore and rollback exercises, which should be performed against this appliance's own
-  backup rather than only against the scratch database.
+Migration `0044` (the lower-bound correction) was applied first; `p6_exhaustion_instant` is present and
+`iam_v2` still holds **zero rows**.
 
-Until those are done this is a **partial** LIVE-DARK candidate: the schema half, verified and reboot-proven,
-with the runtime half outstanding. It is deliberately safe to leave in this state — additive schema, zero
-rows, every flag off, and a verified backup taken beforehand.
+The four binaries were built from this branch (`GOOS=linux`, `-trimpath`, `-tags production`), checksummed
+locally, transferred, and **verified by `sha256sum -c` on the appliance** — all four `OK`. The previous
+binaries were copied to `*.bak-prep6` first, so the runtime is one `install` away from being reverted. The new
+`scd` reports build profile `production`, matching the binaries it replaced.
+
+After restarting scd, acctd, edged and portald:
+
+* all five services **active**, and `journalctl -p err` recorded **no entries**;
+* `scd`: *"phase6 guest device surface is DARK (routes absent)"* — the routes are absent, not refusing;
+* `edged`: *"phase6 dark guest-device surface"*, every flag `false`;
+* `acctd`: `phase6_fallback_accounting: true` — the accounting owner of last resort was constructed, because
+  the Phase-3 arm is off, and it logged the safety line saying so. With `iam_v2` empty it finds nothing to do,
+  which is the data-driven behaviour the design depends on;
+* flag coherence **6/6** with the new binaries;
+* `iam_v2` rows: **0**.
+
+So the runtime is deployed and **inert**: the code is present, every capability is off, and nothing has been
+written.
+
+## 6. What is NOT yet done, and is required before acceptance
+
+* the **controlled flag-on validation** of the authorized gate/setting combinations, across both product
+  slices, using controlled synthetic state only. **No synthetic state has been created**, and no Phase-6 flag
+  has been enabled;
+* the appliance-side **local-first proof** with Central unavailable;
+* the appliance-side **backup/restore and rollback** exercises, against this appliance's own backup rather
+  than only the scratch database;
+* restoring every flag OFF afterwards, cleaning the controlled state, and **re-verifying across a second
+  reboot**. The reboot proof in section 4 is of the *schema-dark* state and does not stand in for it.
+
+This is a **deployed but unvalidated** LIVE-DARK candidate, and it is deliberately safe to hold in exactly
+this state: every capability off and coherent across the three services, `iam_v2` empty, no synthetic state,
+a read-back backup from before the schema changed, the previous binaries one `install` away at `*.bak-prep6`,
+and a rollback sequence rehearsed 54/54 including the 0032 boundary.
