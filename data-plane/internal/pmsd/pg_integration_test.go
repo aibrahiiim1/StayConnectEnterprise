@@ -637,6 +637,12 @@ func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 		"svc_acctd|service_plan_revisions|SELECT":    true,
 		"svc_acctd|sessions|SELECT":                  true,
 		"svc_acctd|session_online_watermarks|SELECT": true,
+		// ...and the reads the expiry sweep performs, added by 0040 with the sanctioned expiry writer. Still
+		// SELECT-only: acctd's single write capability is one definer function, not a table.
+		"svc_acctd|accounting_records|SELECT":               true,
+		"svc_acctd|session_entitlement_bindings|SELECT":     true,
+		"svc_acctd|entitlement_devices|SELECT":              true,
+		"svc_acctd|entitlement_termination_evidence|SELECT": true,
 	}
 	for rows.Next() {
 		var grantee, table, priv string

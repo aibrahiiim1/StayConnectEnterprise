@@ -139,27 +139,49 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Candidates: live entitlements whose window has elapsed, or whose attributed usage has reached the plan
-	// quota. For a quota crossing, the effective time is the SAMPLE that crossed it — the moment the guest
-	// actually used up the allowance, not the moment this sweep ran.
-	rows, err := tx.Query(ctx, `SELECT e.id::text,
-			CASE WHEN e.window_ends_at IS NOT NULL AND e.window_ends_at <= now() THEN 'TIME' ELSE 'DATA' END AS reason,
-			CASE WHEN e.window_ends_at IS NOT NULL AND e.window_ends_at <= now() THEN e.window_ends_at
-			     ELSE COALESCE(q.crossed_at, now()) END AS at
-		FROM iam_v2.entitlements e
-		LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
-		LEFT JOIN LATERAL (
-			SELECT min(x.sampled_at) AS crossed_at FROM (
-				SELECT ar.sampled_at,
-				       sum(ar.bytes_up + ar.bytes_down) OVER (ORDER BY ar.sampled_at, ar.id) AS running
-				FROM iam_v2.accounting_records ar
-				JOIN iam_v2.session_entitlement_bindings b ON b.session_id = ar.session_id
-				  AND b.entitlement_id = e.id AND b.bound_from <= ar.sampled_at
-				  AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at)
-			) x WHERE spr.data_quota_bytes IS NOT NULL AND x.running >= spr.data_quota_bytes) q ON true
-		WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.status IN ('ACTIVE','PENDING','SUSPENDED')
-		  AND ( (e.window_ends_at IS NOT NULL AND e.window_ends_at <= now()) OR q.crossed_at IS NOT NULL )
-		FOR UPDATE OF e`, tenant, site)
+	// THE CANDIDATE READ DOES NOT LOCK, and that is deliberate rather than an omission.
+	//
+	// It used to take FOR UPDATE OF e, which PostgreSQL only allows to a role holding UPDATE on
+	// iam_v2.entitlements -- the one privilege an accounting daemon must never have, because a role that can
+	// write an entitlement row can end a guest's access, or hand it back, with no evidence anywhere. The
+	// lock now lives where the write lives: p6_expire_entitlement takes the row lock itself, as the definer,
+	// and is idempotent for an entitlement another sweep already ended. Two concurrent sweeps therefore
+	// converge on one terminal transition without either of them holding write authority.
+	//
+	// Candidates: live entitlements that have reached a terminal condition -- the outer window elapsed, or
+	// attributed usage crossed the plan quota -- WITH THE EARLIEST OF THE TWO WINNING.
+	//
+	// The earliest is the whole point, and the previous version got it wrong in a way that only shows when
+	// both have happened. It asked "is the window elapsed?" first and answered TIME if so, without comparing
+	// instants. So an entitlement whose quota was crossed at T1 and whose window expired later at T2, swept
+	// after T2, was recorded as ending at T2 for the wrong reason -- and, worse, the aggregate tick was
+	// handed T2 as its cap and could bill the guest for the T1..T2 stretch during which their access had
+	// already ended.
+	//
+	// Now both instants are derived and LEAST decides, with the reason following the instant rather than the
+	// other way round. The DATA crossing is still computed in exactly one place, by the same LATERAL: the
+	// only change is which answer is preferred once both exist.
+	rows, err := tx.Query(ctx, `SELECT id, reason, at FROM (
+			SELECT e.id::text AS id,
+				CASE WHEN win.at IS NOT NULL AND (dat.at IS NULL OR win.at <= dat.at) THEN 'TIME' ELSE 'DATA' END AS reason,
+				LEAST(COALESCE(win.at, 'infinity'::timestamptz), COALESCE(dat.at, 'infinity'::timestamptz)) AS at
+			FROM iam_v2.entitlements e
+			LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+			LEFT JOIN LATERAL (
+				SELECT e.window_ends_at AS at
+				 WHERE e.window_ends_at IS NOT NULL AND e.window_ends_at <= now()) win ON true
+			LEFT JOIN LATERAL (
+				SELECT min(x.sampled_at) AS at FROM (
+					SELECT ar.sampled_at,
+					       sum(ar.bytes_up + ar.bytes_down) OVER (ORDER BY ar.sampled_at, ar.id) AS running
+					FROM iam_v2.accounting_records ar
+					JOIN iam_v2.session_entitlement_bindings b ON b.session_id = ar.session_id
+					  AND b.entitlement_id = e.id AND b.bound_from <= ar.sampled_at
+					  AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at)
+				) x WHERE spr.data_quota_bytes IS NOT NULL AND x.running >= spr.data_quota_bytes) dat ON true
+			WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.status IN ('ACTIVE','PENDING','SUSPENDED')
+			  AND (win.at IS NOT NULL OR dat.at IS NOT NULL)
+		) c ORDER BY c.id`, tenant, site)
 	if err != nil {
 		return nil, err
 	}
@@ -243,15 +265,11 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 
 	for i := range due {
 		x := &due[i]
-		// the controlled boundary termination records the ending at its TRUE time and invalidates any
-		// lifecycle fact recorded for the period after it (TERMINATED is terminal).
-		if _, err := tx.Exec(ctx, `SELECT iam_v2.terminate_entitlement_at_boundary($1,$2,$3)`,
-			x.EntitlementID, x.At, x.Reason); err != nil {
-			return nil, err
-		}
-		// PHASE 6: WHICH time rule ran out, recorded as append-only evidence bound to the transition that
-		// just happened. The terminal_reason set is untouched -- 'TIME' covers both -- so this is the only
-		// place the difference between "the week ran out" and "the minutes ran out" is answerable.
+
+		// PHASE 6: WHICH time rule ran out, decided here and recorded by the writer below as evidence bound
+		// to the transition. The terminal_reason set is untouched -- 'TIME' covers both -- so this is the
+		// only place the difference between "the week ran out" and "the minutes ran out" is answerable.
+		var cause *string
 		if e.aggregateTimeMaxCharge > 0 && x.Reason == "TIME" {
 			var mode string
 			if err := tx.QueryRow(ctx,
@@ -259,29 +277,39 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 				x.EntitlementID).Scan(&mode); err != nil {
 				return nil, err
 			}
-			cause := "VALIDITY_WINDOW_ELAPSED"
+			c := "VALIDITY_WINDOW_ELAPSED"
 			if mode == "AGGREGATE_ONLINE_TIME" {
 				// An aggregate entitlement reported by the tick ran out of MINUTES; one that reached this
 				// sweep through the window branch ran out of CALENDAR.
-				cause = "AGGREGATE_OUTER_WINDOW_EXPIRED"
+				c = "AGGREGATE_OUTER_WINDOW_EXPIRED"
 				for _, ex := range exhausted {
 					if ex.EntitlementID == x.EntitlementID && !ex.At.After(x.At) {
-						cause = "AGGREGATE_ONLINE_TIME_EXHAUSTED"
+						c = "AGGREGATE_ONLINE_TIME_EXHAUSTED"
 						break
 					}
 				}
 			}
-			if _, err := tx.Exec(ctx, `SELECT iam_v2.p6_record_time_termination($1,$2)`,
-				x.EntitlementID, cause); err != nil {
-				return nil, err
-			}
+			cause = &c
 		}
 
-		d, s, err := revoke(ctx, tx, x.EntitlementID, x.At)
-		if err != nil {
+		// ONE AUDITED OPERATION, NOT FIVE STATEMENTS.
+		//
+		// The termination, its evidence and the revocation of devices and sessions used to be issued from
+		// here as separate calls -- terminate_entitlement_at_boundary, p6_record_time_termination, and two
+		// UPDATEs. That works only for an identity holding all of those privileges, which is precisely the
+		// identity an accounting daemon must NOT have: a role that can call the termination primitive
+		// directly can end any entitlement for any reason at any instant.
+		//
+		// p6_expire_entitlement is the sanctioned writer for this exact responsibility. It validates that
+		// the reason is TIME or DATA and that the instant is not in the future, calls the SAME boundary
+		// primitive every other terminal path calls, records the Phase-6 evidence when the sweep knows which
+		// time rule ran out, and closes the authorization intervals and sessions under its own declared
+		// scope. svc_acctd holds EXECUTE on it and on nothing it calls.
+		if err := tx.QueryRow(ctx,
+			`SELECT devices, sessions FROM iam_v2.p6_expire_entitlement($1,$2,$3,$4)`,
+			x.EntitlementID, x.At, x.Reason, cause).Scan(&x.Devices, &x.Sessions); err != nil {
 			return nil, err
 		}
-		x.Devices, x.Sessions = d, s
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
