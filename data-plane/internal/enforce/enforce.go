@@ -139,37 +139,6 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// PHASE 6 (DARK unless the flag is on): accrue online time first, IN THIS TRANSACTION.
-	//
-	// The tick charges every accounting-eligible session, advances its durable watermark and reports the
-	// entitlements whose budget ran out, with the instant it ran out. It terminates nothing itself: those
-	// entitlements join the ordinary candidate list below and end through the SAME boundary path as a window
-	// elapse or a data crossing. One termination path, one set of rules.
-	var exhausted []Expiry
-	if e.aggregateTimeMaxCharge > 0 {
-		trows, err := tx.Query(ctx,
-			`SELECT entitlement_id::text, exhausted_at FROM iam_v2.p6_tick_online_time($1,$2,now(),$3)`,
-			tenant, site, e.aggregateTimeMaxCharge)
-		if err != nil {
-			return nil, err
-		}
-		for trows.Next() {
-			var x Expiry
-			if err := trows.Scan(&x.EntitlementID, &x.At); err != nil {
-				trows.Close()
-				return nil, err
-			}
-			// The contract's existing TIME reason: aggregate exhaustion is a time termination, and which
-			// time rule ran out is recorded as evidence rather than as new terminal vocabulary.
-			x.Reason = "TIME"
-			exhausted = append(exhausted, x)
-		}
-		trows.Close()
-		if err := trows.Err(); err != nil {
-			return nil, err
-		}
-	}
-
 	// Candidates: live entitlements whose window has elapsed, or whose attributed usage has reached the plan
 	// quota. For a quota crossing, the effective time is the SAMPLE that crossed it — the moment the guest
 	// actually used up the allowance, not the moment this sweep ran.
@@ -206,6 +175,49 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+
+	// PHASE 6 (DARK unless the flag is on): accrue online time IN THIS TRANSACTION, and only now.
+	//
+	// THE ORDER IS THE CORRECTNESS. The candidate query above owns the DATA crossing -- it derives the exact
+	// sample that crossed the quota, and that algorithm exists in exactly one place. Running the accrual
+	// first meant the tick knew nothing about it, so an entitlement whose quota was crossed an hour ago went
+	// on accruing online seconds for that hour: time charged for access that had already ended, and, if the
+	// accrual reached the budget, an exhaustion instant later than the true ending recorded as though the
+	// minutes had run out too.
+	//
+	// So the instants found above are passed IN, as per-entitlement caps. The tick treats a cap exactly like
+	// the outer window -- a hard ceiling on what is billable -- and never computes a data crossing itself.
+	var exhausted []Expiry
+	if e.aggregateTimeMaxCharge > 0 {
+		capIDs := make([]string, 0, len(due))
+		capAt := make([]time.Time, 0, len(due))
+		for _, x := range due {
+			capIDs = append(capIDs, x.EntitlementID)
+			capAt = append(capAt, x.At)
+		}
+		trows, err := tx.Query(ctx,
+			`SELECT entitlement_id::text, exhausted_at
+			   FROM iam_v2.p6_tick_online_time($1,$2,now(),$3,$4::uuid[],$5::timestamptz[])`,
+			tenant, site, e.aggregateTimeMaxCharge, capIDs, capAt)
+		if err != nil {
+			return nil, err
+		}
+		for trows.Next() {
+			var x Expiry
+			if err := trows.Scan(&x.EntitlementID, &x.At); err != nil {
+				trows.Close()
+				return nil, err
+			}
+			// The contract's existing TIME reason: aggregate exhaustion is a time termination, and which
+			// time rule ran out is recorded as evidence rather than as new terminal vocabulary.
+			x.Reason = "TIME"
+			exhausted = append(exhausted, x)
+		}
+		trows.Close()
+		if err := trows.Err(); err != nil {
+			return nil, err
+		}
 	}
 
 	// MERGE, KEEPING THE EARLIEST INSTANT. An entitlement can reach two terminal conditions in one sweep --

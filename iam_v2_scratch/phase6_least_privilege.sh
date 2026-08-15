@@ -24,6 +24,8 @@ denied(){ local out; out="$(asrole "$1" "$2")"
   case "$out" in *"permission denied"*) ok "$3";; *) no "$3" "not denied: $(echo "$out" | head -1)";; esac; }
 allowed(){ local out; out="$(asrole "$1" "$2")"
   case "$out" in *"permission denied"*) no "$3" "denied: $(echo "$out" | head -1)";; *) ok "$3";; esac; }
+# eqv <label> <got> <want> -- for catalog readings, where the answer is a value rather than a refusal.
+eqv(){ [ "$2" = "$3" ] && ok "$1" || no "$1" "expected '$3', got '$2'"; }
 
 T=11111111-1111-1111-1111-111111111111
 S=22222222-2222-2222-2222-222222222222
@@ -220,6 +222,27 @@ COMMIT;
 SQL
 [ "$(q "SELECT count(*) FROM iam_v2.entitlements WHERE id='$ENT'")" = "0" ] && ok "the gate left no rows behind" \
   || no "the gate cleaned up" "rows remain"
+
+
+# ---- svc_acctd: the aggregate tick, and nothing else ------------------------------------------------------
+#
+# The accounting daemon needs to CALL one definer function. Everything that function writes -- consumption,
+# the crossing instant, the watermark, the skipped-interval evidence -- it writes as its owner, which is the
+# whole point of the boundary: the caller gets one audited operation instead of the authority to reproduce it.
+eqv "svc_acctd can execute the aggregate tick"    "$(q "SELECT has_function_privilege('svc_acctd','iam_v2.p6_tick_online_time(uuid,uuid,timestamptz,int,uuid[],timestamptz[])','EXECUTE')")" "t"
+eqv "PUBLIC cannot"    "$(q "SELECT has_function_privilege('public','iam_v2.p6_tick_online_time(uuid,uuid,timestamptz,int,uuid[],timestamptz[])','EXECUTE')")" "f"
+eqv "svc_acctd holds NO write anywhere in iam_v2"    "$(q "SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema='iam_v2' AND grantee='svc_acctd' AND privilege_type <> 'SELECT'")" "0"
+eqv "svc_acctd cannot write consumption directly"    "$(q "SELECT has_table_privilege('svc_acctd','iam_v2.entitlements','UPDATE')")" "f"
+eqv "svc_acctd cannot move a watermark directly"    "$(q "SELECT has_table_privilege('svc_acctd','iam_v2.session_online_watermarks','UPDATE')")" "f"
+eqv "svc_acctd cannot write skipped-interval evidence directly"    "$(q "SELECT has_table_privilege('svc_acctd','iam_v2.online_time_skipped_intervals','INSERT')")" "f"
+for fn in authorize_entitlement_device deauthorize_entitlement_device p6_record_time_termination           p6_guest_release_device p6_set_guest_device_self_service; do
+  eqv "svc_acctd cannot execute $fn (another boundary owns it)"      "$(q "SELECT bool_or(has_function_privilege('svc_acctd', p.oid, 'EXECUTE')) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='$fn'")" "f"
+done
+# ...and the required POSITIVE privileges, because a gate that only asserts absences passes for a role that
+# cannot do its job either.
+for tbl in entitlements service_plan_revisions sessions session_online_watermarks; do
+  eqv "svc_acctd can read iam_v2.$tbl" "$(q "SELECT has_table_privilege('svc_acctd','iam_v2.$tbl','SELECT')")" "t"
+done
 
 echo "------------------------------------------------------------"
 echo "PHASE6_LEAST_PRIVILEGE pass=$pass fail=$fail"

@@ -601,13 +601,53 @@ func TestIntegration_RealAdvisoryLockCompetition(t *testing.T) {
 	}
 }
 
+// NO RUNTIME PRIVILEGE ON THE STAY/PMS TABLES WHILE DARK — stated as an allow-list rather than a zero.
+//
+// The original assertion was "zero svc_* grants on iam_v2", and it held until Phase 6, whose least-privilege
+// model grants each runtime role exactly what its own dark-but-mounted surface reads and nothing else. Those
+// grants are deliberate, audited by the Phase-6 privilege gate, and narrower than the role would otherwise
+// have; a zero here would now be a claim that is simply false.
+//
+// So the rule is restated in the form it was always trying to express: NOTHING beyond the specific
+// Phase-6 grants, and in particular nothing on the stay/PMS runtime tables this package is about. A new
+// grant anywhere else still fails, which is the bite the original had.
 func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
-	// no runtime service role (svc_*) may hold any privilege on the runtime/stay tables while DARK
-	n := scalarInt(t, pool, `SELECT count(*) FROM information_schema.role_table_grants
-		WHERE table_schema='iam_v2' AND grantee LIKE 'svc_%'`)
-	if n != 0 {
-		t.Fatalf("expected zero svc_* grants on iam_v2 while dark, got %d", n)
+	rows, err := pool.Query(context.Background(), `SELECT grantee, table_name, privilege_type
+		  FROM information_schema.role_table_grants
+		 WHERE table_schema='iam_v2' AND grantee LIKE 'svc_%'
+		 ORDER BY grantee, table_name, privilege_type`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	// The exact Phase-6 grants, by role and table. EXECUTE on the controlled writers is audited separately
+	// by the Phase-6 privilege gate; this is about table reach.
+	allowed := map[string]bool{
+		"svc_scd|appliance_product_settings|SELECT":   true,
+		"svc_scd|devices|SELECT":                      true,
+		"svc_scd|entitlement_devices|SELECT":          true,
+		"svc_scd|sessions|SELECT":                     true,
+		"svc_scd|sessions|INSERT":                     true,
+		"svc_edged|appliance_product_settings|SELECT": true,
+		// svc_acctd's reads for the aggregate accrual sweep (migration 0039). It holds no write
+		// anywhere in iam_v2, which the Phase-6 privilege gate asserts directly.
+		"svc_acctd|entitlements|SELECT":              true,
+		"svc_acctd|service_plan_revisions|SELECT":    true,
+		"svc_acctd|sessions|SELECT":                  true,
+		"svc_acctd|session_online_watermarks|SELECT": true,
+	}
+	for rows.Next() {
+		var grantee, table, priv string
+		if err := rows.Scan(&grantee, &table, &priv); err != nil {
+			t.Fatal(err)
+		}
+		if !allowed[grantee+"|"+table+"|"+priv] {
+			t.Errorf("unexpected runtime grant while dark: %s holds %s on iam_v2.%s", grantee, priv, table)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 }

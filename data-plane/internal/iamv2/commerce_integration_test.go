@@ -2,6 +2,7 @@ package iamv2
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -56,7 +57,8 @@ type seed struct {
 // `tiers` are optional JSON specs; opts adjust price/settlement/visibility for negative cases.
 func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed {
 	t.Helper()
-	o := seedOpts{price: 0, currency: "USD", exp: 2, settlement: "{NOT_REQUIRED}", tiers: `[{"order":10,"grant":{"down_kbps":5000}}]`, duration: `{"end_mode":"MANUAL_END"}`}
+	o := seedOpts{price: 0, currency: "USD", exp: 2, settlement: "{NOT_REQUIRED}", tiers: `[{"order":10,"grant":{"down_kbps":5000}}]`, duration: `{"end_mode":"MANUAL_END"}`,
+		timeMode: TimeModeValidityWindow}
 	if opts != nil {
 		opts(&o)
 	}
@@ -75,12 +77,18 @@ func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed
 	}
 	var s seed
 	ex(`INSERT INTO public.guest_networks (id,tenant_id,site_id,name) VALUES ($1,$2,$3,'net') ON CONFLICT (id) DO NOTHING`, p2GN, p2Tenant, p2Site)
-	s.deviceID = one(`INSERT INTO iam_v2.devices (tenant_id,site_id,appliance_id,mac) VALUES ($1,$2,$3::uuid,'02:00:00:00:00:01') RETURNING id::text`, p2Tenant, p2Site, p2Appl)
+	// A MAC OF ITS OWN PER SEED. Device identity is (tenant, site, appliance, MAC), so a fixed literal made
+	// this fixture collide with any other test that had already inserted the same address -- and the symptom
+	// was a unique-violation in a DIFFERENT test, which is the worst place to discover it. The counter is
+	// process-local; every test that needs a clean table truncates first.
+	seedDeviceSeq++
+	s.deviceID = one(`INSERT INTO iam_v2.devices (tenant_id,site_id,appliance_id,mac) VALUES ($1,$2,$3::uuid,$4) RETURNING id::text`,
+		p2Tenant, p2Site, p2Appl, fmt.Sprintf("02:00:00:ff:%02x:%02x", (seedDeviceSeq>>8)&0xff, seedDeviceSeq&0xff))
 	s.accountID = one(`INSERT INTO iam_v2.guest_access_accounts (tenant_id,site_id,username,password_hash,enabled) VALUES ($1,$2,'alice','x',true) RETURNING id::text`, p2Tenant, p2Site)
 	// plan + revision (current)
 	planID := one(`INSERT INTO iam_v2.service_plans (tenant_id,site_id,code) VALUES ($1,$2,'PLAN1') RETURNING id::text`, p2Tenant, p2Site)
-	s.planRevID = one(`INSERT INTO iam_v2.service_plan_revisions (tenant_id,site_id,service_plan_id,revision_no,name,down_kbps,up_kbps,max_concurrent_devices,time_accounting_mode,data_quota_bytes)
-		VALUES ($1,$2,$3,1,'p',5000,2000,2,'VALIDITY_WINDOW',1000000000) RETURNING id::text`, p2Tenant, p2Site, planID)
+	s.planRevID = one(`INSERT INTO iam_v2.service_plan_revisions (tenant_id,site_id,service_plan_id,revision_no,name,down_kbps,up_kbps,max_concurrent_devices,time_accounting_mode,data_quota_bytes,time_quota_seconds)
+		VALUES ($1,$2,$3,1,'p',5000,2000,2,$4,1000000000,$5) RETURNING id::text`, p2Tenant, p2Site, planID, o.timeMode, o.timeQuota)
 	ex(`UPDATE iam_v2.service_plans SET current_revision_id=$1 WHERE id=$2`, s.planRevID, planID)
 	// package + revision (current, free)
 	s.packageID = one(`INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active) VALUES ($1,$2,'PKG1',$3) RETURNING id::text`, p2Tenant, p2Site, o.active())
@@ -103,6 +111,9 @@ func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed
 	return s
 }
 
+// seedDeviceSeq keeps every seeded device's MAC distinct within a process.
+var seedDeviceSeq int
+
 type seedOpts struct {
 	price      int64
 	currency   string
@@ -114,6 +125,10 @@ type seedOpts struct {
 	inactive   bool
 	visFrom    *time.Time
 	visUntil   *time.Time
+	// timeMode/timeQuota let a fixture publish an IMMUTABLE plan revision in a given accounting mode. They
+	// default to the pre-Phase-6 shape, so every existing seed is unchanged.
+	timeMode  string
+	timeQuota *int64
 }
 
 func (o seedOpts) active() bool { return !o.inactive }

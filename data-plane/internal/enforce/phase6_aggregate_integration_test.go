@@ -243,3 +243,160 @@ func TestIntegration_Phase6_SweepIsUnchangedWhileDark(t *testing.T) {
 		t.Fatal("a dark sweep wrote Phase-6 evidence")
 	}
 }
+
+// ---- first terminal condition: DATA against aggregate TIME ------------------------------------------------
+//
+// The sweep now evaluates three terminal conditions and the contract says the FIRST reached ends the
+// entitlement, once. These prove both orderings against real accounting rows, and prove that the losing
+// condition contributes nothing -- not consumption, not a watermark, not evidence.
+
+// seedDataCrossing gives the entitlement a data quota and enough attributed usage to have crossed it at
+// `ago`, through the same accounting_records the sweep's own crossing query reads.
+func seedDataCrossing(t *testing.T, p *pgxpool.Pool, f fixture, ent, ses string, quota int64, ago time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+	// Plan revisions are IMMUTABLE, so the quota arrives the only way it can: a new revision carrying it,
+	// with the entitlement pointed at it -- the same thing publishing a changed plan would do.
+	var rev string
+	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.service_plan_revisions
+		 (id, tenant_id, site_id, service_plan_id, revision_no, down_kbps, up_kbps, max_concurrent_devices,
+		  device_limit_policy, time_accounting_mode, time_quota_seconds, data_quota_bytes)
+		 SELECT gen_random_uuid(), r.tenant_id, r.site_id, r.service_plan_id, r.revision_no + 1,
+		        r.down_kbps, r.up_kbps, r.max_concurrent_devices, r.device_limit_policy,
+		        r.time_accounting_mode, r.time_quota_seconds, $2
+		   FROM iam_v2.service_plan_revisions r
+		  WHERE r.id = (SELECT service_plan_revision_id FROM iam_v2.entitlements WHERE id=$1)
+		 RETURNING id::text`, ent, quota).Scan(&rev); err != nil {
+		t.Fatalf("publish a revision carrying the data quota: %v", err)
+	}
+	if _, err := p.Exec(ctx,
+		`UPDATE iam_v2.entitlements SET service_plan_revision_id=$2 WHERE id=$1`, ent, rev); err != nil {
+		t.Fatalf("point the entitlement at it: %v", err)
+	}
+	// One sample, at the instant the quota was crossed. The sweep derives the crossing from the running sum
+	// over attributed samples, so this is the same evidence a real counter would have produced.
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.accounting_records
+		 (tenant_id, site_id, session_id, sample_seq, sampled_at, bytes_up, bytes_down)
+		 VALUES ($1,$2,$3, 1, now() - $4::interval, $5, 0)`,
+		f.tenant, f.site, ses, ago.String(), quota); err != nil {
+		t.Fatalf("seed accounting sample: %v", err)
+	}
+}
+
+func terminalState(t *testing.T, p *pgxpool.Pool, ent string) (status, reason string, consumed int64, at time.Time) {
+	t.Helper()
+	if err := p.QueryRow(context.Background(),
+		`SELECT status, COALESCE(terminal_reason,''), consumed_online_seconds, COALESCE(terminated_at, 'epoch')
+		   FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&status, &reason, &consumed, &at); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+// DATA CROSSED FIRST: data wins, and aggregate accounting stops exactly at the crossing.
+func TestIntegration_Phase6_DataCrossingBoundsAggregateAccrual(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	// A budget it could not spend in the observed time, so nothing but DATA can end it.
+	f, ent, ses := seedAggregate(t, p, 86400, 30*time.Minute)
+	seedDataCrossing(t, p, f, ent, ses, 1_000_000, 20*time.Minute)
+
+	due, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	n := 0
+	for _, x := range due {
+		if x.EntitlementID == ent {
+			n++
+			if x.Reason != "DATA" {
+				t.Fatalf("the entitlement ended with reason %q; the data quota was crossed first", x.Reason)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the entitlement was ended %d times; exactly one terminal transition is allowed", n)
+	}
+
+	// ACCRUAL STOPPED AT THE CROSSING. Ten of the thirty observed minutes preceded it, so ~600 seconds are
+	// billable and the remaining twenty minutes are not: they are after the guest's access ended.
+	status, reason, consumed, _ := terminalState(t, p, ent)
+	if status != "TERMINATED" || reason != "DATA" {
+		t.Fatalf("durable state is %s/%s", status, reason)
+	}
+	if consumed < 570 || consumed > 630 {
+		t.Fatalf("aggregate consumption is %ds; only the ~600s before the data crossing were billable", consumed)
+	}
+	// ...and the watermark did not move past it either.
+	var wm time.Time
+	if err := p.QueryRow(ctx,
+		`SELECT accounted_through FROM iam_v2.session_online_watermarks WHERE session_id=$1`, ses).Scan(&wm); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(wm) < 19*time.Minute {
+		t.Fatalf("the watermark advanced to %s ago, past the data crossing", time.Since(wm))
+	}
+	// No TIME evidence was written: the minutes did not run out.
+	var timeEvidence int
+	if err := p.QueryRow(ctx,
+		`SELECT count(*) FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id=$1`, ent).Scan(&timeEvidence); err != nil {
+		t.Fatal(err)
+	}
+	if timeEvidence != 0 {
+		t.Fatal("a DATA termination recorded time-termination evidence")
+	}
+
+	// A later sweep changes nothing at all.
+	before := consumed
+	if _, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+		t.Fatal(err)
+	}
+	_, _, after, _ := terminalState(t, p, ent)
+	if after != before {
+		t.Fatalf("a later sweep changed consumption from %d to %d", before, after)
+	}
+}
+
+// THE OPPOSITE ORDERING: the budget runs out before the data quota is reached, so TIME wins and carries its
+// own evidence.
+func TestIntegration_Phase6_AggregateExhaustionBeatsALaterDataCrossing(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	// 60 seconds of budget against thirty observed minutes: the budget ran out ~29 minutes ago. The data
+	// quota is crossed only 5 minutes ago -- later.
+	f, ent, ses := seedAggregate(t, p, 60, 30*time.Minute)
+	seedDataCrossing(t, p, f, ent, ses, 1_000_000, 5*time.Minute)
+
+	due, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	n := 0
+	for _, x := range due {
+		if x.EntitlementID == ent {
+			n++
+			if x.Reason != "TIME" {
+				t.Fatalf("the entitlement ended with reason %q; the budget ran out first", x.Reason)
+			}
+			if age := time.Since(x.At); age < 25*time.Minute {
+				t.Fatalf("the ending was dated %s ago, not at the crossing ~29 minutes ago", age)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("the entitlement was ended %d times", n)
+	}
+	status, reason, consumed, _ := terminalState(t, p, ent)
+	if status != "TERMINATED" || reason != "TIME" || consumed != 60 {
+		t.Fatalf("durable state is %s/%s consumed=%d", status, reason, consumed)
+	}
+	var cause string
+	if err := p.QueryRow(ctx,
+		`SELECT cause_detail FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id=$1`,
+		ent).Scan(&cause); err != nil {
+		t.Fatalf("no time-termination evidence: %v", err)
+	}
+	if cause != "AGGREGATE_ONLINE_TIME_EXHAUSTED" {
+		t.Fatalf("the evidence says %q", cause)
+	}
+}

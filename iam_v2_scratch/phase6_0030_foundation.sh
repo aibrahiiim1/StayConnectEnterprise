@@ -323,8 +323,8 @@ gx="$(q "SELECT coalesce(string_agg(DISTINCT a.grantee::regrole::text, ','),'') 
           LATERAL aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
           WHERE n.nspname='iam_v2' AND p.proname LIKE 'p6!_%' ESCAPE '!'
             AND a.privilege_type='EXECUTE' AND a.grantee <> p.proowner
-            AND a.grantee::regrole::text NOT IN ('svc_scd','svc_edged')")"
-[ -z "$gx" ] && ok "no UNINTENDED role holds EXECUTE on a Phase-6 function (svc_scd/svc_edged are 0033's)" \
+            AND a.grantee::regrole::text NOT IN ('svc_scd','svc_edged','svc_acctd')")"
+[ -z "$gx" ] && ok "no UNINTENDED role holds EXECUTE on a Phase-6 function (svc_scd/svc_edged from 0033, svc_acctd from 0039's)" \
              || no "no unintended EXECUTE grants exist" "granted to: $gx"
 
 # ---------------------------------------------------------------- nothing was granted
@@ -334,8 +334,8 @@ g="$(q "SELECT count(*) FROM information_schema.role_table_grants g
         WHERE g.table_schema='iam_v2'
           AND g.table_name IN ('appliance_product_settings','appliance_product_setting_changes','session_online_watermarks','entitlement_termination_evidence')
           AND g.grantee <> pg_get_userbyid(c.relowner) AND g.grantee <> 'PUBLIC'
-          AND g.grantee NOT IN ('svc_scd','svc_edged')")"
-[ "$g" = "0" ] && ok "no role besides the owner holds any privilege on a Phase-6 table (DARK)" \
+          AND g.grantee NOT IN ('svc_scd','svc_edged','svc_acctd')")"
+[ "$g" = "0" ] && ok "no role besides the owner and the named runtime roles holds anything on a Phase-6 table" \
                || no "Phase-6 tables are ungranted" "$g grant(s) exist"
 
 # ---------------------------------------------------------------- cleanup: leave nothing behind

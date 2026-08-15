@@ -260,18 +260,70 @@ session accrues exactly the elapsed time.
 
 ### 3.3 Exhaustion at the true time
 
-When the budget is crossed inside a tick, the terminal instant is computed **within** the tick rather than
-stamped at sweep time: with *n* eligible sessions consuming, the remaining budget is consumed *n* times
-faster, so exhaustion lands at `accounted_through + remaining/n`. This matches the existing rule that a data
-crossing is recorded at the sample that crossed it, not when the sweep noticed.
+**The billable interval, per session.** A session contributes `[accounted_through, ceiling]`, where the
+ceiling is the **earliest** of: now · the session's own `ended` · the entitlement's immutable
+`window_ends_at` · any terminal instant the sweep already knows about, chiefly the **DATA crossing**. The
+per-tick observation bound then trims the charged end; whatever it trims is recorded in
+`online_time_skipped_intervals` rather than charged. A session with no watermark has never been observed by
+this path, so its first tick charges nothing and baselines instead.
 
-Termination goes through the **existing** `terminate_entitlement_at_boundary` path with the contract's
-**existing `TIME` reason** — no new terminal vocabulary is introduced, because AGGREGATE_ONLINE_TIME is a
+**The crossing is piecewise, over the union of those intervals.** An earlier draft of this section described
+it as `accounted_through + remaining/n` for *n* eligible sessions. That is exact only when every contributor
+starts together and runs the whole interval — and staggered watermarks, a device joining late and a device
+disconnecting mid-tick are all ordinary. The burn rate is not a count of sessions; it is **how many
+intervals cover that instant**, and it changes at every interval boundary.
+
+So the boundaries are walked in order: for each segment, `rate` is the number of intervals covering it and
+the segment contributes `duration × rate`. The first segment whose contribution reaches the remaining budget
+contains the crossing, at `p0 + (remaining − accumulated)/rate`. Segments no interval covers contribute
+nothing — nobody is online, so nothing burns. This matches the existing rule that a data crossing is recorded
+at the sample that crossed it, not when the sweep noticed.
+
+Why the instant matters as much as the total: the sweep compares it against the other terminal candidates to
+decide **which condition ended the entitlement**. A total that is right to the second, carrying an instant on
+the wrong side of the window or the data crossing, produces a true number attached to a false account of what
+happened to the guest.
+
+**DATA truth stays in one place.** The tick never computes a data crossing. The expiry sweep already derives
+it from the running sum over attributed samples; it runs that query **first** and passes the instants in as
+per-entitlement caps, which the tick treats exactly like the outer window. Duplicating that algorithm would
+create two answers that drift.
+
+**Termination is unchanged.** It goes through the **existing** `terminate_entitlement_at_boundary` path with
+the contract's **existing `TIME` reason** — no new terminal vocabulary, because AGGREGATE_ONLINE_TIME is a
 *time mode* and exhausting its budget is a time termination. §6.1's precedence rule — the first reached of
 {window end, data cap, hard expiry, checkout, admin} triggers **one** atomic terminal transition — is
-unchanged and stays a single code path. Which time rule ran out is recorded in append-only
-`entitlement_termination_evidence`, which is bound by trigger to the entitlement's actual terminal
-transition, so it can neither describe a termination that did not happen nor disagree with the one that did.
+unchanged and stays a single code path; the merge keeps the earliest instant, so a losing condition
+contributes nothing. Which time rule ran out is recorded in append-only
+`entitlement_termination_evidence`, bound by trigger to the entitlement's actual terminal transition, so it
+can neither describe a termination that did not happen nor disagree with the one that did.
+
+### 3.3a The mode is owned by the immutable revision, and gated twice
+
+The accounting mode is a property of the **immutable plan revision** and of nothing else. An omitted mode is
+`VALIDITY_WINDOW` — a default, not a branch, which is why every revision published before Phase 6 keeps its
+meaning with no compatibility path. A grant tier **may not override it**: an offer-time override would let one
+revision be granted under two different accounting rules, which is exactly the retroactive reinterpretation
+immutability exists to prevent.
+
+Two separate gates sit on top, and they answer different questions:
+
+| Gate | Question | Off means |
+|---|---|---|
+| **Publication** (`CommerceAdmin`) | may this build publish a revision in the new mode? | the mode is refused at publication, and a positive `time_quota_seconds` is required when it is allowed |
+| **Acquisition** (`TimeModeAcquirable`) | may a NEW quote/purchase/entitlement be created in it? | every acquisition path refuses, with one shared reason |
+
+Acquisition is gated on **every** free path — the PMS/stay grant and the Phase-2 free-commerce
+quote/confirm — through one shared rule, because two entry points each carrying their own copy is how they
+come to disagree. Confirm re-checks, above the consume step, so a quote minted while the capability was on
+and presented after it went off is refused **without** consuming the quote or the guest's auth context.
+
+The reason is arithmetic rather than policy: acctd performs no aggregate accrual while the flag is off, so an
+entitlement created in that mode would never consume its budget and never exhaust — an unlimited package by
+accident, on a runtime that cannot account for it. Nothing already durable is touched: an immutable
+aggregate revision keeps existing and keeps its meaning, and entitlements granted earlier under it are not
+reinterpreted, re-moded or deleted. Safe operational disable semantics for **already-live** aggregate
+entitlements are an M4 deployment prerequisite, not something this gate invents.
 
 ### 3.4 Immutability
 

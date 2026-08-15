@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
@@ -207,16 +208,17 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 	// FAIL CLOSED ON A MODE THIS BUILD CANNOT ACCOUNT FOR. The revision is immutable and may legitimately
 	// carry AGGREGATE_ONLINE_TIME; what must not happen is a NEW entitlement in that mode on a process whose
 	// accrual is dark, because nothing would ever consume its budget.
-	if !s.aggregateOnlineTime {
+	{
 		var mode string
 		if err := tx.QueryRow(ctx,
 			`SELECT COALESCE(time_accounting_mode,'VALIDITY_WINDOW') FROM iam_v2.service_plan_revisions WHERE id=$1`,
 			svcRev).Scan(&mode); err != nil {
 			return res, err
 		}
-		if mode == "AGGREGATE_ONLINE_TIME" {
-			return res, fmt.Errorf("aggregate online-time accounting is not enabled on this appliance: "+
-				"refusing to grant plan revision %s, whose budget nothing would consume", svcRev)
+		// THE SHARED RULE, not a second copy of it. Two acquisition paths each carrying their own idea of
+		// what may be created is how they come to disagree.
+		if why := iamv2.TimeModeAcquirable(mode, s.aggregateOnlineTime); why != "" {
+			return res, fmt.Errorf("refusing to grant plan revision %s: %s", svcRev, why)
 		}
 	}
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlements

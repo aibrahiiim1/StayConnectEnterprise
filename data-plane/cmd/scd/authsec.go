@@ -59,7 +59,12 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 		// Phase-2 cutover step, deliberately not performed here.
 		return fmt.Errorf("phase2 commerce master flag is enabled but no production repository is wired (cutover only)")
 	}
-	comm, err := iamv2.NewCommerceEngine(commCfg, commRepo, iamv2.NopObserver{})
+	// PHASE 6 (DARK by default): the commerce engine's aggregate acquisition capability is derived from the
+	// SAME flag that turns on acctd's accrual tick, and from the same fail-closed reader the grant path uses.
+	// A runtime that could create an aggregate entitlement it cannot account for is the state the gate
+	// exists to prevent, so the two must never be configured independently.
+	comm, err := iamv2.NewCommerceEngine(commCfg, commRepo, iamv2.NopObserver{},
+		iamv2.WithAggregateOnlineTime(phase6AggregateOn()))
 	if err != nil {
 		return fmt.Errorf("phase2 commerce new: %w", err)
 	}

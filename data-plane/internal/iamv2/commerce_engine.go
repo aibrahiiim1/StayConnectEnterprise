@@ -14,6 +14,10 @@ type CommerceEngine struct {
 	obs  Observer
 	now  func() time.Time
 	ttl  time.Duration // offer-quote TTL (5 min unless overridden)
+	// aggregateOnlineTime is the Phase-6 capability, OFF by default. It gates NEW acquisition of that time
+	// mode through this engine; see TimeModeAcquirable, which is the single rule every acquisition path
+	// shares.
+	aggregateOnlineTime bool
 }
 
 // NewCommerceEngine builds the engine. repo MUST be nil while the master flag is OFF (dark) and MUST be
@@ -45,6 +49,14 @@ func WithCommerceClock(f func() time.Time) CommerceOption {
 
 // WithQuoteTTL overrides the offer-quote TTL.
 func WithQuoteTTL(d time.Duration) CommerceOption { return func(e *CommerceEngine) { e.ttl = d } }
+
+// WithAggregateOnlineTime declares whether this process may create NEW acquisitions whose effective time
+// mode is AGGREGATE_ONLINE_TIME. Default OFF. It must be derived from the SAME Phase-6 flag that turns on
+// acctd's accrual tick: a runtime that can create the entitlement but not account for it is exactly the
+// state this gate exists to prevent.
+func WithAggregateOnlineTime(on bool) CommerceOption {
+	return func(e *CommerceEngine) { e.aggregateOnlineTime = on }
+}
 
 // ---- transaction-scoped commerce contract (the WHOLE grant runs on one pgx.Tx) ----
 //

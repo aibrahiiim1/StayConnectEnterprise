@@ -278,7 +278,8 @@ case "$r" in *ERROR*) ok "skipped-interval evidence cannot be deleted";;
   *) no "skipped-interval evidence was deleted" "$r";; esac
 
 # ---- 13. no PUBLIC execute on the new function ---------------------------------------------------------------
-r=$(q "SELECT has_function_privilege('public','iam_v2.p6_tick_online_time(uuid,uuid,timestamptz,int)','EXECUTE')")
+# The signature carries the caller's terminal caps since 0038; the privilege assertion follows it.
+r=$(q "SELECT has_function_privilege('public','iam_v2.p6_tick_online_time(uuid,uuid,timestamptz,int,uuid[],timestamptz[])','EXECUTE')")
 eq "PUBLIC cannot execute the accrual tick" "$r" "f"
 
 
