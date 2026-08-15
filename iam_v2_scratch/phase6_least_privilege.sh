@@ -36,6 +36,10 @@ for r in svc_scd svc_edged; do
 done
 
 # ---------------------------------------------------------------- the bypass, closed
+# The parameterized primitive must be out of reach: a role that can choose its own hourly limit can pass
+# 2147483647 and bypass the throttle while still calling an approved function.
+denied svc_scd "SELECT iam_v2.p6_guest_release_device('$(q "SELECT gen_random_uuid()")','$(q "SELECT gen_random_uuid()")', 2147483647)" \
+  "svc_scd CANNOT call the parameterized release -- the throttle is not caller-selectable"
 denied svc_scd "SELECT iam_v2.deauthorize_entitlement_device('$(q "SELECT gen_random_uuid()")','$(q "SELECT gen_random_uuid()")',now(),'X')" \
   "svc_scd CANNOT execute deauthorize_entitlement_device -- the policy bypass is closed"
 denied svc_scd "SELECT iam_v2.authorize_entitlement_device('$(q "SELECT gen_random_uuid()")','$(q "SELECT gen_random_uuid()")',now())" \
@@ -74,8 +78,8 @@ INSERT INTO iam_v2.entitlement_device_authorizations (tenant_id, site_id, entitl
   VALUES ('$T','$S','$ENT','$DEV',1, now());
 COMMIT;
 SQL
-out="$(asrole svc_scd "SELECT iam_v2.p6_guest_release_device('$ENT','$DEV')")"
-[ "$out" = "OK" ] && ok "svc_scd CAN perform the approved release through the policy function (SECURITY DEFINER)" \
+out="$(asrole svc_scd "SELECT iam_v2.p6_guest_release_device_policy('$ENT','$DEV')")"
+[ "$out" = "OK" ] && ok "svc_scd CAN perform the approved release through the POLICY function (SECURITY DEFINER)" \
                   || no "svc_scd can perform the approved release" "got '$out'"
 st="$(q "SELECT status||'/'||coalesce(disconnected_reason,'-') FROM iam_v2.entitlement_devices WHERE entitlement_id='$ENT' AND device_id='$DEV'")"
 [ "$st" = "DISCONNECTED/GUEST_SELF_SERVICE" ] && ok "the definer's write landed with the guest's own reason" \
@@ -84,30 +88,111 @@ n="$(q "SELECT count(*) FROM iam_v2.guest_device_actions WHERE entitlement_id='$
 [ "$n" = "1" ] && ok "the audit row was written by the definer path" || no "the audit row exists" "found $n"
 
 # ---------------------------------------------------------------- the 0032 guard under the ADMISSION role
-# The guard is a BEFORE trigger and runs in the INVOKER's context, so an admission role that cannot READ
-# entitlement_devices would fail on every insert. That is one SELECT on one table -- not the broad write
-# access "make the trigger work" could easily have become.
+# svc_scd's session INSERT is a REQUIRED POSITIVE CAPABILITY: the real admission path opens the session
+# itself. The previous version of this gate passed when the INSERT was permission-denied before the guard was
+# even reached -- a missing privilege reported as a passing security property. Both halves are asserted now,
+# and the positive one FAILS the gate if it is missing.
+GENT=$(q "SELECT gen_random_uuid()"); GDEV=$(q "SELECT gen_random_uuid()")
+docker exec -i "$C" psql -U postgres -d "$DB" -q >/dev/null 2>&1 <<SQL
+BEGIN;
+SET LOCAL session_replication_role = replica;
+ALTER TABLE iam_v2.entitlements DISABLE TRIGGER ALL;
+INSERT INTO iam_v2.entitlements (id, tenant_id, site_id, voucher_id, purchase_id, policy_snapshot,
+    service_plan_revision_id, package_revision_id, time_accounting_mode, end_mode, status)
+  VALUES ('$GENT','$T','$S', gen_random_uuid(), gen_random_uuid(), '{}'::jsonb, gen_random_uuid(),
+          gen_random_uuid(),'VALIDITY_WINDOW','VALIDITY_WINDOW','ACTIVE');
+ALTER TABLE iam_v2.entitlements ENABLE TRIGGER ALL;
+INSERT INTO iam_v2.devices (id, tenant_id, site_id, appliance_id, mac)
+  VALUES ('$GDEV','$T','$S','$A', ('0e:' || substr(replace('$GDEV','-',''),1,2) || ':' ||
+          substr(replace('$GDEV','-',''),3,2) || ':' || substr(replace('$GDEV','-',''),5,2) || ':' ||
+          substr(replace('$GDEV','-',''),7,2) || ':' || substr(replace('$GDEV','-',''),9,2))::macaddr);
+INSERT INTO iam_v2.entitlement_devices (tenant_id, site_id, entitlement_id, device_id, status, first_authorized, last_authorized)
+  VALUES ('$T','$S','$GENT','$GDEV','AUTHORIZED', now(), now());
+COMMIT;
+SQL
+
+# (a) REQUIRED POSITIVE: a PENDING_ENFORCEMENT session on an AUTHORIZED binding must SUCCEED as svc_scd.
 out="$(asrole svc_scd "INSERT INTO iam_v2.sessions (id,tenant_id,site_id,entitlement_id,device_id,state,started)
-       VALUES (gen_random_uuid(),'$T','$S','$ENT','$DEV','active',now())")"
+       VALUES (gen_random_uuid(),'$T','$S','$GENT','$GDEV','PENDING_ENFORCEMENT',now())")"
+case "$out" in
+  *"permission denied"*) no "svc_scd CAN admit a PENDING_ENFORCEMENT session on an AUTHORIZED binding" \
+                            "REQUIRED capability missing: $(echo "$out" | head -1)" ;;
+  *ERROR*)               no "svc_scd CAN admit a PENDING_ENFORCEMENT session on an AUTHORIZED binding" \
+                            "$(echo "$out" | head -1)" ;;
+  *) ok "svc_scd CAN admit a PENDING_ENFORCEMENT session on an AUTHORIZED binding (required capability present)" ;;
+esac
+
+# (b) the SAME insert on a DISCONNECTED binding must reach the 0032 guard and be refused BY THE GUARD.
+docker exec -i "$C" psql -U postgres -d "$DB" -q >/dev/null 2>&1 -c \
+  "UPDATE iam_v2.entitlement_devices SET status='DISCONNECTED', disconnected_reason='GUEST_SELF_SERVICE'
+    WHERE entitlement_id='$GENT' AND device_id='$GDEV'"
+out="$(asrole svc_scd "INSERT INTO iam_v2.sessions (id,tenant_id,site_id,entitlement_id,device_id,state,started)
+       VALUES (gen_random_uuid(),'$T','$S','$GENT','$GDEV','PENDING_ENFORCEMENT',now())")"
 case "$out" in
   *"may not exist on a DISCONNECTED binding"*)
-     ok "the 0032 guard FIRES under the runtime role -- it reached entitlement_devices and refused" ;;
-  *"permission denied for table entitlement_devices"*)
-     no "the guard works under the runtime role" "the role cannot read entitlement_devices, so the guard cannot run" ;;
+     ok "the 0032 guard REFUSES the same insert on a DISCONNECTED binding, under the real role" ;;
   *"permission denied"*)
-     ok "the runtime role cannot insert sessions at all here (narrower than required; guard not reached)" ;;
-  *) no "the guard fires under the runtime role" "unexpected: $(echo "$out" | head -1)" ;;
+     no "the guard refuses the insert on a DISCONNECTED binding" "denied by privilege, so the guard never ran" ;;
+  *) no "the guard refuses the insert on a DISCONNECTED binding" "unexpected: $(echo "$out" | head -1)" ;;
 esac
+
+# (c) UPDATE of session state stays denied: promoting to active is the enforcement owner's write.
+denied svc_scd "UPDATE iam_v2.sessions SET state='active' WHERE entitlement_id='$GENT'" \
+  "svc_scd cannot UPDATE session state -- promoting to active is the enforcement owner's write"
+
+docker exec -i "$C" psql -U postgres -d "$DB" -q >/dev/null 2>&1 <<SQL
+BEGIN;
+SET LOCAL session_replication_role = replica;
+DELETE FROM iam_v2.sessions WHERE entitlement_id='$GENT';
+DELETE FROM iam_v2.entitlement_devices WHERE entitlement_id='$GENT';
+DELETE FROM iam_v2.devices WHERE id='$GDEV';
+DELETE FROM iam_v2.entitlements WHERE id='$GENT';
+COMMIT;
+SQL
 
 # ---------------------------------------------------------------- svc_edged: the operator surface only
 allowed svc_edged "SELECT count(*) FROM iam_v2.appliance_product_settings" "svc_edged can read the setting"
-allowed svc_edged "SELECT count(*) FROM iam_v2.appliance_product_setting_changes" "svc_edged can read the setting audit"
 denied  svc_edged "SELECT iam_v2.p6_guest_release_device('$ENT','$DEV')" \
   "svc_edged cannot release a guest device -- the operator surface is not the guest surface"
 denied  svc_edged "UPDATE iam_v2.entitlement_devices SET status='DISCONNECTED' WHERE false" \
   "svc_edged cannot write device bindings"
 denied  svc_edged "SELECT count(*) FROM iam_v2.guest_device_actions" \
   "svc_edged cannot read the guest action audit (it is not its surface)"
+
+# THE UNAUDITED-WRITE BYPASS. The Go service always wrote the setting and its audit together, but the ROLE
+# could write either alone -- so the audit was mandatory by convention and optional by privilege. An operator
+# could have flipped a guest-facing capability with no trace.
+denied svc_edged "UPDATE iam_v2.appliance_product_settings SET guest_device_self_service=true WHERE false" \
+  "svc_edged CANNOT write the setting directly -- no unaudited path exists"
+denied svc_edged "INSERT INTO iam_v2.appliance_product_settings (tenant_id,site_id,appliance_id) VALUES ('$T','$S','$A')" \
+  "svc_edged cannot INSERT a setting row directly"
+denied svc_edged "INSERT INTO iam_v2.appliance_product_setting_changes
+       (tenant_id,site_id,appliance_id,setting_key,new_value,changed_by_operator_id,changed_by)
+       VALUES ('$T','$S','$A','guest_device_self_service',true,'55555555-5555-5555-5555-555555555555','x')" \
+  "svc_edged cannot forge an audit row directly"
+
+# ...and the controlled operation works, writing BOTH halves.
+out="$(asrole svc_edged "SELECT iam_v2.p6_set_guest_device_self_service('$T','$S','$A', true,
+        '55555555-5555-5555-5555-555555555555','Fixture Operator','least-privilege gate')")"
+case "$out" in
+  *"permission denied"*) no "svc_edged CAN change the setting through the controlled operation" "denied: $out" ;;
+  *) ok "svc_edged CAN change the setting through the controlled operation" ;;
+esac
+v="$(q "SELECT guest_device_self_service FROM iam_v2.appliance_product_settings WHERE appliance_id='$A'")"
+[ "$v" = "t" ] && ok "the setting moved" || no "the setting moved" "got '$v'"
+n="$(q "SELECT count(*) FROM iam_v2.appliance_product_setting_changes WHERE appliance_id='$A' AND new_value=true")"
+[ "$n" = "1" ] && ok "and its audit row was written in the SAME operation -- mandatory by privilege, not by convention" \
+               || no "the audit row accompanied the change" "found $n"
+
+# ---------------------------------------------------------------- no speculative grants survive
+# Audited against what the implemented routes actually query. The audit rows are written by the definer
+# functions under the definer's rights, so the guest surface needs no access to that table at all.
+denied svc_scd "SELECT count(*) FROM iam_v2.guest_device_actions" \
+  "svc_scd holds NO grant on guest_device_actions -- the definer writes it, not the caller"
+denied svc_scd "SELECT count(*) FROM iam_v2.entitlement_device_authorizations" \
+  "svc_scd holds no grant on the authorization intervals -- the listing never reads them"
+denied svc_edged "SELECT count(*) FROM iam_v2.appliance_product_setting_changes" \
+  "svc_edged holds no direct read on the setting audit -- no implemented route needs it"
 
 # ---------------------------------------------------------------- PUBLIC gets nothing
 pub="$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
@@ -119,6 +204,10 @@ pub="$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronames
 docker exec -i "$C" psql -U postgres -d "$DB" -q >/dev/null 2>&1 <<SQL
 BEGIN;
 SET LOCAL session_replication_role = replica;
+ALTER TABLE iam_v2.appliance_product_setting_changes DISABLE TRIGGER p6_setting_changes_append_only;
+DELETE FROM iam_v2.appliance_product_setting_changes WHERE appliance_id='$A';
+ALTER TABLE iam_v2.appliance_product_setting_changes ENABLE TRIGGER p6_setting_changes_append_only;
+DELETE FROM iam_v2.appliance_product_settings WHERE appliance_id='$A';
 ALTER TABLE iam_v2.guest_device_actions DISABLE TRIGGER p6_guest_device_actions_append_only;
 DELETE FROM iam_v2.guest_device_actions WHERE entitlement_id='$ENT';
 ALTER TABLE iam_v2.guest_device_actions ENABLE TRIGGER p6_guest_device_actions_append_only;

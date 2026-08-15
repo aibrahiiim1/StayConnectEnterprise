@@ -111,36 +111,22 @@ func (s *Service) EnabledForAppliance(ctx context.Context, tenant, site, applian
 // trace of a change that did not happen, are both worse than no audit at all.
 func (s *Service) SetForAppliance(ctx context.Context, tenant, site, appliance string,
 	on bool, operatorID, operatorLabel, reason string) error {
-	tx, err := s.pool.Begin(ctx)
+	// ONE CONTROLLED OPERATION, not two writes in a transaction. The Go layer used to write the setting and
+	// its audit itself, which was atomic only because this function chose to be: the ROLE could write either
+	// alone, so the audit was mandatory by convention and optional by privilege. svc_edged now holds no
+	// direct write on either table and only EXECUTE on this operation, so a setting cannot move without its
+	// audit -- there is no privilege that would do it.
+	//
+	// Every argument is still the SERVER'S. tenant/site/appliance come from the appliance's own trusted local
+	// assignment and the operator from authenticated session context; the foreign keys behind them refuse
+	// anything invented.
+	_, err := s.pool.Exec(ctx,
+		`SELECT iam_v2.p6_set_guest_device_self_service($1,$2,$3,$4,$5,$6,$7)`,
+		tenant, site, appliance, on, operatorID, operatorLabel, nullIfEmpty(reason))
 	if err != nil {
-		return err
+		return fmt.Errorf("set guest_device_self_service: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	var old *bool
-	err = tx.QueryRow(ctx, `SELECT guest_device_self_service FROM iam_v2.appliance_product_settings
-		WHERE tenant_id=$1 AND site_id=$2 AND appliance_id=$3 FOR UPDATE`, tenant, site, appliance).Scan(&old)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("lock setting: %w", err)
-	}
-
-	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.appliance_product_settings
-			(tenant_id, site_id, appliance_id, guest_device_self_service, updated_at)
-		VALUES ($1,$2,$3,$4, now())
-		ON CONFLICT (tenant_id, site_id, appliance_id)
-		DO UPDATE SET guest_device_self_service = EXCLUDED.guest_device_self_service, updated_at = now()`,
-		tenant, site, appliance, on); err != nil {
-		return fmt.Errorf("write setting: %w", err)
-	}
-
-	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.appliance_product_setting_changes
-			(tenant_id, site_id, appliance_id, setting_key, old_value, new_value,
-			 changed_by_operator_id, changed_by, change_reason)
-		VALUES ($1,$2,$3,'guest_device_self_service',$4,$5,$6,$7,$8)`,
-		tenant, site, appliance, old, on, operatorID, operatorLabel, nullIfEmpty(reason)); err != nil {
-		return fmt.Errorf("write setting audit: %w", err)
-	}
-	return tx.Commit(ctx)
+	return nil
 }
 
 // ListOwnDevices returns the devices bound to the caller's OWN entitlement.
@@ -187,9 +173,13 @@ func (s *Service) ListOwnDevices(ctx context.Context, entitlementID string) ([]D
 // state, the binding status and the throttle can be read and acted on atomically. This function deliberately
 // contains no logic that could disagree with it.
 func (s *Service) Release(ctx context.Context, entitlementID, deviceID string) (Outcome, error) {
+	// THE POLICY ENTRY POINT, which takes no throttle parameter. The three-argument primitive exists for
+	// tests and is not granted to any runtime role: a caller that can pass its own hourly limit can pass
+	// 2147483647 and use the approved function to bypass the approved policy, so the runtime is never in a
+	// position to name one.
 	var out string
 	if err := s.pool.QueryRow(ctx,
-		`SELECT iam_v2.p6_guest_release_device($1,$2)`, entitlementID, deviceID).Scan(&out); err != nil {
+		`SELECT iam_v2.p6_guest_release_device_policy($1,$2)`, entitlementID, deviceID).Scan(&out); err != nil {
 		return "", fmt.Errorf("release device: %w", err)
 	}
 	return Outcome(out), nil
