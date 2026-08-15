@@ -168,6 +168,31 @@ restore_settings() {
     done
 }
 
+# A RATCHET, AND WHY RESTORING THE BASELINE IS NOT ENOUGH ON ITS OWN.
+#
+# Restoring exactly what was captured is the right instinct and it produced the wrong result: an earlier run
+# ended with guest_device_self_service = true, so the NEXT run captured true as its baseline and faithfully
+# put it back, and so did every run after that. The audit trail shows it plainly -- t -> f, f -> t, then
+# "restore captured pre-validation baseline" writing t. Each run was individually correct and the appliance
+# drifted anyway.
+#
+# While Phase 6 is dark the setting cannot legitimately be on: nothing reads it, so a true here is residue
+# rather than an operator's decision -- and it is the dangerous kind, because the moment the deployment gate
+# opens the capability would be live on this appliance without anyone choosing that. So the final state is
+# pinned rather than merely restored, through the same audited writer, with a reason that says why. It is
+# reported as a correction, not done quietly: if this fires, something left the appliance wrong.
+enforce_dark_setting() {
+  local on op t s a
+  on="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"
+  [ "$on" = "0" ] && { ok "no appliance is left with the capability enabled"; return 0; }
+  op="$(q "SELECT id FROM public.operators ORDER BY created_at LIMIT 1")"
+  q "SELECT iam_v2.p6_set_guest_device_self_service(tenant_id, site_id, appliance_id, false, '$op',
+       'phase6-controlled-validation',
+       'Phase 6 is dark on this appliance; the per-appliance capability must not be left enabled')
+       FROM iam_v2.appliance_product_settings WHERE guest_device_self_service" >/dev/null
+  ok "corrected $on appliance setting(s) left enabled, through the audited writer"
+}
+
 teardown_scope() {
   # ITS OUTPUT IS READ. The first version discarded it, so when the DO block aborted on a column that does not
   # exist, teardown silently did nothing at all -- and the failure only surfaced a run later, as a unique-index
@@ -254,6 +279,7 @@ restore() {
   restore_flags;    ok "Phase-6 flag files restored to the captured baseline; services restarted"
   restore_hotel_admin; ok "Hotel Admin pointed at the captured DARK release"
   restore_settings; ok "per-appliance product settings restored through the audited writer"
+  enforce_dark_setting
   teardown_scope
   case "$TEARDOWN_OUT" in
     *P6_SCOPE_INERT*) ok "the reserved validation scope is inert (terminated through the boundary path)" ;;
@@ -329,16 +355,25 @@ verify_dark() {
   [ "$live" = "0" ] && ok "no live synthetic entitlement, session or device binding remains at the reserved ids" \
     || { no "synthetic state is still live" "$live row(s)"; bad=1; }
 
-  # The settings table matches the captured baseline row for row.
-  local nowset
-  nowset="$(q "SELECT tenant_id||' '||site_id||' '||appliance_id||' '||guest_device_self_service
-                 FROM iam_v2.appliance_product_settings
-                ORDER BY tenant_id, site_id, appliance_id")"
-  if [ "$nowset" = "$(cat "$STATE_DIR/settings" 2>/dev/null)" ]; then
-    ok "the per-appliance product settings match the captured baseline exactly"
+  # THE SETTINGS TABLE: the same appliances as before the run, and none of them enabled.
+  #
+  # Row-for-row equality with the capture was the earlier check, and it is what let the ratchet through: it
+  # passed happily while the appliance sat enabled, because enabled was what had been captured. The two
+  # things actually worth asserting are that this run created no settings row of its own and left none
+  # behind, and that nothing is switched on while the phase is dark.
+  local nowkeys basekeys onnow
+  nowkeys="$(q "SELECT tenant_id||' '||site_id||' '||appliance_id FROM iam_v2.appliance_product_settings
+                 ORDER BY tenant_id, site_id, appliance_id")"
+  basekeys="$(awk '{print $1" "$2" "$3}' "$STATE_DIR/settings" 2>/dev/null)"
+  if [ "$nowkeys" = "$basekeys" ]; then
+    ok "the settings table covers exactly the appliances it did before the run"
   else
-    no "product settings differ from the baseline" "$(printf '%s' "$nowset" | tr '\n' ';')"; bad=1
+    no "the settings table gained or lost a row" "$(printf '%s' "$nowkeys" | tr '\n' ';')"; bad=1
   fi
+  onnow="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"
+  [ "$onnow" = "0" ] \
+    && ok "no appliance is left with guest device self-service enabled" \
+    || { no "an appliance is left with the capability enabled" "$onnow row(s)"; bad=1; }
 
   return $bad
 }
