@@ -1,0 +1,4 @@
+commit 9ac0486c1fe8ac230035bb9d8ad6df882e17c22e
+Date:   Sat Aug 15 19:10:59 2026 +0300
+
+    Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest

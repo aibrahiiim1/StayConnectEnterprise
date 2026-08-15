@@ -1,4 +1,0 @@
-commit 86b5f2148072118f281cee80e82b35d871abaae0
-Date:   Sat Aug 15 19:06:32 2026 +0300
-
-    Phase 6: M3 governance receipt (T0059) under D25

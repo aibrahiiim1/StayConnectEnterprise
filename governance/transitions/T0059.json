@@ -1,7 +1,7 @@
 {
   "transition_id": "T0059",
   "seq": 59,
-  "timestamp": "2026-08-15T19:40:00Z",
+  "timestamp": "2026-08-15T16:05:00Z",
   "record_type": "PHASE_6_M3_AGGREGATE_ONLINE_TIME_COMPLETE_DARK",
   "previous_state": {
     "phase": "6",
@@ -64,5 +64,6 @@
     "no pull request opened and no merge",
     "Phase 6 not marked accepted or closed"
   ],
-  "next": "M4 -- hardening and the controlled DEVELOPMENT-appliance LIVE-DARK acceptance candidate: full-schema regressions under the real service roles, the scd/acctd/edged flag-coherence proof on the appliance, backup and real scratch restore, rollback rehearsal with the Phase-6 routes fail-closed before migration 0032 down, reboot verification, zero-stale governance synchronization, authoritative CI artifacts, and then the single Phase-6 pull request opened UNMERGED for a separate Product-Owner decision."
+  "next": "M4 -- hardening and the controlled DEVELOPMENT-appliance LIVE-DARK acceptance candidate: full-schema regressions under the real service roles, the scd/acctd/edged flag-coherence proof on the appliance, backup and real scratch restore, rollback rehearsal with the Phase-6 routes fail-closed before migration 0032 down, reboot verification, zero-stale governance synchronization, authoritative CI artifacts, and then the single Phase-6 pull request opened UNMERGED for a separate Product-Owner decision.",
+  "timestamp_note": "Corrected in place, minutes after it was written and before Phase 6 is accepted or merged: the first value (19:40:00Z) was the local clock read as UTC, which placed the receipt three hours in its own future and tripped the rule that exists for exactly that. The same local-versus-UTC slip produced the Phase-5 T0053 defect, which is why the rule is enforced."
 }

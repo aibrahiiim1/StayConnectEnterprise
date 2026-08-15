@@ -595,8 +595,8 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
-- **HEAD commit:** `86b5f2148072118f281cee80e82b35d871abaae0`
-- **Provenance (generation HEAD = inventory_head):** `86b5f2148072118f281cee80e82b35d871abaae0`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `9ac0486c1fe8ac230035bb9d8ad6df882e17c22e`
+- **Provenance (generation HEAD = inventory_head):** `9ac0486c1fe8ac230035bb9d8ad6df882e17c22e`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/6-device-selfservice-and-time-modes`
 - **Remote branch:** `origin/phase/6-device-selfservice-and-time-modes`
 - **Changed files:** 556
@@ -946,9 +946,9 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `docs/architecture/Phase3-Privilege-Matrix.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
 | `docs/architecture/Phase4-Financial-Schema-Gap-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
 | `docs/architecture/Phase4-Readiness-Matrix.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Pre-Phase-4 baseline pass + Phase-4 authorization (D18 / T0029) |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 6: M3 governance receipt (T0059) under D25 |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 6: M3 governance receipt (T0059) under D25 |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 6: M3 governance receipt (T0059) under D25 |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `docs/architecture/StayConnect-IAM-Phase2-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/StayConnect-IAM-Phase3-Plan.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
 | `docs/architecture/StayConnect-IAM-Phase4-Plan.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 post-merge housekeeping: merge state is a fact, not prose (D20 / T0049) |
@@ -957,7 +957,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `docs/architecture/adr/ADR-0001-pmsd-connector-ownership.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `docs/architecture/adr/ADR-0002-phase3-single-shaping-owner.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 pre-live (inventory_head): bind the security journal to the assigned scope and to one exact session identity |
 | `docs/architecture/adr/ADR-0003-ruleset-structure-from-current-render.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 3 network lifecycle (inventory_head): unreadable is not empty, boot reconstructs the confirmed revision, and rollback has no destructive fallback |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 6: M3 governance receipt (T0059) under D25 |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `docs/evidence/Phase3-CI-Artifact-Exposure-Audit.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Close five residual findings: cloned host identity, Central-only Edge vhosts, artifact-audit record (T0027) |
 | `docs/evidence/Phase3-Final-Live-Acceptance-Record.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Ratify T0027 state, renew the appliance licence to 2027-08-08, make the Central reload contract honest (T0028) |
 | `docs/evidence/Phase4-Final-Live-Acceptance-Record.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 ACCEPTED AND CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC (D19 / T0044) |
@@ -965,39 +965,39 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `docs/evidence/StayConnect-IAM-Phase5-Evidence.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 5 closure: record the merge of PR #13 into master (D23 / T0054) |
 | `docs/evidence/phase4/npm-audit-full.json` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
 | `docs/evidence/phase4/npm-audit-production.json` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
-| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `docs/reports/StayConnect-IAM-Phase4-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 closure: record the merge of PR #12 into master (D20 / T0048) |
 | `docs/reports/StayConnect-IAM-Phase5-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 5 closure: record the merge of PR #13 into master (D23 / T0054) |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_86b5f21.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase-evidence/GIT_STAT_86b5f21.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M2 pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M2 pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: M3 governance receipt (T0059) under D25 |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: M3 governance receipt (T0059) under D25 |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
-| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 6 (delivery_head): M3 accrual-wiring pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): T0028 manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M2 pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M2 pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M2 pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M2 pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase2-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
@@ -1005,7 +1005,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
 | `governance/artifact-registry.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 6 M1: the pre-live clarification, the as-built reconciliation, and the additive foundation (D24/T0056, D25/T0057) |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 6 M1: the pre-live clarification, the as-built reconciliation, and the additive foundation (D24/T0056, D25/T0057) |
 | `governance/dependency-acceptances.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 6: M3 governance receipt (T0059) under D25 |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `governance/transitions/T0015.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
 | `governance/transitions/T0016.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3: governance activity transition T0016 (software candidate awaiting Increment 9), doc sync |
 | `governance/transitions/T0017.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 3 pre-live safety (inventory_head): bounded kernel lease, fail-closed activation, DB-verified accountability, surgical nft foundation, real-kernel gate |
@@ -1524,12 +1524,12 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  docs/evidence/StayConnect-IAM-Phase5-Evidence.md   |  434 +++
  docs/evidence/phase4/npm-audit-full.json           |   22 +
  docs/evidence/phase4/npm-audit-production.json     |   22 +
- docs/manifests/Phase3-change-manifest.md           | 1565 ++++++++++
+ docs/manifests/Phase3-change-manifest.md           | 1582 ++++++++++
  .../reports/StayConnect-IAM-Phase2-Final-Report.md |    4 +-
- .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2371 +++++++++++++++
+ .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2388 +++++++++++++++
  .../reports/StayConnect-IAM-Phase4-Final-Report.md |  159 +
  .../reports/StayConnect-IAM-Phase5-Final-Report.md |  199 ++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 311599 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 311704 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 117762 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42178 bytes
  .../chatgpt/phase-evidence/GIT_STAT_86b5f21.txt    |    4 +
@@ -1551,7 +1551,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   14 +-
  .../Phase2-change-manifest.md                      |   13 +-
  .../Phase3-Privilege-Matrix.md                     |   34 +
- .../Phase3-change-manifest.md                      | 1565 ++++++++++
+ .../Phase3-change-manifest.md                      | 1582 ++++++++++
  .../stayconnectenterprise/SYSTEM_OVERVIEW.md       |    2 +-
  .../StayConnect-IAM-Handoff.md                     |   25 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   26 +-
@@ -1609,7 +1609,7 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  governance/transitions/T0056.json                  |   53 +
  governance/transitions/T0057.json                  |   85 +
  governance/transitions/T0058.json                  |   61 +
- governance/transitions/T0059.json                  |   68 +
+ governance/transitions/T0059.json                  |   69 +
  hotel-admin/app/(app)/checkout-grace/page.tsx      |   19 +
  hotel-admin/app/(app)/financial-health/page.tsx    |   10 +
  hotel-admin/app/(app)/financial-recovery/page.tsx  |   21 +
@@ -1721,41 +1721,17 @@ Full procedure and post-rollback confirmation queries: `docs/PHASE3_DEPLOYMENT_A
  tools/validate-state-parity-selftest.sh            |  121 +
  tools/validate-state-parity.py                     |  235 ++
  tools/validate-transition-times.sh                 |  175 ++
- 556 files changed, 115579 insertions(+), 2316 deletions(-)
+ 556 files changed, 115631 insertions(+), 2316 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  docs/architecture/StayConnect-IAM-Phase0-Contract.md
-M  docs/architecture/StayConnect-IAM-Phase1A-Plan.md
-M  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
-M  docs/context/StayConnect-IAM-Handoff.md
-M  docs/manifests/Phase3-change-manifest.md
-M  docs/reports/StayConnect-IAM-Phase3-Final-Report.md
-M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
-M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_86b5f21.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_bfec9fd.txt
-M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/MANIFEST.md
-M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
-M  exports/chatgpt/stayconnectenterprise/00-START-HERE.md
-M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md
-M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
-M  governance/project-state.json
+M  governance/transitions/T0059.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 9ac0486 Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest
 HISTORICAL: 86b5f21 Phase 6: M3 governance receipt (T0059) under D25
 HISTORICAL: a496e78 Phase 6 M3: the expiry writer establishes the terminal condition itself
 HISTORICAL: 43ccae5 Phase 6 M3: operator view of online-time budgets, and the M4 flag-coherence check
