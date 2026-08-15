@@ -140,14 +140,24 @@ func (s *Service) SetForAppliance(ctx context.Context, tenant, site, appliance s
 // scoped by it in the WHERE clause, so "only your own devices" is a property of the query rather than of a
 // filter somebody has to remember to apply.
 //
-// Released bindings are included with Online=false and Removable=false: a guest who released a device should
-// see that it is no longer using a slot, rather than watch it vanish and wonder whether the release worked.
+// THE LISTING IS "WHAT IS USING YOUR ALLOWANCE", so a RELEASED binding is not in it.
+//
+// An earlier version returned released bindings too, on the reasoning that a device vanishing might leave a
+// guest unsure whether the removal worked. Walking the assembled flow end to end showed that reasoning was
+// wrong in both directions: the guest is already told in words that the device was removed and its place is
+// free, and a released device reappearing in a list headed "the devices using your internet access" -- with
+// the explanation that it cannot be removed -- says the opposite of what happened. The durable history is
+// preserved where history belongs (the binding row, the authorization intervals, the audit), none of which
+// is a guest-facing screen.
+//
+// It follows that Removable no longer needs to restate the status: every row here is AUTHORIZED, so the only
+// remaining question is whether the device is online.
 func (s *Service) ListOwnDevices(ctx context.Context, entitlementID string) ([]Device, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT d.id::text,
 		       d.last_seen,
 		       (live.n > 0) AS online,
-		       (ed.status = 'AUTHORIZED' AND live.n = 0) AS removable
+		       (live.n = 0) AS removable
 		  FROM iam_v2.entitlement_devices ed
 		  JOIN iam_v2.devices d ON d.id = ed.device_id
 		  CROSS JOIN LATERAL (
@@ -155,6 +165,7 @@ func (s *Service) ListOwnDevices(ctx context.Context, entitlementID string) ([]D
 		       WHERE se.entitlement_id = ed.entitlement_id AND se.device_id = ed.device_id
 		         AND se.state IN ('active','PENDING_ENFORCEMENT')) live
 		 WHERE ed.entitlement_id = $1
+		   AND ed.status = 'AUTHORIZED'
 		 ORDER BY d.last_seen DESC NULLS LAST, d.id`, entitlementID)
 	if err != nil {
 		return nil, fmt.Errorf("list own devices: %w", err)

@@ -132,6 +132,59 @@ yet safe to release, and treating it as offline would let a guest free a slot wh
 still landing. This is the *removal-safety* predicate and it is deliberately **not** the accounting one —
 `PENDING_ENFORCEMENT` never consumes online-time budget. See §3.2z.
 
+### 2.5 The three surfaces, as built (M2)
+
+**The guest sees only what is using their allowance.** The listing returns the caller's own entitlement's
+**AUTHORIZED** bindings — a released device is not in it. The first implementation returned released bindings
+too, reasoning that a device vanishing might leave a guest unsure the removal worked; walking the assembled
+flow showed that backwards. The guest is already told in words that the device was removed and its place is
+free, and a released device reappearing under a heading that says *the devices using your internet access*,
+annotated as un-removable, contradicts what just happened. The durable history lives in the binding row, the
+authorization intervals and the audit — none of which is a guest-facing screen.
+
+Each device is presented by **when it was last used and whether it is connected**. No MAC: on a shared
+network that is a stable identifier for somebody's phone. The opaque device id travels in the release request
+and is never rendered. Every refusal — online, not yours, already released, throttled, switched off, not
+deployed — is one identical sentence, because the API collapses them for the same reason.
+
+**The portal panel is hidden until the appliance answers with a list.** On an appliance where the capability
+is not deployed or the hotel has it off, the guest sees an ordinary success page and learns nothing about
+whether device management exists here.
+
+**The operator surface is authorization, not just authentication.** The setting routes are mounted through
+`mountResource`, so `resourcePermission` and the role matrix decide. `guest-device-self-service` follows
+`auth-methods` exactly — write for `site_admin` and `hotel_it_manager`, read for the two desk roles and the
+two read-only roles, nothing for `voucher_operator` — because which capabilities the property offers its
+guests is a configuration decision rather than a desk action. No new role was invented, and
+`docs/ROLE_AND_SCOPE_MATRIX.md` now carries the row that `auth.go` says it defines, **checked cell for cell
+by test in both directions**.
+
+**The Hotel Admin screen shows two facts, never one.** The product setting ("this property offers it") and
+the deployment state ("available in this release") are separate panels plus a sentence stating what the
+current combination means. No wording may suggest that switching the setting on deploys anything: an operator
+who turns something on, sees it confirmed, and tells guests it exists has been misled by the product.
+
+**The public source identity comes from the connection and only from the connection.** `middleware.RealIP`
+was installed on the portal router and had to be removed. On this architecture guests reach the portal
+directly through nftables DNAT, so `X-Forwarded-For` and its relatives are entirely guest-controlled — and
+that address derives the device, which derives the entitlement. The Phase-6 surface takes no subject
+parameter precisely so identity comes from the connection; a rewritten `RemoteAddr` handed the parameter
+back. If a real reverse proxy is ever introduced the fix is **not** to re-add it, but to trust exactly that
+proxy's address and strip client-supplied forwarding headers at the edge.
+
+### 2.6 What the four combinations must do
+
+| deployment gate | product setting | guest-visible result |
+|---|---|---|
+| OFF | OFF | routes **absent** (404) |
+| OFF | ON | routes **absent** (404) — the hotel's decision is recorded and deploys nothing |
+| ON | OFF | uniform `UNAVAILABLE`, indistinguishable from any other refusal; no durable change |
+| ON | ON | the capability, scoped to the caller's own entitlement |
+
+Proven end to end against a real PostgreSQL over real HTTP, on a subject produced by the **real Phase-3 grant
+path**. An appliance with no setting row at all behaves as OFF: opt-in is a decision the hotel makes, not a
+default in the guest's favour.
+
 ---
 
 ## 3. AGGREGATE_ONLINE_TIME
@@ -233,7 +286,7 @@ and are therefore untouched by construction, not by a compatibility branch.
 | # | Content |
 |---|---|
 | **M1** | the pre-live clarification; this reconciliation; additive migration and configuration boundaries; the foundation for the appliance setting and the time-mode state |
-| **M2** | the complete Guest Device Self-Service vertical slice — setting, Hotel Admin, guest surface, offline-only removal, authorization, race safety, auditing, throttling, adversarial tests |
+| **M2** | **COMPLETE** — the Guest Device Self-Service vertical slice: setting, Hotel Admin, guest surface, offline-only removal, authorization, race safety, auditing, throttling, adversarial tests, all four gate/setting combinations end to end, and the local-first proof with Central unreachable |
 | **M3** | the complete AGGREGATE_ONLINE_TIME vertical slice — immutable configuration, consumption semantics, outer window, entitlement/session integration, guest/admin presentation, concurrency/replay/reboot/accounting regression |
 | **M4** | hardening: full Phase-3/4/5/6 regression, adversarial matrix, least-privilege and local-first verification, backup, real scratch restore, rollback rehearsal, reboot verification, zero-stale governance, authoritative CI and evidence artifacts, controlled DEVELOPMENT-appliance LIVE-DARK validation |
 

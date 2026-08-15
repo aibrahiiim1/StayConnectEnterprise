@@ -954,3 +954,55 @@ func TestSettingRefusesAnEmptyOperatorLabel(t *testing.T) {
 		t.Fatal("a setting change was accepted with a blank operator label")
 	}
 }
+
+// A RELEASED DEVICE LEAVES THE GUEST'S LIST, AND LEAVES NOTHING ELSE.
+//
+// This is the one place the two halves of the rule meet: the guest-facing answer to "what is using my
+// allowance" must stop including a device the guest just removed, and every durable record of that device --
+// its identity, its authorization intervals, the audit of the release -- must survive untouched. A test that
+// asserted only the first half would be satisfied by deleting the device.
+func TestAReleasedDeviceLeavesTheListingButNotTheRecord(t *testing.T) {
+	p := pool(t)
+	s := New(p)
+	ctx := context.Background()
+	ent := seedEntitlement(t, p)
+	kept := seedDevice(t, p, ent, "active")
+	gone := seedDevice(t, p, ent, "")
+
+	if out, err := s.Release(ctx, ent, gone); err != nil || !out.Released() {
+		t.Fatalf("release: %v (%s)", err, out)
+	}
+
+	got, err := s.ListOwnDevices(ctx, ent)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != kept {
+		t.Fatalf("the listing after a release is %+v; only the device still holding a slot belongs there", got)
+	}
+
+	var devices, bindings, authorizations, actions int
+	if err := p.QueryRow(ctx, `SELECT
+		 (SELECT count(*) FROM iam_v2.devices WHERE id=$1),
+		 (SELECT count(*) FROM iam_v2.entitlement_devices WHERE entitlement_id=$2 AND device_id=$1),
+		 (SELECT count(*) FROM iam_v2.entitlement_device_authorizations WHERE entitlement_id=$2 AND device_id=$1),
+		 (SELECT count(*) FROM iam_v2.guest_device_actions WHERE entitlement_id=$2 AND device_id=$1)`,
+		gone, ent).Scan(&devices, &bindings, &authorizations, &actions); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if devices != 1 || bindings != 1 || authorizations == 0 || actions == 0 {
+		t.Fatalf("the release erased history: devices=%d bindings=%d authorizations=%d actions=%d",
+			devices, bindings, authorizations, actions)
+	}
+	// The binding is still there, marked as what it is -- which is how the slot arithmetic and the audit
+	// both stay answerable after the guest's screen has moved on.
+	var status string
+	if err := p.QueryRow(ctx,
+		`SELECT status FROM iam_v2.entitlement_devices WHERE entitlement_id=$1 AND device_id=$2`,
+		ent, gone).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "DISCONNECTED" {
+		t.Fatalf("the released binding is %s", status)
+	}
+}

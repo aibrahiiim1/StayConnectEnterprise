@@ -239,6 +239,10 @@ var rolePerms = map[string]map[string]perm{
 	},
 	"payments_operator": {
 		"payments": permWrite, "stripe-accounts": permRead,
+		// Phase 6 (DARK): read-only, which is this role's established relationship with everything that is
+		// not money. It is on the list rather than absent because "read-only on everything else" is the
+		// documented semantic, and silently omitting a resource would narrow the role by accident.
+		"guest-device-self-service": permRead,
 		// Contract section 15: payments_operator is the role that holds financial-review WRITE. Every
 		// action additionally requires password re-authentication, enforced at the route.
 		"financial-review": permWrite,
@@ -260,6 +264,9 @@ var rolePerms = map[string]map[string]perm{
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		// Phase 5 (DARK): a viewer sees WHETHER a post-stay identity can authenticate, and never acts on it.
 		"post-stay-profiles": permRead,
+		// Phase 6 (DARK): a viewer sees whether the property offers guest device self-service, and cannot
+		// change it -- read-only everywhere is the whole definition of this role.
+		"guest-device-self-service": permRead,
 		// A viewer reads the lineage and the review signals, and acts on neither.
 		"stay-transfers":   permRead,
 		"financial-review": permRead,

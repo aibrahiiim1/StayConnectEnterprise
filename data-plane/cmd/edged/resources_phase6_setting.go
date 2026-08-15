@@ -55,7 +55,7 @@ type guestDeviceSettingResp struct {
 	PhaseGateEnabled bool `json:"phase_gate_enabled"`
 }
 
-// getGuestDeviceSetting serves GET /phase6/settings/guest-device-self-service.
+// getGuestDeviceSetting serves GET /edge/v1/guest-device-self-service/.
 func (s *server) getGuestDeviceSetting(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
@@ -70,7 +70,7 @@ func (s *server) getGuestDeviceSetting(w http.ResponseWriter, r *http.Request) {
 		Enabled: on, PhaseGateEnabled: s.phase6.DeviceGuestOn()})
 }
 
-// setGuestDeviceSetting serves PUT /phase6/settings/guest-device-self-service.
+// setGuestDeviceSetting serves PUT /edge/v1/guest-device-self-service/.
 func (s *server) setGuestDeviceSetting(w http.ResponseWriter, r *http.Request) {
 	var in guestDeviceSettingReq
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
@@ -142,11 +142,14 @@ func (s *server) setGuestDeviceSetting(w http.ResponseWriter, r *http.Request) {
 		Enabled: *in.Enabled, Changed: before != *in.Enabled, PhaseGateEnabled: s.phase6.DeviceGuestOn()})
 }
 
-// guestDeviceSelfServiceRoutes is the resource router. It is mounted through mountResource, which is what
-// places it behind resourcePermission and therefore behind the role matrix: reads need permRead on
-// "guest-device-self-service", writes need permWrite. hotel_it_manager (and site_admin implicitly) hold
-// write; the desk roles hold read, because "does this property offer device self-service" is a question they
-// are asked and a capability they do not own.
+// guestDeviceSelfServiceRoutes is the resource router, mounted by main.go at /edge/v1/guest-device-self-service
+// through mountResource -- which is what places it behind resourcePermission and therefore behind the role
+// matrix: reads need permRead on "guest-device-self-service", writes need permWrite.
+//
+// The matrix (auth.go, and docs/ROLE_AND_SCOPE_MATRIX.md §3, which agree by test) gives write to
+// hotel_it_manager and site_admin, read to the two desk roles and the two read-only roles, and nothing to
+// voucher_operator. That is auth-methods' shape, deliberately: which capabilities the property offers its
+// guests is a configuration decision, not a desk action.
 func (s *server) guestDeviceSelfServiceRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.getGuestDeviceSetting)
