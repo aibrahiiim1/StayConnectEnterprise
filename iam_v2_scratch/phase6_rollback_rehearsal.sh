@@ -67,6 +67,7 @@ PHASE6_MIGRATIONS="
 0044_phase6_exhaustion_instant_lower_bound
 0045_phase6_over_budget_fail_closed
 0046_phase6_suspension_reason_is_not_terminal
+0047_phase6_guest_surface_can_resolve_a_device
 "
 
 # EVERY FILE MUST EXIST BEFORE ANYTHING RUNS. A rollback that discovers a missing down migration halfway

@@ -52,18 +52,28 @@ SCD_SOCK="/run/stayconnect/scd.sock"
 # The reserved identities, matching phase6-validation-scope.sql. Fixed rather than generated, and written down
 # in both places on purpose: teardown has to work from a cold start, including after a run that died before it
 # could record anything anywhere.
-readonly SYN_ENT="6d5f0000-0000-4000-8000-000000000302"
-readonly SYN_SESS="6d5f0000-0000-4000-8000-000000000401"
+# The reserved STAY is the anchor, because the entitlement cannot be: its transitions and its termination
+# evidence are append-only, so each run has to grant a new one. Everything the validation creates hangs off
+# this stay, and teardown works from that -- an identifier stronger than a marker, since it is a foreign key
+# to a row nothing else points at.
+readonly SYN_STAY="6d5f0000-0000-4000-8000-000000000102"
 readonly SYN_MAC_A="02:00:00:60:00:01"
 readonly SYN_MAC_B="02:00:00:60:00:02"
+SYN_ENT=""   # resolved after seeding
+SYN_SESS=""
 
 pass=0; fail=0
 BLACKHOLED=""
+HAD_PREREQ=""
 TEN=""; SITE=""; APPL=""; GIP=""
 ok(){ printf '  [PASS] %s\n' "$1"; pass=$((pass+1)); }
 no(){ printf '  [FAIL] %s :: %s\n' "$1" "${2:-}"; fail=$((fail+1)); }
 say(){ printf '\n== %s ==\n' "$1"; }
-q(){ docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -tAqc "$1" 2>&1; }
+# </dev/null MATTERS. `docker exec -i` inherits this shell's stdin, so calling q inside a `while read` loop
+# lets psql swallow the rest of the file being read. That is not theoretical: the writer-boundary grant looped
+# over two roles, granted svc_scd, and never saw the svc_acctd line -- so acctd spent the entire aggregate
+# section refusing to start while everything else looked configured.
+q(){ docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -tAqc "$1" </dev/null 2>&1; }
 
 guard_environment() {
   local host; host="$(hostname)"
@@ -91,7 +101,8 @@ capture_baseline() {
   for u in $UNITS; do
     cp -p "$ENV_DIR/${u#stayconnect-}.env" "$STATE_DIR/${u}.env.baseline" 2>/dev/null || true
   done
-  ok "baseline captured: dark release $(basename "$(cat "$STATE_DIR/ha_release")"), hash $(cut -c1-12 < "$STATE_DIR/ha_hash"), $(wc -l < "$STATE_DIR/settings" | tr -d ' ') setting row(s)"
+  capture_writer_prereq
+  ok "baseline captured: dark release $(basename "$(cat "$STATE_DIR/ha_release")"), hash $(cut -c1-12 < "$STATE_DIR/ha_hash"), $(wc -l < "$STATE_DIR/settings" | tr -d ' ') setting row(s), svc_scd writer grant=$HAD_PREREQ"
 }
 
 ha_hash() {
@@ -116,6 +127,7 @@ restore_flags() {
       sed -i '/^STAYCONNECT_PHASE6_/d' "$f" 2>/dev/null || true
     fi
   done
+  systemctl reset-failed $UNITS >/dev/null 2>&1
   systemctl restart $UNITS >/dev/null 2>&1 || true
   wait_for_scd || true
 }
@@ -157,24 +169,74 @@ restore_settings() {
 }
 
 teardown_scope() {
+  # ITS OUTPUT IS READ. The first version discarded it, so when the DO block aborted on a column that does not
+  # exist, teardown silently did nothing at all -- and the failure only surfaced a run later, as a unique-index
+  # collision on a grant that should have been ended. A cleanup nobody checked is a wish.
+  TEARDOWN_OUT=""
   if [ -f "$VALIDATION_DIR/phase6-validation-teardown.sql" ]; then
-    docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -v ON_ERROR_STOP=1 -q \
-      < "$VALIDATION_DIR/phase6-validation-teardown.sql" >/dev/null 2>&1
+    TEARDOWN_OUT="$(docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -v ON_ERROR_STOP=1 -q \
+      < "$VALIDATION_DIR/phase6-validation-teardown.sql" 2>&1)"
   fi
   # Belt and braces, and the reason is idempotence from a cold start: if the SQL file is not staged -- a run
   # that died before staging it, or a restore invoked on its own -- the reserved identities must still be made
   # inert. Same statements, same reserved ids, no parameters needed.
   q "DO \$\$
+     DECLARE r record;
      BEGIN
-       IF EXISTS (SELECT 1 FROM iam_v2.entitlements WHERE id='$SYN_ENT' AND status <> 'TERMINATED') THEN
-         PERFORM iam_v2.terminate_entitlement_at_boundary('$SYN_ENT', now(), 'ADMIN');
-       END IF;
+       FOR r IN SELECT id FROM iam_v2.entitlements WHERE stay_id='$SYN_STAY' AND status <> 'TERMINATED'
+       LOOP PERFORM iam_v2.terminate_entitlement_at_boundary(r.id, now(), 'ADMIN'); END LOOP;
        UPDATE iam_v2.sessions SET state='ended', ended=COALESCE(ended,now()),
               end_reason=COALESCE(end_reason,'ADMIN')
-        WHERE entitlement_id='$SYN_ENT' AND state IN ('active','PENDING_ENFORCEMENT');
-       UPDATE iam_v2.entitlement_devices SET status='RELEASED', released_at=COALESCE(released_at,now())
-        WHERE entitlement_id='$SYN_ENT' AND status='AUTHORIZED';
+        WHERE entitlement_id IN (SELECT id FROM iam_v2.entitlements WHERE stay_id='$SYN_STAY')
+          AND state IN ('active','PENDING_ENFORCEMENT');
+       UPDATE iam_v2.entitlement_devices SET status='DISCONNECTED',
+              disconnected_reason=COALESCE(disconnected_reason,'ADMIN')
+        WHERE entitlement_id IN (SELECT id FROM iam_v2.entitlements WHERE stay_id='$SYN_STAY')
+          AND status='AUTHORIZED';
      END \$\$;" >/dev/null
+}
+
+# ---- the Phase-3 writer-boundary prerequisite ----------------------------------------------------------------
+# scd verifies at startup that it can OPEN a controlled operation and refuses to serve the Phase-3 auth surface
+# if it cannot: "no EXECUTE on iam_v2.begin_controlled_operation(text), so every authoritative write in that
+# family would be refused at the first attempt". On this appliance svc_scd has never held that grant, because
+# the Phase-3 auth arm has never been enabled here. Validating the Phase-6 guest surface means the prerequisite
+# has to be real, so it is granted for the duration and revoked again -- recorded like everything else, so
+# restoration puts back what was actually there rather than what it assumes.
+# BOTH RUNTIME ROLES, because both check it at startup. acctd refuses for the same reason scd does -- "acctd:
+# refusing to start ... no EXECUTE on iam_v2.begin_controlled_operation(text)" -- and an appliance running the
+# aggregate capability with its accounting daemon dead is precisely the state in which a finite budget becomes
+# unlimited. Granting one and not the other would have produced exactly that, quietly.
+PREREQ_ROLES="svc_scd svc_acctd"
+
+capture_writer_prereq() {
+  local r v
+  : > "$STATE_DIR/writer_prereq"
+  HAD_PREREQ=""
+  for r in $PREREQ_ROLES; do
+    v="$(q "SELECT has_function_privilege('$r','iam_v2.begin_controlled_operation(text)','EXECUTE')")"
+    printf '%s %s
+' "$r" "$v" >> "$STATE_DIR/writer_prereq"
+    HAD_PREREQ="$HAD_PREREQ $r=$v"
+  done
+}
+
+grant_writer_prereq() {
+  local r v
+  while read -r r v; do
+    [ -n "${r:-}" ] || continue
+    [ "$v" = "f" ] || continue
+    q "GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO $r" >/dev/null
+  done < "$STATE_DIR/writer_prereq"
+}
+
+restore_writer_prereq() {
+  local r v
+  while read -r r v; do
+    [ -n "${r:-}" ] || continue
+    [ "$v" = "f" ] || continue
+    q "REVOKE EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) FROM $r" >/dev/null
+  done < "$STATE_DIR/writer_prereq" 2>/dev/null
 }
 
 restore_network() {
@@ -188,10 +250,16 @@ restore_network() {
 restore() {
   say "restoration (runs on success, failure and interruption)"
   restore_network;  ok "no blackhole route left behind by the local-first proof"
+  restore_writer_prereq; ok "the Phase-3 writer-boundary grant is back to its captured value"
   restore_flags;    ok "Phase-6 flag files restored to the captured baseline; services restarted"
   restore_hotel_admin; ok "Hotel Admin pointed at the captured DARK release"
   restore_settings; ok "per-appliance product settings restored through the audited writer"
-  teardown_scope;   ok "the reserved validation scope is inert (terminated through the boundary path)"
+  teardown_scope
+  case "$TEARDOWN_OUT" in
+    *P6_SCOPE_INERT*) ok "the reserved validation scope is inert (terminated through the boundary path)" ;;
+    *) no "teardown did not reach an inert scope" "$(printf '%s' "$TEARDOWN_OUT" | head -2 | tr '
+' ' ')" ;;
+  esac
 }
 
 # ---- verification: the RUNTIME, not the files this script wrote ------------------------------------------------
@@ -251,9 +319,13 @@ verify_dark() {
 
   local live
   live="$(q "SELECT
-      (SELECT count(*) FROM iam_v2.entitlements WHERE id='$SYN_ENT' AND status <> 'TERMINATED')
-    + (SELECT count(*) FROM iam_v2.sessions WHERE entitlement_id='$SYN_ENT' AND state IN ('active','PENDING_ENFORCEMENT'))
-    + (SELECT count(*) FROM iam_v2.entitlement_devices WHERE entitlement_id='$SYN_ENT' AND status='AUTHORIZED')")"
+      (SELECT count(*) FROM iam_v2.entitlements WHERE stay_id='$SYN_STAY' AND status <> 'TERMINATED')
+    + (SELECT count(*) FROM iam_v2.sessions
+        WHERE entitlement_id IN (SELECT id FROM iam_v2.entitlements WHERE stay_id='$SYN_STAY')
+          AND state IN ('active','PENDING_ENFORCEMENT'))
+    + (SELECT count(*) FROM iam_v2.entitlement_devices
+        WHERE entitlement_id IN (SELECT id FROM iam_v2.entitlements WHERE stay_id='$SYN_STAY')
+          AND status='AUTHORIZED')")"
   [ "$live" = "0" ] && ok "no live synthetic entitlement, session or device binding remains at the reserved ids" \
     || { no "synthetic state is still live" "$live row(s)"; bad=1; }
 
@@ -313,6 +385,11 @@ set_flags() {   # set_flags FLAG [FLAG ...]  -- exactly this set, on every unit;
     sed -i '/^STAYCONNECT_PHASE6_/d; /^STAYCONNECT_PHASE3_MASTER=/d; /^STAYCONNECT_PHASE3_PMS_AUTH=/d' "$f"
     for n in "$@"; do printf '%s=true\n' "$n" >> "$f"; done
   done
+  # reset-failed FIRST. One step here deliberately produces a configuration scd refuses to start on, and
+  # systemd's start limiter then remembers those rapid failures: the NEXT restart is refused outright with
+  # "start request repeated too quickly", the unit stays down, and every later step fails for a reason that
+  # has nothing to do with the product. Clearing the counter is what makes the fail-closed proof survivable.
+  systemctl reset-failed $UNITS >/dev/null 2>&1
   systemctl restart $UNITS >/dev/null 2>&1
   # It REPORTS rather than judges. One step deliberately configures a combination the appliance must refuse to
   # start on, and a helper that recorded that refusal as a failure would turn the fail-closed proof upside
@@ -346,6 +423,9 @@ appliance_identity() {
 }
 
 seed_scope() {
+  # Teardown FIRST, from the host side. The scope file cannot include it: psql executes inside the container,
+  # where a host path does not exist.
+  teardown_scope
   docker exec -i "$PG" psql -U "$DBUSER" -d "$DB" -v ON_ERROR_STOP=1 -q \
     -v ten="$TEN" -v site="$SITE" -v appl="$APPL" -v gip="$GIP" \
     < "$VALIDATION_DIR/phase6-validation-scope.sql" 2>&1
@@ -365,7 +445,7 @@ route_code() {  # route_code <path> -> ONE HTTP status from the running scd
 # Reading it as "the route is gone" would let a genuinely-enabled appliance pass the final check.
 wait_for_scd() {
   local i=0
-  while [ "$i" -lt 30 ]; do
+  while [ "$i" -lt 60 ]; do
     [ "$(route_code /v1/phase6/devices/list)" != "000" ] && return 0
     i=$((i+1)); sleep 1
   done

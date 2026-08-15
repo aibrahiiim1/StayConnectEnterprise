@@ -252,6 +252,18 @@ eqv "PUBLIC cannot execute the suspension writer" \
 eqv "svc_acctd cannot change entitlement status directly" \
    "$(q "SELECT has_function_privilege('svc_acctd','iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)','EXECUTE')")" "f"
 
+# THE GUEST SURFACE MUST BE ABLE TO RESOLVE A DEVICE, AND NOTHING MORE (0047). Found on the appliance under
+# the real role: SELECT alone made every request fail on its first line with "permission denied for table
+# devices", because resolution is an upsert.
+eqv "svc_scd can insert a device"    "$(q "SELECT has_table_privilege('svc_scd','iam_v2.devices','INSERT')")" "t"
+eqv "svc_scd can advance last_seen"    "$(q "SELECT has_column_privilege('svc_scd','iam_v2.devices','last_seen','UPDATE')")" "t"
+eqv "svc_scd CANNOT delete a device"    "$(q "SELECT has_table_privilege('svc_scd','iam_v2.devices','DELETE')")" "f"
+eqv "svc_scd CANNOT move a device between tenants"    "$(q "SELECT has_column_privilege('svc_scd','iam_v2.devices','tenant_id','UPDATE')")" "f"
+eqv "svc_scd CANNOT move a device between appliances"    "$(q "SELECT has_column_privilege('svc_scd','iam_v2.devices','appliance_id','UPDATE')")" "f"
+eqv "svc_scd can read entitlements"    "$(q "SELECT has_table_privilege('svc_scd','iam_v2.entitlements','SELECT')")" "t"
+eqv "svc_scd CANNOT write an entitlement"    "$(q "SELECT has_table_privilege('svc_scd','iam_v2.entitlements','UPDATE')")" "f"
+eqv "svc_scd CANNOT rewrite a plan revision"    "$(q "SELECT has_table_privilege('svc_scd','iam_v2.service_plan_revisions','UPDATE')")" "f"
+
 # ...and the required POSITIVE privileges, because a gate that only asserts absences passes for a role that
 # cannot do its job either.
 for tbl in entitlements service_plan_revisions sessions session_online_watermarks; do
