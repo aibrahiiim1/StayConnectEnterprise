@@ -807,3 +807,150 @@ func TestReleaseRacesNewDeviceAtTheLimit(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// THE FIRST SETTING WRITE, CONCURRENTLY.
+//
+// p6_set_guest_device_self_service used to take the settings row FOR UPDATE, which orders nothing on an
+// appliance that has never been configured: there is no row to lock. Two concurrent first writes would each
+// read old_value as NULL and each record a transition from "unset", so the setting converged (the upsert is
+// idempotent) while the HISTORY claimed two independent first changes -- and the history is the only reason
+// the audit exists.
+//
+// The fix anchors the lock on the APPLIANCE identity, which always exists. This proves the audit's old/new
+// chain reflects the actual committed sequence.
+func TestConcurrentFirstSettingWriteProducesACoherentAuditChain(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	t.Cleanup(func() { clearSetting(ctx, p) })
+	clearSetting(ctx, p)
+
+	// TWO GOROUTINES WERE NOT ENOUGH. Fired together they passed with and without the fix, because the
+	// window between "read the absent row" and "insert it" is a few microseconds and the Go scheduler plus
+	// connection acquisition almost always serialized them. A race that only sometimes overlaps is a test
+	// that only sometimes tests anything -- the Phase-5 F9-i lesson again.
+	//
+	// So the overlap is FORCED. Writer A opens a transaction, calls the function and does NOT commit. Writer
+	// B then calls the function in its own transaction. Without the appliance anchor, B reads the absent row
+	// (READ COMMITTED sees nothing of A's uncommitted insert), records old_value = NULL, and only then blocks
+	// on the row -- so both rows claim to be the first change. With the anchor, B blocks BEFORE it reads, and
+	// therefore sees what A committed.
+	txA, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = txA.Rollback(ctx) }()
+	if _, err := txA.Exec(ctx, `SELECT iam_v2.p6_set_guest_device_self_service($1,$2,$3,$4,$5,$6,$7)`,
+		fixTenant, fixSite, fixAppliance, true, fixOperator, "writer-A", "first"); err != nil {
+		t.Fatalf("writer A: %v", err)
+	}
+
+	bDone := make(chan error, 1)
+	go func() {
+		txB, err := p.Begin(ctx)
+		if err != nil {
+			bDone <- err
+			return
+		}
+		defer func() { _ = txB.Rollback(ctx) }()
+		if _, err := txB.Exec(ctx, `SELECT iam_v2.p6_set_guest_device_self_service($1,$2,$3,$4,$5,$6,$7)`,
+			fixTenant, fixSite, fixAppliance, false, fixOperator, "writer-B", "second"); err != nil {
+			bDone <- err
+			return
+		}
+		bDone <- txB.Commit(ctx)
+	}()
+
+	// Give B time to reach the function and block (or, without the fix, to read past it).
+	time.Sleep(150 * time.Millisecond)
+	if err := txA.Commit(ctx); err != nil {
+		t.Fatalf("writer A commit: %v", err)
+	}
+	select {
+	case err := <-bDone:
+		if err != nil {
+			t.Fatalf("writer B: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("writer B never completed")
+	}
+
+	rows, err := p.Query(ctx, `SELECT old_value, new_value, changed_by
+		FROM iam_v2.appliance_product_setting_changes WHERE appliance_id=$1 ORDER BY changed_at, id`, fixAppliance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type row struct {
+		old *bool
+		new bool
+		by  string
+	}
+	var got []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.old, &r.new, &r.by); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		got = append(got, r)
+	}
+	rows.Close()
+	if len(got) != 2 {
+		t.Fatalf("expected exactly two audit rows, got %d", len(got))
+	}
+
+	firsts := 0
+	for _, r := range got {
+		if r.old == nil {
+			firsts++
+		}
+	}
+	if firsts != 1 {
+		t.Fatalf("%d of 2 audit rows claim to be the FIRST change: the writers were not ordered", firsts)
+	}
+
+	// The chain must be continuous AND in the committed order: A committed first, so A is the first row and
+	// B must have observed A's value.
+	if got[0].by != "writer-A" {
+		t.Fatalf("the audit order does not reflect the committed order: first row is %q", got[0].by)
+	}
+	if got[1].old == nil || *got[1].old != got[0].new {
+		t.Fatalf("broken chain: A wrote %v, B recorded finding %v", got[0].new, got[1].old)
+	}
+
+	var on bool
+	if err := p.QueryRow(ctx, `SELECT guest_device_self_service FROM iam_v2.appliance_product_settings
+		WHERE appliance_id=$1`, fixAppliance).Scan(&on); err != nil {
+		t.Fatal(err)
+	}
+	if on != got[1].new {
+		t.Fatalf("the setting (%v) disagrees with the last audited change (%v)", on, got[1].new)
+	}
+}
+
+// clearSetting removes the fixture appliance's setting and audit so a first-write test really is first.
+func clearSetting(ctx context.Context, p *pgxpool.Pool) {
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, _ = tx.Exec(ctx, `ALTER TABLE iam_v2.appliance_product_setting_changes DISABLE TRIGGER p6_setting_changes_append_only`)
+	_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.appliance_product_setting_changes WHERE appliance_id=$1`, fixAppliance)
+	_, _ = tx.Exec(ctx, `ALTER TABLE iam_v2.appliance_product_setting_changes ENABLE TRIGGER p6_setting_changes_append_only`)
+	_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.appliance_product_settings WHERE appliance_id=$1`, fixAppliance)
+	_ = tx.Commit(ctx)
+}
+
+// The setting write must refuse an operator label the server did not resolve. "Somebody changed it" is not an
+// audit record, and an empty label is how that happens in practice.
+func TestSettingRefusesAnEmptyOperatorLabel(t *testing.T) {
+	p := pool(t)
+	s := New(p)
+	ctx := context.Background()
+	t.Cleanup(func() { clearSetting(ctx, p) })
+	if err := s.SetForAppliance(ctx, fixTenant, fixSite, fixAppliance, true,
+		fixOperator, "   ", "no label"); err == nil {
+		t.Fatal("a setting change was accepted with a blank operator label")
+	}
+}

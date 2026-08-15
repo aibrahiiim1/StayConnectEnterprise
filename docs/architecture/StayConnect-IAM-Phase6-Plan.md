@@ -82,6 +82,20 @@ the entitlement from that authenticated context and lists only its devices. Ther
 rule Phase 5 arrived at for post-stay, for the same reason: a parameter that does not exist cannot be
 validated wrongly.
 
+### 2.3a What is audited, exactly
+
+**`RELEASE` is audited in every outcome, including refusals. `LIST` is not audited at all.**
+
+The schema briefly named a `LIST` action that no code path ever wrote — a standing claim that a guest's list
+requests were investigable when nothing recorded one. Migration 0035 narrowed the action set to the truth
+rather than stretching the implementation to meet it: listing reads and changes nothing, and auditing reads
+would have required granting the guest surface a write on its own audit table, which is precisely the
+privilege the Phase-6 audit removed on purpose.
+
+Refusals are audited deliberately. A guest repeatedly attempting to release somebody else's device, or
+hammering one that keeps coming back online, is exactly the pattern an operator needs to see, and a log
+containing only what worked cannot show it.
+
 ### 2.4 Offline-only removal, re-checked atomically
 
 A device is **offline** when it holds no session in `active` or `PENDING_ENFORCEMENT`.

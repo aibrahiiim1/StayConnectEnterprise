@@ -131,6 +131,11 @@ func (s *Service) SetForAppliance(ctx context.Context, tenant, site, appliance s
 
 // ListOwnDevices returns the devices bound to the caller's OWN entitlement.
 //
+// LISTING IS NOT AUDITED, and the schema no longer claims it is. An earlier version of guest_device_actions
+// admitted a LIST action that no path ever wrote; migration 0035 narrowed the action set to RELEASE, which is
+// the only guest action that changes durable state. Auditing reads would also have meant granting this
+// surface a write on its own audit table -- exactly the privilege the Phase-6 audit removed on purpose.
+//
 // The entitlement is the one the server resolved from the authenticated context. Every row returned is
 // scoped by it in the WHERE clause, so "only your own devices" is a property of the query rather than of a
 // filter somebody has to remember to apply.
