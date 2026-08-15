@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sync/atomic"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,11 +32,13 @@ func pool(t *testing.T) *pgxpool.Pool {
 	return p
 }
 
-// macSeq hands out distinct MAC suffixes; device identity is (tenant, site, appliance, MAC), so two
-// fixtures sharing a MAC would be the SAME device and the tests would silently test one row twice.
-var macCounter atomic.Uint32
-
-func macSeq() uint32 { return macCounter.Add(1) }
+// macFromUUID derives a locally-administered MAC from a device uuid. Device identity is
+// (tenant, site, appliance, MAC), so two fixtures sharing a MAC would be the SAME device -- and that
+// uniqueness outlives the test process, which is why this is derived from the id rather than counted.
+func macFromUUID(id, prefix string) string {
+	h := strings.ReplaceAll(id, "-", "")
+	return fmt.Sprintf("%s:%s:%s:%s:%s:%s", prefix, h[0:2], h[2:4], h[4:6], h[6:8], h[8:10])
+}
 
 const (
 	fixTenant    = "11111111-1111-1111-1111-111111111111"
@@ -98,9 +100,11 @@ func seedDevice(t *testing.T, p *pgxpool.Pool, ent, sessionState string) string 
 	if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
 		t.Fatalf("replica: %v", err)
 	}
-	// The MAC is built in Go rather than from the uuid in SQL: reusing $1 as both a uuid and a text argument
-	// makes PostgreSQL deduce two different types for one parameter and refuse the statement outright.
-	mac := fmt.Sprintf("02:00:00:%02x:%02x:%02x", macSeq()&0xff, (macSeq()>>8)&0xff, (macSeq()>>16)&0xff)
+	// The MAC is DERIVED FROM THE DEVICE UUID, in Go. Two earlier attempts were wrong for different reasons:
+	// building it in SQL from $1 made PostgreSQL deduce two types for one parameter, and a process-local
+	// counter collided with devices left behind by previous runs, because device identity is
+	// (tenant, site, appliance, MAC) and that uniqueness outlives any one test process.
+	mac := macFromUUID(id, "02")
 	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.devices (id, tenant_id, site_id, appliance_id, mac, last_seen)
 		VALUES ($1,$2,$3,$4,$5::macaddr, now())`, id, fixTenant, fixSite, fixAppliance, mac); err != nil {
 		t.Fatalf("seed device: %v", err)
@@ -129,6 +133,83 @@ func seedDevice(t *testing.T, p *pgxpool.Pool, ent, sessionState string) string 
 	return id
 }
 
+// seedEntitlementWithLimit makes a live entitlement whose PINNED plan revision carries a real
+// max_concurrent_devices, so authorize_entitlement_device enforces a genuine limit rather than none.
+func seedEntitlementWithLimit(t *testing.T, p *pgxpool.Pool, limit int) string {
+	t.Helper()
+	ctx := context.Background()
+	var ent, spr string
+	if err := p.QueryRow(ctx, `SELECT gen_random_uuid()::text, gen_random_uuid()::text`).Scan(&ent, &spr); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE iam_v2.service_plan_revisions DISABLE TRIGGER ALL`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.service_plan_revisions
+		(id, tenant_id, site_id, service_plan_id, revision_no, name, down_kbps, up_kbps,
+		 max_concurrent_devices, device_limit_policy, idle_timeout_seconds, time_accounting_mode)
+		VALUES ($1,$2,$3, gen_random_uuid(), 1, 'limit-fixture', 1000, 1000, $4, 'REJECT_NEW_DEVICE', 900,
+		        'VALIDITY_WINDOW')`, spr, fixTenant, fixSite, limit); err != nil {
+		t.Fatalf("seed plan revision: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE iam_v2.service_plan_revisions ENABLE TRIGGER ALL`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE iam_v2.entitlements DISABLE TRIGGER ALL`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.entitlements
+		(id, tenant_id, site_id, voucher_id, purchase_id, policy_snapshot, service_plan_revision_id,
+		 package_revision_id, time_accounting_mode, end_mode, status)
+		VALUES ($1,$2,$3, gen_random_uuid(), gen_random_uuid(), '{}'::jsonb, $4, gen_random_uuid(),
+		        'VALIDITY_WINDOW','VALIDITY_WINDOW','ACTIVE')`, ent, fixTenant, fixSite, spr); err != nil {
+		t.Fatalf("seed entitlement: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE iam_v2.entitlements ENABLE TRIGGER ALL`); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanup(t, p, ent)
+		tx, err := p.Begin(ctx)
+		if err != nil {
+			return
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, _ = tx.Exec(ctx, `SET LOCAL session_replication_role = replica`)
+		_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.service_plan_revisions WHERE id=$1`, spr)
+		_ = tx.Commit(ctx)
+	})
+	return ent
+}
+
+// seedBareDevice makes a device with no binding at all: a genuine newcomer.
+func seedBareDevice(t *testing.T, p *pgxpool.Pool) string {
+	t.Helper()
+	ctx := context.Background()
+	var id string
+	if err := p.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	mac := macFromUUID(id, "06")
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.devices (id, tenant_id, site_id, appliance_id, mac, last_seen)
+		VALUES ($1,$2,$3,$4,$5::macaddr, now())`, id, fixTenant, fixSite, fixAppliance, mac); err != nil {
+		t.Fatalf("seed bare device: %v", err)
+	}
+	t.Cleanup(func() { _, _ = p.Exec(ctx, `DELETE FROM iam_v2.devices WHERE id=$1`, id) })
+	return id
+}
+
 func cleanup(t *testing.T, p *pgxpool.Pool, ent string) {
 	ctx := context.Background()
 	tx, err := p.Begin(ctx)
@@ -142,6 +223,8 @@ func cleanup(t *testing.T, p *pgxpool.Pool, ent string) {
 	_, _ = tx.Exec(ctx, `ALTER TABLE iam_v2.guest_device_actions ENABLE TRIGGER p6_guest_device_actions_append_only`)
 	_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.sessions WHERE entitlement_id=$1`, ent)
 	_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.entitlement_device_authorizations WHERE entitlement_id=$1`, ent)
+	_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.devices d WHERE d.id IN
+		(SELECT device_id FROM iam_v2.entitlement_devices WHERE entitlement_id=$1)`, ent)
 	_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.entitlement_devices WHERE entitlement_id=$1`, ent)
 	_, _ = tx.Exec(ctx, `DELETE FROM iam_v2.entitlements WHERE id=$1`, ent)
 	_ = tx.Commit(ctx)
@@ -494,36 +577,126 @@ func TestThrottleIsDurable(t *testing.T) {
 	}
 }
 
-// A release that races a session arriving must produce one coherent outcome, and never a released binding
-// with a live session on it.
-func TestReleaseRacingAnArrivingSession(t *testing.T) {
+// ---------------------------------------------------------------------------------------------------------
+// THE RACE, against the REAL admission path.
+//
+// The first version of this test created the competing session with a raw INSERT under
+// session_replication_role=replica, which disables the very triggers the invariant depends on -- so it proved
+// that a release and a fake admission do not collide, which is not the claim. Worse, it ACCEPTED the outcome
+// "release OK, binding DISCONNECTED, live session arriving after", and that final state is exactly what the
+// feature must never produce.
+//
+// admitDevice below goes through iam_v2.authorize_entitlement_device -- the primitive migration 0010 declares
+// to be one of only two approved ways to open an authorization interval, the one the real grant path in
+// staygrant.go calls, the one that takes the L3 entitlement lock in the global lock order and enforces the
+// device limit under it -- and then inserts the session with every trigger armed.
+
+// admitDevice performs a REAL device admission: authorize through the approved primitive, then open a
+// session, in one transaction, with no trigger disabled.
+func admitDevice(ctx context.Context, p *pgxpool.Pool, ent, dev string) error {
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`, ent, dev); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO iam_v2.sessions
+		(id, tenant_id, site_id, entitlement_id, device_id, state, started)
+		VALUES (gen_random_uuid(),$1,$2,$3,$4,'PENDING_ENFORCEMENT', now())`,
+		fixTenant, fixSite, ent, dev); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// assertNoReleasedBindingIsOnline is THE assertion. It fails if the database anywhere contains a
+// DISCONNECTED binding carrying an active or PENDING_ENFORCEMENT session.
+func assertNoReleasedBindingIsOnline(t *testing.T, p *pgxpool.Pool) {
+	t.Helper()
+	var n int
+	if err := p.QueryRow(context.Background(), `
+		SELECT count(*) FROM iam_v2.entitlement_devices ed
+		  JOIN iam_v2.sessions se ON se.entitlement_id = ed.entitlement_id AND se.device_id = ed.device_id
+		 WHERE ed.status = 'DISCONNECTED' AND se.state IN ('active','PENDING_ENFORCEMENT')`).Scan(&n); err != nil {
+		t.Fatalf("invariant query: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("FORBIDDEN STATE: %d released binding(s) carry a live session", n)
+	}
+}
+
+// The structural guard, stated on its own: a live session cannot be created on a released binding by ANY
+// writer, however it orders its statements.
+func TestLiveSessionCannotExistOnAReleasedBinding(t *testing.T) {
+	p := pool(t)
+	s := New(p)
+	ctx := context.Background()
+	ent := seedEntitlement(t, p)
+	dev := seedDevice(t, p, ent, "")
+
+	if out, err := s.Release(ctx, ent, dev); err != nil || out != OutcomeOK {
+		t.Fatalf("release: %s %v", out, err)
+	}
+	// A raw admission attempt with every trigger armed must be refused outright.
+	_, err := p.Exec(ctx, `INSERT INTO iam_v2.sessions
+		(id, tenant_id, site_id, entitlement_id, device_id, state, started)
+		VALUES (gen_random_uuid(),$1,$2,$3,$4,'active', now())`, fixTenant, fixSite, ent, dev)
+	if err == nil {
+		t.Fatal("a live session was created on a RELEASED binding")
+	}
+	assertNoReleasedBindingIsOnline(t, p)
+
+	// ...and a legitimate reconnect works, but only through the normal authorization path, which opens a NEW
+	// interval rather than reviving the closed one.
+	if err := admitDevice(ctx, p, ent, dev); err != nil {
+		t.Fatalf("legitimate re-admission was refused: %v", err)
+	}
+	var intervals, open int
+	if err := p.QueryRow(ctx, `SELECT count(*),
+		count(*) FILTER (WHERE deauthorized_at IS NULL)
+		FROM iam_v2.entitlement_device_authorizations WHERE entitlement_id=$1 AND device_id=$2`,
+		ent, dev).Scan(&intervals, &open); err != nil {
+		t.Fatal(err)
+	}
+	if intervals != 2 {
+		t.Fatalf("expected the closed interval PLUS a new one, got %d", intervals)
+	}
+	if open != 1 {
+		t.Fatalf("expected exactly one open interval after re-admission, got %d", open)
+	}
+	var status string
+	if err := p.QueryRow(ctx, `SELECT status FROM iam_v2.entitlement_devices
+		WHERE entitlement_id=$1 AND device_id=$2`, ent, dev).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "AUTHORIZED" {
+		t.Fatalf("re-admission did not restore the binding: %s", status)
+	}
+}
+
+// Release versus a REAL concurrent admission of the same device. Exactly one coherent outcome, and the
+// forbidden state must never appear.
+func TestReleaseRacesRealAdmission(t *testing.T) {
 	p := pool(t)
 	s := New(p)
 	ctx := context.Background()
 
-	for round := 0; round < 8; round++ {
+	var releaseWon, admissionWon int
+	for round := 0; round < 12; round++ {
 		ent := seedEntitlement(t, p)
 		dev := seedDevice(t, p, ent, "")
 
-		done := make(chan struct{})
+		admitErr := make(chan error, 1)
 		go func() {
-			defer close(done)
-			time.Sleep(2 * time.Millisecond)
-			tx, err := p.Begin(ctx)
-			if err != nil {
-				return
-			}
-			defer func() { _ = tx.Rollback(ctx) }()
-			_, _ = tx.Exec(ctx, `SET LOCAL session_replication_role = replica`)
-			_, _ = tx.Exec(ctx, `INSERT INTO iam_v2.sessions
-				(id, tenant_id, site_id, entitlement_id, device_id, state, started)
-				VALUES (gen_random_uuid(),$1,$2,$3,$4,'active', now())`, fixTenant, fixSite, ent, dev)
-			_ = tx.Commit(ctx)
+			time.Sleep(time.Duration(round%3) * time.Millisecond)
+			admitErr <- admitDevice(ctx, p, ent, dev)
 		}()
 		out, err := s.Release(ctx, ent, dev)
-		<-done
+		aerr := <-admitErr
 		if err != nil {
-			t.Fatalf("round %d: %v", round, err)
+			t.Fatalf("round %d release: %v", round, err)
 		}
 
 		var status string
@@ -535,13 +708,102 @@ func TestReleaseRacingAnArrivingSession(t *testing.T) {
 			ent, dev).Scan(&status, &live); err != nil {
 			t.Fatalf("round %d observe: %v", round, err)
 		}
+
 		switch {
-		case out == OutcomeOK && status == "DISCONNECTED":
-			// the release won; a session arriving afterwards is the ordinary reconnect case
-		case out == OutcomeRefusedOnline && status == "AUTHORIZED" && live > 0:
-			// the session won; the binding is untouched
+		case out == OutcomeOK && aerr != nil && status == "DISCONNECTED" && live == 0:
+			// (A) release won: the binding is released and the admission was refused outright.
+			releaseWon++
+		case out == OutcomeOK && aerr == nil && status == "AUTHORIZED" && live > 0:
+			// (A') release won, then the admission RE-AUTHORIZED through the approved primitive -- a new
+			// interval, a fresh device-limit check. That is a legitimate reconnect, not a survival of the
+			// released authorization, and the interval history proves which it was.
+			releaseWon++
+		case out == OutcomeRefusedOnline && aerr == nil && status == "AUTHORIZED" && live > 0:
+			// (B) admission won: the binding is untouched and the release observed the live session.
+			admissionWon++
 		default:
-			t.Fatalf("round %d: incoherent outcome=%s status=%s live=%d", round, out, status, live)
+			t.Fatalf("round %d incoherent: release=%s admitErr=%v status=%s live=%d",
+				round, out, aerr, status, live)
+		}
+		assertNoReleasedBindingIsOnline(t, p)
+	}
+	if releaseWon+admissionWon != 12 {
+		t.Fatalf("rounds did not classify: release=%d admission=%d", releaseWon, admissionWon)
+	}
+	t.Logf("release won %d, admission won %d, forbidden state never observed", releaseWon, admissionWon)
+}
+
+// BRANCH (B), DETERMINISTICALLY. The unbiased race above resolved to "release won" in every round, which is
+// exactly the situation Phase 5 hit with F9-i: an outcome that never occurs is an outcome never tested, and
+// tuning a sleep until it sometimes happens is not a proof. So the admission is committed FIRST, through the
+// real primitive, and the release must then observe it and refuse.
+func TestAdmissionWinsIsRefusedByRelease(t *testing.T) {
+	p := pool(t)
+	s := New(p)
+	ctx := context.Background()
+	ent := seedEntitlement(t, p)
+	dev := seedDevice(t, p, ent, "")
+
+	if err := admitDevice(ctx, p, ent, dev); err != nil {
+		t.Fatalf("real admission failed: %v", err)
+	}
+	out, err := s.Release(ctx, ent, dev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != OutcomeRefusedOnline {
+		t.Fatalf("branch B: release did not observe the admitted session: %s", out)
+	}
+	var status string
+	if err := p.QueryRow(ctx, `SELECT status FROM iam_v2.entitlement_devices
+		WHERE entitlement_id=$1 AND device_id=$2`, ent, dev).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "AUTHORIZED" {
+		t.Fatalf("branch B: the binding was modified by a refused release: %s", status)
+	}
+	assertNoReleasedBindingIsOnline(t, p)
+}
+
+// Release versus a NEW device admission at the max-device boundary. The limit must never be exceeded, even
+// transiently, and exactly one slot may be freed.
+func TestReleaseRacesNewDeviceAtTheLimit(t *testing.T) {
+	p := pool(t)
+	s := New(p)
+	ctx := context.Background()
+
+	for round := 0; round < 8; round++ {
+		ent := seedEntitlementWithLimit(t, p, 1)
+		held := seedDevice(t, p, ent, "")
+		newcomer := seedBareDevice(t, p)
+
+		admitErr := make(chan error, 1)
+		go func() { admitErr <- admitDevice(ctx, p, ent, newcomer) }()
+		out, err := s.Release(ctx, ent, held)
+		aerr := <-admitErr
+		if err != nil {
+			t.Fatalf("round %d release: %v", round, err)
+		}
+
+		var openIntervals int
+		if err := p.QueryRow(ctx, `SELECT count(*) FROM iam_v2.entitlement_device_authorizations
+			WHERE entitlement_id=$1 AND deauthorized_at IS NULL`, ent).Scan(&openIntervals); err != nil {
+			t.Fatal(err)
+		}
+		if openIntervals > 1 {
+			t.Fatalf("round %d: %d devices authorized against a limit of 1 (release=%s admit=%v)",
+				round, openIntervals, out, aerr)
+		}
+		assertNoReleasedBindingIsOnline(t, p)
+
+		// Exactly one slot freed: the released binding is DISCONNECTED exactly once, never twice.
+		var released int
+		if err := p.QueryRow(ctx, `SELECT count(*) FROM iam_v2.guest_device_actions
+			WHERE entitlement_id=$1 AND device_id=$2 AND outcome='OK'`, ent, held).Scan(&released); err != nil {
+			t.Fatal(err)
+		}
+		if released > 1 {
+			t.Fatalf("round %d: the slot was freed %d times", round, released)
 		}
 	}
 }

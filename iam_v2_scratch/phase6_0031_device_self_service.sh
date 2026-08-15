@@ -111,11 +111,18 @@ eq "REFUSALS are audited too, not just successes" \
 eq "the entitlement now holds ONE fewer AUTHORIZED slot" \
    "$(q "SELECT count(*) FROM iam_v2.entitlement_devices WHERE entitlement_id='$E1' AND status='AUTHORIZED'")" "2"
 
-# ---------------------------------------------------------------- RACE 1: offline -> online, concurrently
-# The device is offline when the release begins. A second transaction brings it online and commits while the
-# release is in flight. Exactly one of the two outcomes is acceptable, and BOTH must be coherent: either the
-# release won and the device is released with no live session, or the session won and the device is still
-# authorized. What must never happen is a released binding with a live session on it.
+# ---------------------------------------------------------------- RACE 1: lock behaviour only
+# WHAT THIS CASE DOES AND DOES NOT PROVE. It inserts the competing session under
+# session_replication_role=replica, which disables the very triggers the invariant depends on -- so it shows
+# how the release behaves when a row appears underneath it, and NOTHING about whether the real admission path
+# can produce a released binding with a live session on it.
+#
+# THE REAL PROOF IS IN GO: internal/deviceselfservice TestReleaseRacesRealAdmission and
+# TestLiveSessionCannotExistOnAReleasedBinding run the release against
+# iam_v2.authorize_entitlement_device -- the approved primitive the production grant path calls -- with every
+# trigger armed, and assert directly that no DISCONNECTED binding anywhere carries an active or
+# PENDING_ENFORCEMENT session. This case is kept because lock behaviour is still worth observing; it is
+# labelled so nobody reads it as the invariant.
 R1=$(q "SELECT gen_random_uuid()"); seed_dev "$E1" "$R1" c1 none
 docker exec -i "$C" psql -U postgres -d "$DB" -q >/dev/null 2>&1 <<SQL &
 BEGIN;
