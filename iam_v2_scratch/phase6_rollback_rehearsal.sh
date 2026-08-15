@@ -45,7 +45,69 @@ q(){ docker exec -i "$C" psql -U postgres -d "$DB" -tAqc "$1" 2>&1; }
 apply(){ docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -q < "$MIG/$1" 2>&1; }
 eqv(){ [ "$2" = "$3" ] && ok "$1" || no "$1" "expected '$3', got '$2'"; }
 
+# THE SEQUENCE, DEFINED ONCE. Down is this list reversed; up is this list in order. Two hand-maintained
+# lists is how a migration ends up skipped in one direction and not the other, and how a stray line-
+# continuation token (there was a literal "\n" in the down list) goes unnoticed because the runner only ever
+# looked at output text.
+PHASE6_MIGRATIONS="
+0030_phase6_foundation
+0031_phase6_guest_device_self_service
+0032_phase6_release_admission_serialization
+0033_phase6_runtime_least_privilege
+0034_phase6_policy_boundaries
+0035_phase6_setting_serialization_and_list_audit
+0036_phase6_aggregate_online_time
+0037_phase6_aggregate_window_and_exact_crossing
+0038_phase6_aggregate_respects_data_crossing
+0039_phase6_acctd_aggregate_privilege
+0040_phase6_acctd_expiry_writer
+0041_phase6_expiry_writer_derives_the_condition
+0042_phase6_exhaustion_instant_must_be_provable
+0043_phase6_exhaustion_instant_from_the_real_crossing
+0044_phase6_exhaustion_instant_lower_bound
+0045_phase6_over_budget_fail_closed
+0046_phase6_suspension_reason_is_not_terminal
+"
+
+# EVERY FILE MUST EXIST BEFORE ANYTHING RUNS. A rollback that discovers a missing down migration halfway
+# through is a rollback that cannot finish and cannot go back.
+preflight() {
+  local m missing=0 n=0
+  for m in $PHASE6_MIGRATIONS; do
+    n=$((n+1))
+    [ -f "$MIG/$m.up.sql" ]   || { no "migration file present" "$m.up.sql is missing";   missing=1; }
+    [ -f "$MIG/$m.down.sql" ] || { no "migration file present" "$m.down.sql is missing"; missing=1; }
+  done
+  [ "$missing" = "0" ] && ok "all $n Phase-6 migrations have an up and a down file" || return 1
+  # The list must be strictly ascending: a duplicated or out-of-order entry would run the sequence wrong in
+  # one direction and still look plausible in the log.
+  local sorted; sorted="$(printf '%s\n' $PHASE6_MIGRATIONS | sort -u | tr '\n' ' ')"
+  local given;  given="$(printf '%s\n' $PHASE6_MIGRATIONS | tr '\n' ' ')"
+  [ "$sorted" = "$given" ] && ok "the sequence is strictly ascending with no duplicates" \
+    || { no "the migration sequence is out of order or duplicated" "$given"; return 1; }
+  return 0
+}
+
+# apply_checked runs one migration and FAILS ON THE EXIT STATUS, not on whether the word ERROR appeared in
+# the output. The old runner grepped text, so a psql that could not start -- or a file that did not exist --
+# produced no "ERROR" line and was counted as a PASS.
+apply_checked() {
+  local m="$1" dir="$2" out rc
+  [ -f "$MIG/$m.$dir.sql" ] || { no "$m $dir" "file missing"; return 1; }
+  out="$(docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -q < "$MIG/$m.$dir.sql" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    no "$m $dir" "psql exit $rc: $(printf '%s' "$out" | head -1)"
+    return 1
+  fi
+  case "$out" in *ERROR*) no "$m $dir" "$(printf '%s' "$out" | head -1)"; return 1;; esac
+  ok "$m $dir"
+  return 0
+}
+
 echo "== Phase-6 rollback rehearsal =="
+
+preflight || { echo "PHASE6_ROLLBACK_REHEARSAL pass=$pass fail=$fail (preflight)"; exit 1; }
 
 # ---- 1. the precondition the runbook states, asserted rather than assumed --------------------------------
 live="$(q "SELECT count(*) FROM iam_v2.entitlements WHERE time_accounting_mode='AGGREGATE_ONLINE_TIME' AND status IN ('ACTIVE','PENDING','SUSPENDED')")"
@@ -74,23 +136,10 @@ forbidden="$(q "SELECT count(*) FROM iam_v2.entitlement_devices ed
 eqv "no released binding is carrying a live session before the guard is removed" "$forbidden" "0"
 
 # ---- 2. down, newest first ------------------------------------------------------------------------------
-for m in 0045_phase6_over_budget_fail_closed \
-         0044_phase6_exhaustion_instant_lower_bound \n         0043_phase6_exhaustion_instant_from_the_real_crossing \
-         0042_phase6_exhaustion_instant_must_be_provable \
-         0041_phase6_expiry_writer_derives_the_condition \
-         0040_phase6_acctd_expiry_writer \
-         0039_phase6_acctd_aggregate_privilege \
-         0038_phase6_aggregate_respects_data_crossing \
-         0037_phase6_aggregate_window_and_exact_crossing \
-         0036_phase6_aggregate_online_time \
-         0035_phase6_setting_serialization_and_list_audit \
-         0034_phase6_policy_boundaries \
-         0033_phase6_runtime_least_privilege \
-         0032_phase6_release_admission_serialization \
-         0031_phase6_guest_device_self_service \
-         0030_phase6_foundation; do
-  out="$(apply "$m.down.sql")"
-  case "$out" in *ERROR*) no "$m down" "$(echo "$out" | head -1)";; *) ok "$m down";; esac
+# DOWN: newest first, and the whole run stops at the first failure -- continuing past a failed down
+# migration would leave the schema in a state no list describes.
+for m in $(printf '%s\n' $PHASE6_MIGRATIONS | sort -r); do
+  apply_checked "$m" down || { echo "PHASE6_ROLLBACK_REHEARSAL pass=$pass fail=$fail (down aborted at $m)"; exit 1; }
 done
 
 # The aggregate surface is gone from the schema at this point.
@@ -111,23 +160,9 @@ eqv "the appliance scope anchor 0030 owned is gone with it" \
    "$(q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='appliances_tsi_anchor'")" "0"
 
 # ---- 3. back up, oldest first ---------------------------------------------------------------------------
-for m in 0030_phase6_foundation \
-         0031_phase6_guest_device_self_service \
-         0032_phase6_release_admission_serialization \
-         0033_phase6_runtime_least_privilege \
-         0034_phase6_policy_boundaries \
-         0035_phase6_setting_serialization_and_list_audit \
-         0036_phase6_aggregate_online_time \
-         0037_phase6_aggregate_window_and_exact_crossing \
-         0038_phase6_aggregate_respects_data_crossing \
-         0039_phase6_acctd_aggregate_privilege \
-         0040_phase6_acctd_expiry_writer \
-         0041_phase6_expiry_writer_derives_the_condition \
-         0042_phase6_exhaustion_instant_must_be_provable \
-         0043_phase6_exhaustion_instant_from_the_real_crossing \n         0044_phase6_exhaustion_instant_lower_bound \
-         0045_phase6_over_budget_fail_closed; do
-  out="$(apply "$m.up.sql")"
-  case "$out" in *ERROR*) no "$m re-up" "$(echo "$out" | head -1)";; *) ok "$m re-up";; esac
+# UP: oldest first, same list, same stop-on-failure rule.
+for m in $(printf '%s\n' $PHASE6_MIGRATIONS | sort); do
+  apply_checked "$m" up || { echo "PHASE6_ROLLBACK_REHEARSAL pass=$pass fail=$fail (re-apply aborted at $m)"; exit 1; }
 done
 
 # ---- 4. the system is back, in its CURRENT shape rather than a historical one ----------------------------
@@ -151,6 +186,8 @@ eqv "the guest release policy is back in its non-caller-selectable form" \
    "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_guest_release_device_policy'")" "1"
 eqv "the guest action set is narrowed again to RELEASE" \
    "$(q "SELECT count(*) FROM pg_constraint WHERE conname='guest_device_actions_action_check'")" "1"
+eqv "suspension closes children as SUSPENDED, not ENDED" \
+   "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_suspend_over_budget' AND pg_get_functiondef(p.oid) LIKE '%ENTITLEMENT_SUSPENDED%'")" "1"
 eqv "the fail-closed suspension writer is back" \
    "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_suspend_over_budget'")" "1"
 eqv "the exhaustion instant comes from the real crossing again" \

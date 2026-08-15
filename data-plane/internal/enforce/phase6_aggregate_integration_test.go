@@ -1726,6 +1726,19 @@ func TestIntegration_Phase6_UndatableOverBudgetLosesAccessWithoutFabricatedHisto
 		t.Fatalf("access survived: live sessions=%d authorized devices=%d", live, authorized)
 	}
 
+	// (1b) THE CHILD EVIDENCE SAYS WHAT HAPPENED TOO. A support query lands on the session row long before
+	// the transition history, so a device or session closed as ENTITLEMENT_ENDED would make the same false
+	// claim the parent was careful not to make, one level down and in the place people actually read.
+	var devReason, sessReason string
+	if err := p.QueryRow(ctx, `SELECT
+		 (SELECT disconnected_reason FROM iam_v2.entitlement_devices WHERE entitlement_id=$1 LIMIT 1),
+		 (SELECT end_reason FROM iam_v2.sessions WHERE id=$2)`, ent, ses).Scan(&devReason, &sessReason); err != nil {
+		t.Fatal(err)
+	}
+	if devReason != "ENTITLEMENT_SUSPENDED" || sessReason != "ENTITLEMENT_SUSPENDED" {
+		t.Fatalf("child rows claim the entitlement ended: device=%q session=%q", devReason, sessReason)
+	}
+
 	// (2) NO HISTORICAL CLAIM: not terminated, no terminal reason, no terminated_at, no TIME evidence.
 	var status, reason string
 	var terminatedAt *time.Time
