@@ -1,4 +1,0 @@
-commit bfec9fd2e3face48ec79c65e69da220f12ebac4a
-Date:   Sat Aug 15 14:44:32 2026 +0300
-
-    Phase 6 M3: wire the accrual tick into the one expiry sweep, and fix the fixtures 0032 caught
