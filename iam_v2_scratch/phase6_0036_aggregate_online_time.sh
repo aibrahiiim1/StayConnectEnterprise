@@ -281,6 +281,141 @@ case "$r" in *ERROR*) ok "skipped-interval evidence cannot be deleted";;
 r=$(q "SELECT has_function_privilege('public','iam_v2.p6_tick_online_time(uuid,uuid,timestamptz,int)','EXECUTE')")
 eq "PUBLIC cannot execute the accrual tick" "$r" "f"
 
+
+# =========================================================================================================
+# 0037: THE OUTER WINDOW AS A HARD CEILING, AND THE EXACT PIECEWISE CROSSING
+# =========================================================================================================
+#
+# Both are about WHICH TERMINAL CONDITION WINS, which is not a rounding question: it decides what the guest
+# is charged and what the evidence says happened to them. A total that is right to the second is still a
+# false account of the guest's stay if the instant is wrong.
+
+set_window(){ q "UPDATE iam_v2.entitlements SET window_ends_at = $2 WHERE id='$1'" >/dev/null; }
+crossing(){ q "SELECT exhausted_at FROM iam_v2.p6_tick_online_time('$T','$S', now(), ${2:-3600}) WHERE entitlement_id='$1'"; }
+secs_ago(){ q "SELECT round(extract(epoch from (now() - '$1'::timestamptz)))"; }
+
+# ---- W1. watermark before the window, sweep after it: only pre-window seconds are charged ---------------
+EW1=$(seed_ent 86400); SW1=$(seed_session "$EW1" 'active' '3 hours' '3 hours')
+set_window "$EW1" "now() - interval '1 hour'"
+tick 86400 >/dev/null
+c=$(consumed "$EW1")
+[ "$c" -ge 7190 ] && [ "$c" -le 7210 ] && ok "accrual stops at the outer window, not at the sweep (${c}s of 10800s elapsed)" \
+  || no "seconds after the outer window were charged" "consumed=$c, want ~7200"
+eq "...and the watermark did not move past the window" \
+   "$(q "SELECT (accounted_through <= (SELECT window_ends_at FROM iam_v2.entitlements WHERE id='$EW1')) FROM iam_v2.session_online_watermarks WHERE session_id='$SW1'")" "t"
+tick 86400 >/dev/null; tick 86400 >/dev/null
+eq "repeated sweeps after the window charge nothing more" "$(consumed "$EW1")" "$c"
+
+# ---- W2. the window wins with substantial budget left ---------------------------------------------------
+EW2=$(seed_ent 86400); SW2=$(seed_session "$EW2" 'active' '2 hours' '2 hours')
+set_window "$EW2" "now() - interval '30 minutes'"
+rows=$(q "SELECT count(*) FROM iam_v2.p6_tick_online_time('$T','$S', now(), 86400) WHERE entitlement_id='$EW2'")
+eq "an entitlement whose window ended with budget to spare reports NO exhaustion" "$rows" "0"
+c=$(consumed "$EW2")
+[ "$c" -lt 86400 ] && ok "consumption stays strictly below the budget (${c}s)" \
+  || no "the window case consumed the whole budget" "consumed=$c"
+
+# ---- W3. the window wins while the budget is very nearly exhausted --------------------------------------
+# 5400s of budget and 3600 billable seconds before the window: the budget WOULD have run out inside this
+# tick had the window not ended first.
+EW3=$(seed_ent 5400); SW3=$(seed_session "$EW3" 'active' '2 hours' '2 hours')
+set_window "$EW3" "now() - interval '1 hour'"
+q "UPDATE iam_v2.entitlements SET consumed_online_seconds = 1700 WHERE id='$EW3'" >/dev/null
+rows=$(q "SELECT count(*) FROM iam_v2.p6_tick_online_time('$T','$S', now(), 86400) WHERE entitlement_id='$EW3'")
+c=$(consumed "$EW3")
+eq "a near-exhausted entitlement whose window ended first reports no exhaustion" "$rows" "0"
+[ "$c" -lt 5400 ] && ok "...and its consumption is strictly below the budget (${c}s of 5400s)" \
+  || no "the window case reached the budget anyway" "consumed=$c"
+eq "...and no crossing instant was stamped" \
+   "$(q "SELECT online_time_exhausted_at IS NULL FROM iam_v2.entitlements WHERE id='$EW3'")" "t"
+
+# ---- W4. the budget runs out just BEFORE the window: exhaustion wins, at its true instant ---------------
+EW4=$(seed_ent 600); SW4=$(seed_session "$EW4" 'active' '1 hour' '1 hour')
+set_window "$EW4" "now() + interval '10 minutes'"
+x=$(crossing "$EW4" 86400)
+age=$(secs_ago "$x")
+[ -n "$age" ] && [ "$age" -ge 2985 ] && [ "$age" -le 3015 ] && \
+  ok "exhaustion is dated at the true crossing, ${age}s ago (600s into a 3600s billable interval)" \
+  || no "the crossing instant is wrong" "age=${age:-none}, want ~3000"
+eq "...and consumption is capped at the budget" "$(consumed "$EW4")" "600"
+x2=$(crossing "$EW4" 86400)
+eq "a later sweep reports the same instant" "$x2" "$x"
+eq "...and charges nothing more" "$(consumed "$EW4")" "600"
+
+# ---- C1. staggered watermarks: A observed 60s, B observed 10s, small remaining budget --------------------
+# A burns alone from -60s to -10s (50 seconds), then A+B burn together at 2/s. With 60 seconds of budget the
+# first 50 are spent by t=-10s and the last 10 take five seconds at the doubled rate, so the crossing is 5
+# SECONDS AGO. The old approximation -- remaining / active-session-count, from the earliest start -- would
+# answer 60/2 = 30 seconds after -60s, i.e. 30 seconds ago: six times too early, and on the wrong side of
+# anything that happened in between.
+EC1=$(seed_ent 60)
+A1=$(seed_session "$EC1" 'active' '60 seconds' '60 seconds'); B1=$(seed_session "$EC1" 'active' '10 seconds' '10 seconds')
+x=$(crossing "$EC1" 86400)
+age=$(secs_ago "$x")
+[ -n "$age" ] && [ "$age" -ge 2 ] && [ "$age" -le 9 ] &&   ok "staggered starts cross at the piecewise rate change (${age}s ago, not the naive 30s)"   || no "the crossing ignored the rate change" "age=${age:-none}, want ~5"
+eq "...and consumption is capped at the budget" "$(consumed "$EC1")" "60"
+
+# ---- C2. two sessions, different watermarks, budget NOT exhausted: device-minutes still add up ------------
+EC2=$(seed_ent 86400)
+A2=$(seed_session "$EC2" 'active' '60 seconds' '60 seconds'); B2=$(seed_session "$EC2" 'active' '10 seconds' '10 seconds')
+tick 86400 >/dev/null
+c=$(consumed "$EC2")
+[ "$c" -ge 66 ] && [ "$c" -le 74 ] && ok "shared device-minutes sum the real billable intervals (${c}s = 60 + 10)" \
+  || no "staggered device-minutes are wrong" "consumed=$c, want ~70"
+
+# ---- C3. a contributor ENDS inside the billable interval -------------------------------------------------
+# A observed 100s, still active; B observed 100s, ended 50s ago. 2/s for 50s, then 1/s.
+# 130 remaining => 100 + 30 => 30s after B left = 20s ago.
+EC3=$(seed_ent 130)
+A3=$(seed_session "$EC3" 'active' '100 seconds' '100 seconds'); B3=$(seed_session "$EC3" 'active' '100 seconds' '100 seconds')
+q "UPDATE iam_v2.sessions SET state='ended', ended=now() - interval '50 seconds' WHERE id='$B3'" >/dev/null
+x=$(crossing "$EC3" 86400)
+age=$(secs_ago "$x")
+[ -n "$age" ] && [ "$age" -ge 16 ] && [ "$age" -le 24 ] && \
+  ok "a contributor ending mid-tick changes the burn rate at its end (${age}s ago)" \
+  || no "the crossing ignored a contributor ending" "age=${age:-none}, want ~20"
+
+# ---- C4. an ended session contributes only through its real end ------------------------------------------
+EC4=$(seed_ent 86400); B4=$(seed_session "$EC4" 'active' '300 seconds' '300 seconds')
+q "UPDATE iam_v2.sessions SET state='ended', ended=now() - interval '200 seconds' WHERE id='$B4'" >/dev/null
+tick 86400 >/dev/null
+c=$(consumed "$EC4")
+[ "$c" -ge 96 ] && [ "$c" -le 104 ] && ok "an ended session contributes only up to its end (${c}s)" \
+  || no "time after a session ended was charged" "consumed=$c, want ~100"
+
+# ---- C5. three overlapping devices with different boundaries ---------------------------------------------
+# A: observed 90s active. B: observed 60s active. C: observed 90s, ended 30s ago.
+# [90..60) 2/s = 60 ; [60..30) 3/s = 90 ; [30..0) 2/s. Budget 200 => 150 by t=-30, then 50 at 2/s => 5s ago.
+EC5=$(seed_ent 200)
+A5=$(seed_session "$EC5" 'active' '90 seconds' '90 seconds')
+B5=$(seed_session "$EC5" 'active' '60 seconds' '60 seconds')
+C5=$(seed_session "$EC5" 'active' '90 seconds' '90 seconds')
+q "UPDATE iam_v2.sessions SET state='ended', ended=now() - interval '30 seconds' WHERE id='$C5'" >/dev/null
+x=$(crossing "$EC5" 86400)
+age=$(secs_ago "$x")
+[ -n "$age" ] && [ "$age" -ge 2 ] && [ "$age" -le 9 ] && \
+  ok "three staggered contributors cross where the piecewise rates say (${age}s ago)" \
+  || no "the three-contributor crossing is wrong" "age=${age:-none}, want ~5"
+eq "...and consumption is capped at the budget" "$(consumed "$EC5")" "200"
+
+# ---- C6. a crossing close to the outer-window boundary ----------------------------------------------------
+# Budget 100, session observed 200s, window ended 90s ago: billable [200s..90s] = 110s, so the budget runs
+# out 100s in -- 10 seconds BEFORE the window. Exhaustion must win and be dated there, not at the window.
+EC6=$(seed_ent 100); A6=$(seed_session "$EC6" 'active' '200 seconds' '200 seconds')
+set_window "$EC6" "now() - interval '90 seconds'"
+x=$(crossing "$EC6" 86400)
+age=$(secs_ago "$x")
+[ -n "$age" ] && [ "$age" -ge 96 ] && [ "$age" -le 104 ] && \
+  ok "a crossing just inside the window is dated at the crossing, not the window (${age}s ago)" \
+  || no "a crossing near the window boundary is wrong" "age=${age:-none}, want ~100"
+eq "...and consumption is exactly the budget" "$(consumed "$EC6")" "100"
+
+# ---- C7. the observation bound still limits the crossing --------------------------------------------------
+EC7=$(seed_ent 1000); A7B=$(seed_session "$EC7" 'active' '6 hours' '6 hours')
+rows=$(q "SELECT count(*) FROM iam_v2.p6_tick_online_time('$T','$S', now(), 300) WHERE entitlement_id='$EC7'")
+eq "the observation bound limits the crossing too: no exhaustion from unobserved time" "$rows" "0"
+eq "...and only the bound was charged" "$(consumed "$EC7")" "300"
+
 echo "------------------------------------------------------------"
 printf 'PHASE6_M3_AGGREGATE_ONLINE_TIME pass=%d fail=%d\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
