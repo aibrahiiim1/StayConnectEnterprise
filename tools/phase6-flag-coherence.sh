@@ -88,6 +88,27 @@ for svc in $SERVICES; do
 done
 [ "$fail" -eq 0 ] && ok "no child flag is set without its master"
 
+# ---- the cross-phase prerequisite -------------------------------------------------------------------------
+#
+# Aggregate ACQUISITION creates entitlements that something must then account for. The accrual itself is
+# data-driven and acctd carries a fallback owner precisely so a Phase-3 flag cannot stop it -- but acctd has
+# to be RUNNING, and an appliance offering the mode with its accounting daemon disabled is the state that
+# turns a finite budget unlimited. So the check is here rather than left to inference.
+agg_on=false
+for svc in $SERVICES; do
+  [ "${seen["$svc|STAYCONNECT_PHASE6_AGGREGATE_ONLINE_TIME"]}" = "on" ] && agg_on=true
+done
+if [ "$agg_on" = "true" ]; then
+  if [ -n "${PHASE6_ENV_DIR:-}" ]; then
+    ok "aggregate is ON; acctd's runtime state is verified on the appliance rather than from env files"
+  else
+    st="$(systemctl is-active stayconnect-acctd 2>/dev/null || true)"
+    [ "$st" = "active" ] && ok "aggregate is ON and stayconnect-acctd is active (the budgets have an owner)"       || no "aggregate is ON but stayconnect-acctd is $st"             "an appliance may not offer online-time budgets it is not accounting"
+  fi
+else
+  ok "aggregate is OFF everywhere; no accounting prerequisite applies"
+fi
+
 echo "------------------------------------------------------------"
 printf 'PHASE6_FLAG_COHERENCE pass=%d fail=%d\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

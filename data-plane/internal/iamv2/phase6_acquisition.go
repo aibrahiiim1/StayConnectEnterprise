@@ -11,12 +11,13 @@ import "strings"
 //
 // So the rule lives here once, and every acquisition path calls it.
 //
-// WHAT THE RULE PROTECTS. An AGGREGATE_ONLINE_TIME entitlement is only meaningful if something is consuming
-// its budget. That consumption is acctd's aggregate tick, which does not run while the Phase-6 aggregate
-// flag is off. An entitlement created in that mode on such a build would never consume, never exhaust, and
-// never end -- an unlimited package by accident, on a runtime that cannot account for it. Refusing to create
-// it is the only honest answer, and refusing is safe: nothing is lost, the guest simply does not get access
-// this build cannot measure.
+// WHAT THE RULE PROTECTS, AND WHAT IT DOES NOT. It decides whether a NEW acquisition may be created in a
+// mode this deployment has not enabled. It does NOT decide whether existing entitlements are accounted for:
+// acctd's accrual is data-driven and runs for anything already in that mode whatever this flag says, which
+// is the safety property that stops a disabled capability from turning a finite budget unlimited.
+//
+// So the refusal is about offering something the operator has not asked to offer, and it is free: nothing
+// durable is lost, and the guest simply does not get a package this appliance was not configured to sell.
 //
 // WHAT THE RULE DELIBERATELY DOES NOT DO. It says nothing about anything already durable. An immutable
 // AGGREGATE_ONLINE_TIME plan revision keeps existing and keeps its meaning, entitlements granted earlier

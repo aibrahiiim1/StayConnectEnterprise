@@ -26,13 +26,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/deviceselfservice"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
@@ -48,56 +46,8 @@ type p6E2E struct {
 	operator string
 }
 
-// claimFreeFixtureNet points the shared fixture generator at a guest subnet that is NOT already present in
-// this database.
-//
-// The generator numbers subnets from a process-local counter, which is correct within one run and wrong
-// across runs: a disposable database that has been used before already holds 10.77.1.0/24 and its
-// neighbours, and the appliance resolves a device's network by "which enabled subnet contains this address".
-// Two networks with one subnet make that answer arbitrary, and the symptom is not a clear failure -- it is a
-// resolution that lands in another run's tenant and then trips a foreign key.
-//
-// It is deliberately scoped to THIS file rather than pushed into the shared fixture. One of the Phase-3
-// activation tests depends on two fixtures sharing a traffic class, so per-fixture subnets would break its
-// premise -- and quietly changing what a Phase-3 regression tests is not a thing to do while landing Phase 6.
-func claimFreeFixtureNet(t *testing.T) {
-	t.Helper()
-	dsn := os.Getenv("PHASE3_TEST_DSN")
-	if dsn == "" {
-		return // the fixture itself will skip
-	}
-	ctx := context.Background()
-	p, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		return
-	}
-	defer p.Close()
-	rows, err := p.Query(ctx,
-		`SELECT DISTINCT split_part(host(network(subnet_cidr)), '.', 3)::int
-		   FROM public.guest_networks WHERE subnet_cidr <<= '10.77.0.0/16'`)
-	if err != nil {
-		return
-	}
-	defer rows.Close()
-	used := map[int]bool{}
-	for rows.Next() {
-		var n int
-		if err := rows.Scan(&n); err == nil {
-			used[n] = true
-		}
-	}
-	for n := 1; n < 200; n++ {
-		if !used[n] {
-			fixtureSeq.Store(int64(n - 1)) // the generator's next Add(1) yields n
-			return
-		}
-	}
-	t.Skip("no free 10.77.x fixture subnet remains in this database")
-}
-
 func newP6E2E(t *testing.T) *p6E2E {
 	t.Helper()
-	claimFreeFixtureNet(t)
 	f := newAuthFixture(t)
 	t.Cleanup(f.startEnforcementOwner(t))
 	ctx := context.Background()

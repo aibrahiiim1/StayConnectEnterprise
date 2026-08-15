@@ -53,10 +53,12 @@ func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool, ctxs: authctx.Ne
 // WithAggregateOnlineTime declares whether this process may create NEW entitlements whose effective time
 // mode is AGGREGATE_ONLINE_TIME. Default OFF, and off means REFUSE the grant.
 //
-// The reason is not policy, it is arithmetic: acctd performs no aggregate accrual while the Phase-6
-// aggregate flag is off, so an entitlement created in that mode would never consume its budget and never
-// exhaust -- an unlimited package by accident, on a build that cannot account for it. Refusing to create it
-// is the only honest answer.
+// The reason is not policy, it is arithmetic. Accrual itself is DATA-DRIVEN and deliberately not gated on
+// this flag -- an entitlement that already exists keeps being accounted for whatever the flag says, because
+// not accounting it is what would turn a finite budget unlimited. What the flag decides is whether a NEW one
+// may be created here at all: a build whose operator has not turned the mode on has not asked to serve it,
+// and creating access this deployment was never configured to offer is not a decision a grant path gets to
+// make. Refusing is free -- nothing durable is lost.
 //
 // It deliberately does NOT touch anything already durable. An immutable AGGREGATE_ONLINE_TIME plan revision
 // keeps existing and keeps its meaning; entitlements already granted under it are not reinterpreted,
@@ -205,9 +207,10 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 		w := activatedAt.Add(time.Duration(windowSecs) * time.Second)
 		window = &w
 	}
-	// FAIL CLOSED ON A MODE THIS BUILD CANNOT ACCOUNT FOR. The revision is immutable and may legitimately
-	// carry AGGREGATE_ONLINE_TIME; what must not happen is a NEW entitlement in that mode on a process whose
-	// accrual is dark, because nothing would ever consume its budget.
+	// FAIL CLOSED ON A MODE THIS DEPLOYMENT HAS NOT ENABLED. The revision is immutable and may legitimately
+	// carry AGGREGATE_ONLINE_TIME; what must not happen is a NEW entitlement in that mode on an appliance
+	// whose operator has not turned the mode on. (Anything ALREADY in that mode continues to be accounted
+	// for regardless of this flag -- see the accounting owner in acctd.)
 	{
 		var mode string
 		if err := tx.QueryRow(ctx,

@@ -180,7 +180,14 @@ func main() {
 	// ADR-0002: acctd derives the plan; netd is the ONLY process that mutates Phase-3 tc state.
 	netdShaping := newNetdShaper(envOr("ACCTD_NETD_SOCKET", "/run/stayconnect/netd.sock"))
 	p3 := a.p3
+	// PHASE 6: the accounting owner of last resort. Constructed only when the Phase-3 arm is absent, so a
+	// normal deployment sweeps once per tick -- and an appliance whose Phase-3 flags are off still accounts
+	// for any aggregate entitlement it has already granted, instead of letting a finite budget become
+	// unlimited because of a flag belonging to another phase.
+	aggOwner := newAggregateOwner(p3, a.db, c.TenantID, assignedSite,
+		aggregateChargeBoundSeconds(c.TickSeconds))
 	slog.Info("acctd phase3 arm", "flags", pmsCfg.SafeFlagSummary(), "active", p3 != nil,
+		"phase6_fallback_accounting", aggOwner != nil,
 		"accounting_owner", map[bool]string{true: "phase3", false: "legacy"}[p3.ownsAccounting()])
 
 	tick := time.NewTicker(time.Duration(c.TickSeconds) * time.Second)
@@ -202,6 +209,7 @@ func main() {
 				slog.Debug("phase3: accounting samples ingested", "count", n)
 			}
 			p3.enforceExpiries(rootCtx)
+			aggOwner.sweep(rootCtx)
 			p3.reconcileShaping(rootCtx, netdShaping, c.LegacyBridge)
 			// Liveness heartbeat: proves the accounting loop is PROGRESSING (not
 			// just that the process is up) for the edged health supervisor — together with WHY it is

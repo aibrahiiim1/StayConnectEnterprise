@@ -1247,3 +1247,112 @@ func TestIntegration_Phase6_AStrandedExhaustionIsFoundByTheNextSweep(t *testing.
 		t.Fatalf("evidence says %q", cause)
 	}
 }
+
+// ---- an exhaustion instant must be provable ---------------------------------------------------------------
+//
+// The dangerous state is an aggregate entitlement whose consumption has reached the budget with no stamp: an
+// audited adjustment, or a restore that carried the counter forward. Both the tick and the writer used to
+// fall back to now(), which writes a historical fact nobody observed -- and then the termination, the
+// evidence row and every session end time inherit the invention.
+
+// seedExhaustedWithoutAStamp puts consumption at the budget through the audited adjustment path, optionally
+// WITHOUT recording the adjustment -- the undatable case.
+func seedExhaustedWithoutAStamp(t *testing.T, p *pgxpool.Pool, ent string, withAdjustment bool, adjAgo time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+	if withAdjustment {
+		var tenant, site string
+		if err := p.QueryRow(ctx, `SELECT tenant_id::text, site_id::text FROM iam_v2.entitlements WHERE id=$1`,
+			ent).Scan(&tenant, &site); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Exec(ctx, `INSERT INTO iam_v2.entitlement_adjustments
+			 (tenant_id, site_id, entitlement_id, field, old_value, new_value, reason, created_at)
+			 VALUES ($1,$2,$3,'consumed_online_seconds','0','60','TEST_ADJUSTMENT', now() - $4::interval)`,
+			tenant, site, ent, adjAgo.String()); err != nil {
+			t.Fatalf("seed adjustment: %v", err)
+		}
+	}
+	if _, err := p.Exec(ctx,
+		`UPDATE iam_v2.entitlements SET consumed_online_seconds = 60 WHERE id=$1`, ent); err != nil {
+		t.Fatalf("raise consumption: %v", err)
+	}
+}
+
+// UNDATABLE EXHAUSTION IS NOT A TERMINATION. Nothing may be claimed, stamped or evidenced.
+func TestIntegration_Phase6_UndatableExhaustionIsNeverFabricated(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	f, ent, ses := seedAggregate(t, p, 60, 5*time.Minute)
+	seedExhaustedWithoutAStamp(t, p, ent, false, 0)
+
+	due, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	for _, x := range due {
+		if x.EntitlementID == ent {
+			t.Fatalf("an exhaustion nobody can date was turned into a %s termination at %s", x.Reason, x.At)
+		}
+	}
+	status, _, _, _ := terminalState(t, p, ent)
+	if status == "TERMINATED" {
+		t.Fatal("the entitlement was terminated on an invented instant")
+	}
+	var stamped bool
+	var evidence int
+	if err := p.QueryRow(ctx, `SELECT
+		 (SELECT online_time_exhausted_at IS NOT NULL FROM iam_v2.entitlements WHERE id=$1),
+		 (SELECT count(*) FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id=$1)`,
+		ent).Scan(&stamped, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if stamped {
+		t.Fatal("a crossing instant was stamped with the clock of the tick that noticed")
+	}
+	if evidence != 0 {
+		t.Fatal("evidence was written for a termination that did not happen")
+	}
+	// The writer refuses it directly too, for the same reason.
+	if _, err := p.Exec(ctx, `SELECT * FROM iam_v2.p6_expire_entitlement($1)`, ent); err == nil {
+		t.Fatal("the writer terminated an entitlement whose exhaustion cannot be dated")
+	}
+	_ = ses
+}
+
+// ...AND A DATABLE ONE IS. The audited adjustment is the evidence, and its own timestamp is the instant.
+func TestIntegration_Phase6_AdjustmentDatedExhaustionIsHonoured(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	f, ent, _ := seedAggregate(t, p, 60, 5*time.Minute)
+	seedExhaustedWithoutAStamp(t, p, ent, true, 25*time.Minute)
+
+	due, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	found := false
+	for _, x := range due {
+		if x.EntitlementID == ent {
+			found = true
+			if x.Reason != "TIME" {
+				t.Fatalf("reason %q", x.Reason)
+			}
+			if age := time.Since(x.At); age < 23*time.Minute || age > 27*time.Minute {
+				t.Fatalf("ended %s ago, not at the adjustment's instant ~25 minutes ago", age)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("an exhaustion dated by an audited adjustment was not acted on")
+	}
+	var cause string
+	if err := p.QueryRow(ctx,
+		`SELECT cause_detail FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id=$1`,
+		ent).Scan(&cause); err != nil {
+		t.Fatalf("no evidence: %v", err)
+	}
+	if cause != "AGGREGATE_ONLINE_TIME_EXHAUSTED" {
+		t.Fatalf("evidence says %q", cause)
+	}
+}

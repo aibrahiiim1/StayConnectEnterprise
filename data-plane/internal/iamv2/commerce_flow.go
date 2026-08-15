@@ -122,7 +122,9 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 		}
 		// PHASE 6: a mode this runtime cannot account for is refused HERE, before a quote exists. The plan
 		// revision is immutable and may legitimately carry AGGREGATE_ONLINE_TIME; what must not happen is a
-		// new acquisition in that mode on a build whose accrual is dark.
+		// new acquisition in that mode on a deployment that has not enabled it. (Accrual for entitlements
+		// that already exist is data-driven and continues regardless -- that asymmetry is the safety
+		// property, not an oversight.)
 		if why := TimeModeAcquirable(snapshot.TimeAccountingMode, e.aggregateOnlineTime); why != "" {
 			res = quoteDeny(why)
 			return nil
