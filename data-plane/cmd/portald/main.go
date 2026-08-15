@@ -333,6 +333,14 @@ func (h *handler) routes() http.Handler {
 	// post-stay access exists on this appliance.
 	r.Post("/poststay/issue", h.postStayIssue)
 	r.Post("/auth/post-stay-pin", h.postStayAuth)
+
+	// Phase 6 (DARK): guest device self-service, mounted unconditionally for the same reason as Phase 3 and
+	// Phase 5 above. Whether the capability EXISTS is decided twice behind this layer -- scd does not mount
+	// its endpoints while the deployment gate is off, and refuses every request while the per-appliance
+	// setting is off -- so either way the guest gets the same uniform answer and the portal never reveals
+	// whether device management exists on this appliance.
+	r.Post("/devices/list", h.deviceList)
+	r.Post("/devices/release", h.deviceRelease)
 	r.Get("/api/auth-methods", h.authMethods)
 
 	// Phase 2 (DARK): guest commerce bridge routes are mounted ONLY when the portal surface is ON. While

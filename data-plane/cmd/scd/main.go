@@ -205,6 +205,7 @@ type server struct {
 	// an absent surface cannot be probed for behaviour the way a present-but-refusing one can.
 	p3auth     *phase3Auth
 	p5poststay *phase5PostStay
+	p6devices  *phase6Devices
 
 	// PMS registry is live-reloadable (phase 5.3). All readers must go
 	// through currentPMSReg(); the reload path atomically swaps it under
@@ -855,6 +856,28 @@ func main() {
 		slog.Info("phase5 post-stay guest routes mounted", "flags", p5cfg.SafeFlagSummary())
 	} else {
 		slog.Info("phase5 post-stay guest surface is DARK (routes absent)", "flags", p5cfg.SafeFlagSummary())
+	}
+
+	// ---- Phase 6: guest device self-service (DARK by default) ----------------------------------------
+	// Two controls, and this is only the first. The deployment gate decides whether the routes exist at all;
+	// the per-appliance product setting is read from the site database on every request inside the handler,
+	// so an operator turning the feature off takes effect without a restart and with no Central call.
+	p6cfg, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("phase6 configuration", "err", err)
+		os.Exit(1)
+	}
+	if p6cfg.DeviceGuestOn() && s.p3auth == nil {
+		slog.Error("phase6 guest device surface is enabled but the Phase-3 auth arm is off",
+			"phase6", p6cfg.SafeFlagSummary())
+		os.Exit(1)
+	}
+	if s.p6devices = newPhase6Devices(p6cfg, s, s.p3auth, c.ApplianceID); s.p6devices != nil {
+		r.Post("/v1/phase6/devices/list", s.p6devices.listHandler)
+		r.Post("/v1/phase6/devices/release", s.p6devices.releaseHandler)
+		slog.Info("phase6 guest device routes mounted", "flags", p6cfg.SafeFlagSummary())
+	} else {
+		slog.Info("phase6 guest device surface is DARK (routes absent)", "flags", p6cfg.SafeFlagSummary())
 	}
 
 	_ = os.MkdirAll("/run/stayconnect", 0o755)

@@ -196,3 +196,38 @@ func nullIfEmpty(s string) *string {
 	}
 	return &s
 }
+
+// EntitlementForDevice resolves the entitlement this device is currently authorized under.
+//
+// THIS IS THE WHOLE SUBJECT DERIVATION, and it takes nothing from any request. The caller supplies a device
+// identity that the server itself resolved from the source address and hardware address against its own
+// tables; from there the entitlement is whichever LIVE entitlement currently holds an AUTHORIZED binding for
+// that device. A guest cannot name an entitlement, a Stay, a room, a PMS interface or a profile, because no
+// parameter here would carry one.
+//
+// A device with no live authorized binding gets ErrNoEntitlement, which callers must render as the same
+// uniform non-success as everything else: "you have no access here" and "that device is not yours" must be
+// indistinguishable from outside.
+func (s *Service) EntitlementForDevice(ctx context.Context, tenant, site, device string) (string, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, `
+		SELECT e.id::text
+		  FROM iam_v2.entitlement_devices ed
+		  JOIN iam_v2.entitlements e ON e.id = ed.entitlement_id
+		 WHERE ed.tenant_id = $1 AND ed.site_id = $2 AND ed.device_id = $3
+		   AND ed.status = 'AUTHORIZED'
+		   AND e.status IN ('ACTIVE','PENDING','SUSPENDED')
+		 ORDER BY ed.last_authorized DESC NULLS LAST
+		 LIMIT 1`, tenant, site, device).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNoEntitlement
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve entitlement for device: %w", err)
+	}
+	return id, nil
+}
+
+// ErrNoEntitlement means this device holds no live authorized binding. It is a distinct error from a refusal
+// so the caller can log which happened, and it must NOT be distinguishable in anything the guest sees.
+var ErrNoEntitlement = errors.New("no live authorized entitlement for this device")

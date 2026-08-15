@@ -91,6 +91,7 @@ type server struct {
 	// the master flag is OFF the routes do not exist at all and edged issues zero Phase-3 SQL.
 	pmsCfg    iamv2.PMSConfig
 	phase5Cfg iamv2.Phase5Config
+	phase6    iamv2.Phase6Config
 
 	// Phase 4 DARK financial surface. financialCfg gates whether the Manual Review routes are mounted at
 	// all; while dark they do not exist, so an unmounted route cannot leak a financial schema that is not
@@ -237,6 +238,16 @@ func main() {
 	}
 	s.phase5Cfg = p5cfg
 	slog.Info("phase5 dark post-stay admin surface", "flags", p5cfg.SafeFlagSummary())
+
+	// Phase 6 (DARK). The operator setting surface is mounted under its own admin flag; the per-appliance
+	// PRODUCT setting it edits is a different control entirely, lives in the database, and defaults OFF.
+	p6cfg, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("phase6 configuration", "err", err)
+		os.Exit(1)
+	}
+	s.phase6 = p6cfg
+	slog.Info("phase6 dark guest-device surface", "flags", p6cfg.SafeFlagSummary())
 	slog.Info("phase3 dark pms admin surface", "flags", pmsCfg.SafeFlagSummary())
 	// Before any Phase-3 admin surface is served, prove the controlled-writer boundary is actually in force
 	// for this process. An operator publishing a grace policy through a UI that turns out to be writing raw
@@ -332,6 +343,14 @@ func main() {
 			// thereby asked to be able to end a guest's access and move it.
 			if s.phase5Cfg.TransferOn() {
 				mountResource(r, s, "stay-transfers", s.stayTransfersRoutes)
+			}
+			// Phase 6 (DARK): the per-appliance Guest Device Self-Service setting. Mounted only when the
+			// Phase-6 master AND its admin flag are on; while dark this path does not exist. Note the two
+			// controls are independent -- this mounts the SCREEN, and the screen edits a database setting
+			// that is OFF by default and governs the guest surface separately.
+			if s.phase6.DeviceAdminOn() {
+				r.Get("/phase6/settings/guest-device-self-service", s.getGuestDeviceSetting)
+				r.Put("/phase6/settings/guest-device-self-service", s.setGuestDeviceSetting)
 			}
 			// Phase 4 (DARK): Financial Manual Review. Mounted only when the Phase-4 master flag AND the
 			// review flag are both ON. The delivered configuration has both OFF, so this path does not
