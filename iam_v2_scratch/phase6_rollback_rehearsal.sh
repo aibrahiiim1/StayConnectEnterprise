@@ -11,14 +11,25 @@
 #              termination primitive directly
 #   0038 down  restores a tick that ignores an earlier DATA crossing
 #   0037 down  restores a tick that ignores the outer window and mis-dates the crossing
+#   0035 down  removes the appliance-anchored serialization of the first setting write and re-widens the
+#              guest action set
+#   0034 down  restores a release policy whose throttle the CALLER may choose, and returns direct setting
+#              writes to edged's role
+#   0033 down  removes the runtime least-privilege grants the slice was wired with
 #   0032 down  removes the structural guard, so a live session on a released binding becomes representable
+#              -- the load-bearing hazard the plan records
+#   0031 down  removes the guest release function and its append-only audit
+#   0030 down  removes the per-appliance setting, its audit, the online watermark and the termination
+#              evidence -- and with them the product state an appliance was operating on
 #
 # So the ORDER is the safety property, and this rehearsal proves it in that order:
 #
 #   1. the deployment flags go OFF and the guest/operator surfaces are gone
 #   2. accrual is quiesced -- no entitlement is left in the aggregate mode
-#   3. only then do the migrations come down, newest first
-#   4. and the system comes back up when they are re-applied
+#   3. the guest device capability is quiesced -- no appliance still offers it, and no released binding is
+#      carrying a live session, because 0032 down makes that state representable again
+#   4. only then do the migrations come down, newest first, THROUGH 0030
+#   5. and the whole slice comes back up when they are re-applied
 #
 # Disposable database only. It contacts no appliance and no Production database.
 set -uo pipefail
@@ -49,14 +60,34 @@ fi
 eqv "the schema still carries the Phase-6 guard that 0032 down would remove (so it is worth ordering)" \
    "$(q "SELECT count(*) FROM pg_trigger WHERE tgname='p6_session_requires_authorized_binding'")" "1"
 
+# THE 0032 PRECONDITIONS, checked rather than asserted. Its down migration makes "a live session on a
+# released binding" representable again, so the rollback may only proceed when no appliance is still offering
+# the capability that creates released bindings, and when no such pair exists right now.
+enabled="$(q "SELECT count(*) FROM iam_v2.appliance_product_settings WHERE guest_device_self_service")"
+[ "$enabled" = "0" ] && ok "no appliance still offers guest device self-service: the capability is quiesced" \
+  || no "the guest device capability is still ON somewhere" \
+        "$enabled appliance(s); rolling back 0032 underneath it would make the forbidden state representable"
+
+forbidden="$(q "SELECT count(*) FROM iam_v2.entitlement_devices ed
+                  JOIN iam_v2.sessions se ON se.entitlement_id = ed.entitlement_id AND se.device_id = ed.device_id
+                 WHERE ed.status='DISCONNECTED' AND se.state IN ('active','PENDING_ENFORCEMENT')")"
+eqv "no released binding is carrying a live session before the guard is removed" "$forbidden" "0"
+
 # ---- 2. down, newest first ------------------------------------------------------------------------------
-for m in 0042_phase6_exhaustion_instant_must_be_provable \
+for m in 0043_phase6_exhaustion_instant_from_the_real_crossing \
+         0042_phase6_exhaustion_instant_must_be_provable \
          0041_phase6_expiry_writer_derives_the_condition \
          0040_phase6_acctd_expiry_writer \
          0039_phase6_acctd_aggregate_privilege \
          0038_phase6_aggregate_respects_data_crossing \
          0037_phase6_aggregate_window_and_exact_crossing \
-         0036_phase6_aggregate_online_time; do
+         0036_phase6_aggregate_online_time \
+         0035_phase6_setting_serialization_and_list_audit \
+         0034_phase6_policy_boundaries \
+         0033_phase6_runtime_least_privilege \
+         0032_phase6_release_admission_serialization \
+         0031_phase6_guest_device_self_service \
+         0030_phase6_foundation; do
   out="$(apply "$m.down.sql")"
   case "$out" in *ERROR*) no "$m down" "$(echo "$out" | head -1)";; *) ok "$m down";; esac
 done
@@ -67,14 +98,32 @@ eqv "the accrual tick no longer exists after the aggregate rollback" \
 eqv "...and neither does the skipped-interval evidence table" \
    "$(q "SELECT to_regclass('iam_v2.online_time_skipped_intervals') IS NULL")" "t"
 
+# THE WHOLE SLICE IS GONE, which is what makes this the complete rollback rather than the aggregate half.
+eqv "the per-appliance setting table is gone" "$(q "SELECT to_regclass('iam_v2.appliance_product_settings') IS NULL")" "t"
+eqv "the guest device action audit is gone" "$(q "SELECT to_regclass('iam_v2.guest_device_actions') IS NULL")" "t"
+eqv "the session-binding guard is gone -- the 0032 hazard, now real" \
+   "$(q "SELECT count(*) FROM pg_trigger WHERE tgname='p6_session_requires_authorized_binding'")" "0"
+eqv "no Phase-6 function remains" \
+   "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname LIKE 'p6!_%' ESCAPE '!'")" "0"
+# The platform anchor 0030 created is removed with it -- and only if 0030 created it, which the marker records.
+eqv "the appliance scope anchor 0030 owned is gone with it" \
+   "$(q "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='appliances_tsi_anchor'")" "0"
+
 # ---- 3. back up, oldest first ---------------------------------------------------------------------------
-for m in 0036_phase6_aggregate_online_time \
+for m in 0030_phase6_foundation \
+         0031_phase6_guest_device_self_service \
+         0032_phase6_release_admission_serialization \
+         0033_phase6_runtime_least_privilege \
+         0034_phase6_policy_boundaries \
+         0035_phase6_setting_serialization_and_list_audit \
+         0036_phase6_aggregate_online_time \
          0037_phase6_aggregate_window_and_exact_crossing \
          0038_phase6_aggregate_respects_data_crossing \
          0039_phase6_acctd_aggregate_privilege \
          0040_phase6_acctd_expiry_writer \
          0041_phase6_expiry_writer_derives_the_condition \
-         0042_phase6_exhaustion_instant_must_be_provable; do
+         0042_phase6_exhaustion_instant_must_be_provable \
+         0043_phase6_exhaustion_instant_from_the_real_crossing; do
   out="$(apply "$m.up.sql")"
   case "$out" in *ERROR*) no "$m re-up" "$(echo "$out" | head -1)";; *) ok "$m re-up";; esac
 done
@@ -92,6 +141,16 @@ eqv "...and still holds NO write anywhere in iam_v2" \
    "$(q "SELECT count(*) FROM information_schema.role_table_grants WHERE table_schema='iam_v2' AND grantee='svc_acctd' AND privilege_type <> 'SELECT'")" "0"
 eqv "PUBLIC still cannot execute the writer" \
    "$(q "SELECT has_function_privilege('public','iam_v2.p6_expire_entitlement(uuid)','EXECUTE')")" "f"
+eqv "the session-binding guard is back" \
+   "$(q "SELECT count(*) FROM pg_trigger WHERE tgname='p6_session_requires_authorized_binding'")" "1"
+eqv "the per-appliance setting is back, and still defaults OFF" \
+   "$(q "SELECT column_default FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='appliance_product_settings' AND column_name='guest_device_self_service'")" "false"
+eqv "the guest release policy is back in its non-caller-selectable form" \
+   "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_guest_release_device_policy'")" "1"
+eqv "the guest action set is narrowed again to RELEASE" \
+   "$(q "SELECT count(*) FROM pg_constraint WHERE conname='guest_device_actions_action_check'")" "1"
+eqv "the exhaustion instant comes from the real crossing again" \
+   "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_exhaustion_instant'")" "1"
 
 echo "------------------------------------------------------------"
 printf 'PHASE6_ROLLBACK_REHEARSAL pass=%d fail=%d\n' "$pass" "$fail"

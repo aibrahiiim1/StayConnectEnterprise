@@ -48,8 +48,17 @@ case "$out" in *"$DUMP"*) ok "pg_dump produced a custom-format backup";; *) no "
 out="$(docker exec "$C" sh -c "psql -U postgres -d postgres -qAt -c 'DROP DATABASE $DB WITH (FORCE)' && \
   psql -U postgres -d postgres -qAt -c 'CREATE DATABASE $DB'" 2>&1)"
 case "$out" in *ERROR*) no "drop and recreate the database" "$out";; *) ok "the database was genuinely dropped and recreated";; esac
-docker exec "$C" sh -c "pg_restore -U postgres -d $DB --no-owner $DUMP" >/dev/null 2>&1
-ok "pg_restore completed"
+# pg_restore's own outcome, checked rather than announced. It was reported as a PASS unconditionally, which
+# would have called a completely failed restore a success -- and every assertion after it would then have been
+# measuring an empty database against expectations taken from the same empty database.
+restore_out="$(docker exec "$C" sh -c "pg_restore -U postgres -d $DB --no-owner $DUMP" 2>&1)"
+restore_rc=$?
+restore_errs="$(printf '%s\n' "$restore_out" | grep -c 'error:')"
+if [ "$restore_rc" -eq 0 ] && [ "$restore_errs" -eq 0 ]; then
+  ok "pg_restore completed with no errors"
+else
+  no "pg_restore" "exit $restore_rc, $restore_errs error line(s): $(printf '%s\n' "$restore_out" | grep 'error:' | head -2)"
+fi
 
 # ---- what survived ----------------------------------------------------------------------------------------
 eqv "every iam_v2 table is back" "$(q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2'")" "$before_tables"

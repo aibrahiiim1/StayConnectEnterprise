@@ -4,6 +4,7 @@ package enforce
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -1354,5 +1355,169 @@ func TestIntegration_Phase6_AdjustmentDatedExhaustionIsHonoured(t *testing.T) {
 	}
 	if cause != "AGGREGATE_ONLINE_TIME_EXHAUSTED" {
 		t.Fatalf("evidence says %q", cause)
+	}
+}
+
+// ---- the exhaustion instant is the ACTUAL crossing ---------------------------------------------------------
+//
+// Taking the earliest related adjustment answers "when did anything relevant happen", which is a different
+// question. An entitlement corrected harmlessly on Monday and actually spent on Friday would be dated
+// Monday, and four days of real access would be recorded as having happened after the entitlement ended.
+// Backdating is not a smaller error than inventing now(); it is the same error pointing the other way, and it
+// is harder to spot because the instant looks like evidence.
+
+// adjust records an audited counter change with its own before/after and instant, which is the only way
+// either counter moves outside accrual.
+func adjust(t *testing.T, p *pgxpool.Pool, f fixture, ent, field string, from, to int64, ago time.Duration) {
+	t.Helper()
+	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.entitlement_adjustments
+		 (tenant_id, site_id, entitlement_id, field, old_value, new_value, reason, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,'TEST_ADJUSTMENT', now() - $7::interval)`,
+		f.tenant, f.site, ent, field, fmt.Sprint(from), fmt.Sprint(to), ago.String()); err != nil {
+		t.Fatalf("adjustment: %v", err)
+	}
+}
+
+// adjustRaw is the same audited record for fields whose values are not numbers.
+func adjustRaw(t *testing.T, p *pgxpool.Pool, f fixture, ent, field, from, to string, ago time.Duration) {
+	t.Helper()
+	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.entitlement_adjustments
+		 (tenant_id, site_id, entitlement_id, field, old_value, new_value, reason, created_at)
+		 VALUES ($1,$2,$3,$4,$5,$6,'TEST_ADJUSTMENT', now() - $7::interval)`,
+		f.tenant, f.site, ent, field, from, to, ago.String()); err != nil {
+		t.Fatalf("adjustment: %v", err)
+	}
+}
+
+func exhaustionInstant(t *testing.T, p *pgxpool.Pool, ent string) *time.Time {
+	t.Helper()
+	var at *time.Time
+	if err := p.QueryRow(context.Background(),
+		`SELECT iam_v2.p6_exhaustion_instant($1)`, ent).Scan(&at); err != nil {
+		t.Fatalf("exhaustion instant: %v", err)
+	}
+	return at
+}
+
+// AN EARLIER, NON-EXHAUSTING ADJUSTMENT MUST NOT BE THE ANSWER.
+func TestIntegration_Phase6_CrossingIsTheAdjustmentThatActuallyExhausted(t *testing.T) {
+	p := pool(t)
+	f, ent, _ := seedAggregate(t, p, 600, 5*time.Minute) // 600s budget
+	// Monday: a harmless correction, nowhere near the budget.
+	adjust(t, p, f, ent, "consumed_online_seconds", 0, 100, 4*time.Hour)
+	// Friday: the adjustment that actually spends it.
+	adjust(t, p, f, ent, "consumed_online_seconds", 100, 600, 30*time.Minute)
+	if _, err := p.Exec(context.Background(),
+		`UPDATE iam_v2.entitlements SET consumed_online_seconds = 600 WHERE id=$1`, ent); err != nil {
+		t.Fatal(err)
+	}
+
+	at := exhaustionInstant(t, p, ent)
+	if at == nil {
+		t.Fatal("a crossing that the history plainly accounts for was reported as undatable")
+	}
+	age := time.Since(*at)
+	if age < 25*time.Minute || age > 35*time.Minute {
+		t.Fatalf("dated %s ago; the crossing was the 30-minute-old adjustment, not the 4-hour-old one", age)
+	}
+
+	// ...and the sweep ends it there, not four hours earlier.
+	due, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(context.Background(), f.tenant, f.site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range due {
+		if x.EntitlementID == ent {
+			if d := time.Since(x.At); d < 25*time.Minute || d > 35*time.Minute {
+				t.Fatalf("the entitlement was ended %s ago, backdated to an unrelated adjustment", d)
+			}
+		}
+	}
+}
+
+// A BUDGET CUT IS A CROSSING TOO, and is dated at the cut rather than at whenever consumption last moved.
+func TestIntegration_Phase6_LoweringTheBudgetUnderConsumptionIsTheCrossing(t *testing.T) {
+	p := pool(t)
+	f, ent, _ := seedAggregate(t, p, 600, 5*time.Minute)
+	adjust(t, p, f, ent, "consumed_online_seconds", 0, 500, 3*time.Hour) // still under 600
+	if _, err := p.Exec(context.Background(),
+		`UPDATE iam_v2.entitlements SET consumed_online_seconds = 500 WHERE id=$1`, ent); err != nil {
+		t.Fatal(err)
+	}
+	// A budget cut is a REPOINT to another immutable revision -- revisions themselves never change -- and the
+	// repoint is what the audit records.
+	var oldRev, newRev string
+	if err := p.QueryRow(context.Background(),
+		`SELECT service_plan_revision_id::text FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&oldRev); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.QueryRow(context.Background(), `INSERT INTO iam_v2.service_plan_revisions
+		 (id, tenant_id, site_id, service_plan_id, revision_no, down_kbps, up_kbps, max_concurrent_devices,
+		  device_limit_policy, time_accounting_mode, time_quota_seconds)
+		 SELECT gen_random_uuid(), r.tenant_id, r.site_id, r.service_plan_id, r.revision_no + 10,
+		        r.down_kbps, r.up_kbps, r.max_concurrent_devices, r.device_limit_policy,
+		        r.time_accounting_mode, 400
+		   FROM iam_v2.service_plan_revisions r WHERE r.id = $1 RETURNING id::text`, oldRev).Scan(&newRev); err != nil {
+		t.Fatalf("publish the smaller revision: %v", err)
+	}
+	adjustRaw(t, p, f, ent, "service_plan_revision_id", oldRev, newRev, 20*time.Minute)
+	if _, err := p.Exec(context.Background(),
+		`UPDATE iam_v2.entitlements SET service_plan_revision_id=$2 WHERE id=$1`, ent, newRev); err != nil {
+		t.Fatal(err)
+	}
+	at := exhaustionInstant(t, p, ent)
+	if at == nil {
+		t.Fatal("a budget cut below existing consumption was not recognised as a crossing")
+	}
+	if age := time.Since(*at); age < 15*time.Minute || age > 25*time.Minute {
+		t.Fatalf("dated %s ago; the crossing was the budget cut 20 minutes ago", age)
+	}
+}
+
+// A HISTORY THAT NEVER CROSSES LEAVES IT UNDATABLE, however exhausted the entitlement looks now.
+func TestIntegration_Phase6_UnaccountedExhaustionStaysUndatable(t *testing.T) {
+	p := pool(t)
+	f, ent, _ := seedAggregate(t, p, 600, 5*time.Minute)
+	// An adjustment that leaves it well below budget, and then a consumption value nothing explains.
+	adjust(t, p, f, ent, "consumed_online_seconds", 0, 100, 2*time.Hour)
+	if _, err := p.Exec(context.Background(),
+		`UPDATE iam_v2.entitlements SET consumed_online_seconds = 600 WHERE id=$1`, ent); err != nil {
+		t.Fatal(err)
+	}
+	if at := exhaustionInstant(t, p, ent); at != nil {
+		t.Fatalf("an unexplained exhaustion was dated %s, from a history that never crosses", at)
+	}
+	due, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(context.Background(), f.tenant, f.site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range due {
+		if x.EntitlementID == ent {
+			t.Fatalf("it was terminated anyway, at %s", x.At)
+		}
+	}
+	status, _, _, _ := terminalState(t, p, ent)
+	if status == "TERMINATED" {
+		t.Fatal("terminated on an instant nothing supports")
+	}
+}
+
+// THE TICK'S OWN STAMP ALWAYS WINS. It was computed inside the tick that crossed, which is better evidence
+// than any reconstruction, and a later adjustment must not move it.
+func TestIntegration_Phase6_TheTicksStampOutranksAdjustmentHistory(t *testing.T) {
+	p := pool(t)
+	f, ent, _ := seedAggregate(t, p, 60, 30*time.Minute)
+	if _, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(context.Background(), f.tenant, f.site); err != nil {
+		t.Fatal(err)
+	}
+	var stamped time.Time
+	if err := p.QueryRow(context.Background(),
+		`SELECT online_time_exhausted_at FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&stamped); err != nil {
+		t.Fatalf("the tick recorded no stamp: %v", err)
+	}
+	adjust(t, p, f, ent, "consumed_online_seconds", 60, 60, 90*time.Minute) // an older, irrelevant record
+	at := exhaustionInstant(t, p, ent)
+	if at == nil || !at.Equal(stamped) {
+		t.Fatalf("the stamp %s was overridden by adjustment history (%v)", stamped, at)
 	}
 }
