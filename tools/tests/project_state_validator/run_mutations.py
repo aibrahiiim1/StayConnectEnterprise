@@ -322,9 +322,14 @@ MUTATIONS = [
  ("M09 missing acceptance record", "governance/project-state.json",
    ("replace", [('"path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"',
                  '"path": "docs/acceptance/MISSING.md"')])),
+ # The registry was reformatted from one-entry-per-line to expanded JSON, so this mutation's old anchor --
+ # path and status on a single line -- stopped existing and the case failed as fixture drift instead of
+ # running. That is the failure mode a mutation suite exists to prevent in the code it tests, so it is worth
+ # naming here: for as long as it drifted, NOTHING was proving that the validator notices the permanent rule
+ # going missing. The anchor is now the path alone, which is what the mutation actually needs to change.
  ("M10 missing permanent rule", "governance/artifact-registry.json",
-   ("replace", [('"path": "docs/ZERO_STALE_LEFTOVERS_RULE.md", "status": "AUTHORITATIVE"',
-                 '"path": "docs/MISSING_RULE.md", "status": "AUTHORITATIVE"')])),
+   ("replace", [('"path": "docs/ZERO_STALE_LEFTOVERS_RULE.md"',
+                 '"path": "docs/MISSING_RULE.md"')])),
  ("M11 retained legacy item without removal gate", "governance/artifact-registry.json",
    ("replace", [('"removal_gate": "later separately-approved legacy-cleanup phase, AFTER the atomic complete-domain cutover + reconciliation"',
                  '"removal_gate": ""')])),
