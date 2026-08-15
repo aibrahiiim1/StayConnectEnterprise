@@ -1,0 +1,85 @@
+{
+  "transition_id": "T0057",
+  "seq": 57,
+  "timestamp": "2026-08-15T00:10:00Z",
+  "record_type": "PHASE_6_AUTHORIZED_AND_STARTED",
+  "previous_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "6",
+    "activity": "PHASE_6_IMPLEMENTATION_IN_PROGRESS_DARK",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "6",
+  "decision": "D25",
+  "new_decision_created": true,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner authorization of 2026-08-15 for complete end-to-end Phase-6 implementation and verified LIVE-DARK validation on the DEVELOPMENT appliance, executed as four substantial milestones with automatic continuation while gates are green, from authoritative master 09e67156fb6cb286fe47fe632a368a3c4e4c6d23.",
+  "history_note": "Phases 0, 1A, 1B, 2, 3, 4 and 5 are unchanged and remain ACCEPTED_AND_CLOSED, with every accepted limitation preserved and none promoted. T0044 through T0056 are unchanged. Phase 5 is FINAL for implementation purposes and is not reopened or redesigned by this phase.",
+  "baseline": {
+    "master_head": "09e67156fb6cb286fe47fe632a368a3c4e4c6d23",
+    "branch": "phase/6-device-selfservice-and-time-modes",
+    "latest_governance_correction_before_start": "T0055",
+    "pre_live_clarification": "T0056 (D24)"
+  },
+  "scope": {
+    "guest_device_self_service": {
+      "optionality": "OPTIONAL PER APPLIANCE, via a persistent local setting managed from the Hotel Admin settings surface. DEFAULT OFF.",
+      "local_first": "The setting is local-first and must behave correctly with no Central Control Plane connectivity.",
+      "when_off": "The guest device-management capability is not exposed to the guest, and ordinary authentication and device-limit behaviour is unchanged.",
+      "when_on": [
+        "an already authenticated guest may view ONLY devices belonging to that guest's own current authorized entitlement/subject",
+        "the guest may remove ONLY an OFFLINE device; an ONLINE device is never removable by guest self-service",
+        "the offline state is re-checked ATOMICALLY at mutation time so an offline-to-online race fails safely",
+        "removal frees that entitlement's device slot but MUST NOT delete device identity, accounting history, authorization history, audit history or any other durable evidence",
+        "no guest may identify or manipulate another guest's device by supplying a MAC, entitlement id, stay id, room number, PMS interface, profile id or any other client-chosen subject identifier",
+        "max-device, license-capacity, session, checkout/grace, post-stay and cross-PMS invariants accepted in earlier phases are preserved",
+        "management operations are auditable and appropriately throttled against abuse, without inventing unnecessary product restrictions"
+      ]
+    },
+    "package_time_modes": {
+      "validity_window": "PRESERVED UNCHANGED -- the continuous wall-clock model. A 2-hour package activated at 10:00 expires at 12:00 whether the guest used two hours or ten minutes.",
+      "aggregate_online_time": "IMPLEMENTED -- the capability the FINAL contract reserved. It supports BOTH an aggregate online-time budget AND an outer calendar/hard-validity window (for example 120 online minutes valid for 7 days). Only eligible online sessions consume the shared budget; with no eligible session online the aggregate timer does not consume; idle-reaped or terminated sessions stop consuming. The FINAL contract's SHARED DEVICE-MINUTE semantics are preserved: two eligible devices online for ten minutes consume twenty aggregate minutes.",
+      "termination": "The entitlement terminates ATOMICALLY at the first applicable terminal condition, including aggregate online-time exhaustion, outer hard-validity expiry, data-cap exhaustion where applicable, checkout/lifecycle termination, admin termination and the other already-approved terminal conditions.",
+      "safety": "No replay, delayed accounting tick, counter reset, reconnect, reboot, concurrent session or multi-device use may double-count, lose time, reopen a terminal entitlement or create negative remaining time.",
+      "immutability": "Selectable per IMMUTABLE package revision. Existing revisions retain their original semantics and are never reinterpreted retroactively. The default and backward-compatible mode remains VALIDITY_WINDOW unless an immutable revision explicitly selects AGGREGATE_ONLINE_TIME."
+    }
+  },
+  "dark_boundary": {
+    "phase_gate": "A phase-level deployment/capability gate remains OFF for acceptance even though the per-Appliance product setting exists.",
+    "why_two_controls": "They are different things and are deliberately not merged. The per-Appliance setting is the LONG-TERM PRODUCT CONTROL a hotel operates; the phase-level gate is only the SAFE DEPLOYMENT BOUNDARY until later activation is separately authorized. Collapsing them would mean that shipping the product control also shipped the activation."
+  },
+  "prohibited_by_this_authorization": [
+    "any Production environment mutation or contact -- the system is pre-live, but any environment labelled Production remains protected",
+    "real guest traffic",
+    "real PMS, provider or financial traffic",
+    "Phase-4 financial enablement",
+    "IAM-v2 authentication cutover",
+    "paid-access activation",
+    "Phase 7 implementation",
+    "unrelated network changes",
+    "merging the Phase-6 pull request",
+    "marking Phase 6 accepted or closed by the implementer"
+  ],
+  "delivery": {
+    "branch": "phase/6-device-selfservice-and-time-modes",
+    "pull_requests": 1,
+    "commit_count": "implementation-driven",
+    "milestones": [
+      "M1 baseline correction + Phase-6 contract/foundation reconciliation",
+      "M2 complete Guest Device Self-Service vertical slice",
+      "M3 complete AGGREGATE_ONLINE_TIME vertical slice",
+      "M4 hardening and final acceptance candidate at controlled DEVELOPMENT-appliance LIVE-DARK"
+    ],
+    "stop_conditions": [
+      "a genuine Product-Owner product decision that cannot be safely inferred",
+      "an architectural conflict with the FINAL contract that requires a Product-Owner choice",
+      "a safety boundary",
+      "an unfixable failed acceptance gate",
+      "the final Phase-6 acceptance boundary"
+    ]
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "transition_id": "T0056",
+  "seq": 56,
+  "timestamp": "2026-08-15T00:05:00Z",
+  "record_type": "PRODUCT_OWNER_PRE_LIVE_OPERATIONAL_CLARIFICATION",
+  "previous_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "5",
+    "activity": "PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "5",
+  "decision": "D24",
+  "new_decision_created": true,
+  "transition_accepted": false,
+  "scope_note": "THIS TRANSITION CHANGES NO PHASE, NO ACCEPTANCE, NO MATURITY AND NO LIMITATION. It records a Product-Owner clarification of the product's operational status and the forward correction of the current-state wording that contradicted it.",
+  "po_authorization_ref": "Product-Owner clarification of 2026-08-15, recorded as decision D24 before the Phase-6 authorization: StayConnect has not yet entered real hotel guest/staff production operation; no guest or hotel user currently depends on either the prior public-schema IAM or iam_v2 for live service; the system is under active development and controlled testing.",
+  "clarification": {
+    "statement": "STAYCONNECT HAS NOT YET ENTERED REAL HOTEL GUEST/STAFF PRODUCTION OPERATION. No guest and no hotel user currently depends on either the prior public-schema IAM or iam_v2 for live service. The system is under active development and controlled testing.",
+    "why_it_needed_recording": "Several current-state surfaces described the legacy public-schema IAM as 'the SOLE PRODUCTION authority' and 'the live authority', and one said that removing it 'would break all guest authentication'. Each described the CONFIGURATION correctly and implied an OPERATIONAL fact that is not true: that real hotel guests are being served today. In a project whose whole method is that a current surface must not read as more finished than the record, that is exactly the class of staleness the zero-stale rule exists for -- it was simply pointing the other way, overstating operational maturity rather than implementation progress."
+  },
+  "preserved_unchanged": {
+    "iam_v2_cutover_performed": false,
+    "iam_v2_rows": 0,
+    "service_routed_to_iam_v2": false,
+    "configured_authentication_baseline": "the public-schema path remains the currently configured legacy authentication/routing baseline, and is the only path any deployed service is routed to",
+    "note": "The technical architectural facts are unchanged and are deliberately restated here rather than softened. Correcting an operational implication must not blur an architectural boundary: iam_v2 is still dark, still holds zero rows, and is still not cut over."
+  },
+  "historical_evidence_not_rewritten": {
+    "rule": "Genuine historical evidence is preserved exactly as written and is NOT edited by this clarification.",
+    "examples": [
+      "The supervised Protel FIAS Gate-3A acceptance test (live USD 1.00 folio debit, Phase 0) -- a real, controlled, supervised test whose record stands.",
+      "Every transition receipt, including T0009, T0010, T0014, T0024, T0029, T0043, T0044, T0048 and T0054, each of which states the authority wording that was standard when it was written.",
+      "Every dated decision-register entry, including D11, D13, D16, D19 and D22, which record what was accepted on the day it was accepted.",
+      "Every phase acceptance record and final report."
+    ],
+    "why": "A receipt records what was believed and measured at its moment. Editing old receipts to match today's phrasing would erase the fact that the phrasing ever changed, which is the opposite of an audit trail. The correction is made FORWARD, in the current-state surfaces only."
+  },
+  "surfaces_corrected_forward": [
+    "governance/project-state.json -- service_routing_state and the new operational_status facts",
+    "governance/artifact-registry.json -- the legacy-iam-public entry's note and removal-risk wording",
+    "docs/context/StayConnect-IAM-Handoff.md -- via the generated canonical-state block"
+  ],
+  "authorizes_nothing": [
+    "No phase status, acceptance, maturity or limitation changes.",
+    "Any environment labelled Production remains protected and must not be changed without separate explicit authorization.",
+    "No deployment, appliance mutation, feature-flag enablement, IAM-v2 cutover, Production migration or contact, PMS/provider or financial traffic, or paid access is authorized by this clarification."
+  ]
+}
