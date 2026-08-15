@@ -58,6 +58,20 @@ def paragraphs(text):
         off += len(para) + 2
 
 
+def split_clauses(text):
+    """Yield (offset, clause) for sentence-sized clauses of one unit.
+
+    A "unit" is a paragraph in markdown or a whole value in JSON, and a JSON value can be thousands of
+    characters carrying many independent statements. Rules that excuse a unit because it contains a marker
+    somewhere are only safe when the unit is about ONE thing, so anything longer is split here first.
+    Splitting on sentence terminators is deliberately crude: it does not need to be linguistically right, it
+    needs to stop one corrected sentence from vouching for the rest of the document.
+    """
+    for m in re.finditer(r"[^.;!?\n]+[.;!?\n]?", text):
+        clause = m.group(0)
+        if clause.strip():
+            yield m.start(), clause
+
 def scan(text, pattern):
     """Yield paragraphs matching pattern that are NOT marked historical."""
     for para, _ in paragraphs(text):
@@ -851,15 +865,27 @@ def main():
             else:
                 units = [p for p, _ in paragraphs(text)]
             for para in units:
-                m = live_claim.search(para)
-                if not m:
-                    continue
-                if HISTORY_MARKERS.search(para):
-                    continue
-                # A sentence that quotes the wrong wording IN ORDER TO CORRECT IT is not the wrong wording.
-                if re.search(r"corrected|PRE-LIVE|pre-live|used to say|earlier wording|D24", para):
-                    continue
-                hits.append((rel, " ".join(para[max(0, m.start() - 70):m.end() + 70].split())))
+                # CLAUSE-LEVEL, not unit-level. A long JSON value such as current_maturity carries dozens of
+                # independent claims in one string; excusing the whole value because a corrected clause
+                # appears somewhere in it lets every stale clause before that point ride along. The unit is
+                # therefore split into sentence-sized clauses and each is judged against markers found in
+                # ITS OWN neighbourhood -- the clause itself plus a bounded window either side, so a
+                # correction can still cover the sentence it is attached to and no further.
+                for cl_start, clause in split_clauses(para):
+                    m = live_claim.search(clause)
+                    if not m:
+                        continue
+                    lo = max(0, cl_start - 160)
+                    hi = min(len(para), cl_start + len(clause) + 160)
+                    neighbourhood = para[lo:hi]
+                    if HISTORY_MARKERS.search(neighbourhood):
+                        continue
+                    # A sentence that quotes the wrong wording IN ORDER TO CORRECT IT is not the wrong
+                    # wording.
+                    if re.search(r"corrected|PRE-LIVE|pre-live|used to say|earlier wording|D24",
+                                 neighbourhood):
+                        continue
+                    hits.append((rel, " ".join(clause[max(0, m.start() - 70):m.end() + 70].split())))
         for rel, hit in hits:
             bad("pre-live-operational-parity",
                 "the recorded facts say real hotel guest operation has NOT started, but this presents the "

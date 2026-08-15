@@ -183,11 +183,109 @@ SQL
   refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, terminated_at)
            VALUES ('$ENT2','$T','$S','TIME','VALIDITY_WINDOW_ELAPSED','VALIDITY_WINDOW', '$TAT')" \
           "evidence whose time mode disagrees with the entitlement is refused" "time mode"
-  accepts "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, terminated_at)
+  # ENT2 carries no pinned plan revision and consumed 0, so it can no longer stand for an ACCEPTED
+  # row: the real-state binding compares the numbers against the entitlement and its revision, and
+  # ENT2 has neither. What it proves now is stronger -- that invented numbers are refused even when
+  # the transition itself agrees. The accepted case moves to a fixture whose numbers are genuine.
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, terminated_at)
            VALUES ('$ENT2','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_ONLINE_TIME', 7200, 7200, '$TAT')" \
-          "evidence that AGREES with the recorded termination is accepted"
-  refuses "UPDATE iam_v2.entitlement_termination_evidence SET consumed_online_seconds = 1 WHERE entitlement_id='$ENT2'" \
+          "invented numbers are refused even when the transition itself agrees" "consumed seconds but the entitlement recorded"
+
+  # =======================================================================================================
+  # BOTH terminal time outcomes of an AGGREGATE_ONLINE_TIME entitlement
+  # =======================================================================================================
+  # An aggregate entitlement can end two ways and BOTH must be recordable: the online-minute budget running
+  # out, and the outer calendar window expiring first while minutes remain. The second is how an unused
+  # package ordinarily ends, and an earlier coupling constraint made it impossible to describe at all.
+  #
+  # Which story a row may tell is decided by the NUMBERS, and the numbers must be the REAL ones -- so each
+  # fixture below is built with a genuine pinned plan revision carrying a genuine time_quota_seconds, and the
+  # entitlement's own consumed_online_seconds is what the evidence must match.
+  seed_agg(){ # seed_agg <ent> <budget> <consumed> <window|NULL> -- a terminated AGGREGATE entitlement
+    local ent="$1" budget="$2" consumed="$3" win="$4"
+    local spr; spr=$(q "SELECT gen_random_uuid()")
+    docker exec -i "$C" psql -U postgres -d "$DB" -q >/dev/null 2>&1 <<SQL
+BEGIN;
+SET LOCAL session_replication_role = replica;
+ALTER TABLE iam_v2.service_plan_revisions DISABLE TRIGGER ALL;
+INSERT INTO iam_v2.service_plan_revisions (id, tenant_id, site_id, service_plan_id, revision_no, name,
+    down_kbps, up_kbps, max_concurrent_devices, device_limit_policy, idle_timeout_seconds,
+    time_accounting_mode, time_quota_seconds)
+  VALUES ('$spr','$T','$S','$(q "SELECT gen_random_uuid()")', 1, 'gate-plan', 1000, 1000, 3,
+          'REJECT_NEW_DEVICE', 900, 'AGGREGATE_ONLINE_TIME', $budget);
+ALTER TABLE iam_v2.service_plan_revisions ENABLE TRIGGER ALL;
+ALTER TABLE iam_v2.entitlements DISABLE TRIGGER ALL;
+INSERT INTO iam_v2.entitlements (id, tenant_id, site_id, voucher_id, purchase_id, policy_snapshot,
+    service_plan_revision_id, package_revision_id, time_accounting_mode, end_mode, status, terminal_reason,
+    terminated_at, window_ends_at, consumed_online_seconds)
+  VALUES ('$ent','$T','$S','$(q "SELECT gen_random_uuid()")','$(q "SELECT gen_random_uuid()")','{}'::jsonb,
+    '$spr','$(q "SELECT gen_random_uuid()")','AGGREGATE_ONLINE_TIME','VALIDITY_WINDOW','TERMINATED','TIME',
+    '$TAT', $win, $consumed);
+ALTER TABLE iam_v2.entitlements ENABLE TRIGGER ALL;
+COMMIT;
+SQL
+  }
+
+  # --- (1) exhaustion, consumed >= budget -----------------------------------------------------------------
+  EX=$(q "SELECT gen_random_uuid()"); seed_agg "$EX" 7200 7200 "'$TAT'"
+  accepts "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, terminated_at)
+           VALUES ('$EX','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_ONLINE_TIME', 7200, 7200, '$TAT')" \
+          "AGGREGATE exhaustion with consumed >= budget is accepted"
+  refuses "UPDATE iam_v2.entitlement_termination_evidence SET consumed_online_seconds = 1 WHERE entitlement_id='$EX'" \
           "termination evidence is append-only" "append-only"
+
+  # --- (2) outer-window expiry, consumed < budget ---------------------------------------------------------
+  OW=$(q "SELECT gen_random_uuid()"); seed_agg "$OW" 7200 900 "'$TAT'"
+  accepts "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, window_ends_at, terminated_at)
+           VALUES ('$OW','$T','$S','TIME','AGGREGATE_OUTER_WINDOW_EXPIRED','AGGREGATE_ONLINE_TIME', 7200, 900, '$TAT', '$TAT')" \
+          "AGGREGATE outer-window expiry with consumed < budget is accepted"
+
+  # --- (3) each outcome MISLABELLED as the other ----------------------------------------------------------
+  # The label alone must never decide. An exhausted entitlement described as an outer-window expiry, and an
+  # unexhausted one described as exhaustion, are both refused -- by the constraint that names the actual
+  # arithmetic, not by a naming convention.
+  MIS1=$(q "SELECT gen_random_uuid()"); seed_agg "$MIS1" 7200 7200 "'$TAT'"
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, window_ends_at, terminated_at)
+           VALUES ('$MIS1','$T','$S','TIME','AGGREGATE_OUTER_WINDOW_EXPIRED','AGGREGATE_ONLINE_TIME', 7200, 7200, '$TAT', '$TAT')" \
+          "an EXHAUSTED entitlement mislabelled as an outer-window expiry is refused" "ete_outer_window_is_distinguishable"
+  MIS2=$(q "SELECT gen_random_uuid()"); seed_agg "$MIS2" 7200 900 "'$TAT'"
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, terminated_at)
+           VALUES ('$MIS2','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_ONLINE_TIME', 7200, 900, '$TAT')" \
+          "an UNEXHAUSTED entitlement mislabelled as exhaustion is refused" "ete_exhaustion_reached_its_budget"
+
+  # --- (4) outer-window evidence without its immutable window ---------------------------------------------
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, window_ends_at, terminated_at)
+           VALUES ('$MIS2','$T','$S','TIME','AGGREGATE_OUTER_WINDOW_EXPIRED','AGGREGATE_ONLINE_TIME', 7200, 900, NULL, '$TAT')" \
+          "outer-window evidence that names no window is refused" "ete_outer_window_is_distinguishable"
+  NOWIN=$(q "SELECT gen_random_uuid()"); seed_agg "$NOWIN" 7200 900 "NULL"
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, window_ends_at, terminated_at)
+           VALUES ('$NOWIN','$T','$S','TIME','AGGREGATE_OUTER_WINDOW_EXPIRED','AGGREGATE_ONLINE_TIME', 7200, 900, '$TAT', '$TAT')" \
+          "outer-window evidence for an entitlement that HAS no window is refused" "immutable window"
+
+  # --- (5) the numbers must be the REAL ones, not merely self-consistent ----------------------------------
+  # This is what separates evidence from a well-formed fabrication: a row can satisfy every CHECK above and
+  # still describe numbers the termination never used.
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, terminated_at)
+           VALUES ('$MIS2','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_ONLINE_TIME', 600, 900, '$TAT')" \
+          "an invented BUDGET that disagrees with the pinned plan revision is refused" "pinned plan revision states"
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, window_ends_at, terminated_at)
+           VALUES ('$MIS2','$T','$S','TIME','AGGREGATE_OUTER_WINDOW_EXPIRED','AGGREGATE_ONLINE_TIME', 7200, 42, '$TAT', '$TAT')" \
+          "an invented CONSUMPTION that disagrees with the entitlement is refused" "consumed seconds but the entitlement recorded"
+  BADWIN=$(q "SELECT gen_random_uuid()"); seed_agg "$BADWIN" 7200 900 "'$TAT'"
+  refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, window_ends_at, terminated_at)
+           VALUES ('$BADWIN','$T','$S','TIME','AGGREGATE_OUTER_WINDOW_EXPIRED','AGGREGATE_ONLINE_TIME', 7200, 900, now(), '$TAT')" \
+          "evidence naming a window the entitlement does not have is refused" "immutable window is"
+
+  # --- (6) the controlled writer derives everything -------------------------------------------------------
+  # A caller that cannot supply a number cannot supply a wrong one.
+  CW=$(q "SELECT gen_random_uuid()"); seed_agg "$CW" 3600 3600 "'$TAT'"
+  accepts "SELECT iam_v2.p6_record_time_termination('$CW','AGGREGATE_ONLINE_TIME_EXHAUSTED')" \
+          "the controlled writer records exhaustion from the entitlement and its pinned plan revision"
+  v="$(q "SELECT budget_seconds||'/'||consumed_online_seconds FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id='$CW'")"
+  [ "$v" = "3600/3600" ] && ok "the controlled writer's numbers came from real state (budget/consumed = $v)" \
+                         || no "controlled writer derives real numbers" "got '$v'"
+  refuses "SELECT iam_v2.p6_record_time_termination('$CW','NOT_A_CAUSE')" \
+          "the controlled writer refuses an unknown cause" "unknown time-termination cause"
 fi
 
 # ---------------------------------------------------------------- nothing was granted
@@ -211,6 +309,7 @@ DELETE FROM iam_v2.session_online_watermarks WHERE tenant_id='$T';
 DELETE FROM iam_v2.sessions WHERE tenant_id='$T';
 DELETE FROM iam_v2.devices WHERE tenant_id='$T';
 DELETE FROM iam_v2.entitlements WHERE tenant_id='$T';
+DELETE FROM iam_v2.service_plan_revisions WHERE tenant_id='$T';
 ALTER TABLE iam_v2.appliance_product_setting_changes DISABLE TRIGGER p6_setting_changes_append_only;
 DELETE FROM iam_v2.appliance_product_setting_changes WHERE tenant_id='$T';
 ALTER TABLE iam_v2.appliance_product_setting_changes ENABLE TRIGGER p6_setting_changes_append_only;
@@ -221,7 +320,8 @@ left="$(q "SELECT (SELECT count(*) FROM iam_v2.appliance_product_settings WHERE 
               + (SELECT count(*) FROM iam_v2.appliance_product_setting_changes WHERE tenant_id='$T')
               + (SELECT count(*) FROM iam_v2.sessions WHERE tenant_id='$T')
               + (SELECT count(*) FROM iam_v2.entitlements WHERE tenant_id='$T')
-              + (SELECT count(*) FROM iam_v2.entitlement_termination_evidence WHERE tenant_id='$T')")"
+              + (SELECT count(*) FROM iam_v2.entitlement_termination_evidence WHERE tenant_id='$T')
+              + (SELECT count(*) FROM iam_v2.service_plan_revisions WHERE tenant_id='$T')")"
 [ "$left" = "0" ] && ok "the gate left no rows behind" || no "the gate cleaned up after itself" "$left row(s) remain"
 
 echo "------------------------------------------------------------"

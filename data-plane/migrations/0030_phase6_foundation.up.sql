@@ -48,7 +48,36 @@ BEGIN;
 -- filed under the RIGHT tenant and site: a settings row could pair a real appliance with somebody else's
 -- scope, and the composite primary key would happily accept it. The anchor makes the whole triple
 -- referential, which is the same technique MG-0 uses on public.guest_networks and for the same reason.
-CREATE UNIQUE INDEX IF NOT EXISTS appliances_tsi_anchor ON public.appliances (id, tenant_id, site_id);
+--
+-- OWNERSHIP IS RECORDED, because `IF NOT EXISTS` creates a hazard on the way back down: if this index (or an
+-- equivalent one under another name) already existed on the appliance, an unconditional DROP in the down
+-- migration would remove a PLATFORM object that this migration never created. A rollback must reverse what it
+-- did and nothing else. The marker is a COMMENT on the index, which needs no new table and is visible to
+-- anyone inspecting the catalog.
+DO $$
+DECLARE existing_name text;
+BEGIN
+  -- Any UNIQUE index that already provides the (id, tenant_id, site_id) triple is sufficient; the FK does not
+  -- care which name it has. Only create one when none exists.
+  SELECT c.relname INTO existing_name
+    FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indexrelid
+    JOIN pg_class tb ON tb.oid = i.indrelid
+    JOIN pg_namespace n ON n.oid = tb.relnamespace
+   WHERE n.nspname = 'public' AND tb.relname = 'appliances' AND i.indisunique
+     AND ARRAY(SELECT a.attname::text FROM pg_attribute a
+                WHERE a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey::int2[])
+                ORDER BY a.attname) = ARRAY['id','site_id','tenant_id']
+   LIMIT 1;
+
+  IF existing_name IS NULL THEN
+    CREATE UNIQUE INDEX appliances_tsi_anchor ON public.appliances (id, tenant_id, site_id);
+    COMMENT ON INDEX public.appliances_tsi_anchor IS 'created by iam_v2 migration 0030_phase6_foundation';
+  ELSE
+    RAISE NOTICE 'appliance (id,tenant_id,site_id) anchor already exists as %; 0030 will not create or own it',
+      existing_name;
+  END IF;
+END $$;
 
 -- ---------------------------------------------------------------------------------------------------------
 -- 1. Per-appliance product settings (local-first)
@@ -244,9 +273,10 @@ COMMENT ON TABLE iam_v2.entitlement_termination_evidence IS
 -- exists.
 CREATE OR REPLACE FUNCTION iam_v2.p6_termination_evidence_matches_transition() RETURNS trigger
 LANGUAGE plpgsql AS $$
-DECLARE e record;
+DECLARE e record; real_budget bigint;
 BEGIN
-  SELECT status, terminal_reason, terminated_at, time_accounting_mode, window_ends_at
+  SELECT status, terminal_reason, terminated_at, time_accounting_mode, window_ends_at,
+         consumed_online_seconds, service_plan_revision_id
     INTO e FROM iam_v2.entitlements
    WHERE id = NEW.entitlement_id AND tenant_id = NEW.tenant_id AND site_id = NEW.site_id
    FOR SHARE;
@@ -270,6 +300,37 @@ BEGIN
     RAISE EXCEPTION 'termination evidence claims time mode % but the entitlement is %',
       NEW.time_mode, e.time_accounting_mode USING ERRCODE = 'restrict_violation';
   END IF;
+
+  -- THE NUMBERS MUST BE THE REAL ONES, not merely numbers that agree with each other. Everything above this
+  -- point makes a row internally consistent, and an internally consistent fabrication is still a fabrication:
+  -- a caller could invent a budget and a consumption that satisfy every CHECK and describe a termination that
+  -- never had those values. So each is compared against the state the termination actually used -- the
+  -- entitlement's own counter, and the budget on the IMMUTABLE plan revision pinned into it at grant time.
+  IF NEW.consumed_online_seconds IS NOT NULL
+     AND NEW.consumed_online_seconds IS DISTINCT FROM e.consumed_online_seconds THEN
+    RAISE EXCEPTION 'termination evidence claims % consumed seconds but the entitlement recorded %',
+      NEW.consumed_online_seconds, e.consumed_online_seconds USING ERRCODE = 'restrict_violation';
+  END IF;
+
+  SELECT spr.time_quota_seconds INTO real_budget
+    FROM iam_v2.service_plan_revisions spr
+   WHERE spr.id = e.service_plan_revision_id;
+  IF NEW.budget_seconds IS NOT NULL AND NEW.budget_seconds IS DISTINCT FROM real_budget THEN
+    RAISE EXCEPTION 'termination evidence claims a % second budget but the pinned plan revision states %',
+      NEW.budget_seconds, coalesce(real_budget::text, 'none') USING ERRCODE = 'restrict_violation';
+  END IF;
+
+  -- An outer-window expiry must name the entitlement's OWN immutable window. window_ends_at is stamped once
+  -- and never moves, so evidence naming a different instant is describing a boundary that does not exist.
+  IF NEW.window_ends_at IS NOT NULL AND NEW.window_ends_at IS DISTINCT FROM e.window_ends_at THEN
+    RAISE EXCEPTION 'termination evidence names window % but the entitlement''s immutable window is %',
+      NEW.window_ends_at, coalesce(e.window_ends_at::text, 'none') USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF NEW.cause_detail = 'AGGREGATE_OUTER_WINDOW_EXPIRED' AND e.window_ends_at IS NULL THEN
+    RAISE EXCEPTION 'outer-window expiry evidence for an entitlement that has no window at all'
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+
   RETURN NEW;
 END $$;
 
@@ -294,6 +355,40 @@ COMMENT ON COLUMN iam_v2.entitlement_devices.disconnected_reason IS
   'Why the device left this entitlement. Phase 6 adds GUEST_SELF_SERVICE, which is deliberately distinct from '
   'ENTITLEMENT_ENDED, CROSS_PMS_TRANSFER and operator-driven reasons: a slot the guest released is a '
   'different fact from one the system took back.';
+
+-- ---------------------------------------------------------------------------------------------------------
+-- 5. The controlled writer: callers state the CAUSE, the database derives the FACTS
+-- ---------------------------------------------------------------------------------------------------------
+-- The trigger above makes a fabricated row impossible. This makes it unnecessary to try: the sanctioned path
+-- takes only the entitlement and which time rule ran out, and reads every number from the entitlement and its
+-- pinned immutable plan revision. A caller that cannot supply a number cannot supply a wrong one.
+CREATE OR REPLACE FUNCTION iam_v2.p6_record_time_termination(p_entitlement uuid, p_cause text)
+RETURNS void LANGUAGE plpgsql AS $$
+DECLARE e record; v_budget bigint;
+BEGIN
+  IF p_cause NOT IN ('VALIDITY_WINDOW_ELAPSED','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_OUTER_WINDOW_EXPIRED') THEN
+    RAISE EXCEPTION 'unknown time-termination cause %', p_cause USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  SELECT id, tenant_id, site_id, status, terminal_reason, terminated_at, time_accounting_mode,
+         window_ends_at, consumed_online_seconds, service_plan_revision_id
+    INTO e FROM iam_v2.entitlements WHERE id = p_entitlement FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'no such entitlement %', p_entitlement USING ERRCODE = 'foreign_key_violation';
+  END IF;
+  SELECT spr.time_quota_seconds INTO v_budget FROM iam_v2.service_plan_revisions spr
+   WHERE spr.id = e.service_plan_revision_id;
+
+  INSERT INTO iam_v2.entitlement_termination_evidence
+    (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode,
+     budget_seconds, consumed_online_seconds, window_ends_at, terminated_at)
+  VALUES (e.id, e.tenant_id, e.site_id, e.terminal_reason, p_cause, e.time_accounting_mode,
+          v_budget, e.consumed_online_seconds, e.window_ends_at, e.terminated_at);
+END $$;
+
+COMMENT ON FUNCTION iam_v2.p6_record_time_termination(uuid, text) IS
+  'The sanctioned way to record why a time-mode entitlement ended. It accepts the entitlement and the cause '
+  'and derives every number from the entitlement and its pinned immutable plan revision, so no caller is in '
+  'a position to state a budget, a consumption or a window at all.';
 
 INSERT INTO public.schema_migrations (version) VALUES ('0030_phase6_foundation')
   ON CONFLICT (version) DO NOTHING;

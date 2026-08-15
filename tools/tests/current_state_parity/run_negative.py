@@ -81,6 +81,18 @@ def sandbox():
                 if one not in rels:
                     rels.append(one)
 
+    # ...and the plan the state file currently points at. Same lesson as the evidence files above, learned
+    # again on a different field: enumerating it in COPY means every new phase breaks the baseline until
+    # somebody remembers, and the failure reads as a repository defect rather than a fixture one. Derived.
+    try:
+        st = json.load(io.open(os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))
+        for key in ("current_phase_plan",):
+            v = str(st.get(key) or "").strip()
+            if v and v not in rels:
+                rels.append(v)
+    except Exception:  # noqa: BLE001
+        pass
+
     for rel in rels:
         src = os.path.join(ROOT, rel)
         if not os.path.exists(src):
