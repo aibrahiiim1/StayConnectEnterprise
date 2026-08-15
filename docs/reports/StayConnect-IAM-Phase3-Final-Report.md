@@ -554,8 +554,7 @@ What is true at acceptance:
 - **The PMS was read, never written** — one authorized read-only FIAS session on 2026-08-10. No `PS`, no `PA`,
   no posting, no folio change.
 - **No guest lost or gained access.** `auth_ipv4` was empty before, during and after every authorized window.
-- **Phase 3 is DARK and NOT CUT OVER.** All six flags OFF; legacy public-schema IAM remains the sole production
-  authority. PR #6 is merged and closed; merging changed the repository only and altered nothing on the
+- **Phase 3 is DARK and NOT CUT OVER.** All six flags OFF; legacy public-schema IAM remains the sole CONFIGURED authentication baseline -- PRE-LIVE per D24/T0056, no real hotel guest or staff depends on it for live service yet. PR #6 is merged and closed; merging changed the repository only and altered nothing on the
   appliance, in the database or at the PMS.
 
 The appliance WAS deliberately contacted under Product-Owner authorization during Increment 9 and its

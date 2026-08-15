@@ -33,16 +33,22 @@ accepts(){ local out; out="$(docker exec -i "$C" psql -U postgres -d "$DB" -v ON
 echo "== Phase-6 foundation (0030) =="
 
 # ---------------------------------------------------------------- structure
-for t in appliance_product_settings appliance_product_setting_changes session_online_watermarks; do
+for t in appliance_product_settings appliance_product_setting_changes session_online_watermarks entitlement_termination_evidence; do
   n="$(q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_name='$t'")"
   [ "$n" = "1" ] && ok "iam_v2.$t exists" || no "iam_v2.$t exists" "found $n"
 done
 
 n="$(q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_type='BASE TABLE'")"
-[ "$n" = "71" ] && ok "iam_v2 carries 71 base tables (68 + the three Phase-6 tables)" || no "iam_v2 base-table count" "found $n"
+[ "$n" = "72" ] && ok "iam_v2 carries 72 base tables (68 + the four Phase-6 tables)" || no "iam_v2 base-table count" "found $n"
 
 # ---------------------------------------------------------------- the default IS the product decision
-T=$(q "SELECT gen_random_uuid()"); S=$(q "SELECT gen_random_uuid()"); A=$(q "SELECT gen_random_uuid()")
+# The scope is anchored to REAL platform records, so the gate uses the fixture's real ones -- and then
+# proves that invented ones are refused, which is the property that matters.
+T=11111111-1111-1111-1111-111111111111
+S=22222222-2222-2222-2222-222222222222
+A=44444444-4444-4444-4444-444444444444
+OP=55555555-5555-5555-5555-555555555555
+FAKE=$(q "SELECT gen_random_uuid()")
 accepts "INSERT INTO iam_v2.appliance_product_settings (tenant_id, site_id, appliance_id) VALUES ('$T','$S','$A')" \
         "a settings row can be created without mentioning the setting"
 v="$(q "SELECT guest_device_self_service FROM iam_v2.appliance_product_settings WHERE appliance_id='$A'")"
@@ -50,19 +56,29 @@ v="$(q "SELECT guest_device_self_service FROM iam_v2.appliance_product_settings 
                 || no "default is OFF" "got '$v'"
 
 # ---------------------------------------------------------------- audit is append-only, enforced
-accepts "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, setting_key, old_value, new_value, changed_by)
-         VALUES ('$T','$S','$A','guest_device_self_service', false, true, 'gate-selftest')" \
+accepts "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, setting_key, old_value, new_value, changed_by_operator_id, changed_by)
+         VALUES ('$T','$S','$A','guest_device_self_service', false, true, '$OP', 'gate-selftest')" \
         "a setting change can be recorded"
 refuses "UPDATE iam_v2.appliance_product_setting_changes SET new_value=false WHERE appliance_id='$A'" \
         "an audit row cannot be UPDATEd" "append-only"
 refuses "DELETE FROM iam_v2.appliance_product_setting_changes WHERE appliance_id='$A'" \
         "an audit row cannot be DELETEd" "append-only"
-refuses "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, setting_key, new_value, changed_by)
-         VALUES ('$T','$S','$A','guest_device_self_service', true, '   ')" \
+refuses "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, setting_key, new_value, changed_by_operator_id, changed_by)
+         VALUES ('$T','$S','$A','guest_device_self_service', true, '$OP', '   ')" \
         "an audit row with a blank actor is refused -- 'somebody changed it' is not an audit record" "changed_by"
-refuses "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, setting_key, new_value, changed_by)
-         VALUES ('$T','$S','$A','something_else', true, 'gate-selftest')" \
+refuses "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, setting_key, new_value, changed_by_operator_id, changed_by)
+         VALUES ('$T','$S','$A','something_else', true, '$OP', 'gate-selftest')" \
         "an unknown setting key is refused" "setting_key"
+
+# ---------------------------------------------------------------- no fake or orphan managed state
+refuses "INSERT INTO iam_v2.appliance_product_settings (tenant_id, site_id, appliance_id) VALUES ('$T','$S','$FAKE')" \
+        "a settings row for an appliance that does not exist is refused -- no fake managed state" "aps_appliance_must_exist"
+refuses "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, setting_key, new_value, changed_by_operator_id, changed_by)
+         VALUES ('$T','$S','$FAKE','guest_device_self_service', true, '$OP', 'gate-selftest')" \
+        "an audit row for an appliance that does not exist is refused" "apsc_appliance_must_exist"
+refuses "INSERT INTO iam_v2.appliance_product_setting_changes (tenant_id, site_id, appliance_id, setting_key, new_value, changed_by_operator_id, changed_by)
+         VALUES ('$T','$S','$A','guest_device_self_service', true, '$FAKE', 'not-a-real-operator')" \
+        "an audit actor the server never authenticated is refused -- an actor a caller can choose is not an actor" "changed_by_operator_id"
 
 # ---------------------------------------------------------------- the online watermark cannot go backwards
 # A real session is needed for the FK. Build the minimum chain with ids of our own, in ONE committed
@@ -97,23 +113,37 @@ else
           "a negative accounted_seconds is refused" "check"
 fi
 
-# ---------------------------------------------------------------- the new terminal cause is distinguishable
+# ---------------------------------------------------------------- the CONTRACT vocabulary is untouched
+# The distinguishing evidence must NOT come from a new terminal_reason. Widening that set is a change to
+# contract vocabulary, which is the Product Owner's to make, not an implementation's.
 d="$(q "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='entitlements_terminal_reason_check'")"
 case "$d" in
-  *AGGREGATE_TIME*) ok "AGGREGATE_TIME is admitted as a terminal reason distinct from TIME" ;;
-  *) no "AGGREGATE_TIME is admitted" "constraint: $d" ;;
+  *AGGREGATE_TIME*) no "the contract terminal_reason set is unchanged" "it was widened with AGGREGATE_TIME: $d" ;;
+  *) ok "the contract terminal_reason set is UNCHANGED -- no invented vocabulary" ;;
 esac
 case "$d" in
-  *"'TIME'"*) ok "the pre-existing terminal reasons are still admitted (TIME retained)" ;;
-  *) no "pre-existing terminal reasons retained" "constraint: $d" ;;
+  *"'TIME'"*) ok "the contract's own terminal reasons are intact (TIME retained)" ;;
+  *) no "contract terminal reasons intact" "constraint: $d" ;;
 esac
+
+# ...and the distinction is carried by EVIDENCE, which must be checkable and self-consistent.
+E=$(q "SELECT gen_random_uuid()")
+refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, terminated_at)
+         VALUES ('$E','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_ONLINE_TIME', now())" \
+        "aggregate-exhaustion evidence without the budget numbers is refused -- evidence without the number is an assertion" "ete_aggregate_carries_its_budget"
+refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, budget_seconds, consumed_online_seconds, terminated_at)
+         VALUES ('$E','$T','$S','TIME','AGGREGATE_ONLINE_TIME_EXHAUSTED','VALIDITY_WINDOW', 7200, 7200, now())" \
+        "evidence whose cause and time mode disagree is refused" "ete_detail_matches_mode"
+refuses "INSERT INTO iam_v2.entitlement_termination_evidence (entitlement_id, tenant_id, site_id, terminal_reason, cause_detail, time_mode, terminated_at)
+         VALUES ('$E','$T','$S','AGGREGATE_TIME','VALIDITY_WINDOW_ELAPSED','VALIDITY_WINDOW', now())" \
+        "evidence may not introduce a terminal_reason the contract does not define" "terminal_reason"
 
 # ---------------------------------------------------------------- nothing was granted
 g="$(q "SELECT count(*) FROM information_schema.role_table_grants g
         JOIN pg_class c ON c.relname=g.table_name
         JOIN pg_namespace n ON n.oid=c.relnamespace AND n.nspname=g.table_schema
         WHERE g.table_schema='iam_v2'
-          AND g.table_name IN ('appliance_product_settings','appliance_product_setting_changes','session_online_watermarks')
+          AND g.table_name IN ('appliance_product_settings','appliance_product_setting_changes','session_online_watermarks','entitlement_termination_evidence')
           AND g.grantee <> pg_get_userbyid(c.relowner) AND g.grantee <> 'PUBLIC'")"
 [ "$g" = "0" ] && ok "no role besides the owner holds any privilege on a Phase-6 table (DARK)" \
                || no "Phase-6 tables are ungranted" "$g grant(s) exist"

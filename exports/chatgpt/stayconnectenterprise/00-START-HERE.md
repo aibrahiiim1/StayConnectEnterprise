@@ -6,7 +6,7 @@
 **Current activity:** `PHASE_6_IMPLEMENTATION_IN_PROGRESS_DARK`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 IN_PROGRESS · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
-**iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
+**iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
 **Single next authorized action:** Execute the authorized Phase-6 implementation on branch phase/6-device-selfservice-and-time-modes under D25/T0057 -- Guest Device Self-Service and the AGGREGATE_ONLINE_TIME time mode, delivered DARK on the DEVELOPMENT appliance only, stopping at the acceptance boundary with one pull request open and unmerged for a separate Product-Owner decision.
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D25`.
 <!-- END GENERATED PROJECT STATE -->
@@ -36,7 +36,7 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 
 ## 3. Current project phase & status
 
-**Current operational state is the GENERATED PROJECT STATE block at the top of this file** (rendered from `governance/project-state.json` — the single machine-readable source). Do not maintain a second current-state description here. Non-dynamic context: the isolated `iam_v2` schema is an additive, reversible, dark schema; the currently deployed voucher/guest-account system is a separate prior delivery, live and untouched.
+**Current operational state is the GENERATED PROJECT STATE block at the top of this file** (rendered from `governance/project-state.json` — the single machine-readable source). Do not maintain a second current-state description here. Non-dynamic context: the isolated `iam_v2` schema is an additive, reversible, dark schema; the currently deployed voucher/guest-account system is a separate prior delivery, DEPLOYED AND UNTOUCHED. PRE-LIVE (D24/T0056): it is not serving real hotel guests today -- it is the configured baseline in a system under active development and controlled testing.
 
 ## 4. Completed & live-verified milestones
 

@@ -1,24 +1,13 @@
 -- Reverse of 0030_phase6_foundation. Restores the exact pre-0030 structure.
 --
--- The terminal_reason CHECK is restored to its pre-Phase-6 value WITHOUT 'AGGREGATE_TIME'. That is only safe
--- while no row uses it, which is the case for a DARK deployment and is asserted here rather than assumed: a
--- rollback that silently dropped a constraint value in use would leave rows the restored constraint forbids.
+-- The contract's terminal_reason set was never modified by 0030, so there is nothing to restore about it and
+-- no risk of a rollback leaving rows a narrowed constraint forbids. That is a direct consequence of not
+-- having widened it in the first place: vocabulary you never changed needs no reversal.
 BEGIN;
 
-DO $$
-DECLARE n bigint;
-BEGIN
-  SELECT count(*) INTO n FROM iam_v2.entitlements WHERE terminal_reason = 'AGGREGATE_TIME';
-  IF n > 0 THEN
-    RAISE EXCEPTION 'refusing to roll back 0030: % entitlement(s) are terminated with reason AGGREGATE_TIME, '
-      'which the pre-Phase-6 constraint does not admit', n USING ERRCODE = 'restrict_violation';
-  END IF;
-END $$;
-
-ALTER TABLE iam_v2.entitlements DROP CONSTRAINT IF EXISTS entitlements_terminal_reason_check;
-ALTER TABLE iam_v2.entitlements ADD CONSTRAINT entitlements_terminal_reason_check
-  CHECK (terminal_reason IN ('TIME','DATA','HARD_EXPIRY','CHECKOUT','ADMIN','REVOKED','SUPERSEDED',
-                             'CONVERTED','TRANSFERRED','CANCELLED','OTHER'));
+DROP TRIGGER IF EXISTS p6_termination_evidence_append_only ON iam_v2.entitlement_termination_evidence;
+DROP FUNCTION IF EXISTS iam_v2.p6_termination_evidence_append_only();
+DROP TABLE IF EXISTS iam_v2.entitlement_termination_evidence;
 
 COMMENT ON COLUMN iam_v2.entitlement_devices.disconnected_reason IS NULL;
 

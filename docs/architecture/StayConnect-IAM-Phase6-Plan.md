@@ -43,11 +43,11 @@ something already built*. Each row was read from the schema and the runtime, not
 | §6.1 aggregate balance | **Column present.** `entitlements.consumed_online_seconds bigint NOT NULL DEFAULT 0 CHECK (>= 0)` with `usage_version`. | Never incremented. Phase 6 accrues into it. |
 | §6.1 plan-level quota | **Present.** `service_plan_revisions.time_quota_seconds`, immutable and append-only. | Not consulted for time. Phase 6 reads it as the aggregate budget. |
 | §6.1 outer hard-validity window | **Present.** `entitlements.window_ends_at`, stamped once and never moved. | Phase 6 reuses it *unchanged* as the outer window of an AGGREGATE_ONLINE_TIME entitlement — no second window concept is invented. |
-| §6.1 terminal precedence | **Partially built.** `enforce.EnforceExpiries` terminates on `TIME` (window elapsed) and `DATA` (quota crossed), at the **true** time, through `terminate_entitlement_at_boundary`. | Aggregate exhaustion is a **new terminal cause** that must enter the same single atomic path — not a parallel one. |
+| §6.1 terminal precedence | **Partially built.** `enforce.EnforceExpiries` terminates on `TIME` (window elapsed) and `DATA` (quota crossed), at the **true** time, through `terminate_entitlement_at_boundary`. | Aggregate exhaustion enters that **same** atomic path with the contract's existing `TIME` reason. The contract's `terminal_reason` set is **not widened** — that is contract vocabulary and belongs to the Product Owner; the distinction is carried by append-only `entitlement_termination_evidence`, which unlike an enum value also carries the budget, the consumption and the crossing instant. |
 | §6.4 idempotent accounting | **Present for bytes.** `accounting_records UNIQUE(session_id, sample_seq)` makes replay a no-op; `session_counter_watermarks(source_epoch, last_up, last_down, sample_seq)` detects counter resets and re-baselines. | Time has **no** watermark. Phase 6 adds the same shape for online seconds, or replay/reboot double-counts. |
 | §6.3 device slots | **Present.** Per-entitlement distinct-device slots in `entitlement_devices(status AUTHORIZED\|DISCONNECTED)`; license capacity is the outermost gate; `entitlement_device_authorizations` carries the interval history (Phase-5 D5-1). | A **guest-driven** release path does not exist. Phase 6 adds one that frees the slot by the same `DISCONNECTED` mechanism the system already uses, so no new slot-accounting concept appears. |
 | §6.3 "a device-management surface" | **Named by the contract, never built.** | This is Phase 6's first half. |
-| Per-appliance product settings | **No appliance-scoped product-setting store exists.** `public.tenants.auth_methods` is a tenant-scoped local-first jsonb bundle; `public.appliances.metadata` is untyped. | Phase 6 adds a typed, appliance-scoped, additive settings table rather than overloading either. |
+| Per-appliance product settings | **No appliance-scoped product-setting store exists.** `public.tenants.auth_methods` is a tenant-scoped local-first jsonb bundle; `public.appliances.metadata` is untyped. | Phase 6 adds a typed, appliance-scoped, additive settings table **foreign-keyed to the enrolled appliance**, so managed state for an appliance that does not exist cannot be created, and an audit row **foreign-keyed to the authenticated operator**, so an actor a caller can choose is not accepted as an actor. Scope and identity are derived server-side from trusted assignment/authentication context, never from a request body. |
 
 **Conclusion.** The schema was built for both features and the runtime implements neither. Phase 6 is
 therefore *additive and activating*: three of its four core state elements already exist and are already
@@ -121,6 +121,33 @@ in one transaction per entitlement:
 
 A replayed tick charges zero because the watermark already moved. A reboot charges only the real elapsed
 interval. A late sample cannot reopen a terminal entitlement — the same rule §6.4 already states for bytes.
+
+### 3.2a A watermark proves idempotency — it does NOT prove the time was online
+
+**The gap, stated plainly.** `accounted_through` makes a replayed tick charge zero. It says nothing about
+whether the interval it charges was time the guest was actually *online*. Charge `now - accounted_through`
+naively and an appliance that was powered off for six hours bills six hours the moment it comes back — the
+session row still says `active`, because nothing was running to end it.
+
+**So elapsed wall-clock is not evidence of online time. Observation is.** Accrual is bounded by how recently
+the accounting service last *observed* the session:
+
+* each tick charges `min(now - accounted_through, MAX_CHARGE_PER_TICK)`, where the bound is a small multiple
+  of the tick interval;
+* a gap larger than the bound means the service was not running, so the unobserved remainder is **not
+  charged** — it is re-baselined and recorded as a skipped interval, which is evidence rather than silence;
+* the session must still be eligible *now*: `active` or `PENDING_ENFORCEMENT`, its entitlement live. A session
+  that was idle-reaped or ended while the service was down stops at its `ended` instant, not at `now`.
+
+The failure this rules out is asymmetric on purpose. Charging unobserved time takes minutes from a guest who
+was not using them and cannot be undone without an audited adjustment; declining to charge it gives away at
+most one bound's worth per outage, to a guest who may genuinely have been online. **Given the choice, the
+system under-charges.**
+
+**Adversarial proof required before M3 is implemented:** clean restart mid-session · crash/reboot with the
+session row left `active` · a gap far longer than the bound · idle reap during the gap · restoration from
+backup to an older watermark (the monotonic trigger refuses the backwards move) · and the ordinary case, where
+a continuously observed session accrues exactly the elapsed time.
 
 ### 3.3 Exhaustion at the true time
 

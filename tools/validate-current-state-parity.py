@@ -800,6 +800,67 @@ def main():
         ok("no current surface presents an accepted/closed phase as unfinished (accepted: %s)"
            % ", ".join(accepted_phases))
 
+    # ---- 10b. PRE-LIVE OPERATIONAL PARITY -----------------------------------------------------------------------
+    #
+    # THE FALSE PASS THIS CLOSES. Every rule above this one is about a surface claiming MORE IMPLEMENTATION
+    # PROGRESS than the record supports. This one is the mirror image, and nothing caught it: seven rendered
+    # surfaces called the legacy public-schema path "the SOLE PRODUCTION authority", one said its rows "grow
+    # with normal guest traffic", and two called the deployed voucher system "live and untouched" -- while the
+    # recorded fact is that StayConnect has NOT yet entered real hotel guest/staff operation (D24/T0056).
+    #
+    # Each of those sentences described the CONFIGURATION correctly. What made them wrong was the operational
+    # implication, and an implication is exactly what a keyword gate cannot judge on its own -- so, like the
+    # accepted-phase rule, this one is RELATIVE TO THE RECORDED FACT and does nothing at all once real
+    # operation begins and `real_hotel_guest_operation_started` becomes true.
+    #
+    # Historical records are not surfaces: docs/acceptance/ and docs/evidence/ say what was true when they
+    # were written and are deliberately not scanned, and a paragraph carrying a history marker is excused
+    # exactly as everywhere else.
+    if facts.get("real_hotel_guest_operation_started") is False:
+        live_claim = re.compile(
+            r"sole\s+production\s+authority|"
+            r"\bthe\s+live\s+authority\b|"
+            r"normal\s+guest\s+traffic|"
+            r"\blive\s+and\s+untouched\b|"
+            r"(?:currently|presently|today)\s+serv\w*\s+(?:real\s+)?(?:hotel\s+)?guests|"
+            r"break\s+all\s+guest\s+authentication",
+            re.I)
+        prelive_surfaces = sorted(set(
+            list(DOC_SURFACES) + list(PHASE_PLANS.values()) + [
+                "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+                "exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md",
+                "exports/chatgpt/stayconnectenterprise/MANIFEST.md",
+                "docs/architecture/Phase3-Privilege-Matrix.md",
+                "governance/artifact-registry.json",
+            ]))
+        hits = []
+        for rel in prelive_surfaces:
+            text = load_surface(rel)
+            if text is None:
+                continue
+            # A JSON document has no blank lines, so paragraph labelling would excuse the whole file. Scan it
+            # value by value, exactly as the merged-PR rule learned to.
+            if rel.endswith(".json"):
+                units = [v for v in json_strings(load_json(rel))]
+            else:
+                units = [p for p, _ in paragraphs(text)]
+            for para in units:
+                m = live_claim.search(para)
+                if not m:
+                    continue
+                if HISTORY_MARKERS.search(para):
+                    continue
+                # A sentence that quotes the wrong wording IN ORDER TO CORRECT IT is not the wrong wording.
+                if re.search(r"corrected|PRE-LIVE|pre-live|used to say|earlier wording|D24", para):
+                    continue
+                hits.append((rel, " ".join(para[max(0, m.start() - 70):m.end() + 70].split())))
+        for rel, hit in hits:
+            bad("pre-live-operational-parity",
+                "the recorded facts say real hotel guest operation has NOT started, but this presents the "
+                "system as operationally live: %s" % hit[:180], rel)
+        if not hits:
+            ok("no current surface presents the pre-live system as already serving real hotel guests")
+
     # ---- 11. STATIC CURRENT-STATE PROSE OUTSIDE THE GENERATED BLOCK ------------------------------------------
     #
     # THE FALSE PASS THIS CLOSES. Every rule above reads either the machine-readable facts or the GENERATED

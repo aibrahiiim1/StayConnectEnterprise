@@ -34,4 +34,27 @@ INSERT INTO public.guest_networks(id, tenant_id, site_id, name, parent_interface
   ('33333333-3333-3333-3333-333333333333','11111111-1111-1111-1111-111111111111','22222222-2222-2222-2222-222222222222',
    'fixture-guests','ens192','br-fixture','10.90.0.1/22','10.90.0.1','10.90.0.0/22',true)
   ON CONFLICT DO NOTHING;
+-- Phase 6 anchors its per-appliance product settings and its audit actor to the REAL platform records, so a
+-- settings row cannot name an appliance that does not exist and an audit row cannot name an operator the
+-- server never authenticated. Those FKs need the platform tables to exist here too. Same shape as migration
+-- 0001/0005 create on a real appliance, reduced to the columns the FKs and the gate actually use.
+CREATE TABLE IF NOT EXISTS public.appliances (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid NOT NULL,
+  site_id uuid NOT NULL,
+  serial text UNIQUE,
+  name text);
+CREATE TABLE IF NOT EXISTS public.operators (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id uuid,
+  email text,
+  name text);
+INSERT INTO public.appliances(id, tenant_id, site_id, serial, name) VALUES
+  ('44444444-4444-4444-4444-444444444444','11111111-1111-1111-1111-111111111111',
+   '22222222-2222-2222-2222-222222222222','APP-FIXTURE-0001','fixture-appliance')
+  ON CONFLICT DO NOTHING;
+INSERT INTO public.operators(id, tenant_id, email, name) VALUES
+  ('55555555-5555-5555-5555-555555555555','11111111-1111-1111-1111-111111111111',
+   'fixture-operator@example.invalid','Fixture Operator')
+  ON CONFLICT DO NOTHING;
 COMMIT;

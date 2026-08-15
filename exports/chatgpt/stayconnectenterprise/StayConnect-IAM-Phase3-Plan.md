@@ -28,8 +28,7 @@ This plan governs implementation, tests, live-dark deployment and rollback. It i
 **T0024**, 2026-08-11. Accepted runtime candidate **`7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4`**, which is the
 build the appliance runs.
 
-**DARK and NOT CUT OVER.** All Phase-3 flags OFF; legacy public-schema IAM remains the sole production
-authority; iam_v2 dark at **63 tables / 0 rows** with migration 0010 applied and **zero** runtime `iam_v2`
+**DARK and NOT CUT OVER.** All Phase-3 flags OFF; legacy public-schema IAM remains the sole CONFIGURED authentication baseline -- PRE-LIVE per D24/T0056, no real hotel guest or staff depends on it for live service yet; iam_v2 dark at **63 tables / 0 rows** with migration 0010 applied and **zero** runtime `iam_v2`
 grants. Accepted at DARK maturity **only** — no IAM-v2 cutover, no feature enablement, no PMS financial
 posting, no paid access, no `PS`/`PA`, no implicit FX, no programmatic reversal, no Gate-P grants, no Phase 4.
 
