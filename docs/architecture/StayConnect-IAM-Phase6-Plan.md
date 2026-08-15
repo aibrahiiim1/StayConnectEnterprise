@@ -366,8 +366,26 @@ and are therefore untouched by construction, not by a compatibility branch.
 |---|---|
 | **M1** | the pre-live clarification; this reconciliation; additive migration and configuration boundaries; the foundation for the appliance setting and the time-mode state |
 | **M2** | **COMPLETE** — the Guest Device Self-Service vertical slice: setting, Hotel Admin, guest surface, offline-only removal, authorization, race safety, auditing, throttling, adversarial tests, all four gate/setting combinations end to end, and the local-first proof with Central unreachable |
-| **M3** | the complete AGGREGATE_ONLINE_TIME vertical slice — immutable configuration, consumption semantics, outer window, entitlement/session integration, guest/admin presentation, concurrency/replay/reboot/accounting regression |
+| **M3** | **COMPLETE** (T0059) — the AGGREGATE_ONLINE_TIME vertical slice — immutable configuration, consumption semantics, outer window, entitlement/session integration, guest/admin presentation, concurrency/replay/reboot/accounting regression |
 | **M4** | hardening: full Phase-3/4/5/6 regression, adversarial matrix, least-privilege and local-first verification, backup, real scratch restore, rollback rehearsal, reboot verification, zero-stale governance, authoritative CI and evidence artifacts, controlled DEVELOPMENT-appliance LIVE-DARK validation |
+
+### M4 evidence, and what it does and does not cover
+
+Repository- and database-side M4 gates, all green and all repeatable against a database that has already
+seen them:
+
+| Gate | What it proves |
+|---|---|
+| `phase6_rollback_rehearsal.sh` (24) | every Phase-6 down and re-up **in the order a rollback must be performed**, with the quiescence precondition checked rather than assumed — it refuses while a live aggregate entitlement remains, and has demonstrably refused |
+| `phase6_backup_restore.sh` (16) | pg_dump → **DROP** → pg_restore, then functions, privileges, guards and a marker row verified on the restored copy |
+| `phase6-flag-coherence.sh` (6) | scd/acctd/edged agree on every Phase-6 flag, no child without its master, and the accounting prerequisite: an appliance may not offer online-time budgets with its accounting daemon inactive |
+| foundation / device / aggregate / least-privilege (50 / 22 / 49 / 54) | the durable invariants, measured as the real roles |
+| the integration matrix | green **twice consecutively on one database**, which is what makes it a regression suite rather than a one-shot |
+
+**What is still appliance-bound** and cannot be established from the repository: the controlled
+DEVELOPMENT-appliance LIVE-DARK validation itself, the flag-coherence check run against the appliance's own
+units, real reboot verification, and restoring every Phase-6 deployment flag OFF afterwards and confirming
+that state survives a reboot. Those are the remaining M4 gates.
 
 ### M4 rollback prerequisite — recorded now, because it is easy to discover too late
 
