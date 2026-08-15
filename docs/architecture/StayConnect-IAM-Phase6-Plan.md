@@ -394,13 +394,25 @@ seen them:
 * **a real reboot**, after which all five services are active, coherence is 6/6 again, the schema is unchanged
   at zero rows and no appliance setting row exists.
 
-**Not yet proven, and required before acceptance.** The Phase-6 **runtime binaries are not deployed**, so the
-schema is inert rather than merely unused. That leaves outstanding: the controlled LIVE-DARK validation of the
-authorized gate/setting combinations across both product slices; the local-first proof with Central
-unavailable, on the appliance; runtime flag coherence with the new binaries; appliance-side backup/restore and
-rollback evidence; and — after the validation — restoring every flag OFF, cleaning the controlled synthetic
-state, and **re-verifying that across a second reboot**. The reboot proof recorded above is of the
-*schema-dark* state, and is not a substitute for it.
+**The Phase-6 Go runtime is now deployed on that appliance as well** — scd, acctd, edged and portald, built
+from this branch, checksum-verified on the appliance, with the previous binaries retained at `*.bak-prep6`.
+All services are healthy and each reports Phase 6 OFF in its own words; runtime flag coherence is 6/6 and
+`iam_v2` still holds zero rows. The runtime is deployed and **inert**.
+
+**Three environments, and they are not the same thing:**
+
+| | Schema | Runtime | Phase-6 capability |
+|---|---|---|---|
+| **Production** | untouched, prior accepted baseline | untouched | not present, not contacted |
+| **DEVELOPMENT appliance** | Phase-6 schema applied (0030→0045) | Phase-6 binaries deployed | **every flag OFF**, coherent, reboot-verified |
+| scratch database | full schema, disposable | n/a | gates only |
+
+**Not yet proven, and required before acceptance:** the Hotel Admin standalone bundle is not yet rebuilt and
+deployed for Phase 6; the controlled validation of the authorized gate/setting combinations across both
+product slices has not run and **no synthetic acceptance state exists**; the appliance-side local-first,
+backup/restore and rollback exercises are outstanding; and after the validation every flag must be restored
+OFF, the controlled state cleaned, and that state **re-verified across a second reboot**. The reboot recorded
+above is of the *schema-dark* state and does not stand in for it.
 
 ### M4 rollback prerequisite — recorded now, because it is easy to discover too late
 

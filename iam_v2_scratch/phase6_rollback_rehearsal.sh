@@ -74,7 +74,8 @@ forbidden="$(q "SELECT count(*) FROM iam_v2.entitlement_devices ed
 eqv "no released binding is carrying a live session before the guard is removed" "$forbidden" "0"
 
 # ---- 2. down, newest first ------------------------------------------------------------------------------
-for m in 0044_phase6_exhaustion_instant_lower_bound \n         0043_phase6_exhaustion_instant_from_the_real_crossing \
+for m in 0045_phase6_over_budget_fail_closed \
+         0044_phase6_exhaustion_instant_lower_bound \n         0043_phase6_exhaustion_instant_from_the_real_crossing \
          0042_phase6_exhaustion_instant_must_be_provable \
          0041_phase6_expiry_writer_derives_the_condition \
          0040_phase6_acctd_expiry_writer \
@@ -123,7 +124,8 @@ for m in 0030_phase6_foundation \
          0040_phase6_acctd_expiry_writer \
          0041_phase6_expiry_writer_derives_the_condition \
          0042_phase6_exhaustion_instant_must_be_provable \
-         0043_phase6_exhaustion_instant_from_the_real_crossing \n         0044_phase6_exhaustion_instant_lower_bound; do
+         0043_phase6_exhaustion_instant_from_the_real_crossing \n         0044_phase6_exhaustion_instant_lower_bound \
+         0045_phase6_over_budget_fail_closed; do
   out="$(apply "$m.up.sql")"
   case "$out" in *ERROR*) no "$m re-up" "$(echo "$out" | head -1)";; *) ok "$m re-up";; esac
 done
@@ -149,6 +151,8 @@ eqv "the guest release policy is back in its non-caller-selectable form" \
    "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_guest_release_device_policy'")" "1"
 eqv "the guest action set is narrowed again to RELEASE" \
    "$(q "SELECT count(*) FROM pg_constraint WHERE conname='guest_device_actions_action_check'")" "1"
+eqv "the fail-closed suspension writer is back" \
+   "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_suspend_over_budget'")" "1"
 eqv "the exhaustion instant comes from the real crossing again" \
    "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_exhaustion_instant'")" "1"
 

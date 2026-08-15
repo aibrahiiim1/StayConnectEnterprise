@@ -244,6 +244,14 @@ eqv "svc_acctd can execute the sanctioned expiry writer"    "$(q "SELECT has_fun
 eqv "PUBLIC cannot execute the expiry writer"    "$(q "SELECT has_function_privilege('public','iam_v2.p6_expire_entitlement(uuid)','EXECUTE')")" "f"
 eqv "the old caller-supplied-reason writer is gone"    "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.proname='p6_expire_entitlement' AND pg_get_function_arguments(p.oid) <> 'p_entitlement uuid'")" "0"
 
+# The fail-closed suspension writer: acctd may call it, and may not change entitlement status any other way.
+eqv "svc_acctd can execute the over-budget suspension writer" \
+   "$(q "SELECT has_function_privilege('svc_acctd','iam_v2.p6_suspend_over_budget(uuid,uuid)','EXECUTE')")" "t"
+eqv "PUBLIC cannot execute the suspension writer" \
+   "$(q "SELECT has_function_privilege('public','iam_v2.p6_suspend_over_budget(uuid,uuid)','EXECUTE')")" "f"
+eqv "svc_acctd cannot change entitlement status directly" \
+   "$(q "SELECT has_function_privilege('svc_acctd','iam_v2.apply_entitlement_transition(uuid,text,timestamptz,text)','EXECUTE')")" "f"
+
 # ...and the required POSITIVE privileges, because a gate that only asserts absences passes for a role that
 # cannot do its job either.
 for tbl in entitlements service_plan_revisions sessions session_online_watermarks; do

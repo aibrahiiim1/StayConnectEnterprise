@@ -1292,9 +1292,14 @@ func TestIntegration_Phase6_UndatableExhaustionIsNeverFabricated(t *testing.T) {
 		t.Fatalf("sweep: %v", err)
 	}
 	for _, x := range due {
-		if x.EntitlementID == ent {
+		if x.EntitlementID == ent && x.Reason != "SUSPENDED_OVER_BUDGET" {
 			t.Fatalf("an exhaustion nobody can date was turned into a %s termination at %s", x.Reason, x.At)
 		}
+	}
+	// It IS withheld, though: undatable history is not a licence to keep browsing. The historical claim and
+	// the current safety decision are separate, and only the first one is refused here.
+	if s := statusOf(t, p, ent); s != "SUSPENDED" {
+		t.Fatalf("an entitlement over its budget is %s; access must be withheld while the crossing is unknown", s)
 	}
 	status, _, _, _ := terminalState(t, p, ent)
 	if status == "TERMINATED" {
@@ -1453,13 +1458,17 @@ func TestIntegration_Phase6_UnaccountedExhaustionStaysUndatable(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, x := range due {
-		if x.EntitlementID == ent {
-			t.Fatalf("it was terminated anyway, at %s", x.At)
+		if x.EntitlementID == ent && x.Reason != "SUSPENDED_OVER_BUDGET" {
+			t.Fatalf("it was terminated anyway, as %s at %s", x.Reason, x.At)
 		}
 	}
 	status, _, _, _ := terminalState(t, p, ent)
 	if status == "TERMINATED" {
 		t.Fatal("terminated on an instant nothing supports")
+	}
+	// ...and access is withheld rather than left running, which is the other half of the rule.
+	if status != "SUSPENDED" {
+		t.Fatalf("an entitlement over its budget is %s", status)
 	}
 }
 
@@ -1547,9 +1556,15 @@ func TestIntegration_Phase6_AccruedConsumptionThenBudgetCutIsUndatable(t *testin
 		t.Fatal(err)
 	}
 	for _, x := range due {
-		if x.EntitlementID == ent {
-			t.Fatalf("it was terminated anyway, at %s", x.At)
+		if x.EntitlementID == ent && x.Reason == "TIME" {
+			t.Fatalf("it was TERMINATED for TIME at %s, on an instant nothing supports", x.At)
 		}
+	}
+	// ...and being undatable is not a licence to keep browsing: it is over budget NOW, so access is withheld
+	// through SUSPENDED while the historical question stays open. See the fail-closed tests below.
+	if s := statusOf(t, p, ent); s != "SUSPENDED" {
+		t.Fatalf("an entitlement over its budget is %s; access must be withheld even when the crossing "+
+			"cannot be dated", s)
 	}
 }
 
@@ -1645,5 +1660,248 @@ func TestIntegration_Phase6_MalformedAdjustmentHistoryFailsSafe(t *testing.T) {
 				t.Fatal("terminated on an unreadable history")
 			}
 		})
+	}
+}
+
+// ---- undatable, but over budget NOW: access stops -----------------------------------------------------------
+//
+// Historical truth and current safety are different questions, and answering the first for both is how an
+// entitlement that has spent its budget keeps browsing. These prove the separation: nothing is invented about
+// WHEN it ended, and it stops carrying traffic regardless.
+//
+// The mechanism is SUSPENDED, which already exists and already means this -- admission refuses anything that
+// is not ACTIVE, and the shaping plan selects only ACTIVE. Nothing is redefined.
+
+// overBudgetUndatable produces the exact state: consumption at the budget through silent accrual, so no
+// audited history can date the crossing, with a live session still in place.
+func overBudgetUndatable(t *testing.T, p *pgxpool.Pool) (fixture, string, string) {
+	t.Helper()
+	f, ent, ses := seedAggregate(t, p, 600, 5*time.Minute)
+	accrueSilently(t, p, ent, 600)
+	return f, ent, ses
+}
+
+func statusOf(t *testing.T, p *pgxpool.Pool, ent string) string {
+	t.Helper()
+	var s string
+	if err := p.QueryRow(context.Background(),
+		`SELECT status FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// THE CENTRAL CASE. Access is withheld, and NOTHING about history is fabricated.
+func TestIntegration_Phase6_UndatableOverBudgetLosesAccessWithoutFabricatedHistory(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	f, ent, ses := overBudgetUndatable(t, p)
+
+	due, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	var got *Expiry
+	for i := range due {
+		if due[i].EntitlementID == ent {
+			got = &due[i]
+		}
+	}
+	if got == nil {
+		t.Fatal("an entitlement over its budget kept its access because its crossing could not be dated")
+	}
+	if got.Reason != "SUSPENDED_OVER_BUDGET" {
+		t.Fatalf("reported as %q; it is withheld, not ended", got.Reason)
+	}
+
+	// (1) ACCESS IS GONE: no live session, no authorized binding.
+	var live, authorized int
+	if err := p.QueryRow(ctx, `SELECT
+		 (SELECT count(*) FROM iam_v2.sessions WHERE id=$1 AND state IN ('active','PENDING_ENFORCEMENT')),
+		 (SELECT count(*) FROM iam_v2.entitlement_devices WHERE entitlement_id=$2 AND status='AUTHORIZED')`,
+		ses, ent).Scan(&live, &authorized); err != nil {
+		t.Fatal(err)
+	}
+	if live != 0 || authorized != 0 {
+		t.Fatalf("access survived: live sessions=%d authorized devices=%d", live, authorized)
+	}
+
+	// (2) NO HISTORICAL CLAIM: not terminated, no terminal reason, no terminated_at, no TIME evidence.
+	var status, reason string
+	var terminatedAt *time.Time
+	var evidence int
+	if err := p.QueryRow(ctx, `SELECT status, COALESCE(terminal_reason,''), terminated_at,
+		 (SELECT count(*) FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id=$1)
+		   FROM iam_v2.entitlements WHERE id=$1`, ent).Scan(&status, &reason, &terminatedAt, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if status != "SUSPENDED" {
+		t.Fatalf("status is %s; SUSPENDED is the state that withholds access without ending anything", status)
+	}
+	if reason != "" || terminatedAt != nil || evidence != 0 {
+		t.Fatalf("a historical ending was fabricated: reason=%q terminated_at=%v evidence=%d",
+			reason, terminatedAt, evidence)
+	}
+
+	// (3) IT CANNOT REGAIN ACCESS. The real admission primitive refuses a non-ACTIVE entitlement.
+	var dev string
+	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.devices (id,tenant_id,site_id,appliance_id,mac,last_seen)
+		 VALUES (gen_random_uuid(),$1,$2,gen_random_uuid(),
+		         ('02:00:00:'||substr(md5(random()::text),1,2)||':'||substr(md5(random()::text),3,2)||':'||
+		          substr(md5(random()::text),5,2))::macaddr, now()) RETURNING id::text`,
+		f.tenant, f.site).Scan(&dev); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Exec(ctx, `SELECT iam_v2.authorize_entitlement_device($1,$2,now())`, ent, dev); err == nil {
+		t.Fatal("a suspended over-budget entitlement admitted a new device")
+	}
+
+	// (4) IT IS NOT IN THE SHAPING PLAN, so netd forwards nothing for it.
+	plan, err := New(p).PlanForSite(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sh := range plan.Shape {
+		if sh.SessionID == ses {
+			t.Fatal("a suspended entitlement's session is still in the shaping plan")
+		}
+	}
+
+	// (5) THE EVIDENCE IS BOUNDED: one transition, with a machine-readable reason, not one per sweep.
+	for i := 0; i < 3; i++ {
+		if _, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var transitions int
+	if err := p.QueryRow(ctx,
+		`SELECT count(*) FROM iam_v2.entitlement_state_transitions
+		  WHERE entitlement_id=$1 AND to_state='SUSPENDED' AND reason='AGGREGATE_OVER_BUDGET'`,
+		ent).Scan(&transitions); err != nil {
+		t.Fatal(err)
+	}
+	if transitions != 1 {
+		t.Fatalf("%d suspension transitions after four sweeps; the evidence must be bounded", transitions)
+	}
+	if statusOf(t, p, ent) != "SUSPENDED" {
+		t.Fatal("a later sweep changed the status")
+	}
+}
+
+// IT CONVERGES. When durable evidence later establishes the true crossing, the entitlement terminates through
+// the ONE boundary path, at the true instant, with the correct evidence.
+func TestIntegration_Phase6_SuspendedConvergesWhenEvidenceArrives(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	f, ent, _ := overBudgetUndatable(t, p)
+	if _, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+		t.Fatal(err)
+	}
+	if statusOf(t, p, ent) != "SUSPENDED" {
+		t.Fatal("the fixture did not reach the suspended state")
+	}
+
+	// The evidence arrives: an audited adjustment records that consumption had already reached the budget.
+	adjust(t, p, f, ent, "consumed_online_seconds", 0, 600, 40*time.Minute)
+
+	due, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, x := range due {
+		if x.EntitlementID == ent && x.Reason == "TIME" {
+			found = true
+			if age := time.Since(x.At); age < 35*time.Minute || age > 45*time.Minute {
+				t.Fatalf("terminated %s ago rather than at the newly-evidenced crossing", age)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("evidence arrived and the entitlement did not converge to a termination")
+	}
+	status, reason, _, _ := terminalState(t, p, ent)
+	if status != "TERMINATED" || reason != "TIME" {
+		t.Fatalf("converged state is %s/%s", status, reason)
+	}
+	var cause string
+	if err := p.QueryRow(ctx,
+		`SELECT cause_detail FROM iam_v2.entitlement_termination_evidence WHERE entitlement_id=$1`,
+		ent).Scan(&cause); err != nil {
+		t.Fatalf("no evidence after convergence: %v", err)
+	}
+	if cause != "AGGREGATE_ONLINE_TIME_EXHAUSTED" {
+		t.Fatalf("evidence says %q", cause)
+	}
+}
+
+// CONCURRENT SWEEPS SUSPEND ONCE. Six overlapping sweeps must leave one transition, not six.
+func TestIntegration_Phase6_ConcurrentSweepsSuspendOnce(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	f, ent, _ := overBudgetUndatable(t, p)
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _ = New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	var transitions int
+	if err := p.QueryRow(ctx,
+		`SELECT count(*) FROM iam_v2.entitlement_state_transitions
+		  WHERE entitlement_id=$1 AND to_state='SUSPENDED'`, ent).Scan(&transitions); err != nil {
+		t.Fatal(err)
+	}
+	if transitions != 1 {
+		t.Fatalf("%d suspension transitions from six concurrent sweeps", transitions)
+	}
+	if statusOf(t, p, ent) != "SUSPENDED" {
+		t.Fatal("the concurrent sweeps left it unsuspended")
+	}
+}
+
+// AN ORDINARY BELOW-BUDGET ENTITLEMENT IS UNTOUCHED. Without this the tests above would be satisfied by a
+// sweep that suspends everything.
+func TestIntegration_Phase6_BelowBudgetIsUnaffected(t *testing.T) {
+	p := pool(t)
+	ctx := context.Background()
+	f, ent, ses := seedAggregate(t, p, 86400, 5*time.Minute) // hours of budget, minutes used
+
+	if _, err := New(p).WithAggregateOnlineTime(86400).EnforceExpiries(ctx, f.tenant, f.site); err != nil {
+		t.Fatal(err)
+	}
+	if s := statusOf(t, p, ent); s != "ACTIVE" {
+		t.Fatalf("a below-budget entitlement is %s", s)
+	}
+	var live, authorized int
+	if err := p.QueryRow(ctx, `SELECT
+		 (SELECT count(*) FROM iam_v2.sessions WHERE id=$1 AND state IN ('active','PENDING_ENFORCEMENT')),
+		 (SELECT count(*) FROM iam_v2.entitlement_devices WHERE entitlement_id=$2 AND status='AUTHORIZED')`,
+		ses, ent).Scan(&live, &authorized); err != nil {
+		t.Fatal(err)
+	}
+	if live != 1 || authorized == 0 {
+		t.Fatalf("an ordinary guest lost access: live=%d authorized=%d", live, authorized)
+	}
+	plan, err := New(p).PlanForSite(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inPlan := false
+	for _, sh := range plan.Shape {
+		if sh.SessionID == ses {
+			inPlan = true
+		}
+	}
+	if !inPlan {
+		t.Fatal("an ordinary guest's session left the shaping plan")
 	}
 }

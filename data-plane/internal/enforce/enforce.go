@@ -124,7 +124,7 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 // Expiry is one enforced ending.
 type Expiry struct {
 	EntitlementID string
-	Reason        string // TIME | DATA
+	Reason        string // TIME | DATA | SUSPENDED_OVER_BUDGET (withheld, not ended)
 	At            time.Time
 	Sessions      int
 	Devices       int
@@ -295,6 +295,38 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 		}
 		x.Reason, x.At = gotReason, gotAt
 	}
+	// FAIL CLOSED ON WHAT CANNOT BE DATED. An aggregate entitlement whose consumption has reached its budget
+	// RIGHT NOW, and whose crossing instant no durable evidence can establish, must not keep carrying traffic
+	// while the question stays open. It is suspended rather than terminated: SUSPENDED already means "not
+	// entitled to forwarding, not ended", admission already refuses anything that is not ACTIVE, and the
+	// shaping plan already excludes it -- so access stops without anyone claiming to know when it ended.
+	//
+	// It stays in the terminal-condition candidate set, so if evidence later establishes the true crossing it
+	// converges through the ONE boundary path at the true instant.
+	if e.aggregateTimeMaxCharge > 0 {
+		srows, err := tx.Query(ctx,
+			`SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)`,
+			tenant, site)
+		if err != nil {
+			return nil, err
+		}
+		for srows.Next() {
+			var x Expiry
+			if err := srows.Scan(&x.EntitlementID, &x.Devices, &x.Sessions); err != nil {
+				srows.Close()
+				return nil, err
+			}
+			// Reported with its own reason so a caller cannot mistake it for an ending. It is not one, and
+			// nothing durable says it is.
+			x.Reason, x.At = "SUSPENDED_OVER_BUDGET", time.Now().UTC()
+			due = append(due, x)
+		}
+		srows.Close()
+		if err := srows.Err(); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
