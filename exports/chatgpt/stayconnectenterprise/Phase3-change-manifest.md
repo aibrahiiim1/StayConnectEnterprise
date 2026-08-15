@@ -2,7 +2,7 @@
 
 - **Base commit:** `ffb68e1ad325f5dd6d2096f2e30a782f8caef059`
 - **HEAD commit:** `259a15113d2ff2a0b48b4a21c2777e2085580461`
-- **Provenance (generation HEAD = inventory_head):** `c2010061e9dc48f5bd6c06454cda5320217dafa6`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `259a15113d2ff2a0b48b4a21c2777e2085580461`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/6-device-selfservice-and-time-modes`
 - **Remote branch:** `origin/phase/6-device-selfservice-and-time-modes`
 - **Changed files:** 556
@@ -371,34 +371,34 @@
 | `docs/evidence/StayConnect-IAM-Phase5-Evidence.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 5 closure: record the merge of PR #13 into master (D23 / T0054) |
 | `docs/evidence/phase4/npm-audit-full.json` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
 | `docs/evidence/phase4/npm-audit-production.json` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4: remove the production dependency risk instead of accepting it, and stop the gate accepting its own risk |
-| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `docs/manifests/Phase3-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6: correct the T0059 receipt timestamp to UTC |
 | `docs/reports/StayConnect-IAM-Phase2-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | @ Phase 3 (inventory_head): D14/T0015 authorization + plan + privilege matrix + connector ADR + governance guards |
-| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6: correct the T0059 receipt timestamp to UTC |
 | `docs/reports/StayConnect-IAM-Phase4-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 4 closure: record the merge of PR #12 into master (D20 / T0048) |
 | `docs/reports/StayConnect-IAM-Phase5-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 5 closure: record the merge of PR #13 into master (D23 / T0054) |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_259a151.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: correct the T0059 receipt timestamp to UTC |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: correct the T0059 receipt timestamp to UTC |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: correct the T0059 receipt timestamp to UTC |
+| `exports/chatgpt/phase-evidence/GIT_STAT_259a151.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_9a1f356.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: correct the T0059 receipt timestamp to UTC |
 | `exports/chatgpt/phase-evidence/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: correct the T0059 receipt timestamp to UTC |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Final-Report.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/StayConnect-IAM-Phase2-Live-Dark-Acceptance.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M2 pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: correct the T0059 receipt timestamp to UTC |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: correct the T0059 receipt timestamp to UTC |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: correct the T0059 receipt timestamp to UTC |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: correct the T0059 receipt timestamp to UTC |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/Phase2-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | @ Phase 3 (delivery_head): complete manifest (base..delivery_head, 48 files) + rebuilt packs + pointer |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
-| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
+| `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Phase 6: correct the T0059 receipt timestamp to UTC |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 3 (delivery_head): T0028 manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
@@ -935,7 +935,7 @@
  .../reports/StayConnect-IAM-Phase3-Final-Report.md | 2366 +++++++++++++++
  .../reports/StayConnect-IAM-Phase4-Final-Report.md |  159 +
  .../reports/StayConnect-IAM-Phase5-Final-Report.md |  199 ++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 311554 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 250675 -> 311629 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 101471 -> 117762 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 41921 -> 42178 bytes
  .../chatgpt/phase-evidence/GIT_STAT_259a151.txt    |    4 +
@@ -1132,12 +1132,25 @@
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-(clean)
+M  docs/manifests/Phase3-change-manifest.md
+M  docs/reports/StayConnect-IAM-Phase3-Final-Report.md
+M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
+A  exports/chatgpt/phase-evidence/GIT_STAT_259a151.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_9ac0486.txt
+M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/MANIFEST.md
+M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
+M  exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md
+M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: c201006 Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest
 HISTORICAL: 259a151 Phase 6: correct the T0059 receipt timestamp to UTC
 HISTORICAL: 9ac0486 Phase 6 (delivery_head): M3 receipt pointer, complete staged manifest, rebuilt packs and report-embedded manifest
 HISTORICAL: 86b5f21 Phase 6: M3 governance receipt (T0059) under D25
