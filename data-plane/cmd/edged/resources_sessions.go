@@ -36,6 +36,12 @@ func scanEdgeSession(row interface{ Scan(...any) error }, e *edgeSessionRow) err
 func (s *server) sessionsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listGuestSessions)
+	// PHASE 6 (DARK): the online-time budget view. Registered BEFORE the {id} pattern so the static path
+	// wins, and mounted here rather than as its own resource because it is live access state -- exactly what
+	// this resource already means -- so it inherits the role matrix instead of adding a row to it.
+	if s.phase6.AggregateTimeOn() {
+		r.Get("/aggregate-time", s.listAggregateTime)
+	}
 	r.Get("/{id}", s.getGuestSession)
 	r.Post("/{id}/disconnect", s.disconnectGuestSession)
 	return r

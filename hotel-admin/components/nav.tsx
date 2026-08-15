@@ -55,6 +55,9 @@ const SECTIONS: Section[] = [
       { href: "/commercial-packages", label: "Commercial packages", icon: Package, resource: "commercial-packages", enabled: PHASE2_ADMIN },
       { href: "/sessions",           label: "Sessions",           icon: Monitor,  resource: "sessions" },
       { href: "/guest-device-self-service", label: "Guest devices", icon: Smartphone, resource: "guest-device-self-service", enabled: PHASE6_ADMIN },
+      // Live access state, so it rides the sessions resource rather than introducing a role-matrix row for a
+      // read-only view that is not a new kind of authority.
+      { href: "/online-time", label: "Online-time budgets", icon: Activity, resource: "sessions", enabled: PHASE6_ADMIN },
     ],
   },
   {
