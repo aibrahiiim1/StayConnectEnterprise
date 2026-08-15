@@ -819,6 +819,12 @@ def main():
     if facts.get("real_hotel_guest_operation_started") is False:
         live_claim = re.compile(
             r"sole\s+production\s+authority|"
+            # The same claim wearing a different noun. The first pass caught only "production" and this form
+            # survived in three places, which is why the pattern now names the CLAIM rather than one spelling
+            # of it: any "sole ... authority" over authentication asserts an operational role that a pre-live
+            # system does not have.
+            r"sole\s+authentication\s+authority|"
+            r"sole\s+(?:production\s+)?auth\w*\s+authority|"
             r"\bthe\s+live\s+authority\b|"
             r"normal\s+guest\s+traffic|"
             r"\blive\s+and\s+untouched\b|"

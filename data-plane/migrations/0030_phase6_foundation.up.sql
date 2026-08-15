@@ -194,7 +194,12 @@ CREATE TABLE iam_v2.entitlement_termination_evidence (
   terminal_reason text NOT NULL CHECK (terminal_reason = 'TIME'),
   -- WHICH rule inside that reason ran out. This is implementation detail about the cause, not new contract
   -- vocabulary about the outcome, and the distinction is the whole point of putting it here.
-  cause_detail text NOT NULL CHECK (cause_detail IN ('VALIDITY_WINDOW_ELAPSED','AGGREGATE_ONLINE_TIME_EXHAUSTED')),
+  -- WHICH rule inside TIME ran out. Three, not two: an AGGREGATE_ONLINE_TIME entitlement has TWO terminal
+  -- time outcomes and both must be representable -- the budget running out, and the outer calendar window
+  -- expiring first while minutes remain. The latter is how an unused package ordinarily ends.
+  cause_detail text NOT NULL CHECK (cause_detail IN ('VALIDITY_WINDOW_ELAPSED',
+                                                     'AGGREGATE_ONLINE_TIME_EXHAUSTED',
+                                                     'AGGREGATE_OUTER_WINDOW_EXPIRED')),
   time_mode text NOT NULL CHECK (time_mode IN ('VALIDITY_WINDOW','AGGREGATE_ONLINE_TIME')),
   -- The numbers that make the claim checkable rather than assertable.
   budget_seconds bigint CHECK (budget_seconds IS NULL OR budget_seconds >= 0),
@@ -204,13 +209,26 @@ CREATE TABLE iam_v2.entitlement_termination_evidence (
   recorded_at timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (tenant_id, site_id, entitlement_id)
     REFERENCES iam_v2.entitlements (tenant_id, site_id, id) ON DELETE CASCADE,
-  -- An aggregate exhaustion must carry the budget it exhausted. Evidence without the number is an assertion.
+  -- EITHER aggregate outcome must carry the budget and the consumption, because those two numbers are
+  -- precisely what distinguishes them: exhaustion has consumed >= budget, outer-window expiry has consumed
+  -- < budget and minutes left on the clock. Evidence without the numbers is an assertion.
   CONSTRAINT ete_aggregate_carries_its_budget CHECK (
-    cause_detail <> 'AGGREGATE_ONLINE_TIME_EXHAUSTED'
+    cause_detail NOT IN ('AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_OUTER_WINDOW_EXPIRED')
     OR (budget_seconds IS NOT NULL AND consumed_online_seconds IS NOT NULL)),
-  -- The two halves must agree: an aggregate exhaustion cannot claim a VALIDITY_WINDOW entitlement.
+  -- The cause and the mode must agree in BOTH directions: an aggregate cause cannot describe a
+  -- VALIDITY_WINDOW entitlement, and a VALIDITY_WINDOW cause cannot describe an aggregate one.
   CONSTRAINT ete_detail_matches_mode CHECK (
-    (cause_detail = 'AGGREGATE_ONLINE_TIME_EXHAUSTED') = (time_mode = 'AGGREGATE_ONLINE_TIME'))
+    (cause_detail IN ('AGGREGATE_ONLINE_TIME_EXHAUSTED','AGGREGATE_OUTER_WINDOW_EXPIRED'))
+      = (time_mode = 'AGGREGATE_ONLINE_TIME')),
+  -- An outer-window expiry must NAME the window it hit, and must show the budget was NOT exhausted --
+  -- otherwise the row cannot be told apart from an exhaustion that happened to be recorded late.
+  CONSTRAINT ete_outer_window_is_distinguishable CHECK (
+    cause_detail <> 'AGGREGATE_OUTER_WINDOW_EXPIRED'
+    OR (window_ends_at IS NOT NULL AND consumed_online_seconds < budget_seconds)),
+  -- ...and symmetrically, an exhaustion must show the budget WAS reached.
+  CONSTRAINT ete_exhaustion_reached_its_budget CHECK (
+    cause_detail <> 'AGGREGATE_ONLINE_TIME_EXHAUSTED'
+    OR consumed_online_seconds >= budget_seconds)
 );
 
 COMMENT ON TABLE iam_v2.entitlement_termination_evidence IS
