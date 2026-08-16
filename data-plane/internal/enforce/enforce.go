@@ -62,9 +62,13 @@ type Enforcer struct {
 	// dataCrossing is the LATERAL that derives the DATA-quota crossing, chosen per sweep from the catalog --
 	// the Phase-6 function when the schema has it, the pre-Phase-6 expression when it does not.
 	dataCrossing string
-	// phase6Writers records whether the Phase-6 expiry writer exists in this schema. Both it and the crossing
-	// arrive together (0038/0041) and both disappear together on a rollback, so one probe decides both.
+	// phase6Writers records whether the Phase-6 expiry writer exists in this schema. It, the crossing and the
+	// online_time_exhausted_at column arrive together (0036/0038/0041) and disappear together on a rollback,
+	// so one probe decides all three.
 	phase6Writers bool
+	// exhaustedAt is the stamped online-time exhaustion instant, or a typed NULL on a schema without the
+	// column. Referencing a column that does not exist fails the whole statement, so it is a fragment too.
+	exhaustedAt string
 }
 
 // The two forms. They answer the same question; the first is the single sanctioned implementation the expiry
@@ -97,8 +101,10 @@ func (e *Enforcer) resolveDataCrossing(ctx context.Context, tx pgx.Tx) error {
 	e.phase6Writers = present
 	if present {
 		e.dataCrossing = dataCrossingPhase6
+		e.exhaustedAt = "e.online_time_exhausted_at"
 	} else {
 		e.dataCrossing = dataCrossingLegacy
+		e.exhaustedAt = "NULL::timestamptz"
 	}
 	return nil
 }
@@ -224,10 +230,10 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 			SELECT e.id::text AS id,
 				CASE WHEN dat.at IS NOT NULL
 				          AND (win.at IS NULL OR dat.at < win.at)
-				          AND (e.online_time_exhausted_at IS NULL OR dat.at <= e.online_time_exhausted_at)
+				          AND (`+e.exhaustedAt+` IS NULL OR dat.at <= `+e.exhaustedAt+`)
 				     THEN 'DATA' ELSE 'TIME' END AS reason,
 				LEAST(COALESCE(win.at, 'infinity'::timestamptz), COALESCE(dat.at, 'infinity'::timestamptz),
-				      COALESCE(e.online_time_exhausted_at, 'infinity'::timestamptz)) AS at
+				      COALESCE(`+e.exhaustedAt+`, 'infinity'::timestamptz)) AS at
 			FROM iam_v2.entitlements e
 			LEFT JOIN LATERAL (
 				SELECT e.window_ends_at AS at
@@ -241,7 +247,7 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 			  -- though the tick normally reports it in the same transaction. If a process died between the
 			  -- stamp and the termination, the stamp is durable and this is what finds it on the next sweep;
 			  -- the writer re-derives the condition anyway, so naming it here can never end a healthy one.
-			  AND (win.at IS NOT NULL OR dat.at IS NOT NULL OR e.online_time_exhausted_at IS NOT NULL)
+			  AND (win.at IS NOT NULL OR dat.at IS NOT NULL OR `+e.exhaustedAt+` IS NOT NULL)
 		) c ORDER BY c.id`, tenant, site)
 	if err != nil {
 		return nil, err

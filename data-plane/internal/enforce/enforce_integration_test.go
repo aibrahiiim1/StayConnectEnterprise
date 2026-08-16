@@ -315,9 +315,24 @@ func TestIntegration_ExpiryWorksWithoutThePhase6DataCrossing(t *testing.T) {
 		}
 	}()
 
-	due, err := New(p).EnforceExpiries(ctx, f.tenant, f.site)
+	e := New(p)
+	due, err := e.EnforceExpiries(ctx, f.tenant, f.site)
 	if err != nil {
 		t.Fatalf("the sweep failed on a pre-Phase-6 schema: %v", err)
+	}
+
+	// The fragments the sweep chose, checked directly. online_time_exhausted_at arrives with 0036 and appears
+	// in the candidate query in three places; on a schema without it the statement fails as a whole, exactly
+	// as the missing function did. Asserting the fragment is what proves the column is never emitted -- the
+	// fragment is the only place its name appears.
+	if e.phase6Writers {
+		t.Fatal("the sweep still believes the Phase-6 writers are present")
+	}
+	if e.exhaustedAt != "NULL::timestamptz" {
+		t.Fatalf("the exhaustion instant is read as %q on a schema without the column", e.exhaustedAt)
+	}
+	if e.dataCrossing != dataCrossingLegacy {
+		t.Fatal("the sweep did not fall back to the pre-Phase-6 data crossing")
 	}
 	found := false
 	for _, x := range due {

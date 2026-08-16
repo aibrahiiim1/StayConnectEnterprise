@@ -417,12 +417,16 @@ MUTATIONS = [
  # --- Phase-2 acceptance/closure + complete-manifest self-reference contradiction classes ---
  ("M45 Phase 2 accepted (transition_accepted=true) but status not ACCEPTED_AND_CLOSED", "governance/project-state.json",
    ("json_set", [(["phases", "2", "status"], "IN_PROGRESS")])),
- ("M46 change-manifest lists a path not present in git base..HEAD", "docs/manifests/Phase3-change-manifest.md",
+ # M46/M48 target the manifest the VALIDATOR ACTUALLY READS, which is Phase{current_phase}. They pointed at
+ # Phase 3's for as long as that was the only manifest; the moment Phase 6 published its own, mutating the
+ # Phase-3 file changed nothing the validator looks at and both cases silently stopped biting -- a mutation
+ # case that cannot fail is worse than no case, because it reports green.
+ ("M46 change-manifest lists a path not present in git base..HEAD", "docs/manifests/Phase6-change-manifest.md",
    ("append", "\n| `zz-fabricated-extra-path.md` | CREATED | `A` | other | OTHER | rollback REMOVES it | fabricated |\n")),
  ("M47 acceptance decision D13 removed from the register", "governance/decision-register.json",
    ("replace", [('"id": "D13"', '"id": "D13-DISABLED"')])),
- ("M48 manifest base repointed so its path/status set no longer equals git base..delivery_head", "docs/manifests/Phase3-change-manifest.md",
-   ("replace", [("ffb68e1ad325f5dd6d2096f2e30a782f8caef059", "a8c3b3caac6baf8ac41fa581fca5350c97219bb8")])),
+ ("M48 manifest base repointed so its path/status set no longer equals git base..delivery_head", "docs/manifests/Phase6-change-manifest.md",
+   ("replace", [("09e67156fb6cb286fe47fe632a368a3c4e4c6d23", "a8c3b3caac6baf8ac41fa581fca5350c97219bb8")])),
  # --- Phase-3 governance contradiction classes (D14/T0015; DARK; no financial posting; Phase 4 gated) ---
  ("M49 decision D14 removed while Phase 3 is IN_PROGRESS", "governance/decision-register.json",
    ("replace", [('"id": "D14"', '"id": "D14-DISABLED"')])),
