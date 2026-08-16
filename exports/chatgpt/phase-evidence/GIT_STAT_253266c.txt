@@ -1,4 +1,0 @@
-commit 253266c11ce40963b3a0d8d61210e1aad255b7c0
-Date:   Sat Aug 15 20:46:53 2026 +0300
-
-    Phase 6 M4: record the repository-side evidence, and what remains appliance-bound

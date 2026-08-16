@@ -1,13 +1,13 @@
 # StayConnect IAM — Phase 1B Implementation Plan (Credential/Portal Integration, DARK)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0059 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0060 -->
 **Current phase:** 6 — Guest device self-service; optional AGGREGATE_ONLINE_TIME
 **Current activity:** `PHASE_6_IMPLEMENTATION_IN_PROGRESS_DARK`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 IN_PROGRESS · 7 NOT_STARTED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
-**Single next authorized action:** Continue Phase-6 milestone M4 under D25 on branch phase/6-device-selfservice-and-time-modes -- hardening and the controlled DEVELOPMENT-appliance LIVE-DARK acceptance candidate as scoped in docs/architecture/StayConnect-IAM-Phase6-Plan.md section 4, finishing with the single Phase-6 pull request opened UNMERGED for a separate Product-Owner acceptance decision.
+**Single next authorized action:** Open the single Phase-6 pull request against master from branch phase/6-device-selfservice-and-time-modes, keep it UNMERGED, verify the remote PR HEAD equals the delivery HEAD and that the required GitHub CI including Project Governance is green, and STOP at the Product-Owner acceptance boundary. Acceptance, closure, merge, any Phase-6 enablement on any environment, IAM-v2 cutover, paid access and Phase 7 all remain unauthorized.
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D25`.
 <!-- END GENERATED PROJECT STATE -->
 
