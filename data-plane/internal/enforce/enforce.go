@@ -59,6 +59,48 @@ type Enforcer struct {
 	// existing caller produces -- means the mode is DARK: no accrual runs, no watermark is written, and the
 	// sweep behaves exactly as it did before Phase 6.
 	aggregateTimeMaxCharge int
+	// dataCrossing is the LATERAL that derives the DATA-quota crossing, chosen per sweep from the catalog --
+	// the Phase-6 function when the schema has it, the pre-Phase-6 expression when it does not.
+	dataCrossing string
+	// phase6Writers records whether the Phase-6 expiry writer exists in this schema. Both it and the crossing
+	// arrive together (0038/0041) and both disappear together on a rollback, so one probe decides both.
+	phase6Writers bool
+}
+
+// The two forms. They answer the same question; the first is the single sanctioned implementation the expiry
+// writer also calls, so on a Phase-6 database the sweep's candidate list and the writer's verdict cannot
+// disagree about when a guest ran out of data.
+const dataCrossingPhase6 = `LEFT JOIN LATERAL (SELECT iam_v2.p6_data_crossing(e.id) AS at) dat ON true`
+
+const dataCrossingLegacy = `LEFT JOIN LATERAL (
+				SELECT min(x.sampled_at) AS at FROM (
+					SELECT ar.sampled_at,
+					       sum(ar.bytes_up + ar.bytes_down) OVER (ORDER BY ar.sampled_at, ar.id) AS running
+					FROM iam_v2.accounting_records ar
+					JOIN iam_v2.session_entitlement_bindings b ON b.session_id = ar.session_id
+					  AND b.entitlement_id = e.id AND b.bound_from <= ar.sampled_at
+					  AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at)
+				) x
+				JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
+				WHERE spr.data_quota_bytes IS NOT NULL AND x.running >= spr.data_quota_bytes) dat ON true`
+
+// resolveDataCrossing asks the catalog once per sweep. It is a single cheap lookup rather than a cached flag
+// because a migration can be applied or rolled back under a running process, and a flag decided at startup
+// would then be wrong for the rest of the process's life -- in the direction that stops every expiry.
+func (e *Enforcer) resolveDataCrossing(ctx context.Context, tx pgx.Tx) error {
+	var present bool
+	if err := tx.QueryRow(ctx,
+		`SELECT to_regprocedure('iam_v2.p6_data_crossing(uuid)') IS NOT NULL
+		    AND to_regprocedure('iam_v2.p6_expire_entitlement(uuid)') IS NOT NULL`).Scan(&present); err != nil {
+		return err
+	}
+	e.phase6Writers = present
+	if present {
+		e.dataCrossing = dataCrossingPhase6
+	} else {
+		e.dataCrossing = dataCrossingLegacy
+	}
+	return nil
 }
 
 func New(pool *pgxpool.Pool) *Enforcer { return &Enforcer{pool: pool} }
@@ -140,6 +182,22 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// THE DATA CROSSING HAS TO SURVIVE A DATABASE THAT HAS NEVER SEEN PHASE 6.
+	//
+	// iam_v2.p6_data_crossing arrives with migration 0038. This sweep is Phase-3/5 machinery that predates it
+	// by two phases and runs on every appliance, so calling the function unconditionally made the whole of
+	// expiry enforcement fail with "function iam_v2.p6_data_crossing(uuid) does not exist" the moment the
+	// binary met an older schema -- which is exactly what a Phase-6 rollback produces, and what CI caught
+	// against the Phase-3 migration set.
+	//
+	// That is worse than losing a Phase-6 feature: no entitlement expires at all, so every guest whose window
+	// or quota has run out keeps their access. So the crossing is resolved per sweep against the catalog, and
+	// when the function is absent the sweep falls back to the pre-Phase-6 expression it always used. Same
+	// answer on a Phase-6 database, correct behaviour on one without it, and no version flag to keep in sync.
+	if err := e.resolveDataCrossing(ctx, tx); err != nil {
+		return nil, err
+	}
+
 	// THE CANDIDATE READ DOES NOT LOCK, and that is deliberate rather than an omission.
 	//
 	// It used to take FOR UPDATE OF e, which PostgreSQL only allows to a role holding UPDATE on
@@ -177,7 +235,7 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 			-- THE ONE DATA-CROSSING IMPLEMENTATION. The sanctioned expiry writer calls this same function to
 			-- establish the condition for itself, so the sweep's candidate list and the writer's verdict
 			-- cannot disagree about when -- or whether -- a guest ran out of data.
-			LEFT JOIN LATERAL (SELECT iam_v2.p6_data_crossing(e.id) AS at) dat ON true
+			`+e.dataCrossing+`
 			WHERE e.tenant_id=$1 AND e.site_id=$2 AND e.status IN ('ACTIVE','PENDING','SUSPENDED')
 			  -- An entitlement whose online-time budget was stamped exhausted is a candidate too, even
 			  -- though the tick normally reports it in the same transaction. If a process died between the
@@ -279,6 +337,24 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 		//
 		// The reason and instant come BACK, so what this sweep reports is what the database decided rather
 		// than what the sweep proposed. Where they differ, the database is right: it locked the row first.
+		//
+		// WITHOUT the Phase-6 writer -- a schema that predates 0041, or one it has been rolled back from --
+		// the sweep takes the path it always took: the controlled boundary termination at the instant the
+		// candidate query derived, then closing the authorizations and sessions. Less evidence is recorded,
+		// because less exists to record; access still ends, which is the part that must never depend on a
+		// migration being present.
+		if !e.phase6Writers {
+			if _, err := tx.Exec(ctx, `SELECT iam_v2.terminate_entitlement_at_boundary($1,$2,$3)`,
+				x.EntitlementID, x.At, x.Reason); err != nil {
+				return nil, err
+			}
+			d, sN, err := revoke(ctx, tx, x.EntitlementID, x.At)
+			if err != nil {
+				return nil, err
+			}
+			x.Devices, x.Sessions = d, sN
+			continue
+		}
 		var gotReason string
 		var gotAt time.Time
 		err := tx.QueryRow(ctx,
@@ -303,7 +379,7 @@ func (e *Enforcer) EnforceExpiries(ctx context.Context, tenant, site string) ([]
 	//
 	// It stays in the terminal-condition candidate set, so if evidence later establishes the true crossing it
 	// converges through the ONE boundary path at the true instant.
-	if e.aggregateTimeMaxCharge > 0 {
+	if e.aggregateTimeMaxCharge > 0 && e.phase6Writers {
 		srows, err := tx.Query(ctx,
 			`SELECT entitlement::text, devices, sessions FROM iam_v2.p6_suspend_over_budget($1,$2)`,
 			tenant, site)
