@@ -1,13 +1,13 @@
 # StayConnect Enterprise — ChatGPT Project Instructions
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0062 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0063 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
-**Current activity:** `PHASE_7_FULL_SYSTEM_REACCEPTANCE_AUTHORIZED`
-**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 AUTHORIZED
+**Current activity:** `PHASE_7_IMPLEMENTATION_IN_PROGRESS_FULL_SYSTEM_REACCEPTANCE`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 IN_PROGRESS
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
-**Single next authorized action:** Execute the authorized Phase-7 full-system re-acceptance under D26 on branch phase/7-full-system-reacceptance as one pull request and approximately four substantial end-to-end milestones, proving the already-built system works as one complete IAM domain with every future-facing capability DARK except where a validation procedure requires controlled temporary enablement on the authorized DEVELOPMENT appliance with guaranteed restoration afterwards.
+**Single next authorized action:** Continue the authorized Phase-7 full-system re-acceptance under D26 on branch phase/7-full-system-reacceptance, restoring a complete Phase-2-to-6 scratch database so that the combined regression matrix can be run to completion before any Phase-7 acceptance is proposed.
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D26`.
 <!-- END GENERATED PROJECT STATE -->
 
