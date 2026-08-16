@@ -315,7 +315,7 @@
     "Any Production contact or mutation.",
     "Implementing work beyond the authorized Phase 7 scope."
   ],
-  "next_authorized_action": "Phase-7 execution is COMPLETE and evidenced. Repository side: the accepted schema is rebuilt from repository sources alone to semantic digest e7216a988642c9d5e44ca22478d4972d parts=2686, identical to the DEVELOPMENT appliance, and the complete cross-phase regression matrix is GREEN in strict mode (gates_run=20, skipped=0, unverdicted_or_crashed=0, pass=1262, fail=0). Appliance side: the assembled system passes 70/0 with 3 explicit NOT PROVEN lines, and a REAL reboot (kernel boot id changed) passes 24/0 with no operator action. The single next action is the PRODUCT-OWNER PHASE-7 ACCEPTANCE DECISION. Phase 7 remains IN_PROGRESS and unaccepted, and PR #15 remains open and unmerged until that decision.",
+  "next_authorized_action": "Obtain the Product-Owner acceptance decision on the Phase-7 full-system re-acceptance, whose execution is now complete and evidenced. Repository side: the accepted schema is rebuilt from repository sources alone to semantic digest e7216a988642c9d5e44ca22478d4972d parts=2686, identical to the DEVELOPMENT appliance, and the complete cross-phase regression matrix is GREEN in strict mode (gates_run=20, skipped=0, unverdicted_or_crashed=0, pass=1262, fail=0). Appliance side: the assembled system passes 70/0 with 3 explicit NOT PROVEN lines, and a REAL reboot (the kernel boot id changed) passes 24/0 with no operator action. Phase 7 remains IN_PROGRESS and unaccepted, and PR #15 remains OPEN and UNMERGED until that decision is taken.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D26",
@@ -702,8 +702,8 @@
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "8cd563f62e1cbdc4d9cf2a87b8e99139c46f6ef5",
+  "acceptance_candidate_head": "f9ba606e38bb6d3141870afa4ff8a761eaf55594",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "8cd563f62e1cbdc4d9cf2a87b8e99139c46f6ef5",
+  "inventory_head": "f9ba606e38bb6d3141870afa4ff8a761eaf55594",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported."
 }
