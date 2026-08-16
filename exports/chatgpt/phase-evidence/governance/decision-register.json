@@ -552,6 +552,13 @@
         "docs/",
         "exports/"
       ]
+    },
+    {
+      "id": "D26",
+      "title": "PHASE 6 ACCEPTED AND CLOSED AT VERIFIED LIVE-DARK MATURITY, AND PR #14 AUTHORIZED TO MERGE (2026-08-16). The Product Owner accepts the Phase-6 acceptance candidate at delivery head 1bdf9bfbd96b7f0264d634183d5cc8e69904cbb9 (acceptance_candidate_head = inventory_head 5358013eabbabda1ad8d519fa9b93c9c0893d672) on branch phase/6-device-selfservice-and-time-modes: Guest Device Self-Service and the AGGREGATE_ONLINE_TIME package time mode, delivered DARK, validated in one supervised controlled run on the authorized DEVELOPMENT appliance (42 proofs, 0 failures) and verified dark afterwards and across a second reboot. ACCEPTED MATURITY IS VERIFIED LIVE-DARK: every Phase-6 capability is OFF on every environment, the guest routes are absent from the running process, and the operator screens are compiled out of the deployed Hotel Admin bundle. This decision authorizes the acceptance, the closure and the merge of PR #14, and it authorizes nothing else: no Phase-6 enablement on any environment, no IAM-v2 production cutover, no paid access, no real guest, PMS, provider or financial traffic. Every recorded limitation is preserved without promotion -- in particular that a full in-place restore of the appliance database remains NOT PROVEN, because it requires a restore manifest signed off-appliance with the registry root key, and that enabling Phase 6 requires a Phase-3 writer-boundary provisioning grant the runtime roles do not hold. The same decision supersedes the earlier instruction to close the development programme after Phase 6 and directs continuation into Phase 7 (full-system re-acceptance) and every remaining planned development phase.",
+      "decided_on": "2026-08-16",
+      "phase": "6",
+      "accepted": true
     }
   ]
 }
