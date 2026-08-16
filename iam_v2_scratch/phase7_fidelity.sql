@@ -41,12 +41,13 @@ WITH parts(part) AS (
    WHERE n.nspname = 'iam_v2' AND c.relkind IN ('r','p') AND a.attnum > 0 AND NOT a.attisdropped
   UNION ALL
   -- constraints, by DEFINITION: a CHECK rewritten to admit what it used to refuse moves this
-  -- NORMALISED FOR PARENTHESES AND SPACING. A dump/restore round trip re-deparses `(A AND B) AND C` as
-  -- `A AND B AND C` -- the same predicate, written differently by the same server. Grouping is stripped so
-  -- that formatting cannot fail a faithful restore, and NOTHING else is: a different operator, literal,
-  -- column or referenced table still changes the token stream, which is the property worth keeping.
+  -- PARENTHESES ARE KEPT. Stripping them was wrong: `(A OR B) AND C` and `A OR (B AND C)` differ only in
+  -- grouping and admit different rows, so a digest that erases grouping cannot see a precedence change --
+  -- exactly the kind of edit that widens a CHECK while looking untouched. Only whitespace is normalised, and
+  -- the two databases are compared as built from the same sources rather than through a dump round trip, so
+  -- the deparse spacing that motivated the earlier stripping does not arise.
   SELECT 'CON:'||c.relname||':'||con.conname||':'
-         ||translate(pg_get_constraintdef(con.oid), '() ', '')
+         ||regexp_replace(pg_get_constraintdef(con.oid), '[[:space:]]+', ' ', 'g')
     FROM pg_constraint con
     JOIN pg_class c ON c.oid = con.conrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -64,8 +65,16 @@ WITH parts(part) AS (
   UNION ALL
   -- functions: signature, definer flag, volatility, and the BODY. A replaced definer body is the exact case
   -- a name-only fingerprint cannot see, and the one with the largest blast radius.
+  -- LANGUAGE, STRICTNESS AND CONFIGURATION, not just the body. A SECURITY DEFINER function whose
+  -- `SET search_path` is removed resolves unqualified names through the caller's path -- the classic definer
+  -- hijack -- while its body, name, signature and definer flag all stay identical. proconfig is where that
+  -- lives, and a digest without it cannot see the change.
   SELECT 'FN:'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')'
          ||':secdef='||p.prosecdef::text
+         ||':lang='||l.lanname
+         ||':strict='||p.proisstrict::text
+         ||':leakproof='||p.proleakproof::text
+         ||':config='||COALESCE(array_to_string(p.proconfig, ','), 'none')
          ||':vol='||p.provolatile::text
          -- CARRIAGE RETURNS STRIPPED, and this is the difference between a real divergence and a transport
          -- artifact. The appliance's migrations were applied from CRLF files; the same blobs applied from an
@@ -75,6 +84,7 @@ WITH parts(part) AS (
          -- there.
          ||':body='||md5(replace(COALESCE(p.prosrc, ''), chr(13), ''))
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    JOIN pg_language l ON l.oid = p.prolang
    WHERE n.nspname = 'iam_v2'
   UNION ALL
   -- ROLE ATTRIBUTES, for the roles this schema names. Membership alone is not fidelity: on the appliance
@@ -89,6 +99,15 @@ WITH parts(part) AS (
                        'svc_netd','sc_payment_runtime','sc_payment_outcome','sc_commerce_runtime',
                        'sc_financial_operator','sc_financial_readonly')
   UNION ALL
+  -- ROLE MEMBERSHIPS. Granting svc_scd membership of iam_v2_owner hands it every owner privilege without
+  -- changing one ACL entry or role attribute, so neither of the checks above would see it.
+  SELECT 'MEMBER:'||m.rolname||' IN '||g.rolname
+    FROM pg_auth_members am
+    JOIN pg_roles m ON m.oid = am.member
+    JOIN pg_roles g ON g.oid = am.roleid
+   WHERE m.rolname LIKE 'svc\_%' OR m.rolname LIKE 'sc\_%' OR m.rolname LIKE 'iam\_v2\_%'
+      OR g.rolname LIKE 'iam\_v2\_%'
+  UNION ALL
   -- schema-level privileges. GRANT USAGE ON SCHEMA is a namespace ACL, not a table grant, so a digest built
   -- only from table grants cannot see a role losing access to the schema itself.
   SELECT 'NSP:'||n.nspname||':'||COALESCE(array_to_string(n.nspacl, ','), 'DEFAULT')
@@ -97,7 +116,11 @@ WITH parts(part) AS (
   -- table privileges held by the real service roles
   SELECT 'GRT:'||grantee||':'||table_name||':'||privilege_type
     FROM information_schema.role_table_grants
-   WHERE table_schema = 'iam_v2' AND grantee LIKE 'svc\_%'
+   -- EVERY runtime and financial role, not only svc_*. sc_payment_runtime, sc_financial_operator and the
+   -- rest hold the financial privileges; a digest that watched only svc_* would not notice one of them
+   -- gaining write access to the posting tables.
+   WHERE table_schema = 'iam_v2'
+     AND (grantee LIKE 'svc\_%' OR grantee LIKE 'sc\_%' OR grantee LIKE 'iam\_v2\_%')
   UNION ALL
   -- function privileges, PUBLIC included. An empty grantee IS public, and that is the entry that matters.
   -- EFFECTIVE PRIVILEGE, NOT ACL TEXT. Two databases can express the same function privileges differently:
@@ -113,7 +136,7 @@ WITH parts(part) AS (
          ||':roles='||COALESCE((
              SELECT string_agg(r.rolname, ',' ORDER BY r.rolname)
                FROM pg_roles r
-              WHERE (r.rolname LIKE 'svc\_%' OR r.rolname LIKE 'sc\_%' OR r.rolname LIKE 'iam\_v2\_svc%')
+              WHERE (r.rolname LIKE 'svc\_%' OR r.rolname LIKE 'sc\_%' OR r.rolname LIKE 'iam\_v2\_%')
                 AND has_function_privilege(r.rolname, p.oid, 'EXECUTE')), 'none')
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'iam_v2'

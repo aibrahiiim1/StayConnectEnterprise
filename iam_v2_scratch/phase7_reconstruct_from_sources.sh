@@ -121,6 +121,51 @@ done
 eq "L3 Phases 2-6 applied (0009-0047)" "$n" "39"
 [ -z "$bad" ] || no "L3 failures" "$(printf '%s' "$bad" | cut -c1-200)"
 
+# ---- L4: the accepted role graph -------------------------------------------------------------------------
+#
+# The Phase-1A record says "iam_v2_migrator is a member of the owner". That one membership accounts for TWO
+# whole classes of difference: it is a MEMBER row, and because membership inherits EXECUTE it also puts
+# iam_v2_migrator into the effective-privilege list of every owner-executable function -- 100 of them.
+#
+# An earlier version of this layer also reassigned EVERY iam_v2 object to iam_v2_owner, reading the Phase-1A
+# invariant too widely. It holds for the 49 objects Phase 1A created, not for the Phase-2-to-6 tables, which
+# the appliance leaves owned by the superuser that created them. Reassigning them invented 42 table grants
+# the appliance does not have -- an owner holds every privilege implicitly, and information_schema reports it.
+docker exec -i "$C" psql -U postgres -d "$DB" -qc "
+  DO \$\$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='iam_v2_migrator') THEN
+      CREATE ROLE iam_v2_migrator NOSUPERUSER NOLOGIN INHERIT;
+    END IF;
+    GRANT iam_v2_owner TO iam_v2_migrator;
+  END \$\$;" </dev/null >/dev/null 2>&1
+eq "L4 iam_v2_migrator is a member of iam_v2_owner, as the Phase-1A record states"    "$(q "SELECT count(*) FROM pg_auth_members am JOIN pg_roles m ON m.oid=am.member
+          JOIN pg_roles g ON g.oid=am.roleid WHERE m.rolname='iam_v2_migrator' AND g.rolname='iam_v2_owner'")" "1"
+
+# ---- WHAT THIS RECONSTRUCTION DOES NOT YET REPRODUCE, stated precisely rather than rounded off -------------
+#
+# Against the APPLIANCE ITSELF (not the dump-restored oracle, which under-reports implicit owner privileges),
+# two related surfaces still differ and they have one shape:
+#
+#   GRT    182 grants the appliance has and this build does not -- iam_v2_owner on the Phase-2..6 TABLES.
+#   FNEXEC  76 functions where the effective-privilege lists differ, for the same ownership reason.
+#
+# It is ONE question: on the appliance, iam_v2_owner holds privileges on the Phase-2-to-6 tables while those
+# phases' FUNCTIONS remain owned by the superuser. A blanket reassignment of every object to iam_v2_owner was
+# tried and is WRONG in the other direction -- it closes the 182 grants and then gives iam_v2_owner EXECUTE on
+# 45 functions the appliance denies it, because on the appliance those functions belong to the superuser.
+#
+# So the remaining work is to find which accepted transition granted the owner those table privileges without
+# transferring function ownership -- a migration GRANT, an ALTER DEFAULT PRIVILEGES, or an operational step --
+# and add it additively. Until that is established, the fidelity claim is stated at its true scope:
+#
+#   PROVEN IDENTICAL: columns, constraints (with grouping preserved), indexes, triggers, function bodies and
+#                     attributes including proconfig, role attributes, role memberships, schema ACL, and every
+#                     svc_/sc_ runtime and financial table grant.
+#   NOT YET IDENTICAL: iam_v2_owner's table grants on Phase-2..6 objects, and the 76 function
+#                     effective-privilege entries that follow from the same ownership question.
+#
+# This is NOT "exactly semantically equal", and it is not called that anywhere.
+
 echo
 GOT="$(docker exec -i "$C" psql -U postgres -d "$DB" -tAq < "$HERE/phase7_fidelity.sql" 2>&1 | tail -1)"
 echo "  reconstructed digest: $GOT"
