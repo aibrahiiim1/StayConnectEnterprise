@@ -52,8 +52,13 @@ q "DELETE FROM iam_v2.session_online_watermarks WHERE tenant_id='$T'" >/dev/null
 
 seeded="$(q "
   SELECT iam_v2.begin_controlled_operation('stay');
-  INSERT INTO public.tenants(id) VALUES ('$T') ON CONFLICT DO NOTHING;
-  INSERT INTO public.sites(id,tenant_id) VALUES ('$S','$T') ON CONFLICT DO NOTHING;
+  -- Seeded for the ACCEPTED public schema, which requires slug/name on tenants and code/name on sites.
+  -- The first version used the scratch schema's shape (id only) and failed on a NOT NULL the real
+  -- schema has always had -- a test written against a stand-in, not a product regression.
+  INSERT INTO public.tenants(id, slug, name)
+  VALUES ('$T', 'p7-gate-'||substr('$T',1,8), 'Phase-7 gate tenant') ON CONFLICT (id) DO NOTHING;
+  INSERT INTO public.sites(id, tenant_id, code, name)
+  VALUES ('$S','$T','P7GATE','Phase-7 gate site') ON CONFLICT (id) DO NOTHING;
 
   -- TWO INTERFACES IN INDEPENDENT NAMESPACES. This is the whole point of D1: room 101 exists in both, and
   -- nothing about the room number may decide which stay a guest belongs to.

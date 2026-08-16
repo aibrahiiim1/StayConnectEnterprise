@@ -33,14 +33,20 @@ SCHEMA="$HERE/accepted/appliance-schema-20260816.sql"
 # The accepted semantic digest, read from the DEVELOPMENT appliance on 2026-08-16 with the identical
 # expression in phase7_fidelity.sql. Changing this is an edit somebody makes and justifies, never a value the
 # script discovers and then agrees with.
-EXPECT_DIGEST="58a92f656aaeab241d6b33b2b8d0673d parts=1848"
+EXPECT_DIGEST="e38aa1a100d79cb8d858369c9832da52 parts=1861"
 
 # Every role the dump's ownership and grant statements name. Missing one turns GRANT lines into errors and
 # silently produces a database with a different privilege shape -- which the digest would catch, but only
 # after wasting a diagnosis.
-ROLES="stayconnect iam_v2_owner iam_v2_migrator iam_v2_svc_scd iam_v2_svc_edged iam_v2_svc_acctd \
-iam_v2_svc_portald iam_v2_svc_hoteladm svc_scd svc_edged svc_acctd svc_netd sc_payment_runtime \
-sc_payment_outcome sc_commerce_runtime sc_financial_operator sc_financial_readonly"
+# name:attributes, read from the appliance. ATTRIBUTES MATTER, not just names: `stayconnect` is a
+# SUPERUSER there and owns the Phase-6 definer functions, so it bypasses the schema ACL. Creating it as a
+# plain role produced a database that looked identical by every name-based measure and in which EVERY
+# definer function failed with "permission denied for schema iam_v2" -- which is how a whole class of
+# Phase-6 gate failures came to look like product regressions.
+ROLES="stayconnect:SUPERUSER_LOGIN svc_scd:LOGIN svc_edged:LOGIN svc_acctd:LOGIN svc_netd:LOGIN \
+iam_v2_owner:PLAIN iam_v2_migrator:PLAIN iam_v2_svc_scd:PLAIN iam_v2_svc_edged:PLAIN \
+iam_v2_svc_acctd:PLAIN iam_v2_svc_portald:PLAIN iam_v2_svc_hoteladm:PLAIN sc_payment_runtime:PLAIN \
+sc_payment_outcome:PLAIN sc_commerce_runtime:PLAIN sc_financial_operator:PLAIN sc_financial_readonly:PLAIN"
 
 pass=0; fail=0
 ok(){ printf '  [PASS] %s\n' "$1"; pass=$((pass+1)); }
@@ -56,9 +62,17 @@ docker exec -i "$C" psql -U postgres -d postgres -qc "DROP DATABASE IF EXISTS $D
 docker exec -i "$C" psql -U postgres -d postgres -qc "CREATE DATABASE $DB" </dev/null >/dev/null 2>&1 \
   || { echo "cannot create $DB"; exit 1; }
 
-for r in $ROLES; do
+for spec in $ROLES; do
+  r="${spec%%:*}"; attr="${spec##*:}"
+  case "$attr" in
+    SUPERUSER_LOGIN) opts="SUPERUSER LOGIN INHERIT" ;;
+    LOGIN)           opts="NOSUPERUSER LOGIN INHERIT" ;;
+    *)               opts="NOSUPERUSER NOLOGIN INHERIT" ;;
+  esac
+  # ALTER as well as CREATE. Roles are CLUSTER-wide, so one left over from an earlier build keeps its old
+  # attributes and silently defeats the whole point of naming them here.
   docker exec -i "$C" psql -U postgres -d "$DB" -qc \
-    "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='$r') THEN EXECUTE 'CREATE ROLE $r NOLOGIN'; END IF; END \$\$;" \
+    "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='$r') THEN EXECUTE 'CREATE ROLE $r $opts'; ELSE EXECUTE 'ALTER ROLE $r $opts'; END IF; END \$\$;" \
     </dev/null >/dev/null 2>&1
 done
 eq "every role the accepted schema references exists" \

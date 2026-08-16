@@ -71,6 +71,23 @@ WITH parts(part) AS (
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'iam_v2'
   UNION ALL
+  -- ROLE ATTRIBUTES, for the roles this schema names. Membership alone is not fidelity: on the appliance
+  -- `stayconnect` is a SUPERUSER and owns the Phase-6 definer functions, so it bypasses the schema ACL. A
+  -- rebuild that created the same role name without SUPERUSER produced a database where every definer
+  -- function failed with "permission denied for schema iam_v2" -- and the digest, which only knew names,
+  -- called that database identical to the appliance.
+  SELECT 'ROLE:'||r.rolname||':super='||r.rolsuper::text||':inherit='||r.rolinherit::text
+         ||':login='||r.rolcanlogin::text
+    FROM pg_roles r
+   WHERE r.rolname IN ('stayconnect','iam_v2_owner','iam_v2_migrator','svc_scd','svc_edged','svc_acctd',
+                       'svc_netd','sc_payment_runtime','sc_payment_outcome','sc_commerce_runtime',
+                       'sc_financial_operator','sc_financial_readonly')
+  UNION ALL
+  -- schema-level privileges. GRANT USAGE ON SCHEMA is a namespace ACL, not a table grant, so a digest built
+  -- only from table grants cannot see a role losing access to the schema itself.
+  SELECT 'NSP:'||n.nspname||':'||COALESCE(array_to_string(n.nspacl, ','), 'DEFAULT')
+    FROM pg_namespace n WHERE n.nspname = 'iam_v2'
+  UNION ALL
   -- table privileges held by the real service roles
   SELECT 'GRT:'||grantee||':'||table_name||':'||privilege_type
     FROM information_schema.role_table_grants
