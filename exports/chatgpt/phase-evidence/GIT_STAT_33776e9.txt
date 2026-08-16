@@ -1,0 +1,4 @@
+commit 33776e93d729c0fc16e9a07269cb67c1ad5f2a41
+Date:   Sun Aug 16 04:11:44 2026 +0300
+
+    Phase 6: the expiry sweep must keep working on a database that has never seen Phase 6
