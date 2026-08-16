@@ -32,7 +32,7 @@ a new entitlement with once-per-stay still holding, and Phase 6 composed: an exi
 budgets come from the pinned revision; exhaustion terminates for `TIME`. The cross-namespace seam is checked
 last: after a full checkout/grace cycle on stay A, stay B — same room number, other namespace — is untouched.
 
-### M3 — the boundaries hold · **31/31**
+### M3 — the boundaries hold · **34/0**
 
 `iam_v2_scratch/phase7_m3_boundaries.sh`, every privilege measured **as the real service role**. Financial
 DARK expressed as privilege rather than as a flag; `E4b`'s `UNSET` confirmed as both a real value and the
@@ -42,7 +42,13 @@ write; the mixed-version catalog probe's premise verified; all 47 migrations con
 migration, counted from the filesystem.
 
 **Mutation-checked.** Granting `svc_acctd` UPDATE on entitlements fails exactly that assertion; revoking it
-returns 31/31.
+returns the gate to green.
+
+The gate was 31 cases when first recorded. It is **34/0** now, and the three added cases are the reason the
+earlier number should not be quoted: one line used to read `ok "NOT PROVEN here: ..."`, incrementing the pass
+count while its own text said nothing had been proved. The gate now seeds its own tenant, site, appliance and
+operator — it promises to be fixture-free, and the scratch database has no such rows — seeds a real
+product-setting change row, proves the row exists, and only then attempts the edit that must be refused.
 
 ### The reboot drill · **5/5**, from a real reboot with no operator action
 
@@ -60,24 +66,41 @@ capability enabled.
 
 ## What is NOT proven, and why
 
-**The complete cross-phase matrix has NOT been run to completion in this environment.** It is reported here
-rather than omitted, because a matrix that silently skips is worse than one that fails.
+**The complete cross-phase matrix is now GREEN, in strict mode.** This section previously recorded that it had
+never run to completion; that is no longer true and the older text is not preserved as if it were.
 
-`iam_v2_scratch/phase7_full_matrix.sh` exists and runs, and the Phase-7 gates pass through it (73/0 at the
-time they were run). The cross-phase run did not complete for two environment reasons, neither of which is a
-product finding:
+```
+PHASE7_FULL_MATRIX = PASS (strict)
+gates_run=20  skipped=0  unverdicted_or_crashed=0  pass=1262  fail=0
+```
 
-1. **Two matrix runs overlapped on one scratch database.** The matrix includes `phase6_backup_restore`, which
-   DROPs and restores that database. Both runs then reported failures that were artifacts of the collision.
-   The runner now holds an exclusive lock, so this cannot recur.
-2. **The Phase-6 scratch database was rebuilt without the phase migrations.** `run.sh fresh` applies the
-   `iam_v2_scratch/migrations/mg*` base set, not `data-plane/migrations/0009..0047`, and re-applying those on
-   top conflicts with the base set. Restoring a full Phase-2→6 scratch database is an environment task that
-   remains open.
+Strict mode counts skips, missing gates, crashes and unparsable verdicts as failures, and the roster names
+every gate that must run — so "nothing failed" cannot quietly mean "nothing ran".
 
-Consequently: **the M1/M2/M3 results above stand as recorded at the time they were run and were each
-reproduced across repeated runs; the combined Phase-3/4/5/6 regression matrix is NOT currently green in this
-environment and is not claimed to be.**
+It took five complete runs to get there. The first reported 24 failures and 8 gates with no verdict, and
+**almost none of them were product defects**; each was fixed at its cause rather than tolerated:
+
+- the matrix ran against a scratch database nobody could recreate, missing the deterministic fixture entirely,
+  so six Phase-6 cases failed on foreign keys to an appliance and an operator that did not exist. The gate
+  environment is now built from repository sources by `phase7_build_environment.sh`, proved equal to the
+  appliance before anything runs against it, and is itself a roster gate;
+- `pg_restore` failed on a foreign key nobody had touched: several Phase-6 gates seed under
+  `session_replication_role = replica`, leaving 21 entitlements that violate four validated constraints, so
+  that database cannot be restored from its own dump. That is a property of the DATA, and the gate now says so
+  before dumping;
+- nine Phase-4 failures were `TRANSPORT_HEARTBEAT_STALE` and its cascade — a twenty-minute gate outrunning its
+  own fixture heartbeat;
+- `phase4 db invariants` never ran at all (`rc=90`: the runner never passed `SCRATCH_PORT_ALLOW`) and was
+  first-run-only, because its fixed UUIDs, idempotency keys and P numbers are each unique by design;
+- M1/M2/M3 collapsed because the runner passed a database name but not a container.
+
+**And the schema can be rebuilt from the repository alone.** `phase7_reconstruct_from_sources.sh` applies the
+accepted history into a fresh private cluster and reaches semantic digest
+`e7216a988642c9d5e44ca22478d4972d parts=2686` — identical to the DEVELOPMENT appliance across columns,
+constraints with grouping preserved, indexes, triggers, function bodies and configuration, object ownership,
+the complete role-security surface, memberships, and every grant and function privilege with no allowlist.
+
+**What remains open is appliance-side M4 only**, and it is not claimed until it is run.
 
 ### A privilege observation, resolved
 

@@ -315,7 +315,7 @@
     "Any Production contact or mutation.",
     "Implementing work beyond the authorized Phase 7 scope."
   ],
-  "next_authorized_action": "Continue the authorized Phase-7 full-system re-acceptance under D26 on branch phase/7-full-system-reacceptance, restoring a complete Phase-2-to-6 scratch database so that the combined regression matrix can be run to completion before any Phase-7 acceptance is proposed.",
+  "next_authorized_action": "Continue the authorized Phase-7 full-system re-acceptance under D26 on branch phase/7-full-system-reacceptance. The repository-side work is COMPLETE and proven: the accepted schema is rebuilt from repository sources alone to semantic digest e7216a988642c9d5e44ca22478d4972d parts=2686, identical to the DEVELOPMENT appliance, and the complete cross-phase regression matrix is GREEN in strict mode (gates_run=20, skipped=0, unverdicted_or_crashed=0, pass=1262, fail=0). The current and only remaining Phase-7 activity is the appliance-side M4 acceptance on the authorized DEVELOPMENT appliance, after which Phase-7 acceptance may be PROPOSED to the Product Owner. Phase 7 remains IN_PROGRESS and unaccepted; PR #15 remains open and unmerged.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D26",
@@ -695,7 +695,7 @@
     "phase7_scope_source": "FINAL contract section 18 (Phase 7 = cleanup, final docs/ops manual, full-system re-acceptance; gate = complete matrix) and its section 19 A-G Acceptance and Failure-Drill Matrix. NOT the migration runbook deployment numbering and NOT the commercial-onboarding numbering, both of which contain an unrelated Phase 7.",
     "phase7_branch": "phase/7-full-system-reacceptance",
     "post_phase7_remaining": "The atomic complete-domain IAM-v2 cutover, which the FINAL contract records as a LATER SEPARATELY APPROVED GATE after Phases 2-6 and full-domain acceptance. It is a Product-Owner go-live decision, not a development phase, and no current authorization supplies it.",
-    "phase7_active_milestone": "M1 (20/20), M2 (22/22) and M3 (31/31) complete and mutation-checked; the reboot drill passes 5/5 on the development appliance; M4 is IN PROGRESS and the combined cross-phase regression matrix is NOT yet green in this environment."
+    "phase7_active_milestone": "M1 (20/20), M2 (22/22) and M3 (34/0) are complete and mutation-checked, and the reboot drill passes 5/5 on the development appliance. The complete cross-phase regression matrix is GREEN in strict mode: PHASE7_FULL_MATRIX = PASS (strict), gates_run=20, skipped=0, unverdicted_or_crashed=0, pass=1262, fail=0, over a gate environment rebuilt from repository sources and proved equal to the appliance. M4 is IN PROGRESS and is now appliance-side only."
   },
   "latest_transition_id": "T0063",
   "phase3_delivery_evidence": {
