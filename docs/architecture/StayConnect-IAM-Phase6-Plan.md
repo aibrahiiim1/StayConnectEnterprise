@@ -376,10 +376,10 @@ seen them:
 
 | Gate | What it proves |
 |---|---|
-| `phase6_rollback_rehearsal.sh` (54) | **the whole slice**, 0044 → 0030 down and back up, crossing the 0032 boundary the plan records as load-bearing; the quiescence preconditions are checked rather than assumed — no live aggregate entitlement, no appliance still offering the device capability, no released binding carrying a live session — and they have demonstrably refused |
+| `phase6_rollback_rehearsal.sh` (65) | **the whole slice**, 0047 → 0030 down and back up, crossing the 0032 boundary the plan records as load-bearing; the quiescence preconditions are checked rather than assumed — no live aggregate entitlement, no appliance still offering the device capability, no released binding carrying a live session — and they have demonstrably refused. The runner decides each migration on its **exit status**: the earlier version matched output text, so a missing file and a database it could not reach both produced no `ERROR` line and were counted as passes. It is mutation-proven to fail hard — `pass=2 fail=5`, aborting at the first down migration — when pointed at a container that does not exist |
 | `phase6_backup_restore.sh` (18) | pg_dump → **DROP** → pg_restore with pg_restore's own exit status and error lines checked, then functions, privileges, guards and a marker row verified on the restored copy, and the gate removes the row it wrote |
 | `phase6-flag-coherence.sh` (6) | scd/acctd/edged agree on every Phase-6 flag, no child without its master, and the accounting prerequisite: an appliance may not offer online-time budgets with its accounting daemon inactive |
-| foundation / device / aggregate / least-privilege (50 / 22 / 49 / 54) | the durable invariants, measured as the real roles |
+| foundation / device / aggregate / least-privilege (50 / 22 / 49 / 65) | the durable invariants, measured as the real roles |
 | the integration matrix | green **twice consecutively on one database**, which is what makes it a regression suite rather than a one-shot |
 
 ### What the DEVELOPMENT appliance has proven, and what it has not
@@ -404,15 +404,74 @@ All services are healthy and each reports Phase 6 OFF in its own words; runtime 
 | | Schema | Runtime | Phase-6 capability |
 |---|---|---|---|
 | **Production** | untouched, prior accepted baseline | untouched | not present, not contacted |
-| **DEVELOPMENT appliance** | Phase-6 schema applied (0030→0045) | Phase-6 binaries deployed | **every flag OFF**, coherent, reboot-verified |
+| **DEVELOPMENT appliance** | Phase-6 schema applied (0030→0047) | Phase-6 binaries **and** the dark Hotel Admin bundle deployed | validated, then **every capability OFF**, coherent, verified across a second reboot |
 | scratch database | full schema, disposable | n/a | gates only |
 
-**Not yet proven, and required before acceptance:** the Hotel Admin standalone bundle is not yet rebuilt and
-deployed for Phase 6; the controlled validation of the authorized gate/setting combinations across both
-product slices has not run and **no synthetic acceptance state exists**; the appliance-side local-first,
-backup/restore and rollback exercises are outstanding; and after the validation every flag must be restored
-OFF, the controlled state cleaned, and that state **re-verified across a second reboot**. The reboot recorded
-above is of the *schema-dark* state and does not stand in for it.
+**Now proven on that appliance as well**, in one supervised run under D25 that enabled the capabilities and
+restored them (42 proofs, no failures — see the evidence document):
+
+* the **Hotel Admin standalone bundle is deployed**, dark, through the existing deploy script's atomic release
+  symlink. `NEXT_PUBLIC_PHASE6_ADMIN` is build-time state and this bundle was built without it, so the
+  operator screens are compiled out of the artifact rather than hidden by a runtime check;
+* the **gate/setting matrix** across both controls, against the real `scd` socket: master alone mounts
+  nothing; the guest child without the Phase-3 auth arm refuses to start at all; the arm without the Phase-6
+  child still leaves the route absent; both together mount it; and the per-appliance setting is consulted on
+  every request, taking effect with no restart;
+* the **release rules and their audit**, including the refusal of an id that is not the caller's own;
+* **local-first** with the real Central address blackholed;
+* **accrual, exhaustion and termination by the running `acctd`** — and the safe-disable invariant proven on a
+  live entitlement: with the aggregate capability **disabled**, the already-durable budget is still accounted,
+  so a rollback cannot turn finite access into unlimited access;
+* **restoration verified against the runtime** — the coherence gate, a real socket request, service health,
+  the accounting owner, and the Hotel Admin release by path and content hash — then **a second reboot**, after
+  which all six services are active, coherence is 6/6, the guest route is absent, and no appliance is left
+  with the capability enabled.
+
+The controlled run created only a zero-price `ADMIN_GRANT` on a reserved stay: **no paid access, and no real
+guest, PMS, provider or financial traffic**.
+
+**Deliberately not claimed:** a full in-place restore of the appliance's `stayconnect_site`. The backup was
+taken with the sanctioned script and **proven restorable** into a scratch database on the appliance, but an
+in-place restore requires a manifest signed off-appliance with the registry root key and verified against the
+appliance's pinned anchor. That is key custody, and working around it to make a test pass is the kind of
+shortcut this phase has refused elsewhere.
+
+**What the appliance taught that no test could.** Three findings came out of running the surface as the real
+service role, rather than as a role that owns the schema the way every test connects:
+
+1. `svc_scd` held `SELECT` on `iam_v2.devices` and nothing more, so the guest surface failed on its first
+   line. Device resolution is an **upsert** — a device row is created the first time the appliance sees it —
+   and 0033's grant list, written for "listing a guest's devices is a read", was true of the listing and false
+   of the request. **Migration 0047** grants `INSERT` plus a column-level `UPDATE` on `mac`, `last_seen` and
+   `last_ip` only, and `SELECT` on `entitlements` and `service_plan_revisions`; it asserts the refusals too —
+   no `DELETE` on devices, no write of any kind to entitlements, no rewriting an immutable plan revision.
+2. Neither `scd` nor `acctd` could open a controlled operation, so both refuse to serve the Phase-3 auth arm
+   the Phase-6 guest surface depends on. That is **Phase-3 provisioning**, not Phase-6: the validation harness
+   grants it for the duration of the run and revokes it afterwards.
+3. `scd` **refuses to start** with the guest surface enabled while the Phase-3 arm is off. That is fail-closed
+   and correct — a half-wired guest path should not run at all — and it is now proven rather than assumed.
+
+### Over budget now, but the crossing cannot be dated (migrations 0045-0046)
+
+`p6_exhaustion_instant` will not invent an instant. It uses a stamped exhaustion time if one exists; failing
+that it walks the audited adjustments for a **lower bound** on consumption, which can prove exhaustion but
+never dates it precisely; and failing that it returns NULL. That is the right answer to *when did this end*,
+and it left the wrong answer to a different question — because "the historical instant is unknown" was
+allowing an entitlement that is **over its budget right now** to keep carrying traffic.
+
+The two questions are separated. History stays unknown; access stops. An entitlement over budget with an
+undatable crossing is moved to **SUSPENDED** — an existing, approved status with existing, approved semantics
+— through `apply_entitlement_transition(..., 'AGGREGATE_OVER_BUDGET')`. `authorize_entitlement_device` refuses
+anything that is not ACTIVE and `PlanForSite` selects only ACTIVE, so there is no new session and nothing
+forwards. Nothing terminal is written: no `terminated_at`, no `terminal_reason`, no TIME evidence. If durable
+evidence later establishes the true crossing, the entitlement converges to the single TIME terminal path at
+the instant the evidence proves.
+
+**0046 is the same principle one level down.** 0045 was careful at the parent and then closed that
+entitlement's devices and sessions with `ENTITLEMENT_ENDED` — writing the false claim it had just refused to
+write, in exactly the rows an operator opens first when a guest asks why their access stopped. The writer now
+closes them as `ENTITLEMENT_SUSPENDED`. Both columns are free text carrying machine codes, so no constrained
+vocabulary is widened; `entitlements.terminal_reason`, which *is* constrained, still receives nothing.
 
 ### M4 rollback prerequisite — recorded now, because it is easy to discover too late
 
