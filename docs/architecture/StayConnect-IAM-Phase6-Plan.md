@@ -1,15 +1,16 @@
 # StayConnect IAM — Phase 6 Plan
 ## Guest Device Self-Service + the AGGREGATE_ONLINE_TIME package time mode
 
-**Status:** AUTHORIZED and IN_PROGRESS under Product-Owner decision **D25**, start transition **T0057**
-(2026-08-15). Baseline master `09e67156fb6cb286fe47fe632a368a3c4e4c6d23`. Branch
+**Status:** **ACCEPTED AND CLOSED at verified LIVE-DARK maturity** — Product-Owner decision **D26**, closure
+transition **T0061** (2026-08-16), at delivery head `1bdf9bfbd96b7f0264d634183d5cc8e69904cbb9`. Authorized
+under **D25** / **T0057** (2026-08-15) from baseline master `09e67156fb6cb286fe47fe632a368a3c4e4c6d23`, branch
 `phase/6-device-selfservice-and-time-modes`, one pull request → `master`. Delivered **DARK**: the phase-level
-capability gate defaults OFF. Target acceptance maturity: **VERIFIED LIVE-DARK** on the **development**
-appliance.
+capability gate defaults OFF, and acceptance authorizes no enablement on any environment. This plan is kept as
+the record of what was planned and what was delivered against it.
 
 **Explicitly NOT in scope (fail-closed, governance-enforced):** any Production environment mutation or
 contact; real guest traffic; real PMS, provider or financial traffic; Phase-4 financial enablement; IAM-v2
-authentication cutover; paid-access activation; Phase 7; unrelated network changes; merging the Phase-6 PR;
+authentication cutover; paid-access activation; unrelated network changes;
 marking Phase 6 accepted or closed.
 
 ---

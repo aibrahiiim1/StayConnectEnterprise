@@ -1,7 +1,7 @@
 # Phase 6 — DEVELOPMENT-appliance evidence (LIVE-DARK, in progress)
 
 **Appliance:** the development appliance at `172.21.60.23` (`radius`). **Not Production**, which was not contacted.
-**Decision:** D25 / T0057. **Status:** Phase 6 is `IN_PROGRESS` — not accepted, not closed, not merged.
+**Decision:** D25 / T0057; **accepted** by D26 / T0061 (2026-08-16). **Status:** Phase 6 is `ACCEPTED_AND_CLOSED` at verified LIVE-DARK maturity.
 
 Everything below was executed on 2026-08-15 and read back from the appliance itself. Sections 1-6 describe the
 appliance before any capability was enabled. Section 7 is the **controlled validation**, which did enable the
@@ -206,8 +206,8 @@ section 4 was of the *schema-dark* state and does not stand in for this one.
 
 ## 10. Standing state
 
-Phase 6 is `IN_PROGRESS` -- not accepted, not closed, not merged -- and this evidence authorises no cutover,
-no enablement and no Phase 7. Production was not contacted.
+Phase 6 is `ACCEPTED_AND_CLOSED` at verified LIVE-DARK maturity (D26/T0061). This evidence is what that
+acceptance rests on, and it authorises no cutover and no enablement of any kind. Production was not contacted.
 
 The appliance is left as a **validated LIVE-DARK candidate**: every capability off and coherent across the
 three services, the guest routes absent from the running process, the operator screens compiled out of the

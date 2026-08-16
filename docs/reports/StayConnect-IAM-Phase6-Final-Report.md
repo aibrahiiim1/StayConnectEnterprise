@@ -1,11 +1,13 @@
-# StayConnect IAM — Phase 6 Final Report (acceptance candidate, UNMERGED)
+# StayConnect IAM — Phase 6 Final Report (ACCEPTED AND CLOSED)
 
 > Structure required by [../GITHUB_EXECUTION_AND_DELIVERY_RULE.md](../GITHUB_EXECUTION_AND_DELIVERY_RULE.md) §5.
 > All Git/GitHub operations in this delivery were performed by the authorized AI Agent
 > (`GIT_OPERATIONS_OWNER: AGENT`).
 >
-> **Phase 6 is NOT accepted, NOT closed and NOT merged.** This report exists so a separate Product-Owner
-> decision can be taken on it.
+> **Phase 6 is ACCEPTED AND CLOSED at verified LIVE-DARK maturity** — Product-Owner decision **D26**, closure
+> transition **T0061**, 2026-08-16 UTC. This report was written as the acceptance candidate and is kept as the
+> record of what was decided on. Acceptance authorizes no Phase-6 enablement on any environment, and every
+> limitation in §5 is preserved without promotion.
 
 ---
 
@@ -38,7 +40,7 @@
   acquisition gating on every free path, the `svc_acctd` runtime boundary, the provable exhaustion instant,
   fail-closed enforcement for an undatable crossing, suspension evidence, the rollback rehearsal as execution
   evidence, the controlled-validation harness, and current-state documentation.
-- **Milestones:** M1, M2 (T0058), M3 (T0059) and M4 (T0060) are complete. Phase 6 remains `IN_PROGRESS`.
+- **Milestones:** M1, M2 (T0058), M3 (T0059) and M4 (T0060) are complete. Phase 6 is `ACCEPTED_AND_CLOSED` (D26/T0061).
 
 ## 3. What was implemented
 
@@ -618,10 +620,14 @@ and `PACK_SHA256SUMS` checksums are verified by `tools/validate-project-state.sh
 
 ## 19. Remaining blockers
 
-None technical. What remains is a **decision**: Phase 6 is complete as an acceptance candidate and is not
-accepted, not closed and not merged.
+None. The decision has been taken: Phase 6 is **accepted and closed** at verified LIVE-DARK maturity (D26,
+T0061). What remains is not a Phase-6 blocker but a separate authorization — no Phase-6 capability is enabled
+anywhere, and enabling one is its own Product-Owner decision.
 
 ## 20. Single next proposed action
 
-**Review this pull request and decide.** Acceptance, closure, merge, any Phase-6 enablement on any
-environment, IAM-v2 cutover, paid access and Phase 7 all remain unauthorized until that decision is taken.
+**Execute the authorized Phase-7 full-system re-acceptance** (D26): prove the already-built system works as
+one complete IAM domain, before any IAM-v2 production cutover decision. Phase-6 enablement, IAM-v2 cutover,
+production data migration, dual read/write, legacy IAM removal, real guest service, real PMS financial
+posting, real payment-provider traffic, paid-access activation, per-property financial enablement and
+programmatic reversal all remain unauthorized and are a separate Product-Owner go-live decision.
