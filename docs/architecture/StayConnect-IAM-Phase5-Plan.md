@@ -127,8 +127,7 @@ actually require, the minimum is granted, and the refusals are proven as the rea
 1. Migration integrity — each applied once, recorded once, schema matching the expected fingerprint.
 2. Least privilege — derived, measured, and negatively proven as the real roles.
 3. DARK — every Phase-5 flag absent from every env file and unit; every Phase-5 route 404 on the running
-   services; zero financial egress; the legacy `public` schema structurally unchanged and still the sole
-   authentication authority.
+   services; zero financial egress; the legacy `public` schema structurally unchanged and still the sole CONFIGURED authentication/routing baseline (PRE-LIVE per D24/T0056).
 4. Service health across `scd`, `edged`, `pmsd`, `netd`, `acctd`.
 5. Reboot persistence — an authorized reboot, after which state and darkness survive.
 6. A supported backup taken and really restored into a scratch database.

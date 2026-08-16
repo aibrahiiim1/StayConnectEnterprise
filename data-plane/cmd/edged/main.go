@@ -91,6 +91,7 @@ type server struct {
 	// the master flag is OFF the routes do not exist at all and edged issues zero Phase-3 SQL.
 	pmsCfg    iamv2.PMSConfig
 	phase5Cfg iamv2.Phase5Config
+	phase6    iamv2.Phase6Config
 
 	// Phase 4 DARK financial surface. financialCfg gates whether the Manual Review routes are mounted at
 	// all; while dark they do not exist, so an unmounted route cannot leak a financial schema that is not
@@ -193,6 +194,23 @@ func main() {
 	// Phase 2 DARK Hotel-Admin commerce. Config from env (all flags default OFF); nil repository while the
 	// master flag is OFF (zero Phase-2 SQL). Fail closed if the master flag is set without a wired repo
 	// (cutover only) — edged holds ZERO iam_v2 privileges under its Gate-P role while dark.
+	// PHASE 6 (DARK) CONFIGURATION IS LOADED FIRST, BEFORE ANY COMPONENT CONSUMES IT.
+	//
+	// The ordering is the point. This block used to sit forty lines further down, after the commerce admin
+	// had already been handed s.phase6.AggregateTimeOn() -- reading a zero-value config nothing had assigned
+	// yet. The capability was therefore OFF whatever the environment said, and no unit test could see it,
+	// because every unit test called the validator directly with a flag it chose itself.
+	//
+	// The operator setting surface is mounted under its own admin flag; the per-appliance PRODUCT setting it
+	// edits is a different control entirely, lives in the database, and defaults OFF.
+	p6cfg, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("phase6 configuration", "err", err)
+		os.Exit(1)
+	}
+	s.phase6 = p6cfg
+	slog.Info("phase6 dark guest-device surface", "flags", p6cfg.SafeFlagSummary())
+
 	commCfg, err := iamv2.LoadCommerceConfigFromEnv(os.Getenv)
 	if err != nil {
 		slog.Error("phase2 commerce config", "err", err)
@@ -208,6 +226,11 @@ func main() {
 		slog.Error("phase2 commerce admin new", "err", err)
 		os.Exit(2)
 	}
+	// PHASE 6 (DARK by default): may this build PUBLISH AGGREGATE_ONLINE_TIME plan revisions? With the flag
+	// off -- every environment today -- the admin path refuses the mode exactly as it did before Phase 6, and
+	// every revision published stays VALIDITY_WINDOW. Existing revisions are immutable and are unaffected
+	// either way.
+	applyAggregateTimeCapability(commAdmin, p6cfg)
 	s.commerce = commAdmin
 	s.commerceCfg = commCfg
 	slog.Info("phase2 dark commerce admin constructed", "flags", commCfg.SafeFlagSummary())
@@ -237,6 +260,7 @@ func main() {
 	}
 	s.phase5Cfg = p5cfg
 	slog.Info("phase5 dark post-stay admin surface", "flags", p5cfg.SafeFlagSummary())
+
 	slog.Info("phase3 dark pms admin surface", "flags", pmsCfg.SafeFlagSummary())
 	// Before any Phase-3 admin surface is served, prove the controlled-writer boundary is actually in force
 	// for this process. An operator publishing a grace policy through a UI that turns out to be writing raw
@@ -332,6 +356,18 @@ func main() {
 			// thereby asked to be able to end a guest's access and move it.
 			if s.phase5Cfg.TransferOn() {
 				mountResource(r, s, "stay-transfers", s.stayTransfersRoutes)
+			}
+			// Phase 6 (DARK): the per-appliance Guest Device Self-Service setting. Mounted only when the
+			// Phase-6 master AND its admin flag are on; while dark this path does not exist. Note the two
+			// controls are independent -- this mounts the SCREEN, and the screen edits a database setting
+			// that is OFF by default and governs the guest surface separately.
+			// It is mounted through mountResource like every other management surface, which is what puts it
+			// behind resourcePermission and therefore behind the role matrix. The earlier version registered
+			// the two routes directly, so they sat inside requireAuth with NO authorization boundary at all --
+			// every logged-in operator, including read-only desk roles, could change a guest-facing appliance
+			// capability. Authentication is not authorization.
+			if s.phase6.DeviceAdminOn() {
+				mountResource(r, s, "guest-device-self-service", s.guestDeviceSelfServiceRoutes)
 			}
 			// Phase 4 (DARK): Financial Manual Review. Mounted only when the Phase-4 master flag AND the
 			// review flag are both ON. The delivered configuration has both OFF, so this path does not

@@ -58,6 +58,20 @@ def paragraphs(text):
         off += len(para) + 2
 
 
+def split_clauses(text):
+    """Yield (offset, clause) for sentence-sized clauses of one unit.
+
+    A "unit" is a paragraph in markdown or a whole value in JSON, and a JSON value can be thousands of
+    characters carrying many independent statements. Rules that excuse a unit because it contains a marker
+    somewhere are only safe when the unit is about ONE thing, so anything longer is split here first.
+    Splitting on sentence terminators is deliberately crude: it does not need to be linguistically right, it
+    needs to stop one corrected sentence from vouching for the rest of the document.
+    """
+    for m in re.finditer(r"[^.;!?\n]+[.;!?\n]?", text):
+        clause = m.group(0)
+        if clause.strip():
+            yield m.start(), clause
+
 def scan(text, pattern):
     """Yield paragraphs matching pattern that are NOT marked historical."""
     for para, _ in paragraphs(text):
@@ -528,8 +542,23 @@ def main():
                 "itself to real traffic or enablement: %s" % (i, " ".join(pa.split())[:150]), STATE)
 
     # (c) an unauthorized future phase must not appear in allowed_actions
+    #
+    # NOT_STARTED is not the only way a phase is unauthorized. A phase that is not in the roadmap AT ALL is
+    # unauthorized by construction, and the rule used to miss it entirely: with every recorded phase started,
+    # "Execute the authorized Phase 8 end-to-end" passed unchallenged. That gap only became reachable when
+    # D26 authorized Phase 7 and left nothing NOT_STARTED, which is how the negative suite found it.
+    recorded = set(str(k) for k in (state.get("phases") or {}))
     unauth = sorted(n for n, ph in (state.get("phases") or {}).items()
                     if isinstance(ph, dict) and ph.get("status") == "NOT_STARTED")
+    named = re.compile(r"(?:execute|implement)\w*\s+(?:the\s+)?(?:authorized\s+)?phase[\s-]*([0-9]+[A-Za-z]?)\b", re.I)
+    for i, aa in enumerate(allowed):
+        for m in named.finditer(aa):
+            n = m.group(1)
+            if n not in recorded:
+                bad("authorization-model-parity",
+                    "allowed_actions[%d] permits executing phase %s, which is not in the roadmap at all: %s"
+                    % (i, n, " ".join(aa.split())[:150]), STATE)
+
     for n in unauth:
         pat = re.compile(r"(execute|implement)\w*\s+(the\s+)?(authorized\s+)?phase\s*" + re.escape(n) + r"\b", re.I)
         for i, aa in enumerate(allowed):
@@ -799,6 +828,85 @@ def main():
     if not [f for f in failures if f[0] == "accepted-phase-semantics"]:
         ok("no current surface presents an accepted/closed phase as unfinished (accepted: %s)"
            % ", ".join(accepted_phases))
+
+    # ---- 10b. PRE-LIVE OPERATIONAL PARITY -----------------------------------------------------------------------
+    #
+    # THE FALSE PASS THIS CLOSES. Every rule above this one is about a surface claiming MORE IMPLEMENTATION
+    # PROGRESS than the record supports. This one is the mirror image, and nothing caught it: seven rendered
+    # surfaces called the legacy public-schema path "the SOLE PRODUCTION authority", one said its rows "grow
+    # with normal guest traffic", and two called the deployed voucher system "live and untouched" -- while the
+    # recorded fact is that StayConnect has NOT yet entered real hotel guest/staff operation (D24/T0056).
+    #
+    # Each of those sentences described the CONFIGURATION correctly. What made them wrong was the operational
+    # implication, and an implication is exactly what a keyword gate cannot judge on its own -- so, like the
+    # accepted-phase rule, this one is RELATIVE TO THE RECORDED FACT and does nothing at all once real
+    # operation begins and `real_hotel_guest_operation_started` becomes true.
+    #
+    # Historical records are not surfaces: docs/acceptance/ and docs/evidence/ say what was true when they
+    # were written and are deliberately not scanned, and a paragraph carrying a history marker is excused
+    # exactly as everywhere else.
+    if facts.get("real_hotel_guest_operation_started") is False:
+        live_claim = re.compile(
+            r"sole\s+production\s+authority|"
+            # The same claim wearing a different noun. The first pass caught only "production" and this form
+            # survived in three places, which is why the pattern now names the CLAIM rather than one spelling
+            # of it: any "sole ... authority" over authentication asserts an operational role that a pre-live
+            # system does not have.
+            r"sole\s+authentication\s+authority|"
+            r"sole\s+(?:production\s+)?auth\w*\s+authority|"
+            r"\bthe\s+live\s+authority\b|"
+            r"normal\s+guest\s+traffic|"
+            r"\blive\s+and\s+untouched\b|"
+            r"(?:currently|presently|today)\s+serv\w*\s+(?:real\s+)?(?:hotel\s+)?guests|"
+            r"break\s+all\s+guest\s+authentication",
+            re.I)
+        prelive_surfaces = sorted(set(
+            list(DOC_SURFACES) + list(PHASE_PLANS.values()) + [
+                "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+                "exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md",
+                "exports/chatgpt/stayconnectenterprise/MANIFEST.md",
+                "docs/architecture/Phase3-Privilege-Matrix.md",
+                "governance/artifact-registry.json",
+            ]))
+        hits = []
+        for rel in prelive_surfaces:
+            text = load_surface(rel)
+            if text is None:
+                continue
+            # A JSON document has no blank lines, so paragraph labelling would excuse the whole file. Scan it
+            # value by value, exactly as the merged-PR rule learned to.
+            if rel.endswith(".json"):
+                units = [v for v in json_strings(load_json(rel))]
+            else:
+                units = [p for p, _ in paragraphs(text)]
+            for para in units:
+                # CLAUSE-LEVEL, not unit-level. A long JSON value such as current_maturity carries dozens of
+                # independent claims in one string; excusing the whole value because a corrected clause
+                # appears somewhere in it lets every stale clause before that point ride along. The unit is
+                # therefore split into sentence-sized clauses and each is judged against markers found in
+                # ITS OWN neighbourhood -- the clause itself plus a bounded window either side, so a
+                # correction can still cover the sentence it is attached to and no further.
+                for cl_start, clause in split_clauses(para):
+                    m = live_claim.search(clause)
+                    if not m:
+                        continue
+                    lo = max(0, cl_start - 160)
+                    hi = min(len(para), cl_start + len(clause) + 160)
+                    neighbourhood = para[lo:hi]
+                    if HISTORY_MARKERS.search(neighbourhood):
+                        continue
+                    # A sentence that quotes the wrong wording IN ORDER TO CORRECT IT is not the wrong
+                    # wording.
+                    if re.search(r"corrected|PRE-LIVE|pre-live|used to say|earlier wording|D24",
+                                 neighbourhood):
+                        continue
+                    hits.append((rel, " ".join(clause[max(0, m.start() - 70):m.end() + 70].split())))
+        for rel, hit in hits:
+            bad("pre-live-operational-parity",
+                "the recorded facts say real hotel guest operation has NOT started, but this presents the "
+                "system as operationally live: %s" % hit[:180], rel)
+        if not hits:
+            ok("no current surface presents the pre-live system as already serving real hotel guests")
 
     # ---- 11. STATIC CURRENT-STATE PROSE OUTSIDE THE GENERATED BLOCK ------------------------------------------
     #

@@ -277,3 +277,73 @@ func TestIntegration_UnexpiredAccessIsUntouched(t *testing.T) {
 		t.Fatal("a valid session was ended by the sweep")
 	}
 }
+
+// THE SWEEP MUST WORK ON A DATABASE THAT HAS NEVER SEEN PHASE 6.
+//
+// iam_v2.p6_data_crossing arrives with migration 0038. This sweep predates it by two phases and runs on every
+// appliance, so calling it unconditionally made the whole of expiry enforcement fail with "function
+// iam_v2.p6_data_crossing(uuid) does not exist" the moment the binary met an older schema — which is exactly
+// what rolling Phase 6 back produces. The consequence is not a missing feature: NOTHING expires, so every
+// guest whose window or quota has run out keeps their access.
+//
+// This drops the function, runs the real sweep, and puts it back. Reinstating the unconditional call makes it
+// fail here rather than two phases later on somebody's appliance.
+func TestIntegration_ExpiryWorksWithoutThePhase6DataCrossing(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+
+	var def string
+	if err := p.QueryRow(ctx, `SELECT pg_get_functiondef(p.oid) FROM pg_proc p
+		 JOIN pg_namespace n ON n.oid = p.pronamespace
+		WHERE n.nspname='iam_v2' AND p.proname='p6_data_crossing'`).Scan(&def); err != nil {
+		t.Skip("p6_data_crossing is not present in this schema; the fallback is already what runs")
+	}
+
+	f := seed(t, p, 8000, 3000, 1000)
+	past := time.Now().Add(-2 * time.Hour)
+	ent, _ := grant(t, p, f, &past, time.Now().Add(-3*time.Hour))
+
+	if _, err := p.Exec(ctx, `DROP FUNCTION iam_v2.p6_data_crossing(uuid)`); err != nil {
+		t.Fatalf("drop the Phase-6 crossing: %v", err)
+	}
+	// Put it back whatever happens: a test that leaves the schema short of a function every later test needs
+	// is a worse failure than the one it was written to catch.
+	defer func() {
+		if _, err := p.Exec(context.Background(), def); err != nil {
+			t.Fatalf("restore the Phase-6 crossing: %v", err)
+		}
+	}()
+
+	e := New(p)
+	due, err := e.EnforceExpiries(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatalf("the sweep failed on a pre-Phase-6 schema: %v", err)
+	}
+
+	// The fragments the sweep chose, checked directly. online_time_exhausted_at arrives with 0036 and appears
+	// in the candidate query in three places; on a schema without it the statement fails as a whole, exactly
+	// as the missing function did. Asserting the fragment is what proves the column is never emitted -- the
+	// fragment is the only place its name appears.
+	if e.phase6Writers {
+		t.Fatal("the sweep still believes the Phase-6 writers are present")
+	}
+	if e.exhaustedAt != "NULL::timestamptz" {
+		t.Fatalf("the exhaustion instant is read as %q on a schema without the column", e.exhaustedAt)
+	}
+	if e.dataCrossing != dataCrossingLegacy {
+		t.Fatal("the sweep did not fall back to the pre-Phase-6 data crossing")
+	}
+	found := false
+	for _, x := range due {
+		if x.EntitlementID == ent {
+			found = true
+			if x.Reason != "TIME" {
+				t.Fatalf("an elapsed window ended as %q", x.Reason)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("an entitlement whose window elapsed two hours ago was not expired; access would have survived")
+	}
+}

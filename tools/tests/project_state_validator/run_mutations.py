@@ -250,21 +250,41 @@ def _anchor(actions, *words):
         .format(", ".join(words), actions))
 
 CUR_GOV_MAINT = _anchor(_STATE_DOC["allowed_actions"], "governance", "documentation")
-# The first phase the state file records as NOT_STARTED. Used by the "two current phases" mutation, which
-# needs a phase that is genuinely not current in order to make a second one.
-CUR_NOT_STARTED_PHASE = next(
-    (k for k, v in sorted(_STATE_DOC["phases"].items())
-     if isinstance(v, dict) and v.get("status") == "NOT_STARTED"),
-    None)
-if CUR_NOT_STARTED_PHASE is None:
+# A phase that is genuinely NOT the current one, used by the "two current phases" mutation to make a second.
+#
+# It was the first NOT_STARTED phase, and the suite aborted with "every phase is started, so the mutation has
+# no target -- the case needs rewriting when it happens". It happened: D26 moved Phase 7 from NOT_STARTED to
+# AUTHORIZED, so every phase in the roadmap is now started. That abort was the fixture behaving correctly --
+# refusing to run a case with no target rather than reporting a pass it did not earn, which is precisely the
+# failure M46 and M48 suffered silently for a whole phase.
+#
+# The rewrite: prefer a NOT_STARTED phase while one exists, and otherwise take the highest-numbered CLOSED
+# phase. Promoting a closed phase to IN_PROGRESS is a sharper contradiction than promoting an unstarted one --
+# it produces two current phases AND a phase that is simultaneously accepted and in progress -- so the case
+# gets stronger as the roadmap fills up rather than expiring.
+def _second_current_phase(phases):
+    unstarted = sorted(k for k, v in phases.items()
+                       if isinstance(v, dict) and v.get("status") == "NOT_STARTED")
+    if unstarted:
+        return unstarted[0]
+    closed = sorted((k for k, v in phases.items()
+                     if isinstance(v, dict) and str(v.get("status", "")).startswith("ACCEPTED")),
+                    key=lambda k: (len(k), k))
+    if closed:
+        return closed[-1]
     raise SystemExit(
-        "FIXTURE ANCHOR DRIFT: every phase is started, so the 'two current phases' mutation has no target. "
-        "That is a real change in the project, not a defect: the case needs rewriting when it happens.")
+        "FIXTURE ANCHOR DRIFT: no phase is NOT_STARTED and none is accepted/closed, so the 'two current "
+        "phases' mutation has no target at all. That is a real change in the project, not a defect.")
+
+CUR_NOT_STARTED_PHASE = _second_current_phase(_STATE_DOC["phases"])
 # The blockers sentence is rewritten on every phase closure ("... Phase 3 is ACCEPTED and CLOSED" became
 # "... Phase 4 is ACCEPTED AND CLOSED"), so pinning its wording drifted the same way the other anchors did.
 CUR_BLOCKER_HEAD = _STATE_DOC["blockers"][0][:48]
-CUR_PHASE_BEYOND = next(a for a in _STATE_DOC["prohibited_actions"]
-                       if a.startswith("Implementing any Phase beyond"))
+# Matched on WORDS through _anchor, not on a prefix. A bare next() over a startswith raises StopIteration and
+# aborts the whole suite with a traceback that reads like the repository is broken -- which is exactly the
+# failure mode the comments above this block were written about. The wording moved again at Phase 7
+# ("Implementing work beyond the authorized Phase 7 scope"), so the anchor follows the words.
+CUR_PHASE_BEYOND = _anchor(_STATE_DOC["prohibited_actions"], "beyond", "phase")
 CUR_TRANSITION = json.load(_io.open(
     os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))["latest_transition_id"]
 
@@ -322,9 +342,14 @@ MUTATIONS = [
  ("M09 missing acceptance record", "governance/project-state.json",
    ("replace", [('"path": "docs/acceptance/StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md"',
                  '"path": "docs/acceptance/MISSING.md"')])),
+ # The registry was reformatted from one-entry-per-line to expanded JSON, so this mutation's old anchor --
+ # path and status on a single line -- stopped existing and the case failed as fixture drift instead of
+ # running. That is the failure mode a mutation suite exists to prevent in the code it tests, so it is worth
+ # naming here: for as long as it drifted, NOTHING was proving that the validator notices the permanent rule
+ # going missing. The anchor is now the path alone, which is what the mutation actually needs to change.
  ("M10 missing permanent rule", "governance/artifact-registry.json",
-   ("replace", [('"path": "docs/ZERO_STALE_LEFTOVERS_RULE.md", "status": "AUTHORITATIVE"',
-                 '"path": "docs/MISSING_RULE.md", "status": "AUTHORITATIVE"')])),
+   ("replace", [('"path": "docs/ZERO_STALE_LEFTOVERS_RULE.md"',
+                 '"path": "docs/MISSING_RULE.md"')])),
  ("M11 retained legacy item without removal gate", "governance/artifact-registry.json",
    ("replace", [('"removal_gate": "later separately-approved legacy-cleanup phase, AFTER the atomic complete-domain cutover + reconciliation"',
                  '"removal_gate": ""')])),
@@ -373,8 +398,12 @@ MUTATIONS = [
    ("replace", [(f'"{CUR_GOV_MAINT}"',
                  '"Phase 3 is NOT_STARTED and unauthorized; await explicit Product-Owner authorization"')])),
  ("M32 stale HEAD / production-unchanged in current state after T0010", "governance/project-state.json",
-   ("replace", [("legacy public-schema IAM remains the sole production authority",
-                 "legacy public-schema IAM remains the sole production authority. HEAD 1844da2 Production unchanged.")])),
+   # Anchored on the SHORT stable prefix. The full phrase used to end "the sole production authority", which
+   # D24/T0056 corrected to "the sole CONFIGURED authentication/routing baseline" -- and this case then
+   # stopped running as fixture drift, so nothing was proving that a stale HEAD / production-unchanged claim
+   # is caught. The mutation only needs somewhere in a current-state string to plant the stale claim.
+   ("replace", [("legacy public-schema IAM remains the sole",
+                 "legacy public-schema IAM remains the sole. HEAD 1844da2 Production unchanged. Also")])),
  ("M33 phase 1B marked closed without recorded PO acceptance", "governance/project-state.json",
    ("replace", [('"transition_accepted": true', '"transition_accepted": false')])),
  ("M34 closed but evidence still says PENDING PO acceptance", "governance/project-state.json",
@@ -408,12 +437,16 @@ MUTATIONS = [
  # --- Phase-2 acceptance/closure + complete-manifest self-reference contradiction classes ---
  ("M45 Phase 2 accepted (transition_accepted=true) but status not ACCEPTED_AND_CLOSED", "governance/project-state.json",
    ("json_set", [(["phases", "2", "status"], "IN_PROGRESS")])),
- ("M46 change-manifest lists a path not present in git base..HEAD", "docs/manifests/Phase3-change-manifest.md",
+ # M46/M48 target the manifest the VALIDATOR ACTUALLY READS, which is Phase{current_phase}. They pointed at
+ # Phase 3's for as long as that was the only manifest; the moment Phase 6 published its own, mutating the
+ # Phase-3 file changed nothing the validator looks at and both cases silently stopped biting -- a mutation
+ # case that cannot fail is worse than no case, because it reports green.
+ ("M46 change-manifest lists a path not present in git base..HEAD", "docs/manifests/Phase6-change-manifest.md",
    ("append", "\n| `zz-fabricated-extra-path.md` | CREATED | `A` | other | OTHER | rollback REMOVES it | fabricated |\n")),
  ("M47 acceptance decision D13 removed from the register", "governance/decision-register.json",
    ("replace", [('"id": "D13"', '"id": "D13-DISABLED"')])),
- ("M48 manifest base repointed so its path/status set no longer equals git base..delivery_head", "docs/manifests/Phase3-change-manifest.md",
-   ("replace", [("ffb68e1ad325f5dd6d2096f2e30a782f8caef059", "a8c3b3caac6baf8ac41fa581fca5350c97219bb8")])),
+ ("M48 manifest base repointed so its path/status set no longer equals git base..delivery_head", "docs/manifests/Phase6-change-manifest.md",
+   ("replace", [("09e67156fb6cb286fe47fe632a368a3c4e4c6d23", "a8c3b3caac6baf8ac41fa581fca5350c97219bb8")])),
  # --- Phase-3 governance contradiction classes (D14/T0015; DARK; no financial posting; Phase 4 gated) ---
  ("M49 decision D14 removed while Phase 3 is IN_PROGRESS", "governance/decision-register.json",
    ("replace", [('"id": "D14"', '"id": "D14-DISABLED"')])),

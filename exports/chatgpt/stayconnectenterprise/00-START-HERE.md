@@ -1,14 +1,14 @@
 # StayConnect Enterprise — START HERE (ChatGPT Project entry point)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0055 -->
-**Current phase:** 5 — Post-stay (PIN re-auth); cross-PMS transfer workflow
-**Current activity:** `PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED`
-**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 NOT_STARTED · 7 NOT_STARTED
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0061 -->
+**Current phase:** 6 — Guest device self-service; optional AGGREGATE_ONLINE_TIME
+**Current activity:** `PHASE_6_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 AUTHORIZED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
-**iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Maintain project governance and documentation for the closed phases, because Phase 5 is ACCEPTED_AND_CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity (D22/T0053) and MERGED to master (D23/T0054), leaving no Phase-5 item open, and every further step -- deploying, mutating an appliance, enabling any feature flag, cutting over IAM-v2, migrating or contacting Production, sending PMS, provider or financial traffic, granting paid access, or starting Phase 6 or Phase 7 -- requires a separate explicit Product-Owner decision that has not been taken.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D22`.
+**iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
+**Single next authorized action:** Execute the authorized Phase-7 full-system re-acceptance under D26 on branch phase/7-full-system-reacceptance as one pull request and approximately four substantial end-to-end milestones, proving the already-built system works as one complete IAM domain with every future-facing capability DARK except where a validation procedure requires controlled temporary enablement on the authorized DEVELOPMENT appliance with guaranteed restoration afterwards.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D26`.
 <!-- END GENERATED PROJECT STATE -->
 
 
@@ -36,7 +36,7 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 
 ## 3. Current project phase & status
 
-**Current operational state is the GENERATED PROJECT STATE block at the top of this file** (rendered from `governance/project-state.json` — the single machine-readable source). Do not maintain a second current-state description here. Non-dynamic context: the isolated `iam_v2` schema is an additive, reversible, dark schema; the currently deployed voucher/guest-account system is a separate prior delivery, live and untouched.
+**Current operational state is the GENERATED PROJECT STATE block at the top of this file** (rendered from `governance/project-state.json` — the single machine-readable source). Do not maintain a second current-state description here. Non-dynamic context: the isolated `iam_v2` schema is an additive, reversible, dark schema; the currently deployed voucher/guest-account system is a separate prior delivery, DEPLOYED AND UNTOUCHED. PRE-LIVE (D24/T0056): it is not serving real hotel guests today -- it is the configured baseline in a system under active development and controlled testing.
 
 ## 4. Completed & live-verified milestones
 
@@ -94,7 +94,7 @@ A Linux-based inline **captive-portal Wi-Fi gateway appliance for hotels**, plus
 > `governance/project-state.json` and is the only carrier of it. What follows records the Phase-1B
 > position as it stood on 2026-07-17, retained for provenance.
 
-*(HISTORICAL, as at 2026-07-17.)* The single next authorized action **was** to complete Phase 1B execution and live-dark verification; Phase 1B implementation **was** Product-Owner authorized and in progress (decision `D10`, 2026-07-17; W0 complete). **Phase 1B has since been ACCEPTED AND CLOSED (D11/T0011), as have Phases 2, 3 and 4.** Execution proceeds in verified stages on branch `phase/1b-dark-auth` (PR #2, **not merged**): Gate P (least-privilege roles + credential rotation) → durable throttle + keyed-HMAC OTP → dark IAM-v2 credential/identity/auth-context code (scratch-tested) → controlled live-dark verification. This does **not** authorize cutover, Phase 2, production `iam_v2` reads/writes, bulk IAM migration, PMS posting, or legacy removal; **legacy public-schema authentication remains the sole production authority.**
+*(HISTORICAL, as at 2026-07-17.)* The single next authorized action **was** to complete Phase 1B execution and live-dark verification; Phase 1B implementation **was** Product-Owner authorized and in progress (decision `D10`, 2026-07-17; W0 complete). **Phase 1B has since been ACCEPTED AND CLOSED (D11/T0011), as have Phases 2, 3 and 4.** Execution proceeds in verified stages on branch `phase/1b-dark-auth` (PR #2, **not merged**): Gate P (least-privilege roles + credential rotation) → durable throttle + keyed-HMAC OTP → dark IAM-v2 credential/identity/auth-context code (scratch-tested) → controlled live-dark verification. This does **not** authorize cutover, Phase 2, production `iam_v2` reads/writes, bulk IAM migration, PMS posting, or legacy removal; **legacy public-schema authentication remained the sole configured authentication path** *(HISTORICAL, as at 2026-07-17; see D24/T0056 — StayConnect is PRE-LIVE and no real hotel guest depends on it)*.
 
 The **Phase 1A LIVE-DARK acceptance record** (`StayConnect-IAM-Phase1A-Live-Dark-Acceptance.md`, 18/18; authoritative production evidence `PROD_LIVE_DARK_EVIDENCE_V2.txt`, read-only — the earlier `PROD_LIVE_DARK_EVIDENCE.txt` is **superseded/erroneous**) stands unchanged. The dark `iam_v2` schema is created + verified in production but **NOT cut over**; no service reads/writes it, no DSN/`search_path` change. Cutover, IAM data migration, and legacy cleanup remain **separately gated** future events (plan §7a/§11 ladder) and are **not** authorized by Phase 1B.
 

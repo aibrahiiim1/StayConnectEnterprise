@@ -1,0 +1,67 @@
+{
+  "transition_id": "T0061",
+  "seq": 61,
+  "timestamp": "2026-08-16T07:22:00Z",
+  "record_type": "PHASE_6_PRODUCT_OWNER_ACCEPTANCE_AND_CLOSURE_AT_VERIFIED_LIVE_DARK",
+  "previous_state": {
+    "phase": "6",
+    "activity": "PHASE_6_IMPLEMENTATION_IN_PROGRESS_DARK",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "6",
+    "activity": "PHASE_6_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "6",
+  "decision": "D26",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner direction of 2026-08-16: accept Phase 6 at VERIFIED LIVE-DARK maturity, mark it ACCEPTED_AND_CLOSED, synchronize every directly related governance, current-state, acceptance, report, manifest and export surface, run the required GitHub CI and the Zero-Stale/current-state parity gates, merge PR #14 once the exact acceptance head is green, verify the merge and post-merge repository state, and record the merge/closure receipt truthfully. The same direction supersedes the earlier instruction to close the development programme after Phase 6 and authorizes Phase-7 planning and execution.",
+  "accepted_basis": {
+    "branch": "phase/6-device-selfservice-and-time-modes",
+    "delivery_head": "1bdf9bfbd96b7f0264d634183d5cc8e69904cbb9",
+    "acceptance_candidate_head": "5358013eabbabda1ad8d519fa9b93c9c0893d672",
+    "base": "09e67156fb6cb286fe47fe632a368a3c4e4c6d23",
+    "pull_request": 14,
+    "changed_paths": 161,
+    "migrations": "0030-0047, all additive and DARK, each with a faithful down migration that states the weakness it reinstates",
+    "ci_at_the_accepted_head": "governance PASS, phase3-full-software-gate PASS, phase4-financial-core-gate PASS, phase5-post-stay-transfer-gate PASS"
+  },
+  "accepted_maturity": "VERIFIED_LIVE_DARK",
+  "what_verified_live_dark_means_here": "The capability was exercised end to end against the real runtime in ONE supervised controlled run on the authorized DEVELOPMENT appliance -- the real scd socket, the real device resolution, the real accounting daemon -- and then restored. 42 proofs, 0 failures. Afterwards, and again after a second reboot: every Phase-6 flag OFF and coherent across scd/acctd/edged, the guest device routes ABSENT from the running scd (404), the operator screens compiled out of the deployed Hotel Admin bundle because NEXT_PUBLIC_PHASE6_ADMIN is build-time state, no synthetic business state live, and no appliance left with the per-appliance setting enabled.",
+  "evidence": {
+    "appliance": "docs/acceptance/StayConnect-IAM-Phase6-Development-Appliance-Evidence.md",
+    "report": "docs/reports/StayConnect-IAM-Phase6-Final-Report.md",
+    "manifest": "docs/manifests/Phase6-change-manifest.md",
+    "plan": "docs/architecture/StayConnect-IAM-Phase6-Plan.md",
+    "gates": "rollback rehearsal 65/65 across 0030-0047 down and back up including the 0032 boundary and mutation-proven to fail hard; least privilege 65/65 as the real roles; foundation 50/50; device self-service 22/22; aggregate online time 49/49; backup and restore 18/18; the full tagged Go integration suite, unit tests, go vet and go build green; CURRENT_STATE_PARITY 23/23; PROJECT_STATE_GOVERNANCE PASS; ZERO_STALE_LEFTOVERS PASS",
+    "controlled_validation": "deploy/scripts/phase6-controlled-validation.sh with its product body, proven first by three fault injections -- a failing body, a signal, and a run abandoned with every capability on, the setting on and the fixture seeded -- each ending with the appliance verified dark and the exact release restored by path and content hash"
+  },
+  "limitations_preserved_without_promotion": [
+    "A full in-place restore of the appliance's stayconnect_site database is NOT PROVEN and is not claimed. It requires a restore manifest signed off-appliance with the registry root key and verified against the appliance's own pinned anchor. The backup artefact was taken with the sanctioned script and proven RESTORABLE into a scratch database on the appliance (81 iam_v2 tables, 18 p6_ functions), which is a different and lesser claim.",
+    "Enabling the Phase-6 guest surface is not a flag flip: scd and acctd both refuse to start without EXECUTE on iam_v2.begin_controlled_operation, which svc_scd and svc_acctd do not hold. That is a Phase-3 provisioning step and a prerequisite of any future enablement decision.",
+    "NEXT_PUBLIC_PHASE6_ADMIN is build-time state, so validating the Phase-6 operator screens requires a Hotel Admin bundle built with it; the deployed bundle is built without it.",
+    "The capability has been exercised on one appliance, once, under supervision. It has never carried a real guest.",
+    "The controlled validation leaves TERMINATED business state and its append-only audit trail under a reserved stay on the development appliance. Nothing is live and nothing carries access; removing even that residue would require a database restore, which was not performed."
+  ],
+  "defects_found_and_fixed_before_acceptance": [
+    "0046: suspension evidence claimed a termination one level down -- devices and sessions were closed as ENTITLEMENT_ENDED while the parent deliberately recorded no terminal truth. They are closed as ENTITLEMENT_SUSPENDED; the constrained terminal_reason column still receives nothing.",
+    "The rollback rehearsal counted failures as passes: it matched psql output text, so a missing file and an unreachable database both produced no ERROR line. It now decides on the exit status and is mutation-proven to fail hard.",
+    "0047: the guest surface could not resolve the device asking it a question. svc_scd held SELECT on iam_v2.devices, but resolution is an upsert -- a device row is created the first time the appliance sees it -- and the same for entitlements and service_plan_revisions. Found only by running as the real service role.",
+    "THE MOST SERIOUS ONE, caught by CI: the expiry sweep called two Phase-6 functions and named a Phase-6 column unconditionally, so on any schema without migrations 0036/0038/0041 -- exactly what a Phase-6 rollback produces -- the whole of expiry enforcement failed and NOTHING expired. Every guest whose window or quota had run out would have kept access. The sweep now probes the catalog once per pass and falls back to the pre-Phase-6 path.",
+    "The controlled-validation harness would have written a test marker into purchases.trigger, a constrained business vocabulary, and disabled the product setting with a global owner-level UPDATE across every appliance with no audit record.",
+    "The harness's own restoration ratcheted: a run that ended with the product setting enabled made the next run capture enabled as its baseline and faithfully restore it. The dark state is now pinned through the audited writer.",
+    "Two governance mutation cases (M46, M48) had silently stopped biting: they mutate the change manifest and pointed at Phase 3's, which the validator no longer reads once Phase 6 published its own."
+  ],
+  "boundaries_observed": [
+    "no Production contact or mutation",
+    "no real guest, PMS, provider or financial traffic",
+    "no paid access -- the only entitlement the validation created is a zero-price ADMIN_GRANT",
+    "no IAM-v2 cutover",
+    "no Phase-6 capability enabled on any environment",
+    "no legacy IAM removal and no dual read/write"
+  ],
+  "authorizes": "The acceptance and closure of Phase 6 and the merge of PR #14, and the planning and execution of Phase 7 (full-system re-acceptance). It authorizes no enablement, no cutover, no data migration, no paid access and no real traffic of any kind.",
+  "next": "Merge PR #14 to master, verify the merge and the post-merge repository state, record the merge receipt, and then begin the authorized Phase-7 full-system re-acceptance from the post-merge master."
+}

@@ -1,0 +1,85 @@
+{
+  "transition_id": "T0060",
+  "seq": 60,
+  "timestamp": "2026-08-16T00:05:00Z",
+  "record_type": "PHASE_6_M4_HARDENING_AND_CONTROLLED_DEVELOPMENT_APPLIANCE_VALIDATION_COMPLETE_DARK",
+  "previous_state": {
+    "phase": "6",
+    "activity": "PHASE_6_IMPLEMENTATION_IN_PROGRESS_DARK",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "6",
+    "activity": "PHASE_6_IMPLEMENTATION_IN_PROGRESS_DARK",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "6",
+  "decision": "D25",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner authorization D25 (T0057) of 2026-08-15, together with the Product-Owner findings of 2026-08-15 on suspension evidence, the rollback rehearsal as execution evidence, the controlled-validation harness and current-state documentation. This record closes milestone M4 and opens the delivery boundary. It is NOT an acceptance of Phase 6 and creates no new authorization.",
+  "history_note": "Phases 0, 1A, 1B, 2, 3, 4 and 5 are unchanged and remain ACCEPTED_AND_CLOSED. T0044 through T0059 are unchanged. Phase 6 remains IN_PROGRESS, unaccepted and unmerged.",
+  "milestone": {
+    "id": "M4",
+    "title": "Hardening, and the controlled DEVELOPMENT-appliance LIVE-DARK validation",
+    "status": "COMPLETE",
+    "what_is_now_true": [
+      "suspension evidence is truthful at BOTH levels: an entitlement over budget whose crossing cannot be dated is SUSPENDED with no terminated_at, no terminal_reason and no TIME evidence, and migration 0046 closes its devices and sessions as ENTITLEMENT_SUSPENDED rather than repeating the refused claim one level down in the rows support reads first",
+      "the rollback rehearsal is execution evidence: one ordered migration list reversed for down and sorted for up, a preflight that requires every up and down file to exist and the sequence to be strictly ascending, and an apply step that decides on the EXIT STATUS rather than on whether the word ERROR appeared in psql output",
+      "the controlled-validation harness identifies its synthetic state by RESERVED IDENTITY -- fixed uuids and reserved MACs decided in advance, all hanging off one reserved stay -- and invents no value in any constrained business vocabulary",
+      "restoration is a captured baseline restored under a trap on success, failure, error, INT and TERM: the exact dark Hotel Admin release by path and content hash, the flag files byte for byte, and the per-appliance product setting through the sanctioned audited writer rather than a global owner-level UPDATE",
+      "the DEVELOPMENT-appliance identity guard is a compiled-in allow-list, not an environment override",
+      "the Phase-6 guest surface has the privileges it needs to resolve a device and only those (migration 0047), with the refusals asserted alongside the grants"
+    ],
+    "controlled_validation": {
+      "where": "the authorized DEVELOPMENT appliance 172.21.60.23 (radius). Production was not contacted.",
+      "result": "42 proofs, 0 failures, followed by verified restoration and a second reboot",
+      "capability_state_afterwards": "every Phase-6 flag OFF and coherent across scd/acctd/edged, the guest routes absent from the running scd, the operator screens compiled out of the deployed Hotel Admin bundle, and no appliance left with the per-appliance setting enabled",
+      "what_it_created": "one zero-price ADMIN_GRANT entitlement and two devices at reserved addresses. No paid access, and no real guest, PMS, provider or financial traffic.",
+      "proved": [
+        "the deployment gate and the per-appliance setting are two independent controls and neither alone is sufficient",
+        "scd REFUSES TO START with the Phase-6 guest surface enabled while the Phase-3 auth arm is off -- fail-closed, and now proven rather than assumed",
+        "the setting is read from the local database on every request and takes effect with no restart",
+        "a guest releases their own idle device and is refused an id that is not their own, with every outcome including the refusals in the durable audit",
+        "the guest surface answers unchanged with the real Central Control Plane address blackholed",
+        "the running acctd charges online time, and KEEPS charging it with the aggregate capability DISABLED -- the safe-disable invariant proven on a live entitlement rather than asserted",
+        "the budget runs out and the daemon terminates the entitlement for TIME with the cause in the durable evidence; the guest surface stops answering and the session is closed",
+        "nothing outside the reserved stay changed state, and no priced purchase exists on the appliance"
+      ]
+    },
+    "proofs": {
+      "rollback_rehearsal": "65/65 across 0030-0047 down and back up, crossing the 0032 boundary, and mutation-proven to fail hard (pass=2 fail=5, aborting at the first down migration) when pointed at a container that does not exist -- a case the previous text-matching runner reported as green",
+      "database_gates": "phase6_0030_foundation 50/50, phase6_0031_device_self_service 22/22, phase6_0036_aggregate_online_time 49/49, phase6_least_privilege 65/65 measured as the real roles, phase6_backup_restore 18/18",
+      "go": "the full tagged integration suite green on one database, unit tests green, go vet and go build clean",
+      "harness_fault_injection": "three injections run on the appliance before the harness was trusted -- a failing body, a signal, and a run abandoned with every capability on, the setting on and the fixture seeded -- each ending with the appliance verified dark and the exact release restored",
+      "appliance_backup": "a fresh backup taken with the sanctioned site-backup script and PROVEN RESTORABLE into a scratch database on the appliance (81 iam_v2 tables, 18 p6_ functions), then dropped",
+      "second_reboot": "all six services active after boot (scd, acctd, edged, portald, netd, hotel-admin), flag coherence 6/6, guest route absent, exact dark Hotel Admin release current by path and content hash, no live synthetic state, no appliance with the capability enabled"
+    },
+    "corrections_made_during_m4": [
+      "0045 avoided a false terminal claim at the parent and then wrote it at the child: devices and sessions were closed as ENTITLEMENT_ENDED. 0046 closes them as ENTITLEMENT_SUSPENDED; entitlements.terminal_reason, the constrained column, still receives nothing",
+      "the rollback rehearsal counted failures as passes -- it grepped psql output for the word ERROR, so a missing file and an unreachable database both produced no ERROR line -- and a stray literal newline token in the hand-maintained down list meant one migration was never run in that direction",
+      "the harness identified synthetic rows with a marker written into purchases.trigger, a column whose CHECK lists the ten real commercial triggers; the write would have failed, and had it succeeded it would have widened a business vocabulary to describe a test",
+      "the harness disabled the product setting with a global owner-level UPDATE across every appliance in the database, leaving no audit record of who changed what",
+      "svc_scd could not resolve the requesting device: 0033 granted SELECT on iam_v2.devices, but resolution is an upsert because a device row is created the first time the appliance sees it. The same for entitlements and service_plan_revisions, read-only. Fixed by migration 0047, found only by running as the real service role",
+      "the local-first proof blackholed 127.0.0.1 and passed; routing loopback into a black hole proves nothing about whether the guest path calls off-box",
+      "exhaustion was being forced by winding the accounting watermark back twenty minutes, which the product rightly refuses to bill: a gap longer than the per-tick charge bound means the service was not watching, and those seconds are recorded as a skipped interval rather than charged",
+      "restoration ratcheted: an earlier run ended with the product setting enabled, the next captured that as its baseline and faithfully restored it, and the row-for-row baseline check passed throughout. The final state is now pinned through the audited writer, because while the phase is dark an enabled setting is residue rather than an operator's decision",
+      "a loop granting the writer-boundary prerequisite to two roles granted only the first: docker exec -i inherits stdin, so psql swallowed the rest of the file being read, and acctd spent the aggregate section refusing to start while everything else looked configured"
+    ]
+  },
+  "flag_state": {
+    "phase6_flags": "OFF everywhere. The controlled validation enabled them for the duration of one supervised run on the DEVELOPMENT appliance under D25 and restored them; the appliance is verified dark afterwards and across a reboot. No Phase-6 capability is enabled on any environment.",
+    "safe_disable": "Proven live: with the aggregate capability disabled, the already-durable budget is still accounted, so a rollback cannot turn finite access into unlimited access."
+  },
+  "boundaries_observed": [
+    "no Production contact or mutation",
+    "no real guest, PMS, provider or financial traffic",
+    "no IAM-v2 cutover",
+    "no paid access",
+    "no Phase 7 work",
+    "Phase 6 not marked accepted or closed",
+    "no merge"
+  ],
+  "next": "Open the single Phase-6 pull request against master, UNMERGED, and stop at the Product-Owner acceptance boundary. Acceptance, enablement, cutover, merge and Phase 7 all remain unauthorized.",
+  "timestamp_note": "Corrected in place, minutes after it was written and before Phase 6 is accepted or merged: the first value (00:10:00Z) was a few seconds AFTER the commit that introduced this receipt, so the record described its own future. The rule exists because the same class of slip produced the Phase-5 T0053 defect."
+}

@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"time"
 
@@ -58,12 +59,52 @@ func newPhase3(cfg iamv2.PMSConfig, a *acctd, tenant, site string, scope planSco
 	if !cfg.CheckoutGraceOn() {
 		return nil
 	}
-	if plans == nil {
-		// An in-memory counter is only correct for a test: it restarts at 1, and netd would then refuse every
-		// plan this process produced. Callers that mean it pass a durable one.
-		plans = newPlanCounter("")
+	enf := enforce.New(a.db)
+
+	// PHASE 6: ACCRUAL IS NOT GATED BY THE FLAG, AND THAT IS THE SAFETY PROPERTY.
+	//
+	// The obvious wiring -- accrue only while the aggregate flag is on -- has a failure mode that is worse
+	// than the feature being off: an appliance that has ALREADY granted aggregate entitlements, whose flag is
+	// then turned off by a rollback, a config change or a partially applied deployment, would stop consuming
+	// their budgets. Nothing would ever exhaust. A guest holding a finite two-hour package would silently
+	// hold unlimited access, and the durable record would show consumption frozen at whatever it was, with no
+	// evidence that anything had stopped.
+	//
+	// So the flag gates ACQUISITION (no new aggregate entitlement can be created while it is off -- see
+	// iamv2.TimeModeAcquirable) and the SURFACES, while accrual is DATA-DRIVEN: the tick runs every sweep and
+	// finds nothing to do unless an aggregate entitlement actually exists. On every appliance today that is
+	// zero rows and zero writes, which is what "dark" has to mean -- no Phase-6 BEHAVIOUR -- rather than
+	// "the accounting for existing entitlements is switched off".
+	//
+	// The bound is deliberately a few sweep intervals rather than one: a tick delayed by ordinary load is
+	// still real observed time and should be charged in full, while a gap that long means the service was
+	// not running and must not be.
+	enf = enf.WithAggregateOnlineTime(aggregateChargeBoundSeconds(envInt("ACCTD_TICK_SECONDS", 1)))
+	if p6, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv); err != nil {
+		slog.Error("phase6 configuration is unreadable; aggregate ACQUISITION stays OFF, "+
+			"but accrual for any entitlement already in that mode continues", "err", err)
+	} else if !p6.AggregateTimeOn() {
+		slog.Info("phase6 aggregate acquisition is OFF; accrual still runs for entitlements already in that mode")
 	}
-	return &phase3{cfg: cfg, enf: enforce.New(a.db), tenant: tenant, site: site, scope: scope, plans: plans}
+
+	return &phase3{cfg: cfg, enf: enf, tenant: tenant, site: site, scope: scope, plans: plans}
+}
+
+// aggregateChargeBoundSeconds turns the sweep interval into the per-tick charge bound.
+//
+// FOUR TICKS, with a floor of a minute. The multiple absorbs an ordinary slow or delayed sweep -- that is
+// real observed time and a guest should be charged for it -- while still being short enough that an outage
+// is unmistakably an outage rather than a long tick. The floor exists because a one-second sweep would
+// otherwise produce a four-second bound, and then a single slow pass would start recording skipped intervals
+// for time the service actually was watching.
+func aggregateChargeBoundSeconds(tickSeconds int) int {
+	if tickSeconds < 1 {
+		tickSeconds = 1
+	}
+	if b := tickSeconds * 4; b > 60 {
+		return b
+	}
+	return 60
 }
 
 // enforce runs one expiry pass. It is idempotent: an Entitlement already terminated is not re-terminated, so

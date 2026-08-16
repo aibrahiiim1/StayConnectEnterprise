@@ -81,6 +81,18 @@ def sandbox():
                 if one not in rels:
                     rels.append(one)
 
+    # ...and the plan the state file currently points at. Same lesson as the evidence files above, learned
+    # again on a different field: enumerating it in COPY means every new phase breaks the baseline until
+    # somebody remembers, and the failure reads as a repository defect rather than a fixture one. Derived.
+    try:
+        st = json.load(io.open(os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))
+        for key in ("current_phase_plan",):
+            v = str(st.get(key) or "").strip()
+            if v and v not in rels:
+                rels.append(v)
+    except Exception:  # noqa: BLE001
+        pass
+
     for rel in rels:
         src = os.path.join(ROOT, rel)
         if not os.path.exists(src):
@@ -350,12 +362,21 @@ def _(d):
 # then became authorized -- so the validator correctly stopped flagging the sentence and the NEGATIVE case
 # failed, reporting a validator regression that had not happened. A case about "an unauthorized future phase"
 # has to ask the state file which phase that currently is.
+# ...and it drifted once more, in the direction the roadmap was always going to take it: D26 authorized
+# Phase 7, so NO phase in the roadmap is unstarted any more and the derivation had nothing to return.
+#
+# The property under test is not "some phase is unstarted". It is that a current surface must never present
+# unauthorized future work as authorized. A phase number BEYOND the roadmap is the purest instance of that --
+# it is unauthorized by construction, it cannot become authorized underneath the fixture the way Phase 5 and
+# Phase 7 each did, and it keeps the case meaningful for every future phase rather than expiring at each one.
 def _first_not_started():
     doc = json.load(io.open(os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))
-    for k, v in sorted((doc.get("phases") or {}).items()):
+    phases = doc.get("phases") or {}
+    for k, v in sorted(phases.items()):
         if isinstance(v, dict) and v.get("status") == "NOT_STARTED":
             return k
-    raise SystemExit("FIXTURE DRIFT: every phase is started, so there is no unauthorized future phase to name")
+    numbered = [int(k) for k in phases if str(k).isdigit()]
+    return str(max(numbered) + 1) if numbered else "99"
 
 
 @case("an unauthorized future phase appears in allowed_actions", "authorization-model-parity")

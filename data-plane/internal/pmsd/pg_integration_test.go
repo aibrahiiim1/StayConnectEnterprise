@@ -601,13 +601,70 @@ func TestIntegration_RealAdvisoryLockCompetition(t *testing.T) {
 	}
 }
 
+// NO RUNTIME PRIVILEGE ON THE STAY/PMS TABLES WHILE DARK — stated as an allow-list rather than a zero.
+//
+// The original assertion was "zero svc_* grants on iam_v2", and it held until Phase 6, whose least-privilege
+// model grants each runtime role exactly what its own dark-but-mounted surface reads and nothing else. Those
+// grants are deliberate, audited by the Phase-6 privilege gate, and narrower than the role would otherwise
+// have; a zero here would now be a claim that is simply false.
+//
+// So the rule is restated in the form it was always trying to express: NOTHING beyond the specific
+// Phase-6 grants, and in particular nothing on the stay/PMS runtime tables this package is about. A new
+// grant anywhere else still fails, which is the bite the original had.
 func TestIntegration_ZeroRuntimeGrantsWhileDark(t *testing.T) {
 	pool := integPool(t)
 	defer pool.Close()
-	// no runtime service role (svc_*) may hold any privilege on the runtime/stay tables while DARK
-	n := scalarInt(t, pool, `SELECT count(*) FROM information_schema.role_table_grants
-		WHERE table_schema='iam_v2' AND grantee LIKE 'svc_%'`)
-	if n != 0 {
-		t.Fatalf("expected zero svc_* grants on iam_v2 while dark, got %d", n)
+	rows, err := pool.Query(context.Background(), `SELECT grantee, table_name, privilege_type
+		  FROM information_schema.role_table_grants
+		 WHERE table_schema='iam_v2' AND grantee LIKE 'svc_%'
+		 ORDER BY grantee, table_name, privilege_type`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	// The exact Phase-6 grants, by role and table. EXECUTE on the controlled writers is audited separately
+	// by the Phase-6 privilege gate; this is about table reach.
+	allowed := map[string]bool{
+		"svc_scd|appliance_product_settings|SELECT": true,
+		"svc_scd|devices|SELECT":                    true,
+		// 0047. The guest surface resolves the requesting device before it does anything else, and that
+		// resolution is an upsert -- a device row is created the first time the appliance sees it. SELECT
+		// alone made every request fail on its first line under the real service role, which is how this was
+		// found. The UPDATE is column-level (mac, last_seen, last_ip) and does not appear here, because
+		// information_schema reports column grants separately; there is no table-level UPDATE to allow.
+		"svc_scd|devices|INSERT": true,
+		// ...and the two reads the same path makes: whose entitlement this device belongs to, and the pinned
+		// plan revision the listing reports remaining time from. Read-only: svc_scd never writes either, and
+		// the Phase-6 privilege gate asserts that refusal directly.
+		"svc_scd|entitlements|SELECT":                 true,
+		"svc_scd|service_plan_revisions|SELECT":       true,
+		"svc_scd|entitlement_devices|SELECT":          true,
+		"svc_scd|sessions|SELECT":                     true,
+		"svc_scd|sessions|INSERT":                     true,
+		"svc_edged|appliance_product_settings|SELECT": true,
+		// svc_acctd's reads for the aggregate accrual sweep (migration 0039). It holds no write
+		// anywhere in iam_v2, which the Phase-6 privilege gate asserts directly.
+		"svc_acctd|entitlements|SELECT":              true,
+		"svc_acctd|service_plan_revisions|SELECT":    true,
+		"svc_acctd|sessions|SELECT":                  true,
+		"svc_acctd|session_online_watermarks|SELECT": true,
+		// ...and the reads the expiry sweep performs, added by 0040 with the sanctioned expiry writer. Still
+		// SELECT-only: acctd's single write capability is one definer function, not a table.
+		"svc_acctd|accounting_records|SELECT":               true,
+		"svc_acctd|session_entitlement_bindings|SELECT":     true,
+		"svc_acctd|entitlement_devices|SELECT":              true,
+		"svc_acctd|entitlement_termination_evidence|SELECT": true,
+	}
+	for rows.Next() {
+		var grantee, table, priv string
+		if err := rows.Scan(&grantee, &table, &priv); err != nil {
+			t.Fatal(err)
+		}
+		if !allowed[grantee+"|"+table+"|"+priv] {
+			t.Errorf("unexpected runtime grant while dark: %s holds %s on iam_v2.%s", grantee, priv, table)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 }

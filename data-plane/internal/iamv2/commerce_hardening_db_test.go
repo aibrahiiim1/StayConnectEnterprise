@@ -285,6 +285,21 @@ func (t *faultTx) InsertEntitlement(ctx context.Context, e EntitlementSpec) (str
 	}
 	return id, t.trip("insert_entitlement")
 }
+
+// GrantQuotedEntitlement is THE boundary the free confirm actually crosses now.
+//
+// The three hooks above -- terminate, insert, mark-granted -- were the confirm path's steps until the
+// Phase-4 consolidation replaced them with the shared grant kernel (migration 0024). They have been
+// unreachable from this test ever since, so three of its seven "every boundary rolls back" cases were
+// proving nothing. The drift was masked by an earlier failure in the same test and only surfaced when that
+// was fixed. They are kept because the paid path still calls them; the free path's real boundary is here.
+func (t *faultTx) GrantQuotedEntitlement(ctx context.Context, tenantID, siteID, purchaseID string) (string, string, error) {
+	id, superseded, err := t.CommerceTx.GrantQuotedEntitlement(ctx, tenantID, siteID, purchaseID)
+	if err != nil {
+		return id, superseded, err
+	}
+	return id, superseded, t.trip("grant_kernel")
+}
 func (t *faultTx) MarkPurchaseGranted(ctx context.Context, purchaseID string) error {
 	if err := t.trip("before_granted"); err != nil { // fail BEFORE marking granted
 		return err
@@ -296,7 +311,10 @@ func TestC2RollbackAtEveryBoundary(t *testing.T) {
 	db := p2DB(t)
 	s := seedFreeCommerce(t, db, nil)
 	ctx := context.Background()
-	boundaries := []string{"consume_quote", "consume_auth", "insert_purchase", "insert_settlement", "terminate_entitlement", "insert_entitlement", "before_granted"}
+	// The boundaries the FREE confirm path actually crosses. terminate_entitlement / insert_entitlement /
+	// before_granted are no longer among them: the shared grant kernel absorbed those three steps, so a
+	// fault on them could never fire and the cases silently passed by not running.
+	boundaries := []string{"consume_quote", "consume_auth", "insert_purchase", "insert_settlement", "grant_kernel"}
 	for _, b := range boundaries {
 		acct, dev, ac := newAccountChain(t, db)
 		// build a quote with the real engine, then confirm through a fault-injecting repo.

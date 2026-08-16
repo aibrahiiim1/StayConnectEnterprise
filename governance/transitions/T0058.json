@@ -1,0 +1,61 @@
+{
+  "transition_id": "T0058",
+  "seq": 58,
+  "timestamp": "2026-08-15T09:05:00Z",
+  "record_type": "PHASE_6_M2_GUEST_DEVICE_SELF_SERVICE_COMPLETE_DARK",
+  "previous_state": {
+    "phase": "6",
+    "activity": "PHASE_6_IMPLEMENTATION_IN_PROGRESS_DARK",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "6",
+    "activity": "PHASE_6_IMPLEMENTATION_IN_PROGRESS_DARK",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "6",
+  "decision": "D25",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner authorization D25 (T0057) of 2026-08-15 for complete end-to-end Phase-6 execution with automatic continuation between milestones while gates are green. This record closes milestone M2 and opens M3; it is not an acceptance of Phase 6 and creates no new authorization.",
+  "history_note": "Phases 0, 1A, 1B, 2, 3, 4 and 5 are unchanged and remain ACCEPTED_AND_CLOSED. T0044 through T0057 are unchanged. Phase 6 remains IN_PROGRESS, unaccepted and unmerged.",
+  "milestone": {
+    "id": "M2",
+    "title": "Complete Guest Device Self-Service vertical slice, DARK",
+    "status": "COMPLETE",
+    "what_is_now_true": [
+      "the durable core (migrations 0030-0035) enforces own-entitlement scope, offline-only release re-checked inside the same lock as admission, exactly-once release, a non-caller-selectable throttle, an append-only audit and an appliance-anchored serialization of the first setting write",
+      "the per-appliance product setting defaults OFF, is written only through iam_v2.p6_set_guest_device_self_service (setting and audit in one operation), and is read from the LOCAL database on every guest request",
+      "the guest surface takes no subject parameter in any service: the device is re-resolved from the connection and the entitlement from the device",
+      "the operator surface is mounted through mountResource and is therefore behind edged's role matrix, which now agrees cell-for-cell with docs/ROLE_AND_SCOPE_MATRIX.md by test",
+      "the Hotel Admin screen shows the product setting and the deployment state as two separate facts and never implies that switching the setting on deploys the capability",
+      "the guest portal presents only the guest's own devices, without a MAC or any internal identity, marks online devices non-removable, and gives every refusal one identical sentence"
+    ],
+    "proofs": {
+      "database_gates": "phase6_0030_foundation 50/50, phase6_0031_device_self_service 22/22, phase6_least_privilege 33/33 (real roles via SET ROLE)",
+      "four_control_combinations": "cmd/scd Phase-6 end-to-end integration tests against real PostgreSQL over real HTTP: gate OFF + setting OFF and gate OFF + setting ON both answer 404 (routes ABSENT); gate ON + setting OFF answers the uniform UNAVAILABLE and changes no durable state; only gate ON + setting ON provides the capability",
+      "source_identity": "cmd/portald adversarial tests with two distinct subjects prove that no forwarding header lets caller A list or release victim B's devices, and a control case proves the removed middleware.RealIP genuinely would have moved the identity",
+      "local_first": "the complete flow (operator switches the setting on, guest lists, guest releases, guest lists, operator switches it off) completes with every Central endpoint pointed at a closed port, and the Phase-6 import graph contains nothing Central-facing; the device self-service package imports no network package at all",
+      "ui": "hotel-admin vitest suite 105/105 including 13 Phase-6 cases covering the two-state separation, the four combinations in words, RBAC parity with the documented matrix, and the absence of any identity in the request body"
+    },
+    "corrections_made_during_m2": [
+      "the guest listing no longer returns RELEASED bindings: a device the guest just removed reappearing in a list headed 'the devices using your internet access', explained as un-removable, said the opposite of what had happened. The durable history is preserved in the binding row, the authorization intervals and the audit, none of which is a guest-facing screen. Found by walking the assembled flow end to end.",
+      "docs/ROLE_AND_SCOPE_MATRIX.md now carries the guest-device-self-service row that edged's rolePerms says it defines, and payments_operator and site_viewer hold the read their established semantics imply"
+    ]
+  },
+  "flag_state": {
+    "phase6_flags": "OFF everywhere, including every real environment. No Phase-6 flag has been enabled on any appliance.",
+    "deployment_gate_vs_product_setting": "still two separate controls, and the four-combination proof is the evidence that they remain separate."
+  },
+  "boundaries_observed": [
+    "no Production contact or mutation",
+    "no appliance contact in this milestone",
+    "no real guest, PMS, provider or financial traffic",
+    "no IAM-v2 cutover",
+    "no paid access",
+    "no Phase 7 work",
+    "no pull request opened and no merge",
+    "Phase 6 not marked accepted or closed"
+  ],
+  "next": "M3 -- the AGGREGATE_ONLINE_TIME vertical slice, under the same D25 authorization, with accounting eligibility restricted to sessions in state 'active' only."
+}

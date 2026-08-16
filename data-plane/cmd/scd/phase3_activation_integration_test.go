@@ -84,8 +84,10 @@ func newActivationFixture(t *testing.T) *activationFixture {
 	t.Helper()
 	f := newAuthFixture(t)
 
-	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "",
-		"0000fb01-0000-4000-8000-000000000000"))
+	// A REQUEST ID OF ITS OWN PER FIXTURE. The constant one made resolution idempotent across RUNS as well as
+	// within one: a disposable database that had seen this suite before already held that resolution, so
+	// every activation test failed to resolve and the suite could only ever be run once.
+	_, res := post(t, f.p3.resolveHandler, f.resolveBody("412", "Okonkwo", "", mustUUID(t, f.pool)))
 	if res.Outcome != outcomeVerified {
 		t.Fatalf("the fixture could not resolve: %+v", res)
 	}
@@ -134,15 +136,28 @@ func TestActivationRefusedWithoutARegisteredAccountingOrigin(t *testing.T) {
 }
 
 // A FABRICATED origin belonging to another session does not make this one accountable.
+//
+// WHERE THE REFUSAL HAPPENS HAS MOVED, and the test says so rather than pretending otherwise. It used to be
+// possible to register an origin naming one session on a class another session owns, and the ACTIVATION was
+// what refused. The class-origin writer now refuses the registration itself -- the origin must describe the
+// session it names -- so the fabrication cannot be created in the first place. Both facts are asserted: the
+// forgery is rejected at the door, and the session it was meant to help is still not activatable.
 func TestActivationRefusedWhenTheOriginBelongsToAnotherSession(t *testing.T) {
 	a := newActivationFixture(t)
-	// Register a perfectly valid origin — for a DIFFERENT session on the same bridge and class.
-	other := newActivationFixture(t)
-	other.registerOrigin(t, other.session, other.device, a.bridge, a.minor, 1)
+	otherSession := a.f.secondSessionOnSameClass(t)
 
+	out := a.tryRegisterOrigin(t, otherSession, a.device, a.bridge, a.minor, 1)
+	if out == "" {
+		t.Fatal("an origin naming another session was accepted for this class")
+	}
+	if !strings.Contains(out, "ACCT_SOURCE_MISMATCH") {
+		t.Fatalf("the forged origin was refused for the wrong reason: %s", out)
+	}
+
+	// ...and with no accountable origin of its own, the session cannot be activated.
 	_, err := a.activate(t, a.bridge, a.minor, 1)
 	if err == nil {
-		t.Fatal("a Session was activated on the strength of ANOTHER session's accounting origin")
+		t.Fatal("a Session was activated with no accounting origin describing it")
 	}
 	if !strings.Contains(err.Error(), "ENFORCE_NOT_ACCOUNTABLE") && !strings.Contains(err.Error(), "ENFORCE_CLASS_CONTESTED") {
 		t.Fatalf("refused for the wrong reason: %v", err)
@@ -238,4 +253,38 @@ func TestActivationRefusedForAnEndedSession(t *testing.T) {
 	if st := a.state(t); st != "ended" {
 		t.Fatalf("session state = %s", st)
 	}
+}
+
+// secondSessionOnSameClass creates another PENDING_ENFORCEMENT session for this fixture's own device, so a
+// test can talk about "another session on the same traffic class" without needing a second tenant.
+func (f *authFixture) secondSessionOnSameClass(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	var ent, dev, ip string
+	if err := f.pool.QueryRow(ctx, `SELECT s.entitlement_id::text, s.device_id::text, host(s.ip)
+		  FROM iam_v2.sessions s WHERE s.tenant_id=$1 AND s.site_id=$2
+		 ORDER BY s.started DESC LIMIT 1`, f.tenant, f.site).Scan(&ent, &dev, &ip); err != nil {
+		t.Fatalf("no session to base a second one on: %v", err)
+	}
+	var sess string
+	if err := f.pool.QueryRow(ctx, `INSERT INTO iam_v2.sessions
+		 (id, tenant_id, site_id, entitlement_id, device_id, state, started, ip)
+		 VALUES (gen_random_uuid(),$1,$2,$3,$4,'PENDING_ENFORCEMENT', now(), $5::inet)
+		 RETURNING id::text`, f.tenant, f.site, ent, dev, ip).Scan(&sess); err != nil {
+		t.Fatalf("second session: %v", err)
+	}
+	return sess
+}
+
+// tryRegisterOrigin attempts a registration and RETURNS the error text instead of failing the test, so a
+// caller can assert that the database refused it.
+func (a *activationFixture) tryRegisterOrigin(t *testing.T, session, device, bridge string, minor int, epoch int64) string {
+	t.Helper()
+	_, err := a.pool.Exec(context.Background(), `
+		SELECT iam_v2.register_class_origin($1,$2,$3::uuid,$4::uuid,$5,$6,$7,0,0,now())`,
+		a.f.tenant, a.f.site, session, device, bridge, minor, epoch)
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

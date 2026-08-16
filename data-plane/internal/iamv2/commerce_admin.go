@@ -15,6 +15,20 @@ type CommerceAdmin struct {
 	repo CommerceAdminRepository
 	obs  Observer
 	now  func() time.Time
+	// aggregateOnlineTime is the Phase-6 capability. OFF by default, which is what keeps every existing
+	// deployment publishing VALIDITY_WINDOW revisions and nothing else.
+	aggregateOnlineTime bool
+}
+
+// AllowAggregateOnlineTime turns on publication of AGGREGATE_ONLINE_TIME plan revisions.
+//
+// It is a separate call rather than a constructor argument because it answers a different question from the
+// Phase-2 commerce flags: whether this build may OFFER the mode at all. Existing revisions are untouched
+// either way -- a plan revision is immutable, so a revision published as VALIDITY_WINDOW stays
+// VALIDITY_WINDOW forever, and turning the capability on can only affect revisions published afterwards.
+func (a *CommerceAdmin) AllowAggregateOnlineTime(on bool) *CommerceAdmin {
+	a.aggregateOnlineTime = on
+	return a
 }
 
 // NewCommerceAdmin builds the admin engine. repo MUST be nil while the master flag is OFF (dark) and
@@ -295,7 +309,7 @@ func (a *CommerceAdmin) PackageRevisions(ctx context.Context, tenantID, siteID, 
 
 // validatePlanSpec fail-closes on a malformed plan spec (AGGREGATE accounting capability-disabled;
 // device policy enum; non-negative bounded ints; concurrency >= 1).
-func validatePlanSpec(spec *PlanPublishSpec) error {
+func validatePlanSpec(spec *PlanPublishSpec, allowAggregate bool) error {
 	if spec.MaxConcurrentDevices == 0 {
 		spec.MaxConcurrentDevices = 1
 	}
@@ -308,10 +322,26 @@ func validatePlanSpec(spec *PlanPublishSpec) error {
 	if !deviceLimitPolicies[spec.DeviceLimitPolicy] {
 		return &Error{Code: ErrInvalidInput, Msg: "unknown device_limit_policy"}
 	}
+	// THE DEFAULT IS THE OLD BEHAVIOUR, and it is a default rather than a branch: a spec that omits the mode
+	// publishes VALIDITY_WINDOW, exactly as every revision published so far did.
 	if spec.TimeAccountingMode == "" {
 		spec.TimeAccountingMode = "VALIDITY_WINDOW"
 	}
-	if spec.TimeAccountingMode != "VALIDITY_WINDOW" { // AGGREGATE_ONLINE_TIME capability-disabled in Phase 2
+	switch spec.TimeAccountingMode {
+	case "VALIDITY_WINDOW":
+	case "AGGREGATE_ONLINE_TIME":
+		if !allowAggregate {
+			// Capability-disabled: the mode exists in the schema but this build may not offer it.
+			return &Error{Code: ErrInvalidInput, Msg: "unsupported time_accounting_mode"}
+		}
+		// A budget is the whole point of the mode. Publishing it without one would create a revision whose
+		// entitlements can never exhaust -- an aggregate package that behaves like an unlimited one, which is
+		// the opposite of what an operator selecting it meant.
+		if spec.TimeQuotaSeconds == nil || *spec.TimeQuotaSeconds <= 0 {
+			return &Error{Code: ErrInvalidInput,
+				Msg: "AGGREGATE_ONLINE_TIME requires a positive time_quota_seconds"}
+		}
+	default:
 		return &Error{Code: ErrInvalidInput, Msg: "unsupported time_accounting_mode"}
 	}
 	nn := func(p *int, max int) error {
@@ -348,7 +378,7 @@ func (a *CommerceAdmin) PublishPlanRevision(ctx context.Context, spec PlanPublis
 	if spec.TenantID == "" || spec.SiteID == "" || spec.PlanCode == "" {
 		return AdminResult{}, &Error{Code: ErrInvalidInput, Msg: "publish plan: missing tenant/site/code"}
 	}
-	if err := validatePlanSpec(&spec); err != nil {
+	if err := validatePlanSpec(&spec, a.aggregateOnlineTime); err != nil {
 		return AdminResult{Reason: "invalid_plan_spec"}, nil
 	}
 	var res AdminResult
@@ -487,3 +517,8 @@ func (a *CommerceAdmin) SetActive(ctx context.Context, tenantID, siteID, package
 	}
 	return AdminResult{PackageID: packageID, Reason: "ok"}, nil
 }
+
+// AggregateOnlineTimeAllowed reports whether this admin may publish AGGREGATE_ONLINE_TIME plan revisions.
+// It exists so composition tests can assert what the REAL startup wiring produced, rather than asserting
+// against a validator called directly with a flag the test chose itself.
+func (a *CommerceAdmin) AggregateOnlineTimeAllowed() bool { return a != nil && a.aggregateOnlineTime }

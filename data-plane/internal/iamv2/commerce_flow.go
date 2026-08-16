@@ -120,6 +120,15 @@ func (e *CommerceEngine) CreateQuote(ctx context.Context, req QuoteRequest) (Quo
 			res = quoteDeny("invalid_grant_config")
 			return nil
 		}
+		// PHASE 6: a mode this runtime cannot account for is refused HERE, before a quote exists. The plan
+		// revision is immutable and may legitimately carry AGGREGATE_ONLINE_TIME; what must not happen is a
+		// new acquisition in that mode on a deployment that has not enabled it. (Accrual for entitlements
+		// that already exist is data-driven and continues regardless -- that asymmetry is the safety
+		// property, not an oversight.)
+		if why := TimeModeAcquirable(snapshot.TimeAccountingMode, e.aggregateOnlineTime); why != "" {
+			res = quoteDeny(why)
+			return nil
+		}
 		// resolve the immutable duration/end policy once, freezing it into the snapshot
 		endMode, window, derr := ResolveEndPolicy(pkg.DurationPolicy, now)
 		if derr != nil {
@@ -184,6 +193,15 @@ func (e *CommerceEngine) ConfirmFreePurchase(ctx context.Context, req ConfirmReq
 		// 1a. Re-validate the quote as a Phase-2 FREE quote BEFORE consuming anything (a tampered quote
 		//     row — non-zero price, a settlement mapping, a PMS interface, any tax — must not be granted).
 		if why := revalidateFreeQuote(q); why != "" {
+			res = purchaseDeny(why)
+			return nil
+		}
+		// 1b. PHASE 6, RE-CHECKED AT CONFIRM AND BEFORE ANYTHING IS CONSUMED. A quote created while the
+		//     capability was on may be presented after it was turned off -- restart, rollback, an operator
+		//     changing the deployment -- and confirming it would create exactly the unaccountable
+		//     entitlement the gate exists to prevent. Refusing here, above the consume step, is what leaves
+		//     no consumed quote, no consumed auth context and no partial purchase behind.
+		if why := TimeModeAcquirable(q.GrantSnapshot.TimeAccountingMode, e.aggregateOnlineTime); why != "" {
 			res = purchaseDeny(why)
 			return nil
 		}

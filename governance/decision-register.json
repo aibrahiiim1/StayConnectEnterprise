@@ -525,6 +525,40 @@
         "docs/",
         "exports/"
       ]
+    },
+    {
+      "id": "D24",
+      "title": "PRE-LIVE OPERATIONAL CLARIFICATION (2026-08-15). The Product Owner clarifies a fact about the product's operational status that several current-state surfaces stated imprecisely: STAYCONNECT HAS NOT YET ENTERED REAL HOTEL GUEST/STAFF PRODUCTION OPERATION. No guest and no hotel user currently depends on either the prior public-schema IAM or iam_v2 for live service. The system is under active development and controlled testing. THE TECHNICAL ARCHITECTURAL FACTS ARE UNCHANGED AND PRESERVED: iam_v2 has NOT been cut over, holds zero rows and has no service routed to it, and the public-schema path remains the currently configured legacy authentication/routing baseline. What is corrected FORWARD is only the operational implication -- wording such as 'the SOLE PRODUCTION authority', 'the live authority' and 'removing it would break all guest authentication' reads as though real hotel guests are being served today, and they are not. GENUINE HISTORICAL EVIDENCE IS NOT REWRITTEN: the supervised Protel FIAS Gate-3A acceptance test, every transition receipt, every phase acceptance record and every dated decision entry stand exactly as written, because they record what was true and what was measured when they were written. This clarification changes no phase status, no acceptance, no maturity and no limitation, and it authorizes nothing: any environment labelled Production remains protected and must not be changed without separate explicit authorization.",
+      "status": "ACTIVE",
+      "effective": "2026-08-15",
+      "supersedes": [],
+      "authoritative_document": "governance/project-state.json",
+      "affected": [
+        "governance/",
+        "docs/"
+      ]
+    },
+    {
+      "id": "D25",
+      "title": "PHASE 6 AUTHORIZED FOR COMPLETE END-TO-END IMPLEMENTATION AND VERIFIED LIVE-DARK VALIDATION ON THE DEVELOPMENT APPLIANCE (2026-08-15). Scope: Guest Device Self-Service and the AGGREGATE_ONLINE_TIME package time mode, delivered as four substantial milestones with automatic continuation while gates are green (M1 baseline correction + contract/foundation reconciliation; M2 the complete Guest Device Self-Service vertical slice; M3 the complete AGGREGATE_ONLINE_TIME vertical slice; M4 hardening, full Phase-3/4/5/6 regression, adversarial matrix, least-privilege and local-first verification, backup, real scratch restore, rollback rehearsal, reboot verification, authoritative CI and a controlled DARK deployment on the DEVELOPMENT appliance). PRODUCT DECISIONS FIXED BY THIS AUTHORIZATION: (1) Guest Device Self-Service is OPTIONAL PER APPLIANCE via a persistent local setting managed from Hotel Admin, DEFAULT OFF, local-first and correct without Central Control Plane connectivity; when OFF the capability is not exposed to the guest and ordinary authentication and device-limit behaviour is unchanged; when ON an authenticated guest may view only devices belonging to that guest's own current authorized entitlement/subject and may remove ONLY an OFFLINE device, with the offline state re-checked atomically at mutation time so an offline-to-online race fails safely, with the freed slot released but device identity, accounting history, authorization history and audit history all preserved, with no client-supplied MAC, entitlement id, stay id, room number, PMS interface or profile id able to select another subject, and with auditing and throttling. (2) Both package time semantics become real and are selectable per IMMUTABLE package revision: VALIDITY_WINDOW preserves the continuous wall-clock model unchanged, and AGGREGATE_ONLINE_TIME implements the capability the FINAL contract reserved -- an aggregate online-time budget PLUS an outer calendar/hard-validity window, consuming only while an eligible session is online, with the contract's shared device-minute semantics (two eligible devices online ten minutes consume twenty aggregate minutes), terminating atomically at the first applicable terminal condition, and with no replay, delayed tick, counter reset, reconnect, reboot, concurrent session or multi-device use able to double-count, lose time, reopen a terminal entitlement or create negative remaining time. Existing package revisions retain their original semantics and are never reinterpreted retroactively; the default remains VALIDITY_WINDOW unless an immutable revision explicitly selects AGGREGATE_ONLINE_TIME. Delivery: one Phase branch, one pull request, implementation-driven commit count. THE IMPLEMENTATION REMAINS DARK DURING ACCEPTANCE: a phase-level deployment/capability gate stays OFF even though the per-Appliance product setting exists -- the per-Appliance setting is the long-term product control and the phase gate is only the safe deployment boundary until later activation is separately authorized. THIS AUTHORIZATION DOES NOT AUTHORIZE: any Production environment mutation or contact, real guest traffic, real PMS/provider/financial traffic, Phase-4 financial enablement, IAM-v2 authentication cutover, paid-access activation, Phase 7 implementation, unrelated network changes, or the merge of the Phase-6 pull request. Phase 6 must NOT be marked accepted or closed by the implementer. All closed phases (0, 1A, 1B, 2, 3, 4, 5) and their accepted limitations are preserved unchanged and not promoted.",
+      "status": "ACTIVE",
+      "effective": "2026-08-15",
+      "supersedes": [],
+      "authoritative_document": "docs/architecture/StayConnect-IAM-Phase6-Plan.md",
+      "affected": [
+        "data-plane/",
+        "hotel-admin/",
+        "governance/",
+        "docs/",
+        "exports/"
+      ]
+    },
+    {
+      "id": "D26",
+      "title": "PHASE 6 ACCEPTED AND CLOSED AT VERIFIED LIVE-DARK MATURITY, AND PR #14 AUTHORIZED TO MERGE (2026-08-16). The Product Owner accepts the Phase-6 acceptance candidate at delivery head 1bdf9bfbd96b7f0264d634183d5cc8e69904cbb9 (acceptance_candidate_head = inventory_head 5358013eabbabda1ad8d519fa9b93c9c0893d672) on branch phase/6-device-selfservice-and-time-modes: Guest Device Self-Service and the AGGREGATE_ONLINE_TIME package time mode, delivered DARK, validated in one supervised controlled run on the authorized DEVELOPMENT appliance (42 proofs, 0 failures) and verified dark afterwards and across a second reboot. ACCEPTED MATURITY IS VERIFIED LIVE-DARK: every Phase-6 capability is OFF on every environment, the guest routes are absent from the running process, and the operator screens are compiled out of the deployed Hotel Admin bundle. This decision authorizes the acceptance, the closure and the merge of PR #14, and it authorizes nothing else: no Phase-6 enablement on any environment, no IAM-v2 production cutover, no paid access, no real guest, PMS, provider or financial traffic. Every recorded limitation is preserved without promotion -- in particular that a full in-place restore of the appliance database remains NOT PROVEN, because it requires a restore manifest signed off-appliance with the registry root key, and that enabling Phase 6 requires a Phase-3 writer-boundary provisioning grant the runtime roles do not hold. The same decision supersedes the earlier instruction to close the development programme after Phase 6 and directs continuation into Phase 7 (full-system re-acceptance) and every remaining planned development phase.",
+      "decided_on": "2026-08-16",
+      "phase": "6",
+      "accepted": true
     }
   ]
 }

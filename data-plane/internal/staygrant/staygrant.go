@@ -14,12 +14,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/authctx"
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 )
@@ -40,11 +42,31 @@ var (
 
 // Store performs atomic stay grants.
 type Store struct {
-	pool *pgxpool.Pool
-	ctxs *authctx.Store
+	// aggregateOnlineTime gates NEW acquisition of the Phase-6 time mode. See WithAggregateOnlineTime.
+	aggregateOnlineTime bool
+	pool                *pgxpool.Pool
+	ctxs                *authctx.Store
 }
 
 func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool, ctxs: authctx.NewStore(pool)} }
+
+// WithAggregateOnlineTime declares whether this process may create NEW entitlements whose effective time
+// mode is AGGREGATE_ONLINE_TIME. Default OFF, and off means REFUSE the grant.
+//
+// The reason is not policy, it is arithmetic. Accrual itself is DATA-DRIVEN and deliberately not gated on
+// this flag -- an entitlement that already exists keeps being accounted for whatever the flag says, because
+// not accounting it is what would turn a finite budget unlimited. What the flag decides is whether a NEW one
+// may be created here at all: a build whose operator has not turned the mode on has not asked to serve it,
+// and creating access this deployment was never configured to offer is not a decision a grant path gets to
+// make. Refusing is free -- nothing durable is lost.
+//
+// It deliberately does NOT touch anything already durable. An immutable AGGREGATE_ONLINE_TIME plan revision
+// keeps existing and keeps its meaning; entitlements already granted under it are not reinterpreted,
+// re-moded or deleted. Only NEW acquisition is closed.
+func (s *Store) WithAggregateOnlineTime(on bool) *Store {
+	s.aggregateOnlineTime = on
+	return s
+}
 
 // Request is what a guest-side grant needs. Everything that decides ACCESS is server-derived: the caller
 // supplies only the one-time Auth Context id, the presenter identity it must match, and which package was
@@ -184,6 +206,23 @@ func (s *Store) GrantTx(ctx context.Context, tx pgx.Tx, tenant, site string, r R
 	if windowSecs > 0 {
 		w := activatedAt.Add(time.Duration(windowSecs) * time.Second)
 		window = &w
+	}
+	// FAIL CLOSED ON A MODE THIS DEPLOYMENT HAS NOT ENABLED. The revision is immutable and may legitimately
+	// carry AGGREGATE_ONLINE_TIME; what must not happen is a NEW entitlement in that mode on an appliance
+	// whose operator has not turned the mode on. (Anything ALREADY in that mode continues to be accounted
+	// for regardless of this flag -- see the accounting owner in acctd.)
+	{
+		var mode string
+		if err := tx.QueryRow(ctx,
+			`SELECT COALESCE(time_accounting_mode,'VALIDITY_WINDOW') FROM iam_v2.service_plan_revisions WHERE id=$1`,
+			svcRev).Scan(&mode); err != nil {
+			return res, err
+		}
+		// THE SHARED RULE, not a second copy of it. Two acquisition paths each carrying their own idea of
+		// what may be created is how they come to disagree.
+		if why := iamv2.TimeModeAcquirable(mode, s.aggregateOnlineTime); why != "" {
+			return res, fmt.Errorf("refusing to grant plan revision %s: %s", svcRev, why)
+		}
 	}
 	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlements
 		(tenant_id, site_id, stay_id, pms_interface_id, purchase_id, policy_snapshot, service_plan_revision_id,

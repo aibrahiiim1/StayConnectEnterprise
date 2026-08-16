@@ -30,7 +30,7 @@ case "${1:-}" in
     safety_guard
     psqlx "DROP SCHEMA IF EXISTS iam_v2 CASCADE; DROP TABLE IF EXISTS public._iam_v2_migrations;" >/dev/null
     psql_ac "DROP INDEX CONCURRENTLY IF EXISTS public.$IDX;" >/dev/null || true
-    psqlx "DROP TABLE IF EXISTS public.guest_networks, public.sites, public.tenants CASCADE;" >/dev/null
+    psqlx "DROP TABLE IF EXISTS public.guest_networks, public.appliances, public.operators, public.sites, public.tenants CASCADE;" >/dev/null
     psqlf "$HERE/00_platform_fixture.sql" >/dev/null; echo "  fixture ok"
     bash "$HERE/mg0.sh" | sed 's/^/  /'
     up;;

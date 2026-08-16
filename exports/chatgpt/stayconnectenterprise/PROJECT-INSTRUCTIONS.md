@@ -1,14 +1,14 @@
 # StayConnect Enterprise — ChatGPT Project Instructions
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0055 -->
-**Current phase:** 5 — Post-stay (PIN re-auth); cross-PMS transfer workflow
-**Current activity:** `PHASE_5_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY_AND_MERGED`
-**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 NOT_STARTED · 7 NOT_STARTED
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0061 -->
+**Current phase:** 6 — Guest device self-service; optional AGGREGATE_ONLINE_TIME
+**Current activity:** `PHASE_6_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY`
+**Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 AUTHORIZED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
-**iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the sole production authority.
-**Single next authorized action:** Maintain project governance and documentation for the closed phases, because Phase 5 is ACCEPTED_AND_CLOSED at verified LIVE-DARK / NO-FINANCIAL-TRAFFIC maturity (D22/T0053) and MERGED to master (D23/T0054), leaving no Phase-5 item open, and every further step -- deploying, mutating an appliance, enabling any feature flag, cutting over IAM-v2, migrating or contacting Production, sending PMS, provider or financial traffic, granting paid access, or starting Phase 6 or Phase 7 -- requires a separate explicit Product-Owner decision that has not been taken.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D22`.
+**iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
+**Single next authorized action:** Execute the authorized Phase-7 full-system re-acceptance under D26 on branch phase/7-full-system-reacceptance as one pull request and approximately four substantial end-to-end milestones, proving the already-built system works as one complete IAM domain with every future-facing capability DARK except where a validation procedure requires controlled temporary enablement on the authorized DEVELOPMENT appliance with guaranteed restoration afterwards.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D26`.
 <!-- END GENERATED PROJECT STATE -->
 
 

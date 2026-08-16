@@ -41,6 +41,9 @@ const MATRIX: Matrix = {
     // it decides whether the BUTTON is offered, never whether the action is allowed.
     "post-stay-profiles": "write",
     "stay-transfers": "write",
+    // Phase 6 (DARK): the per-appliance Guest Device Self-Service setting follows auth-methods -- which
+    // capabilities the property offers its guests is a configuration decision, not a desk action.
+    "guest-device-self-service": "write",
     "guest-access-plans": "write", "voucher-batches": "write", "guest-accounts": "write",
     vouchers: "write", sessions: "write", "pms-providers": "write",
     "auth-methods": "write", "walled-garden": "write",
@@ -51,6 +54,8 @@ const MATRIX: Matrix = {
     reports: "read", backups: "read", license: "read", diagnostics: "write",
   },
   front_office_operator: {
+    // Phase 6 (DARK): the desk answers "why can't I remove my old phone" and changes no capability.
+    "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
     "voucher-batches": "write", "guest-accounts": "write", vouchers: "write", sessions: "write",
@@ -59,6 +64,7 @@ const MATRIX: Matrix = {
     reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
+    "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
     "voucher-batches": "write", "guest-accounts": "write", vouchers: "write", sessions: "write",
@@ -72,10 +78,12 @@ const MATRIX: Matrix = {
     license: "read", diagnostics: "read",
   },
   payments_operator: {
+    "guest-device-self-service": "read",
     payments: "write", "stripe-accounts": "read",
     sessions: "read", reports: "read", audit: "read", license: "read", diagnostics: "read",
   },
   site_viewer: {
+    "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read", "checkout-grace": "read", "operational-alerts": "read",
     "post-stay-profiles": "read", "stay-transfers": "read",
     "guest-access-plans": "read", "voucher-batches": "read", "guest-accounts": "read", vouchers: "read",

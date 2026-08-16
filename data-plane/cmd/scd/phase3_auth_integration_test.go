@@ -64,6 +64,46 @@ func nextFixtureNet() fixtureNet {
 	}
 }
 
+// claimFreeFixtureNet points the shared fixture generator at a guest subnet that is NOT already present in
+// this database.
+//
+// The generator numbers subnets from a process-local counter, which is correct within one run and wrong
+// across runs: a disposable database that has been used before already holds 10.77.1.0/24 and its
+// neighbours, and the appliance resolves a device's network by "which enabled subnet contains this address".
+// Two networks with one subnet make that answer arbitrary, and the symptom is not a clear failure -- it is a
+// resolution that lands in another run's tenant and then trips a foreign key.
+//
+// It lives in the shared fixture now. It was scoped to one file while a Phase-3 activation test depended on
+// two fixtures sharing a traffic class; that test has since been corrected to create its second session
+// within its own scope, which is what "another session on the same class" actually means -- so every fixture
+// can have a subnet of its own and the whole suite becomes re-runnable against a database that has seen it
+// before.
+func claimFreeFixtureOctet(t *testing.T, p *pgxpool.Pool) {
+	t.Helper()
+	ctx := context.Background()
+	rows, err := p.Query(ctx,
+		`SELECT DISTINCT split_part(host(network(subnet_cidr)), '.', 3)::int
+		   FROM public.guest_networks WHERE subnet_cidr <<= '10.77.0.0/16'`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	used := map[int]bool{}
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err == nil {
+			used[n] = true
+		}
+	}
+	for n := 1; n < 200; n++ {
+		if !used[n] {
+			fixtureSeq.Store(int64(n - 1)) // the generator's next Add(1) yields n
+			return
+		}
+	}
+	t.Skip("no free 10.77.x fixture subnet remains in this database")
+}
+
 func newAuthFixture(t *testing.T) *authFixture {
 	t.Helper()
 	dsn := os.Getenv("PHASE3_TEST_DSN")
@@ -77,6 +117,7 @@ func newAuthFixture(t *testing.T) *authFixture {
 	}
 	t.Cleanup(p.Close)
 
+	claimFreeFixtureOctet(t, p)
 	f := &authFixture{pool: p, net: nextFixtureNet()}
 	if err := p.QueryRow(ctx, `WITH
 	  t AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
@@ -483,7 +524,11 @@ func TestIntegration_Phase3Auth_RetryIsIdempotent(t *testing.T) {
 	}
 	var n int
 	if err := f.pool.QueryRow(ctx,
-		`SELECT count(*) FROM iam_v2.auth_resolutions WHERE resolution_request_id=$1`, "00000007-0000-4000-8000-000000000000").Scan(&n); err != nil {
+		// Scoped to THIS fixture's tenant and site: the request id is a constant, and a database that has run
+		// this test before holds another tenant's row carrying the same id.
+		`SELECT count(*) FROM iam_v2.auth_resolutions
+		  WHERE resolution_request_id=$1 AND tenant_id=$2 AND site_id=$3`,
+		"00000007-0000-4000-8000-000000000000", f.tenant, f.site).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 1 {
@@ -699,7 +744,8 @@ func TestIntegration_Phase3Auth_OneResolutionYieldsOneLiveContext(t *testing.T) 
 	var live int
 	if err := f.pool.QueryRow(ctx, `
 		SELECT count(*) FROM iam_v2.auth_contexts
-		 WHERE resolution_request_id=$1::uuid AND consumed_at IS NULL`, reqID).Scan(&live); err != nil {
+		 WHERE resolution_request_id=$1::uuid AND consumed_at IS NULL
+		   AND tenant_id=$2 AND site_id=$3`, reqID, f.tenant, f.site).Scan(&live); err != nil {
 		t.Fatal(err)
 	}
 	if live != 1 {
@@ -760,7 +806,8 @@ func TestIntegration_Phase3Auth_ConcurrentReplaysConvergeOnOneContext(t *testing
 	var live int
 	if err := f.pool.QueryRow(context.Background(), `
 		SELECT count(*) FROM iam_v2.auth_contexts
-		 WHERE resolution_request_id=$1::uuid AND consumed_at IS NULL`, reqID).Scan(&live); err != nil {
+		 WHERE resolution_request_id=$1::uuid AND consumed_at IS NULL
+		   AND tenant_id=$2 AND site_id=$3`, reqID, f.tenant, f.site).Scan(&live); err != nil {
 		t.Fatal(err)
 	}
 	if live > 1 {

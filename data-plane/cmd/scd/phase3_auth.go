@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -51,16 +52,30 @@ type phase3Auth struct {
 	contextTTL time.Duration
 }
 
+// phase6AggregateOn reads the Phase-6 aggregate capability from the environment, failing CLOSED on an
+// unreadable or incoherent flag pair: a configuration nobody can parse must not be read as permission.
+func phase6AggregateOn() bool {
+	cfg, err := iamv2.LoadPhase6ConfigFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("phase6 configuration is unreadable; aggregate acquisition stays OFF", "err", err)
+		return false
+	}
+	return cfg.AggregateTimeOn()
+}
+
 // newPhase3Auth constructs the arm ONLY when the master + PMS-auth flags are on.
 func newPhase3Auth(cfg iamv2.PMSConfig, s *server) *phase3Auth {
 	if !cfg.AuthOn() {
 		return nil
 	}
 	return &phase3Auth{
-		srv:        s,
-		resolver:   pmsresolve.NewResolver(s.db),
-		ctxs:       authctx.NewStore(s.db),
-		grants:     staygrant.New(s.db),
+		srv:      s,
+		resolver: pmsresolve.NewResolver(s.db),
+		ctxs:     authctx.NewStore(s.db),
+		// PHASE 6 (DARK by default): may this appliance create NEW entitlements in AGGREGATE_ONLINE_TIME
+		// mode? Only when the flag that also turns on the accrual tick is on. Off means the grant is
+		// refused rather than silently created with a budget nothing would ever consume.
+		grants:     staygrant.New(s.db).WithAggregateOnlineTime(phase6AggregateOn()),
 		contextTTL: 10 * time.Minute,
 	}
 }

@@ -461,6 +461,21 @@ const successHTML = `<!doctype html>
   .pkg button[disabled], #cx-confirm[disabled] { opacity:.5; cursor:default; }
   #cx-note { color:#666; font-size:.85rem; margin-top:8px; }
   .cx-err { color:#b00020; }
+  #timeleft { margin-top:20px; padding:12px 14px; border:1px solid #ddd; border-radius:10px; text-align:left; }
+  #timeleft .tl-main { font-size:1.05rem; font-weight:600; }
+  #timeleft .tl-note { color:#666; font-size:.85rem; margin-top:4px; }
+  #devices { margin-top:28px; text-align:left; border-top:1px solid #eee; padding-top:18px; }
+  #devices h2 { font-size:1.05rem; }
+  #devices p.lead { margin:.2rem 0 .9rem; }
+  .dev { border:1px solid #ddd; border-radius:10px; padding:12px 14px; margin:10px 0; }
+  .dev .name { font-weight:600; }
+  .dev .meta { color:#666; font-size:.85rem; line-height:1.5; margin-top:2px; }
+  .dev button { margin-top:8px; padding:8px 14px; border:1px solid #0a6cff; background:#fff; color:#0a6cff; border-radius:8px; cursor:pointer; }
+  .dev button[disabled] { opacity:.5; cursor:default; }
+  .dev .inuse { color:#666; font-size:.85rem; margin-top:8px; }
+  #dv-note { font-size:.9rem; margin-top:10px; }
+  .dv-done { color:#1a9e4a; }
+  .dv-err { color:#b00020; }
 </style>
 </head><body>
   <div class="ok">✓</div>
@@ -551,4 +566,164 @@ const successHTML = `<!doctype html>
   })();
   </script>
   {{end}}
+
+
+  <!-- YOUR TIME (Phase 6, DARK).
+       Hidden until the appliance answers with an aggregate package, so on every other package -- which is
+       all of them today -- the page is unchanged.
+
+       TWO CLOCKS, BOTH SHOWN. Remaining online time counts down only while the guest is connected; the hard
+       expiry is a calendar instant that arrives whether they used the minutes or not. Showing only the
+       minutes would be the comfortable half-truth: a guest with ninety minutes left and a window closing in
+       ten would plan their evening around a number that is about to stop mattering. -->
+  <div id="timeleft" hidden>
+    <div class="tl-main"><span id="tl-remaining"></span> of internet time left</div>
+    <div class="tl-note">This counts down only while you are connected.</div>
+    <div class="tl-note" id="tl-expiry" hidden></div>
+  </div>
+  <script>
+  (function(){
+    var box = document.getElementById('timeleft');
+    var main = document.getElementById('tl-remaining');
+    var exp = document.getElementById('tl-expiry');
+    function human(s){
+      if(s <= 0) return 'no time';
+      var h = Math.floor(s/3600), m = Math.round((s%3600)/60);
+      if(h > 0) return h + ' hour' + (h===1?'':'s') + (m ? ' ' + m + ' min' : '');
+      if(m > 0) return m + ' minute' + (m===1?'':'s');
+      return 'less than a minute';
+    }
+    function day(iso){
+      var t = Date.parse(iso);
+      if(isNaN(t)) return '';
+      var d = new Date(t);
+      return d.toLocaleString();
+    }
+    fetch('/status', {headers:{'Accept':'application/json'}})
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(st){
+        if(!st || st.time_mode !== 'AGGREGATE_ONLINE_TIME') return;  // every other package: nothing changes
+        main.textContent = human(st.remaining_online_seconds);
+        if(st.hard_expiry){
+          var when = day(st.hard_expiry);
+          if(when){
+            exp.textContent = 'Your access ends on ' + when + ', whether or not the time is used.';
+            exp.hidden = false;
+          }
+        }
+        box.hidden = false;
+      })
+      .catch(function(){ /* the ordinary page is the fallback */ });
+  })();
+  </script>
+
+  <!-- YOUR DEVICES (Phase 6, DARK).
+       The panel starts HIDDEN and is only ever shown after the appliance answers with a list. On an
+       appliance where the capability is not deployed, or where the hotel has turned the setting off, the
+       answer is the uniform non-success and this panel simply never appears — the guest sees the ordinary
+       success page and learns nothing about whether device management exists here.
+
+       What the guest sees about a device is when it was last used and whether it is online. There is no MAC
+       address and no internal identifier anywhere in the text: a MAC would hand every guest on a shared
+       network a stable identifier for somebody's phone, and the internal ids are not theirs to see. The
+       opaque id travels in a data attribute because the release call needs a target, and it is never
+       rendered. -->
+  <div id="devices" hidden>
+    <h2>Your devices</h2>
+    <p class="lead">These are the devices using your internet access. Removing one frees its place for
+       another device — nothing about your access changes, and the removed device can connect again at
+       any time.</p>
+    <div id="dv-list"></div>
+    <div id="dv-note"></div>
+  </div>
+  <script>
+  (function(){
+    var panel = document.getElementById('devices');
+    var list  = document.getElementById('dv-list');
+    var note  = document.getElementById('dv-note');
+    var busy  = false;
+
+    function ago(iso){
+      if(!iso) return 'Last used: unknown';
+      var t = Date.parse(iso);
+      if(isNaN(t)) return 'Last used: unknown';
+      var mins = Math.floor((Date.now()-t)/60000);
+      if(mins < 1)  return 'Last used: just now';
+      if(mins < 60) return 'Last used: ' + mins + ' minute' + (mins===1?'':'s') + ' ago';
+      var hrs = Math.floor(mins/60);
+      if(hrs < 24)  return 'Last used: ' + hrs + ' hour' + (hrs===1?'':'s') + ' ago';
+      var days = Math.floor(hrs/24);
+      return 'Last used: ' + days + ' day' + (days===1?'':'s') + ' ago';
+    }
+    // Every refusal is the same sentence. The appliance does not tell the guest whether a removal failed
+    // because the device came back online, because it was already removed, or because they have tried too
+    // many times — and neither does this page.
+    function refused(){ note.className='dv-err'; note.textContent='That didn’t work. Please try again in a moment.'; }
+    function clearNote(){ note.className=''; note.textContent=''; }
+
+    function render(devices){
+      list.innerHTML='';
+      devices.forEach(function(d, i){
+        var el = document.createElement('div'); el.className='dev';
+        var name = document.createElement('div'); name.className='name';
+        name.textContent = 'Device ' + (i+1);
+        var meta = document.createElement('div'); meta.className='meta';
+        meta.textContent = (d.online ? 'Connected now' : 'Not connected') + ' · ' + ago(d.last_seen);
+        el.appendChild(name); el.appendChild(meta);
+
+        if(d.removable){
+          var btn = document.createElement('button');
+          btn.type='button';
+          btn.textContent='Remove this device';
+          btn.setAttribute('aria-label','Remove device ' + (i+1));
+          btn.addEventListener('click', function(){ release(d.id, btn, i+1); });
+          el.appendChild(btn);
+        } else {
+          // An online device is never removable, and saying so plainly is better than offering a button
+          // that will refuse: the guest is told what to do instead.
+          var why = document.createElement('div'); why.className='inuse';
+          why.textContent = d.online
+            ? 'In use right now, so it can’t be removed. Disconnect it from the Wi‑Fi first.'
+            : 'This device can’t be removed right now.';
+          el.appendChild(why);
+        }
+        list.appendChild(el);
+      });
+    }
+
+    function load(showPanel){
+      fetch('/devices/list', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(res){
+          if(!res || !res.ok || !res.devices || res.devices.length===0){
+            // Not deployed, switched off, nothing to show, or a failure — one behaviour for all of them.
+            if(showPanel) panel.hidden = true;
+            return;
+          }
+          render(res.devices);
+          panel.hidden = false;
+        })
+        .catch(function(){ if(showPanel) panel.hidden = true; });
+    }
+
+    function release(id, btn, n){
+      if(busy) return;
+      if(!window.confirm('Remove device ' + n + '? It will lose its place, and can connect again at any time.')) return;
+      busy = true; btn.disabled = true; clearNote();
+      fetch('/devices/release', {method:'POST', headers:{'Content-Type':'application/json'},
+                                 body: JSON.stringify({device_id: id})})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(res){
+          busy = false;
+          if(!res || !res.ok){ btn.disabled=false; refused(); return; }
+          note.className='dv-done';
+          note.textContent = res.message || 'That device has been removed and its place is free.';
+          load(false);
+        })
+        .catch(function(){ busy=false; btn.disabled=false; refused(); });
+    }
+
+    load(true);
+  })();
+  </script>
 </body></html>`

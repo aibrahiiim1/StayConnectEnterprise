@@ -1,0 +1,69 @@
+{
+  "transition_id": "T0059",
+  "seq": 59,
+  "timestamp": "2026-08-15T16:05:00Z",
+  "record_type": "PHASE_6_M3_AGGREGATE_ONLINE_TIME_COMPLETE_DARK",
+  "previous_state": {
+    "phase": "6",
+    "activity": "PHASE_6_IMPLEMENTATION_IN_PROGRESS_DARK",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "6",
+    "activity": "PHASE_6_IMPLEMENTATION_IN_PROGRESS_DARK",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "6",
+  "decision": "D25",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner authorization D25 (T0057) of 2026-08-15, with the Product-Owner findings of the same day on terminal precedence, the svc_acctd runtime boundary, restore semantics and plan synchronization. This record closes milestone M3 and opens M4; it is not an acceptance of Phase 6 and creates no new authorization.",
+  "history_note": "Phases 0, 1A, 1B, 2, 3, 4 and 5 are unchanged and remain ACCEPTED_AND_CLOSED. T0044 through T0058 are unchanged. Phase 6 remains IN_PROGRESS, unaccepted and unmerged.",
+  "milestone": {
+    "id": "M3",
+    "title": "The AGGREGATE_ONLINE_TIME vertical slice, DARK",
+    "status": "COMPLETE",
+    "what_is_now_true": [
+      "the mode is a property of the IMMUTABLE plan revision: an omitted mode is VALIDITY_WINDOW by default rather than by branch, a grant tier may not override it, and publication requires both the Phase-6 capability and a positive time budget",
+      "acquisition of a NEW aggregate entitlement is gated on every free path -- the PMS/stay grant and the Phase-2 free-commerce quote/confirm -- through ONE shared rule, with confirm re-checking above the consume step so a refusal consumes neither the quote nor the guest's auth context",
+      "accrual charges only sessions in state 'active', never PENDING_ENFORCEMENT, bounded by observation so unobserved time is recorded as skipped rather than charged",
+      "every session is billable only to the earliest of now, its own end, the immutable outer window and any terminal instant the sweep already knows -- including the DATA crossing",
+      "exhaustion is the exact piecewise crossing over the union of the billable intervals, because the burn rate changes whenever a contributor starts or ends",
+      "the sweep selects the EARLIEST terminal condition and its matching reason, so an entitlement that reached DATA before its window is ended as DATA at the DATA instant",
+      "the sanctioned expiry writer establishes the terminal condition from authoritative state and refuses a healthy entitlement; svc_acctd holds EXECUTE on that one operation, SELECT on the tables the sweep reads, and no write authority anywhere in iam_v2",
+      "accounting an entitlement that already exists is NOT gated on the deployment flag, so disabling the capability can never turn finite access unlimited; an empty aggregate set produces no writes",
+      "the guest sees both clocks -- remaining online time and the immutable hard expiry -- and the operator sees the same numbers from the same durable state"
+    ],
+    "proofs": {
+      "database_gates": "phase6_0030_foundation 50/50, phase6_0031_device_self_service 22/22, phase6_0036_aggregate_online_time 49/49 (19 of them added for the window ceiling and the piecewise crossing, and proven to bite: 40/9 against the superseded implementation), phase6_least_privilege 54/54 measured as the real roles",
+      "sweep_integration": "24 EnforceExpiries proofs against real PostgreSQL: both DATA/TIME orderings, both both-elapsed orderings, the complete sweep run AS svc_acctd for a TIME exhaustion and a DATA termination, three refusals of healthy entitlements whose ids the role knows, three positive controls per condition, concurrency, restart, restore, rollback and a stranded exhaustion recovered with the accrual arm off",
+      "acquisition": "CreateQuote/ConfirmFreePurchase against a real database with a pre-existing immutable aggregate revision: refused while OFF with zero quotes, purchases, entitlements and an unconsumed auth context; acquired normally while ON; VALIDITY_WINDOW identical either way; the revision unchanged throughout",
+      "presentation": "hotel-admin 110/110 including the operator budget view, and portald template proofs that the guest panels stay hidden for every other package and expose no MAC or internal identity",
+      "regressions": "edged Phase-3/4/5/6 API integration suites now RUN in this environment and are green -- the scratch platform fixture had stubbed public.operators without display_name, so they had been failing at fixture time rather than passing"
+    },
+    "corrections_made_during_m3": [
+      "the outer window was not an accrual ceiling: a sweep after the window charged the stretch between them, and could report EXHAUSTION for an entitlement whose calendar had run out -- a false account produced from real data",
+      "the crossing instant assumed every contributor burned the same interval; it is now computed piecewise, which moves the answer by tens of seconds in ordinary staggered cases",
+      "the Phase-6 config was consumed by the commerce admin BEFORE it was loaded, pinning the publication capability off regardless of the environment -- invisible to every unit test, since the defect was the order of two statements",
+      "accrual was gated on the deployment flag, which would have turned an already-granted finite entitlement into unlimited access on any rollback; accrual is now data-driven",
+      "the expiry writer accepted a caller-supplied reason and instant, which was generic destructive termination authority under two labels",
+      "the candidate query preferred an elapsed window without comparing its instant to the DATA crossing"
+    ]
+  },
+  "flag_state": {
+    "phase6_flags": "OFF everywhere, including every real environment. No Phase-6 flag has been enabled on any appliance.",
+    "safe_disable": "Publication, acquisition and the guest/operator surfaces are gated. Accounting of already-durable aggregate entitlements is not, and that asymmetry is deliberate: it is what prevents a disabled capability from silently granting unlimited access."
+  },
+  "boundaries_observed": [
+    "no Production contact or mutation",
+    "no appliance contact in this milestone",
+    "no real guest, PMS, provider or financial traffic",
+    "no IAM-v2 cutover",
+    "no paid access",
+    "no Phase 7 work",
+    "no pull request opened and no merge",
+    "Phase 6 not marked accepted or closed"
+  ],
+  "next": "M4 -- hardening and the controlled DEVELOPMENT-appliance LIVE-DARK acceptance candidate: full-schema regressions under the real service roles, the scd/acctd/edged flag-coherence proof on the appliance, backup and real scratch restore, rollback rehearsal with the Phase-6 routes fail-closed before migration 0032 down, reboot verification, zero-stale governance synchronization, authoritative CI artifacts, and then the single Phase-6 pull request opened UNMERGED for a separate Product-Owner decision.",
+  "timestamp_note": "Corrected in place, minutes after it was written and before Phase 6 is accepted or merged: the first value (19:40:00Z) was the local clock read as UTC, which placed the receipt three hours in its own future and tripped the rule that exists for exactly that. The same local-versus-UTC slip produced the Phase-5 T0053 defect, which is why the rule is enforced."
+}

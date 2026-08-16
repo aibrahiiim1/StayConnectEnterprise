@@ -7,6 +7,7 @@ import {
   LayoutDashboard, Ticket, Users, LogOut, Monitor, FileText,
   Shield, ScrollText, Hotel, Send, KeyRound, Wallet, BadgeCheck,
   Paintbrush, Archive, Network, Wifi, History, Router, Cloud, ServerCog, Lock, Activity, Package,
+  Smartphone,
 } from "lucide-react";
 
 // Phase 2 (DARK) commercial packages: the admin surface is off by default and the nav item stays hidden
@@ -25,6 +26,12 @@ const PHASE4_ADMIN = process.env.NEXT_PUBLIC_PHASE4_ADMIN === "1";
 // NEXT_PUBLIC_PHASE5_ADMIN=1, mirroring the edged STAYCONNECT_PHASE5_* flags. Hiding the link is a
 // convenience, not the boundary: edged does not mount the routes at all while dark.
 const PHASE5_ADMIN = process.env.NEXT_PUBLIC_PHASE5_ADMIN === "1";
+// Phase 6 (DARK): the Guest Device Self-Service SETTING screen is hidden unless the deployment sets
+// NEXT_PUBLIC_PHASE6_ADMIN=1, mirroring edged's STAYCONNECT_PHASE6_* flags. Note what this flag is and is
+// not: it hides the OPERATOR screen. It is not the per-appliance product setting the screen manages, and it
+// is not the guest-facing deployment gate either -- three separate things, and edged is the authority on the
+// first two.
+const PHASE6_ADMIN = process.env.NEXT_PUBLIC_PHASE6_ADMIN === "1";
 
 // Each item names the edged resource that gates its visibility. Items the
 // operator's roles cannot read are hidden (edged still enforces server-side).
@@ -47,6 +54,10 @@ const SECTIONS: Section[] = [
       { href: "/guest-accounts",     label: "Guest accounts",     icon: KeyRound, resource: "guest-accounts" },
       { href: "/commercial-packages", label: "Commercial packages", icon: Package, resource: "commercial-packages", enabled: PHASE2_ADMIN },
       { href: "/sessions",           label: "Sessions",           icon: Monitor,  resource: "sessions" },
+      { href: "/guest-device-self-service", label: "Guest devices", icon: Smartphone, resource: "guest-device-self-service", enabled: PHASE6_ADMIN },
+      // Live access state, so it rides the sessions resource rather than introducing a role-matrix row for a
+      // read-only view that is not a new kind of authority.
+      { href: "/online-time", label: "Online-time budgets", icon: Activity, resource: "sessions", enabled: PHASE6_ADMIN },
     ],
   },
   {

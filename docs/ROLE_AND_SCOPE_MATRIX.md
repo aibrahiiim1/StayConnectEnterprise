@@ -46,6 +46,7 @@ Seven roles, enforced by edged per `/edge/v1` resource. Legend:
 | guests | W | W | **W** | **W** | – | R | R |
 | pms-providers (+test/cache/health) | W | W | R | R | – | R | R |
 | auth-methods | W | W | R | R | – | R | R |
+| guest-device-self-service | W | W | R | R | – | R | R |
 | walled-garden | W | W | R | R | – | R | R |
 | portal-branding | W | W | R | R | – | R | R |
 | payments (view) | W | W | R | R | – | **W** | R |
@@ -71,6 +72,21 @@ Summary of intent:
 - **payments_operator** — payments read-write (incl. refunds), read-only on
   everything else.
 - **site_viewer** — read-only everywhere.
+
+**guest-device-self-service** (Phase 6, DARK) is the per-appliance product
+setting that decides whether this property offers guests the ability to remove
+their own offline devices. It follows `auth-methods` exactly, and for the same
+reason: *which capabilities the property offers its guests* is a configuration
+decision, not a desk action. So the two management roles hold **W**, the desk
+roles hold **R** (they are asked "why can't I remove my old phone" and need to
+be able to answer it), `voucher_operator` gains nothing — a kiosk account has no
+business here — and the two read-only roles keep their established read.
+
+The setting is separate from the Phase-6 **deployment gate**: turning the
+setting on does not deploy the capability, and while the gate is dark the guest
+routes do not exist at all. edged does not even mount this resource unless the
+build's Phase-6 admin flag is on, so the row above describes who may use the
+screen once it exists, not whether it exists.
 
 License-state gates apply **on top of** roles: e.g. in Restricted state even
 site_admin cannot create GuestAccessPlans or voucher batches
