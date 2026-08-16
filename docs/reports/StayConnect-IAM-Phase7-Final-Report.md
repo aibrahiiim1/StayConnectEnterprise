@@ -83,7 +83,9 @@ snapshot of one appliance. The proof is mutation-checked, so a claim of equality
   Gate P grants on all three.
 - **A database seeded under `session_replication_role = replica` cannot be restored from its own dump.**
   Several Phase-6 gates do exactly that, leaving 21 entitlements violating four validated constraints.
-- **M4 is not complete.** The appliance-side items listed in §6 remain open and are not claimed.
+- **Three things are NOT PROVEN on the appliance and are not claimed as passes** (§6.2): a deliberate Central
+  outage drill, a live rollback of the appliance schema, and a real purge or archive with external receipt
+  authority. Each is stated with the reason it cannot lawfully be executed here.
 
 ---
 

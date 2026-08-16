@@ -50,6 +50,12 @@ Each check performs the forbidden write and asserts rejection, against a freshly
 now run **twice** by the migration gate: once on the pre-0011 chain, and again on a clean rebuild carrying
 0011 — so "0011 weakened nothing" is a measured result rather than a claim. Both runs are **31/31**.
 
+> **Later note (Phase 7).** That gate now reports **33/0**, not 31/31, and the two extra cases are
+> preconditions rather than new invariants: it re-establishes interface freshness (it inherits a container
+> the financial gate spent twenty minutes building, so that heartbeat has aged out) and derives a per-run
+> identity namespace, because its fixed UUIDs, idempotency keys and P numbers are each unique by design and
+> made it first-run-only. The 31 invariants recorded here are unchanged.
+
 | C-row | Proven behaviourally |
 |---|---|
 | C1 | CHARGE accepted when all pinned objects are in scope; a folio outside the pinned tenant/site/interface is **rejected** |
