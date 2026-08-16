@@ -542,8 +542,23 @@ def main():
                 "itself to real traffic or enablement: %s" % (i, " ".join(pa.split())[:150]), STATE)
 
     # (c) an unauthorized future phase must not appear in allowed_actions
+    #
+    # NOT_STARTED is not the only way a phase is unauthorized. A phase that is not in the roadmap AT ALL is
+    # unauthorized by construction, and the rule used to miss it entirely: with every recorded phase started,
+    # "Execute the authorized Phase 8 end-to-end" passed unchallenged. That gap only became reachable when
+    # D26 authorized Phase 7 and left nothing NOT_STARTED, which is how the negative suite found it.
+    recorded = set(str(k) for k in (state.get("phases") or {}))
     unauth = sorted(n for n, ph in (state.get("phases") or {}).items()
                     if isinstance(ph, dict) and ph.get("status") == "NOT_STARTED")
+    named = re.compile(r"(?:execute|implement)\w*\s+(?:the\s+)?(?:authorized\s+)?phase[\s-]*([0-9]+[A-Za-z]?)\b", re.I)
+    for i, aa in enumerate(allowed):
+        for m in named.finditer(aa):
+            n = m.group(1)
+            if n not in recorded:
+                bad("authorization-model-parity",
+                    "allowed_actions[%d] permits executing phase %s, which is not in the roadmap at all: %s"
+                    % (i, n, " ".join(aa.split())[:150]), STATE)
+
     for n in unauth:
         pat = re.compile(r"(execute|implement)\w*\s+(the\s+)?(authorized\s+)?phase\s*" + re.escape(n) + r"\b", re.I)
         for i, aa in enumerate(allowed):
