@@ -1,7 +1,7 @@
 {
   "transition_id": "T0060",
   "seq": 60,
-  "timestamp": "2026-08-16T00:10:00Z",
+  "timestamp": "2026-08-16T00:05:00Z",
   "record_type": "PHASE_6_M4_HARDENING_AND_CONTROLLED_DEVELOPMENT_APPLIANCE_VALIDATION_COMPLETE_DARK",
   "previous_state": {
     "phase": "6",
@@ -80,5 +80,6 @@
     "Phase 6 not marked accepted or closed",
     "no merge"
   ],
-  "next": "Open the single Phase-6 pull request against master, UNMERGED, and stop at the Product-Owner acceptance boundary. Acceptance, enablement, cutover, merge and Phase 7 all remain unauthorized."
+  "next": "Open the single Phase-6 pull request against master, UNMERGED, and stop at the Product-Owner acceptance boundary. Acceptance, enablement, cutover, merge and Phase 7 all remain unauthorized.",
+  "timestamp_note": "Corrected in place, minutes after it was written and before Phase 6 is accepted or merged: the first value (00:10:00Z) was a few seconds AFTER the commit that introduced this receipt, so the record described its own future. The rule exists because the same class of slip produced the Phase-5 T0053 defect."
 }
