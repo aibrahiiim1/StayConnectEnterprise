@@ -67,7 +67,13 @@ WITH parts(part) AS (
   SELECT 'FN:'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')'
          ||':secdef='||p.prosecdef::text
          ||':vol='||p.provolatile::text
-         ||':body='||md5(COALESCE(p.prosrc, ''))
+         -- CARRIAGE RETURNS STRIPPED, and this is the difference between a real divergence and a transport
+         -- artifact. The appliance's migrations were applied from CRLF files; the same blobs applied from an
+         -- LF checkout produce bodies that differ by exactly one character per line. All 46 "differing
+         -- function bodies" were this and nothing else -- zero remain once CR is removed. A line ending is
+         -- not semantics, and treating it as such sent a whole session hunting a divergence that was never
+         -- there.
+         ||':body='||md5(replace(COALESCE(p.prosrc, ''), chr(13), ''))
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'iam_v2'
   UNION ALL
