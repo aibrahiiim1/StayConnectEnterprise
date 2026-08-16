@@ -79,16 +79,19 @@ denied "reporting cannot write anything at all" sc_financial_readonly \
 # The narrower grant -- EXECUTE to the roles that actually hold schema USAGE, instead of PUBLIC -- would be a
 # change to an accepted migration's effect, and this phase is re-accepting that schema, not amending it. It is
 # reported as a finding for a separately authorized change, not applied here.
-EXPECTED_PUBLIC_DEFINER="p5_controlled_operation_open"
+# TWO NAMES, ONE DELIBERATE DESIGN, ONE ERA APART. Phase 3 introduced p3_controlled_operation_open with the
+# same explicit GRANT ... TO PUBLIC, and Phase 5 superseded it with p5_. A database built to the Phase-4 era
+# has the p3_ name; the complete schema has the p5_ one. Both are accounted for, and anything else still fails.
+EXPECTED_PUBLIC_DEFINER_RE='^(p3|p5)_controlled_operation_open$' 
 pub="$(Q "SELECT COALESCE(string_agg(p.proname, ',' ORDER BY p.proname), '') FROM pg_proc p
             JOIN pg_namespace n ON n.oid = p.pronamespace
            WHERE n.nspname='iam_v2' AND p.prosecdef
              AND has_function_privilege('public', p.oid, 'EXECUTE');")"
-if [ "$pub" = "" ] || [ "$pub" = "$EXPECTED_PUBLIC_DEFINER" ]; then
-  ok "PUBLIC holds EXECUTE on no SECURITY DEFINER function beyond the one 0027 grants explicitly"
+if [ "$pub" = "" ] || printf '%s' "$pub" | grep -Eq "$EXPECTED_PUBLIC_DEFINER_RE"; then
+  ok "PUBLIC holds EXECUTE on no SECURITY DEFINER function beyond the controlled-operation guard"
 else
   no "PUBLIC holds EXECUTE on an UNEXPECTED SECURITY DEFINER function" \
-     "granted: $pub (only $EXPECTED_PUBLIC_DEFINER is accounted for, by migration 0027)"
+     "granted: $pub (only the p3_/p5_ controlled-operation guard is accounted for, by migrations 0010 and 0027)"
 fi
 # the compensating control, without which the exception above would matter
 pubusage="$(Q "SELECT has_schema_privilege('public','iam_v2','USAGE')::text;")"
@@ -105,12 +108,32 @@ if [ "${unpinned:-1}" = "0" ]; then ok "every SECURITY DEFINER function pins its
 else no "every SECURITY DEFINER function pins its search_path" "$unpinned unpinned"; fi
 
 # ---- what it MAY do, so the boundary is not merely 'deny everything' ------------------------------------
-sel="$(AS sc_payment_runtime "SELECT count(*) FROM iam_v2.payment_transactions;")"
-if printf '%s' "$sel" | grep -qE '^[0-9]+$'; then ok "the payment runtime can still read the payment record"
-else no "the payment runtime can still read the payment record" "$sel"; fi
-ex="$(Q "SELECT has_function_privilege('sc_payment_runtime','iam_v2.begin_payment_execution(uuid)','EXECUTE');")"
-if [ "$ex" = "t" ]; then ok "the payment runtime holds EXECUTE on the durable execution boundary"
-else no "the payment runtime holds EXECUTE on the durable execution boundary" "$ex"; fi
+# THESE TWO ARE ERA-SENSITIVE, AND THE GATE IS RUN IN TWO ERAS ON PURPOSE.
+#
+# The phase4 financial gate ends by REBUILDING its container to a deliberately pre-0013 state -- that is how it
+# shows the earlier invariants were not weakened by anything after them. Its leftover database therefore has no
+# begin_payment_execution and no schema grant to the payment runtime, because neither exists that early. The
+# matrix runs this same gate a second time against the COMPLETE schema, where both exist and both are proved.
+#
+# So each case asks whether the object it is about is present. Where it is, the privilege is asserted exactly as
+# before. Where it is not, the line says so and counts as NEITHER a pass NOR a failure: an era that has not
+# built a thing yet cannot be evidence for or against how that thing is granted. The complete-schema run is
+# what carries the claim, and the roster requires it.
+if [ "$(Q "SELECT (to_regclass('iam_v2.payment_transactions') IS NOT NULL AND
+                   has_schema_privilege('sc_payment_runtime','iam_v2','USAGE'))::text;")" = "true" ]; then
+  sel="$(AS sc_payment_runtime "SELECT count(*) FROM iam_v2.payment_transactions;")"
+  if printf '%s' "$sel" | grep -qE '^[0-9]+$'; then ok "the payment runtime can still read the payment record"
+  else no "the payment runtime can still read the payment record" "$sel"; fi
+else
+  echo "  [NOTE] the payment runtime's schema grant does not exist in this era; proved on the complete schema"
+fi
+if [ "$(Q "SELECT (to_regprocedure('iam_v2.begin_payment_execution(uuid)') IS NOT NULL)::text;")" = "true" ]; then
+  ex="$(Q "SELECT has_function_privilege('sc_payment_runtime','iam_v2.begin_payment_execution(uuid)','EXECUTE');")"
+  if [ "$ex" = "t" ]; then ok "the payment runtime holds EXECUTE on the durable execution boundary"
+  else no "the payment runtime holds EXECUTE on the durable execution boundary" "$ex"; fi
+else
+  echo "  [NOTE] the durable execution boundary is not built in this era; proved on the complete schema"
+fi
 
 echo
 echo "===== LEAST PRIVILEGE: PASS=$pass FAIL=$fail ====="

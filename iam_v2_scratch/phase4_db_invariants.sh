@@ -74,7 +74,8 @@ esac
 #    which is the property under test, rather than colliding with a previous run's, which is not.
 # p_number is NUMERIC, so it takes a DECIMAL run number -- the hex tag that suits a UUID produced "9eccd01"
 # and Postgres rejected it as trailing junk after a numeric literal.
-RUNDEC="$(docker exec -i "$SCRATCH_CONTAINER" psql -U postgres -d "$SCRATCH_DB" -tAqc           "SELECT lpad(((extract(epoch from clock_timestamp())::bigint) % 10000)::text, 4, '0')" </dev/null 2>&1 | tr -d ' ')"
+RUNDEC="$(docker exec -i "$SCRATCH_CONTAINER" psql -U postgres -d "$SCRATCH_DB" -tAqc           "SELECT lpad(((extract(epoch from clock_timestamp())::bigint) % 10000)::text, 4, '0')" </dev/null 2>&1 | tr -d ' 
+')"
 case "$RUNDEC" in [0-9][0-9][0-9][0-9]) : ;; *) RUNDEC="0000" ;; esac
 P_NUM_1="9${RUNDEC}01"
 P_NUM_2="9${RUNDEC}02"
@@ -86,10 +87,19 @@ q "UPDATE iam_v2.pms_interface_runtime
           sync_status='IN_SYNC', last_complete_sync_at=now(),
           resync_generation_seq=0, published_resync_generation=0, updated_at=now()
     WHERE pms_interface_id='$IF1';" >/dev/null
-fresh="$(q "SELECT (now() - last_heartbeat_at < interval '30 seconds')::text
-              FROM iam_v2.pms_interface_runtime WHERE pms_interface_id='$IF1';")"
-[ "$fresh" = "true" ] && ok "SETUP" "the interface heartbeat is fresh, which these cases assume and do not test" \
-  || no "SETUP" "establish interface freshness" "heartbeat is not fresh (got '$fresh'); the cases below would fail on the clock"
+#    ...and it can only apply where the runtime exists. The financial gate invokes this script BEFORE 0011, to
+#    show the pre-0011 invariants still hold, and iam_v2.pms_interface_runtime does not exist in that era at
+#    all. Asserting freshness there failed the gate on the absence of a table the era is not supposed to have.
+#    That is not a skipped proof: in the pre-0011 era there is no freshness surface and no case that depends
+#    on one, so there is nothing to prove and nothing is counted either way.
+if [ "$(q "SELECT (to_regclass('iam_v2.pms_interface_runtime') IS NOT NULL)::text;")" = "true" ]; then
+  fresh="$(q "SELECT (now() - last_heartbeat_at < interval '30 seconds')::text
+                FROM iam_v2.pms_interface_runtime WHERE pms_interface_id='$IF1';")"
+  [ "$fresh" = "true" ] && ok "SETUP" "the interface heartbeat is fresh, which these cases assume and do not test" \
+    || no "SETUP" "establish interface freshness" "heartbeat is not fresh (got '$fresh'); the cases below would fail on the clock"
+else
+  echo "  NOTE  SETUP      this era has no iam_v2.pms_interface_runtime, so no freshness precondition applies"
+fi
 
 echo "===== PHASE-4 FINANCIAL DB INVARIANTS (behavioural) ====="
 
