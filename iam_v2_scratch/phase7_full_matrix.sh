@@ -72,7 +72,7 @@ have(){ docker inspect "$1" >/dev/null 2>&1; }
 # THE ROSTER. Naming the gates that MUST run is what turns "nothing failed" into "everything was checked".
 # Without it, deleting a gate file is indistinguishable from a clean run.
 EXPECTED_ALL="phase3_lifecycle phase4_financial phase4_db_invariants phase4_least_privilege \
-phase5_foundation phase5_least_privilege phase7_environment phase6_foundation phase6_device_self_service \
+phase5_foundation phase5_least_privilege phase7_environment phase4_least_privilege_full phase6_foundation phase6_device_self_service \
 phase6_aggregate_online_time phase6_least_privilege phase6_backup_restore phase6_rollback_rehearsal \
 phase7_m1 phase7_m2 phase7_m3 phase7_reconstruct phase7_fidelity_selftest phase7_ledger"
 EXPECTED_PHASE7="phase7_m1 phase7_m2 phase7_m3 phase7_reconstruct phase7_fidelity_selftest phase7_ledger"
@@ -194,6 +194,12 @@ if [ "$ONLY_PHASE7" = "0" ]; then
       phase6_rollback_rehearsal.sh PHASE6_CONTAINER="${P6_CONTAINER:-phase7-env}" PHASE6_DB="${P6_DB:-iam_scratch_full}"
   rebuild_env || exit 1
 
+  # THE PRIVILEGE MODEL, AGAINST THE COMPLETE SCHEMA. The Phase-4-era run above is kept -- the model must hold
+  # in the era that introduced it -- but two of the three failures it reported were objects that era does not
+  # have yet (begin_payment_execution, and the payment runtime's grant on a schema built later). Least
+  # privilege is a property of the finished system, so it is proved there as well, as its own roster entry.
+  NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase4_least_privilege_full "phase4 least privilege (complete schema)"       phase4_least_privilege.sh PHASE4_LP_CONTAINER="${P6_CONTAINER:-phase7-env}"       PHASE4_LP_DB="${P6_DB:-iam_scratch_full}"
+
   # ...and now the gates that seed.
   NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase6_foundation "phase6 foundation (0030)" \
       phase6_0030_foundation.sh PHASE6_CONTAINER="${P6_CONTAINER:-phase7-env}" PHASE6_DB="${P6_DB:-iam_scratch_full}"
@@ -208,11 +214,11 @@ fi
 
 echo "-- Phase 7: the composition gates --"
 NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase7_m1 "phase7 M1 identity and acquisition" \
-    phase7_m1_identity_and_acquisition.sh PHASE7_DB="${P6_DB:-iam_scratch_full}"
+    phase7_m1_identity_and_acquisition.sh PHASE7_CONTAINER="${P6_CONTAINER:-phase7-env}"  PHASE7_DB="${P6_DB:-iam_scratch_full}"
 NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase7_m2 "phase7 M2 the stay end to end" \
-    phase7_m2_the_stay_end_to_end.sh PHASE7_DB="${P6_DB:-iam_scratch_full}"
+    phase7_m2_the_stay_end_to_end.sh PHASE7_CONTAINER="${P6_CONTAINER:-phase7-env}"  PHASE7_DB="${P6_DB:-iam_scratch_full}"
 NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase7_m3 "phase7 M3 the boundaries hold" \
-    phase7_m3_boundaries.sh PHASE7_DB="${P6_DB:-iam_scratch_full}"
+    phase7_m3_boundaries.sh PHASE7_CONTAINER="${P6_CONTAINER:-phase7-env}"  PHASE7_DB="${P6_DB:-iam_scratch_full}"
 
 # ---- Phase 7: the proofs the composition gates rest on ------------------------------------------------------
 #
