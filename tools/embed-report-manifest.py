@@ -2,25 +2,44 @@
 """Embed the current generated change-manifest into the Final Report's §10, verbatim.
 
 The Final Report §10 ("Complete generated changed-file manifest") must carry the EXACT current manifest, not a
-frozen copy from an older delivery. This replaces the body of §10 with the current
-docs/manifests/Phase3-change-manifest.md content, so the report's embedded manifest and the standalone
-generated manifest describe the identical path set (the evidence collector's manifest-parity check verifies
-this).
+frozen copy from an older delivery. This replaces the body of §10 with the current generated manifest, so the
+report's embedded manifest and the standalone generated manifest describe the identical path set (the evidence
+collector's manifest-parity check verifies this).
 
 Run it during delivery, AFTER generating the manifest and BEFORE the final regenerate+packs.
+
+  embed-report-manifest.py [--report <path>] [--manifest <path>]
+
+The paths default to Phase 3, which is where this tool started. They are arguments now because a phase-3
+constant embedded in the delivery tooling means every later phase either edits the tool or, far worse, embeds
+Phase 3's manifest into its own report and looks complete.
 """
 import io
 import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-REPORT = os.path.join(ROOT, "docs/reports/StayConnect-IAM-Phase3-Final-Report.md")
-MANIFEST = os.path.join(ROOT, "docs/manifests/Phase3-change-manifest.md")
+DEFAULT_REPORT = "docs/reports/StayConnect-IAM-Phase3-Final-Report.md"
+DEFAULT_MANIFEST = "docs/manifests/Phase3-change-manifest.md"
 
 HEADING = "## 10. Complete generated changed-file manifest"
 
 
+def resolve(argv):
+    report, manifest = DEFAULT_REPORT, DEFAULT_MANIFEST
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--report" and i + 1 < len(argv):
+            report = argv[i + 1]; i += 2; continue
+        if argv[i] == "--manifest" and i + 1 < len(argv):
+            manifest = argv[i + 1]; i += 2; continue
+        sys.stderr.write("usage: embed-report-manifest.py [--report <path>] [--manifest <path>]\n")
+        raise SystemExit(2)
+    return os.path.join(ROOT, report), os.path.join(ROOT, manifest), manifest
+
+
 def main() -> int:
+    REPORT, MANIFEST, manifest_rel = resolve(sys.argv[1:])
     report = io.open(REPORT, encoding="utf-8").read()
     manifest = io.open(MANIFEST, encoding="utf-8").read().strip("\n")
 
@@ -35,7 +54,7 @@ def main() -> int:
 
     new_section = (
         HEADING + "\n\n"
-        "> Embedded verbatim from `docs/manifests/Phase3-change-manifest.md` at delivery time. The evidence\n"
+        "> Embedded verbatim from `" + manifest_rel + "` at delivery time. The evidence\n"
         "> artifact's manifest-parity check confirms this equals the standalone generated manifest.\n\n"
         + manifest + "\n"
     )
