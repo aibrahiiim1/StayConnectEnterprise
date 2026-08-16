@@ -28,6 +28,19 @@ FP="SELECT md5(string_agg(x, E'\n' ORDER BY x)) FROM (
 ) s;"
 
 echo '== setup: fresh disposable PG16 + accepted schema (mg1..mg9 + 0009) =='
+# THIS GATE OWNS ITS CONTAINER, AND IT MUST NOT BE POINTED AT SOMEBODY ELSE'S.
+#
+# The first two lines of its setup destroy the named container and recreate it. That is correct for a
+# disposable container this gate created -- and catastrophic for one it did not: pointing PHASE3_CONTAINER at
+# the shared iamv2-p6 scratch container deleted it, and with it the complete Phase-2-through-6 database, mid
+# way through a matrix run. The gate cannot tell whose container it is from the name alone, so it refuses any
+# container that already exists and that it did not just create.
+if docker inspect "$C" >/dev/null 2>&1; then
+  echo "REFUSED: container '$C' already exists and this gate DESTROYS the container it is given." >&2
+  echo "  It creates its own disposable one. Point PHASE3_CONTAINER at a name nothing else owns, or remove" >&2
+  echo "  that container yourself if it really is disposable." >&2
+  exit 2
+fi
 docker rm -f "$C" >/dev/null 2>&1 || true
 docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" -p 127.0.0.1:$PORT:5432 postgres:16-alpine >/dev/null
 # robust readiness: a real query must succeed (pg_isready can pass during initdb's transient server, which
