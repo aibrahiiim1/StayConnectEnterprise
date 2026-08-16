@@ -354,7 +354,20 @@ def cmd_validate(deep=True, manifest_equality=True):
     # equality check silently skipped. Prefer the current phase's manifest, else fall back to the newest one
     # that actually exists — never to "no file, no checks".
     man_path = os.path.join(ROOT, f"docs/manifests/Phase{cp}-change-manifest.md")
-    if not os.path.isfile(man_path):
+    # is_current_manifest decides whether the RANGE checks below may run at all.
+    #
+    # The fallback exists so that advancing the phase before its manifest is written does not silently skip
+    # every check. But the fallback picks a CLOSED phase's manifest, and a closed phase's manifest describes
+    # the range that phase delivered -- not the range that ends at today's HEAD. Range-checking it against the
+    # current HEAD asserts something false by construction, and it fires at every phase boundary: the moment
+    # Phase 6 merged and the next commit landed on master, the Phase-6 manifest was reported as omitting the
+    # Phase-7 plan and the merge receipt. It had not omitted anything; it was being asked the wrong question.
+    #
+    # So: the HEAD/identity check still runs against whatever manifest exists (a manifest with no recorded
+    # HEAD is a defect whichever phase produced it), and the PATH-SET equality runs only for the manifest that
+    # belongs to the current phase. A historical manifest is stated as skipped rather than quietly passed.
+    is_current_manifest = os.path.isfile(man_path)
+    if not is_current_manifest:
         import glob as _glob
         cands = sorted(_glob.glob(os.path.join(ROOT, "docs/manifests/Phase*-change-manifest.md")))
         if cands:
@@ -374,7 +387,11 @@ def cmd_validate(deep=True, manifest_equality=True):
     # the delivery-only commit introduces zero unlisted paths, its path/status set equals
     # base..delivery_head (the current HEAD at final validation). Skipped inside build-packs
     # (manifest_equality=False), which validates a pre-regeneration source tree.
-    if manifest_equality and os.path.isfile(man_path):
+    if manifest_equality and not is_current_manifest and os.path.isfile(man_path):
+        print("  note: manifest path/status equality SKIPPED -- %s belongs to a closed phase, not to phase %s;"
+              " its range ended at its own delivery head and cannot describe the range ending at the current"
+              " HEAD" % (os.path.basename(man_path), cp))
+    if manifest_equality and is_current_manifest and os.path.isfile(man_path):
         mtext = open(man_path, encoding="utf-8").read()
         bmm = re.search(r"Base commit:\*\*\s*`([0-9a-f]{7,40})`", mtext)
         base_sha = bmm.group(1) if bmm else ""
