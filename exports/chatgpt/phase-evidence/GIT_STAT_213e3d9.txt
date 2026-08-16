@@ -1,0 +1,4 @@
+commit 213e3d9a35bf5cddab8bb0954517f5dae11bfe53
+Date:   Sun Aug 16 10:50:50 2026 +0300
+
+    Phase 6: the next-action allow-list learns the Phase-7 phrasings
