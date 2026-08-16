@@ -15,7 +15,18 @@
 --   functions    identity signature, SECURITY DEFINER flag, volatility, and md5 of the BODY
 --   grants       every svc_* table privilege, and every function ACL entry, PUBLIC included
 --
--- Two databases with the same digest here have the same iam_v2 semantics, not merely the same nouns.
+-- WHAT AN EQUAL DIGEST DOES AND DOES NOT MEAN.
+--
+-- It means the two databases agree on every surface listed above: column types/nullability/defaults, constraint
+-- definitions INCLUDING grouping, index definitions, trigger definitions, function signatures, bodies, owners
+-- and configuration, object ownership, role attributes and memberships, and the complete effective privilege
+-- surface for iam_v2 -- every grantee, not a known-prefix allowlist.
+--
+-- It does NOT mean "exactly semantically equal" in any wider sense, and that phrase is used nowhere. Row data
+-- is deliberately excluded (it is test fixture, proven separately). Carriage returns inside function bodies
+-- are normalised, because the same Git blob applied from a CRLF checkout and an LF checkout produces
+-- byte-different, meaning-identical text. Anything outside schema iam_v2 -- including the public schema's own
+-- objects -- is outside this claim and is proven separately where it matters.
 --
 -- Usage:  psql -tAqf phase7_fidelity.sql          -> one line: the digest
 --         psql -tAqvdetail=1 -f phase7_fidelity.sql -> every component row, for diffing two databases
@@ -87,17 +98,37 @@ WITH parts(part) AS (
     JOIN pg_language l ON l.oid = p.prolang
    WHERE n.nspname = 'iam_v2'
   UNION ALL
+  -- OWNERSHIP. A SECURITY DEFINER function with an identical body, signature and proconfig but a DIFFERENT
+  -- owner runs with different authority -- it is not the same function in any sense that matters. Table
+  -- ownership matters too: an owner holds every privilege implicitly, so moving ownership silently moves the
+  -- effective grant surface without touching one ACL entry.
+  SELECT 'OWNTBL:'||c.relname||':'||pg_get_userbyid(c.relowner)
+    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'iam_v2' AND c.relkind IN ('r','p','v','m','S')
+  UNION ALL
+  SELECT 'OWNFN:'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||'):'
+         ||pg_get_userbyid(p.proowner)||':secdef='||p.prosecdef::text
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'iam_v2'
+  UNION ALL
+  SELECT 'OWNNSP:iam_v2:'||pg_get_userbyid(n.nspowner) FROM pg_namespace n WHERE n.nspname = 'iam_v2'
+  UNION ALL
   -- ROLE ATTRIBUTES, for the roles this schema names. Membership alone is not fidelity: on the appliance
   -- `stayconnect` is a SUPERUSER and owns the Phase-6 definer functions, so it bypasses the schema ACL. A
   -- rebuild that created the same role name without SUPERUSER produced a database where every definer
   -- function failed with "permission denied for schema iam_v2" -- and the digest, which only knew names,
   -- called that database identical to the appliance.
+  -- EVERY load-bearing attribute, not a convenient subset. BYPASSRLS defeats row-level security outright;
+  -- CREATEROLE is a privilege-escalation path to any non-superuser role; CREATEDB and REPLICATION are their
+  -- own escalations. A role gaining any of them is a security change that no ACL comparison would reveal.
   SELECT 'ROLE:'||r.rolname||':super='||r.rolsuper::text||':inherit='||r.rolinherit::text
-         ||':login='||r.rolcanlogin::text
+         ||':login='||r.rolcanlogin::text||':bypassrls='||r.rolbypassrls::text
+         ||':createrole='||r.rolcreaterole::text||':createdb='||r.rolcreatedb::text
+         ||':replication='||r.rolreplication::text
     FROM pg_roles r
-   WHERE r.rolname IN ('stayconnect','iam_v2_owner','iam_v2_migrator','svc_scd','svc_edged','svc_acctd',
-                       'svc_netd','sc_payment_runtime','sc_payment_outcome','sc_commerce_runtime',
-                       'sc_financial_operator','sc_financial_readonly')
+   -- Every non-system role in the cluster. Naming a fixed list would hide the arrival of a role nobody
+   -- expected, which is the thing most worth noticing.
+   WHERE r.rolname NOT LIKE 'pg\_%' AND r.rolname <> 'postgres'
   UNION ALL
   -- ROLE MEMBERSHIPS. Granting svc_scd membership of iam_v2_owner hands it every owner privilege without
   -- changing one ACL entry or role attribute, so neither of the checks above would see it.
@@ -105,8 +136,8 @@ WITH parts(part) AS (
     FROM pg_auth_members am
     JOIN pg_roles m ON m.oid = am.member
     JOIN pg_roles g ON g.oid = am.roleid
-   WHERE m.rolname LIKE 'svc\_%' OR m.rolname LIKE 'sc\_%' OR m.rolname LIKE 'iam\_v2\_%'
-      OR g.rolname LIKE 'iam\_v2\_%'
+   WHERE m.rolname NOT LIKE 'pg\_%' AND g.rolname NOT LIKE 'pg\_%'
+     AND m.rolname <> 'postgres' AND g.rolname <> 'postgres'
   UNION ALL
   -- schema-level privileges. GRANT USAGE ON SCHEMA is a namespace ACL, not a table grant, so a digest built
   -- only from table grants cannot see a role losing access to the schema itself.
@@ -116,11 +147,10 @@ WITH parts(part) AS (
   -- table privileges held by the real service roles
   SELECT 'GRT:'||grantee||':'||table_name||':'||privilege_type
     FROM information_schema.role_table_grants
-   -- EVERY runtime and financial role, not only svc_*. sc_payment_runtime, sc_financial_operator and the
-   -- rest hold the financial privileges; a digest that watched only svc_* would not notice one of them
-   -- gaining write access to the posting tables.
-   WHERE table_schema = 'iam_v2'
-     AND (grantee LIKE 'svc\_%' OR grantee LIKE 'sc\_%' OR grantee LIKE 'iam\_v2\_%')
+   -- NO ALLOWLIST. Every grantee on every iam_v2 table, whoever it is. An allowlist of svc_/sc_/iam_v2_
+   -- prefixes makes exactly the dangerous case invisible: a grant to PUBLIC, or to some role nobody expected,
+   -- is precisely what a privilege regression looks like, and it would have matched no prefix.
+   WHERE table_schema = 'iam_v2' AND grantee <> 'postgres'
   UNION ALL
   -- function privileges, PUBLIC included. An empty grantee IS public, and that is the entry that matters.
   -- EFFECTIVE PRIVILEGE, NOT ACL TEXT. Two databases can express the same function privileges differently:
@@ -134,9 +164,14 @@ WITH parts(part) AS (
   SELECT 'FNEXEC:'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||'):'
          ||'public='||has_function_privilege('public', p.oid, 'EXECUTE')::text
          ||':roles='||COALESCE((
+             -- Every non-system role, not a prefix list, for the same reason as the table grants above.
+             -- `postgres` is excluded as the CLUSTER BOOTSTRAP identity: a scratch container has one and the
+             -- appliance does not, so including it compares environments rather than systems. Nothing else is
+             -- excluded, and every other role's SUPERUSER status is still hashed in the ROLE parts, so a role
+             -- that GAINS superuser is still caught.
              SELECT string_agg(r.rolname, ',' ORDER BY r.rolname)
                FROM pg_roles r
-              WHERE (r.rolname LIKE 'svc\_%' OR r.rolname LIKE 'sc\_%' OR r.rolname LIKE 'iam\_v2\_%')
+              WHERE r.rolname NOT LIKE 'pg\_%' AND r.rolname <> 'postgres'
                 AND has_function_privilege(r.rolname, p.oid, 'EXECUTE')), 'none')
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname = 'iam_v2'
