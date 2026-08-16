@@ -158,8 +158,8 @@ disabling the capability can never turn finite access into unlimited access.
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `09e67156fb6cb286fe47fe632a368a3c4e4c6d23`
-- **HEAD commit:** `213e3d9a35bf5cddab8bb0954517f5dae11bfe53`
-- **Provenance (generation HEAD = inventory_head):** `213e3d9a35bf5cddab8bb0954517f5dae11bfe53`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `9002fcf0c6350a215adfa09bce3742f5eff6a763`
+- **Provenance (generation HEAD = inventory_head):** `9002fcf0c6350a215adfa09bce3742f5eff6a763`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/6-device-selfservice-and-time-modes`
 - **Remote branch:** `origin/phase/6-device-selfservice-and-time-modes`
 - **Changed files:** 163
@@ -276,22 +276,22 @@ disabling the capability can never turn finite access into unlimited access.
 | `docs/manifests/Phase6-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 6 (delivery_head): M4 evidence pointer, complete staged manifest, rebuilt packs and report-embedded manifest |
 | `docs/reports/StayConnect-IAM-Phase6-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
-| `exports/chatgpt/phase-evidence/GIT_STAT_213e3d9.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/GIT_STAT_3da826c.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
+| `exports/chatgpt/phase-evidence/GIT_STAT_9002fcf.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: next_authorized_action is one action again, and the legacy Phase-4 scope guard is satisfied |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6: next_authorized_action is one action again, and the legacy Phase-4 scope guard is satisfied |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
 | `exports/chatgpt/stayconnectenterprise/Phase3-change-manifest.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 6 (delivery_head): complete staged manifest + rebuilt packs + pointer + report-embedded manifest |
@@ -329,7 +329,7 @@ disabling the capability can never turn finite access into unlimited access.
 | `tools/phase6-flag-coherence.sh` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Phase 6 M4: an exhaustion instant must be provable, accounting has an owner in every configuration, and the suite is re-runnable |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 6 M1 fix-forward: finish the pre-live reconciliation, stop inventing contract vocabulary, anchor scope server-side, and ground the online-time model |
 | `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 6: evidence bound to real state, both aggregate outcomes proven, current facts reconciled from data |
-| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 6: the pre-Phase-6 sweep must not name a Phase-6 column either, and two mutation cases that stopped biting |
+| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Governance: two mutation-suite anchors expired when Phase 7 was authorized, and the suite said so |
 | `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 6: evidence bound to real state, both aggregate outcomes proven, current facts reconciled from data |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 6: the next-action allow-list learns the Phase-7 phrasings |
 
@@ -439,14 +439,14 @@ disabling the capability can never turn finite access into unlimited access.
  docs/architecture/StayConnect-IAM-Phase6-Plan.md   |  510 ++++++
  docs/context/StayConnect-IAM-Handoff.md            |   20 +-
  docs/manifests/Phase3-change-manifest.md           |  417 +++--
- docs/manifests/Phase6-change-manifest.md           |  416 +++++
+ docs/manifests/Phase6-change-manifest.md           |  418 +++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |  420 +++--
- .../reports/StayConnect-IAM-Phase6-Final-Report.md |  630 +++++++
+ .../reports/StayConnect-IAM-Phase6-Final-Report.md |  632 +++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 306526 -> 312568 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 115922 -> 118378 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42174 -> 42205 bytes
- .../chatgpt/phase-evidence/GIT_STAT_213e3d9.txt    |    4 +
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 115922 -> 118401 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42174 -> 42204 bytes
  .../chatgpt/phase-evidence/GIT_STAT_3da826c.txt    |    4 -
+ .../chatgpt/phase-evidence/GIT_STAT_9002fcf.txt    |    4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    8 +-
  .../governance/decision-register.json              |   34 +
@@ -495,10 +495,10 @@ disabling the capability can never turn finite access into unlimited access.
  tools/phase6-flag-coherence.sh                     |  114 ++
  tools/project-state.py                             |    2 +-
  tools/tests/current_state_parity/run_negative.py   |   12 +
- .../tests/project_state_validator/run_mutations.py |   27 +-
+ .../tests/project_state_validator/run_mutations.py |   69 +-
  tools/validate-current-state-parity.py             |   93 +
  tools/validate-project-state.sh                    |    2 +-
- 163 files changed, 19933 insertions(+), 690 deletions(-)
+ 163 files changed, 19968 insertions(+), 701 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -508,8 +508,8 @@ M  docs/reports/StayConnect-IAM-Phase6-Final-Report.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_213e3d9.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_e32b8ee.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_213e3d9.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_9002fcf.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -521,6 +521,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 9002fcf Governance: two mutation-suite anchors expired when Phase 7 was authorized, and the suite said so
+HISTORICAL: d0c570d Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest
 HISTORICAL: 213e3d9 Phase 6: the next-action allow-list learns the Phase-7 phrasings
 HISTORICAL: e32b8ee Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest
 HISTORICAL: 200bb37 Phase 6: next_authorized_action is one action again, and the legacy Phase-4 scope guard is satisfied
