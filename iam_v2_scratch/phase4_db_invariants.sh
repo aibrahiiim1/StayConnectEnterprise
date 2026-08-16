@@ -42,6 +42,33 @@ T="11111111-1111-1111-1111-111111111111"   # tenant   (from seed)
 S="22222222-2222-2222-2222-222222222222"   # site
 IF1="aaaa0000-0000-0000-0000-000000000001" # pms interface
 
+# ---- PRECONDITIONS THIS GATE DEPENDS ON BUT DOES NOT TEST ----------------------------------------------------
+#
+# 1. INTERFACE FRESHNESS. The financial core refuses to post through an interface whose transport heartbeat has
+#    gone stale, and it is right to. But this gate runs AFTER the phase4 financial gate has spent twenty
+#    minutes building the container it inherits, so the heartbeat that gate set has long since aged out. Nine
+#    cases failed with TRANSPORT_HEARTBEAT_STALE and cascaded into wrong-reason failures -- the clock, not the
+#    product. Staleness is proved on its own terms by the C32 freshness axes in the financial gate; here it is
+#    a precondition, so it is established explicitly.
+#
+# 2. A CLEAN SLATE. This gate is NOT idempotent: it inserts rows at fixed UUIDs and asserts they are accepted.
+#    Run twice against the same container the second run fails on duplicate keys and REVIEW_ALREADY_DECIDED --
+#    which look like invariant violations and are nothing of the sort. The matrix always builds a fresh
+#    container first; running it by hand against a used one does not, so it says so rather than misreporting.
+q "UPDATE iam_v2.pms_interface_runtime
+      SET transport_status='CONNECTED', last_heartbeat_at=now(),
+          continuity_status='CONTINUOUS', last_valid_event_at=now(),
+          sync_status='IN_SYNC', last_complete_sync_at=now(),
+          resync_generation_seq=0, published_resync_generation=0, updated_at=now()
+    WHERE pms_interface_id='$IF1';" >/dev/null
+used="$(q "SELECT count(*) FROM iam_v2.posting_attempts WHERE internal_posting_id='c1c10000-0000-0000-0000-000000000001';")"
+case "$used" in
+  0) : ;;
+  *) echo "  NOTE: this container has already been through this gate ($used attempt row(s) present)." >&2
+     echo "        It is not idempotent -- duplicate-key and ALREADY_DECIDED failures below would be" >&2
+     echo "        artifacts of the re-run, not invariant violations. Build a fresh container." >&2 ;;
+esac
+
 echo "===== PHASE-4 FINANCIAL DB INVARIANTS (behavioural) ====="
 
 # Fixture context: a revision with a CONCRETE folio strategy, an IN_HOUSE postable stay and a folio, so the

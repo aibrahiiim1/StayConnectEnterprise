@@ -72,7 +72,7 @@ have(){ docker inspect "$1" >/dev/null 2>&1; }
 # THE ROSTER. Naming the gates that MUST run is what turns "nothing failed" into "everything was checked".
 # Without it, deleting a gate file is indistinguishable from a clean run.
 EXPECTED_ALL="phase3_lifecycle phase4_financial phase4_db_invariants phase4_least_privilege \
-phase5_foundation phase5_least_privilege phase6_foundation phase6_device_self_service \
+phase5_foundation phase5_least_privilege phase7_environment phase6_foundation phase6_device_self_service \
 phase6_aggregate_online_time phase6_least_privilege phase6_backup_restore phase6_rollback_rehearsal \
 phase7_m1 phase7_m2 phase7_m3 phase7_reconstruct phase7_fidelity_selftest phase7_ledger"
 EXPECTED_PHASE7="phase7_m1 phase7_m2 phase7_m3 phase7_reconstruct phase7_fidelity_selftest phase7_ledger"
@@ -119,6 +119,26 @@ run(){
   else                          printf '  %-44s pass=%-4s fail=%s   <-- FAILED\n' "$label" "$p" "${f:-0}"; fi
 }
 
+# rebuild_env -- restore the gate environment to its freshly built state.
+#
+# Several gates SEED. Two others -- backup/restore and the rollback rehearsal -- can only tell the truth about a
+# database whose data satisfies its own constraints, and the seeding gates leave rows behind that do not (they
+# insert under session_replication_role=replica to skip building the parent chain). Run in the wrong order,
+# pg_restore fails on a foreign key nobody touched and it reads as a backup defect. So the order is deliberate:
+# the two data-sensitive gates run against a pristine environment, and the environment is rebuilt between them.
+#
+# A failed rebuild is NOT a gate result and must never be silent -- every gate after it would be measuring the
+# wrong database.
+rebuild_env(){
+  if ! PHASE7_ORACLE_DIGEST="${PHASE7_ORACLE_DIGEST:-}" PHASE7_ENV_CONTAINER="${P6_CONTAINER:-phase7-env}" \
+       PHASE7_ENV_DB="${P6_DB:-iam_scratch_full}" bash "$HERE/phase7_build_environment.sh" >/dev/null 2>&1; then
+    echo "  !! THE GATE ENVIRONMENT COULD NOT BE REBUILT -- refusing to run further gates against a stale one" >&2
+    broken=$((broken+1))
+    return 1
+  fi
+  return 0
+}
+
 echo "== Phase 7: the complete acceptance matrix (mode: $MODE) =="
 echo
 
@@ -138,12 +158,17 @@ if [ "$ONLY_PHASE7" = "0" ]; then
   # The matrix asked for the container to survive, so the matrix destroys it, below.
   run phase4_financial "phase4 financial (0011)" \
       phase4_0011_financial.sh PHASE4_KEEP=1
+  # SCRATCH_PORT_ALLOW is not optional. The invariants gate refuses to touch a container that is not on the
+  # port it was told to expect -- a deliberate safety check against pointing it at a real database -- and the
+  # runner never passed one, so the gate aborted with rc=90 and no verdict on every matrix run. The phase4
+  # gate builds on 55433; the default here must be the same number or the abort simply returns.
   NEED_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" run phase4_db_invariants "phase4 db invariants" \
       phase4_db_invariants.sh SCRATCH_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" \
-      SCRATCH_DB="${P4_DB:-iam_scratch}" SCRATCH_ACK=I_UNDERSTAND_DISPOSABLE
+      SCRATCH_DB="${P4_DB:-iam_scratch}" SCRATCH_ACK=I_UNDERSTAND_DISPOSABLE \
+      SCRATCH_PORT_ALLOW="${P4_PORT:-55433}"
   NEED_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" run phase4_least_privilege "phase4 least privilege" \
       phase4_least_privilege.sh PHASE4_LP_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" \
-      PHASE4_LP_DB="${P4_DB:-iam_scratch}"
+      PHASE4_LP_DB="${P4_DB:-iam_scratch}" SCRATCH_PORT_ALLOW="${P4_PORT:-55433}"
   # ...and now that its dependants have run, the matrix cleans up what it asked to be kept.
   docker rm -f "${P4_CONTAINER:-iamv2-p4gate}" >/dev/null 2>&1 || true
 
@@ -154,28 +179,40 @@ if [ "$ONLY_PHASE7" = "0" ]; then
       phase5_least_privilege.sh IGNORE=1
 
   echo "-- Phase 6: guest device self-service + aggregate online time --"
-  NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_foundation "phase6 foundation (0030)" \
-      phase6_0030_foundation.sh PHASE6_DB="${P6_DB:-iam_full}"
-  NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_device_self_service "phase6 device self-service (0031)" \
-      phase6_0031_device_self_service.sh PHASE6_DB="${P6_DB:-iam_full}"
-  NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_aggregate_online_time "phase6 aggregate online time (0036)" \
-      phase6_0036_aggregate_online_time.sh PHASE6_DB="${P6_DB:-iam_full}"
-  NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_least_privilege "phase6 least privilege" \
-      phase6_least_privilege.sh PHASE6_DB="${P6_DB:-iam_full}"
-  NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_backup_restore "phase6 backup and restore" \
-      phase6_backup_restore.sh PHASE6_DB="${P6_DB:-iam_full}"
-  NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_rollback_rehearsal "phase6 rollback rehearsal (0030-0047)" \
-      phase6_rollback_rehearsal.sh PHASE6_DB="${P6_DB:-iam_full}"
+  # THE ENVIRONMENT IS ITSELF A GATE. It is built from repository sources and proved equal to the appliance
+  # before anything runs against it; an environment nobody can rebuild is how six Phase-6 cases came to fail on
+  # a missing fixture and be read as product defects.
+  run phase7_environment "phase7 rebuildable gate environment" \
+      phase7_build_environment.sh PHASE7_ORACLE_DIGEST="${PHASE7_ORACLE_DIGEST:-}" \
+      PHASE7_ENV_CONTAINER="${P6_CONTAINER:-phase7-env}" PHASE7_ENV_DB="${P6_DB:-iam_scratch_full}"
+
+  # PRISTINE FIRST: these two are the only gates whose subject is the DATA, so they run before anything seeds.
+  NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase6_backup_restore "phase6 backup and restore" \
+      phase6_backup_restore.sh PHASE6_CONTAINER="${P6_CONTAINER:-phase7-env}" PHASE6_DB="${P6_DB:-iam_scratch_full}"
+  rebuild_env || exit 1
+  NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase6_rollback_rehearsal "phase6 rollback rehearsal (0030-0047)" \
+      phase6_rollback_rehearsal.sh PHASE6_CONTAINER="${P6_CONTAINER:-phase7-env}" PHASE6_DB="${P6_DB:-iam_scratch_full}"
+  rebuild_env || exit 1
+
+  # ...and now the gates that seed.
+  NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase6_foundation "phase6 foundation (0030)" \
+      phase6_0030_foundation.sh PHASE6_CONTAINER="${P6_CONTAINER:-phase7-env}" PHASE6_DB="${P6_DB:-iam_scratch_full}"
+  NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase6_device_self_service "phase6 device self-service (0031)" \
+      phase6_0031_device_self_service.sh PHASE6_CONTAINER="${P6_CONTAINER:-phase7-env}" PHASE6_DB="${P6_DB:-iam_scratch_full}"
+  NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase6_aggregate_online_time "phase6 aggregate online time (0036)" \
+      phase6_0036_aggregate_online_time.sh PHASE6_CONTAINER="${P6_CONTAINER:-phase7-env}" PHASE6_DB="${P6_DB:-iam_scratch_full}"
+  NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase6_least_privilege "phase6 least privilege" \
+      phase6_least_privilege.sh PHASE6_CONTAINER="${P6_CONTAINER:-phase7-env}" PHASE6_DB="${P6_DB:-iam_scratch_full}"
   echo
 fi
 
 echo "-- Phase 7: the composition gates --"
-NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase7_m1 "phase7 M1 identity and acquisition" \
-    phase7_m1_identity_and_acquisition.sh PHASE7_DB="${P6_DB:-iam_full}"
-NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase7_m2 "phase7 M2 the stay end to end" \
-    phase7_m2_the_stay_end_to_end.sh PHASE7_DB="${P6_DB:-iam_full}"
-NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase7_m3 "phase7 M3 the boundaries hold" \
-    phase7_m3_boundaries.sh PHASE7_DB="${P6_DB:-iam_full}"
+NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase7_m1 "phase7 M1 identity and acquisition" \
+    phase7_m1_identity_and_acquisition.sh PHASE7_DB="${P6_DB:-iam_scratch_full}"
+NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase7_m2 "phase7 M2 the stay end to end" \
+    phase7_m2_the_stay_end_to_end.sh PHASE7_DB="${P6_DB:-iam_scratch_full}"
+NEED_CONTAINER="${P6_CONTAINER:-phase7-env}" run phase7_m3 "phase7 M3 the boundaries hold" \
+    phase7_m3_boundaries.sh PHASE7_DB="${P6_DB:-iam_scratch_full}"
 
 # ---- Phase 7: the proofs the composition gates rest on ------------------------------------------------------
 #

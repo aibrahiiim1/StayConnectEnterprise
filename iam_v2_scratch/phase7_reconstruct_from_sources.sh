@@ -59,7 +59,12 @@ if [ "$ISOLATED" = "1" ]; then
       exit 2
     fi
   fi
-  docker run -d --name "$C" --label phase7-disposable=1 \
+  # PHASE7_PORT publishes the cluster on loopback. Off by default -- nothing here connects over TCP -- but the
+  # scratch-safety library in lib.sh REFUSES to touch a container that is not bound to 127.0.0.1 on an allowed
+  # port, so gates that use it (phase4_db_invariants) cannot run against an unpublished container at all.
+  ports=""
+  [ -n "${PHASE7_PORT:-}" ] && ports="-p 127.0.0.1:${PHASE7_PORT}:5432"
+  docker run -d --name "$C" --label phase7-disposable=1 $ports \
     -e POSTGRES_PASSWORD=phase7 -e POSTGRES_HOST_AUTH_METHOD=trust "$IMAGE" >/dev/null 2>&1 \
     || { echo "REFUSING: could not start the disposable cluster ($IMAGE)" >&2; exit 2; }
   [ "${PHASE7_KEEP:-0}" = "1" ] || trap 'docker rm -f "$C" >/dev/null 2>&1' EXIT
@@ -392,6 +397,11 @@ else
   FID=FAIL; why="differs from the supplied appliance oracle ($PHASE7_ORACLE_DIGEST)"
 fi
 printf 'APPLIANCE_FIDELITY   = %s (%s)\n' "$FID" "$why"
+
+# AND A LAST LINE ANY RUNNER CAN PARSE. The two verdict lines above are for a human; the matrix reads the
+# final line for pass=/fail= counts and reported NO VERDICT for this gate because the last thing it printed was
+# prose. A gate that passes but cannot say so in the agreed shape is indistinguishable from one that crashed.
+printf 'PHASE7_RECONSTRUCT build=%s fidelity=%s pass=%d fail=%d\n' "$BUILD" "$FID" "$pass" "$fail"
 
 # The exit status reflects both: a clean build that provably contradicts the oracle is not a success.
 [ "$BUILD" = "PASS" ] && [ "$FID" != "FAIL" ]

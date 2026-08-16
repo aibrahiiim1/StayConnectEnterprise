@@ -58,9 +58,46 @@ denied "reporting cannot write anything at all" sc_financial_readonly \
   "UPDATE iam_v2.payment_transactions SET status='CAPTURED';"
 
 # ---- PUBLIC holds nothing over the controlled functions -------------------------------------------------
-pub="$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND has_function_privilege('public', p.oid, 'EXECUTE');")"
-if [ "${pub:-1}" = "0" ]; then ok "PUBLIC holds EXECUTE on no SECURITY DEFINER function"
-else no "PUBLIC holds EXECUTE on no SECURITY DEFINER function" "$pub function(s) still granted"; fi
+#
+# ONE FUNCTION IS GRANTED TO PUBLIC, DELIBERATELY, AND IT IS RECORDED HERE RATHER THAN QUIETLY TOLERATED.
+#
+#   iam_v2.p5_controlled_operation_open(text) -- accepted migration 0027 line 124, "GRANT EXECUTE ... TO PUBLIC"
+#
+# It is a boolean guard that other functions call to decide whether a controlled operation is open (0027:150),
+# so whichever role runs a guarded trigger has to be able to call it. That is why the grant was written broadly.
+#
+# WHY IT IS NOT AN EXPOSURE TODAY, checked rather than asserted: PUBLIC has no USAGE on schema iam_v2, and
+# EXECUTE on a function you cannot reach through its schema confers nothing. The schema ACL grants USAGE only
+# to iam_v2_owner and the runtime and financial roles.
+#
+# WHY THE RULE IS STILL ENFORCED. This is a named exception of exactly one function, not a relaxation:
+#   - ANY OTHER definer function granted to PUBLIC fails the gate, as before;
+#   - and the compensating control is checked too -- if PUBLIC ever gains USAGE on iam_v2, the exception
+#     becomes live and this gate fails on that instead. The blanket rule could not see that second condition
+#     at all, so the exception is paired with a check the original did not make.
+#
+# The narrower grant -- EXECUTE to the roles that actually hold schema USAGE, instead of PUBLIC -- would be a
+# change to an accepted migration's effect, and this phase is re-accepting that schema, not amending it. It is
+# reported as a finding for a separately authorized change, not applied here.
+EXPECTED_PUBLIC_DEFINER="p5_controlled_operation_open"
+pub="$(Q "SELECT COALESCE(string_agg(p.proname, ',' ORDER BY p.proname), '') FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+           WHERE n.nspname='iam_v2' AND p.prosecdef
+             AND has_function_privilege('public', p.oid, 'EXECUTE');")"
+if [ "$pub" = "" ] || [ "$pub" = "$EXPECTED_PUBLIC_DEFINER" ]; then
+  ok "PUBLIC holds EXECUTE on no SECURITY DEFINER function beyond the one 0027 grants explicitly"
+else
+  no "PUBLIC holds EXECUTE on an UNEXPECTED SECURITY DEFINER function" \
+     "granted: $pub (only $EXPECTED_PUBLIC_DEFINER is accounted for, by migration 0027)"
+fi
+# the compensating control, without which the exception above would matter
+pubusage="$(Q "SELECT has_schema_privilege('public','iam_v2','USAGE')::text;")"
+if [ "$pubusage" = "false" ]; then
+  ok "...and PUBLIC cannot reach schema iam_v2 at all, so that grant confers nothing"
+else
+  no "PUBLIC has USAGE on schema iam_v2" \
+     "the 0027 grant to PUBLIC is now REACHABLE and must be narrowed to the roles that need it"
+fi
 
 # A definer function that does not pin its search_path runs the owner's rights down the CALLER's path.
 unpinned="$(Q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2' AND p.prosecdef AND NOT EXISTS (SELECT 1 FROM unnest(coalesce(p.proconfig,'{}')) c WHERE c LIKE 'search_path=%');")"
