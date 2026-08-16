@@ -1,9 +1,9 @@
 # StayConnect Enterprise — START HERE (ChatGPT Project entry point)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0061 -->
-**Current phase:** 6 — Guest device self-service; optional AGGREGATE_ONLINE_TIME
-**Current activity:** `PHASE_6_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY`
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0062 -->
+**Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
+**Current activity:** `PHASE_7_FULL_SYSTEM_REACCEPTANCE_AUTHORIZED`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 AUTHORIZED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.

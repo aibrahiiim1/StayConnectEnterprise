@@ -1,0 +1,44 @@
+{
+  "transition_id": "T0062",
+  "seq": 62,
+  "timestamp": "2026-08-16T09:52:00Z",
+  "record_type": "PHASE_6_PULL_REQUEST_MERGED_TO_MASTER",
+  "previous_state": {
+    "phase": "6",
+    "activity": "PHASE_6_ACCEPTED_AND_CLOSED_AT_VERIFIED_LIVE_DARK_MATURITY",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "PHASE_7_FULL_SYSTEM_REACCEPTANCE_AUTHORIZED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "phase_affected": "6",
+  "decision": "D26",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner decision D26 of 2026-08-16, which accepted and closed Phase 6 at verified LIVE-DARK maturity and explicitly authorized this merge. No new decision is created by merging: the merge executes an authorization that already existed.",
+  "merge": {
+    "pull_request": 14,
+    "branch": "phase/6-device-selfservice-and-time-modes",
+    "base": "master",
+    "merged_head": "fe1d07277a79b01d00103854bcd2107a93063d41",
+    "merge_commit": "da6a14aba5f51300deac7ee3736f7fbbc8ab5d25",
+    "merged_at": "2026-08-16T09:48:33Z",
+    "merge_method": "merge",
+    "commits_in_range": 68,
+    "ci_at_the_merged_head": "governance 95145864189 SUCCESS, phase3-full-software-gate 95145864169 SUCCESS, phase4-financial-core-gate 95145864418 SUCCESS, phase5-post-stay-transfer-gate 95145863980 SUCCESS"
+  },
+  "merge_introduced_no_content": "Verified after the merge: `git diff --stat origin/master fe1d072` is empty, so master's tree is byte-identical to the accepted head's tree. The merge commit adds history, not content.",
+  "the_merge_deployed_nothing": "Merging changes no environment. Every Phase-6 capability remains OFF everywhere, the guest device routes remain ABSENT from the running scd on the development appliance, the Phase-6 operator screens remain compiled out of the deployed Hotel Admin bundle, and no migration was applied to any database by this merge.",
+  "history_note": "Phases 0, 1A, 1B, 2, 3, 4 and 5 are unchanged and remain ACCEPTED_AND_CLOSED. T0044 through T0061 are unchanged. Phase 6 is ACCEPTED_AND_CLOSED (D26/T0061) and now MERGED. Phase 7 is AUTHORIZED for planning and execution under the same decision.",
+  "boundaries_observed": [
+    "no Production contact or mutation",
+    "no Phase-6 capability enabled on any environment",
+    "no IAM-v2 cutover, production data migration, dual read/write or legacy IAM removal",
+    "no real guest, PMS, provider or financial traffic",
+    "no paid access"
+  ],
+  "next": "Execute the authorized Phase-7 full-system re-acceptance from this post-merge master: prove the already-built system works as one complete IAM domain, on one branch and one pull request, before any IAM-v2 production cutover decision.",
+  "new_state_note": "new_state.phase_status describes the PHASE_AFFECTED (6), which the merge leaves ACCEPTED_AND_CLOSED. It was first written as AUTHORIZED, conflating the affected phase's status with the fact that the CURRENT phase advances to 7 -- two different things that the validator correctly refused to see as one. Corrected in place, minutes after it was written and before it was published."
+}

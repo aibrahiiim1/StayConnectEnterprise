@@ -1,0 +1,4 @@
+commit da6a14aba5f51300deac7ee3736f7fbbc8ab5d25
+Date:   Sun Aug 16 12:48:33 2026 +0300
+
+    Phase 6 â€” Guest Device Self-Service + AGGREGATE_ONLINE_TIME (#14)

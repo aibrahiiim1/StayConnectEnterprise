@@ -1,4 +1,0 @@
-commit 3dc8b2580aa59615b3301579cdca741a5e3f26b6
-Date:   Sun Aug 16 12:25:31 2026 +0300
-
-    Governance: a parity rule that could not see an unauthorized phase outside the roadmap
