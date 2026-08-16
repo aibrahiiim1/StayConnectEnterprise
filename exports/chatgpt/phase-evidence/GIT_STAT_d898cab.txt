@@ -1,4 +1,0 @@
-commit d898cabe684054be141ad0e05b76f81b33ba711a
-Date:   Mon Aug 17 01:04:24 2026 +0300
-
-    Phase 7 (delivery_head): appliance M4, real reboot, complete manifest and packs

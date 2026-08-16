@@ -211,8 +211,8 @@ move that specific digest component.
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `9cb25b8afc6a4753d75148455c577228c0fbd67a`
-- **HEAD commit:** `f9ba606e38bb6d3141870afa4ff8a761eaf55594`
-- **Provenance (generation HEAD = inventory_head):** `f9ba606e38bb6d3141870afa4ff8a761eaf55594`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `a1b8b957d9060235dc2dcc1338cebede06c20df7`
+- **Provenance (generation HEAD = inventory_head):** `a1b8b957d9060235dc2dcc1338cebede06c20df7`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/7-full-system-reacceptance`
 - **Remote branch:** `origin/phase/7-full-system-reacceptance`
 - **Changed files:** 56
@@ -230,33 +230,33 @@ move that specific digest component.
 | `docs/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: document the scd bootstrap tables and the appliance verification procedure |
 | `docs/acceptance/StayConnect-IAM-Phase7-Progress-Evidence.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 7: record the appliance M4 and the real reboot in the report and evidence |
 | `docs/architecture/Phase4-Financial-Schema-Gap-Audit.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: the remaining action is the Product-Owner acceptance decision |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: the remaining action is the Product-Owner acceptance decision |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: the remaining action is the Product-Owner acceptance decision |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: the remaining action is the Product-Owner acceptance decision |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: the remaining action is the Product-Owner acceptance decision |
-| `docs/manifests/Phase7-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
-| `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 7: the remaining action is the Product-Owner acceptance decision |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `docs/manifests/Phase7-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 7: state the next action in the project's canonical vocabulary |
+| `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
 | `exports/chatgpt/phase-evidence/GIT_STAT_7b5b6b9.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
-| `exports/chatgpt/phase-evidence/GIT_STAT_f9ba606.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: the remaining action is the Product-Owner acceptance decision |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
+| `exports/chatgpt/phase-evidence/GIT_STAT_a1b8b95.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
 | `exports/chatgpt/stayconnectenterprise/MIGRATION_RUNBOOK.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: the remaining action is the Product-Owner acceptance decision |
-| `exports/chatgpt/stayconnectenterprise/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 7: the remaining action is the Product-Owner acceptance decision |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/stayconnectenterprise/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
 | `governance/transitions/T0063.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
 | `hotel-admin/e2e/phase4-financial-operator.spec.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 7: make the Phase-4 operator e2e deterministic at its locator |
 | `iam_v2_scratch/accepted/appliance-schema-20260816.sql` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 7 M4: the fidelity proof was too weak, and it was hiding an approximate hybrid |
@@ -293,13 +293,13 @@ move that specific digest component.
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |     8 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |     8 +-
  docs/context/StayConnect-IAM-Handoff.md            |     8 +-
- docs/manifests/Phase7-change-manifest.md           |   167 +
- .../reports/StayConnect-IAM-Phase7-Final-Report.md |   392 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |   Bin 312530 -> 314658 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |   Bin 118948 -> 118928 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |   Bin 42195 -> 42379 bytes
+ docs/manifests/Phase7-change-manifest.md           |   192 +
+ .../reports/StayConnect-IAM-Phase7-Final-Report.md |   417 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |   Bin 312530 -> 314687 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |   Bin 118948 -> 118927 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |   Bin 42195 -> 42380 bytes
  .../chatgpt/phase-evidence/GIT_STAT_7b5b6b9.txt    |     4 -
- .../chatgpt/phase-evidence/GIT_STAT_f9ba606.txt    |     4 +
+ .../chatgpt/phase-evidence/GIT_STAT_a1b8b95.txt    |     4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |     4 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |     4 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |     2 +-
@@ -337,7 +337,7 @@ move that specific digest component.
  iam_v2_scratch/phase7_matrix_selftest.sh           |   137 +
  iam_v2_scratch/phase7_reconstruct_from_sources.sh  |   407 +
  .../tests/project_state_validator/run_mutations.py |    12 +-
- 56 files changed, 19308 insertions(+), 151 deletions(-)
+ 56 files changed, 19358 insertions(+), 151 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -345,25 +345,20 @@ move that specific digest component.
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_8cd563f.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_f9ba606.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_a1b8b95.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_d898cab.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: a1b8b95 Phase 7: state the next action in the project's canonical vocabulary
 HISTORICAL: f9ba606 Phase 7: the remaining action is the Product-Owner acceptance decision
 HISTORICAL: 006aed0 Phase 7: record the appliance M4 and the real reboot in the report and evidence
 HISTORICAL: 71bbe71 Phase 7: document the scd bootstrap tables and the appliance verification procedure
