@@ -5,7 +5,11 @@
 set -uo pipefail
 export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-C=iamv2-scratch; DB=iam_scratch; PORT=55432
+# Container, database and port are ENVIRONMENT, not constants. They were hard-coded, which meant this gate
+# could only ever run in one place: the Phase-7 matrix could not point it at the complete Phase-2-through-6
+# database, and reported it SKIPPED because a container named iamv2-scratch did not exist. A gate that can
+# only run in one environment is a gate that stops being run when that environment moves.
+C="${PHASE3_CONTAINER:-iamv2-scratch}"; DB="${PHASE3_DB:-iam_scratch}"; PORT="${PHASE3_PORT:-55432}"
 UP="$ROOT/data-plane/migrations/0010_phase3_stay_resolution.up.sql"
 DOWN="$ROOT/data-plane/migrations/0010_phase3_stay_resolution.down.sql"
 pass=0; fail=0

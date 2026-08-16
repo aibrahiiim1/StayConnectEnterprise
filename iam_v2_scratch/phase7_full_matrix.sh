@@ -145,27 +145,27 @@ if [ "$ONLY_PHASE7" = "0" ]; then
 
   echo "-- Phase 6: guest device self-service + aggregate online time --"
   NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_foundation "phase6 foundation (0030)" \
-      phase6_0030_foundation.sh IGNORE=1
+      phase6_0030_foundation.sh PHASE6_DB="${P6_DB:-iam_full}"
   NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_device_self_service "phase6 device self-service (0031)" \
-      phase6_0031_device_self_service.sh IGNORE=1
+      phase6_0031_device_self_service.sh PHASE6_DB="${P6_DB:-iam_full}"
   NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_aggregate_online_time "phase6 aggregate online time (0036)" \
-      phase6_0036_aggregate_online_time.sh IGNORE=1
+      phase6_0036_aggregate_online_time.sh PHASE6_DB="${P6_DB:-iam_full}"
   NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_least_privilege "phase6 least privilege" \
-      phase6_least_privilege.sh IGNORE=1
+      phase6_least_privilege.sh PHASE6_DB="${P6_DB:-iam_full}"
   NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_backup_restore "phase6 backup and restore" \
-      phase6_backup_restore.sh IGNORE=1
+      phase6_backup_restore.sh PHASE6_DB="${P6_DB:-iam_full}"
   NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase6_rollback_rehearsal "phase6 rollback rehearsal (0030-0047)" \
-      phase6_rollback_rehearsal.sh IGNORE=1
+      phase6_rollback_rehearsal.sh PHASE6_DB="${P6_DB:-iam_full}"
   echo
 fi
 
 echo "-- Phase 7: the composition gates --"
 NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase7_m1 "phase7 M1 identity and acquisition" \
-    phase7_m1_identity_and_acquisition.sh IGNORE=1
+    phase7_m1_identity_and_acquisition.sh PHASE7_DB="${P6_DB:-iam_full}"
 NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase7_m2 "phase7 M2 the stay end to end" \
-    phase7_m2_the_stay_end_to_end.sh IGNORE=1
+    phase7_m2_the_stay_end_to_end.sh PHASE7_DB="${P6_DB:-iam_full}"
 NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase7_m3 "phase7 M3 the boundaries hold" \
-    phase7_m3_boundaries.sh IGNORE=1
+    phase7_m3_boundaries.sh PHASE7_DB="${P6_DB:-iam_full}"
 
 # ---- the roster check -------------------------------------------------------------------------------------
 expected="$EXPECTED_ALL"; [ "$ONLY_PHASE7" = "1" ] && expected="$EXPECTED_PHASE7"
