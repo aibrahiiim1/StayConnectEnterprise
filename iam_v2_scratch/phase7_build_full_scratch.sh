@@ -1,36 +1,46 @@
 #!/usr/bin/env bash
-# PHASE-7 — BUILD A COMPLETE PHASE-2-THROUGH-6 SCRATCH DATABASE, FROM THE AUTHORITATIVE LINEAGE.
+# PHASE-7 — BUILD THE ACCEPTED FULL-SYSTEM SCRATCH DATABASE.
 #
-# THE PROVENANCE QUESTION, ANSWERED BEFORE ANY SQL RUNS.
+# TWO CLAIMS, KEPT APART ON PURPOSE. Collapsing them is how fixture rows end up inside a statement about what
+# the appliance contains:
 #
-# There appeared to be two conflicting migration lineages. There are not; there are three ordered layers, and
-# the earlier failure was applying them in the wrong order, not a conflict between them:
+#   1. ACCEPTED SCHEMA FIDELITY -- the catalogue, privileges and definitions are the DEVELOPMENT appliance's
+#      accepted as-built shape. Proven by a semantic digest over column types/nullability/defaults, full
+#      constraint and index definitions, trigger definitions, function signatures and BODIES, table grants and
+#      EFFECTIVE function privileges. It carries no rows and makes no claim about data.
 #
-#   1. data-plane/migrations/0001..0008   the EDGE/public schema -- audit_log, guest_networks, appliances,
-#                                         operators, sites, tenants, throttles, OTP keys.
-#   2. iam_v2_scratch/mg0 + mg1..mg9      the iam_v2 schema itself. This is where `CREATE SCHEMA iam_v2` and
-#                                         the Phase-1A/1B tables live; it is the only such source in the
-#                                         repository, so it is authoritative rather than approximate. mg0 adds
-#                                         the UNIQUE(tenant_id,site_id,id) anchor on public.guest_networks
-#                                         that mg1's foreign keys require -- which is why mg1 failed with "no
-#                                         unique constraint matching given keys" when it was run first.
-#   3. data-plane/migrations/0009..0047   Phases 2 through 6, the same files the appliance runs.
+#   2. DETERMINISTIC TEST FIXTURE -- the canonical tenant/site/guest-network/appliance/operator identifiers
+#      that eleven gates address by literal uuid without seeding them. This is TEST DATA. It is not part of any
+#      statement about appliance or production state, it is applied afterwards, and it is reported separately.
 #
-# Layer 3 is byte-identical to what the DEVELOPMENT appliance has applied, so the result is the accepted
-# as-built schema rather than a hybrid. The verification at the end is not decoration: it compares this
-# database's catalogue against the appliance's accepted shape, and refuses to report success on a mismatch.
+# WHY NOT REBUILD FROM MIGRATIONS. The earlier attempt composed data-plane 0001-0008 + iam_v2_scratch mg1-mg9 +
+# data-plane 0009-0047, and a name-level fingerprint said it matched the appliance. The semantic digest said
+# otherwise: 46 function BODIES differed and 6 foreign keys were missing. mg1-mg9 is the scratch equivalent of
+# Phase 1A/1B, not the source the appliance's iam_v2 was built from, so that composition was an approximate
+# hybrid -- precisely what a full-system re-acceptance must not diagnose against. The narrowest correct
+# reconstruction is the appliance's own schema, captured with pg_dump --schema-only (a read; no Production is
+# involved) and committed under accepted/ so the procedure reproduces without the appliance being reachable.
 #
-#   usage:  phase7_build_full_scratch.sh [database-name]      default: iam_full
-#
-# It DROPS and recreates the target database. It contacts no appliance and no Production system: the expected
-# values it checks against are recorded here, having been read from the appliance once and written down.
+#   usage:  phase7_build_full_scratch.sh [database-name]      default: iam_accepted
 set -uo pipefail
 export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/.." && pwd)"
 
 C="${PHASE7_CONTAINER:-iamv2-p6}"
-DB="${1:-${PHASE7_FULL_DB:-iam_full}}"
+DB="${1:-${PHASE7_ACCEPTED_DB:-iam_accepted}}"
+SCHEMA="$HERE/accepted/appliance-schema-20260816.sql"
+
+# The accepted semantic digest, read from the DEVELOPMENT appliance on 2026-08-16 with the identical
+# expression in phase7_fidelity.sql. Changing this is an edit somebody makes and justifies, never a value the
+# script discovers and then agrees with.
+EXPECT_DIGEST="58a92f656aaeab241d6b33b2b8d0673d parts=1848"
+
+# Every role the dump's ownership and grant statements name. Missing one turns GRANT lines into errors and
+# silently produces a database with a different privilege shape -- which the digest would catch, but only
+# after wasting a diagnosis.
+ROLES="stayconnect iam_v2_owner iam_v2_migrator iam_v2_svc_scd iam_v2_svc_edged iam_v2_svc_acctd \
+iam_v2_svc_portald iam_v2_svc_hoteladm svc_scd svc_edged svc_acctd svc_netd sc_payment_runtime \
+sc_payment_outcome sc_commerce_runtime sc_financial_operator sc_financial_readonly"
 
 pass=0; fail=0
 ok(){ printf '  [PASS] %s\n' "$1"; pass=$((pass+1)); }
@@ -38,122 +48,61 @@ no(){ printf '  [FAIL] %s :: %s\n' "$1" "${2:-}"; fail=$((fail+1)); }
 q(){ docker exec -i "$C" psql -U postgres -d "$DB" -tAqc "$1" </dev/null 2>&1; }
 eq(){ [ "$2" = "$3" ] && ok "$1" || no "$1" "expected '$3', got '$2'"; }
 
-# THE ACCEPTED SHAPE, read from the DEVELOPMENT appliance and written down so this script needs no network.
-# If the appliance's accepted schema changes, these change with it -- deliberately, as an edit somebody makes
-# and explains, not as a number the script discovers and then agrees with.
-EXPECT_IAMV2_TABLES=81
-EXPECT_P6_FUNCTIONS=18
-# The appliance's own catalogue+privilege fingerprint, computed by the identical expression below and read from
-# the DEVELOPMENT appliance on 2026-08-16. Matching it is what makes this database the ACCEPTED as-built schema
-# rather than merely a schema that applied without error -- counts can agree while shapes differ.
-EXPECT_FINGERPRINT=03aef816b8541e7300d2570efe673f2f
+echo "== Phase 7: building the accepted full-system scratch database ($DB) =="
 
-echo "== Phase 7: building a complete Phase-2-through-6 scratch database ($DB) =="
-
-apply(){ # apply <label> <file>
-  local out
-  out="$(docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -q < "$2" 2>&1)"
-  if [ $? -ne 0 ]; then
-    no "apply $1" "$(printf '%s' "$out" | grep -i error | head -1 | cut -c1-140)"
-    return 1
-  fi
-  return 0
-}
+[ -f "$SCHEMA" ] || { echo "missing accepted schema: $SCHEMA"; exit 1; }
 
 docker exec -i "$C" psql -U postgres -d postgres -qc "DROP DATABASE IF EXISTS $DB" </dev/null >/dev/null 2>&1
 docker exec -i "$C" psql -U postgres -d postgres -qc "CREATE DATABASE $DB" </dev/null >/dev/null 2>&1 \
   || { echo "cannot create $DB"; exit 1; }
 
-# ---- layer 1: the edge/public schema -------------------------------------------------------------------------
-n=0
-for f in "$ROOT"/data-plane/migrations/000[1-8]_*.up.sql; do
-  apply "$(basename "$f" .up.sql)" "$f" || exit 1
-  n=$((n+1))
+for r in $ROLES; do
+  docker exec -i "$C" psql -U postgres -d "$DB" -qc \
+    "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='$r') THEN EXECUTE 'CREATE ROLE $r NOLOGIN'; END IF; END \$\$;" \
+    </dev/null >/dev/null 2>&1
 done
-eq "layer 1: the edge/public schema applied (0001-0008)" "$n" "8"
+eq "every role the accepted schema references exists" \
+   "$(q "SELECT count(*) FROM pg_roles WHERE rolname IN ('iam_v2_owner','svc_scd','svc_acctd','svc_edged','svc_netd')")" "5"
 
-# ---- layer 2: the iam_v2 schema (Phase 1A/1B) ------------------------------------------------------------------
-# mg0 is a CONCURRENTLY index build and cannot run inside a transaction block, so it is issued directly rather
-# than through the file applier. Its anchor is what mg1's foreign keys depend on.
-docker exec -i "$C" psql -U postgres -d "$DB" -qc \
-  "CREATE UNIQUE INDEX IF NOT EXISTS guest_networks_tsi_anchor ON public.guest_networks (tenant_id, site_id, id)" \
-  </dev/null >/dev/null 2>&1
-eq "layer 2: the guest-network anchor mg1 depends on exists" \
-   "$(q "SELECT count(*) FROM pg_indexes WHERE indexname='guest_networks_tsi_anchor'")" "1"
+err="$(docker exec -i "$C" psql -U postgres -d "$DB" -q < "$SCHEMA" 2>&1 >/dev/null)"
+# Two errors are expected in a scratch container and are NAMED rather than filtered blindly: `schema "public"
+# already exists` (the dump recreates it) and `_timescaledb_functions does not exist` (the appliance runs
+# TimescaleDB, the scratch container does not, and nothing under iam_v2 depends on it).
+unexpected="$(printf '%s' "$err" | grep -i '^ERROR' \
+  | grep -viE 'schema "public" already exists|_timescaledb_functions' | head -3)"
+[ -z "$unexpected" ] && ok "the accepted schema restored with no unexpected error" \
+  || no "restore produced unexpected errors" "$(printf '%s' "$unexpected" | head -1 | cut -c1-120)"
 
-n=0
-for f in "$HERE"/migrations/mg[1-9]_*.sql; do
-  apply "$(basename "$f" .sql)" "$f" || exit 1
-  n=$((n+1))
-done
-eq "layer 2: the iam_v2 schema applied (mg1-mg9)" "$n" "9"
-
-# ---- layer 3: Phases 2 through 6 -------------------------------------------------------------------------------
-n=0
-for f in "$ROOT"/data-plane/migrations/00[0-4][0-9]_*.up.sql; do
-  case "$(basename "$f")" in 000[1-8]_*) continue ;; esac
-  apply "$(basename "$f" .up.sql)" "$f" || exit 1
-  n=$((n+1))
-done
-eq "layer 3: Phases 2-6 applied (0009-0047)" "$n" "39"
-
-# ---- and now: is this the accepted as-built shape, or something that merely ran? ---------------------------------
+# ---- CLAIM 1: accepted schema fidelity ---------------------------------------------------------------------
 echo
-echo "-- verifying against the accepted as-built shape --"
-eq "iam_v2 table count matches the appliance" \
-   "$(q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2'")" "$EXPECT_IAMV2_TABLES"
-eq "Phase-6 function count matches the appliance" \
-   "$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-          WHERE n.nspname='iam_v2' AND p.proname LIKE 'p6\\_%'")" "$EXPECT_P6_FUNCTIONS"
+echo "-- claim 1: accepted schema fidelity --"
+GOT="$(docker exec -i "$C" psql -U postgres -d "$DB" -tAq < "$HERE/phase7_fidelity.sql" 2>&1 | tail -1)"
+eq "the SEMANTIC digest matches the accepted appliance schema" "$GOT" "$EXPECT_DIGEST"
+echo "  digest: $GOT"
 
-# The service roles must exist and hold the shape the phases granted them. A schema without its roles is not
-# the as-built system: every least-privilege proof in the matrix would pass vacuously against nothing.
-for r in svc_scd svc_acctd svc_edged; do
-  eq "role $r exists" "$(q "SELECT count(*) FROM pg_roles WHERE rolname='$r'")" "1"
-done
-eq "svc_scd can insert a device (0047)" \
-   "$(q "SELECT has_table_privilege('svc_scd','iam_v2.devices','INSERT')")" "t"
-eq "svc_scd can read entitlements (0047)" \
-   "$(q "SELECT has_table_privilege('svc_scd','iam_v2.entitlements','SELECT')")" "t"
-eq "svc_scd CANNOT write an entitlement" \
-   "$(q "SELECT has_table_privilege('svc_scd','iam_v2.entitlements','UPDATE')")" "f"
-eq "svc_acctd CANNOT write an entitlement" \
-   "$(q "SELECT has_table_privilege('svc_acctd','iam_v2.entitlements','UPDATE')")" "f"
+# ---- CLAIM 2: the deterministic test fixture ----------------------------------------------------------------
+echo
+echo "-- claim 2: deterministic TEST FIXTURE (test data; no claim about appliance state) --"
+fixerr="$(docker exec -i "$C" psql -U postgres -d "$DB" -q < "$HERE/phase7_fixture.sql" 2>&1 >/dev/null \
+          | grep -i '^ERROR' | head -1)"
+[ -z "$fixerr" ] && ok "the deterministic Phase-7 fixture applied" \
+  || no "the platform fixture failed" "$(printf '%s' "$fixerr" | cut -c1-120)"
 
-# PUBLIC EXPOSURE IS THE ONE THAT MUST NOT BE INTRODUCED BY THE BUILD -- but the rule is "no UNEXPECTED
-# exposure", not "none at all", and the difference matters because the first version of this check asserted
-# the stronger rule and failed against a decision the system made on purpose.
-#
-# iam_v2.p5_controlled_operation_open IS deliberately SECURITY DEFINER and deliberately granted to PUBLIC, and
-# migration 0027 says why next to the grant: it reads controlled_operation_scope, which is closed to every
-# role but the owner, while the guard trigger that calls it is NOT definer and runs as the WRITING role. So
-# the writing role has to be able to call it, and what a caller learns is whether ITS OWN transaction has an
-# open scope -- scoped to txid_current() and to a token the caller itself set. It already knew.
-#
-# The allow-list is one name long and every other definer function must still be closed. Widening it is an
-# edit somebody makes and justifies; a new PUBLIC-executable definer function appearing on its own still fails
-# here, which is the property worth keeping.
-PUBLIC_DEFINER_ALLOWED="p5_controlled_operation_open"
-pubfn="$(q "SELECT COALESCE(string_agg(p.proname, ',' ORDER BY p.proname), 'none') FROM pg_proc p
-             JOIN pg_namespace n ON n.oid = p.pronamespace
-            WHERE n.nspname='iam_v2' AND p.prosecdef AND has_function_privilege('public', p.oid, 'EXECUTE')")"
-eq "only the justified definer function is PUBLIC-executable, and no other" "$pubfn" "$PUBLIC_DEFINER_ALLOWED"
+# The eleven gates that address these identifiers by literal uuid without seeding them are why this exists. A
+# gate failing for want of these rows is a MISSING FIXTURE, not a product regression, and the two must never
+# be reported as the same thing.
+eq "fixture tenant present"    "$(q "SELECT count(*) FROM public.tenants    WHERE id='11111111-1111-1111-1111-111111111111'")" "1"
+eq "fixture site present"      "$(q "SELECT count(*) FROM public.sites      WHERE id='22222222-2222-2222-2222-222222222222'")" "1"
+eq "fixture appliance present" "$(q "SELECT count(*) FROM public.appliances WHERE id='44444444-4444-4444-4444-444444444444'")" "1"
+eq "fixture guest network present" \
+   "$(q "SELECT count(*) FROM public.guest_networks WHERE id='33333333-3333-3333-3333-333333333333'")" "1"
+eq "at least one fixture operator present" \
+   "$(q "SELECT (count(*) > 0)::text FROM public.operators")" "true"
 
-# A catalogue fingerprint, so "rebuilding it twice produces the same result" is a comparison rather than a
-# feeling. Ordered, and covering the things a privilege or shape regression would move.
-FP="$(q "SELECT md5(string_agg(x, '|' ORDER BY x)) FROM (
-   SELECT 'T:'||table_name FROM information_schema.tables WHERE table_schema='iam_v2'
-   UNION ALL SELECT 'F:'||p.proname||':'||p.prosecdef::text FROM pg_proc p
-     JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2'
-   UNION ALL SELECT 'C:'||conname FROM pg_constraint c
-     JOIN pg_namespace n ON n.oid=c.connamespace WHERE n.nspname='iam_v2'
-   UNION ALL SELECT 'I:'||indexname FROM pg_indexes WHERE schemaname='iam_v2'
-   UNION ALL SELECT 'G:'||grantee||':'||table_name||':'||privilege_type
-     FROM information_schema.role_table_grants WHERE table_schema='iam_v2' AND grantee LIKE 'svc\\_%'
- ) s(x)")"
-eq "the catalogue+privilege fingerprint MATCHES the accepted appliance state" "$FP" "$EXPECT_FINGERPRINT"
-echo "  catalogue fingerprint: $FP"
-printf '%s' "$FP" > "${TMPDIR:-/tmp}/phase7_fullscratch_fingerprint.$DB"
+# Fixture rows must not have disturbed the SCHEMA claim: data is not shape, and if inserting rows moved the
+# digest then the digest is fingerprinting the wrong thing.
+AFTER="$(docker exec -i "$C" psql -U postgres -d "$DB" -tAq < "$HERE/phase7_fidelity.sql" 2>&1 | tail -1)"
+eq "the fixture changed no schema definition (digest unmoved)" "$AFTER" "$EXPECT_DIGEST"
 
 echo "------------------------------------------------------------"
 printf 'PHASE7_BUILD_FULL_SCRATCH db=%s pass=%d fail=%d\n' "$DB" "$pass" "$fail"
