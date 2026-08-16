@@ -111,13 +111,39 @@ run_baseline(){   # run_baseline <label>
   fi
 }
 
-cleanup(){ docker rm -f "$C" >/dev/null 2>&1 || true; }
+# THIS GATE OWNS ITS CONTAINER, AND IT MUST NOT BE POINTED AT SOMEBODY ELSE'S.
+#
+# It destroys the named container on entry and on exit. That is correct for a disposable container this gate
+# created, and destructive for one it did not: the same lifecycle in the Phase-3 gate deleted a shared scratch
+# container -- and with it a complete Phase-2-through-6 database -- part way through a matrix run, because the
+# name was passed in and the gate could not tell whose it was. Phase 3 was fixed then; this gate has carried
+# the identical defect ever since, unnoticed because nobody had aimed it at anything valuable YET.
+#
+# It cannot tell ownership from a name, so it refuses any container that already exists, and its cleanup
+# removes only a container it actually created.
+if docker inspect "$C" >/dev/null 2>&1; then
+  echo "REFUSED: container '$C' already exists and this gate DESTROYS the container it is given." >&2
+  echo "  It creates its own disposable one. Point PHASE4_GATE_CONTAINER at a name nothing else owns, or" >&2
+  echo "  remove that container yourself if it really is disposable." >&2
+  exit 2
+fi
+CREATED_CONTAINER=0
+# PHASE4_KEEP exists because two other gates -- phase4_db_invariants and phase4_least_privilege -- run
+# AGAINST the container this gate builds. Destroying it on exit meant that in a matrix run both of them found
+# no container and reported SKIPPED, and a skip in strict mode is a failure. The matrix had been failing
+# strictly for that reason alone: not a product defect, a lifecycle defect in this script. Whoever sets
+# PHASE4_KEEP owns the teardown.
+cleanup(){
+  [ "${PHASE4_KEEP:-0}" = "1" ] && return 0
+  [ "$CREATED_CONTAINER" = "1" ] && docker rm -f "$C" >/dev/null 2>&1
+  return 0
+}
 trap cleanup EXIT
-cleanup
 
 echo "===== PHASE-4: Migration 0011 + financial-core DB gate (disposable PG16, container=$C port=$PORT) ====="
 docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" -p "127.0.0.1:$PORT:5432" postgres:16-alpine >/dev/null 2>&1 \
   || { echo "INFRA: could not start the disposable container"; exit 2; }
+CREATED_CONTAINER=1   # only from here on may cleanup destroy it
 ready=0
 for i in $(seq 1 60); do docker exec "$C" psql -U postgres -d "$DB" -tAqc 'select 1' >/dev/null 2>&1 && { ready=1; break; }; sleep 1; done
 [ "$ready" = 1 ] || { echo "INFRA: postgres did not become ready"; docker logs "$C" 2>&1 | tail -20; exit 2; }

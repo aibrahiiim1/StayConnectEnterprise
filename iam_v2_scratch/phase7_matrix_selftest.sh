@@ -22,8 +22,13 @@ trap cleanup EXIT INT TERM
 
 cp "$HERE/phase7_full_matrix.sh" "$SB/"
 
-# A stand-in for each Phase-7 gate. The suite drives ONLY --phase7, so the roster is exactly these three and
-# the mutations stay small and legible.
+# A stand-in for each Phase-7 gate. The suite drives ONLY --phase7, so the roster is exactly the gates named
+# below and the mutations stay small and legible.
+#
+# THE STAND-INS MUST TRACK THE ROSTER. When the reconstruction, fidelity and ledger proofs joined it, this
+# suite still fabricated only three gates -- so the runner correctly reported three MISSING, and the suite's
+# own CONTROL case ("healthy gates exit 0") failed. The failure was real and in the right place: a roster the
+# stand-ins do not cover is a roster this suite cannot test.
 mk(){ # mk <file> <last-line> <exit-code>
   printf '#!/usr/bin/env bash\necho "%s"\nexit %s\n' "$2" "$3" > "$SB/$1"
   chmod +x "$SB/$1"
@@ -32,6 +37,9 @@ reset_gates(){
   mk phase7_m1_identity_and_acquisition.sh "PHASE7_M1 pass=20 fail=0" 0
   mk phase7_m2_the_stay_end_to_end.sh      "PHASE7_M2 pass=22 fail=0" 0
   mk phase7_m3_boundaries.sh               "PHASE7_M3 pass=31 fail=0" 0
+  mk phase7_reconstruct_from_sources.sh    "RECONSTRUCTION_BUILD = PASS (checks pass=26 fail=0)" 0
+  mk phase7_fidelity_selftest.sh           "PHASE7_FIDELITY_SELFTEST pass=23 fail=0" 0
+  mk phase7_ledger_material_effect.sh      "PHASE7_LEDGER_MATERIAL_EFFECT target=stub pass=57 fail=0" 0
 }
 
 # run_sb <extra-args...> -> sets OUT and RC.
@@ -103,6 +111,9 @@ run_sb; rc="$RC"
 # gate that the container guard removes -- the roster, not the file system, is what catches it.
 reset_gates
 P6_CONTAINER=no-such-container-xyz run_sb; rc="$RC"
+# The reconstruction, fidelity and ledger gates carry no container requirement -- they build their own or read
+# a remote one -- so removing the container only strands the three that depend on it. The roster must name
+# exactly those three and no others.
 case "$OUT" in *"EXPECTED GATES THAT NEVER EXECUTED: phase7_m1 phase7_m2 phase7_m3"*)
     ok "the ROSTER lists every expected gate that never executed" ;;
   *) no "roster listing" "$(printf '%s' "$OUT" | grep -A1 'NEVER EXECUTED' | head -1)" ;; esac

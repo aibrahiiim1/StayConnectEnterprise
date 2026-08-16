@@ -74,8 +74,8 @@ have(){ docker inspect "$1" >/dev/null 2>&1; }
 EXPECTED_ALL="phase3_lifecycle phase4_financial phase4_db_invariants phase4_least_privilege \
 phase5_foundation phase5_least_privilege phase6_foundation phase6_device_self_service \
 phase6_aggregate_online_time phase6_least_privilege phase6_backup_restore phase6_rollback_rehearsal \
-phase7_m1 phase7_m2 phase7_m3"
-EXPECTED_PHASE7="phase7_m1 phase7_m2 phase7_m3"
+phase7_m1 phase7_m2 phase7_m3 phase7_reconstruct phase7_fidelity_selftest phase7_ledger"
+EXPECTED_PHASE7="phase7_m1 phase7_m2 phase7_m3 phase7_reconstruct phase7_fidelity_selftest phase7_ledger"
 
 # run <key> <label> <script> [env assignments...]
 run(){
@@ -133,14 +133,19 @@ if [ "$ONLY_PHASE7" = "0" ]; then
       phase3_0010_lifecycle.sh IGNORE=1
 
   echo "-- Phase 4: financial core, DARK (contract E) --"
+  # KEEP the container: phase4_db_invariants and phase4_least_privilege run against it, and this gate used to
+  # destroy it on the way out -- so both dependants reported SKIPPED and strict mode failed on the skips alone.
+  # The matrix asked for the container to survive, so the matrix destroys it, below.
   run phase4_financial "phase4 financial (0011)" \
-      phase4_0011_financial.sh IGNORE=1
+      phase4_0011_financial.sh PHASE4_KEEP=1
   NEED_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" run phase4_db_invariants "phase4 db invariants" \
       phase4_db_invariants.sh SCRATCH_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" \
       SCRATCH_DB="${P4_DB:-iam_scratch}" SCRATCH_ACK=I_UNDERSTAND_DISPOSABLE
   NEED_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" run phase4_least_privilege "phase4 least privilege" \
       phase4_least_privilege.sh PHASE4_LP_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" \
       PHASE4_LP_DB="${P4_DB:-iam_scratch}"
+  # ...and now that its dependants have run, the matrix cleans up what it asked to be kept.
+  docker rm -f "${P4_CONTAINER:-iamv2-p4gate}" >/dev/null 2>&1 || true
 
   echo "-- Phase 5: post-stay and cross-PMS transfer (contract F8, F9) --"
   NEED_CONTAINER="${P5_CONTAINER:-iamv2-p5}" run phase5_foundation "phase5 foundation (0027)" \
@@ -171,6 +176,24 @@ NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase7_m2 "phase7 M2 the stay end
     phase7_m2_the_stay_end_to_end.sh PHASE7_DB="${P6_DB:-iam_full}"
 NEED_CONTAINER="${P6_CONTAINER:-iamv2-p6}" run phase7_m3 "phase7 M3 the boundaries hold" \
     phase7_m3_boundaries.sh PHASE7_DB="${P6_DB:-iam_full}"
+
+# ---- Phase 7: the proofs the composition gates rest on ------------------------------------------------------
+#
+# These three are in the roster because the composition gates are only as good as the database they run
+# against. The reconstruction proves that database can be rebuilt from repository sources; the fidelity suite
+# proves the digest making that claim can actually fail; the ledger proof shows the backfilled migration rows
+# are backed by every material effect their migrations describe. Leaving them out would let the matrix pass
+# while the ground under it went unchecked.
+#
+# The reconstruction and the fidelity suite build and destroy their OWN isolated clusters, so they need no
+# pre-existing container -- and must not be given one.
+run phase7_reconstruct "phase7 rebuild from repository sources" \
+    phase7_reconstruct_from_sources.sh PHASE7_ORACLE_DIGEST="${PHASE7_ORACLE_DIGEST:-}" \
+    PHASE7_CONTAINER=phase7-matrix-recon
+run phase7_fidelity_selftest "phase7 fidelity proof mutation suite" \
+    phase7_fidelity_selftest.sh PHASE7_SELFTEST_CONTAINER=phase7-matrix-fidsel
+run phase7_ledger "phase7 ledger material effect" \
+    phase7_ledger_material_effect.sh PHASE7_TARGET="${PHASE7_LEDGER_TARGET:-appliance}"
 
 # ---- the roster check -------------------------------------------------------------------------------------
 expected="$EXPECTED_ALL"; [ "$ONLY_PHASE7" = "1" ] && expected="$EXPECTED_PHASE7"
