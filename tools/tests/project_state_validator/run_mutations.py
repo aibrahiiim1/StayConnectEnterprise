@@ -441,12 +441,18 @@ MUTATIONS = [
  # Phase 3's for as long as that was the only manifest; the moment Phase 6 published its own, mutating the
  # Phase-3 file changed nothing the validator looks at and both cases silently stopped biting -- a mutation
  # case that cannot fail is worse than no case, because it reports green.
- ("M46 change-manifest lists a path not present in git base..HEAD", "docs/manifests/Phase6-change-manifest.md",
+ #
+ # It happened AGAIN at the Phase-6/7 boundary, and for a better reason: the validator now correctly SKIPS the
+ # path-set check for a closed phase's manifest, so once Phase 6 closed there was nothing for these two to
+ # mutate until Phase 7 published its own. The fix is not to weaken them -- it is to give Phase 7 the
+ # authoritative manifest they need, and repoint them at it. They must be repointed at every phase boundary,
+ # and the CI failure when they are not is the mechanism that makes anyone do it.
+ ("M46 change-manifest lists a path not present in git base..HEAD", "docs/manifests/Phase7-change-manifest.md",
    ("append", "\n| `zz-fabricated-extra-path.md` | CREATED | `A` | other | OTHER | rollback REMOVES it | fabricated |\n")),
  ("M47 acceptance decision D13 removed from the register", "governance/decision-register.json",
    ("replace", [('"id": "D13"', '"id": "D13-DISABLED"')])),
- ("M48 manifest base repointed so its path/status set no longer equals git base..delivery_head", "docs/manifests/Phase6-change-manifest.md",
-   ("replace", [("09e67156fb6cb286fe47fe632a368a3c4e4c6d23", "a8c3b3caac6baf8ac41fa581fca5350c97219bb8")])),
+ ("M48 manifest base repointed so its path/status set no longer equals git base..delivery_head", "docs/manifests/Phase7-change-manifest.md",
+   ("replace", [("9cb25b8afc6a4753d75148455c577228c0fbd67a", "a8c3b3caac6baf8ac41fa581fca5350c97219bb8")])),
  # --- Phase-3 governance contradiction classes (D14/T0015; DARK; no financial posting; Phase 4 gated) ---
  ("M49 decision D14 removed while Phase 3 is IN_PROGRESS", "governance/decision-register.json",
    ("replace", [('"id": "D14"', '"id": "D14-DISABLED"')])),
