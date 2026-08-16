@@ -322,7 +322,7 @@
     "Enabling any Phase-5 feature flag; performing any Post-Stay PIN issuance, verification or conversion or any Cross-PMS transfer against a real guest, a real Stay or a live PMS; creating synthetic PMS state to make a transfer possible; granting paid or priced post-stay access. NOTE: the Phase-5 software is ACCEPTED AND CLOSED at LIVE-DARK maturity under D22/T0053 -- what is prohibited is its enablement and any real traffic, not the existence of the accepted software.",
     "Any Production environment mutation or contact; real guest traffic; real PMS, provider or financial traffic; Phase-4 financial enablement; IAM-v2 authentication cutover; paid-access activation; unrelated network changes. NOTE: implementing and DARK-testing the Phase-6 guest device self-service surface and the AGGREGATE_ONLINE_TIME time mode IS AUTHORIZED under D25/T0057 -- what is prohibited is their enablement and any real traffic, not the existence of the authorized software. The system is PRE-LIVE (D24), but any environment labelled Production remains protected."
   ],
-  "next_authorized_action": "Continue Phase-6 milestone M4 under D25 on branch phase/6-device-selfservice-and-time-modes -- hardening and the controlled DEVELOPMENT-appliance LIVE-DARK acceptance candidate as scoped in docs/architecture/StayConnect-IAM-Phase6-Plan.md section 4, finishing with the single Phase-6 pull request opened UNMERGED for a separate Product-Owner acceptance decision.",
+  "next_authorized_action": "Open the single Phase-6 pull request against master from branch phase/6-device-selfservice-and-time-modes, keep it UNMERGED, verify the remote PR HEAD equals the delivery HEAD and that the required GitHub CI including Project Governance is green, and STOP at the Product-Owner acceptance boundary. Acceptance, closure, merge, any Phase-6 enablement on any environment, IAM-v2 cutover, paid access and Phase 7 all remain unauthorized.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase6-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D25",
@@ -681,7 +681,7 @@
     "phase6_start_transition": "T0057",
     "phase6_branch": "phase/6-device-selfservice-and-time-modes",
     "phase6_baseline_master": "09e67156fb6cb286fe47fe632a368a3c4e4c6d23",
-    "phase6_active_milestone": "M1 -- baseline correction and contract/foundation reconciliation",
+    "phase6_active_milestone": "M4 -- hardening and the controlled DEVELOPMENT-appliance LIVE-DARK validation: COMPLETE (T0060). M1, M2 and M3 are closed.",
     "phase6_device_self_service_default": "OFF",
     "phase6_device_self_service_scope": "OPTIONAL PER APPLIANCE via a persistent local setting managed from Hotel Admin, default OFF, local-first and correct with no Central Control Plane connectivity. When ON, an authenticated guest sees only devices on that guest's own current authorized entitlement/subject and may remove only an OFFLINE device, with the offline state re-checked atomically at mutation time; removal frees the slot but preserves device identity, accounting, authorization and audit history; no client-supplied MAC, entitlement, stay, room, PMS interface or profile identifier can select another subject.",
     "phase6_time_modes": "VALIDITY_WINDOW is preserved unchanged as the continuous wall-clock model. AGGREGATE_ONLINE_TIME adds an aggregate online-time budget PLUS an outer calendar/hard-validity window, consuming only while an eligible session is online, with the FINAL contract's shared device-minute semantics, and terminating atomically at the first applicable terminal condition. Selectable per IMMUTABLE package revision; existing revisions are never reinterpreted and the default remains VALIDITY_WINDOW.",
@@ -691,7 +691,7 @@
     "phase7_authorized": false,
     "phase_authorization_note": "The former single phases_5_to_7_authorized boolean covered three phases at once and was false while Phase 5 was accepted/closed/merged (D22/T0053, D23/T0054) and Phase 6 was authorized and IN_PROGRESS (D25/T0057). One flag cannot state three different facts, so it is replaced by one fact per phase. PHASE 7 REMAINS UNAUTHORIZED."
   },
-  "latest_transition_id": "T0059",
+  "latest_transition_id": "T0060",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
