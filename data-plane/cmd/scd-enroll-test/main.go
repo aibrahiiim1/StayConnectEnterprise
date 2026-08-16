@@ -26,7 +26,6 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/identity"
 )
 
-
 func fatal(msg string, args ...any) {
 	fmt.Fprintf(os.Stderr, "scd-enroll-test: "+msg+"\n", args...)
 	os.Exit(1)
@@ -104,11 +103,12 @@ func main() {
 }
 
 // --nft-publish: impersonate a peer scd and publish an "add" op. Env:
-//   NATS_URL    (default nats://127.0.0.1:4222)
-//   SITE_ID     required
-//   IP          required
-//   TTL_SECONDS default 600
-//   SENDER_ID   default "peer-test"
+//
+//	NATS_URL    (default nats://127.0.0.1:4222)
+//	SITE_ID     required
+//	IP          required
+//	TTL_SECONDS default 600
+//	SENDER_ID   default "peer-test"
 func natsPublishNFT() {
 	url := envOr("NATS_URL", "nats://127.0.0.1:4222")
 	site := os.Getenv("SITE_ID")
@@ -136,9 +136,10 @@ func natsPublishNFT() {
 
 // --nft-await: subscribe to nft.{SITE_ID} and print up to N messages.
 // Used by tests to capture what scd publishes during an auth flow.
-//   SITE_ID required
-//   WAIT_SECONDS default 5
-//   N default 1
+//
+//	SITE_ID required
+//	WAIT_SECONDS default 5
+//	N default 1
 func natsAwaitNFT() {
 	url := envOr("NATS_URL", "nats://127.0.0.1:4222")
 	site := os.Getenv("SITE_ID")

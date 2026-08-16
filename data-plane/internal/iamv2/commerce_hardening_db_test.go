@@ -285,6 +285,7 @@ func (t *faultTx) InsertEntitlement(ctx context.Context, e EntitlementSpec) (str
 	}
 	return id, t.trip("insert_entitlement")
 }
+
 // GrantQuotedEntitlement is THE boundary the free confirm actually crosses now.
 //
 // The three hooks above -- terminate, insert, mark-granted -- were the confirm path's steps until the
