@@ -70,11 +70,14 @@ snapshot of one appliance. The proof is mutation-checked, so a claim of equality
 
 ## 5. Risks and limitations
 
-- **A real least-privilege finding, reported and not silenced.** `iam_v2.p5_controlled_operation_open` is
-  `SECURITY DEFINER` and granted `EXECUTE` to PUBLIC by accepted migration `0027:124` (Phase 3's
-  `p3_controlled_operation_open` before it). PUBLIC has no `USAGE` on schema `iam_v2`, so it confers nothing
-  today, and that compensating control is now asserted. Narrowing the grant would amend the schema this phase
-  is re-accepting, so it is left for a separately authorized change.
+- **A least-privilege finding, tested on the assembled system and preserved as a hardening item.**
+  `iam_v2.p5_controlled_operation_open` is `SECURITY DEFINER` and granted `EXECUTE` to PUBLIC by accepted
+  migration `0027:124` (Phase 3's `p3_controlled_operation_open` before it). It was **attempted for real on the
+  appliance as `svc_scd`**, not reasoned about: the role cannot execute the opener, cannot `INSERT` into
+  `controlled_operation_scope`, cannot forge a scope row even with the session token set, and cannot perform
+  the guarded write; the predicate answers `false` to it; and PUBLIC holds no `USAGE` on `iam_v2` at all. The
+  grant is therefore **inert**. It is preserved as a hardening / cutover-review item — narrowing it would
+  amend an accepted migration this phase is re-accepting — and it is **not** a blocker.
 - **The schema is not fully described by its migrations.** `public.edge_executed_commands`,
   `edge_installed_updates` and `edge_offline_packages` are created by `scd` at first use, not by any migration.
   Gate P grants on all three.
@@ -125,12 +128,52 @@ defects, and each was fixed at its cause:
 - M1/M2/M3 collapsed because the matrix passed the database name but not the container;
 - the `phase4` gate destroyed the container its two dependants needed, so both reported `SKIPPED`.
 
-### 6.2 Open items
+### 6.2 The assembled system, on the DEVELOPMENT appliance — **70/0, 3 NOT PROVEN**
 
-The appliance-side M4 work — Hotel Admin and Guest Portal composed behaviour, DEVELOPMENT-appliance
-full-system live-dark acceptance, local-first with Central unavailable, runtime-role boundaries exercised on
-the appliance, appliance backup/restore evidence, purge and archive within authorization, guaranteed DARK/OFF
-restoration and a final real reboot — is **not done and is not claimed**.
+`deploy/scripts/phase7-appliance-m4.sh`, against the real services, roles, listeners and schema:
+
+- the DARK baseline captured **before** anything ran, and every restoration claim compared against that
+  capture rather than a fresh reading;
+- the PUBLIC definer finding attempted as the real role and shown inert (§5);
+- runtime-role boundaries as the real roles, including an append-only edit refused;
+- the financial core dark and fail-closed: zero postings, zero outbox rows, zero payment transactions, zero
+  attempts, folio strategy still defaulting to `UNSET`;
+- `scd` does **not mount** its Phase-6 endpoints (404) while the portal returns the uniform non-success that
+  reveals nothing — darkness proved at the layer that decides it, not at the edge;
+- Hotel Admin serving the exact expected release and sending an unauthenticated caller to login; the edge API
+  healthy with its licence Active; and the appliance answering **404 for the Central-only names** rather than
+  impersonating Central;
+- guest and admin surfaces reading **one** database, agreeing on the same durable row set;
+- accounting live (812 records), shaping and enforcement loaded;
+- **a real `pg_dump` and `pg_restore`** into a fresh database reproducing the same `iam_v2` table count and
+  entitlement count, then removing itself;
+- restoration proved: identical counts, identical settings, identical column digest, same services, same
+  release.
+
+**NOT PROVEN, counted as neither pass nor failure:** a deliberate Central outage drill (Production Central must
+not be disrupted; this appliance is unenrolled, so that outage state is already the running state); a live
+rollback of the appliance schema (destructive on the system under acceptance — rehearsed at 65/0 in the
+reproducible environment); a real purge or archive (needs an external receipt authority this environment does
+not lawfully hold — the fail-closed gate that depends on it is proved instead).
+
+### 6.3 The final real reboot — **24/0**
+
+`deploy/scripts/phase7-final-reboot.sh`. The reboot is the evidence: the kernel boot id changed
+(`291095eb…` → `05461c40…`, uptime 45s at first contact), so this is a boot and not a restart.
+
+After it, **with no operator action of any kind**: all six services came back by themselves and the appliance
+converged to **serving** 10s after ssh answered; schema, durable state and runtime roles survived exactly; the
+Hotel Admin release is the expected DARK one; `scd` still does not mount its Phase-6 endpoints; the
+per-appliance setting is still OFF; financial egress is still zero on all three counts; no synthetic session
+was started or left open; and the Central-only names are still refused.
+
+An earlier attempt reported five services down and was wrong to: it asserted at 44s of uptime, inside the
+machine's normal startup window. It now waits, bounded, for convergence to *serving* rather than *active* —
+waiting is measurement, and the script still starts, enables, reloads and fixes nothing.
+
+### 6.4 Open items
+
+Phase 7 is **IN_PROGRESS and unaccepted**; acceptance is the Product Owner's decision and is not claimed here.
 
 ---
 

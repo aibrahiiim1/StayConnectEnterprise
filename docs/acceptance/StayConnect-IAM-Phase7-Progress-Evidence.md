@@ -100,7 +100,24 @@ accepted history into a fresh private cluster and reaches semantic digest
 constraints with grouping preserved, indexes, triggers, function bodies and configuration, object ownership,
 the complete role-security surface, memberships, and every grant and function privilege with no allowlist.
 
-**What remains open is appliance-side M4 only**, and it is not claimed until it is run.
+**Appliance-side M4 has now been run.** `deploy/scripts/phase7-appliance-m4.sh` is **70/0 with 3 NOT PROVEN**
+against the real services, roles, listeners and schema: the DARK baseline captured before anything ran and
+proved unchanged afterwards; the PUBLIC-executable definer finding attempted as the real `svc_scd` role and
+shown inert; runtime-role boundaries; the financial core dark with zero postings, outbox rows, payments and
+attempts; `scd` not mounting its Phase-6 endpoints at all while the portal returns the uniform non-success;
+Hotel Admin on the expected release and closed to the unauthenticated; the appliance refusing the Central-only
+names; guest and admin over one database; accounting, shaping and enforcement live; and a real
+`pg_dump`/`pg_restore` into a fresh database that reproduces the same table and row counts and then removes
+itself.
+
+The three NOT PROVEN lines are counted as neither pass nor failure: a deliberate Central outage drill, a live
+rollback of the appliance schema, and a real purge/archive with external receipt authority.
+
+**The final reboot was real.** `deploy/scripts/phase7-final-reboot.sh` is **24/0**, and the kernel boot id
+changed (`291095eb…` → `05461c40…`) because a service restart is not reboot evidence. Everything came back
+with no operator action, and everything that was dark is still dark.
+
+Phase 7 remains **IN_PROGRESS and unaccepted**.
 
 ### A privilege observation, resolved
 
