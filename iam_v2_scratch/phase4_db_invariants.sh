@@ -92,13 +92,18 @@ q "UPDATE iam_v2.pms_interface_runtime
 #    all. Asserting freshness there failed the gate on the absence of a table the era is not supposed to have.
 #    That is not a skipped proof: in the pre-0011 era there is no freshness surface and no case that depends
 #    on one, so there is nothing to prove and nothing is counted either way.
-if [ "$(q "SELECT (to_regclass('iam_v2.pms_interface_runtime') IS NOT NULL)::text;")" = "true" ]; then
+#    The guard is on the ROW, not the table. The table can exist in an era that has not yet seeded a runtime row
+#    for this interface, and then the freshness SELECT returns the empty string -- which is exactly how this
+#    check failed the financial gate after being written to test for the table alone.
+if [ "$(q "SELECT (count(*) > 0)::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname='iam_v2' AND c.relname='pms_interface_runtime';")" = "true" ] &&
+   [ "$(q "SELECT (count(*) > 0)::text FROM iam_v2.pms_interface_runtime WHERE pms_interface_id='$IF1';")" = "true" ]; then
   fresh="$(q "SELECT (now() - last_heartbeat_at < interval '30 seconds')::text
                 FROM iam_v2.pms_interface_runtime WHERE pms_interface_id='$IF1';")"
   [ "$fresh" = "true" ] && ok "SETUP" "the interface heartbeat is fresh, which these cases assume and do not test" \
     || no "SETUP" "establish interface freshness" "heartbeat is not fresh (got '$fresh'); the cases below would fail on the clock"
 else
-  echo "  NOTE  SETUP      this era has no iam_v2.pms_interface_runtime, so no freshness precondition applies"
+  echo "  NOTE  SETUP      this era has no runtime row for the interface, so no freshness precondition applies"
 fi
 
 echo "===== PHASE-4 FINANCIAL DB INVARIANTS (behavioural) ====="
