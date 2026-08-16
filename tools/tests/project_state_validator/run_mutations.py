@@ -250,21 +250,41 @@ def _anchor(actions, *words):
         .format(", ".join(words), actions))
 
 CUR_GOV_MAINT = _anchor(_STATE_DOC["allowed_actions"], "governance", "documentation")
-# The first phase the state file records as NOT_STARTED. Used by the "two current phases" mutation, which
-# needs a phase that is genuinely not current in order to make a second one.
-CUR_NOT_STARTED_PHASE = next(
-    (k for k, v in sorted(_STATE_DOC["phases"].items())
-     if isinstance(v, dict) and v.get("status") == "NOT_STARTED"),
-    None)
-if CUR_NOT_STARTED_PHASE is None:
+# A phase that is genuinely NOT the current one, used by the "two current phases" mutation to make a second.
+#
+# It was the first NOT_STARTED phase, and the suite aborted with "every phase is started, so the mutation has
+# no target -- the case needs rewriting when it happens". It happened: D26 moved Phase 7 from NOT_STARTED to
+# AUTHORIZED, so every phase in the roadmap is now started. That abort was the fixture behaving correctly --
+# refusing to run a case with no target rather than reporting a pass it did not earn, which is precisely the
+# failure M46 and M48 suffered silently for a whole phase.
+#
+# The rewrite: prefer a NOT_STARTED phase while one exists, and otherwise take the highest-numbered CLOSED
+# phase. Promoting a closed phase to IN_PROGRESS is a sharper contradiction than promoting an unstarted one --
+# it produces two current phases AND a phase that is simultaneously accepted and in progress -- so the case
+# gets stronger as the roadmap fills up rather than expiring.
+def _second_current_phase(phases):
+    unstarted = sorted(k for k, v in phases.items()
+                       if isinstance(v, dict) and v.get("status") == "NOT_STARTED")
+    if unstarted:
+        return unstarted[0]
+    closed = sorted((k for k, v in phases.items()
+                     if isinstance(v, dict) and str(v.get("status", "")).startswith("ACCEPTED")),
+                    key=lambda k: (len(k), k))
+    if closed:
+        return closed[-1]
     raise SystemExit(
-        "FIXTURE ANCHOR DRIFT: every phase is started, so the 'two current phases' mutation has no target. "
-        "That is a real change in the project, not a defect: the case needs rewriting when it happens.")
+        "FIXTURE ANCHOR DRIFT: no phase is NOT_STARTED and none is accepted/closed, so the 'two current "
+        "phases' mutation has no target at all. That is a real change in the project, not a defect.")
+
+CUR_NOT_STARTED_PHASE = _second_current_phase(_STATE_DOC["phases"])
 # The blockers sentence is rewritten on every phase closure ("... Phase 3 is ACCEPTED and CLOSED" became
 # "... Phase 4 is ACCEPTED AND CLOSED"), so pinning its wording drifted the same way the other anchors did.
 CUR_BLOCKER_HEAD = _STATE_DOC["blockers"][0][:48]
-CUR_PHASE_BEYOND = next(a for a in _STATE_DOC["prohibited_actions"]
-                       if a.startswith("Implementing any Phase beyond"))
+# Matched on WORDS through _anchor, not on a prefix. A bare next() over a startswith raises StopIteration and
+# aborts the whole suite with a traceback that reads like the repository is broken -- which is exactly the
+# failure mode the comments above this block were written about. The wording moved again at Phase 7
+# ("Implementing work beyond the authorized Phase 7 scope"), so the anchor follows the words.
+CUR_PHASE_BEYOND = _anchor(_STATE_DOC["prohibited_actions"], "beyond", "phase")
 CUR_TRANSITION = json.load(_io.open(
     os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))["latest_transition_id"]
 
