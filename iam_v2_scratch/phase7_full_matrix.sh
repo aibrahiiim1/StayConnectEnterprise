@@ -124,11 +124,16 @@ echo
 
 if [ "$ONLY_PHASE7" = "0" ]; then
   echo "-- Phase 3: stay domain, resolution, checkout grace (contract D, F) --"
-  NEED_CONTAINER="${P3_CONTAINER:-iamv2-scratch}" run phase3_lifecycle "phase3 lifecycle (0010)" \
+  # SELF-BUILDING GATES GET NO CONTAINER REQUIREMENT. phase3 and phase4-financial create and destroy
+  # their own disposable container, and each builds the schema of ITS OWN ERA -- phase3 asserts a
+  # 49-table Phase-2-era iam_v2 and would fail against the complete Phase-6 schema. Demanding a
+  # pre-existing container for them was a defect in this runner: it reported SKIPPED for gates that
+  # were perfectly able to run, and in strict mode a skip is a failure. Era-scoped is not stale.
+  run phase3_lifecycle "phase3 lifecycle (0010)" \
       phase3_0010_lifecycle.sh IGNORE=1
 
   echo "-- Phase 4: financial core, DARK (contract E) --"
-  NEED_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" run phase4_financial "phase4 financial (0011)" \
+  run phase4_financial "phase4 financial (0011)" \
       phase4_0011_financial.sh IGNORE=1
   NEED_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" run phase4_db_invariants "phase4 db invariants" \
       phase4_db_invariants.sh SCRATCH_CONTAINER="${P4_CONTAINER:-iamv2-p4gate}" \
