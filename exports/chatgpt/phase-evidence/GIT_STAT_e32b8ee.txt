@@ -1,0 +1,4 @@
+commit e32b8ee0aa8437f1bd8b2c730edefa95f4126107
+Date:   Sun Aug 16 10:38:35 2026 +0300
+
+    Phase 6 (delivery_head): acceptance-round manifest + rebuilt packs + pointer + report-embedded manifest

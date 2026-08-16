@@ -1,4 +1,0 @@
-commit 200bb37416ac4720f2a4e091b8a6c0d54dad0ce7
-Date:   Sun Aug 16 10:38:05 2026 +0300
-
-    Phase 6: next_authorized_action is one action again, and the legacy Phase-4 scope guard is satisfied
