@@ -311,11 +311,11 @@
   ],
   "prohibited_actions": [
     "IAM-v2 production cutover, production data migration, dual read/write, legacy IAM removal, real guest service, real PMS financial posting, real payment-provider traffic, paid-access activation, per-property financial enablement and programmatic reversal. Each is a separate Product-Owner go-live decision and none is authorized by D26.",
-    "Enabling any Phase-4, Phase-5 or Phase-6 capability on any environment outside a controlled, restored DEVELOPMENT-appliance validation run.",
+    "Enabling any Phase 4, Phase 5 or Phase 6 capability on any environment outside a controlled, restored DEVELOPMENT-appliance validation run.",
     "Any Production contact or mutation.",
-    "Implementing work beyond the authorized Phase-7 scope."
+    "Implementing work beyond the authorized Phase 7 scope."
   ],
-  "next_authorized_action": "Merge PR #14 to master now that Phase 6 is accepted and closed (D26/T0061), record the merge receipt, and then execute the authorized Phase-7 full-system re-acceptance on branch phase/7-full-system-reacceptance as one PR and approximately four substantial milestones. Production cutover, production data migration, dual read/write, legacy IAM removal, real guest service, real PMS financial posting, real payment-provider traffic, paid-access activation, per-property financial enablement and programmatic reversal remain UNAUTHORIZED and are a separate Product-Owner go-live decision.",
+  "next_authorized_action": "Execute the authorized Phase-7 full-system re-acceptance under D26 on branch phase/7-full-system-reacceptance as one pull request and approximately four substantial end-to-end milestones, proving the already-built system works as one complete IAM domain with every future-facing capability DARK except where a validation procedure requires controlled temporary enablement on the authorized DEVELOPMENT appliance with guaranteed restoration afterwards.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase6-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D26",
