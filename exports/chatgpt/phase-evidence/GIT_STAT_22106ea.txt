@@ -1,0 +1,4 @@
+commit 22106eac47e37d14e5892115a295f4cd7b16e295
+Date:   Sun Aug 16 03:50:37 2026 +0300
+
+    gofmt: a missing blank line of mine, and an import block that predates this branch
