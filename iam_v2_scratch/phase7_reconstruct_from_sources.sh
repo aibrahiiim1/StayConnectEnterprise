@@ -83,13 +83,30 @@ done
 eq "L1 the edge/public schema applied (0001-0008)" "$n" "8"
 [ -z "$bad" ] || no "L1 failures" "$bad"
 
-# mg0's anchor: mg1's composite foreign keys reference public.guest_networks(tenant_id, site_id, id), and
-# without a unique constraint on exactly those columns mg1 fails with "no unique constraint matching given
-# keys". It is a CONCURRENTLY build in the original, which cannot run inside a transaction block.
-docker exec -i "$C" psql -U postgres -d "$DB" -qc \
-  "CREATE UNIQUE INDEX IF NOT EXISTS guest_networks_tsi_anchor ON public.guest_networks (tenant_id, site_id, id);
-   GRANT ALL ON SCHEMA public TO iam_v2_owner;
-   GRANT ALL ON ALL TABLES IN SCHEMA public TO iam_v2_owner;" </dev/null >/dev/null 2>&1
+# MG-0, AS THE ACCEPTED HISTORY RAN IT. The Phase-1A record: "MG-0 (non-transactional): CREATE UNIQUE INDEX
+# CONCURRENTLY guest_networks_tsi_anchor ON public.guest_networks (tenant_id, site_id, id)", executed by the
+# superuser, and AC-03 records "public schema unchanged except the MG-0 anchor".
+#
+# THE PRIVILEGES ARE THE HISTORICAL MINIMUM, read from the appliance rather than chosen for convenience. It
+# grants iam_v2_owner exactly REFERENCES on public.guest_networks and INSERT/SELECT on public.schema_migrations
+# -- nothing else. An earlier version granted ALL ON SCHEMA public and ALL ON ALL TABLES to make the build
+# pass; that is an over-grant which contradicts AC-03 and would have made the reconstruction a laxer system
+# than the one it claims to reproduce.
+docker exec -i "$C" psql -U postgres -d "$DB" -qc "
+  SET ROLE $SU;
+  CREATE UNIQUE INDEX IF NOT EXISTS guest_networks_tsi_anchor ON public.guest_networks (tenant_id, site_id, id);
+  GRANT REFERENCES ON public.guest_networks TO iam_v2_owner;
+  GRANT INSERT, SELECT ON public.schema_migrations TO iam_v2_owner;" </dev/null >/dev/null 2>&1
+eq "L2 iam_v2_owner holds ONLY the historical minimum on public.guest_networks" \
+   "$(q "SELECT string_agg(privilege_type, ',' ORDER BY privilege_type)
+           FROM information_schema.role_table_grants
+          WHERE table_schema='public' AND table_name='guest_networks' AND grantee='iam_v2_owner'")" "REFERENCES"
+eq "L2 ...and only INSERT/SELECT on public.schema_migrations" \
+   "$(q "SELECT string_agg(privilege_type, ',' ORDER BY privilege_type)
+           FROM information_schema.role_table_grants
+          WHERE table_schema='public' AND table_name='schema_migrations' AND grantee='iam_v2_owner'")" "INSERT,SELECT"
+eq "L2 iam_v2_owner was NOT granted the public schema itself (AC-03: public unchanged)" \
+   "$(q "SELECT (COALESCE(nspacl::text,'') NOT LIKE '%iam_v2_owner%')::text FROM pg_namespace WHERE nspname='public'")" "true"
 eq "L2 the mg0 guest-network anchor exists" \
    "$(q "SELECT count(*) FROM pg_indexes WHERE indexname='guest_networks_tsi_anchor'")" "1"
 
@@ -112,14 +129,44 @@ done
 eq "L2b Gate-P created the runtime service roles" \
    "$(q "SELECT count(*) FROM pg_roles WHERE rolname IN ('svc_scd','svc_edged','svc_acctd','svc_netd')")" "4"
 
-# ---- L3: Phases 2 through 6, as the superuser -----------------------------------------------------------------
+# ---- L3: Phases 2 through 6, and the identity CHANGES AT PHASE 5 --------------------------------------------
+#
+# Established from the appliance, not assumed. Its iam_v2 objects are owned in exactly two groups:
+#
+#   iam_v2_owner   68 tables, 111 functions   -- everything up to and including Phase 4
+#   stayconnect     6 tables,  25 functions   -- every Phase-5 and Phase-6 object, by name:
+#                                                appliance_product_settings, appliance_product_setting_changes,
+#                                                guest_device_actions, entitlement_termination_evidence,
+#                                                online_time_skipped_intervals, session_online_watermarks,
+#                                                and the p5_*/p6_* functions
+#
+# So the first historical layer where the divergence appears is PHASE 5 (0027): from there on the migrations
+# were applied as the superuser directly, while 0009-0026 were applied as the schema owner. That also explains
+# the 182 "missing" grants without inventing anything -- their grantor is iam_v2_owner itself, so they are
+# IMPLICIT OWNER privileges that appear simply because the owner owns the table. Nothing granted them, and a
+# blanket reassignment to reproduce them would have been reproducing a symptom.
 n=0; bad=""
-for f in "$ROOT"/data-plane/migrations/00[0-4][0-9]_*.up.sql; do
+for f in "$ROOT"/data-plane/migrations/00[0-2][0-9]_*.up.sql; do
   case "$(basename "$f")" in 000[1-8]_*) continue ;; esac
+  case "$(basename "$f")" in 002[7-9]_*) continue ;; esac      # 0027+ belongs to L3b
+  if e="$(apply_as iam_v2_owner "$f")"; then n=$((n+1)); else bad="$bad $(basename "$f" .up.sql):$e"; fi
+done
+eq "L3a Phases 2-4 applied as iam_v2_owner (0009-0026)" "$n" "18"
+[ -z "$bad" ] || no "L3a failures" "$(printf '%s' "$bad" | cut -c1-200)"
+
+n=0; bad=""
+for f in "$ROOT"/data-plane/migrations/002[7-9]_*.up.sql "$ROOT"/data-plane/migrations/00[3-4][0-9]_*.up.sql; do
   if e="$(apply_as "$SU" "$f")"; then n=$((n+1)); else bad="$bad $(basename "$f" .up.sql):$e"; fi
 done
-eq "L3 Phases 2-6 applied (0009-0047)" "$n" "39"
-[ -z "$bad" ] || no "L3 failures" "$(printf '%s' "$bad" | cut -c1-200)"
+eq "L3b Phases 5-6 applied as the superuser (0027-0047)" "$n" "21"
+[ -z "$bad" ] || no "L3b failures" "$(printf '%s' "$bad" | cut -c1-200)"
+
+eq "L3 ownership matches the appliance: Phase-6 tables belong to the superuser" \
+   "$(q "SELECT pg_get_userbyid(relowner) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE n.nspname='iam_v2' AND c.relname='appliance_product_settings'")" "$SU"
+eq "L3 ownership matches the appliance: Phase-3 tables belong to the schema owner" \
+   "$(q "SELECT pg_get_userbyid(relowner) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+          WHERE n.nspname='iam_v2' AND c.relname='stays'")" "iam_v2_owner"
 
 # ---- L4: the accepted role graph -------------------------------------------------------------------------
 #
