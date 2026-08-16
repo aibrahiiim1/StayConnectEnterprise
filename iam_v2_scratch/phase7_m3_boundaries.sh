@@ -103,14 +103,49 @@ case "$gda_ent" in
     no "the guest device audit could not be probed" "no entitlement exists to hang an action on" ;;
 esac
 
-apsc="$(q "SELECT count(*) FROM iam_v2.appliance_product_setting_changes")"
-if [ "${apsc:-0}" -gt 0 ] 2>/dev/null; then
-  refused "G the product-setting audit is append-only (UPDATE refused on a real row)" \
-    "UPDATE iam_v2.appliance_product_setting_changes SET new_value=true WHERE true"
+# THE PRODUCT-SETTING AUDIT, PROVED HERE RATHER THAN DEFERRED.
+#
+# This case used to end in `ok "NOT PROVEN here: ..."` when the table was empty -- a line that INCREMENTED THE
+# PASS COUNT while stating in its own text that nothing had been proved. A gate that scores its own unproven
+# cases as passes reports a number that means nothing, and the deferral was unnecessary: the gate can create
+# the row it needs. It seeds a real change row from the fixture's own appliance and operator, proves the row
+# exists, then attempts the edit against THAT row.
+# Both foreign keys point at PUBLIC, not iam_v2 -- apsc_appliance_must_exist -> public.appliances and the
+# operator key -> public.operators. Naming them iam_v2.* silently produced an empty result and a vacuous
+# UPDATE against nothing, which is precisely the failure this rewrite exists to remove.
+# SELF-SEEDING, because this gate promises to be fixture-free and the scratch database has no operator or
+# appliance rows at all. Without them the seed insert silently did nothing and the UPDATE that followed hit
+# zero rows -- "accepted" against an empty set, the same vacuity as an append-only test on an empty table.
+q "INSERT INTO public.tenants (id, slug, name) VALUES
+     ('77770000-0000-4000-8000-000000000001','phase7-m3','Phase 7 M3') ON CONFLICT DO NOTHING;
+   INSERT INTO public.sites (id, tenant_id, code, name) VALUES
+     ('77770000-0000-4000-8000-000000000002','77770000-0000-4000-8000-000000000001','P7M3','Phase 7 M3 site')
+     ON CONFLICT DO NOTHING;
+   INSERT INTO public.appliances (id, tenant_id, site_id, serial, name) VALUES
+     ('77770000-0000-4000-8000-000000000003','77770000-0000-4000-8000-000000000001',
+      '77770000-0000-4000-8000-000000000002','P7M3-SERIAL','Phase 7 M3 appliance') ON CONFLICT DO NOTHING;
+   INSERT INTO public.operators (id, tenant_id, email) VALUES
+     ('77770000-0000-4000-8000-000000000004','77770000-0000-4000-8000-000000000001','p7m3@example.invalid')
+     ON CONFLICT DO NOTHING;" >/dev/null
+eq "the gate seeded its own appliance and operator (it depends on no fixture)"    "$(q "SELECT (count(*) = 1)::text FROM public.appliances a JOIN public.operators o
+                 ON o.tenant_id = a.tenant_id WHERE a.serial='P7M3-SERIAL'")" "true"
+apsc_app="$(q "SELECT a.id||' '||a.tenant_id||' '||a.site_id FROM public.appliances a
+                 JOIN public.operators o ON o.tenant_id = a.tenant_id LIMIT 1")"
+apsc_op="$(q "SELECT o.id FROM public.operators o
+                JOIN public.appliances a ON a.tenant_id = o.tenant_id LIMIT 1")"
+if [ -n "$apsc_app" ] && [ -n "$apsc_op" ]; then
+  set -- $apsc_app
+  q "INSERT INTO iam_v2.appliance_product_setting_changes
+       (tenant_id, site_id, appliance_id, setting_key, old_value, new_value,
+        changed_by_operator_id, changed_by, change_reason)
+     VALUES ('$2','$3','$1','guest_device_self_service', false, true,
+             '$apsc_op', 'phase7-m3', 'append-only probe')" >/dev/null
+  eq "the product-setting audit has a real row to attempt an edit against"      "$(q "SELECT (count(*) > 0)::text FROM iam_v2.appliance_product_setting_changes
+            WHERE changed_by='phase7-m3'")" "true"
+  refused "G the product-setting audit is append-only (UPDATE refused on a real row)"     "UPDATE iam_v2.appliance_product_setting_changes SET new_value=false WHERE changed_by='phase7-m3'"
+  refused "G ...and DELETE is refused on it too"     "DELETE FROM iam_v2.appliance_product_setting_changes WHERE changed_by='phase7-m3'"
 else
-  # Stated as NOT PROVEN here rather than reported as a pass. The same protection is exercised against real
-  # rows on the appliance in M4, where product-setting changes actually happen.
-  ok "NOT PROVEN here: the product-setting audit is empty in this scratch database, so no edit can be attempted against it; the protection is exercised on the appliance in M4"
+  no "the product-setting audit could not be probed"      "the fixture has no appliance/operator pair to hang a change on"
 fi
 
 # ---- G: mixed-version safety, which Phase 6 proved is not hypothetical ------------------------------------
