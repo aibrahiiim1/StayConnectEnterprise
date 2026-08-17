@@ -1,4 +1,0 @@
-commit 24187343870811312ef67621cb9d45098963837c
-Date:   Mon Aug 17 15:47:53 2026 +0300
-
-    Phase 7 post-merge (delivery_head): manifest, packs and checksums
