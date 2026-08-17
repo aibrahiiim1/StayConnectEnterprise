@@ -1068,6 +1068,42 @@ def main():
                         % (field, ", ".join(enabled_envs)), STATE)
         ok("global IAM-v2 dark claims name their environment, given %s is enabled" % ", ".join(enabled_envs))
 
+    # ---- 8g. A DECISION ATTRIBUTED TO A TRANSITION THAT DOES NOT CARRY IT --------------------------------
+    #
+    # "D31/T0067" survived several rounds of review. Both ids are real, both appear in the register and the
+    # ledger, and every existing rule was satisfied -- so nothing noticed that T0067 records D30's wiring while
+    # D31 is carried by T0068. A pairing can be wrong while both halves are valid, and that is exactly the
+    # shape that reads as authoritative and is not.
+    #
+    # General: wherever current state writes "Dnn/Tmmmm" or "Dnn (transition Tmmmm)", the named transition must
+    # actually record that decision.
+    PAIR = re.compile(r"\b(D\d+)\s*(?:/|\s*\(transition\s*)\s*(T\d{4})\b")
+    seen = {}
+    for _f, txt in [(k, v) for k, v in state.items() if isinstance(v, str)] + \
+                   [(k, x) for k, v in state.items() if isinstance(v, list)
+                    for x in v if isinstance(x, str)]:
+        for dec, tr in PAIR.findall(txt):
+            seen.setdefault((dec, tr), _f)
+    bad_pairs = []
+    for (dec, tr), where in sorted(seen.items()):
+        rp = os.path.join(TRANSITIONS_DIR, "%s.json" % tr)
+        if not os.path.exists(rp):
+            bad_pairs.append("%s cites %s/%s but %s.json does not exist" % (where, dec, tr, tr))
+            continue
+        try:
+            rec = json.load(io.open(rp, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        if str(rec.get("decision", "")).strip() != dec:
+            bad_pairs.append("%s cites %s/%s but %s records decision %r"
+                             % (where, dec, tr, tr, rec.get("decision")))
+    if bad_pairs:
+        bad("decision-transition-attribution",
+            "current state pairs a decision with a transition that does not carry it -- %s"
+            % " | ".join(bad_pairs[:3]), STATE)
+    else:
+        ok("every decision/transition pair in current state is carried by the transition it names")
+
     # ---- 9. TRANSITION / PHASE-STATUS COHERENCE --------------------------------------------------------------------
     #
     # THE FALSE PASS THIS CLOSES. T0044 recorded new_state.phase_status = ACCEPTED_AND_CLOSED for phase 4, and
