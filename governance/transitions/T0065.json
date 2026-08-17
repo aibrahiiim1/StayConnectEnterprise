@@ -1,7 +1,7 @@
 {
   "transition_id": "T0065",
   "seq": 65,
-  "timestamp": "2026-08-17T13:05:00Z",
+  "timestamp": "2026-08-17T12:20:00Z",
   "record_type": "PHASE_7_PULL_REQUEST_MERGED_TO_MASTER",
   "previous_state": {
     "phase": "7",
@@ -33,7 +33,8 @@
     "expected_head_guard": "the merge request carried sha=47e65029e6af36a3d7ca30f686435c44750b4107, so a moved head would have been refused",
     "ci_at_the_merged_head": "governance SUCCESS; phase3-full-software-gate SUCCESS; phase4-financial-core-gate SUCCESS x2; phase5-post-stay-transfer-gate SUCCESS x2 -- 6 check runs from 4 workflows, all SUCCESS",
     "tree_identity": "master tree 5334821b15ee0944306bf52d73f8f1b62ed33df7 is byte-identical to the approved head's tree; the approved head is an ancestor of master",
-    "content_introduced_by_the_merge": "none"
+    "content_introduced_by_the_merge": "none",
+    "merged_at": "2026-08-17T12:14:58Z"
   },
   "runtime_effect": {
     "deployment": "none",
