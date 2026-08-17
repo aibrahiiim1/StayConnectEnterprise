@@ -221,8 +221,8 @@ move that specific digest component.
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `9cb25b8afc6a4753d75148455c577228c0fbd67a`
-- **HEAD commit:** `cceec21b2db6f4a2bb477478a9452806b3888a96`
-- **Provenance (generation HEAD = inventory_head):** `cceec21b2db6f4a2bb477478a9452806b3888a96`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `c644777a8dbd8b70d6e1173d3882245e8673d6d5`
+- **Provenance (generation HEAD = inventory_head):** `c644777a8dbd8b70d6e1173d3882245e8673d6d5`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `phase/7-full-system-reacceptance`
 - **Remote branch:** `origin/phase/7-full-system-reacceptance`
 - **Changed files:** 62
@@ -245,22 +245,22 @@ move that specific digest component.
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7 closure: reconcile current state with D27/T0064, and make the gate catch this class |
 | `docs/architecture/StayConnect-IAM-Phase7-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7 ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK (D27/T0064) |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7 closure: reconcile current state with D27/T0064, and make the gate catch this class |
-| `docs/manifests/Phase7-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
-| `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
+| `docs/manifests/Phase7-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
+| `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
 | `exports/chatgpt/phase-evidence/GIT_STAT_7b5b6b9.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
-| `exports/chatgpt/phase-evidence/GIT_STAT_cceec21.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
+| `exports/chatgpt/phase-evidence/GIT_STAT_c644777.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure delivery_head): acceptance manifest, packs and checksums |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 closure: reconcile current state with D27/T0064, and make the gate catch this class |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): manifest, packs and checksums |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
 | `exports/chatgpt/stayconnectenterprise/MIGRATION_RUNBOOK.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 closure: reconcile current state with D27/T0064, and make the gate catch this class |
 | `exports/chatgpt/stayconnectenterprise/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
@@ -269,7 +269,7 @@ move that specific digest component.
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (closure-correction delivery_head): re-rendered blocks, manifest, packs and checksums |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 7 ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK (D27/T0064) |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 7 closure: two current-state statements frozen at the moment they were written |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Phase 7 closure: a third copy of the stale sentence, and the rule that skipped it |
 | `governance/transitions/T0063.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
 | `governance/transitions/T0064.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 7 ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK (D27/T0064) |
 | `hotel-admin/e2e/phase4-financial-operator.spec.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 7: make the Phase-4 operator e2e deterministic at its locator |
@@ -293,7 +293,7 @@ move that specific digest component.
 | `iam_v2_scratch/phase7_reconstruct_from_sources.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 7 M4: a rebuildable gate environment, and the failures it explained |
 | `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 7 closure: two current-state statements frozen at the moment they were written |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 7 closure: repair the mutation fixture anchor my reword drifted |
-| `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 7 closure: two current-state statements frozen at the moment they were written |
+| `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 7 closure: a third copy of the stale sentence, and the rule that skipped it |
 
 ## Total diff statistics (`git diff --stat`)
 ```text
@@ -310,13 +310,13 @@ move that specific digest component.
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |    10 +-
  docs/architecture/StayConnect-IAM-Phase7-Plan.md   |     9 +-
  docs/context/StayConnect-IAM-Handoff.md            |    12 +-
- docs/manifests/Phase7-change-manifest.md           |   207 +
- .../reports/StayConnect-IAM-Phase7-Final-Report.md |   443 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |   Bin 312530 -> 313944 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |   Bin 118948 -> 120418 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |   Bin 42195 -> 42250 bytes
+ docs/manifests/Phase7-change-manifest.md           |   209 +
+ .../reports/StayConnect-IAM-Phase7-Final-Report.md |   445 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |   Bin 312530 -> 313943 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |   Bin 118948 -> 120419 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |   Bin 42195 -> 42255 bytes
  .../chatgpt/phase-evidence/GIT_STAT_7b5b6b9.txt    |     4 -
- .../chatgpt/phase-evidence/GIT_STAT_cceec21.txt    |     4 +
+ .../chatgpt/phase-evidence/GIT_STAT_c644777.txt    |     4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |     6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |     6 +-
  .../governance/decision-register.json              |     7 +
@@ -334,7 +334,7 @@ move that specific digest component.
  .../StayConnect-IAM-Phase1A-Plan.md                |    10 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |    10 +-
  governance/decision-register.json                  |     7 +
- governance/project-state.json                      |    59 +-
+ governance/project-state.json                      |    61 +-
  governance/transitions/T0063.json                  |    45 +
  governance/transitions/T0064.json                  |   120 +
  hotel-admin/e2e/phase4-financial-operator.spec.ts  |    20 +-
@@ -358,8 +358,8 @@ move that specific digest component.
  iam_v2_scratch/phase7_reconstruct_from_sources.sh  |   407 +
  tools/tests/current_state_parity/run_negative.py   |   110 +
  .../tests/project_state_validator/run_mutations.py |    20 +-
- tools/validate-current-state-parity.py             |   184 +
- 62 files changed, 19891 insertions(+), 179 deletions(-)
+ tools/validate-current-state-parity.py             |   199 +
+ 62 files changed, 19911 insertions(+), 180 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -367,8 +367,8 @@ move that specific digest component.
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_9a5c39f.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_cceec21.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_c644777.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_cceec21.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -380,6 +380,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: c644777 Phase 7 closure: a third copy of the stale sentence, and the rule that skipped it
+HISTORICAL: b6cc983 Phase 7 (micro-correction delivery_head): re-rendered blocks, manifest, packs and checksums
 HISTORICAL: cceec21 Phase 7 closure: two current-state statements frozen at the moment they were written
 HISTORICAL: 73c17fd Phase 7 (closure-correction delivery_head): manifest, packs and checksums
 HISTORICAL: 9a5c39f Phase 7 closure: repair the mutation fixture anchor my reword drifted
