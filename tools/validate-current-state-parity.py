@@ -49,6 +49,9 @@ HISTORY_MARKERS = re.compile(
 )
 
 
+HIST_RX = re.compile(r"\b(?:was|were|previously|formerly|historical(?:ly)?|until|before|no longer|superseded|earlier wording)\b", re.I)
+
+
 def paragraphs(text):
     """Yield (paragraph, offset). A paragraph is the unit of labelling: a historical marker excuses the
     statements around it, not the whole file."""
@@ -819,6 +822,73 @@ def main():
                     break
             else:
                 ok("%s prints the current latest accepted decision (%s)" % (rel, pointer))
+
+    # ---- 8d. CURRENT STATE THAT CITES A SUPERSEDED DECISION, OR CALLS A CLOSED PROJECT ACTIVE --------------
+    #
+    # Two more survivors of the same closure, found after the previous correction was already green. Both are
+    # the identical failure shape as 8c -- a current field frozen at the moment it was written -- so they are
+    # checked the same way and stay general.
+    #
+    #   prohibited_actions[0]   "... none is authorized by D26."      D26 is no longer the latest decision, so
+    #                                                                 a reader checking D26 learns nothing about
+    #                                                                 what is authorized NOW. The prohibition is
+    #                                                                 right; its authority reference was stale.
+    #   service_routing_state   "... under active development and     every numbered development phase is
+    #                            controlled testing"                  closed, so this describes a project that
+    #                                                                 no longer exists in that state.
+    #
+    # RULE 1: a current field may not settle a question of authorization by citing a decision that has been
+    # superseded. Citing an older decision as HISTORY is fine and says so; citing it as the current authority
+    # is what goes stale silently.
+    SUPERSEDED = [i for i in accepted_ids if i != pointer] if pointer else []
+    AUTHORITY = re.compile(r"\b(?:authoriz(?:ed|es|ation)|permitted|allowed|granted)\b[^.;!?]{0,60}?\b(D\d+)\b"
+                           r"|\b(D\d+)\b[^.;!?]{0,60}?\b(?:authoriz(?:ed|es)|permits?|allows?|grants?)\b", re.I)
+    for field in ("blockers", "allowed_actions", "prohibited_actions", "next_authorized_action"):
+        val = state.get(field)
+        stale_cites = []
+        for text in ([val] if isinstance(val, str) else (val if isinstance(val, list) else [])):
+            if not isinstance(text, str):
+                continue
+            for _off, clause in split_clauses(text):
+                if HIST_RX.search(clause):
+                    continue
+                for m in AUTHORITY.finditer(clause):
+                    cited = m.group(1) or m.group(2)
+                    if cited in SUPERSEDED:
+                        stale_cites.append("%s cites %s: %s" % (field, cited, clause.strip()[:120]))
+        if stale_cites:
+            bad("superseded-decision-as-current-authority",
+                "a current field settles what is authorized by citing a SUPERSEDED decision (latest accepted is "
+                "%s) -- %s" % (pointer, " | ".join(stale_cites[:2])), STATE)
+    ok("no current field cites a superseded decision as the authority for what is authorized now")
+
+    # RULE 2: with every numbered development phase closed, no current field may describe the project as still
+    # under development. PRE-LIVE and controlled testing remain true and are not touched by this.
+    dev_phases = {ph: (body or {}).get("status", "") for ph, body in (state.get("phases") or {}).items()
+                  if isinstance(body, dict)}
+    open_phases = [ph for ph, st in dev_phases.items()
+                   if str(st).strip() not in ("ACCEPTED_AND_CLOSED", "FINAL_CLOSED")]
+    if dev_phases and not open_phases:
+        ACTIVE_DEV = re.compile(r"\bunder\s+active\s+development\b|\bactively\s+(?:developed|under\s+development)\b"
+                                r"|\bdevelopment\s+is\s+(?:ongoing|continuing|in\s+progress)\b", re.I)
+        hits = []
+        for field, val in state.items():
+            if field in ("phases", "roadmap_exhaustion") or not isinstance(val, (str, list)):
+                continue
+            for text in ([val] if isinstance(val, str) else val):
+                if not isinstance(text, str):
+                    continue
+                for _off, clause in split_clauses(text):
+                    if HIST_RX.search(clause):
+                        continue
+                    if ACTIVE_DEV.search(clause):
+                        hits.append("%s: %s" % (field, clause.strip()[:130]))
+        if hits:
+            bad("closed-project-described-as-active-development",
+                "every numbered phase is closed (%s), but current state still describes the project as under "
+                "active development -- %s" % (", ".join(sorted(dev_phases)), " | ".join(hits[:2])), STATE)
+        else:
+            ok("no current field describes the project as under active development now that every phase is closed")
 
     # ---- 9. TRANSITION / PHASE-STATUS COHERENCE --------------------------------------------------------------------
     #

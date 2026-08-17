@@ -702,6 +702,45 @@ def _(d):
         s2.replace(marker, "Latest accepted PO decision: `%s`" % stale))
 
 
+# ---- the two closure survivors: stale authority, and a closed project still called active ------------------
+#
+# Both were found after the previous correction was already green, and both are the same shape as the cases
+# above: a current field frozen at the moment it was written. Written against whatever the state currently
+# records, so they keep working after the next decision and the next closure.
+
+@case("a current prohibition settles what is authorized by citing a superseded decision",
+      "superseded-decision-as-current-authority")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    reg = json.load(io.open(os.path.join(d, "governance/decision-register.json"), encoding="utf-8"))
+    ids = [str(x.get("id")) for x in reg.get("decisions", []) if isinstance(x, dict) and x.get("accepted")]
+    nums = sorted(int(i[1:]) for i in ids if i.startswith("D") and i[1:].isdigit())
+    if len(nums) < 2:
+        raise AssertionError("the register has fewer than two accepted decisions to supersede between")
+    older = "D%d" % nums[-2]
+    acts = list(doc.get("prohibited_actions") or [])
+    acts.append("IAM-v2 production cutover and go-live: none is authorized by %s." % older)
+    doc["prohibited_actions"] = acts
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("current state calls the project under active development after every phase is closed",
+      "closed-project-described-as-active-development")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    phases = doc.get("phases") or {}
+    if any(str((b or {}).get("status", "")).strip() not in ("ACCEPTED_AND_CLOSED", "FINAL_CLOSED")
+           for b in phases.values() if isinstance(b, dict)):
+        raise AssertionError("a phase is still open in the fixture: this case has no subject")
+    srs = doc.get("service_routing_state")
+    if not isinstance(srs, str):
+        raise AssertionError("service_routing_state is not prose: the fixture anchor has drifted")
+    doc["service_routing_state"] = srs + " The system is under active development and controlled testing."
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
 def main():
     print("== baseline: the real repository must PASS ==")
     d = sandbox()
