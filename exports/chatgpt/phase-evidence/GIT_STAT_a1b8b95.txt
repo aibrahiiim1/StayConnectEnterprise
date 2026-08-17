@@ -1,4 +1,0 @@
-commit a1b8b957d9060235dc2dcc1338cebede06c20df7
-Date:   Mon Aug 17 01:23:18 2026 +0300
-
-    Phase 7: state the next action in the project's canonical vocabulary
