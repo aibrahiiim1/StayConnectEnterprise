@@ -1104,6 +1104,46 @@ def main():
     else:
         ok("every decision/transition pair in current state is carried by the transition it names")
 
+    # ---- 8h. AN EVENT ATTRIBUTED TO THE WRONG (BUT VALID) DECISION/TRANSITION PAIR -----------------------
+    #
+    # "Phase 7 merged under D31/T0068" passed rule 8g, because D31 really is carried by T0068. The PAIR was
+    # valid and the ATTRIBUTION was false: that pair belongs to the post-roadmap DEVELOPMENT trial, not to the
+    # merge, which was D28/T0065. Proving a pair exists is not proving it describes the event it is attached to.
+    #
+    # So the lifecycle events carry STRUCTURED fields (phase_lifecycle_authority) and prose is checked against
+    # them. This generalises to any event in that map, and needs no sentence-specific pattern.
+    auth = state.get("phase_lifecycle_authority") or {}
+    EVENT_WORDS = {"merged": r"merged", "accepted_and_closed": r"accepted[ _]and[ _]closed|accepted and closed"}
+    claims = []
+    for ph, events in auth.items():
+        if not isinstance(events, dict):
+            continue
+        for ev, rec in events.items():
+            if not isinstance(rec, dict) or ev not in EVENT_WORDS:
+                continue
+            want = "%s/%s" % (rec.get("decision"), rec.get("transition"))
+            # TEMPERED GAP. A plain [^.;!?]{0,40}? let "...ACCEPTED_AND_CLOSED and Phase 7 is MERGED to
+            # master (D28/T0065)" match the ACCEPTED event against the MERGE pair -- the rule inventing a
+            # contradiction inside a correct sentence. No other event keyword may sit between the event
+            # word and the pair it is judged against.
+            gap = r"(?:(?!merged|accepted)[^.;!?])"
+            rx = re.compile(r"\b(?:phase[\s\-]*%s\b%s{0,60}?)?(?:%s)\b%s{0,40}?\b(D\d+/T\d{4})\b"
+                            % (re.escape(str(ph)), gap, EVENT_WORDS[ev], gap), re.I)
+            for _f, txt in [(k, v) for k, v in state.items() if isinstance(v, str)] + \
+                           [(k, x) for k, v in state.items() if isinstance(v, list)
+                            for x in v if isinstance(x, str)]:
+                for m in rx.finditer(txt):
+                    got = m.group(1)
+                    if got != want and str(ph) in m.group(0).lower().replace("phase", "").replace(" ", ""):
+                        claims.append("%s attributes phase %s '%s' to %s, but the lifecycle record says %s"
+                                      % (_f, ph, ev, got, want))
+    if claims:
+        bad("event-attribution-vs-lifecycle-record",
+            "current state attributes a lifecycle event to a decision/transition that did not carry it -- %s"
+            % " | ".join(sorted(set(claims))[:3]), STATE)
+    else:
+        ok("every lifecycle-event attribution in current state matches phase_lifecycle_authority")
+
     # ---- 9. TRANSITION / PHASE-STATUS COHERENCE --------------------------------------------------------------------
     #
     # THE FALSE PASS THIS CLOSES. T0044 recorded new_state.phase_status = ACCEPTED_AND_CLOSED for phase 4, and
