@@ -1,0 +1,4 @@
+commit 40340a8d60c1a59f7cd906723546c5ac03c18588
+Date:   Mon Aug 17 22:09:00 2026 +0300
+
+    Transition receipts: stamp each before the commit that introduced it
