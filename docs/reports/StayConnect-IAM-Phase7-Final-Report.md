@@ -3,13 +3,14 @@
 <!-- MACHINE ASSERTION - validated by tools/project-state.py -->
 <!-- PHASE: 7 -->
 <!-- STATUS: ACCEPTED_AND_CLOSED -->
-<!-- MERGE_STATE: PR_OPEN_UNMERGED -->
+<!-- MERGE_STATE: PR_MERGED -->
 
 > **Phase 7 is ACCEPTED AND CLOSED** at **VERIFIED FULL-SYSTEM LIVE-DARK** maturity by Product-Owner decision
 > **D27** (2026-08-17, transition **T0064**) at delivery head `16819aa027633b84486999451e8b689a191a15d2`.
 >
-> **PR #15 remains OPEN and UNMERGED** pending a separate Product-Owner merge decision. The acceptance
-> authorizes no merge, no cutover, no enablement, no data migration, no dual read/write, no legacy IAM removal,
+> **PR #15 was MERGED** to master on 2026-08-17 under Product-Owner merge decision **D28** (transition
+> **T0065**), merge commit `9c57c2b5a29eb886cf317912a9eb6a6da8ccb603`. The merge introduced no content beyond
+> the approved head and deployed nothing. Neither the acceptance nor the merge authorizes a cutover, no enablement, no data migration, no dual read/write, no legacy IAM removal,
 > no real guest, PMS, provider or financial traffic, no paid access, no per-property financial enablement and no
 > programmatic reversal. Production was never contacted.
 >
@@ -442,8 +443,8 @@ See the manifest's commit range in §10.
 
 ## 12. Branch and PR information
 
-Branch `phase/7-full-system-reacceptance`; PR #15, **open and unmerged** — acceptance does not authorize the
-merge, which is a separate Product-Owner decision.
+Branch `phase/7-full-system-reacceptance` (deleted after the merge, as merged phase branches are); PR #15
+**merged and closed** under D28/T0065, merge commit `9c57c2b5a29eb886cf317912a9eb6a6da8ccb603`.
 
 ## 13. Remote reachability of HEAD
 

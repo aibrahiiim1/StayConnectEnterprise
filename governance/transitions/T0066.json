@@ -1,0 +1,79 @@
+{
+  "transition_id": "T0066",
+  "seq": 66,
+  "timestamp": "2026-08-17T13:10:00Z",
+  "record_type": "POST_MERGE_GOVERNANCE_CLEANUP_AND_DEVELOPMENT_TRIAL_AUTHORIZED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "PHASE_7_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_IAM_V2_OPERATIONAL_TRIAL",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "note": "Not a numbered phase. The numbered Development Roadmap remains COMPLETE and no Phase 8 exists.",
+    "lifecycle": "post-roadmap DEVELOPMENT operational trial (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D29",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner authorization of 2026-08-17: finish the post-merge governance cleanup, then proceed automatically -- without returning for further approval -- into the DEVELOPMENT-appliance IAM-v2 operational trial on the authorized development appliance only.",
+  "post_merge_cleanup": {
+    "false_greens_fixed": [
+      "docs/architecture/StayConnect-IAM-Phase7-Plan.md presented PR #15 as OPEN and UNMERGED",
+      "docs/reports/StayConnect-IAM-Phase7-Final-Report.md carried MERGE_STATE: PR_OPEN_UNMERGED and matching prose",
+      "the merged GitHub PR #15 title and body still said ACCEPTED_AND_CLOSED, DO NOT MERGE and OPEN/UNMERGED",
+      "current_state_facts.phase7_status was IN_PROGRESS and operational_status was ACTIVE_DEVELOPMENT after the roadmap completed",
+      "T0065 claimed the DEVELOPMENT appliance was 'not contacted for this merge' when read-only verification had in fact been performed",
+      "docs/acceptance/StayConnect-IAM-Phase7-Progress-Evidence.md also presented PR #15 as open and unmerged -- found only when the new rule was widened to scan every committed plan, report and acceptance record"
+    ],
+    "validator_rules_added": [
+      "merged-phase-still-called-unmerged: no committed plan, report or acceptance record may present a merged phase's PR as open/unmerged or say DO NOT MERGE; the scan covers every such file, discovered rather than enumerated",
+      "machine-state-behind-phase-status: current_state_facts.phaseN_status may not read IN_PROGRESS for a phase recorded ACCEPTED_AND_CLOSED or FINAL_CLOSED",
+      "completed-roadmap-still-active-development: a roadmap recorded COMPLETE may not coexist with an ACTIVE_DEVELOPMENT machine status",
+      "runtime-contact-evidence-contradicts-itself: a receipt may not deny contacting an environment in a claim that also reports what was observed there; correcting or quoting the old wording is exempt"
+    ],
+    "rules_are_general": true,
+    "negative_suite": "63 -> 67 cases, each proved to fail for its own named rule and to pass once restored"
+  },
+  "development_trial_scope": {
+    "environment": "DEVELOPMENT appliance 172.21.60.23 only",
+    "authorized": [
+      "enable accepted IAM-v2 capabilities for hands-on DEVELOPMENT testing",
+      "set per-appliance product controls as needed for the trial",
+      "grant the DEVELOPMENT administrative test identity application-level permissions to exercise and inspect the product"
+    ],
+    "security_invariants_preserved": [
+      "tenant/site isolation",
+      "PMS Interface scoping",
+      "RN + G# verification",
+      "financial UNKNOWN fail-closed",
+      "package/PMS currency rules",
+      "audit requirements",
+      "device/stay ownership isolation",
+      "immutable package revisions",
+      "local-first/offline guarantees"
+    ],
+    "still_unauthorized": [
+      "Production contact or mutation",
+      "Production go-live",
+      "real hotel guest traffic",
+      "real PMS financial posting",
+      "real payment-provider traffic",
+      "paid-access financial activation",
+      "programmatic reversal",
+      "any irreversible external financial effect"
+    ]
+  },
+  "boundaries_observed": [
+    "no Production contact or mutation",
+    "no Production go-live",
+    "no IAM-v2 production cutover",
+    "no real guest, PMS, provider or financial traffic",
+    "no paid access",
+    "no numbered phase created; no Phase 8"
+  ],
+  "next": "Execute the authorized DEVELOPMENT-appliance IAM-v2 operational trial and verify it end to end on the running development services. Production remains PRE-LIVE with IAM-v2 not cut over."
+}

@@ -905,6 +905,136 @@ def main():
         else:
             ok("no current field describes the project as under active development now that every phase is closed")
 
+    # ---- 8e. A MERGED PHASE THAT THE REPOSITORY STILL CALLS UNMERGED, AND MACHINE STATE LEFT BEHIND -------
+    #
+    # After PR #15 merged, five current surfaces still described the world before it: the Phase-7 plan and the
+    # Final Report said "PR #15 remains OPEN and UNMERGED", the report's machine marker said
+    # MERGE_STATE: PR_OPEN_UNMERGED, current_state_facts.phase7_status said IN_PROGRESS, and
+    # operational_status said ACTIVE_DEVELOPMENT after the roadmap had completed. Prose rules could not see the
+    # machine markers, and the merged-PR rule only looked at OPEN pull requests -- so a merged PR's own body
+    # went unchecked precisely when it mattered.
+    #
+    # All of it is one shape: a merge or a closure happened and the records that describe it did not move.
+    merged_phases = {}
+    for ph, body in (state.get("phases") or {}).items():
+        if isinstance(body, dict) and body.get("merged"):
+            merged_phases[ph] = body
+
+    # (a) a committed plan or report for a MERGED phase may not present its PR as open, unmerged or unmergeable.
+    UNMERGED_CLAIM = re.compile(r"\b(?:remains?|is|are)\s+(?:\*\*)?open\s+and\s+unmerged\b"
+                                r"|\bopen\s+and\s+unmerged\b"
+                                r"|\bPR_OPEN_UNMERGED\b"
+                                r"|\bDO\s+NOT\s+MERGE\b", re.I)
+    if merged_phases:
+        # DOC_SURFACES is a Phase-3-era list of five files and does not include later phases' plans or reports,
+        # which is why this rule saw nothing while the Phase-7 plan and report both said "OPEN and UNMERGED".
+        # Every committed plan and final report is in scope, discovered rather than enumerated.
+        import glob as _glob
+        scan_rels = sorted(set(
+            [r for r in DOC_SURFACES if r.endswith(".md")] +
+            [os.path.relpath(f, ROOT).replace(os.sep, "/")
+             for pat in ("docs/architecture/*-Plan.md", "docs/reports/*-Final-Report.md",
+                         "docs/acceptance/*.md")
+             for f in _glob.glob(os.path.join(ROOT, pat))]))
+        for rel in scan_rels:
+            text = load_surface(rel)
+            if not text:
+                continue
+            hits = []
+            for para, _off in paragraphs(text):
+                if HIST_RX.search(para):
+                    continue
+                m = UNMERGED_CLAIM.search(para)
+                if m:
+                    hits.append(" ".join(para.split())[:140])
+            if hits:
+                bad("merged-phase-still-called-unmerged",
+                    "%s still presents a merged phase's pull request as open/unmerged or says DO NOT MERGE "
+                    "(merged phases: %s) -- %s" % (rel, ", ".join(sorted(merged_phases)), hits[0]), rel)
+        ok("no committed surface presents a merged phase's pull request as open, unmerged or do-not-merge")
+
+    # (b) machine-readable state for an accepted/merged phase may not still read IN_PROGRESS, and a completed
+    #     roadmap may not still read ACTIVE_DEVELOPMENT. These are values, not prose, so no prose rule sees them.
+    facts = state.get("current_state_facts") or {}
+    for ph, body in sorted((state.get("phases") or {}).items()):
+        if not isinstance(body, dict):
+            continue
+        st = str(body.get("status", "")).strip()
+        if st not in ("ACCEPTED_AND_CLOSED", "FINAL_CLOSED"):
+            continue
+        key = "phase%s_status" % ph.lower()
+        val = str(facts.get(key, "")).strip()
+        if val and ("IN_PROGRESS" in val.upper() or "AUTHORIZED" == val.upper()):
+            bad("machine-state-behind-phase-status",
+                "current_state_facts.%s is %r while phases[%s].status is %s -- a machine-readable value left "
+                "behind by the closure" % (key, val, ph, st), STATE)
+    ok("no machine-readable phase status contradicts a closed phase")
+
+    roadmap = state.get("roadmap_exhaustion") or {}
+    if str(roadmap.get("numbered_development_roadmap", "")).strip().upper() == "COMPLETE":
+        opstat = str(facts.get("operational_status", ""))
+        if "ACTIVE_DEVELOPMENT" in opstat.upper():
+            bad("completed-roadmap-still-active-development",
+                "the numbered roadmap is recorded COMPLETE but current_state_facts.operational_status is %r"
+                % opstat, STATE)
+        else:
+            ok("the completed roadmap is not contradicted by an ACTIVE_DEVELOPMENT machine status")
+
+    # (c) a receipt that denies contacting an environment IN THE SAME BREATH as reporting what it observed
+    #     there. Scoped to ONE field: the first version read the whole receipt, so Production's entirely
+    #     legitimate "not contacted and not mutated" collided with the appliance field saying it was contacted,
+    #     and it failed a truthful receipt. The detectable defect is narrower and real -- a single claim that
+    #     denies contact while carrying observations (a uptime, an HTTP code, row counts, a release path, a
+    #     service state) that can only have come from contacting the thing.
+    latest_rid = state.get("latest_transition_id")
+    if latest_rid:
+        rpath2 = os.path.join(TRANSITIONS_DIR, "%s.json" % latest_rid)
+        try:
+            rec = json.load(io.open(rpath2, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            rec = None
+        DENIES = re.compile(r"\bnot\s+contacted\b|\bnever\s+contacted\b|\bno\s+contact\b", re.I)
+        OBSERVED = re.compile(r"\buptime\b|\bhttp\s*\d{3}\b|\b404\b|\bstill\s+\d+\b|\brow counts?\b|"
+                              r"\breleases?/[\w.-]+\b|\bis-active\b|\bsystemctl\b|\bcounts? (?:are|were)\b|"
+                              r"\bobserved\b|\bmeasured\b", re.I)
+
+        def _vals(node, path=""):
+            if isinstance(node, str):
+                yield path, node
+            elif isinstance(node, dict):
+                for k, v in node.items():
+                    for x in _vals(v, path + "." + str(k)):
+                        yield x
+            elif isinstance(node, list):
+                for i, v in enumerate(node):
+                    for x in _vals(v, path + "[%d]" % i):
+                        yield x
+
+        if isinstance(rec, dict):
+            clash = []
+            for where, val in _vals(rec):
+                # Per clause, and historical/correcting clauses are exempt. A receipt that says the earlier
+                # wording "not contacted" was wrong is CORRECTING the defect, not committing it, and an early
+                # version of this rule failed exactly that honest sentence.
+                # Judged per FIELD, with the denial judged per clause. Per-clause on BOTH halves was too
+                # narrow: "not contacted for this change; uptime 14h32m and the endpoint still 404" puts the
+                # denial and the observation in adjacent clauses and slipped straight through. What matters is
+                # a live denial anywhere in a claim that also reports observations.
+                if not OBSERVED.search(val):
+                    continue
+                for _o, clause in split_clauses(val):
+                    if HIST_RX.search(clause):
+                        continue          # correcting or quoting the old wording is not committing the defect
+                    if DENIES.search(clause):
+                        clash.append("%s: %s" % (where, " ".join(clause.split())[:140]))
+                        break
+            if clash:
+                bad("runtime-contact-evidence-contradicts-itself",
+                    "%s denies contacting an environment in the same claim that reports what was observed "
+                    "there -- %s" % (latest_rid, clash[0]), rpath2)
+            else:
+                ok("%s never denies contact in the same claim that reports observations" % latest_rid)
+
     # ---- 9. TRANSITION / PHASE-STATUS COHERENCE --------------------------------------------------------------------
     #
     # THE FALSE PASS THIS CLOSES. T0044 recorded new_state.phase_status = ACCEPTED_AND_CLOSED for phase 4, and

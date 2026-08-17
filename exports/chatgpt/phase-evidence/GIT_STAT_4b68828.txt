@@ -1,4 +1,0 @@
-commit 4b68828eed38d137805f26b3ddcac523ce886b4d
-Date:   Mon Aug 17 15:47:44 2026 +0300
-
-    Phase 7 merge receipt: stamp T0065 at the time it was actually recorded

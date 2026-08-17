@@ -741,6 +741,68 @@ def _(d):
     io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
 
 
+# ---- the post-merge survivors: records that did not move when the merge did --------------------------------
+#
+# After PR #15 merged, five current surfaces still described the world before it, and a sixth (the progress
+# evidence) was only found when the rule was widened to scan every committed plan and report. Prose rules could
+# not see the machine markers, and the merged-PR rule had only ever looked at OPEN pull requests.
+
+@case("a merged phase's report still carries the machine marker PR_OPEN_UNMERGED",
+      "merged-phase-still-called-unmerged")
+def _(d):
+    doc = json.load(io.open(os.path.join(d, "governance/project-state.json"), encoding="utf-8"))
+    if not any((b or {}).get("merged") for b in (doc.get("phases") or {}).values() if isinstance(b, dict)):
+        raise AssertionError("no merged phase in the fixture: this case has no subject")
+    import glob as _g
+    reps = _g.glob(os.path.join(d, "docs/reports/*-Final-Report.md"))
+    if not reps:
+        raise AssertionError("no committed final report to regress")
+    f = sorted(reps)[-1]
+    txt = io.open(f, encoding="utf-8", newline="").read()
+    io.open(f, "w", encoding="utf-8", newline="").write(
+        txt + "\n\n<!-- MERGE_STATE: PR_OPEN_UNMERGED -->\n")
+
+
+@case("machine-readable phase status still reads IN_PROGRESS after the phase closed",
+      "machine-state-behind-phase-status")
+def _(d):
+    p2 = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p2, encoding="utf-8"))
+    closed = [ph for ph, b in (doc.get("phases") or {}).items()
+              if isinstance(b, dict) and str(b.get("status", "")).strip() in ("ACCEPTED_AND_CLOSED", "FINAL_CLOSED")]
+    if not closed:
+        raise AssertionError("no closed phase in the fixture")
+    ph = sorted(closed)[-1]
+    doc["current_state_facts"]["phase%s_status" % ph.lower()] = "IN_PROGRESS"
+    io.open(p2, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("a completed roadmap still carries an ACTIVE_DEVELOPMENT machine status",
+      "completed-roadmap-still-active-development")
+def _(d):
+    p2 = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p2, encoding="utf-8"))
+    if str((doc.get("roadmap_exhaustion") or {}).get("numbered_development_roadmap", "")).upper() != "COMPLETE":
+        raise AssertionError("the roadmap is not recorded COMPLETE in the fixture")
+    doc["current_state_facts"]["operational_status"] = "PRE_LIVE__ACTIVE_DEVELOPMENT_AND_CONTROLLED_TESTING"
+    io.open(p2, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("a receipt denies contacting an environment in the same claim that reports what it observed there",
+      "runtime-contact-evidence-contradicts-itself")
+def _(d):
+    p2 = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p2, encoding="utf-8"))
+    rid = doc.get("latest_transition_id")
+    if not rid:
+        raise AssertionError("no latest_transition_id to regress")
+    rp = os.path.join(d, "governance/transitions/%s.json" % rid)
+    rec = json.load(io.open(rp, encoding="utf-8"))
+    rec.setdefault("runtime_effect", {})["development_appliance"] = (
+        "not contacted for this change; uptime 14h32m and the endpoint still 404")
+    io.open(rp, "w", encoding="utf-8", newline="").write(json.dumps(rec, indent=2, ensure_ascii=False) + chr(10))
+
+
 def main():
     print("== baseline: the real repository must PASS ==")
     d = sandbox()

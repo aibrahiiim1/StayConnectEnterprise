@@ -15,7 +15,7 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "7",
-  "current_activity": "PHASE_7_ACCEPTED_AND_CLOSED_AND_MERGED",
+  "current_activity": "DEVELOPMENT_APPLIANCE_IAM_V2_OPERATIONAL_TRIAL",
   "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -305,22 +305,22 @@
   "pms_financial_state": "FIAS lookup-only in production. The Phase-4 financial layer is ACCEPTED AND CLOSED at verified LIVE-DARK maturity (D19/T0044) and is DEPLOYED DARK on the development appliance: migrations 0011-0026 applied to iam_v2 (68 tables, 0 rows), five NOLOGIN restricted roles, and the Phase-4 binaries and Hotel-Admin bundle in service. Every Phase-4 flag is OFF, every Phase-4 route returns 404, and no PS has been transmitted, no PA financially accepted, no folio debited, no provider CHARGE or REFUND issued and no paid access granted. folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED and per-property Tier-2 onboarding still mandatory.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
-    "No governance blocker. The numbered Development Roadmap is COMPLETE: Phase 0 is FINAL_CLOSED, Phases 1A through 7 are ACCEPTED_AND_CLOSED and Phase 7 is MERGED to master (D28/T0065). No development phase is open or authorized and no Phase 8 exists. StayConnect remains PRE-LIVE under controlled testing; IAM-v2 remains DARK and NOT cut over. Every further activity -- the DEVELOPMENT-appliance operational trial with IAM-v2 enabled, an IAM-v2 cutover, and Production go-live -- requires its own separate Product-Owner decision, and none is supplied by any current authorization."
+    "No governance blocker. The numbered Development Roadmap is COMPLETE (Phase 0 FINAL_CLOSED, Phases 1A through 7 ACCEPTED_AND_CLOSED, Phase 7 MERGED under D28/T0065) and no Phase 8 exists. A post-roadmap DEVELOPMENT-appliance IAM-v2 operational trial is authorized under D29/T0066 for the development appliance only. PRODUCTION remains PRE-LIVE with IAM-v2 not cut over; Production go-live and any real guest, PMS, provider or financial activity require their own separate Product-Owner decisions and none is supplied by any current authorization."
   ],
   "allowed_actions": [
-    "Maintain project governance, current-state parity and documentation for the closed phases and the completed roadmap.",
-    "Await a separate Product-Owner decision for any further lifecycle activity. None is authorized now."
+    "Execute the authorized DEVELOPMENT-appliance IAM-v2 operational trial (D29/T0066) on the development appliance only, including enabling accepted capabilities there and granting the DEVELOPMENT administrative test identity the application-level permissions needed to exercise the product.",
+    "Maintain project governance, current-state parity and documentation for the closed phases and completed roadmap."
   ],
   "prohibited_actions": [
-    "IAM-v2 production cutover, production data migration, dual read/write, legacy IAM removal, real guest service, real PMS financial posting, real payment-provider traffic, paid-access activation, per-property financial enablement and programmatic reversal. Each is a separate Product-Owner go-live decision and NONE is authorized by any current decision: the latest accepted decision is D28 (transition T0065), which authorized only the merge of PR #15 and its governance closure and explicitly authorized none of them. The DEVELOPMENT-appliance operational trial with IAM-v2 enabled is likewise not authorized yet and requires its own decision.",
+    "IAM-v2 production cutover, production data migration, dual read/write, legacy IAM removal, real guest service, real PMS financial posting, real payment-provider traffic, paid-access activation, per-property financial enablement and programmatic reversal. Each is a separate Product-Owner go-live decision and NONE is authorized by any current decision: the latest accepted decision is D29 (transition T0066), which authorizes only the DEVELOPMENT-appliance IAM-v2 operational trial on the development appliance and explicitly authorizes none of them.",
     "Enabling any Phase 4, Phase 5 or Phase 6 capability on any environment outside a controlled, restored DEVELOPMENT-appliance validation run.",
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "No further Phase-7 action is authorized -- Phase 7 is ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity (D27/T0064) and MERGED to master under D28/T0065, merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603. The numbered Development Roadmap is COMPLETE: Phase 0 is FINAL_CLOSED, Phases 1A through 7 are ACCEPTED_AND_CLOSED, no numbered development phase remains open and no Phase 8 exists. StayConnect remains PRE-LIVE under controlled testing and IAM-v2 remains DARK and NOT cut over. The next lifecycle activity requires its own separate Product-Owner decision and is NOT automatically Production go-live: the Product Owner has stated an intention to first run a DEVELOPMENT-appliance operational trial with IAM-v2 enabled there for hands-on product testing and iterative refinement, which is not authorized yet.",
+  "next_authorized_action": "Execute the authorized DEVELOPMENT-appliance IAM-v2 operational trial under D29 (transition T0066) on the development appliance 172.21.60.23 only, and verify it end to end on the running development services. It is a post-roadmap product-evaluation activity, not a numbered phase and not Phase 8, which does not exist. PRODUCTION remains PRE-LIVE with IAM-v2 NOT cut over, and Production go-live, real guest, PMS, provider and financial traffic and paid access all remain unauthorized.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D28",
+  "latest_accepted_po_decision": "D29",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -416,7 +416,7 @@
       "scripts/ci/phase3_evidence.py (modified)"
     ],
     "post_closure_operational_changes_note": "Caddy deployment configuration, the Caddy systemd unit sources and CI/operational tooling changed AFTER Phase-3 closure, under T0026 and T0027. No Phase-3 application binary, migration, schema, IAM-v2 authority, PMS behaviour or financial behaviour changed. Do not claim the whole deploy/ or scripts/ tree is identical to the accepted candidate.",
-    "current_activity": "PHASE_7_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "current_activity": "DEVELOPMENT_APPLIANCE_IAM_V2_OPERATIONAL_TRIAL",
     "live_increment9_executed": true,
     "live_increment9_executed_on": "2026-08-10",
     "live_increment9_item_verdicts": {
@@ -665,7 +665,7 @@
     "phase5_merged_pr": 13,
     "phase5_merge_recorded_at": "2026-08-14T22:25:11Z",
     "phase5_merge_receipt_timestamp_correction": "T0054 records PHASE_5_PULL_REQUEST_MERGED_TO_MASTER with timestamp 2026-08-14T22:20:00Z, which is 311 seconds EARLIER than the merge it records: GitHub's merged_at and the merge commit's committer date are both 2026-08-14T22:25:11Z. A receipt asserting an event it pre-dates is not evidence of that event. CORRECTED FORWARD by T0055 under D23; T0054 is preserved BYTE-FOR-BYTE and is not rewritten, because editing it to satisfy a rule invented afterwards would erase the only trace that the defect occurred. Only the timestamp was wrong -- the merge commit, its parents, the tree-equality proof, the pre-merge conditions and the check runs are unchanged and remain verified. tools/validate-transition-times.sh now refuses any merge receipt dated before the merge commit it names, and refuses a merge receipt that names none at all; tools/validate-merge-receipt-times-selftest.sh proves the rule catches this exact defect (311s) while still accepting T0048, the Phase-4 merge receipt written 17 seconds AFTER its merge.",
-    "operational_status": "PRE_LIVE__ACTIVE_DEVELOPMENT_AND_CONTROLLED_TESTING",
+    "operational_status": "PRE_LIVE__CONTROLLED_TESTING__DEVELOPMENT_ROADMAP_COMPLETE",
     "real_hotel_guest_operation_started": false,
     "real_hotel_staff_operation_started": false,
     "pre_live_clarification_decision": "D24",
@@ -690,16 +690,19 @@
     "phase6_acceptance_transition": "T0061",
     "phase6_delivery_head": "1bdf9bfbd96b7f0264d634183d5cc8e69904cbb9",
     "phase6_flags_off": true,
-    "phase7_status": "IN_PROGRESS",
+    "phase7_status": "ACCEPTED_AND_CLOSED_AND_MERGED",
     "phase6_merged": true,
     "phase6_merge_commit": "da6a14aba5f51300deac7ee3736f7fbbc8ab5d25",
     "phase6_merge_transition": "T0062",
     "phase7_scope_source": "FINAL contract section 18 (Phase 7 = cleanup, final docs/ops manual, full-system re-acceptance; gate = complete matrix) and its section 19 A-G Acceptance and Failure-Drill Matrix. NOT the migration runbook deployment numbering and NOT the commercial-onboarding numbering, both of which contain an unrelated Phase 7.",
-    "phase7_branch": "phase/7-full-system-reacceptance",
+    "phase7_branch": "phase/7-full-system-reacceptance (merged and deleted)",
     "post_phase7_remaining": "The atomic complete-domain IAM-v2 cutover, which the FINAL contract records as a LATER SEPARATELY APPROVED GATE after Phases 2-6 and full-domain acceptance. It is a Product-Owner go-live decision, not a development phase, and no current authorization supplies it.",
-    "phase7_active_milestone": "Phase 7 is COMPLETE and ACCEPTED. M1 (20/20), M2 (22/22), M3 (34/0) and M4 all closed: the complete cross-phase matrix is PHASE7_FULL_MATRIX = PASS (strict) with gates_run=20, skipped=0, unverdicted_or_crashed=0, pass=1262, fail=0; the DEVELOPMENT-appliance assembled-system acceptance is 70/0 with 3 explicit NOT PROVEN lines; and the final REAL reboot is 24/0. Nothing remains to execute."
+    "phase7_active_milestone": "Phase 7 is COMPLETE and ACCEPTED. M1 (20/20), M2 (22/22), M3 (34/0) and M4 all closed: the complete cross-phase matrix is PHASE7_FULL_MATRIX = PASS (strict) with gates_run=20, skipped=0, unverdicted_or_crashed=0, pass=1262, fail=0; the DEVELOPMENT-appliance assembled-system acceptance is 70/0 with 3 explicit NOT PROVEN lines; and the final REAL reboot is 24/0. Nothing remains to execute.",
+    "phase7_authorization_note": "Phase 7 is no longer authorized for execution because it is finished: ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK (D27/T0064) and MERGED to master (D28/T0065, merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The numbered Development Roadmap is COMPLETE and no numbered phase is open or authorized.",
+    "phase7_merged": true,
+    "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603"
   },
-  "latest_transition_id": "T0065",
+  "latest_transition_id": "T0066",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"

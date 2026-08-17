@@ -573,6 +573,13 @@
       "decided_on": "2026-08-17",
       "phase": "7",
       "accepted": true
+    },
+    {
+      "id": "D29",
+      "title": "DEVELOPMENT-APPLIANCE IAM-v2 OPERATIONAL TRIAL AUTHORIZED (2026-08-17). The Product Owner authorizes turning the authorized DEVELOPMENT appliance (172.21.60.23) from its accepted DARK state into an interactive IAM-v2 DEVELOPMENT TRIAL environment, so the already-built and accepted system can be exercised and evaluated hands-on instead of remaining permanently dark. THIS IS NOT PRODUCTION GO-LIVE and it is NOT the atomic complete-domain IAM-v2 cutover. It is a post-roadmap DEVELOPMENT operational trial / product-evaluation activity; it is NOT a numbered phase and NOT Phase 8, which does not exist. SCOPE: enable the accepted IAM-v2 capabilities needed for hands-on DEVELOPMENT testing on that appliance only, including the per-appliance product controls the accepted design provides; grant the designated DEVELOPMENT administrative test identity the application-level permissions needed to exercise and inspect the product comprehensively, without ordinary hotel-operator role restrictions blocking inspection of accepted capabilities. SECURITY INVARIANTS ARE NOT RELAXED. Tenant/site isolation, PMS Interface scoping, RN + G# verification, financial UNKNOWN fail-closed behaviour, package/PMS currency rules, audit requirements, device/stay ownership isolation, immutable package revisions, local-first/offline guarantees and every other accepted boundary remain in force. 'Full permissions' means application-level administrative reach for testing, not a weakened security model. STILL UNAUTHORIZED: Production contact or mutation, Production go-live, real hotel guest traffic, real PMS financial posting, real payment-provider traffic, paid-access financial activation, programmatic reversal, and any uncontrolled or irreversible Production action. A financial or external feature that cannot be exercised safely without real external traffic is to be exposed and verified only through its DEVELOPMENT-safe or DARK operator surface, with the limitation reported truthfully rather than simulated. No fabricated topology, PMS responses, protocol behaviour or evidence. The accepted Phase-7 limitations are preserved, including the three NOT PROVEN appliance items and the iam_v2.p5_controlled_operation_open PUBLIC EXECUTE cutover-hardening finding, which this authorization does not resolve.",
+      "decided_on": "2026-08-17",
+      "phase": "post-roadmap",
+      "accepted": true
     }
   ]
 }

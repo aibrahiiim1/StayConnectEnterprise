@@ -1,14 +1,14 @@
 # StayConnect Internet Access Management — Phase 0 Contract
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0065 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0066 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
-**Current activity:** `PHASE_7_ACCEPTED_AND_CLOSED_AND_MERGED`
+**Current activity:** `DEVELOPMENT_APPLIANCE_IAM_V2_OPERATIONAL_TRIAL`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
-**Single next authorized action:** No further Phase-7 action is authorized -- Phase 7 is ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity (D27/T0064) and MERGED to master under D28/T0065, merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603. The numbered Development Roadmap is COMPLETE: Phase 0 is FINAL_CLOSED, Phases 1A through 7 are ACCEPTED_AND_CLOSED, no numbered development phase remains open and no Phase 8 exists. StayConnect remains PRE-LIVE under controlled testing and IAM-v2 remains DARK and NOT cut over. The next lifecycle activity requires its own separate Product-Owner decision and is NOT automatically Production go-live: the Product Owner has stated an intention to first run a DEVELOPMENT-appliance operational trial with IAM-v2 enabled there for hands-on product testing and iterative refinement, which is not authorized yet.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D28`.
+**Single next authorized action:** Execute the authorized DEVELOPMENT-appliance IAM-v2 operational trial under D29 (transition T0066) on the development appliance 172.21.60.23 only, and verify it end to end on the running development services. It is a post-roadmap product-evaluation activity, not a numbered phase and not Phase 8, which does not exist. PRODUCTION remains PRE-LIVE with IAM-v2 NOT cut over, and Production go-live, real guest, PMS, provider and financial traffic and paid access all remain unauthorized.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D29`.
 <!-- END GENERATED PROJECT STATE -->
 
 

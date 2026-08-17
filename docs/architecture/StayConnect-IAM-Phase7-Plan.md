@@ -2,8 +2,9 @@
 ## Full-system re-acceptance: proving the built system is one working IAM domain
 
 **Status:** **ACCEPTED AND CLOSED** at **VERIFIED FULL-SYSTEM LIVE-DARK** maturity by Product-Owner decision
-**D27** (2026-08-17, transition **T0064**) at delivery head `16819aa027633b84486999451e8b689a191a15d2`. PR #15 remains **OPEN and UNMERGED** pending a
-separate merge decision. Phase 7 was the **last numbered development phase**; no Phase 8 exists or is
+**D27** (2026-08-17, transition **T0064**) at delivery head `16819aa027633b84486999451e8b689a191a15d2`. PR #15 was **MERGED** to master on 2026-08-17 under Product-Owner merge decision **D28** (transition
+**T0065**), merge commit `9c57c2b5a29eb886cf317912a9eb6a6da8ccb603`; the merge introduced no content and
+deployed nothing. Phase 7 was the **last numbered development phase**; no Phase 8 exists or is
 authorized, and the only major next lifecycle gate is the separately authorized atomic complete-domain IAM-v2
 cutover / go-live decision, which this acceptance does **not** authorize.
 

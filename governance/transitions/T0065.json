@@ -40,7 +40,7 @@
     "deployment": "none",
     "capability_enablement": "none",
     "iam_v2": "still DARK and NOT cut over",
-    "development_appliance": "unchanged, in its previously verified DARK state; not contacted for this merge",
+    "development_appliance": "UNCHANGED and in its previously verified DARK state. It WAS contacted, READ-ONLY, to verify that the merge changed nothing that runs: service states, the Hotel Admin release symlink, the scd Phase-6 endpoint (still 404), the per-appliance product setting (still off), financial row counts (all zero) and uptime (14h32m, the same boot as the Phase-7 final reboot, so nothing restarted or redeployed). No write, no configuration change, no capability enablement, no deployment. The earlier wording 'not contacted for this merge' was wrong: read-only verification is contact, and a receipt that denies it is not evidence.",
     "production": "not contacted and not mutated"
   },
   "roadmap_exhaustion": {

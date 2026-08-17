@@ -1,8 +1,9 @@
 # Phase 7 — full-system re-acceptance: progress evidence
 
 **Phase 7 is `ACCEPTED_AND_CLOSED`** at **VERIFIED FULL-SYSTEM LIVE-DARK** maturity — Product-Owner decision
-**D27** (2026-08-17), transition **T0064**, delivery head `16819aa027633b84486999451e8b689a191a15d2`. PR #15 remains **open and
-unmerged** pending a separate merge decision. Originally authorized by **D26** (2026-08-16).
+**D27** (2026-08-17), transition **T0064**, delivery head `16819aa027633b84486999451e8b689a191a15d2`. PR #15 was **MERGED** to master under
+Product-Owner merge decision **D28** (transition **T0065**), merge commit
+`9c57c2b5a29eb886cf317912a9eb6a6da8ccb603`; the merge introduced no content and deployed nothing. Originally authorized by **D26** (2026-08-16).
 Branch `phase/7-full-system-reacceptance`, from post-Phase-6 master `9cb25b8`.
 
 Scope reconciled from the FINAL contract §18 (Phase 7 = *cleanup, final docs/ops manual, full-system
