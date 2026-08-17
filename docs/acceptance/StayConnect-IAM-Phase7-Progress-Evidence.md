@@ -1,6 +1,8 @@
 # Phase 7 — full-system re-acceptance: progress evidence
 
-**Phase 7 is `IN_PROGRESS`.** Not accepted, not closed, not merged. Authorized by **D26** (2026-08-16).
+**Phase 7 is `ACCEPTED_AND_CLOSED`** at **VERIFIED FULL-SYSTEM LIVE-DARK** maturity — Product-Owner decision
+**D27** (2026-08-17), transition **T0064**, delivery head `16819aa027633b84486999451e8b689a191a15d2`. PR #15 remains **open and
+unmerged** pending a separate merge decision. Originally authorized by **D26** (2026-08-16).
 Branch `phase/7-full-system-reacceptance`, from post-Phase-6 master `9cb25b8`.
 
 Scope reconciled from the FINAL contract §18 (Phase 7 = *cleanup, final docs/ops manual, full-system
@@ -117,7 +119,8 @@ rollback of the appliance schema, and a real purge/archive with external receipt
 changed (`291095eb…` → `05461c40…`) because a service restart is not reboot evidence. Everything came back
 with no operator action, and everything that was dark is still dark.
 
-Phase 7 remains **IN_PROGRESS and unaccepted**.
+Phase 7 was subsequently **ACCEPTED AND CLOSED** on this evidence (D27 / T0064). The three NOT PROVEN items
+were **not promoted** by that acceptance.
 
 ### A privilege observation, resolved
 

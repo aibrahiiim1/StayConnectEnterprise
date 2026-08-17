@@ -1,13 +1,19 @@
-# StayConnect IAM — Phase 7 Final Report (IN_PROGRESS — NOT ACCEPTED, NOT CLOSED)
+# StayConnect IAM — Phase 7 Final Report (ACCEPTED AND CLOSED)
 
 <!-- MACHINE ASSERTION - validated by tools/project-state.py -->
 <!-- PHASE: 7 -->
-<!-- STATUS: IN_PROGRESS -->
+<!-- STATUS: ACCEPTED_AND_CLOSED -->
 <!-- MERGE_STATE: PR_OPEN_UNMERGED -->
 
-> **This report describes work in progress.** Phase 7 is not accepted and not closed, PR #15 is open and
-> unmerged by instruction, and nothing in it authorizes a cutover, an enablement, a data migration or any
-> real traffic. Production was never contacted.
+> **Phase 7 is ACCEPTED AND CLOSED** at **VERIFIED FULL-SYSTEM LIVE-DARK** maturity by Product-Owner decision
+> **D27** (2026-08-17, transition **T0064**) at delivery head `16819aa027633b84486999451e8b689a191a15d2`.
+>
+> **PR #15 remains OPEN and UNMERGED** pending a separate Product-Owner merge decision. The acceptance
+> authorizes no merge, no cutover, no enablement, no data migration, no dual read/write, no legacy IAM removal,
+> no real guest, PMS, provider or financial traffic, no paid access, no per-property financial enablement and no
+> programmatic reversal. Production was never contacted.
+>
+> Phase 7 was the **last numbered development phase**. No Phase 8 exists or is authorized.
 
 ---
 
@@ -25,7 +31,7 @@
 
 ---
 
-## 2. Current Phase and authorized scope
+## 2. Accepted scope and maturity
 
 Phase 7 is *"Cleanup, final docs/ops manual, full-system re-acceptance"* with the gate *"complete matrix"*
 (FINAL contract §18, §19 A–G). It consolidates; it does not reopen accepted phase internals without failing
@@ -173,9 +179,13 @@ An earlier attempt reported five services down and was wrong to: it asserted at 
 machine's normal startup window. It now waits, bounded, for convergence to *serving* rather than *active* —
 waiting is measurement, and the script still starts, enables, reloads and fixes nothing.
 
-### 6.4 Open items
+### 6.4 Acceptance
 
-Phase 7 is **IN_PROGRESS and unaccepted**; acceptance is the Product Owner's decision and is not claimed here.
+Accepted at **VERIFIED FULL-SYSTEM LIVE-DARK** by **D27 / T0064** on the evidence above. The three NOT PROVEN
+items in §6.2 were **not promoted** by the acceptance, and the `p5_controlled_operation_open` observation in §5
+remains a hardening / cutover-review finding — neither a PASS nor a blocker.
+
+The only outstanding item on this branch is the Product Owner's **separate merge decision** on PR #15.
 
 ---
 
@@ -401,7 +411,8 @@ See the manifest's commit range in §10.
 
 ## 12. Branch and PR information
 
-Branch `phase/7-full-system-reacceptance`; PR #15, **open and unmerged by instruction**.
+Branch `phase/7-full-system-reacceptance`; PR #15, **open and unmerged** — acceptance does not authorize the
+merge, which is a separate Product-Owner decision.
 
 ## 13. Remote reachability of HEAD
 
