@@ -1,0 +1,4 @@
+commit 55369df2676db6081b3cec389c92a1d5455983f3
+Date:   Tue Aug 18 01:46:54 2026 +0300
+
+    Correct the D31/T0067 attribution, and make that class fail Governance
