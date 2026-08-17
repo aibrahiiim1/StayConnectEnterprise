@@ -1035,6 +1035,39 @@ def main():
             else:
                 ok("%s never denies contact in the same claim that reports observations" % latest_rid)
 
+    # ---- 8f. AN ENVIRONMENT CALLED DARK WHILE ITS OWN RECORD SAYS IAM-v2 IS ENABLED THERE ------------------
+    #
+    # The DEVELOPMENT trial enabled IAM-v2 on one appliance while Production stayed dark. The global claims --
+    # "iam_v2 is dark", "no deployed service is routed to iam_v2", "legacy IAM is the configured baseline" --
+    # were then true of one environment and false of the other, and nothing noticed, because every rule read
+    # them as one answer about one world.
+    #
+    # The rule is general: if the state records a per-environment block saying IAM-v2 is ENABLED or WIRED in
+    # some environment, then a global dark/not-routed claim must say which environment it speaks for.
+    envs = state.get("environment_scoped_iam_state") or {}
+    enabled_envs = []
+    for name, body in envs.items():
+        if not isinstance(body, dict):
+            continue
+        blob = json.dumps(body).lower()
+        if ("enabled" in blob or "installed" in blob) and "not cut over" not in blob:
+            enabled_envs.append(name)
+    if enabled_envs:
+        SCOPED = re.compile(r"\bproduction scope\b|\bproduction only\b|\bon production\b|\bproduction:", re.I)
+        DARKISH = re.compile(r"\biam[_ ]?v2 is dark\b|\bremains dark\b|\bno service is routed to iam_v2\b|"
+                             r"\bno deployed service is routed\b", re.I)
+        for field in ("service_routing_state", "database_schema_state", "blockers"):
+            val = state.get(field)
+            for text in ([val] if isinstance(val, str) else (val if isinstance(val, list) else [])):
+                if not isinstance(text, str) or not DARKISH.search(text):
+                    continue
+                if not SCOPED.search(text):
+                    bad("unscoped-dark-claim-vs-enabled-environment",
+                        "%s makes a global IAM-v2 dark/not-routed claim while %s is recorded as having IAM-v2 "
+                        "enabled or wired; the claim must name the environment it speaks for"
+                        % (field, ", ".join(enabled_envs)), STATE)
+        ok("global IAM-v2 dark claims name their environment, given %s is enabled" % ", ".join(enabled_envs))
+
     # ---- 9. TRANSITION / PHASE-STATUS COHERENCE --------------------------------------------------------------------
     #
     # THE FALSE PASS THIS CLOSES. T0044 recorded new_state.phase_status = ACCEPTED_AND_CLOSED for phase 4, and

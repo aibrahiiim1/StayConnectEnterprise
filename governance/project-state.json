@@ -153,7 +153,11 @@
       "title": "Cleanup, final docs, full-system re-acceptance",
       "maturity": "ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity by Product-Owner decision D27 (2026-08-17) at delivery head 16819aa027633b84486999451e8b689a191a15d2 on branch phase/7-full-system-reacceptance (PR #15, which remains OPEN and UNMERGED pending a separate merge decision). The whole IAM domain built across Phases 2-6 was re-proved as ONE system, on an environment rebuilt from repository sources and on the authorized DEVELOPMENT appliance, with every future-facing capability OFF everywhere. Acceptance basis: reconstruction digest e7216a988642c9d5e44ca22478d4972d parts=2686 identical to the appliance; PHASE7_FULL_MATRIX = PASS (strict) gates_run=20 skipped=0 unverdicted_or_crashed=0 pass=1262 fail=0; fidelity mutation suite 23/23; matrix-runner mutation suite 20/20; appliance assembled-system M4 = 70/0; final REAL reboot = 24/0; PROJECT_STATE_MUTATION_TESTS 53/53; CURRENT_STATE_PARITY 23/0; negative parity 57/57; Zero-Stale PASS; required exact-head GitHub Actions green. Three appliance items remain NOT PROVEN and are NOT promoted (a deliberate Central outage drill, a live rollback of the appliance schema, a real purge/archive requiring external receipt authority), and the iam_v2.p5_controlled_operation_open PUBLIC EXECUTE observation is preserved as a hardening / cutover-review finding -- proved INERT on the assembled system, neither a PASS nor a blocker. Acceptance authorizes no merge, no cutover, no enablement, no data migration, no dual read/write, no legacy IAM removal, no real guest, PMS, provider or financial traffic, no paid access, no per-property financial enablement and no programmatic reversal.",
       "merged": true,
-      "merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603"
+      "merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
+      "merge_decision": "D28",
+      "merge_transition": "T0065",
+      "acceptance_decision": "D27",
+      "acceptance_transition": "T0064"
     }
   },
   "completed_milestones": [
@@ -301,7 +305,7 @@
     "migration_0011_to_0026_applied_in_production": false,
     "iam_v2_fingerprint_note": "Catalog fingerprint of the CURRENT live appliance schema (0011-0026 applied). The earlier value bd75026f is HISTORICAL and describes the 49-table Phase-1A schema. A catalog fingerprint includes ordinal_position and therefore is not stable across a migration rollback cycle; see iam_v2_scratch/schema_structure_fingerprint.sql for the structural comparison to use after a rollback."
   },
-  "service_routing_state": "Legacy public-schema IAM is the currently CONFIGURED authentication/routing baseline and the only path any deployed service is routed to. No service is routed to iam_v2, which remains dark at 0 rows and is NOT cut over. PRE-LIVE (D24/T0056): StayConnect has NOT yet entered real hotel guest/staff production operation -- no guest and no hotel user currently depends on either path for live service, and the system remains PRE-LIVE under controlled testing. Every numbered development phase is now closed (Phase 7 ACCEPTED_AND_CLOSED, D27/T0064), so the project is no longer under active development; what remains is the separately authorized cutover / go-live decision. The earlier wording, 'the SOLE PRODUCTION authority', described the configuration correctly and implied live hotel operation that has not begun. All four site-DB daemons (scd/edged/acctd/netd) connect under dedicated LEAST-PRIVILEGE Gate-P roles (svc_scd/svc_edged/svc_acctd/svc_netd; NOSUPERUSER, SCRAM) instead of superuser stayconnect -- reboot-validated 2026-07-18. All new auth features (durable throttle, keyed-HMAC OTP, IAM-v2) remain OFF (dark).",
+  "service_routing_state": "PRODUCTION SCOPE. Legacy public-schema IAM is the currently CONFIGURED authentication/routing baseline and the only path any deployed service is routed to. No service is routed to iam_v2, which remains dark at 0 rows and is NOT cut over. PRE-LIVE (D24/T0056): StayConnect has NOT yet entered real hotel guest/staff production operation -- no guest and no hotel user currently depends on either path for live service, and the system remains PRE-LIVE under controlled testing. Every numbered development phase is now closed (Phase 7 ACCEPTED_AND_CLOSED, D27/T0064), so the project is no longer under active development; what remains is the separately authorized cutover / go-live decision. The earlier wording, 'the SOLE PRODUCTION authority', described the configuration correctly and implied live hotel operation that has not begun. All four site-DB daemons (scd/edged/acctd/netd) connect under dedicated LEAST-PRIVILEGE Gate-P roles (svc_scd/svc_edged/svc_acctd/svc_netd; NOSUPERUSER, SCRAM) instead of superuser stayconnect -- reboot-validated 2026-07-18. All new auth features (durable throttle, keyed-HMAC OTP, IAM-v2) remain OFF (dark). DEVELOPMENT SCOPE: this statement does NOT describe the DEVELOPMENT appliance 172.21.60.23, where the authorized D31/T0068 trial has installed the IAM-v2 runtime wiring and enabled selected IAM-v2 surfaces. See environment_scoped_iam_state.",
   "pms_financial_state": "FIAS lookup-only in production. The Phase-4 financial layer is ACCEPTED AND CLOSED at verified LIVE-DARK maturity (D19/T0044) and is DEPLOYED DARK on the development appliance: migrations 0011-0026 applied to iam_v2 (68 tables, 0 rows), five NOLOGIN restricted roles, and the Phase-4 binaries and Hotel-Admin bundle in service. Every Phase-4 flag is OFF, every Phase-4 route returns 404, and no PS has been transmitted, no PA financially accepted, no folio debited, no provider CHARGE or REFUND issued and no paid access granted. folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED and per-property Tier-2 onboarding still mandatory.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
@@ -700,7 +704,8 @@
     "phase7_active_milestone": "Phase 7 is COMPLETE and ACCEPTED. M1 (20/20), M2 (22/22), M3 (34/0) and M4 all closed: the complete cross-phase matrix is PHASE7_FULL_MATRIX = PASS (strict) with gates_run=20, skipped=0, unverdicted_or_crashed=0, pass=1262, fail=0; the DEVELOPMENT-appliance assembled-system acceptance is 70/0 with 3 explicit NOT PROVEN lines; and the final REAL reboot is 24/0. Nothing remains to execute.",
     "phase7_authorization_note": "Phase 7 is no longer authorized for execution because it is finished: ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK (D27/T0064) and MERGED to master (D28/T0065, merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The numbered Development Roadmap is COMPLETE and no numbered phase is open or authorized.",
     "phase7_merged": true,
-    "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603"
+    "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
+    "phase7_merge_attribution": "Phase 7 was ACCEPTED_AND_CLOSED under D27/T0064 and MERGED under D28/T0065 (merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The current DEVELOPMENT trial continuation is D31/T0068. D30 is preserved historically and its over-broad Production policy clauses were corrected by D31."
   },
   "latest_transition_id": "T0068",
   "phase3_delivery_evidence": {
@@ -747,5 +752,36 @@
       "update/recovery/security infrastructure"
     ],
     "legacy_iam": "NOT retired and NOT deleted anywhere. No Production data migrated."
+  },
+  "environment_scoped_iam_state": {
+    "_note": "Environment-scoped on purpose. A global iam_v2_dark answer was true for Production and false for the DEVELOPMENT appliance after the authorized trial, which is a contradiction no single flag can hold. Neither side may be read as describing the other.",
+    "production": {
+      "lifecycle": "PRE-LIVE",
+      "iam_v2": "DARK and NOT cut over",
+      "routing": "no deployed Production service is routed to iam_v2",
+      "mutation": "none -- Production has not been contacted",
+      "legacy_iam": "still the configured Production authentication/routing baseline; NOT retired and NOT deleted",
+      "transition_strategy": "OPEN. No Production IAM transition strategy is approved. Legacy retirement, a no-migration approach and any clean-replacement or cutover sequence each require a separate explicit Product-Owner decision."
+    },
+    "development_appliance": {
+      "host": "172.21.60.23",
+      "authorization": "D31 / T0068 (post-roadmap DEVELOPMENT IAM-v2 trial)",
+      "iam_v2_runtime_wiring": "INSTALLED (PgRepository, PgCommerceRepository, PgCommerceAdminRepository)",
+      "authority_scope": "IAM-v2 is the intended authority for the ENABLED trial surfaces only. This is NOT a claim that the whole IAM-v2 domain is live.",
+      "enabled": [
+        "VOUCHER authentication",
+        "ACCOUNT authentication",
+        "Phase-2 commerce (portal + admin) for the authorized trial",
+        "Phase-3 ADMIN, after the minimum svc_edged opener privilege fix",
+        "Phase-6 device self-service and AGGREGATE_ONLINE_TIME deployment gates"
+      ],
+      "deliberately_off": [
+        "Phase-5 guest Post-Stay -- requires real PMS-derived state this environment does not have",
+        "Phase-4 external financial egress (posting, outbox worker, PMS transmit, payment provider)",
+        "OTP and social provider paths -- real external effects",
+        "Phase-3 PMS connector/ingest/auth -- no PMS and pmsd not running"
+      ],
+      "legacy_iam": "NOT retired and NOT deleted on the development appliance either"
+    }
   }
 }
