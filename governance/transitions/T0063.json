@@ -1,0 +1,45 @@
+{
+  "transition_id": "T0063",
+  "seq": 63,
+  "timestamp": "2026-08-16T10:55:00Z",
+  "record_type": "PHASE_7_IMPLEMENTATION_STARTED_FULL_SYSTEM_REACCEPTANCE",
+  "previous_state": {
+    "phase": "7",
+    "activity": "PHASE_7_FULL_SYSTEM_REACCEPTANCE_AUTHORIZED",
+    "phase_status": "AUTHORIZED"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "PHASE_7_IMPLEMENTATION_IN_PROGRESS_FULL_SYSTEM_REACCEPTANCE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "phase_affected": "7",
+  "decision": "D26",
+  "new_decision_created": false,
+  "transition_accepted": false,
+  "po_authorization_ref": "Product-Owner decision D26 of 2026-08-16 authorizing Phase-7 planning AND execution without a further planning checkpoint. This record opens implementation; it accepts nothing.",
+  "scope_provenance": "FINAL contract section 18 (Phase 7 = cleanup, final docs/ops manual, full-system re-acceptance; gate = complete matrix) and its section 19 A-G matrix. Explicitly NOT the migration runbook's deployment 'Phase 7 - Start edged', and NOT the commercial-onboarding numbering.",
+  "milestones": {
+    "M1_identity_and_acquisition": "COMPLETE - 20/20, re-runnable, mutation-checked (dropping ent_live_stay fails exactly C3)",
+    "M2_the_stay_end_to_end": "COMPLETE - 22/22, re-runnable",
+    "M3_the_boundaries_hold": "COMPLETE - 31/31, every privilege measured as the real service role, mutation-checked",
+    "M4_the_system_on_the_appliance": "IN PROGRESS - the reboot drill passes 5/5 from a real reboot with no operator action; the combined cross-phase regression matrix is NOT yet green in this environment"
+  },
+  "defects_found_in_the_project_s_own_tools": [
+    "Three assertions across M1-M3 were green while measuring nothing: C3 was refused by a coherence trigger rather than by the once-per-stay index; a room move was rejected by the stay lifecycle guard while every following assertion still passed; and two append-only cases ran UPDATE against EMPTY tables, where a BEFORE-ROW trigger cannot fire.",
+    "The Phase-6 controlled-validation harness cannot serve as a reboot drill: its restoration restarts the runtime units, so it reports services active whether or not they would have come up alone. phase7-reboot-drill.sh watches without touching anything.",
+    "The new matrix runner parsed verdicts case-sensitively and reported a Phase-5 gate carrying two failures as passing; and it had no concurrency guard, so two overlapping runs corrupted the shared scratch database that one of its gates DROPs and restores."
+  ],
+  "not_proven": [
+    "The combined Phase-3/4/5/6 regression matrix has NOT been run to completion in this environment. Two causes, both environmental: overlapping matrix runs corrupted the shared scratch database, and the rebuilt scratch database carries only the base mg* migration set rather than data-plane 0009-0047. Restoring a complete Phase-2-to-6 scratch database remains open."
+  ],
+  "boundaries_observed": [
+    "no Production contact or mutation",
+    "no capability enabled on any environment",
+    "no IAM-v2 cutover",
+    "no production data migration, dual read/write or legacy IAM removal",
+    "no real guest, PMS, provider or financial traffic",
+    "no paid access"
+  ],
+  "next": "Restore a complete Phase-2-to-6 scratch database, run the combined regression matrix to completion, and only then propose Phase-7 acceptance."
+}

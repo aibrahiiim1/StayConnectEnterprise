@@ -111,13 +111,39 @@ run_baseline(){   # run_baseline <label>
   fi
 }
 
-cleanup(){ docker rm -f "$C" >/dev/null 2>&1 || true; }
+# THIS GATE OWNS ITS CONTAINER, AND IT MUST NOT BE POINTED AT SOMEBODY ELSE'S.
+#
+# It destroys the named container on entry and on exit. That is correct for a disposable container this gate
+# created, and destructive for one it did not: the same lifecycle in the Phase-3 gate deleted a shared scratch
+# container -- and with it a complete Phase-2-through-6 database -- part way through a matrix run, because the
+# name was passed in and the gate could not tell whose it was. Phase 3 was fixed then; this gate has carried
+# the identical defect ever since, unnoticed because nobody had aimed it at anything valuable YET.
+#
+# It cannot tell ownership from a name, so it refuses any container that already exists, and its cleanup
+# removes only a container it actually created.
+if docker inspect "$C" >/dev/null 2>&1; then
+  echo "REFUSED: container '$C' already exists and this gate DESTROYS the container it is given." >&2
+  echo "  It creates its own disposable one. Point PHASE4_GATE_CONTAINER at a name nothing else owns, or" >&2
+  echo "  remove that container yourself if it really is disposable." >&2
+  exit 2
+fi
+CREATED_CONTAINER=0
+# PHASE4_KEEP exists because two other gates -- phase4_db_invariants and phase4_least_privilege -- run
+# AGAINST the container this gate builds. Destroying it on exit meant that in a matrix run both of them found
+# no container and reported SKIPPED, and a skip in strict mode is a failure. The matrix had been failing
+# strictly for that reason alone: not a product defect, a lifecycle defect in this script. Whoever sets
+# PHASE4_KEEP owns the teardown.
+cleanup(){
+  [ "${PHASE4_KEEP:-0}" = "1" ] && return 0
+  [ "$CREATED_CONTAINER" = "1" ] && docker rm -f "$C" >/dev/null 2>&1
+  return 0
+}
 trap cleanup EXIT
-cleanup
 
 echo "===== PHASE-4: Migration 0011 + financial-core DB gate (disposable PG16, container=$C port=$PORT) ====="
 docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" -p "127.0.0.1:$PORT:5432" postgres:16-alpine >/dev/null 2>&1 \
   || { echo "INFRA: could not start the disposable container"; exit 2; }
+CREATED_CONTAINER=1   # only from here on may cleanup destroy it
 ready=0
 for i in $(seq 1 60); do docker exec "$C" psql -U postgres -d "$DB" -tAqc 'select 1' >/dev/null 2>&1 && { ready=1; break; }; sleep 1; done
 [ "$ready" = 1 ] || { echo "INFRA: postgres did not become ready"; docker logs "$C" 2>&1 | tail -20; exit 2; }
@@ -360,6 +386,18 @@ accepts "C32 with all four axes green the charge is accepted again" \
   "$(mkposting c0120000-0000-0000-0000-000000000019 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-axok)"
 
 echo "== C22 per-interface lane serialization, across DIFFERENT postings =="
+# RT_OK re-establishes the interface runtime as CONNECTED/CONTINUOUS/IN_SYNC with a heartbeat of NOW.
+#
+# It is a PRECONDITION of this section, not its subject. The financial core refuses to post through an
+# interface whose transport heartbeat has gone stale -- correctly, and that refusal is proved on its own
+# terms in the C32 freshness axes above. But this gate takes many minutes to run, and two sections wait on
+# real concurrent clients, so by the time execution reached here the fixture heartbeat set once at the top
+# had aged past the interface timeout. Nine cases then failed with TRANSPORT_HEARTBEAT_STALE and cascaded
+# into wrong-reason failures downstream -- a gate failing on the clock, not on the product.
+#
+# Refreshing it here weakens nothing: staleness is still tested, deliberately and separately, by setting a
+# stale heartbeat immediately before the case that asserts the refusal.
+RT_OK
 Q "INSERT INTO iam_v2.posting_outbox(tenant_id,site_id,pms_interface_id,posting_id,state) VALUES ('$T','$S','$IF1','c0120000-0000-0000-0000-000000000012','IN_FLIGHT');" >/dev/null
 rejects "C22 a SECOND different posting cannot be IN_FLIGHT on the same interface" \
   "INSERT INTO iam_v2.posting_outbox(tenant_id,site_id,pms_interface_id,posting_id,state) VALUES ('$T','$S','$IF1','c0120000-0000-0000-0000-000000000019','IN_FLIGHT');" \
@@ -370,6 +408,7 @@ accepts "C23 a DIFFERENT interface may be in flight at the same time" \
 Q "UPDATE iam_v2.posting_outbox SET state='DONE' WHERE pms_interface_id IN ('$IF1','$IF2');" >/dev/null
 
 echo "== 0014: online payment and settlement execution =="
+RT_OK   # see the note at the first of these
 MERCH=aa000000-0000-0000-0000-000000000011
 PPUR=77770000-0000-0000-0000-000000000001
 PSET=77770000-0000-0000-0000-0000000000d1
@@ -453,6 +492,7 @@ rejects "the provider callback ledger is append-only" \
   "UPDATE iam_v2.payment_transaction_events SET event_type='TAMPERED';" "append-only"
 
 echo "== C18/C20 review: evidence, the action/state matrix, single-use authorization =="
+RT_OK   # see the note at the first of these
 Q "INSERT INTO iam_v2.posting_attempts(tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at,outcome,pa_as_status,response_at) VALUES ('$T','$S','c0120000-0000-0000-0000-000000000019','$IF1',1,'7001','1421','5',now(),'ACKED','OK',now());" >/dev/null
 rejects "C18 a terminal decision with no evidence is refused" \
   "SELECT iam_v2.record_posting_review_action('c0120000-0000-0000-0000-000000000019','CONFIRM_POSTED','$T','looks fine');" \
@@ -466,6 +506,7 @@ accepts "C18 a terminal decision WITH evidence is accepted" \
 
 # ------------------------------------------------------------------ G2 currency gate
 echo "== G2: exact currency equality, no implicit FX =="
+RT_OK   # see the note at the first of these
 accepts "C6 CHARGE accepted when interface, purchase and package currency all match exactly" \
   "$(mkposting c0110000-0000-0000-0000-000000000001 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-ok-1)"
 rejects "C36 a revision with NO financial currency blocks the CHARGE (fail-closed onboarding)" \
@@ -489,6 +530,7 @@ rejects "C5 the folio-UNSET refusal still takes precedence over the currency ref
 
 # ------------------------------------------------------------------ G1 RN + G#
 echo "== G1: verified RN + G# on every attempt =="
+RT_OK   # see the note at the first of these
 POK=c0110000-0000-0000-0000-000000000001
 rejects "C4 a NULL RN is refused"        "$(mkattempt "$POK" 1 100 '' 'G1' | sed "s/''/NULL/")" "attempt_rn_verified"
 rejects "C4 a blank RN is refused"       "$(mkattempt "$POK" 1 100 '   ' 'G1')"                 "attempt_rn_verified"
@@ -504,6 +546,7 @@ eq "C3 Room Number is still EVIDENCE, not identity (no unique index or key on rn
 
 # ------------------------------------------------------------------ P# allocator
 echo "== P#: durable, atomic, per-interface =="
+RT_OK   # see the note at the first of these
 eq "first P# on a never-used interface is 1" "1" "$(Q "SELECT iam_v2.allocate_p_number('$T','$S','$IF2');")"
 eq "the next P# on the same interface is 2"  "2" "$(Q "SELECT iam_v2.allocate_p_number('$T','$S','$IF2');")"
 eq "a different interface has its OWN independent sequence" "1" "$(Q "SELECT iam_v2.allocate_p_number('$T','$S','$IF1');")"
@@ -516,6 +559,7 @@ eq "a rolled-back allocation consumes no P# (transactional)" "$BEFORE_ROLLBACK" 
   "$(Q "SELECT next_p_number FROM iam_v2.pms_interface_pnumber_seq WHERE pms_interface_id='$IF1';")"
 
 echo "== P# under REAL concurrency (8 concurrent clients x 25 allocations on one interface) =="
+RT_OK   # see the note at the first of these
 IF2_BEFORE="$(Q "SELECT next_p_number FROM iam_v2.pms_interface_pnumber_seq WHERE pms_interface_id='$IF2';")"
 TMPD="$(mktemp -d)"
 for w in 1 2 3 4 5 6 7 8; do
@@ -536,6 +580,7 @@ rm -rf "$TMPD"
 
 # ------------------------------------------------------------------ UNKNOWN safety
 echo "== UNKNOWN is terminal without audited review =="
+RT_OK   # see the note at the first of these
 accepts "C13 the first attempt is accepted" "$(mkattempt "$POK" 1 1001 '101' 'G-1')"
 rejects "C22 a second attempt while the first is SENDING is refused" "$(mkattempt "$POK" 2 1002 '101' 'G-1')" "ATTEMPT_IN_FLIGHT"
 Q "UPDATE iam_v2.posting_attempts SET outcome='UNKNOWN', response_at=now() WHERE internal_posting_id='$POK' AND attempt_no=1;" >/dev/null
@@ -550,6 +595,7 @@ eq "G3 the read model reports UNKNOWN and awaiting_manual_review" "UNKNOWN|true|
 
 # ------------------------------------------------------------------ C21 review
 echo "== C21: the review ledger has exactly one writer =="
+RT_OK   # see the note at the first of these
 rejects "a direct INSERT into the append-only review ledger is refused" \
   "INSERT INTO iam_v2.posting_review_actions(tenant_id,site_id,posting_id,action,actor,reason) VALUES ('$T','$S','$POK','CONFIRM_POSTED','$T','bypass');" \
   "REVIEW_WRITER_ONLY"
@@ -562,6 +608,7 @@ rejects "C21 a decision made against a stale version is refused" \
   "REVIEW_VERSION_STALE"
 
 echo "== C21 under REAL concurrency: two reviewers, incompatible decisions, same posting =="
+RT_OK   # see the note at the first of these
 # Reviewer A opens a transaction, commits its decision, and holds the transaction open. Reviewer B starts
 # while A still holds the lock: it MUST block, and then MUST be refused once A commits. This is the whole
 # claim — a version column that nobody blocks on would let both of these commit.
@@ -590,6 +637,7 @@ eq "C20 the retry decision authorized exactly attempt 2" "2" \
   "$(Q "SELECT retry_authorized_attempt_no FROM iam_v2.posting_review_state WHERE posting_id='$POK';")"
 
 echo "== the authorized retry, and only the authorized retry =="
+RT_OK   # see the note at the first of these
 rejects "C14 an attempt number the review did NOT authorize is still refused" "$(mkattempt "$POK" 3 1003 '101' 'G-1')" "ATTEMPT_SEQUENCE"
 accepts "C20 the ONE authorized retry attempt is accepted" "$(mkattempt "$POK" 2 1002 '101' 'G-1')"
 Q "UPDATE iam_v2.posting_attempts SET outcome='ACKED', pa_as_status='OK', response_at=now() WHERE internal_posting_id='$POK' AND attempt_no=2;" >/dev/null
@@ -605,6 +653,7 @@ eq "G3 the read model is DERIVED — pms_postings still has no status column" "0
 
 # ------------------------------------------------------------------ ESCALATE is not terminal
 echo "== ESCALATE is explicitly NOT a terminal decision =="
+RT_OK   # see the note at the first of these
 accepts "C17 a second posting can be escalated" \
   "$(mkposting c0110000-0000-0000-0000-000000000009 "$SET1" "$PUR1" "$REV_OK" USD 2 p4-ok-9)"
 accepts "an ESCALATE with no attempt yet is allowed" \
@@ -681,6 +730,7 @@ eq "0018 is recorded in the migration ledger" "1" \
 # recovery tables and the observability column, and a gate that tested them against a chain missing their
 # dependencies would be measuring the dependency error rather than the migrations.
 echo "== 0019/0020 recovery and observability =="
+RT_OK   # see the note at the first of these
 for M in 0019_phase4_financial_recovery 0020_phase4_financial_observability; do
   if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1        < "$ROOT/data-plane/migrations/$M.up.sql" >/dev/null 2>&1; then ok "$M applies"
   else no "$M applies" "up failed"; fi
@@ -688,6 +738,7 @@ done
 eq "the financial epoch table exists" "1"   "$(Q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_name='financial_epochs';")"
 
 echo "== 0021/0022/0023 trust boundary, recovery closure and restore generation =="
+RT_OK   # see the note at the first of these
 for M in 0021_phase4_trust_boundary 0022_phase4_recovery_closure 0023_phase4_restore_generation; do
   if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$M.up.sql" >/dev/null 2>&1; then ok "$M applies"
@@ -742,6 +793,7 @@ eq "0023 is recorded in the migration ledger" "1" \
 
 # ------------------------------------------------------------------ 0024/0025 final closure
 echo "== 0024/0025 outcome authority, grant kernel, recovery completion, C27, C35 =="
+RT_OK   # see the note at the first of these
 for M in 0024_phase4_outcome_authority_and_grant_kernel 0025_phase4_recovery_completion_and_compliance; do
   if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
        < "$ROOT/data-plane/migrations/$M.up.sql" >/dev/null 2>&1; then ok "$M applies"
@@ -822,6 +874,7 @@ eq "0025 is recorded in the migration ledger" "1" \
 # authorized the deletion. These assertions are about the corrected property and, just as importantly,
 # about it not being routable AROUND: the flag cannot be set without external evidence even by the owner.
 echo "== 0026 C35 fail-closed + zero-attempt read model =="
+RT_OK   # see the note at the first of these
 if docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
      < "$ROOT/data-plane/migrations/0026_phase4_c35_failclosed_and_operator_retry.up.sql" >/dev/null 2>&1; then
   ok "0026 applies"

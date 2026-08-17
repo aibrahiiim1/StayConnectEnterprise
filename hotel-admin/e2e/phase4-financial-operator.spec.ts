@@ -164,7 +164,18 @@ test.describe("Phase 4 financial operator surface", () => {
     await installBackend(page, mutations);
     await page.goto("/financial-recovery");
 
-    await expect(page.getByText("FINANCIAL RECOVERY")).toBeVisible();
+    // Scoped to the content region on purpose. getByText() matches a SUBSTRING and is CASE-INSENSITIVE, so
+    // "FINANCIAL RECOVERY" also matched the navigation link "Financial recovery" -- two elements, and Playwright
+    // fails strict mode. Which one resolved first depended on render timing, so the same commit produced both a
+    // passing and a failing run. The banner is what this asserts, and the banner is inside <main>; the nav link
+    // is outside it. Nothing in the product changed to accommodate the test.
+    await expect(page.getByRole("main").getByText("FINANCIAL RECOVERY")).toBeVisible();
+    // The ambiguity itself, asserted so it cannot come back silently: exactly ONE banner inside the content
+    // region, and exactly one navigation LINK that happens to share the words. Measured: page-wide 2, in-main 1,
+    // in-nav 1 with nav text "Financial recovery". If the banner is ever rendered twice, or the nav moves inside
+    // <main>, this fails here with a clear reason instead of surfacing as an intermittent strict-mode violation.
+    await expect(page.getByRole("main").getByText("FINANCIAL RECOVERY")).toHaveCount(1);
+    await expect(page.getByRole("navigation").getByRole("link", { name: /financial recovery/i })).toHaveCount(1);
     await expect(page.getByText(/2 items still to reconcile/i)).toBeVisible();
     await expect(page.getByText(/guest internet access is unaffected/i)).toBeVisible();
 
@@ -283,7 +294,12 @@ test.describe("Phase 4 financial operator surface", () => {
   test("the recovery screen offers no way to replay anything", async ({ page }) => {
     await installBackend(page, []);
     await page.goto("/financial-recovery");
-    await expect(page.getByText("FINANCIAL RECOVERY")).toBeVisible();
+    // Scoped to the content region on purpose. getByText() matches a SUBSTRING and is CASE-INSENSITIVE, so
+    // "FINANCIAL RECOVERY" also matched the navigation link "Financial recovery" -- two elements, and Playwright
+    // fails strict mode. Which one resolved first depended on render timing, so the same commit produced both a
+    // passing and a failing run. The banner is what this asserts, and the banner is inside <main>; the nav link
+    // is outside it. Nothing in the product changed to accommodate the test.
+    await expect(page.getByRole("main").getByText("FINANCIAL RECOVERY")).toBeVisible();
     for (const forbidden of [/retry/i, /re-?send/i, /replay/i, /force/i]) {
       await expect(page.getByRole("button", { name: forbidden })).toHaveCount(0);
     }

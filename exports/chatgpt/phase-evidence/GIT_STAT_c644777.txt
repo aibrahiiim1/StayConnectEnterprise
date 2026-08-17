@@ -1,0 +1,4 @@
+commit c644777a8dbd8b70d6e1173d3882245e8673d6d5
+Date:   Mon Aug 17 14:39:54 2026 +0300
+
+    Phase 7 closure: a third copy of the stale sentence, and the rule that skipped it

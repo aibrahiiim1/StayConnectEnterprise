@@ -1,10 +1,17 @@
 # StayConnect IAM — Phase 7 Plan
 ## Full-system re-acceptance: proving the built system is one working IAM domain
 
-**Status:** AUTHORIZED for planning **and execution** under Product-Owner decision **D26** (2026-08-16),
+**Status:** **ACCEPTED AND CLOSED** at **VERIFIED FULL-SYSTEM LIVE-DARK** maturity by Product-Owner decision
+**D27** (2026-08-17, transition **T0064**) at delivery head `16819aa027633b84486999451e8b689a191a15d2`. PR #15 remains **OPEN and UNMERGED** pending a
+separate merge decision. Phase 7 was the **last numbered development phase**; no Phase 8 exists or is
+authorized, and the only major next lifecycle gate is the separately authorized atomic complete-domain IAM-v2
+cutover / go-live decision, which this acceptance does **not** authorize.
+
+<sub>Historical: this plan was AUTHORIZED for planning **and execution** under Product-Owner decision **D26** (2026-08-16),
 continuing from post-Phase-6 master `da6a14aba5f51300deac7ee3736f7fbbc8ab5d25`. Branch
 `phase/7-full-system-reacceptance`, one pull request → `master`, approximately four substantial end-to-end
 milestones. Target acceptance maturity: **VERIFIED FULL-SYSTEM LIVE-DARK** on the **development** appliance.
+That target was met and accepted.</sub>
 
 ---
 

@@ -1,4 +1,0 @@
-commit 7b5b6b9ca71ffedb355ebe075ff855b18ddb5817
-Date:   Sun Aug 16 13:00:23 2026 +0300
-
-    Phase 6 MERGED (T0062), and the authoritative Phase-7 scope reconciled from the FINAL contract

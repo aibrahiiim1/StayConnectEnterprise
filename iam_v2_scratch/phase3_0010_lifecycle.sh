@@ -5,7 +5,11 @@
 set -uo pipefail
 export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-C=iamv2-scratch; DB=iam_scratch; PORT=55432
+# Container, database and port are ENVIRONMENT, not constants. They were hard-coded, which meant this gate
+# could only ever run in one place: the Phase-7 matrix could not point it at the complete Phase-2-through-6
+# database, and reported it SKIPPED because a container named iamv2-scratch did not exist. A gate that can
+# only run in one environment is a gate that stops being run when that environment moves.
+C="${PHASE3_CONTAINER:-iamv2-scratch}"; DB="${PHASE3_DB:-iam_scratch}"; PORT="${PHASE3_PORT:-55432}"
 UP="$ROOT/data-plane/migrations/0010_phase3_stay_resolution.up.sql"
 DOWN="$ROOT/data-plane/migrations/0010_phase3_stay_resolution.down.sql"
 pass=0; fail=0
@@ -24,6 +28,19 @@ FP="SELECT md5(string_agg(x, E'\n' ORDER BY x)) FROM (
 ) s;"
 
 echo '== setup: fresh disposable PG16 + accepted schema (mg1..mg9 + 0009) =='
+# THIS GATE OWNS ITS CONTAINER, AND IT MUST NOT BE POINTED AT SOMEBODY ELSE'S.
+#
+# The first two lines of its setup destroy the named container and recreate it. That is correct for a
+# disposable container this gate created -- and catastrophic for one it did not: pointing PHASE3_CONTAINER at
+# the shared iamv2-p6 scratch container deleted it, and with it the complete Phase-2-through-6 database, mid
+# way through a matrix run. The gate cannot tell whose container it is from the name alone, so it refuses any
+# container that already exists and that it did not just create.
+if docker inspect "$C" >/dev/null 2>&1; then
+  echo "REFUSED: container '$C' already exists and this gate DESTROYS the container it is given." >&2
+  echo "  It creates its own disposable one. Point PHASE3_CONTAINER at a name nothing else owns, or remove" >&2
+  echo "  that container yourself if it really is disposable." >&2
+  exit 2
+fi
 docker rm -f "$C" >/dev/null 2>&1 || true
 docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" -p 127.0.0.1:$PORT:5432 postgres:16-alpine >/dev/null
 # robust readiness: a real query must succeed (pg_isready can pass during initdb's transient server, which

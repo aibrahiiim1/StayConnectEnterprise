@@ -2,9 +2,20 @@
 
 > **Scope banner:** this runbook describes the **already-delivered Central-to-site *edge*
 > migration** (moving a site's guest rows from the shared central Postgres into its isolated
-> `stayconnect_site` database via `cmd/sitemigrate`). **It is NOT the future IAM `iam_v2`
-> migration.** Do not confuse this with Phase-1A `iam_v2` implementation — that is a separate,
-> not-yet-started effort governed by `docs/architecture/StayConnect-IAM-Phase1A-Plan.md`.
+> `stayconnect_site` database via `cmd/sitemigrate`). **It is NOT the IAM `iam_v2` migration**,
+> which is governed by `docs/architecture/StayConnect-IAM-Phase0-Contract.md` §18 and is a
+> separate effort at a different stage entirely.
+>
+> **The two "Phase N" numberings are unrelated, and this one is not the IAM one.** The headings
+> below (Phase 0 … Phase 8) are *deployment steps of this edge cutover*: "Phase 7 — Start edged"
+> means start a daemon. The IAM plan's Phase 7 is *full-system re-acceptance*. Reading one
+> numbering as the other is a live hazard — it was checked and explicitly rejected when the IAM
+> Phase-7 scope was reconciled, precisely because the coincidence is so easy to act on.
+>
+> The banner previously described IAM Phase 1A as "not-yet-started". That has not been true for
+> a long time: IAM Phases 1A through 6 are implemented and accepted at live-dark, with `iam_v2`
+> created DARK on the appliance and never cut over. Consult the governance state, not this
+> banner, for where the IAM work stands.
 
 > Phased cutover of one site from the shared central Postgres to its isolated
 > `stayconnect_site` database, using `cmd/sitemigrate` (idempotent, dry-run,

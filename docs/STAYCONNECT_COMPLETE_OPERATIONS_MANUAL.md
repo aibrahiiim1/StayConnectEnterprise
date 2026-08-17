@@ -763,6 +763,32 @@ Notes verified in code:
   confirm backups are current across the fleet.
 - For disaster recovery of an appliance, prefer **Replace** (§23) — it preserves
   the site binding and licenses cleanly.
+- **Three `public` tables are created by `scd` at first use, not by any
+  migration** — `edge_executed_commands`, `edge_installed_updates` and
+  `edge_offline_packages`. They are in any dump taken from a running appliance,
+  but a database rebuilt from migrations alone will not have them, and Gate P's
+  grants fail without them. See
+  [BACKUP_AND_RESTORE.md](BACKUP_AND_RESTORE.md) §"Three public tables no
+  migration creates".
+
+### Verifying an appliance after a reboot or a restore
+
+Two scripts re-run the acceptance checks on a live appliance. Both are
+read-only or self-restoring, contact no Production system, and enable nothing:
+
+```sh
+bash deploy/scripts/phase7-appliance-m4.sh      # the assembled system: services,
+                                                # roles, boundaries, darkness,
+                                                # backup+restore, restoration proof
+bash deploy/scripts/phase7-final-reboot.sh      # REBOOTS the appliance, then proves
+                                                # it came back with no operator action
+```
+
+`phase7-final-reboot.sh` really reboots the machine and verifies the kernel boot
+id changed — a service restart is not reboot evidence. It waits for the
+appliance to converge to **serving** (not merely `active`, since a unit can be
+active while the thing it serves does not answer) and repairs nothing: if the
+appliance needs a human to come back, the run fails rather than hiding it.
 
 ---
 

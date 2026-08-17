@@ -1,0 +1,120 @@
+{
+  "transition_id": "T0064",
+  "seq": 64,
+  "timestamp": "2026-08-17T05:55:00Z",
+  "record_type": "PHASE_7_ACCEPTED_AND_CLOSED_AT_VERIFIED_FULL_SYSTEM_LIVE_DARK",
+  "previous_state": {
+    "phase": "7",
+    "activity": "PHASE_7_IMPLEMENTATION_IN_PROGRESS_FULL_SYSTEM_REACCEPTANCE",
+    "phase_status": "IN_PROGRESS"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "PHASE_7_ACCEPTED_AND_CLOSED",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "maturity": "VERIFIED FULL-SYSTEM LIVE-DARK"
+  },
+  "phase_affected": "7",
+  "decision": "D27",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "accepted_delivery_head": "16819aa027633b84486999451e8b689a191a15d2",
+  "pull_request": {
+    "number": 15,
+    "state": "OPEN",
+    "merged": false,
+    "note": "Acceptance does NOT authorize the merge. PR #15 stays open and unmerged pending a separate Product-Owner merge decision."
+  },
+  "po_authorization_ref": "Product-Owner decision of 2026-08-17: accept Phase 7 at VERIFIED FULL-SYSTEM LIVE-DARK at delivery head 16819aa027633b84486999451e8b689a191a15d2 (PR #15), record the acceptance and closure, synchronize every directly related authoritative surface, record roadmap exhaustion truthfully, preserve the verified DARK runtime state, run the complete closure governance round, and STOP without merging and without beginning cutover.",
+  "acceptance_basis": {
+    "repository_reconstruction_digest": "e7216a988642c9d5e44ca22478d4972d parts=2686",
+    "reconstruction_claim": "built from repository-controlled sources alone in a fresh private cluster and identical to the DEVELOPMENT appliance under the semantic fidelity proof, with no allowlist anywhere in the grant or role surface",
+    "phase7_full_matrix": {
+      "verdict": "PASS (strict)",
+      "gates_run": 20,
+      "skipped": 0,
+      "unverdicted_or_crashed": 0,
+      "pass": 1262,
+      "fail": 0
+    },
+    "fidelity_mutation_suite": "23/23",
+    "matrix_runner_mutation_suite": "20/20",
+    "development_appliance_assembled_system_m4": "70/0",
+    "final_real_reboot": "24/0 (kernel boot id changed; a service restart is not reboot evidence)",
+    "project_state_mutation_tests": "53/53 PASS (no case limit, isolation verified)",
+    "current_state_parity": "23/0",
+    "negative_parity_suite": "57/57",
+    "zero_stale_leftovers": "PASS",
+    "exact_head_github_actions": "all required workflows SUCCESS on 16819aa027633b84486999451e8b689a191a15d2"
+  },
+  "not_proven": [
+    {
+      "item": "a deliberate Central outage drill",
+      "reason": "Production Central must not be contacted or disrupted, and this appliance is unenrolled, so that outage state is already the running state and no drill can add to it",
+      "promoted": false
+    },
+    {
+      "item": "a live rollback of the DEVELOPMENT-appliance schema",
+      "reason": "rolling the accepted schema down and up on the system under acceptance is destructive and unauthorized; rehearsed at 65/0 in the reproducible environment instead",
+      "promoted": false
+    },
+    {
+      "item": "a real purge or archive requiring external receipt authority",
+      "reason": "compliance archival requires a receipt authority this environment does not lawfully hold; the fail-closed gate that depends on it is proved instead",
+      "promoted": false
+    }
+  ],
+  "hardening_findings": [
+    {
+      "finding": "iam_v2.p5_controlled_operation_open is SECURITY DEFINER and granted EXECUTE to PUBLIC by accepted migration 0027",
+      "status": "HARDENING / CUTOVER-REVIEW FINDING -- neither PASS nor blocker",
+      "assembled_system_result": "INERT: as the real svc_scd role it cannot execute the opener, cannot INSERT into controlled_operation_scope, cannot forge a scope row even with the session token set, and cannot perform the guarded write; the predicate answers false; PUBLIC holds no USAGE on iam_v2",
+      "action": "narrowing the grant would amend an accepted migration and is left to a separately authorized change"
+    },
+    {
+      "finding": "public.edge_executed_commands, public.edge_installed_updates and public.edge_offline_packages are created by scd at first use and by no migration",
+      "status": "DOCUMENTED DETERMINISTIC BOOTSTRAP",
+      "action": "covered by the operations and recovery procedure, including what it means for a dump restore, a rebuild from migrations, and a comparison against an appliance"
+    }
+  ],
+  "runtime_state_preserved": {
+    "appliance_mutated_to_record_acceptance": false,
+    "capabilities": "OFF / DARK on every environment",
+    "guest_capability": "scd does not mount its Phase-6 endpoints; the per-appliance setting is OFF; the portal returns the uniform non-success",
+    "financial_egress": "disabled -- zero postings, zero outbox rows, zero payment transactions, zero attempts",
+    "hotel_admin_release": "the exact expected DARK release, unchanged",
+    "live_synthetic_access": "none remaining",
+    "production_contact": "none"
+  },
+  "roadmap_exhaustion": {
+    "phase_0": "FINAL_CLOSED",
+    "phases_accepted_and_closed": [
+      "1A",
+      "1B",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7"
+    ],
+    "development_phases_open_or_authorized": [],
+    "phase_8_created": false,
+    "note": "Phase 7 was the LAST numbered development phase. The only major next lifecycle gate is the separately authorized atomic complete-domain IAM-v2 cutover / go-live decision, which this acceptance does NOT authorize."
+  },
+  "boundaries_observed": [
+    "no Production contact or mutation",
+    "no IAM-v2 cutover",
+    "no production data migration",
+    "no dual read/write",
+    "no legacy IAM removal",
+    "no real guest service",
+    "no real PMS financial posting",
+    "no payment-provider traffic",
+    "no paid-access activation",
+    "no per-property financial enablement",
+    "no programmatic reversal",
+    "PR #15 NOT merged"
+  ],
+  "next": "Return the Phase-7 closure report for the Product Owner's SEPARATE merge decision on PR #15. No development phase remains open. The cutover/go-live decision is a distinct, separately authorized gate."
+}

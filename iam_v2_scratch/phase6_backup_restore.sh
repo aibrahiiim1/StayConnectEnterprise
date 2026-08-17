@@ -40,6 +40,60 @@ q "INSERT INTO iam_v2.appliance_product_setting_changes
 before_tables="$(q "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2'")"
 before_funcs="$(q "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='iam_v2'")"
 
+# ---- PRECONDITION: THE SOURCE DATA MUST SATISFY ITS OWN CONSTRAINTS ----------------------------------------
+#
+# pg_restore re-validates every foreign key at the end of a restore, so a database holding rows that violate
+# one CANNOT be restored from its own dump. Worth stating plainly, because it is exactly what happened: several
+# Phase-6 gates seed entitlements under `SET LOCAL session_replication_role = replica` -- deliberately, to skip
+# building the whole parent chain above sessions -- and the rows they leave reference package revisions that do
+# not exist. All 21 of them. pg_restore then failed on a constraint nobody had touched, and it read as a defect
+# in backup and restore.
+#
+# It is not. It is a statement about the DATA this gate was pointed at. Checking it BEFORE the dump, generically
+# over every validated foreign key in iam_v2, means a real restore defect and a fixture polluted by a seeding
+# shortcut can never again arrive as the same message. The check only SELECTs.
+badfk="$(docker exec -i "$C" psql -U postgres -d "$DB" -tAq </dev/null 2>&1 <<'SQL' | tail -1
+CREATE TEMP TABLE _viol(conname text, n bigint);
+DO $probe$
+DECLARE
+  r record; child text; parent text; cond text; nulls text; cnt bigint; i int;
+BEGIN
+  FOR r IN
+    SELECT c.conname,
+           cn.nspname || '.' || ct.relname AS child,
+           pn.nspname || '.' || pt.relname AS parent,
+           c.conkey, c.confkey, c.conrelid, c.confrelid
+      FROM pg_constraint c
+      JOIN pg_class ct     ON ct.oid = c.conrelid
+      JOIN pg_namespace cn ON cn.oid = ct.relnamespace
+      JOIN pg_class pt     ON pt.oid = c.confrelid
+      JOIN pg_namespace pn ON pn.oid = pt.relnamespace
+     WHERE c.contype = 'f' AND c.convalidated AND cn.nspname = 'iam_v2'
+  LOOP
+    cond := ''; nulls := '';
+    FOR i IN 1 .. array_length(r.conkey, 1) LOOP
+      IF i > 1 THEN cond := cond || ' AND '; nulls := nulls || ' AND '; END IF;
+      cond := cond || format('p.%I = c.%I',
+                (SELECT attname FROM pg_attribute WHERE attrelid = r.confrelid AND attnum = r.confkey[i]),
+                (SELECT attname FROM pg_attribute WHERE attrelid = r.conrelid  AND attnum = r.conkey[i]));
+      nulls := nulls || format('c.%I IS NOT NULL',
+                (SELECT attname FROM pg_attribute WHERE attrelid = r.conrelid AND attnum = r.conkey[i]));
+    END LOOP;
+    EXECUTE format('SELECT count(*) FROM %s c WHERE (%s) AND NOT EXISTS (SELECT 1 FROM %s p WHERE %s)',
+                   r.child, nulls, r.parent, cond) INTO cnt;
+    IF cnt > 0 THEN INSERT INTO _viol VALUES (r.conname, cnt); END IF;
+  END LOOP;
+END $probe$;
+SELECT COALESCE(string_agg(conname || ' (' || n || ' rows)', ', ' ORDER BY conname), '') FROM _viol;
+SQL
+)"
+if [ -n "$badfk" ]; then
+  no "the source database satisfies its own foreign keys BEFORE the dump" \
+     "$badfk -- seeded under session_replication_role=replica; such a database cannot be restored from its own dump, and that is a property of the DATA, not of backup and restore"
+else
+  ok "every validated foreign key in iam_v2 is satisfied, so a restore can revalidate them"
+fi
+
 # ---- backup -----------------------------------------------------------------------------------------------
 out="$(docker exec "$C" sh -c "pg_dump -U postgres -d $DB -Fc > $DUMP && ls -la $DUMP" 2>&1)"
 case "$out" in *"$DUMP"*) ok "pg_dump produced a custom-format backup";; *) no "backup" "$out";; esac

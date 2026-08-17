@@ -42,6 +42,70 @@ T="11111111-1111-1111-1111-111111111111"   # tenant   (from seed)
 S="22222222-2222-2222-2222-222222222222"   # site
 IF1="aaaa0000-0000-0000-0000-000000000001" # pms interface
 
+# ---- PRECONDITIONS THIS GATE DEPENDS ON BUT DOES NOT TEST ----------------------------------------------------
+#
+# 1. INTERFACE FRESHNESS. The financial core refuses to post through an interface whose transport heartbeat has
+#    gone stale, and it is right to. But this gate runs AFTER the phase4 financial gate has spent twenty
+#    minutes building the container it inherits, so the heartbeat that gate set has long since aged out. Nine
+#    cases failed with TRANSPORT_HEARTBEAT_STALE and cascaded into wrong-reason failures -- the clock, not the
+#    product. Staleness is proved on its own terms by the C32 freshness axes in the financial gate; here it is
+#    a precondition, so it is established explicitly.
+#
+# 2. A CLEAN SLATE, WHICH THIS GATE MAKES BY NOT REUSING IDENTITIES. It inserts rows at fixed UUIDs and asserts
+#    they are accepted, so a second run failed on duplicate keys and REVIEW_ALREADY_DECIDED -- failures that
+#    look exactly like invariant violations and are nothing of the sort. A second run is not the exception: the
+#    phase4 financial gate INVOKES this script twice inside its own "the invariants still hold after 0011+0012"
+#    section, so by the time the matrix runs it standalone it is always at least the third pass.
+#
+#    Deleting the previous run's rows CANNOT work, and the reason is the schema doing its job: several of these
+#    tables are append-only, and this very gate proves that DELETE against them is refused. So the identities
+#    are made per-run instead. Every fixed UUID below carries a run tag in its second group, which makes each
+#    run's rows disjoint from every other run's -- nothing is deleted, no trigger is disabled, and the append-
+#    only property stays exactly as strict as it is meant to be.
+RUNTAG="$(docker exec -i "$SCRATCH_CONTAINER" psql -U postgres -d "$SCRATCH_DB" -tAqc \
+          "SELECT lpad(to_hex((extract(epoch from clock_timestamp())::bigint % 65536)), 4, '0')" </dev/null 2>&1 | tr -d ' \r')"
+case "$RUNTAG" in
+  [0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ok "SETUP" "this run uses its own identity namespace (tag $RUNTAG), so re-runs cannot collide" ;;
+  *) no "SETUP" "derive a per-run identity tag" "got '$RUNTAG'; falling back to the fixed namespace"; RUNTAG="0000" ;;
+esac
+
+#    The P# namespace is unique per interface as well -- that is exactly what C9 proves -- so the P numbers are
+#    derived from the same run tag. The duplicate-P# case still duplicates: it reuses this run's own number,
+#    which is the property under test, rather than colliding with a previous run's, which is not.
+# p_number is NUMERIC, so it takes a DECIMAL run number -- the hex tag that suits a UUID produced "9eccd01"
+# and Postgres rejected it as trailing junk after a numeric literal.
+RUNDEC="$(docker exec -i "$SCRATCH_CONTAINER" psql -U postgres -d "$SCRATCH_DB" -tAqc           "SELECT lpad(((extract(epoch from clock_timestamp())::bigint) % 10000)::text, 4, '0')" </dev/null 2>&1 | tr -d ' 
+')"
+case "$RUNDEC" in [0-9][0-9][0-9][0-9]) : ;; *) RUNDEC="0000" ;; esac
+P_NUM_1="9${RUNDEC}01"
+P_NUM_2="9${RUNDEC}02"
+
+# 3. INTERFACE FRESHNESS, re-established (see 1 above).
+q "UPDATE iam_v2.pms_interface_runtime
+      SET transport_status='CONNECTED', last_heartbeat_at=now(),
+          continuity_status='CONTINUOUS', last_valid_event_at=now(),
+          sync_status='IN_SYNC', last_complete_sync_at=now(),
+          resync_generation_seq=0, published_resync_generation=0, updated_at=now()
+    WHERE pms_interface_id='$IF1';" >/dev/null
+#    ...and it can only apply where the runtime exists. The financial gate invokes this script BEFORE 0011, to
+#    show the pre-0011 invariants still hold, and iam_v2.pms_interface_runtime does not exist in that era at
+#    all. Asserting freshness there failed the gate on the absence of a table the era is not supposed to have.
+#    That is not a skipped proof: in the pre-0011 era there is no freshness surface and no case that depends
+#    on one, so there is nothing to prove and nothing is counted either way.
+#    The guard is on the ROW, not the table. The table can exist in an era that has not yet seeded a runtime row
+#    for this interface, and then the freshness SELECT returns the empty string -- which is exactly how this
+#    check failed the financial gate after being written to test for the table alone.
+if [ "$(q "SELECT (count(*) > 0)::text FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE n.nspname='iam_v2' AND c.relname='pms_interface_runtime';")" = "true" ] &&
+   [ "$(q "SELECT (count(*) > 0)::text FROM iam_v2.pms_interface_runtime WHERE pms_interface_id='$IF1';")" = "true" ]; then
+  fresh="$(q "SELECT (now() - last_heartbeat_at < interval '30 seconds')::text
+                FROM iam_v2.pms_interface_runtime WHERE pms_interface_id='$IF1';")"
+  [ "$fresh" = "true" ] && ok "SETUP" "the interface heartbeat is fresh, which these cases assume and do not test" \
+    || no "SETUP" "establish interface freshness" "heartbeat is not fresh (got '$fresh'); the cases below would fail on the clock"
+else
+  echo "  NOTE  SETUP      this era has no runtime row for the interface, so no freshness precondition applies"
+fi
+
 echo "===== PHASE-4 FINANCIAL DB INVARIANTS (behavioural) ====="
 
 # Fixture context: a revision with a CONCRETE folio strategy, an IN_HOUSE postable stay and a folio, so the
@@ -72,42 +136,42 @@ mkposting(){ # $1=id $2=revision $3=idem
 # ---- C5 folio strategy UNSET blocks CHARGE ---------------------------------------------------------------
 if [ -n "$REV_UNSET" ]; then
   rejects "C5" "UNSET folio strategy blocks CHARGE fail-closed" \
-    "$(mkposting 'e5e50000-0000-0000-0000-000000000001' "$REV_UNSET" 'inv-unset-1')" "FOLIO_STRATEGY_UNSET"
+    "$(mkposting "e5e5${RUNTAG}-0000-0000-0000-000000000001" "$REV_UNSET" "inv-unset-1-${RUNTAG}")" "FOLIO_STRATEGY_UNSET"
 else
   echo "  SKIP  C5         no UNSET revision in fixture"
 fi
 
 # ---- C1 a CHARGE against a concrete strategy is ACCEPTED (positive control) -------------------------------
 accepts "C1" "CHARGE accepted when every pinned object is in scope" \
-  "$(mkposting 'c1c10000-0000-0000-0000-000000000001' "$REV_OK" 'inv-ok-1')"
+  "$(mkposting "c1c1${RUNTAG}-0000-0000-0000-000000000001" "$REV_OK" "inv-ok-1-${RUNTAG}")"
 
 # ---- pms_postings append-only ----------------------------------------------------------------------------
 rejects "C-AO1" "pms_postings rejects UPDATE" \
-  "UPDATE iam_v2.pms_postings SET amount_minor=999 WHERE id='c1c10000-0000-0000-0000-000000000001';"
+  "UPDATE iam_v2.pms_postings SET amount_minor=999 WHERE id='c1c1${RUNTAG}-0000-0000-0000-000000000001';"
 rejects "C-AO1" "pms_postings rejects DELETE" \
-  "DELETE FROM iam_v2.pms_postings WHERE id='c1c10000-0000-0000-0000-000000000001';"
+  "DELETE FROM iam_v2.pms_postings WHERE id='c1c1${RUNTAG}-0000-0000-0000-000000000001';"
 
 # ---- idempotency uniqueness ------------------------------------------------------------------------------
 rejects "C26" "duplicate idempotency_key rejected" \
-  "$(mkposting 'c1c10000-0000-0000-0000-000000000002' "$REV_OK" 'inv-ok-1')" "idempotency"
+  "$(mkposting "c1c1${RUNTAG}-0000-0000-0000-000000000002" "$REV_OK" "inv-ok-1-${RUNTAG}")" "idempotency"
 
 # ---- C1 cross-scope composite FK pinning -----------------------------------------------------------------
 rejects "C1" "folio from another tenant/site/interface rejected" \
   "INSERT INTO iam_v2.pms_postings(id,tenant_id,site_id,pms_interface_id,settlement_id,purchase_id,stay_id,folio_id,posting_interface_revision_id,posting_type,amount_minor,currency,currency_exponent,idempotency_key)
-   VALUES ('c1c10000-0000-0000-0000-000000000003','$T','$S','$IF1','$SET','$PUR','$STAY','99999999-9999-9999-9999-999999999999','$REV_OK','CHARGE',100,'USD',2,'inv-badfolio');"
+   VALUES ('c1c1${RUNTAG}-0000-0000-0000-000000000003','$T','$S','$IF1','$SET','$PUR','$STAY','99999999-9999-9999-9999-999999999999','$REV_OK','CHARGE',100,'USD',2,"inv-badfolio-${RUNTAG}");"
 
 # ---- C9 P# uniqueness per interface ----------------------------------------------------------------------
 accepts "C9" "first attempt with P#=900001 accepted" \
   "INSERT INTO iam_v2.posting_attempts(id,tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
-   VALUES ('a9a90000-0000-0000-0000-000000000001','$T','$S','c1c10000-0000-0000-0000-000000000001','$IF1',1,'900001','14215','G1',now());"
+   VALUES ('a9a9${RUNTAG}-0000-0000-0000-000000000001','$T','$S','c1c1${RUNTAG}-0000-0000-0000-000000000001','$IF1',1,"$P_NUM_1",'14215','G1',now());"
 # A SECOND posting reusing the same P#. Deliberately a different posting rather than a second attempt on
 # the same one: this check is about the per-interface P# namespace, and reusing the first posting would
 # let the post-0011 retry gate answer first and leave P# uniqueness untested.
 accepts "C9" "a second posting exists to contest the P# namespace" \
-  "$(mkposting 'c1c10000-0000-0000-0000-000000000009' "$REV_OK" 'inv-ok-9')"
+  "$(mkposting "c1c1${RUNTAG}-0000-0000-0000-000000000009" "$REV_OK" "inv-ok-9-${RUNTAG}")"
 rejects "C9" "duplicate P# in the SAME interface rejected" \
   "INSERT INTO iam_v2.posting_attempts(id,tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
-   VALUES ('a9a90000-0000-0000-0000-000000000002','$T','$S','c1c10000-0000-0000-0000-000000000009','$IF1',1,'900001','14215','G1',now());" "p_number"
+   VALUES ('a9a9${RUNTAG}-0000-0000-0000-000000000002','$T','$S','c1c1${RUNTAG}-0000-0000-0000-000000000009','$IF1',1,"$P_NUM_1",'14215','G1',now());" "p_number"
 
 # ---- attempt_no uniqueness per posting -------------------------------------------------------------------
 # Pre-0011 the UNIQUE (internal_posting_id, attempt_no) index answers. Post-0011 the retry gate answers
@@ -115,46 +179,46 @@ rejects "C9" "duplicate P# in the SAME interface rejected" \
 if [ "$HAS_0011" = "1" ]; then WANT8="ATTEMPT_SEQUENCE"; else WANT8="attempt_no"; fi
 rejects "C8" "duplicate attempt_no for one posting rejected" \
   "INSERT INTO iam_v2.posting_attempts(id,tenant_id,site_id,internal_posting_id,pms_interface_id,attempt_no,p_number,rn,g_number,sent_at)
-   VALUES ('a9a90000-0000-0000-0000-000000000003','$T','$S','c1c10000-0000-0000-0000-000000000001','$IF1',1,'900002','14215','G1',now());" "$WANT8"
+   VALUES ('a9a9${RUNTAG}-0000-0000-0000-000000000003','$T','$S','c1c1${RUNTAG}-0000-0000-0000-000000000001','$IF1',1,"$P_NUM_2",'14215','G1',now());" "$WANT8"
 
 # ---- C15 one-way outcome ---------------------------------------------------------------------------------
 accepts "C15" "SENDING -> UNKNOWN allowed" \
-  "UPDATE iam_v2.posting_attempts SET outcome='UNKNOWN' WHERE id='a9a90000-0000-0000-0000-000000000001';"
+  "UPDATE iam_v2.posting_attempts SET outcome='UNKNOWN' WHERE id='a9a9${RUNTAG}-0000-0000-0000-000000000001';"
 rejects "C15" "UNKNOWN -> SENDING rejected (one-way)" \
-  "UPDATE iam_v2.posting_attempts SET outcome='SENDING' WHERE id='a9a90000-0000-0000-0000-000000000001';"
+  "UPDATE iam_v2.posting_attempts SET outcome='SENDING' WHERE id='a9a9${RUNTAG}-0000-0000-0000-000000000001';"
 rejects "C15" "posting_attempts rejects DELETE" \
-  "DELETE FROM iam_v2.posting_attempts WHERE id='a9a90000-0000-0000-0000-000000000001';"
+  "DELETE FROM iam_v2.posting_attempts WHERE id='a9a9${RUNTAG}-0000-0000-0000-000000000001';"
 
 # ---- C12 PA AS status catalog ----------------------------------------------------------------------------
 rejects "C12" "invented PA AS status rejected" \
-  "UPDATE iam_v2.posting_attempts SET pa_as_status='ZZ' WHERE id='a9a90000-0000-0000-0000-000000000001';" "pa_as_status"
+  "UPDATE iam_v2.posting_attempts SET pa_as_status='ZZ' WHERE id='a9a9${RUNTAG}-0000-0000-0000-000000000001';" "pa_as_status"
 
 # ---- C16 attempt events append-only ----------------------------------------------------------------------
 accepts "C16" "attempt event insert accepted" \
   "INSERT INTO iam_v2.posting_attempt_events(id,tenant_id,site_id,posting_attempt_id,event_type,detail)
-   VALUES ('e1e10000-0000-0000-0000-000000000001','$T','$S','a9a90000-0000-0000-0000-000000000001','SENT','{}');"
+   VALUES ('e1e1${RUNTAG}-0000-0000-0000-000000000001','$T','$S','a9a9${RUNTAG}-0000-0000-0000-000000000001','SENT','{}');"
 rejects "C16" "attempt event UPDATE rejected" \
-  "UPDATE iam_v2.posting_attempt_events SET event_type='TAMPERED' WHERE id='e1e10000-0000-0000-0000-000000000001';"
+  "UPDATE iam_v2.posting_attempt_events SET event_type='TAMPERED' WHERE id='e1e1${RUNTAG}-0000-0000-0000-000000000001';"
 rejects "C16" "attempt event DELETE rejected" \
-  "DELETE FROM iam_v2.posting_attempt_events WHERE id='e1e10000-0000-0000-0000-000000000001';"
+  "DELETE FROM iam_v2.posting_attempt_events WHERE id='e1e1${RUNTAG}-0000-0000-0000-000000000001';"
 
 # ---- C17/C19 review action catalog + immutability ---------------------------------------------------------
 if [ "$HAS_0011" = "1" ]; then
   # post-0011 the append-only ledger has exactly ONE writer, so the review goes through it
   accepts "C17" "CONFIRM_POSTED review action accepted (via the controlled writer)" \
-    "SELECT iam_v2.record_posting_review_action('c1c10000-0000-0000-0000-000000000001','CONFIRM_POSTED','$T','FOLIO_VERIFIED',jsonb_build_object('folio','verified'));"
+    "SELECT iam_v2.record_posting_review_action('c1c1${RUNTAG}-0000-0000-0000-000000000001','CONFIRM_POSTED','$T','FOLIO_VERIFIED',jsonb_build_object('folio','verified'));"
   rejects "C17" "generic APPROVE action rejected (no generic approve exists)" \
-    "SELECT iam_v2.record_posting_review_action('c1c10000-0000-0000-0000-000000000001','APPROVE','$T','X',jsonb_build_object('folio','verified'));" "REVIEW_ACTION_UNKNOWN"
+    "SELECT iam_v2.record_posting_review_action('c1c1${RUNTAG}-0000-0000-0000-000000000001','APPROVE','$T','X',jsonb_build_object('folio','verified'));" "REVIEW_ACTION_UNKNOWN"
 else
   accepts "C17" "CONFIRM_POSTED review action accepted" \
     "INSERT INTO iam_v2.posting_review_actions(id,tenant_id,site_id,posting_id,action,actor,reason,evidence)
-     VALUES ('4a4a0000-0000-0000-0000-000000000001','$T','$S','c1c10000-0000-0000-0000-000000000001','CONFIRM_POSTED','$T','FOLIO_VERIFIED','{}');"
+     VALUES ('4a4a${RUNTAG}-0000-0000-0000-000000000001','$T','$S','c1c1${RUNTAG}-0000-0000-0000-000000000001','CONFIRM_POSTED','$T','FOLIO_VERIFIED','{}');"
   rejects "C17" "generic APPROVE action rejected (no generic approve exists)" \
     "INSERT INTO iam_v2.posting_review_actions(id,tenant_id,site_id,posting_id,action,actor,reason,evidence)
-     VALUES ('4a4a0000-0000-0000-0000-000000000002','$T','$S','c1c10000-0000-0000-0000-000000000001','APPROVE','$T','X','{}');" "action"
+     VALUES ('4a4a${RUNTAG}-0000-0000-0000-000000000002','$T','$S','c1c1${RUNTAG}-0000-0000-0000-000000000001','APPROVE','$T','X','{}');" "action"
 fi
 # whichever way it was written, the recorded action is immutable
-RACT="$(q "SELECT id FROM iam_v2.posting_review_actions WHERE posting_id='c1c10000-0000-0000-0000-000000000001' LIMIT 1;")"
+RACT="$(q "SELECT id FROM iam_v2.posting_review_actions WHERE posting_id='c1c1${RUNTAG}-0000-0000-0000-000000000001' LIMIT 1;")"
 rejects "C19" "review action UPDATE rejected" \
   "UPDATE iam_v2.posting_review_actions SET reason='CHANGED' WHERE id='$RACT';"
 rejects "C19" "review action DELETE rejected" \
@@ -163,19 +227,19 @@ rejects "C19" "review action DELETE rejected" \
 # ---- C22 one active outbox row per posting -----------------------------------------------------------------
 accepts "C22" "first QUEUED outbox row accepted" \
   "INSERT INTO iam_v2.posting_outbox(id,tenant_id,site_id,pms_interface_id,posting_id,state)
-   VALUES ('0b0b0000-0000-0000-0000-000000000001','$T','$S','$IF1','c1c10000-0000-0000-0000-000000000001','QUEUED');"
+   VALUES ('0b0b${RUNTAG}-0000-0000-0000-000000000001','$T','$S','$IF1','c1c1${RUNTAG}-0000-0000-0000-000000000001','QUEUED');"
 rejects "C22" "second ACTIVE outbox row for the same posting rejected" \
   "INSERT INTO iam_v2.posting_outbox(id,tenant_id,site_id,pms_interface_id,posting_id,state)
-   VALUES ('0b0b0000-0000-0000-0000-000000000002','$T','$S','$IF1','c1c10000-0000-0000-0000-000000000001','IN_FLIGHT');" "outbox_one_active"
+   VALUES ('0b0b${RUNTAG}-0000-0000-0000-000000000002','$T','$S','$IF1','c1c1${RUNTAG}-0000-0000-0000-000000000001','IN_FLIGHT');" "outbox_one_active"
 accepts "C22" "a DONE row may coexist (partial index excludes terminal states)" \
-  "UPDATE iam_v2.posting_outbox SET state='DONE' WHERE id='0b0b0000-0000-0000-0000-000000000001';
+  "UPDATE iam_v2.posting_outbox SET state='DONE' WHERE id='0b0b${RUNTAG}-0000-0000-0000-000000000001';
    INSERT INTO iam_v2.posting_outbox(id,tenant_id,site_id,pms_interface_id,posting_id,state)
-   VALUES ('0b0b0000-0000-0000-0000-000000000003','$T','$S','$IF1','c1c10000-0000-0000-0000-000000000001','QUEUED');"
+   VALUES ('0b0b${RUNTAG}-0000-0000-0000-000000000003','$T','$S','$IF1','c1c1${RUNTAG}-0000-0000-0000-000000000001','QUEUED');"
 
 # ---- stay lifecycle gate ------------------------------------------------------------------------------------
 q "UPDATE iam_v2.stays SET posting_allowed=false WHERE id='$STAY';" >/dev/null
 rejects "C32" "posting_allowed=false blocks CHARGE" \
-  "$(mkposting 'c3c30000-0000-0000-0000-000000000001' "$REV_OK" 'inv-noallow')" "POSTING_NOT_ALLOWED"
+  "$(mkposting "c3c3${RUNTAG}-0000-0000-0000-000000000001" "$REV_OK" "inv-noallow-${RUNTAG}")" "POSTING_NOT_ALLOWED"
 q "UPDATE iam_v2.stays SET posting_allowed=true WHERE id='$STAY';" >/dev/null
 # ---- Phase-3 lifecycle boundary (a SEPARATE claim from the financial gate) ----------------------------------
 # A raw status edit is refused because IN_HOUSE->CHECKED_OUT must SET effective_checkout_at in the same
@@ -198,7 +262,7 @@ NOWST="$(q "SELECT status FROM iam_v2.stays WHERE id='$STAY';")"
 if [ "$NOWST" = "CHECKED_OUT" ]; then
   ok "P3-LC" "approved checkout applied (status=CHECKED_OUT, effective_checkout_at set)"
   rejects "C32" "genuinely non-IN_HOUSE stay blocks CHARGE" \
-    "$(mkposting 'c3c30000-0000-0000-0000-000000000002' "$REV_OK" 'inv-notinhouse')" "POSTING_NOT_ALLOWED"
+    "$(mkposting "c3c3${RUNTAG}-0000-0000-0000-000000000002" "$REV_OK" "inv-notinhouse-${RUNTAG}")" "POSTING_NOT_ALLOWED"
   # Reinstate through the approved path: CHECKED_OUT->IN_HOUSE must CLEAR effective_checkout_at and increment
   # lifecycle_version exactly once. Restoring the fixture by any other route would itself be a bypass.
   q "UPDATE iam_v2.stays SET status='IN_HOUSE', effective_checkout_at=NULL, posting_allowed=true, lifecycle_version=lifecycle_version+1 WHERE id='$STAY';" >/dev/null

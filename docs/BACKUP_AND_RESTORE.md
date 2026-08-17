@@ -73,6 +73,33 @@ site whose backups are failing. Manual runs: `POST /edge/v1/backups`.
 - HA pairs: back up on the current primary only (replication covers the
   secondary); the agent checks VRRP state before running.
 
+### Three public tables no migration creates — expected, and what a restore must know
+
+A restored site database is **not** built only from `data-plane/migrations/`. Three tables in the `public`
+schema are created by `scd` itself, the first time the feature that needs them is used:
+
+| Table | Created by | First used for |
+|---|---|---|
+| `public.edge_executed_commands` | `data-plane/cmd/scd/commands.go` | the Central command channel |
+| `public.edge_installed_updates` | `data-plane/cmd/scd/updates.go` | recording an installed update |
+| `public.edge_offline_packages` | `data-plane/cmd/scd/offline_import.go` | consuming an offline package |
+
+All three are `CREATE TABLE IF NOT EXISTS`, so the behaviour is deterministic and idempotent, and on a live
+appliance all three are owned by the installation superuser (`stayconnect`) and carry Gate P's grants to
+`svc_scd`.
+
+**Why this matters to a restore, and to anyone comparing two databases.** `deploy/gatep/gatep-grants.sql`
+grants on all three. Applying the migration lineage to an empty database and then running Gate P therefore
+**fails** — the tables do not exist yet — unless `scd` has run first or the DDL is applied alongside it. A
+rebuild that reaches "the same schema" without them is not the same schema.
+
+- **Restoring from a dump:** they are in the dump, because they exist in the source database. Nothing to do.
+- **Rebuilding from migrations:** expect them to be absent until `scd` starts, and expect Gate P to fail if it
+  is run before that. This is exercised by `iam_v2_scratch/phase7_reconstruct_from_sources.sh`, which applies
+  the same DDL from those three source files at the point in the accepted history where it belongs.
+- **Comparing a rebuilt database with an appliance:** their absence is the expected difference until `scd` has
+  run, and is not evidence of a failed restore.
+
 ### Restore (site)
 
 **Once Phase 4 is deployed, use the supported tool rather than the raw commands:**
