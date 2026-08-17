@@ -1,0 +1,4 @@
+commit 8d184243670438d7fc36415509fe1faab1c74004
+Date:   Mon Aug 17 17:17:40 2026 +0300
+
+    Post-merge cleanup (delivery_head): manifest, packs and checksums

@@ -3,11 +3,11 @@
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
 <!-- source: governance/project-state.json (schema 1.0.0) @ transition T0066 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
-**Current activity:** `DEVELOPMENT_APPLIANCE_IAM_V2_OPERATIONAL_TRIAL`
+**Current activity:** `DEVELOPMENT_TRIAL_BLOCKED_AWAITING_CUTOVER_WIRING_AUTHORIZATION`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
-**Single next authorized action:** Execute the authorized DEVELOPMENT-appliance IAM-v2 operational trial under D29 (transition T0066) on the development appliance 172.21.60.23 only, and verify it end to end on the running development services. It is a post-roadmap product-evaluation activity, not a numbered phase and not Phase 8, which does not exist. PRODUCTION remains PRE-LIVE with IAM-v2 NOT cut over, and Production go-live, real guest, PMS, provider and financial traffic and paid access all remain unauthorized.
+**Single next authorized action:** Obtain a separate Product-Owner decision authorizing implementation of the IAM-v2 production repository wiring, because the authorized DEVELOPMENT-appliance IAM-v2 operational trial under D29 (transition T0066) cannot be enabled by configuration alone. Setting STAYCONNECT_IAMV2_MASTER makes scd fail closed at startup with 'no production repository is wired', the code marks that wiring a cutover step, and no production implementation of iamv2.Repository exists. The appliance was restored to its verified DARK baseline and PRODUCTION remains PRE-LIVE with IAM-v2 NOT cut over.
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D29`.
 <!-- END GENERATED PROJECT STATE -->
 

@@ -10,7 +10,7 @@
   },
   "new_state": {
     "phase": "7",
-    "activity": "DEVELOPMENT_APPLIANCE_IAM_V2_OPERATIONAL_TRIAL",
+    "activity": "DEVELOPMENT_TRIAL_BLOCKED_AWAITING_CUTOVER_WIRING_AUTHORIZATION",
     "phase_status": "ACCEPTED_AND_CLOSED",
     "note": "Not a numbered phase. The numbered Development Roadmap remains COMPLETE and no Phase 8 exists.",
     "lifecycle": "post-roadmap DEVELOPMENT operational trial (not a numbered phase; no Phase 8)"
@@ -75,5 +75,14 @@
     "no paid access",
     "no numbered phase created; no Phase 8"
   ],
-  "next": "Execute the authorized DEVELOPMENT-appliance IAM-v2 operational trial and verify it end to end on the running development services. Production remains PRE-LIVE with IAM-v2 not cut over."
+  "next": "Execute the authorized DEVELOPMENT-appliance IAM-v2 operational trial and verify it end to end on the running development services. Production remains PRE-LIVE with IAM-v2 not cut over.",
+  "trial_outcome": {
+    "status": "BLOCKED -- the trial could not be enabled, and the appliance was restored",
+    "what_was_attempted": "Development safety backup taken (devtrial-20260817-142324: site pg_dump, /etc/stayconnect tarball, release pointer, service states), then the accepted deployment gates were set on the DEVELOPMENT appliance and scd/portald/edged/acctd restarted.",
+    "hard_blocker": "IAM-v2 CANNOT BE ENABLED BY CONFIGURATION. With STAYCONNECT_IAMV2_MASTER=true, scd refuses to start: 'iamv2 master flag is enabled but no production repository is wired (Phase 2 only)'. The source says the same thing at data-plane/cmd/scd/authsec.go:39-42 -- the repository is deliberately nil and the code returns an error where the wiring belongs, commented 'wiring a real repo here is a Phase 2 cutover step'. edged refuses identically for Phase-2 commerce: 'no production admin repository is wired (cutover only)'. No production implementation of iamv2.Repository exists anywhere in the tree -- only a nil and a test fake.",
+    "why_this_is_not_a_defect_to_fix_forward": "Writing that repository IS the atomic complete-domain IAM-v2 cutover implementation, which the FINAL contract defers to a later separately approved gate and which D29 explicitly does not authorize. It is an architecture/business-policy boundary already settled the other way, not an ordinary development defect.",
+    "restoration_proved": "The appliance was restored from the captured baseline and verified: six services active, scd Phase-6 endpoint 404 (dark), portal 200, Hotel Admin 307, edged health 200, release 20260815-204927 unchanged, iam_v2 81 tables, guest_device_self_service false, entitlements 8, postings 0, outbox 0. Only STAYCONNECT_PHASE6_MASTER=true remains, exactly as before the attempt.",
+    "production_effect": "none -- Production was never contacted; no PMS, provider or financial egress occurred",
+    "what_a_future_authorization_would_need": "A decision authorizing implementation of the IAM-v2 production repository wiring (the cutover step), scoped to the DEVELOPMENT appliance if the Product Owner wants the trial without a Production cutover."
+  }
 }
