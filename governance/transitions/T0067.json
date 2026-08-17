@@ -1,0 +1,38 @@
+{
+  "transition_id": "T0067",
+  "seq": 67,
+  "timestamp": "2026-08-17T15:05:00Z",
+  "record_type": "CLEAN_IAM_V2_REPLACEMENT_STRATEGY_AND_DEVELOPMENT_WIRING",
+  "previous_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_TRIAL_BLOCKED_AWAITING_CUTOVER_WIRING_AUTHORIZATION",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_IAM_V2_CLEAN_REPLACEMENT_TRIAL",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D30",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner direction of 2026-08-17: clean IAM-v2 replacement. Complete the missing runtime wiring and make IAM-v2 the sole IAM authority on the DEVELOPMENT appliance.",
+  "wiring_implemented": {
+    "finding": "The Postgres repositories the wiring needed ALREADY EXISTED and were simply never constructed: iamv2.PgRepository (repo_pg.go), iamv2.PgCommerceRepository (commerce_repo_pg.go) and iamv2.PgCommerceAdminRepository (commerce_admin_repo_pg.go). The blocker was three unwritten constructor calls, not a missing domain.",
+    "scd": "data-plane/cmd/scd/authsec.go builds PgRepository and PgCommerceRepository from the pool it already holds when the respective master flag is ON, replacing the two errors that refused to start.",
+    "edged": "data-plane/cmd/edged/main.go builds PgCommerceAdminRepository under the same condition.",
+    "no_silent_fallback": "Nil-while-dark is unchanged: with a master flag OFF the component is constructed with NO repository and short-circuits to disabled, so an enabled IAM-v2 can never quietly serve from legacy tables.",
+    "tests": "go build ./... and go vet clean; internal/iamv2, cmd/scd and cmd/edged package tests all pass."
+  },
+  "boundaries_observed": [
+    "no Production contact or mutation",
+    "no Production go-live",
+    "no real PMS financial posting",
+    "no payment-provider traffic",
+    "no paid-access activation",
+    "proven non-IAM appliance foundations preserved"
+  ],
+  "next": "Deploy the wired build to the DEVELOPMENT appliance, enable IAM-v2 as the sole IAM authority there, and verify it end to end on the running services."
+}

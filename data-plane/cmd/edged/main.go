@@ -216,10 +216,15 @@ func main() {
 		slog.Error("phase2 commerce config", "err", err)
 		os.Exit(2)
 	}
+	// Wired for the same reason as scd's: the clean-replacement decision makes IAM-v2 the only authority, so
+	// the accepted admin repository is constructed when the master flag is on and left nil while it is off.
 	var commRepo iamv2.CommerceAdminRepository // nil while dark
 	if commCfg.MasterEnabled {
-		slog.Error("phase2 commerce master flag enabled but no production admin repository is wired (cutover only)")
-		os.Exit(2)
+		if pool == nil {
+			slog.Error("phase2 commerce master flag enabled but no database pool is available")
+			os.Exit(2)
+		}
+		commRepo = iamv2.NewPgCommerceAdminRepository(pool)
 	}
 	commAdmin, err := iamv2.NewCommerceAdmin(commCfg, commRepo, iamv2.NopObserver{})
 	if err != nil {

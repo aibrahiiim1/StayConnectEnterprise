@@ -36,10 +36,23 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 	if err != nil {
 		return fmt.Errorf("iamv2 config: %w", err)
 	}
+	// THE REPOSITORY IS WIRED WHEN, AND ONLY WHEN, THE MASTER FLAG IS ON.
+	//
+	// This used to return an error here, because wiring a real repository was deferred to the cutover. The
+	// Product Owner has since decided the transition is a CLEAN IAM-v2 REPLACEMENT rather than a migration:
+	// IAM-v2 is the only IAM authority and the legacy IAM is disposable. So the repository the accepted phases
+	// already built (iamv2.PgRepository, over the same pool this daemon already holds) is constructed here.
+	//
+	// The nil-while-dark behaviour is deliberately unchanged: with the master flag OFF the authenticator is
+	// still constructed with NO repository, so it short-circuits to DecisionDisabled without ever issuing an
+	// IAM-v2 statement. Enabling is therefore a real enablement, not a fallback, and there is no path where a
+	// flagged-on IAM-v2 quietly serves from the legacy tables instead.
 	var iamRepo iamv2.Repository // nil: prefer NO repository while the master flag is OFF
 	if iamCfg.MasterEnabled {
-		// Not reachable in Phase 1B (flags OFF); wiring a real repo here is a Phase 2 cutover step.
-		return fmt.Errorf("iamv2 master flag is enabled but no production repository is wired (Phase 2 only)")
+		if pool == nil {
+			return fmt.Errorf("iamv2 master flag is enabled but no database pool is available")
+		}
+		iamRepo = iamv2.NewPgRepository(pool)
 	}
 	auth, err := iamv2.New(iamCfg, iamRepo, iamv2.NopObserver{})
 	if err != nil {
@@ -53,11 +66,14 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 	if err != nil {
 		return fmt.Errorf("phase2 commerce config: %w", err)
 	}
+	// Same shape as the authenticator above, and for the same reason: the accepted Phase-2 commerce repository
+	// is constructed when the master flag is on, and left nil while it is off.
 	var commRepo iamv2.CommerceRepository // nil: NO repository while the master flag is OFF
 	if commCfg.MasterEnabled {
-		// Not reachable in the dark deployment (flags OFF); wiring a production commerce repository is a
-		// Phase-2 cutover step, deliberately not performed here.
-		return fmt.Errorf("phase2 commerce master flag is enabled but no production repository is wired (cutover only)")
+		if pool == nil {
+			return fmt.Errorf("phase2 commerce master flag is enabled but no database pool is available")
+		}
+		commRepo = iamv2.NewPgCommerceRepository(pool)
 	}
 	// PHASE 6 (DARK by default): the commerce engine's aggregate acquisition capability is derived from the
 	// SAME flag that turns on acctd's accrual tick, and from the same fail-closed reader the grant path uses.

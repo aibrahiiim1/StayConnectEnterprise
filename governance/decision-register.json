@@ -580,6 +580,13 @@
       "decided_on": "2026-08-17",
       "phase": "post-roadmap",
       "accepted": true
+    },
+    {
+      "id": "D30",
+      "title": "CLEAN IAM-v2 REPLACEMENT ADOPTED AS THE TRANSITION STRATEGY (2026-08-17). The Product Owner changes the intended transition: IAM-v2 becomes the ONLY StayConnect IAM authority and the legacy IAM is DISPOSABLE and RETIRED. The legacy IAM has no production user base to preserve and its data does NOT need to be migrated. NO legacy IAM data migration, NO dual read, NO dual write, NO legacy/new synchronization and NO backward-compatible IAM authority mode are required or wanted. THIS IS NOT AUTHORIZATION TO DESTROY PROVEN NON-IAM FOUNDATIONS. Appliance enrollment/claim/signed assignment, appliance identity and PKI/mTLS, licensing, WAN/LAN and networking, DHCP/DNS/captive-portal, nftables and traffic control, Central Control Plane integration, and update/recovery/security infrastructure are all PRESERVED. AUTHORIZED NOW, DEVELOPMENT APPLIANCE ONLY: complete the missing production-grade IAM-v2 runtime composition/wiring by reusing the accepted Phase 1-7 implementation rather than rewriting it, make IAM-v2 the sole IAM authority there, retire or reset disposable legacy IAM APPLICATION state where necessary for a clean environment without wiping the appliance unless technical evidence shows that is genuinely necessary, and prepare it for hands-on Product-Owner use. All security and architecture invariants remain binding. FUTURE PRODUCTION MODEL, recorded but NOT authorized: a clean IAM-v2 REPLACEMENT rather than a data migration -- backup/safety checkpoint, stop IAM services, retire legacy IAM authority/application state, deploy the approved IAM-v2 release, initialize and configure clean IAM-v2, start services, verify, go live. Production execution requires a separate explicit Product-Owner authorization after the DEVELOPMENT trial is satisfactory. Real PMS financial posting, payment-provider traffic and paid financial activation remain unauthorized. This is a post-roadmap activity and is NOT Phase 8.",
+      "decided_on": "2026-08-17",
+      "phase": "post-roadmap",
+      "accepted": true
     }
   ]
 }
