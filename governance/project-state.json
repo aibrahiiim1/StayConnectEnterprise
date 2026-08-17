@@ -703,9 +703,9 @@
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "29a899b00d7795affadfd0853b651c0aac8356f7",
+  "acceptance_candidate_head": "129f60dc01517ea532326dbf7f9d6f55ec634c25",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "29a899b00d7795affadfd0853b651c0aac8356f7",
+  "inventory_head": "129f60dc01517ea532326dbf7f9d6f55ec634c25",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D27 / T0064 (2026-08-17)",
