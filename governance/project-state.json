@@ -303,7 +303,7 @@
   "pms_financial_state": "FIAS lookup-only in production. The Phase-4 financial layer is ACCEPTED AND CLOSED at verified LIVE-DARK maturity (D19/T0044) and is DEPLOYED DARK on the development appliance: migrations 0011-0026 applied to iam_v2 (68 tables, 0 rows), five NOLOGIN restricted roles, and the Phase-4 binaries and Hotel-Admin bundle in service. Every Phase-4 flag is OFF, every Phase-4 route returns 404, and no PS has been transmitted, no PA financially accepted, no folio debited, no provider CHARGE or REFUND issued and no paid access granted. folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED and per-property Tier-2 onboarding still mandatory.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
-    "No governance blocker. Phase 6 is ACCEPTED AND CLOSED at verified LIVE-DARK maturity (D26/T0061) and Phase 7 is AUTHORIZED for planning and execution. The remaining gate to real service is a separate Product-Owner go-live/cutover decision, which no current authorization supplies."
+    "No governance blocker. Every numbered development phase is closed: Phase 7 is ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity (D27/T0064), following Phase 6 (D26/T0061). No development phase is open or authorized and no Phase 8 exists. Two separate Product-Owner decisions remain outstanding and neither is supplied by any current authorization: the merge decision on PR #15, which stays OPEN and UNMERGED, and the atomic complete-domain IAM-v2 cutover / go-live decision."
   ],
   "allowed_actions": [
     "Record and maintain the Phase-7 acceptance and closure: governance, current-state parity, manifests, packs and documentation. Phase 7 is ACCEPTED_AND_CLOSED and must not be re-executed.",
@@ -314,12 +314,12 @@
     "IAM-v2 production cutover, production data migration, dual read/write, legacy IAM removal, real guest service, real PMS financial posting, real payment-provider traffic, paid-access activation, per-property financial enablement and programmatic reversal. Each is a separate Product-Owner go-live decision and none is authorized by D26.",
     "Enabling any Phase 4, Phase 5 or Phase 6 capability on any environment outside a controlled, restored DEVELOPMENT-appliance validation run.",
     "Any Production contact or mutation.",
-    "Implementing work beyond the authorized Phase 7 scope."
+    "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
   "next_authorized_action": "No further Phase-7 action is authorized -- Phase 7 is ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity by Product-Owner decision D27 (2026-08-17, transition T0064) at delivery head 16819aa027633b84486999451e8b689a191a15d2, and every numbered development phase is now closed. The only outstanding item on the Phase-7 branch is the Product Owner's SEPARATE merge decision on PR #15, which remains OPEN and UNMERGED. The only major next lifecycle gate is the separately authorized atomic complete-domain IAM-v2 cutover / go-live decision, which this acceptance does NOT authorize. No Phase 8 exists and none is authorized.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D26",
+  "latest_accepted_po_decision": "D27",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",

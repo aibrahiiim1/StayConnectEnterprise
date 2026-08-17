@@ -706,6 +706,120 @@ def main():
         if not missing:
             ok("every file cited as evidence by a transition receipt is %s" % how)
 
+    # ---- 8c. THE LATEST ACCEPTED DECISION, AND PHASES THAT ARE STILL "AUTHORIZED" AFTER BEING CLOSED ---------
+    #
+    # THE FALSE PASS THIS CLOSES, found independently after the Phase-7 acceptance was already recorded and every
+    # gate was green. D27 accepted and closed Phase 7 and T0064 recorded it. phases["7"].status said
+    # ACCEPTED_AND_CLOSED, the receipt agreed, the next action agreed, and rule 9 above compared the receipt with
+    # the phases map and passed. But three OTHER current fields still described the previous world:
+    #
+    #   latest_accepted_po_decision  = "D26"          (D27 exists and is accepted)
+    #   blockers[0]                  = "... Phase 7 is AUTHORIZED for planning and execution."
+    #   prohibited_actions[3]        = "Implementing work beyond the authorized Phase 7 scope."
+    #
+    # Every generated block prints latest_accepted_po_decision, so the START-HERE, Handoff and Contract blocks
+    # each said "D27/T0064 closed Phase 7" and "Latest accepted PO decision: D26" in the same breath. Nothing
+    # caught it, because no rule compared the pointer with the register, and no rule read the blocker and action
+    # prose for a phase that is no longer authorized.
+    #
+    # These three rules are general. They are not written for phase 7 and must not be special-cased to it: any
+    # phase recorded ACCEPTED_AND_CLOSED or FINAL_CLOSED is subject to them, in every current field listed below.
+    register = load_json("governance/decision-register.json") or {}
+    decisions = register.get("decisions") or []
+    accepted_ids = [str(d.get("id")) for d in decisions if isinstance(d, dict) and d.get("accepted")]
+    pointer = str(state.get("latest_accepted_po_decision") or "").strip()
+
+    def dnum(i):
+        m = re.match(r"^D(\d+)$", i or "")
+        return int(m.group(1)) if m else -1
+
+    if not accepted_ids:
+        bad("latest-decision-pointer", "the decision register records no accepted decision, so the pointer "
+            "latest_accepted_po_decision cannot be checked against anything", "governance/decision-register.json")
+    elif not pointer:
+        bad("latest-decision-pointer", "latest_accepted_po_decision is empty while the register records "
+            "accepted decisions up to %s" % max(accepted_ids, key=dnum), STATE)
+    else:
+        newest = max(accepted_ids, key=dnum)
+        if pointer != newest:
+            bad("latest-decision-pointer",
+                "latest_accepted_po_decision is %r but the newest ACCEPTED decision in the register is %r -- "
+                "every generated current-state block prints this pointer, so the blocks would announce the new "
+                "decision and cite the old one in the same paragraph" % (pointer, newest), STATE)
+        else:
+            ok("latest_accepted_po_decision (%s) is the newest accepted decision in the register" % pointer)
+
+    # A closed phase must not still be described as authorized or in progress by any CURRENT field.
+    CLOSED_STATUSES = ("ACCEPTED_AND_CLOSED", "FINAL_CLOSED")
+    closed_phases = [ph for ph, body in (state.get("phases") or {}).items()
+                     if isinstance(body, dict) and str(body.get("status", "")).strip() in CLOSED_STATUSES]
+    # WHAT COUNTS AS THE DEFECT. Not the mere co-occurrence of "phase 7" and "authorized" -- the correct
+    # wording after closure necessarily says both, e.g. "Re-executing Phase 7 ... none is open or authorized".
+    # The defect is the phase being PREDICATED as authorized or in progress, which has a small set of shapes:
+    #
+    #     "Phase 7 is AUTHORIZED for planning and execution"      <- the blocker that was found stale
+    #     "beyond the authorized Phase 7 scope"                   <- the prohibited action that was found stale
+    #     "Phase-7 ... IN_PROGRESS"
+    #
+    # Matching the claim rather than the vocabulary is what keeps this rule general and keeps it from punishing
+    # the sentences that state the closure correctly.
+    def still_open_claim(text, ph):
+        if not isinstance(text, str):
+            return None
+        P = r"\bphase[\s\-_]*%s\b" % re.escape(ph)
+        CLAIMS = (
+            re.compile(P + r"[^.;!?]{0,60}?\b(?:is|are|remains?|stays?)\s+(?:still\s+|currently\s+)?authoriz", re.I),
+            re.compile(r"\bauthoriz(?:ed|es)\b[^.;!?]{0,40}?" + P, re.I),
+            re.compile(P + r"[^.;!?]{0,60}?\b(?:is|are|remains?)\s+(?:still\s+|currently\s+)?in[\s_-]?progress\b", re.I),
+            re.compile(r"\bin[\s_-]?progress\b[^.;!?]{0,40}?" + P, re.I),
+        )
+        HISTORICAL = re.compile(r"\b(?:was|were|previously|formerly|historical(?:ly)?|until|before|no longer)\b", re.I)
+        # A NEGATED authorization is the CORRECT wording after closure, not the defect: "no further Phase-7
+        # action is authorized", "merging is not authorized", "unauthorized". Without this the rule fired on the
+        # very sentences that state the closure properly, which would have taught the next person to delete them.
+        NEGATED = re.compile(r"\b(?:not|no|never|neither|nor)\b[^.;!?]{0,40}?authoriz|\bunauthoriz", re.I)
+        for _off, clause in split_clauses(text):   # split_clauses yields (offset, clause)
+            # historical framing is allowed when the clause says so itself
+            if HISTORICAL.search(clause) or NEGATED.search(clause):
+                continue
+            for rx in CLAIMS:
+                if rx.search(clause):
+                    return clause.strip()
+        return None
+
+    CURRENT_FIELDS = ("blockers", "allowed_actions", "prohibited_actions", "next_authorized_action",
+                      "current_activity", "current_focus", "current_maturity")
+    for ph in sorted(closed_phases):
+        hits = []
+        for field in CURRENT_FIELDS:
+            val = state.get(field)
+            for text in ([val] if isinstance(val, str) else (val if isinstance(val, list) else [])):
+                claim = still_open_claim(text, ph)
+                if claim:
+                    hits.append("%s: %s" % (field, claim[:160]))
+        if hits:
+            bad("closed-phase-still-authorized",
+                "phase %s is recorded %s, but current state still describes it as authorized or in progress -- %s"
+                % (ph, (state.get("phases") or {}).get(ph, {}).get("status"), " | ".join(hits[:3])), STATE)
+        else:
+            ok("no current field describes closed phase %s as still authorized or in progress" % ph)
+
+    # And the generated blocks must not carry a stale decision id, since they are what a reader actually sees.
+    if pointer:
+        for rel in DOC_SURFACES:
+            text = load_surface(rel)
+            if not text:
+                continue
+            for m in re.finditer(r"Latest accepted PO decision:\s*`?(D\d+)`?", text):
+                if m.group(1) != pointer:
+                    bad("generated-block-stale-decision",
+                        "%s prints 'Latest accepted PO decision: %s' while the state records %s -- the block is "
+                        "generated, so this means it was not re-rendered after the decision changed"
+                        % (rel, m.group(1), pointer), rel)
+                    break
+            else:
+                ok("%s prints the current latest accepted decision (%s)" % (rel, pointer))
+
     # ---- 9. TRANSITION / PHASE-STATUS COHERENCE --------------------------------------------------------------------
     #
     # THE FALSE PASS THIS CLOSES. T0044 recorded new_state.phase_status = ACCEPTED_AND_CLOSED for phase 4, and

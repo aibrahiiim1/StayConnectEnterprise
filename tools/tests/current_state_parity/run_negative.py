@@ -631,6 +631,77 @@ def _(d):
                "pending a separate Product-Owner merge decision.")
 
 
+# ---- the closure false-green: a phase closed in one field and still authorized in another ------------------
+#
+# Found independently AFTER the Phase-7 acceptance was recorded and every gate was green. The receipt, the
+# phases map and the next action all said ACCEPTED_AND_CLOSED; three other current fields still described the
+# previous world, and the generated blocks printed both at once. These four cases keep each half of that
+# defect dead. They are written against whatever phase the state currently records as closed, not against
+# phase 7, so they keep working after the next acceptance.
+
+def _a_closed_phase(d):
+    doc = json.load(io.open(os.path.join(d, "governance/project-state.json"), encoding="utf-8"))
+    for ph, body in sorted((doc.get("phases") or {}).items()):
+        if isinstance(body, dict) and str(body.get("status", "")).strip() in ("ACCEPTED_AND_CLOSED", "FINAL_CLOSED"):
+            return ph
+    raise AssertionError("no closed phase in the fixture: this suite has nothing to regress")
+
+
+@case("latest_accepted_po_decision points at an older decision than the register's newest accepted one",
+      "latest-decision-pointer")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    reg = json.load(io.open(os.path.join(d, "governance/decision-register.json"), encoding="utf-8"))
+    ids = [str(x.get("id")) for x in reg.get("decisions", []) if isinstance(x, dict) and x.get("accepted")]
+    nums = sorted(int(i[1:]) for i in ids if i.startswith("D") and i[1:].isdigit())
+    if len(nums) < 2:
+        raise AssertionError("the register has fewer than two accepted decisions to regress between")
+    doc["latest_accepted_po_decision"] = "D%d" % nums[-2]
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("a closed phase is described as AUTHORIZED in the current blockers",
+      "closed-phase-still-authorized")
+def _(d):
+    ph = _a_closed_phase(d)
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    doc["blockers"] = ["No governance blocker. Phase %s is AUTHORIZED for planning and execution." % ph]
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("a closed phase is described as authorized in the current prohibited actions",
+      "closed-phase-still-authorized")
+def _(d):
+    ph = _a_closed_phase(d)
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    acts = list(doc.get("prohibited_actions") or [])
+    acts.append("Implementing work beyond the authorized Phase %s scope." % ph)
+    doc["prohibited_actions"] = acts
+    io.open(p, "w", encoding="utf-8", newline="").write(json.dumps(doc, indent=2, ensure_ascii=False) + chr(10))
+
+
+@case("a generated current-state block prints a stale latest-decision id",
+      "generated-block-stale-decision")
+def _(d):
+    p = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p, encoding="utf-8"))
+    cur = str(doc.get("latest_accepted_po_decision") or "")
+    if not cur.startswith("D"):
+        raise AssertionError("no latest_accepted_po_decision to regress against")
+    stale = "D%d" % (int(cur[1:]) - 1)
+    rel = "docs/context/StayConnect-IAM-Handoff.md"
+    f = os.path.join(d, rel)
+    s2 = io.open(f, encoding="utf-8", newline="").read()
+    marker = "Latest accepted PO decision: `%s`" % cur
+    if marker not in s2:
+        raise AssertionError("the generated block does not carry the decision marker: anchor drifted")
+    io.open(f, "w", encoding="utf-8", newline="").write(
+        s2.replace(marker, "Latest accepted PO decision: `%s`" % stale))
+
+
 def main():
     print("== baseline: the real repository must PASS ==")
     d = sandbox()
