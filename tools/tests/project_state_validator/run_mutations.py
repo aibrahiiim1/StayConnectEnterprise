@@ -284,7 +284,13 @@ CUR_BLOCKER_HEAD = _STATE_DOC["blockers"][0][:48]
 # aborts the whole suite with a traceback that reads like the repository is broken -- which is exactly the
 # failure mode the comments above this block were written about. The wording moved again at Phase 7
 # ("Implementing work beyond the authorized Phase 7 scope"), so the anchor follows the words.
-CUR_PHASE_BEYOND = _anchor(_STATE_DOC["prohibited_actions"], "beyond", "phase")
+#
+# ...and moved a third time at the Phase-7 CLOSURE, to "Re-executing, reopening or extending Phase 7, which is
+# ACCEPTED_AND_CLOSED, and implementing any numbered development phase". That dropped "beyond" and the suite
+# hard-stopped with FIXTURE ANCHOR DRIFT -- correctly: it refuses to run a case that would mutate nothing. The
+# anchor now follows "implementing", which both the authorized-scope wording and the closed-phase wording use,
+# so it survives the next rewording of the same prohibition instead of pinning one phase's phrasing.
+CUR_PHASE_BEYOND = _anchor(_STATE_DOC["prohibited_actions"], "implementing", "phase")
 CUR_TRANSITION = json.load(_io.open(
     os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))["latest_transition_id"]
 
