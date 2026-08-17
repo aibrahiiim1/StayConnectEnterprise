@@ -566,6 +566,13 @@
       "decided_on": "2026-08-17",
       "phase": "7",
       "accepted": true
+    },
+    {
+      "id": "D28",
+      "title": "PHASE 7 PULL REQUEST #15 AUTHORIZED FOR MERGE AND MERGED (2026-08-17). The Product Owner authorizes the merge of PR #15 at the approved head 47e65029e6af36a3d7ca30f686435c44750b4107 into master, and the merge was performed: merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603, a true merge preserving the complete 49-commit Phase-7 history rather than a squash. Phase 7 was already ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity under D27 (transition T0064); this decision adds only the merge and its directly required governance closure. PRE-MERGE VERIFICATION: PR #15 was OPEN, mergeable, based on master and up to date with it; the head was exactly the approved SHA; all six exact-head check runs were SUCCESS including the authoritative Project Governance gate, which executed the complete 53-case mutation suite with no case limit; and there was no review thread, review comment or other unresolved blocker. The merge used an expected-head guard, so it could not have merged a moved head. POST-MERGE PROOF: master's tree is byte-identical to the approved head's tree (5334821b15ee...), and the approved head is an ancestor of master. THE MERGE CHANGED NOTHING THAT RUNS. It deployed nothing, enabled nothing and contacted nothing. The DEVELOPMENT appliance remains in its verified DARK state, IAM-v2 remains dark and NOT cut over, and no Production environment was contacted or mutated. THIS DECISION AUTHORIZES the merge and its governance closure, AND NOTHING ELSE. It does not authorize an IAM-v2 cutover, go-live, deployment, capability enablement, Production contact, production data migration, dual read/write, legacy IAM removal, real guest service, PMS financial posting, payment-provider traffic or paid access. It also does NOT authorize the DEVELOPMENT-appliance operational trial the Product Owner has described -- using the development appliance interactively with IAM-v2 enabled for hands-on product testing and iterative refinement -- which will receive its own explicit authorization after this merge is closed. The numbered Development Roadmap is COMPLETE: Phase 0 is FINAL_CLOSED, Phases 1A, 1B, 2, 3, 4, 5, 6 and 7 are ACCEPTED_AND_CLOSED, Phase 7 is MERGED, no numbered development phase remains open and no Phase 8 exists.",
+      "decided_on": "2026-08-17",
+      "phase": "7",
+      "accepted": true
     }
   ]
 }

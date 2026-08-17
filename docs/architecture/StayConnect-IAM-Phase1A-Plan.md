@@ -1,14 +1,14 @@
 # StayConnect IAM — Phase 1A Execution Plan (Core Domain & Persistence Foundation)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0064 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0065 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
-**Current activity:** `PHASE_7_ACCEPTED_AND_CLOSED`
+**Current activity:** `PHASE_7_ACCEPTED_AND_CLOSED_AND_MERGED`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
-**Single next authorized action:** No further Phase-7 action is authorized -- Phase 7 is ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity by Product-Owner decision D27 (2026-08-17, transition T0064) at delivery head 16819aa027633b84486999451e8b689a191a15d2, and every numbered development phase is now closed. The only outstanding item on the Phase-7 branch is the Product Owner's SEPARATE merge decision on PR #15, which remains OPEN and UNMERGED. The only major next lifecycle gate is the separately authorized atomic complete-domain IAM-v2 cutover / go-live decision, which this acceptance does NOT authorize. No Phase 8 exists and none is authorized.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D27`.
+**Single next authorized action:** No further Phase-7 action is authorized -- Phase 7 is ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity (D27/T0064) and MERGED to master under D28/T0065, merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603. The numbered Development Roadmap is COMPLETE: Phase 0 is FINAL_CLOSED, Phases 1A through 7 are ACCEPTED_AND_CLOSED, no numbered development phase remains open and no Phase 8 exists. StayConnect remains PRE-LIVE under controlled testing and IAM-v2 remains DARK and NOT cut over. The next lifecycle activity requires its own separate Product-Owner decision and is NOT automatically Production go-live: the Product Owner has stated an intention to first run a DEVELOPMENT-appliance operational trial with IAM-v2 enabled there for hands-on product testing and iterative refinement, which is not authorized yet.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D28`.
 <!-- END GENERATED PROJECT STATE -->
 
 

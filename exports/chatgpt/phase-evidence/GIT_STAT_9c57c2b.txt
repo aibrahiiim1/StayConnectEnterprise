@@ -1,0 +1,4 @@
+commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603
+Date:   Mon Aug 17 15:14:58 2026 +0300
+
+    Phase 7 â€” full-system re-acceptance (#15)

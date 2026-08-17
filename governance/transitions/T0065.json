@@ -1,0 +1,79 @@
+{
+  "transition_id": "T0065",
+  "seq": 65,
+  "timestamp": "2026-08-17T13:05:00Z",
+  "record_type": "PHASE_7_PULL_REQUEST_MERGED_TO_MASTER",
+  "previous_state": {
+    "phase": "7",
+    "activity": "PHASE_7_ACCEPTED_AND_CLOSED",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "PHASE_7_ACCEPTED_AND_CLOSED_AND_MERGED",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "merged": true,
+    "maturity": "VERIFIED FULL-SYSTEM LIVE-DARK"
+  },
+  "phase_affected": "7",
+  "decision": "D28",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner merge authorization of 2026-08-17: merge PR #15 at approved head 47e65029e6af36a3d7ca30f686435c44750b4107, record the merge decision and receipt using the established governance model, synchronize current state, verify post-merge, and stop without beginning the DEVELOPMENT-appliance operational trial, an IAM-v2 cutover or Production go-live.",
+  "merge": {
+    "pull_request": 15,
+    "branch": "phase/7-full-system-reacceptance",
+    "base": "master",
+    "merged_head": "47e65029e6af36a3d7ca30f686435c44750b4107",
+    "merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
+    "base_before_merge": "9cb25b8afc6a4753d75148455c577228c0fbd67a",
+    "merge_method": "merge",
+    "history": "full Phase-7 history preserved; not squashed",
+    "commits_in_range": 49,
+    "expected_head_guard": "the merge request carried sha=47e65029e6af36a3d7ca30f686435c44750b4107, so a moved head would have been refused",
+    "ci_at_the_merged_head": "governance SUCCESS; phase3-full-software-gate SUCCESS; phase4-financial-core-gate SUCCESS x2; phase5-post-stay-transfer-gate SUCCESS x2 -- 6 check runs from 4 workflows, all SUCCESS",
+    "tree_identity": "master tree 5334821b15ee0944306bf52d73f8f1b62ed33df7 is byte-identical to the approved head's tree; the approved head is an ancestor of master",
+    "content_introduced_by_the_merge": "none"
+  },
+  "runtime_effect": {
+    "deployment": "none",
+    "capability_enablement": "none",
+    "iam_v2": "still DARK and NOT cut over",
+    "development_appliance": "unchanged, in its previously verified DARK state; not contacted for this merge",
+    "production": "not contacted and not mutated"
+  },
+  "roadmap_exhaustion": {
+    "phase_0": "FINAL_CLOSED",
+    "phases_accepted_and_closed": [
+      "1A",
+      "1B",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7"
+    ],
+    "phase_7_merged": true,
+    "development_phases_open_or_authorized": [],
+    "phase_8_created": false,
+    "numbered_development_roadmap": "COMPLETE",
+    "note": "The next lifecycle activity requires a separate Product-Owner decision. It is NOT automatically Production go-live: the Product Owner has stated an intention to first use the DEVELOPMENT appliance interactively as a real trial system with IAM-v2 enabled there for hands-on product testing and iterative feature/UX refinement. That operational trial is NOT authorized by this merge and will receive its own explicit authorization."
+  },
+  "boundaries_observed": [
+    "no IAM-v2 cutover",
+    "no go-live",
+    "no deployment",
+    "no capability enablement",
+    "no Production contact or mutation",
+    "no production data migration",
+    "no dual read/write",
+    "no legacy IAM removal",
+    "no real guest service",
+    "no real PMS financial posting",
+    "no payment-provider traffic",
+    "no paid-access activation",
+    "no DEVELOPMENT-appliance operational trial started"
+  ],
+  "next": "None. The numbered Development Roadmap is COMPLETE and no development phase remains open. Any further activity -- the DEVELOPMENT-appliance operational trial with IAM-v2 enabled, an IAM-v2 cutover, or Production go-live -- requires its own explicit Product-Owner decision."
+}
