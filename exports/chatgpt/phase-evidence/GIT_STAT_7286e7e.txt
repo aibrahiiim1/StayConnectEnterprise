@@ -1,0 +1,4 @@
+commit 7286e7e27409fed44056e5b45c8a43e59ffd0410
+Date:   Mon Aug 17 12:42:54 2026 +0300
+
+    Phase 7 closure: reconcile current state with D27/T0064, and make the gate catch this class

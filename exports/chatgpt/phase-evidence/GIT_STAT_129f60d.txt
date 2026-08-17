@@ -1,4 +1,0 @@
-commit 129f60dc01517ea532326dbf7f9d6f55ec634c25
-Date:   Mon Aug 17 09:08:52 2026 +0300
-
-    Phase 7 closure: three current-state contradictions the gates caught

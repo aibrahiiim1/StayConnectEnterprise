@@ -8,7 +8,7 @@
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
 **Single next authorized action:** No further Phase-7 action is authorized -- Phase 7 is ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity by Product-Owner decision D27 (2026-08-17, transition T0064) at delivery head 16819aa027633b84486999451e8b689a191a15d2, and every numbered development phase is now closed. The only outstanding item on the Phase-7 branch is the Product Owner's SEPARATE merge decision on PR #15, which remains OPEN and UNMERGED. The only major next lifecycle gate is the separately authorized atomic complete-domain IAM-v2 cutover / go-live decision, which this acceptance does NOT authorize. No Phase 8 exists and none is authorized.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D26`.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D27`.
 <!-- END GENERATED PROJECT STATE -->
 
 
