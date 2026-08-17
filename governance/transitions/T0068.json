@@ -1,7 +1,7 @@
 {
   "transition_id": "T0068",
   "seq": 68,
-  "timestamp": "2026-08-17T18:40:00Z",
+  "timestamp": "2026-08-17T18:30:00Z",
   "record_type": "D30_SCOPE_CORRECTION_AND_DEVELOPMENT_TRIAL_PRIVILEGE_FIX",
   "previous_state": {
     "phase": "7",

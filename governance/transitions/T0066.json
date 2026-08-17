@@ -1,7 +1,7 @@
 {
   "transition_id": "T0066",
   "seq": 66,
-  "timestamp": "2026-08-17T14:35:00Z",
+  "timestamp": "2026-08-17T14:15:00Z",
   "record_type": "POST_MERGE_GOVERNANCE_CLEANUP_AND_DEVELOPMENT_TRIAL_AUTHORIZED",
   "previous_state": {
     "phase": "7",
