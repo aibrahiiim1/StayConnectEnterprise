@@ -1,4 +1,0 @@
-commit 39a322a621a2a550a68a2e10562f8a8e2b0dc490
-Date:   Mon Aug 17 21:33:35 2026 +0300
-
-    D31/T0068: correct D30 scope, and make the edged writer grant reproducible
