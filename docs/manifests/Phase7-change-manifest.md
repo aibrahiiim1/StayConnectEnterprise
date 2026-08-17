@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `9cb25b8afc6a4753d75148455c577228c0fbd67a`
-- **HEAD commit:** `40340a8d60c1a59f7cd906723546c5ac03c18588`
-- **Provenance (generation HEAD = inventory_head):** `40340a8d60c1a59f7cd906723546c5ac03c18588`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `38890f531daadcd11f1b2d403db378772b272e86`
+- **Provenance (generation HEAD = inventory_head):** `38890f531daadcd11f1b2d403db378772b272e86`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `post-roadmap/dev-iamv2-trial`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 71
@@ -33,7 +33,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): manifest, packs and checksums |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): manifest, packs and checksums |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/GIT_STAT_40340a8.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_38890f5.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_7b5b6b9.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): manifest, packs and checksums |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): manifest, packs and checksums |
@@ -53,7 +53,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | D31/T0068: correct D30 scope, and make the edged writer grant reproducible |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Post-fef8 correction (delivery_head): manifest, packs and checksums |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Environment-scope the IAM state, correct merge attribution, fix the PR metadata |
 | `governance/transitions/T0063.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
 | `governance/transitions/T0064.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 7 ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK (D27/T0064) |
 | `governance/transitions/T0065.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
@@ -81,7 +81,7 @@
 | `iam_v2_scratch/phase7_reconstruct_from_sources.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 7 M4: a rebuildable gate environment, and the failures it explained |
 | `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 7 closure: repair the mutation fixture anchor my reword drifted |
-| `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
+| `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Environment-scope the IAM state, correct merge attribution, fix the PR metadata |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D31/T0068: correct D30 scope, and make the edged writer grant reproducible |
 
 ## Total diff statistics (`git diff --stat`)
@@ -102,12 +102,12 @@
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |    10 +-
  docs/architecture/StayConnect-IAM-Phase7-Plan.md   |    10 +-
  docs/context/StayConnect-IAM-Handoff.md            |    12 +-
- docs/manifests/Phase7-change-manifest.md           |   245 +
- .../reports/StayConnect-IAM-Phase7-Final-Report.md |   482 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |   Bin 312530 -> 313277 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |   Bin 118948 -> 123162 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |   Bin 42195 -> 42147 bytes
- .../chatgpt/phase-evidence/GIT_STAT_40340a8.txt    |     4 +
+ docs/manifests/Phase7-change-manifest.md           |   247 +
+ .../reports/StayConnect-IAM-Phase7-Final-Report.md |   484 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |   Bin 312530 -> 313279 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |   Bin 118948 -> 123174 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |   Bin 42195 -> 42145 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_38890f5.txt    |     4 +
  .../chatgpt/phase-evidence/GIT_STAT_7b5b6b9.txt    |     4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |     8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |     6 +-
@@ -127,7 +127,7 @@
  .../StayConnect-IAM-Phase1A-Plan.md                |    10 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |    10 +-
  governance/decision-register.json                  |    35 +
- governance/project-state.json                      |    87 +-
+ governance/project-state.json                      |   123 +-
  governance/transitions/T0063.json                  |    45 +
  governance/transitions/T0064.json                  |   120 +
  governance/transitions/T0065.json                  |    80 +
@@ -155,9 +155,9 @@
  iam_v2_scratch/phase7_reconstruct_from_sources.sh  |   407 +
  tools/tests/current_state_parity/run_negative.py   |   172 +
  .../tests/project_state_validator/run_mutations.py |    20 +-
- tools/validate-current-state-parity.py             |   329 +
+ tools/validate-current-state-parity.py             |   362 +
  tools/validate-project-state.sh                    |     2 +-
- 71 files changed, 20575 insertions(+), 193 deletions(-)
+ 71 files changed, 20648 insertions(+), 193 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -165,8 +165,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_25ed4ee.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_40340a8.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_38890f5.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_40340a8.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -178,6 +178,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 38890f5 Environment-scope the IAM state, correct merge attribution, fix the PR metadata
+HISTORICAL: e98edf1 Post-fef8 correction (delivery_head): manifest, packs and checksums
 HISTORICAL: 40340a8 Transition receipts: stamp each before the commit that introduced it
 HISTORICAL: ba79acd Post-fef8 correction (delivery_head): manifest, packs and checksums
 HISTORICAL: 25ed4ee T0066: stamp the receipt after the trial attempt it records

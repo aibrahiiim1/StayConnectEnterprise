@@ -1,0 +1,4 @@
+commit 38890f531daadcd11f1b2d403db378772b272e86
+Date:   Mon Aug 17 23:21:18 2026 +0300
+
+    Environment-scope the IAM state, correct merge attribution, fix the PR metadata
