@@ -1,0 +1,4 @@
+commit 25ed4eeff956fad89145b6512178f7a25642b4d1
+Date:   Mon Aug 17 21:58:43 2026 +0300
+
+    T0066: stamp the receipt after the trial attempt it records
