@@ -222,8 +222,8 @@ move that specific digest component.
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `9cb25b8afc6a4753d75148455c577228c0fbd67a`
-- **HEAD commit:** `9ecf961f200036cc797d080b9e32be722cdf1187`
-- **Provenance (generation HEAD = inventory_head):** `9ecf961f200036cc797d080b9e32be722cdf1187`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `2e6cb28c3b4dc19090175dd17b9720933fea7641`
+- **Provenance (generation HEAD = inventory_head):** `2e6cb28c3b4dc19090175dd17b9720933fea7641`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `master`
 - **Remote branch:** `origin/master`
 - **Changed files:** 66
@@ -241,41 +241,41 @@ move that specific digest component.
 | `docs/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: document the scd bootstrap tables and the appliance verification procedure |
 | `docs/acceptance/StayConnect-IAM-Phase7-Progress-Evidence.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
 | `docs/architecture/Phase4-Financial-Schema-Gap-Audit.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Phase 7: the remaining action is the Product-Owner acceptance decision |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
 | `docs/architecture/StayConnect-IAM-Phase7-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `docs/manifests/Phase7-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Phase 7 post-merge (delivery_head): manifest, packs and checksums |
-| `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `docs/manifests/Phase7-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Post-merge cleanup (delivery_head): manifest, packs and checksums |
+| `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Post-merge cleanup (delivery_head): manifest, packs and checksums |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/phase-evidence/GIT_STAT_2e6cb28.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_7b5b6b9.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
-| `exports/chatgpt/phase-evidence/GIT_STAT_9ecf961.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | (no commit subject in range) |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
+| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
 | `exports/chatgpt/stayconnectenterprise/MIGRATION_RUNBOOK.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7 (delivery_head): complete staged manifest + rebuilt packs + report-embedded manifest |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
 | `exports/chatgpt/stayconnectenterprise/STAYCONNECT_COMPLETE_OPERATIONS_MANUAL.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Phase 7: state the next action in the project's canonical vocabulary |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
 | `governance/transitions/T0063.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 7 IN_PROGRESS (T0063): M1-M3 complete and mutation-checked, M4 open, matrix not yet green |
 | `governance/transitions/T0064.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Phase 7 ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK (D27/T0064) |
 | `governance/transitions/T0065.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `governance/transitions/T0066.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
+| `governance/transitions/T0066.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
 | `hotel-admin/e2e/phase4-financial-operator.spec.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Phase 7: make the Phase-4 operator e2e deterministic at its locator |
 | `iam_v2_scratch/accepted/appliance-schema-20260816.sql` | CREATED | `A` | other | OTHER | rollback REMOVES it | Phase 7 M4: the fidelity proof was too weak, and it was hiding an approximate hybrid |
 | `iam_v2_scratch/phase3_0010_lifecycle.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Phase 7 M4: a gate that destroys its container must refuse one it does not own |
@@ -298,7 +298,7 @@ move that specific digest component.
 | `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Phase 7 closure: repair the mutation fixture anchor my reword drifted |
 | `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
-| `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial |
+| `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored |
 
 ## Total diff statistics (`git diff --stat`)
 ```text
@@ -315,13 +315,13 @@ move that specific digest component.
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |    10 +-
  docs/architecture/StayConnect-IAM-Phase7-Plan.md   |    10 +-
  docs/context/StayConnect-IAM-Handoff.md            |    12 +-
- docs/manifests/Phase7-change-manifest.md           |   218 +
- .../reports/StayConnect-IAM-Phase7-Final-Report.md |   455 +
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |   Bin 312530 -> 313609 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |   Bin 118948 -> 121875 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |   Bin 42195 -> 42200 bytes
+ docs/manifests/Phase7-change-manifest.md           |   227 +
+ .../reports/StayConnect-IAM-Phase7-Final-Report.md |   464 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |   Bin 312530 -> 313996 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |   Bin 118948 -> 121903 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |   Bin 42195 -> 42252 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_2e6cb28.txt    |     4 +
  .../chatgpt/phase-evidence/GIT_STAT_7b5b6b9.txt    |     4 -
- .../chatgpt/phase-evidence/GIT_STAT_9ecf961.txt    |     4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |     8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |     6 +-
  .../governance/decision-register.json              |    21 +
@@ -344,7 +344,7 @@ move that specific digest component.
  governance/transitions/T0063.json                  |    45 +
  governance/transitions/T0064.json                  |   120 +
  governance/transitions/T0065.json                  |    80 +
- governance/transitions/T0066.json                  |    79 +
+ governance/transitions/T0066.json                  |    88 +
  hotel-admin/e2e/phase4-financial-operator.spec.ts  |    20 +-
  .../accepted/appliance-schema-20260816.sql         | 15060 +++++++++++++++++++
  iam_v2_scratch/phase3_0010_lifecycle.sh            |    19 +-
@@ -368,7 +368,7 @@ move that specific digest component.
  .../tests/project_state_validator/run_mutations.py |    20 +-
  tools/validate-current-state-parity.py             |   329 +
  tools/validate-project-state.sh                    |     2 +-
- 66 files changed, 20323 insertions(+), 185 deletions(-)
+ 66 files changed, 20350 insertions(+), 185 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -376,11 +376,10 @@ move that specific digest component.
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_2418734.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_9ecf961.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_2e6cb28.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_8d18424.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/tools/validate-project-state.sh
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
@@ -390,6 +389,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 2e6cb28 DEVELOPMENT IAM-v2 trial: blocked at the cutover boundary, appliance restored
+HISTORICAL: 8d18424 Post-merge cleanup (delivery_head): manifest, packs and checksums
 HISTORICAL: 9ecf961 Post-merge cleanup, and D29/T0066 authorizing the DEVELOPMENT IAM-v2 trial
 HISTORICAL: 2418734 Phase 7 post-merge (delivery_head): manifest, packs and checksums
 HISTORICAL: 4b68828 Phase 7 merge receipt: stamp T0065 at the time it was actually recorded
