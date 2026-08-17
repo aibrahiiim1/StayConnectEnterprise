@@ -872,10 +872,25 @@ def main():
         ACTIVE_DEV = re.compile(r"\bunder\s+active\s+development\b|\bactively\s+(?:developed|under\s+development)\b"
                                 r"|\bdevelopment\s+is\s+(?:ongoing|continuing|in\s+progress)\b", re.I)
         hits = []
+        # current_state_facts is a DICT, and the first version of this loop skipped every non-str/list value --
+        # so it missed a third copy of the same stale sentence sitting in the most authoritative current block
+        # there is. Nested string values are walked, not skipped.
+        def _strings(node):
+            if isinstance(node, str):
+                yield node
+            elif isinstance(node, dict):
+                for v in node.values():
+                    for t in _strings(v):
+                        yield t
+            elif isinstance(node, list):
+                for v in node:
+                    for t in _strings(v):
+                        yield t
+
         for field, val in state.items():
-            if field in ("phases", "roadmap_exhaustion") or not isinstance(val, (str, list)):
+            if field in ("phases", "roadmap_exhaustion"):
                 continue
-            for text in ([val] if isinstance(val, str) else val):
+            for text in _strings(val):
                 if not isinstance(text, str):
                     continue
                 for _off, clause in split_clauses(text):
