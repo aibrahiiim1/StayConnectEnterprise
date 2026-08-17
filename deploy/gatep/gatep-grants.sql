@@ -198,3 +198,20 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- THE CONTROLLED-OPERATION OPENER, FOR THE ADMIN WRITER (added for the DEVELOPMENT IAM-v2 trial, D31/T0068)
+--
+-- edged refuses to serve the Phase-3 admin surface at startup unless the role it connects as can OPEN a
+-- controlled operation: "this process cannot open an auth_context operation (no EXECUTE on
+-- iam_v2.begin_controlled_operation(text)), so every authoritative write in that family would be refused at
+-- the first attempt". That guard is correct -- a writer that cannot open the operation would fail on its first
+-- authoritative write, and failing at startup is better than failing in front of an operator.
+--
+-- This is the MINIMUM that satisfies it: EXECUTE on the opener only. It grants no table write, no schema
+-- create, no ownership and no membership. The controlled-writer trigger still refuses any write that is not
+-- inside an open operation, so the privilege lets edged open one -- it does not let it bypass one.
+--
+-- It lives here, in the Gate-P privilege bootstrap, rather than as an undocumented GRANT typed on one
+-- appliance, so any rebuilt environment reproduces it.
+GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_edged;
