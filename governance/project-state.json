@@ -306,8 +306,9 @@
     "No governance blocker. Phase 6 is ACCEPTED AND CLOSED at verified LIVE-DARK maturity (D26/T0061) and Phase 7 is AUTHORIZED for planning and execution. The remaining gate to real service is a separate Product-Owner go-live/cutover decision, which no current authorization supplies."
   ],
   "allowed_actions": [
-    "Execute the authorized Phase-7 full-system re-acceptance under D26 on branch phase/7-full-system-reacceptance -- one branch, one PR, approximately four substantial end-to-end milestones -- proving the already-built system works as one complete IAM domain, with all future-facing capabilities DARK except where a validation procedure requires controlled temporary enablement on the authorized DEVELOPMENT appliance with guaranteed restoration afterwards.",
-    "Maintain project governance, current-state parity and documentation for the closed phases."
+    "Record and maintain the Phase-7 acceptance and closure: governance, current-state parity, manifests, packs and documentation. Phase 7 is ACCEPTED_AND_CLOSED and must not be re-executed.",
+    "Maintain project governance, current-state parity and documentation for the closed phases.",
+    "Await the Product Owner's SEPARATE merge decision on PR #15, which remains OPEN and UNMERGED. Merging is not authorized by the Phase-7 acceptance."
   ],
   "prohibited_actions": [
     "IAM-v2 production cutover, production data migration, dual read/write, legacy IAM removal, real guest service, real PMS financial posting, real payment-provider traffic, paid-access activation, per-property financial enablement and programmatic reversal. Each is a separate Product-Owner go-live decision and none is authorized by D26.",
@@ -315,7 +316,7 @@
     "Any Production contact or mutation.",
     "Implementing work beyond the authorized Phase 7 scope."
   ],
-  "next_authorized_action": "None -- every numbered development phase is closed. Phase 7 was ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK by Product-Owner decision D27 (2026-08-17, transition T0064) at delivery head 16819aa027633b84486999451e8b689a191a15d2. The only outstanding item on the Phase-7 branch is the Product Owner's SEPARATE merge decision on PR #15, which remains OPEN and UNMERGED. The only major next lifecycle gate is the separately authorized atomic complete-domain IAM-v2 cutover / go-live decision, which this acceptance does NOT authorize. No Phase 8 exists and none is authorized.",
+  "next_authorized_action": "No further Phase-7 action is authorized -- Phase 7 is ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity by Product-Owner decision D27 (2026-08-17, transition T0064) at delivery head 16819aa027633b84486999451e8b689a191a15d2, and every numbered development phase is now closed. The only outstanding item on the Phase-7 branch is the Product Owner's SEPARATE merge decision on PR #15, which remains OPEN and UNMERGED. The only major next lifecycle gate is the separately authorized atomic complete-domain IAM-v2 cutover / go-live decision, which this acceptance does NOT authorize. No Phase 8 exists and none is authorized.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D26",
@@ -414,7 +415,7 @@
       "scripts/ci/phase3_evidence.py (modified)"
     ],
     "post_closure_operational_changes_note": "Caddy deployment configuration, the Caddy systemd unit sources and CI/operational tooling changed AFTER Phase-3 closure, under T0026 and T0027. No Phase-3 application binary, migration, schema, IAM-v2 authority, PMS behaviour or financial behaviour changed. Do not claim the whole deploy/ or scripts/ tree is identical to the accepted candidate.",
-    "current_activity": "PHASE_7_IMPLEMENTATION_IN_PROGRESS_FULL_SYSTEM_REACCEPTANCE",
+    "current_activity": "PHASE_7_ACCEPTED_AND_CLOSED",
     "live_increment9_executed": true,
     "live_increment9_executed_on": "2026-08-10",
     "live_increment9_item_verdicts": {

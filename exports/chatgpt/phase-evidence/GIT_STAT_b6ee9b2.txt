@@ -1,0 +1,4 @@
+commit b6ee9b2c95da023f247697d6faec0bddb90cb6c4
+Date:   Mon Aug 17 08:57:49 2026 +0300
+
+    Phase 7 (closure delivery_head): acceptance manifest, packs and checksums
