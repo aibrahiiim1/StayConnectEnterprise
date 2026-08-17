@@ -587,6 +587,13 @@
       "decided_on": "2026-08-17",
       "phase": "post-roadmap",
       "accepted": true
+    },
+    {
+      "id": "D31",
+      "title": "D30 SCOPE CORRECTION -- DEVELOPMENT-ONLY AUTHORIZATION, NO PRODUCTION IAM POLICY ADOPTED (2026-08-17). D30 recorded a set of PERMANENT PRODUCT-OWNER POLICY clauses that the Product Owner did not explicitly approve: that the legacy IAM is disposable and retired, that no legacy data migration is required, that no dual read, dual write, synchronization or compatibility authority mode is wanted, and a specific future Production clean-replacement sequence. Those were inferred from the fact that PRE-LIVE currently has no real users. Inference is not authorization, and a policy recorded as approved becomes the thing every later decision is built on, so it is corrected here rather than left standing. D30 IS PRESERVED HISTORICALLY and is not deleted or rewritten. AUTHORIZED AND TRUE, and unchanged by this correction: DEVELOPMENT-only IAM-v2 runtime wiring; the DEVELOPMENT operational trial on appliance 172.21.60.23; IAM-v2 enabled as the intended authority for the DEVELOPMENT trial surfaces that are actually enabled; and Production untouched and PRE-LIVE. NOT AN APPROVED PRODUCT-OWNER POLICY, and not to be relied on or designed around until separately and explicitly approved: permanent legacy-IAM retirement; a no-migration Production strategy; and any Production clean-replacement or cutover procedure. The future Production IAM transition model is OPEN. Also recorded: the minimum least-privilege grant the Phase-3 admin writer needs (EXECUTE on iam_v2.begin_controlled_operation(text) for svc_edged) is now carried in deploy/gatep/gatep-grants.sql so it is reproducible from the repository rather than existing only on one appliance.",
+      "decided_on": "2026-08-17",
+      "phase": "post-roadmap",
+      "accepted": true
     }
   ]
 }
