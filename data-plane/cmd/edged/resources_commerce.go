@@ -208,7 +208,7 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 			"reason_code must be a bounded machine code matching ^[A-Z][A-Z0-9_]{0,63}$, not free text")
 		return
 	}
-	pol, perr := graceePolicyFromConfig(in.Config)
+	pol, perr := gracePolicyFromConfig(in.Config)
 	if perr != nil {
 		jsonErr(w, http.StatusBadRequest, "validation", perr.Error())
 		return
@@ -246,11 +246,11 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// graceePolicyFromConfig maps the operator's typed config keys onto the policy the system derives from.
+// gracePolicyFromConfig maps the operator's typed config keys onto the policy the system derives from.
 //
 // The key names are the ones the schema itself designates as typed (grace_config_no_dup_policy_keys), so the
 // operator-facing vocabulary and the columns cannot drift apart.
-func graceePolicyFromConfig(cfg map[string]any) (iamv2.SystemGracePolicy, error) {
+func gracePolicyFromConfig(cfg map[string]any) (iamv2.SystemGracePolicy, error) {
 	num := func(k string) (int64, bool) {
 		v, ok := cfg[k]
 		if !ok {
