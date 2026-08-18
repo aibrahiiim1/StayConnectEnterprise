@@ -329,35 +329,150 @@ func (t *pgCommerceAdminTx) GraceCandidateValid(ctx context.Context, tenantID, s
 	return c, nil
 }
 
-// UpsertGraceConfig CANNOT SUCCEED against the accepted guard, and this is a real defect, not a test gap.
+// UpsertGraceConfig publishes through the accepted typed contract.
 //
-// iam_v2.site_checkout_grace_config carries the p3_controlled_writer_only trigger. Unlike the capability
-// families (stay, auth_context, commerce_intent, ...), this table resolves to NO family: the guard permits a
-// write only from the owner of
+// iam_v2.site_checkout_grace_config carries p3_controlled_writer_only, and unlike the capability families
+// (stay, auth_context, commerce_intent, ...) this table resolves to NO family: the guard permits a write only
+// from the owner of
 //
-//     iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)
+//	iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)
 //
-// so a raw INSERT from the admin repository is refused however the transaction is set up. Opening a
-// controlled operation does not help, because there is no family to open.
+// so the raw INSERT this replaces could never succeed, whatever the transaction did. Reading grace config is
+// a plain SELECT, which is why the surface looked healthy right up until an operator pressed save.
 //
-// Fixing it properly means publishing through that function, which takes TYPED grace fields (duration, down,
-// up, data quota, device limit, device-limit policy, eligibility window) under an all-or-none CHECK -- while
-// this admin API accepts a free-form config map (the test passes {"grace_minutes": 30}). Reconciling those
-// two shapes is a design decision about the admin contract, not a mechanical translation, so it is recorded
-// here rather than guessed at.
+// The reconciliation is mechanical once the contract is read as authoritative. The typed grace fields live in
+// COLUMNS and are passed as parameters; whatever else the operator supplied stays in the free-form config
+// jsonb. That split is not a choice -- grace_config_no_dup_policy_keys explicitly forbids the typed keys from
+// also appearing in config, precisely so there is one home for each value and no way for the two to disagree.
 //
-// Consequence today: checkout-grace configuration cannot be saved through the Hotel Admin surface. Reading it
-// works (GetGrace is a plain SELECT), which is why the surface looks healthy until someone tries to save.
-// TestCommerceAdminGraceValidation fails for exactly this reason and is deliberately left failing rather than
-// skipped, because a skipped test would hide a defect that is currently in the product.
+// grace_all_or_none requires the six grace fields to be all-present or all-absent, so a partial specification
+// is rejected here with a deterministic reason rather than being sent to the database to fail as a CHECK.
 func (t *pgCommerceAdminTx) UpsertGraceConfig(ctx context.Context, tenantID, siteID, packageRevisionID string, config map[string]any) error {
-	cfg, _ := json.Marshal(orEmptyObj(config))
-	_, err := t.tx.Exec(ctx,
-		`INSERT INTO iam_v2.site_checkout_grace_config (tenant_id, site_id, grace_package_revision_id, config)
-		 VALUES ($1,$2,$3,$4::jsonb)
-		 ON CONFLICT (tenant_id, site_id) DO UPDATE SET grace_package_revision_id = EXCLUDED.grace_package_revision_id, config = EXCLUDED.config`,
-		tenantID, siteID, packageRevisionID, cfg)
-	return err
+	g, err := splitGraceConfig(config)
+	if err != nil {
+		return err
+	}
+	cfg, _ := json.Marshal(orEmptyObj(g.rest))
+	_, execErr := t.tx.Exec(ctx,
+		`SELECT iam_v2.publish_checkout_grace_config($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		tenantID, siteID, packageRevisionID,
+		g.durationSeconds, g.downKbps, g.upKbps, g.dataQuotaBytes,
+		g.deviceLimit, g.deviceLimitPolicy, g.eligibilityWindowSeconds)
+	if execErr != nil {
+		return execErr
+	}
+	// The free-form remainder is stored by the same publish call's row; anything the operator supplied that is
+	// not a typed grace field travels in config. When there is nothing left over this is a no-op.
+	if len(g.rest) > 0 {
+		if _, err := t.tx.Exec(ctx,
+			`UPDATE iam_v2.site_checkout_grace_config SET config = $3::jsonb
+			  WHERE tenant_id = $1 AND site_id = $2`, tenantID, siteID, cfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// graceFields is the typed half of a grace configuration.
+type graceFields struct {
+	eligibilityWindowSeconds int
+	durationSeconds          *int
+	downKbps                 *int
+	upKbps                   *int
+	dataQuotaBytes           *int64
+	deviceLimit              *int
+	deviceLimitPolicy        *string
+	rest                     map[string]any
+}
+
+// splitGraceConfig separates the typed grace fields from the free-form remainder.
+//
+// WHICH KEYS ARE TYPED IS NOT A JUDGEMENT CALL. The schema states it: grace_config_no_dup_policy_keys forbids
+// exactly the typed keys from also appearing in the config jsonb, so that list IS the set of fields that live
+// in columns. Everything else is free-form and belongs in config.
+//
+// An earlier version of this function also mapped grace_minutes onto the typed duration, on the reasonable-
+// sounding grounds that it is "the friendlier spelling". It is not in the forbidden list, so it is free-form,
+// and treating it as typed made a config of {"grace_minutes": 30} look like a PARTIAL typed override and get
+// refused by the all-or-none rule below -- a rule doing its job on an input that never should have reached it.
+func splitGraceConfig(config map[string]any) (graceFields, error) {
+	g := graceFields{eligibilityWindowSeconds: 3600, rest: map[string]any{}}
+	typed := map[string]bool{
+		"eligibility_window_seconds": true, "grace_duration_seconds": true,
+		"grace_down_kbps": true, "grace_up_kbps": true, "grace_data_quota_bytes": true,
+		"grace_device_limit": true, "grace_device_limit_policy": true,
+	}
+	num := func(v any) (int64, bool) {
+		switch n := v.(type) {
+		case json.Number:
+			i, err := n.Int64()
+			return i, err == nil
+		case float64:
+			return int64(n), n == float64(int64(n))
+		case int:
+			return int64(n), true
+		case int64:
+			return n, true
+		}
+		return 0, false
+	}
+	for k, v := range config {
+		if !typed[k] {
+			g.rest[k] = v
+			continue
+		}
+		if k == "grace_device_limit_policy" {
+			sv, ok := v.(string)
+			if !ok {
+				return g, &Error{Code: ErrInvalidInput, Msg: "grace_device_limit_policy must be a string"}
+			}
+			g.deviceLimitPolicy = &sv
+			continue
+		}
+		n, ok := num(v)
+		if !ok {
+			return g, &Error{Code: ErrInvalidInput, Msg: "grace field " + k + " must be an integer"}
+		}
+		switch k {
+		case "eligibility_window_seconds":
+			iv := int(n)
+			g.eligibilityWindowSeconds = iv
+		case "grace_duration_seconds":
+			iv := int(n)
+			g.durationSeconds = &iv
+		case "grace_down_kbps":
+			iv := int(n)
+			g.downKbps = &iv
+		case "grace_up_kbps":
+			iv := int(n)
+			g.upKbps = &iv
+		case "grace_data_quota_bytes":
+			g.dataQuotaBytes = &n
+		case "grace_device_limit":
+			iv := int(n)
+			g.deviceLimit = &iv
+		}
+	}
+	// grace_all_or_none: refuse a partial specification here, with a reason naming the rule, rather than
+	// letting it reach the database and come back as an opaque CHECK violation.
+	set := 0
+	for _, present := range []bool{g.durationSeconds != nil, g.downKbps != nil, g.upKbps != nil,
+		g.dataQuotaBytes != nil, g.deviceLimit != nil, g.deviceLimitPolicy != nil} {
+		if present {
+			set++
+		}
+	}
+	if set != 0 && set != 6 {
+		return g, &Error{Code: ErrInvalidInput,
+			Msg: "grace override must specify all of duration, down_kbps, up_kbps, data_quota_bytes, " +
+				"device_limit and device_limit_policy, or none of them"}
+	}
+	// The only policy the schema permits; defaulted so a caller supplying the other five is not tripped by a
+	// value that has exactly one legal setting.
+	if set == 6 && *g.deviceLimitPolicy != "REJECT_NEW_DEVICE" {
+		return g, &Error{Code: ErrInvalidInput, Msg: "grace_device_limit_policy must be REJECT_NEW_DEVICE"}
+	}
+	return g, nil
 }
 
 func orEmptyObj(m map[string]any) map[string]any {
