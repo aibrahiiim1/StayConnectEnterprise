@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `fef8af9989a2a9695d5a728912effce09ab582bb`
-- **HEAD commit:** `4c2939d51e6d80a56f8c5a45605a34858f8b8463`
-- **Provenance (generation HEAD = inventory_head):** `4c2939d51e6d80a56f8c5a45605a34858f8b8463`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `25c087e40520e5b0afd729b8653e8f03cfd17f0d`
+- **Provenance (generation HEAD = inventory_head):** `25c087e40520e5b0afd729b8653e8f03cfd17f0d`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `post-roadmap/dev-iamv2-trial`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 99
@@ -18,7 +18,7 @@
 | `data-plane/cmd/edged/guest_accounts_iamv2.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Make IAM-v2 actually authoritative at the real guest entry points |
 | `data-plane/cmd/edged/guest_accounts_iamv2_lifecycle.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Put the whole guest-account lifecycle on one authority |
 | `data-plane/cmd/edged/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Wire PUT /grace to the D32 policy path and retire every legacy grace writer |
-| `data-plane/cmd/edged/resources_commerce.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Wire PUT /grace to the D32 policy path and retire every legacy grace writer |
+| `data-plane/cmd/edged/resources_commerce.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Spell gracePolicyFromConfig correctly |
 | `data-plane/cmd/edged/resources_guest_accounts.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Put the whole guest-account lifecycle on one authority |
 | `data-plane/cmd/edged/resources_plans_vouchers.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Implement IAM-v2 voucher issuance on the accepted key-generation model |
 | `data-plane/cmd/portald/iamv2_commerce_session.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Validate the whole trusted identity on activation, and make success mean enforced |
@@ -78,30 +78,30 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Wire PUT /grace to the D32 policy path and retire every legacy grace writer |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Wire PUT /grace to the D32 policy path and retire every legacy grace writer |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Wire PUT /grace to the D32 policy path and retire every legacy grace writer |
-| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
+| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
 | `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
-| `exports/chatgpt/phase-evidence/GIT_STAT_4c2939d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
+| `exports/chatgpt/phase-evidence/GIT_STAT_25c087e.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_d0e3904.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 439e8ce: heads, packs, manifest, capability ladder |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 29436ca: T0070, packs and manifest for the D32 product wiring |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Wire PUT /grace to the D32 policy path and retire every legacy grace writer |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Wire PUT /grace to the D32 policy path and retire every legacy grace writer |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 29436ca: T0070, packs and manifest for the D32 product wiring |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 29436ca: T0070, packs and manifest for the D32 product wiring |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 29436ca: T0070, packs and manifest for the D32 product wiring |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 29436ca: T0070, packs and manifest for the D32 product wiring |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | D32: system-provisioned hidden per-site CHECKOUT_GRACE, Hotel Admin policy only |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at 2a5e4a7: packs and manifest for the startup boundary check |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction |
 | `governance/transitions/T0066.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0067.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0068.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Transition receipts: stamp each before the commit that introduced it |
@@ -180,12 +180,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   8 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   8 +-
  docs/context/StayConnect-IAM-Handoff.md            |   8 +-
- docs/manifests/Phase7-change-manifest.md           | 469 ++++++++++++---------
+ docs/manifests/Phase7-change-manifest.md           | 471 ++++++++++++---------
  .../reports/StayConnect-IAM-Phase7-Final-Report.md | 127 +++---
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 314263 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 123601 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42288 bytes
- .../chatgpt/phase-evidence/GIT_STAT_4c2939d.txt    |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 314264 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 123586 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42287 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_25c087e.txt    |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_d0e3904.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -213,7 +213,7 @@
  .../tests/project_state_validator/run_mutations.py |  36 +-
  tools/validate-current-state-parity.py             | 228 ++++++++++
  tools/validate-project-state.sh                    |   2 +-
- 99 files changed, 6429 insertions(+), 580 deletions(-)
+ 99 files changed, 6431 insertions(+), 580 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -222,8 +222,8 @@ M  docs/manifests/Phase7-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_2a5e4a7.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_4c2939d.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_25c087e.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_4c2939d.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -235,6 +235,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 25c087e Spell gracePolicyFromConfig correctly
+HISTORICAL: 4aca170 Delivery at 4c2939d: packs and manifest for the D32 evidence and privilege correction
 HISTORICAL: 4c2939d Record the D32 grace evidence and correct the privilege manifest
 HISTORICAL: 270e48d Delivery at 2a5e4a7: packs and manifest for the startup boundary check
 HISTORICAL: 2a5e4a7 Verify the audited grace boundary itself at startup

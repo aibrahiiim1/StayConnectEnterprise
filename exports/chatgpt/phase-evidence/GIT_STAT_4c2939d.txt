@@ -1,4 +1,0 @@
-commit 4c2939d51e6d80a56f8c5a45605a34858f8b8463
-Date:   Tue Aug 18 22:56:19 2026 +0300
-
-    Record the D32 grace evidence and correct the privilege manifest
