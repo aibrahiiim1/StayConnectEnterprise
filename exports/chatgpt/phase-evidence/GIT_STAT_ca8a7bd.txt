@@ -1,4 +1,0 @@
-commit ca8a7bdfb447e5ed5165cbab6ac41c69ee909b0b
-Date:   Wed Aug 19 01:12:19 2026 +0300
-
-    Close the grace boundary across every runtime role, and assert it fail-closed
