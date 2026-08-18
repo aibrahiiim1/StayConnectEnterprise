@@ -40,10 +40,17 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 	}
 	// THE REPOSITORY IS WIRED WHEN, AND ONLY WHEN, THE MASTER FLAG IS ON.
 	//
-	// This used to return an error here, because wiring a real repository was deferred to the cutover. The
-	// Product Owner has since decided the transition is a CLEAN IAM-v2 REPLACEMENT rather than a migration:
-	// IAM-v2 is the only IAM authority and the legacy IAM is disposable. So the repository the accepted phases
-	// already built (iamv2.PgRepository, over the same pool this daemon already holds) is constructed here.
+	// This used to return an error here, because wiring a real repository was deferred to the cutover. It is
+	// wired now so that the AUTHORIZED DEVELOPMENT trial (D31/T0068) can run IAM-v2 for real on a development
+	// appliance; the repository the accepted phases already built (iamv2.PgRepository, over the same pool this
+	// daemon already holds) is constructed here.
+	//
+	// WHAT THIS DOES NOT MEAN. An earlier version of this comment said the Product Owner had decided on a
+	// "CLEAN IAM-v2 REPLACEMENT", that IAM-v2 is the only IAM authority and that the legacy IAM is disposable.
+	// That was D30's wording, and D31 explicitly withdrew it as policy the Product Owner had never approved.
+	// The PRODUCTION IAM transition strategy is OPEN: no replacement, migration, dual-run or legacy-retirement
+	// approach is authorized, and nothing in this file may be read as adopting one. Wiring a repository for a
+	// development trial is not a transition decision.
 	//
 	// The nil-while-dark behaviour is deliberately unchanged: with the master flag OFF the authenticator is
 	// still constructed with NO repository, so it short-circuits to DecisionDisabled without ever issuing an

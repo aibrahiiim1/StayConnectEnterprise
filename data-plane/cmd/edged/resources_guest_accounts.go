@@ -246,7 +246,19 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
 		return
 	}
-	if in.TemplateID == "" {
+	// THE LEGACY PLAN REQUIREMENT IS LEGACY-ONLY.
+	//
+	// A legacy guest account carries a ticket_template ("guest access plan") that decides what it may do.
+	// IAM-v2 does not work that way: what a subject may acquire is decided by PACKAGE ELIGIBILITY RULES
+	// (AUTH_METHOD, SUBJECT_KIND, DATE_WINDOW, SITE_NETWORK, ...) evaluated when packages are listed, so the
+	// package declares who is eligible rather than the credential declaring what it gets. iam_v2 has no
+	// template column at all -- it has an OPTIONAL assigned_package_id for direct assignment.
+	//
+	// Requiring template_id under IAM-v2 authority would validate a legacy row and then discard it: a
+	// dependency with no effect on any IAM-v2 decision, kept only so the existing UI form still submits. That
+	// is exactly the hidden split authority this trial is meant to remove, so it is dropped here rather than
+	// replaced with an invented rule of equivalent shape.
+	if !s.iamv2Cfg.Enabled(iamv2.MethodAccount) && in.TemplateID == "" {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "template_id (guest access plan) required")
 		return
 	}
@@ -255,10 +267,13 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 	if !s.requireProvisioning(w, r) {
 		return
 	}
-	var tplExists bool
-	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ticket_templates WHERE id=$1 AND tenant_id=$2 AND is_active)`, in.TemplateID, s.tenantID).Scan(&tplExists); err != nil || !tplExists {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "guest access plan not found or inactive")
-		return
+	// Same reason: under IAM-v2 authority this reads a legacy table whose answer changes no IAM-v2 behaviour.
+	if !s.iamv2Cfg.Enabled(iamv2.MethodAccount) {
+		var tplExists bool
+		if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ticket_templates WHERE id=$1 AND tenant_id=$2 AND is_active)`, in.TemplateID, s.tenantID).Scan(&tplExists); err != nil || !tplExists {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "guest access plan not found or inactive")
+			return
+		}
 	}
 	hash, err := hashPassword(in.Password)
 	if err != nil {

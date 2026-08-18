@@ -27,7 +27,12 @@ package main
 //   method enabled   -> IAM-v2 is the authority. It establishes the auth_context
 //                       and device in iam_v2 and the guest continues through the
 //                       accepted commerce flow (eligible packages -> quote ->
-//                       confirm -> purchase -> entitlement -> iam_v2.sessions).
+//                       confirm -> purchase -> entitlement).
+//
+//                       MEASURED as far as entitlement. Activation into
+//                       iam_v2.sessions is the next step of the accepted domain
+//                       and is NOT yet proven on this appliance, so this comment
+//                       deliberately stops where the evidence stops.
 //   method enabled
 //   but IAM-v2 cannot
 //   serve the request -> REFUSE. Never fall back to legacy.
@@ -130,7 +135,12 @@ func (s *server) authorizeViaIAMv2(w http.ResponseWriter, r *http.Request,
 			})
 			return true
 		}
-		s.met.SessionsStarted.WithLabelValues(string(method) + "_iamv2").Inc()
+		// NOT SessionsStarted: no session exists yet. The guest has authenticated; access still requires
+		// package selection, an entitlement and activation. Counting this as a session start inflated the
+		// session rate and left started/closed permanently unbalanced.
+		if s.met != nil && s.met.AuthContextsCreated != nil {
+			s.met.AuthContextsCreated.WithLabelValues(string(method)).Inc()
+		}
 		writeJSON(w, http.StatusOK, iamv2GuestResult{
 			AuthContextID:  res.AuthContextID,
 			DeviceID:       res.DeviceID,
