@@ -89,7 +89,14 @@ func (r *PgCommerceAdminRepository) ListPlans(ctx context.Context, tenantID, sit
 		        (SELECT count(*) FROM iam_v2.service_plan_revisions r WHERE r.service_plan_id = p.id)
 		   FROM iam_v2.service_plans p
 		  WHERE p.tenant_id=$1 AND p.site_id=$2
-		  ORDER BY p.code`, tenantID, siteID)
+		    -- Hide the reserved system grace plan, for the same reason ListPackages hides the system package:
+		    -- it is not an operator-editable object. Showing it in the catalogue invites an operator to publish
+		    -- a revision onto it (which the reserved-code guard then refuses) or to attach it to a package of
+		    -- their own, and it presents system-derived internals as if they were part of the product's offer.
+		    -- service_plans carries no is_system column, so the reserved codes are named directly -- the same
+		    -- pair the publish guards refuse.
+		    AND p.code <> $3 AND p.code <> $4
+		  ORDER BY p.code`, tenantID, siteID, systemGracePlanCode, systemGraceCode)
 	if err != nil {
 		return nil, err
 	}
@@ -149,9 +156,10 @@ func (r *PgCommerceAdminRepository) GetGraceConfig(ctx context.Context, tenantID
 	err := r.db.QueryRow(ctx,
 		`SELECT grace_package_revision_id::text, config, eligibility_window_seconds,
 		        grace_duration_seconds, grace_down_kbps, grace_up_kbps, grace_data_quota_bytes,
-		        grace_device_limit, grace_device_limit_policy
+		        grace_device_limit, grace_device_limit_policy, COALESCE(config_version, 0)
 		   FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2`,
-		tenantID, siteID).Scan(&rev, &cfg, &eligibility, &duration, &down, &up, &quota, &devLimit, &devPolicy)
+		tenantID, siteID).Scan(&rev, &cfg, &eligibility, &duration, &down, &up, &quota, &devLimit, &devPolicy,
+		&gc.ConfigVersion)
 	if err == pgx.ErrNoRows {
 		return GraceConfig{Config: map[string]any{}}, nil
 	}
@@ -162,9 +170,20 @@ func (r *PgCommerceAdminRepository) GetGraceConfig(ctx context.Context, tenantID
 		gc.GracePackageRevisionID = *rev
 	}
 	gc.Config = map[string]any{}
-	if len(cfg) > 0 {
-		_ = json.Unmarshal(cfg, &gc.Config)
-	}
+	// The free-form `config` jsonb is deliberately NOT merged into the read.
+	//
+	// Under D32 the only writer of grace policy is the audited publication boundary, and it writes the typed
+	// columns. Nothing can write that jsonb any more, and -- because the table is owner-only -- nothing can
+	// clear it either. Any keys still in it are pre-D32 residue. Returning them would present values that no
+	// longer describe the running policy, that the operator cannot change and cannot delete, alongside the ones
+	// that do: a "grace_minutes: 30" sitting next to grace_duration_seconds, agreeing today and silently
+	// disagreeing after the next publication. Read-only stale state shown as configuration is worse than absent
+	// configuration, because it is indistinguishable from the real thing.
+	//
+	// The column is left in place rather than dropped: it is historical evidence of what a site was configured
+	// with before the cutover, and a migration that deletes it destroys that. It simply is not the answer to
+	// "what is this site's grace policy".
+	_ = cfg
 	// Project the typed columns back. Only non-NULL values are surfaced: an absent grace override must read
 	// back as absent, not as a set of zeroes that a later save would publish as a real policy.
 	if eligibility != nil {
@@ -235,6 +254,26 @@ func (r *PgCommerceAdminRepository) ListPurchases(ctx context.Context, tenantID,
 	return out, rows.Err()
 }
 
+// reservedCommerceCodes are the catalogue codes no operator publish may ever land on.
+//
+// The first two are the D32 system grace objects, guarded here because the database trigger does not cover
+// them. The last two are the EMERGENCY catalogue, which the trigger DOES cover -- and that was exactly the
+// problem: the trigger refused them with a plain RAISE, the transaction wrapper collapsed it to a repository
+// error, and an operator who typed a reserved code got HTTP 500 "publish failed". A refusal reported as an
+// internal error tells the operator the system is broken when in fact it is working, and it is the shape that
+// gets escalated as an outage. Refusing all four here makes the answer uniform and truthful, and it does so
+// before any row is touched.
+func reservedCommerceCode(code string) bool {
+	switch code {
+	case systemGraceCode, systemGracePlanCode,
+		"__sys_emergency_grace_pkg__", "__sys_emergency_grace_plan__":
+		return true
+	}
+	return false
+}
+
+const reservedCommerceCodeMsg = "reserved system grace code is not operator-publishable"
+
 type pgCommerceAdminTx struct{ tx pgx.Tx }
 
 func (t *pgCommerceAdminTx) UpsertPackage(ctx context.Context, tenantID, siteID, code string) (string, error) {
@@ -244,8 +283,8 @@ func (t *pgCommerceAdminTx) UpsertPackage(ctx context.Context, tenantID, siteID,
 	// reserved system grace code would land ON the system row and republish it as an operator package -- the
 	// one door left open after the catalogue was hidden and activation was protected. The database's
 	// reserved-code trigger guards only the EMERGENCY catalog codes, so this one is enforced here.
-	if code == systemGraceCode || code == systemGracePlanCode {
-		return "", &Error{Code: ErrInvalidInput, Msg: "reserved system grace code is not operator-publishable"}
+	if reservedCommerceCode(code) {
+		return "", &Error{Code: ErrInvalidInput, Msg: reservedCommerceCodeMsg}
 	}
 	var existingSystem bool
 	if err := t.tx.QueryRow(ctx,
@@ -347,8 +386,8 @@ func (t *pgCommerceAdminTx) SetPackageActive(ctx context.Context, tenantID, site
 func (t *pgCommerceAdminTx) UpsertPlan(ctx context.Context, tenantID, siteID, code string) (string, error) {
 	// D32: the derived system grace PLAN is not operator-publishable either. A package is only as trustworthy
 	// as the plan revision it pins, so leaving the plan reachable reopens the same door one level down.
-	if code == systemGracePlanCode || code == systemGraceCode {
-		return "", &Error{Code: ErrInvalidInput, Msg: "reserved system grace code is not operator-publishable"}
+	if reservedCommerceCode(code) {
+		return "", &Error{Code: ErrInvalidInput, Msg: reservedCommerceCodeMsg}
 	}
 	var id string
 	err := t.tx.QueryRow(ctx,
@@ -433,34 +472,22 @@ func (t *pgCommerceAdminTx) GraceCandidateValid(ctx context.Context, tenantID, s
 //
 // grace_all_or_none requires the six grace fields to be all-present or all-absent, so a partial specification
 // is rejected here with a deterministic reason rather than being sent to the database to fail as a CHECK.
+// UpsertGraceConfig is RETIRED (D32). It is retained only to satisfy the CommerceAdminTx interface and
+// always refuses.
+//
+// It was the raw path: publish_checkout_grace_config with no actor, no reason code, no optimistic version and
+// no audit row. Every one of those is what makes a change to what departing guests receive attributable and
+// safe under two operators, so leaving a working bypass beside the canonical boundary would mean the
+// guarantees hold only for callers who happened to choose the right door.
+//
+// The live path is iamv2.PublishSystemGracePolicy -> iam_v2.publish_checkout_grace_policy, which also derives
+// the system package the checkout validator will accept. Nothing in the product calls this any more; the
+// refusal exists so that if something ever does, it fails loudly rather than quietly writing an unaudited,
+// unversioned policy.
 func (t *pgCommerceAdminTx) UpsertGraceConfig(ctx context.Context, tenantID, siteID, packageRevisionID string, config map[string]any) error {
-	g, err := splitGraceConfig(config)
-	if err != nil {
-		return err
-	}
-	cfg, _ := json.Marshal(orEmptyObj(g.rest))
-	_, execErr := t.tx.Exec(ctx,
-		`SELECT iam_v2.publish_checkout_grace_config($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-		tenantID, siteID, packageRevisionID,
-		g.durationSeconds, g.downKbps, g.upKbps, g.dataQuotaBytes,
-		g.deviceLimit, g.deviceLimitPolicy, g.eligibilityWindowSeconds)
-	if execErr != nil {
-		return execErr
-	}
-	// The free-form remainder is written UNCONDITIONALLY, including when it is empty.
-	//
-	// Skipping the write when there is nothing left over looks like a harmless optimisation and is a silent
-	// data-retention bug: an operator who deletes the last free-form key sends a config with no remainder, the
-	// UPDATE is skipped, and the OLD keys stay in the row. The read then returns them, the UI shows keys the
-	// operator just deleted, and a later save writes them back -- a value that cannot be cleared, only
-	// overwritten. Save -> read -> save has to close for the empty case too, which is exactly the case an
-	// existence check omits.
-	if _, err := t.tx.Exec(ctx,
-		`UPDATE iam_v2.site_checkout_grace_config SET config = $3::jsonb
-		  WHERE tenant_id = $1 AND site_id = $2`, tenantID, siteID, cfg); err != nil {
-		return err
-	}
-	return nil
+	return &Error{Code: ErrInvalidInput,
+		Msg: "grace configuration must be published through PublishSystemGracePolicy (D32): the raw writer " +
+			"records no actor, reason or version and derives no validated package"}
 }
 
 // graceFields is the typed half of a grace configuration.

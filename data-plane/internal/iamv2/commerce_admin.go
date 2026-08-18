@@ -105,6 +105,11 @@ type PlanSummary struct {
 type GraceConfig struct {
 	GracePackageRevisionID string         `json:"grace_package_revision_id"`
 	Config                 map[string]any `json:"config"`
+	// ConfigVersion is what the operator must send back as expected_version when publishing. Without it on the
+	// read, the mandatory optimistic-concurrency check on the write would be unsatisfiable through the product:
+	// the caller would have to guess the number that decides whether their change is accepted. Zero means
+	// nothing is published yet, which is also the correct expected_version for a first publication.
+	ConfigVersion int `json:"config_version"`
 }
 
 // GraceCandidate describes a candidate grace package revision for validation.
@@ -449,66 +454,21 @@ func (a *CommerceAdmin) GetGrace(ctx context.Context, tenantID, siteID string) (
 	return gc, false, nil
 }
 
-// SetGrace validates and stores the site checkout-grace package. It creates NO grace entitlement or
-// checkout behavior (that is Phase 3); it only records which package revision would be used, and only if
-// that revision is active, CHECKOUT_GRACE, free, exactly NOT_REQUIRED and pinned to a valid plan revision.
-func (a *CommerceAdmin) SetGrace(ctx context.Context, tenantID, siteID, packageRevisionID string, config map[string]any) (AdminResult, error) {
-	if !a.cfg.AdminOn() {
-		a.obs.Event("phase2.disabled", map[string]string{"op": "set_grace"})
-		return AdminResult{Disabled: true, Reason: "phase2_disabled"}, nil
-	}
-	if tenantID == "" || siteID == "" || packageRevisionID == "" {
-		return AdminResult{}, &Error{Code: ErrInvalidInput, Msg: "set_grace: missing tenant/site/package_revision"}
-	}
-	var res AdminResult
-	err := a.repo.WithTx(ctx, func(tx CommerceAdminTx) error {
-		c, err := tx.GraceCandidateValid(ctx, tenantID, siteID, packageRevisionID)
-		if err != nil {
-			return err
-		}
-		if !c.Found {
-			res = AdminResult{Reason: "grace_package_not_found"}
-			return nil
-		}
-		if !c.PackageActive {
-			res = AdminResult{Reason: "grace_package_inactive"}
-			return nil
-		}
-		if c.PackageType != "CHECKOUT_GRACE" {
-			res = AdminResult{Reason: "grace_package_wrong_type"}
-			return nil
-		}
-		// The contract requires the grace package to be is_system = true, re-validated "at save AND at every
-		// checkout". The type check alone would accept an ordinary operator package that merely carries the
-		// CHECKOUT_GRACE type -- exactly what would exist if the general publisher were opened up to set that
-		// type. Checking provenance is what makes the distinction real rather than nominal.
-		if !c.IsSystem {
-			res = AdminResult{Reason: "grace_package_not_system"}
-			return nil
-		}
-		if c.PriceMinor != 0 || !c.SettlementOnly {
-			res = AdminResult{Reason: "grace_package_not_free"}
-			return nil
-		}
-		if _, cerr := ValidateCurrency(c.Currency, c.CurrencyExp); cerr != nil {
-			res = AdminResult{Reason: "grace_package_bad_currency"}
-			return nil
-		}
-		if !c.PlanRevValid {
-			res = AdminResult{Reason: "grace_package_bad_plan"}
-			return nil
-		}
-		if err := tx.UpsertGraceConfig(ctx, tenantID, siteID, packageRevisionID, config); err != nil {
-			return err
-		}
-		res = AdminResult{Reason: "ok"}
-		return nil
-	})
-	if err != nil {
-		return AdminResult{}, &Error{Code: ErrRepo, Msg: "set_grace"}
-	}
-	return res, nil
-}
+// SetGrace is RETIRED (D32) and deliberately no longer exists.
+//
+// It took a packageRevisionID CHOSEN BY THE OPERATOR and validated it against a list of properties. That was
+// the right design while an operator picked the grace package, and it cannot be made right now: the checkout
+// conversion judges the pinned revision with iam_v2.grace_package_mismatch_reason, which demands EXACT
+// equality between the published policy and the revision's plan scalars, duration policy and declared policy
+// version. A package the operator selected can satisfy that only by coincidence, and the property list here
+// checked none of those equalities -- so a save could succeed and the grace still never convert.
+//
+// The replacement is PublishSystemGracePolicy: the operator supplies POLICY, the system derives the plan and
+// package revisions that express it exactly, the same matcher the conversion uses is consulted before the
+// write, and publication goes through the audited, versioned boundary with an actor and a reason code.
+//
+// The name is left documented rather than silently deleted because "where did SetGrace go" is the first
+// question anyone reading the old call sites will have.
 
 // Quotes / Purchases return guest-PII-free inspection rows (read-only).
 func (a *CommerceAdmin) Quotes(ctx context.Context, tenantID, siteID string, limit int) ([]QuoteInspect, bool, error) {

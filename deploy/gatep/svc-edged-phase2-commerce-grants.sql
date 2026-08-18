@@ -60,8 +60,8 @@ GRANT INSERT ON iam_v2.service_plan_revisions      TO svc_edged;
 GRANT INSERT ON iam_v2.package_eligibility_rules   TO svc_edged;
 GRANT INSERT ON iam_v2.package_grant_tiers         TO svc_edged;
 
--- setGraceConfig is a per-site upsert.
-GRANT INSERT, UPDATE ON iam_v2.site_checkout_grace_config TO svc_edged;
+-- Grace policy is NOT written directly, and the absence of a table grant here is the point. See the D32
+-- section at the end of this file.
 
 -- NOT granted, on purpose, and each absence is load-bearing:
 --   * DELETE on anything -- no admin path deletes commerce rows;
@@ -104,18 +104,42 @@ GRANT SELECT         ON iam_v2.entitlements TO svc_edged;
 -- ---------------------------------------------------------------------------
 -- D32: the grace POLICY path (Hotel Admin controls policy only)
 --
--- site_checkout_grace_config resolves to no capability family under
--- p3_controlled_writer_only: it is writable only by the owner of
--- publish_checkout_grace_config. edged is the admin surface that saves grace
--- policy, so it needs EXECUTE on that function. Without it the PUT fails 500
--- with "permission denied for function publish_checkout_grace_config" while the
--- READ keeps working, so the surface looks healthy until an operator saves.
+-- WHAT CHANGED, AND WHY THE EARLIER GRANTS ARE NOW REVOKED
+-- --------------------------------------------------------
+-- This file first granted edged INSERT/UPDATE on iam_v2.site_checkout_grace_config and EXECUTE on the RAW
+-- writer iam_v2.publish_checkout_grace_config. Both are now withdrawn.
 --
--- (It was granted to svc_netd earlier because netd references it too. netd is
--- not the caller for the admin policy path; edged is -- the same
--- granted-the-wrong-service mistake that hid the acctd accounting gap.)
-GRANT EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer) TO svc_edged;
+-- The raw writer records no actor, no reason code and no version, performs no optimistic-concurrency check and
+-- appends no audit row. Under D32 every one of those is what makes a change to what departing guests receive
+-- attributable, and safe when two operators edit at once. Leaving a working raw path beside the canonical
+-- audited one would mean those guarantees hold only for callers who happened to pick the right door -- and the
+-- Go-side retirement of that path is only as strong as the privilege behind it. So the privilege goes too.
+--
+-- The direct table grant is withdrawn for the same reason. site_checkout_grace_config resolves to NO
+-- capability family under p3_controlled_writer_only, i.e. it is writable only by the owner of the publication
+-- function; the grant never actually enabled a direct write, it merely made one look permitted. A privilege
+-- that cannot be exercised but reads as authorisation is worse than no privilege at all, because it invites
+-- the next person to write the bypass and discover the refusal at runtime.
+--
+-- REVOKEs are unconditional and idempotent: revoking a privilege that was never granted is a no-op, so a
+-- freshly built environment converges to the same effective set as an upgraded one.
+REVOKE INSERT, UPDATE ON iam_v2.site_checkout_grace_config FROM svc_edged;
+DO $$
+BEGIN
+  -- Guarded only because the raw function may not exist in a database built after it was retired; the REVOKE
+  -- must not turn that into a failure of the whole bootstrap.
+  IF EXISTS (
+    SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'iam_v2' AND p.proname = 'publish_checkout_grace_config'
+  ) THEN
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config('
+         || 'uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer) FROM svc_edged';
+  END IF;
+END $$;
 
--- Provisioning creates the hidden system package row (D32). INSERT only: the
--- revisions it publishes are append-only and it never deletes.
+-- The EXECUTE grants for the canonical audited boundary, and the SELECT that iam_v2_owner needs to validate
+-- the actor, live in gatep-grants.sql -- which includes this file and therefore applies them after it.
+
+-- Provisioning creates the hidden system package row (D32). INSERT only: the revisions it publishes are
+-- append-only and it never deletes.
 GRANT INSERT ON iam_v2.internet_packages TO svc_edged;

@@ -81,10 +81,37 @@ func TestSystemGraceProvisioningIsIdempotentAndHidden(t *testing.T) {
 	if before.GracePackageRevisionID != "" {
 		t.Fatalf("provisioning set grace policy on the operator's behalf: %+v", before)
 	}
-	a := newAdmin(t, db)
-	if res, err := a.SetGrace(ctx, p2Tenant, p2Site, first.RevisionID,
-		map[string]any{"eligibility_window_seconds": 3600}); err != nil || res.Reason != "ok" {
-		t.Fatalf("the system grace package must be a valid policy target: %+v %v", res, err)
+	// ...and publishing a policy converges onto THAT package rather than creating a competing one. The
+	// startup-provisioned row and the publication path must agree about which package is the site's grace
+	// package; if they did not, a site would end up with two system packages and the one the conversion looks
+	// at would depend on which code path ran last.
+	_, pkgRev, err := PublishSystemGracePolicy(ctx, repo, GracePublishRequest{
+		TenantID: p2Tenant, SiteID: p2Site,
+		Policy: SystemGracePolicy{DurationSeconds: 1800, DownKbps: 4000, UpKbps: 1500,
+			DataQuotaBytes: 524288000, DeviceLimit: 2, DeviceLimitPolicy: "REJECT_NEW_DEVICE",
+			EligibilityWindowSeconds: 3600},
+		ActorOperatorID: graceTestActor(t, db), ReasonCode: "TEST_PROVISION_CONVERGE", ExpectedVersion: 0,
+	})
+	if err != nil {
+		t.Fatalf("publishing onto the provisioned package failed: %v", err)
+	}
+	var pkgOfRev string
+	if err := db.QueryRow(ctx,
+		`SELECT package_id::text FROM iam_v2.internet_package_revisions WHERE id=$1`, pkgRev).Scan(&pkgOfRev); err != nil {
+		t.Fatal(err)
+	}
+	if pkgOfRev != first.PackageID {
+		t.Fatalf("publication created a SECOND system grace package (%s) instead of using the provisioned one (%s)",
+			pkgOfRev, first.PackageID)
+	}
+	var n int
+	if err := db.QueryRow(ctx,
+		`SELECT count(*) FROM iam_v2.internet_packages WHERE tenant_id=$1 AND site_id=$2 AND is_system`,
+		p2Tenant, p2Site).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected exactly one system package for the site, found %d", n)
 	}
 }
 

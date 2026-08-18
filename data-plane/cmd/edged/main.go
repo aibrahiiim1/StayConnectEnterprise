@@ -86,6 +86,10 @@ type server struct {
 	// the master flag is OFF (zero Phase-2 SQL); commerceCfg gates whether the admin routes are mounted.
 	commerce    *iamv2.CommerceAdmin
 	commerceCfg iamv2.CommerceConfig
+	// commerceRepo is the same repository the admin engine holds. The grace publication path needs it
+	// directly because D32 publication is not an admin-engine operation: it derives system catalogue rows and
+	// goes through the canonical audited boundary, neither of which the operator-facing engine may do.
+	commerceRepo iamv2.CommerceAdminRepository
 	// iamv2Cfg is the IAM-v2 authentication config. edged needs it because credential ISSUANCE must land
 	// in whichever domain will later AUTHENTICATE the credential: with IAM-v2 as the ACCOUNT authority,
 	// an account issued into the legacy table can never be logged in with. Nothing in the runtime issued
@@ -265,6 +269,7 @@ func main() {
 	// either way.
 	applyAggregateTimeCapability(commAdmin, p6cfg)
 	s.commerce = commAdmin
+	s.commerceRepo = commRepo
 	s.commerceCfg = commCfg
 	// Fail closed on an incoherent IAM-v2 auth config: LoadConfigFromEnv already rejects a per-method flag
 	// set while the master flag is off, and edged must not run with a config scd would refuse.

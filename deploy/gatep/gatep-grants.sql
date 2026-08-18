@@ -229,3 +229,64 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_edged;
 -- Same minimum as above: EXECUTE on the opener, nothing else. acctd still cannot write outside an open
 -- controlled operation.
 GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
+
+-- ===========================================================================================================
+-- D32 -- CHECKOUT GRACE: the audited policy boundary, and the privileges it actually needs.
+--
+-- WHY THIS IS HERE AND NOT IN A SIDE FILE
+-- ---------------------------------------
+-- The reconciler preamble at the top of this file REVOKEs ALL privileges on schema iam_v2 from every svc_*
+-- role before re-granting the allowlist. Any iam_v2 grant that lives in a separate script is therefore
+-- ERASED the next time Gate-P is applied, and the surface it feeds starts failing at some later, unrelated
+-- moment -- exactly the failure shape that made the netd stored-bundle replay so expensive to find. A grant
+-- that a re-run of the canonical bootstrap silently deletes is not reproducible, whatever file it is in.
+--
+-- This was not one stray file. EVERY per-service iam_v2 grant written during the trial lived beside this
+-- bootstrap rather than inside it, so a single Gate-P re-run would have silently disarmed the enforcement
+-- plane, accounting, guest auth, voucher redemption and the commerce surface at once -- each one failing later,
+-- somewhere else, for a reason that would not point back to the re-run. They are all INCLUDED here, after the
+-- revoke, in dependency-free order. \ir resolves relative to THIS file, so it works from any working directory.
+--
+-- Each included file remains individually applicable (that is how they are deployed incrementally), and each is
+-- idempotent, so including them changes nothing about a single-file apply -- it only removes the window in
+-- which the canonical path and the real privilege set disagree.
+\ir svc-service-health-grants.sql
+\ir svc-scd-iamv2-guest-auth-grants.sql
+\ir svc-scd-iamv2-guest-commerce-grants.sql
+\ir svc-voucher-iamv2-grants.sql
+\ir svc-netd-iamv2-enforcement-grants.sql
+\ir svc-acctd-guest-networks-grant.sql
+\ir svc-acctd-iamv2-accounting-grants.sql
+\ir svc-edged-phase2-commerce-grants.sql
+
+-- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
+-- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason
+-- code and the version the caller last read, validates the derived package with the same matcher the checkout
+-- conversion uses, and appends to iam_v2.checkout_grace_policy_publications.
+GRANT EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_policy(
+  uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer, integer, uuid, text
+) TO svc_edged;
+
+-- ...and on the matcher itself, which the publication path consults BEFORE publishing so a bad derivation is
+-- reported as the specific condition it violated rather than as a generic publication failure.
+GRANT EXECUTE ON FUNCTION iam_v2.grace_package_mismatch_reason(
+  uuid, uuid, uuid, integer, integer, integer, bigint, integer, text
+) TO svc_edged;
+
+-- ---- and the privilege that is NOT the caller's ------------------------------------------------------
+-- iam_v2.publish_checkout_grace_policy is SECURITY DEFINER owned by iam_v2_owner, and it validates the actor
+-- against public.operators. A SECURITY DEFINER function runs as its OWNER, so the privilege that decides
+-- whether that lookup succeeds is iam_v2_owner's -- granting the CALLING service SELECT on public.operators
+-- changes nothing and publication still fails with "permission denied for table operators". That is a genuinely
+-- misleading failure: the caller has every privilege the error appears to be about.
+--
+-- Read-only, and only this table: the actor check reads an operator, it never writes one.
+--
+-- Guarded, because iam_v2_owner exists only where the IAM-v2 domain has been created; on a public-schema-only
+-- database this section must be a no-op rather than an error.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    EXECUTE 'GRANT SELECT ON public.operators TO iam_v2_owner';
+  END IF;
+END $$;

@@ -707,7 +707,7 @@
     "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
     "phase7_merge_attribution": "Phase 7 was ACCEPTED_AND_CLOSED under D27/T0064 and MERGED under D28/T0065 (merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The current DEVELOPMENT trial continuation is D31/T0068. D30 is preserved historically and its over-broad Production policy clauses were corrected by D31."
   },
-  "latest_transition_id": "T0069",
+  "latest_transition_id": "T0070",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
