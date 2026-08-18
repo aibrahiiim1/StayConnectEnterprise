@@ -1,4 +1,0 @@
-commit 366a09d010741e46edade7eda098a8228a10db25
-Date:   Tue Aug 18 15:09:14 2026 +0300
-
-    Grace: clearing the last free-form key must actually clear it
