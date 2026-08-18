@@ -28,6 +28,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -123,6 +125,48 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			return errDeviceNotOnEntitlement
 		}
 
+		// ...AND THE REST OF THE IDENTITY MUST COHERE.
+		//
+		// Binding the device alone still let a caller present that device with somebody else's MAC, or on a
+		// guest network it was never seen on. Each of those is a different lie about who is being admitted:
+		//
+		//   MAC     -- device identity IS (tenant, site, appliance, MAC) in this domain, so a device row and a
+		//              MAC that disagree are not the same device, whatever the id says.
+		//   network -- the session is enforced on the bridge derived from the source IP. Admitting a device
+		//              onto a network it never appeared on would enforce it somewhere its appearance record
+		//              cannot account for.
+		//
+		// The IP is deliberately NOT pinned to the appearance record: DHCP legitimately reassigns it within a
+		// network, and the source IP is already server-derived from the connection rather than the body. The
+		// network it resolves to is the invariant that matters.
+		var deviceMAC, deviceTenant, deviceSite string
+		if err := tx.QueryRow(ctx, `
+		    SELECT mac::text, tenant_id::text, site_id::text
+		      FROM iam_v2.devices WHERE id = $1`, req.DeviceID).Scan(&deviceMAC, &deviceTenant, &deviceSite); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errDeviceNotOnEntitlement
+			}
+			return err
+		}
+		// Tenant/site come from this appliance's own config, never the request, so a device belonging to
+		// another owner cannot be activated here even with a valid id.
+		if deviceTenant != s.tenID || deviceSite != s.siteID {
+			return errDeviceNotOnEntitlement
+		}
+		if !strings.EqualFold(deviceMAC, mac.String()) {
+			return errIdentityMismatch
+		}
+		var seenOnNetwork bool
+		if err := tx.QueryRow(ctx, `
+		    SELECT EXISTS(SELECT 1 FROM iam_v2.device_network_appearances
+		                   WHERE device_id = $1 AND guest_network_id = $2)`,
+			req.DeviceID, nc.NetworkID).Scan(&seenOnNetwork); err != nil {
+			return err
+		}
+		if !seenOnNetwork {
+			return errIdentityMismatch
+		}
+
 		// RECONNECT / IDEMPOTENCY. The same device returning to the same entitlement gets the session it
 		// already has rather than a second one. Without this, a retried request -- a lost response, a guest
 		// reloading the page -- would consume another device slot against its own limit.
@@ -188,6 +232,11 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if errors.Is(err, errIdentityMismatch) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": "DEVICE_IDENTITY_MISMATCH", "authority": "iam_v2"})
+			return
+		}
 		if errors.Is(err, errDeviceNotOnEntitlement) {
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"error": "DEVICE_NOT_ON_ENTITLEMENT", "authority": "iam_v2"})
@@ -203,14 +252,26 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The session is durable. It is NOT yet enforced, and saying otherwise is the whole failure this design
-	// avoids, so the response reports the state honestly and the caller decides whether to wait.
-	if !reused {
+	// WAIT FOR ENFORCEMENT BEFORE ANSWERING.
+	//
+	// The session row is durable at this point, but the guest is not online: no accountable tc class exists
+	// and nft has not authorized them yet. netd converges on its own cadence. Returning here and letting the
+	// portal show "connected" would reproduce, one layer up, the exact defect the portal seam just fixed --
+	// a success page for a guest whose packets are still being dropped.
+	//
+	// So the caller is told the truth: the state actually reached. The wait is bounded by the caller's own
+	// deadline, because a wait longer than the caller's budget is not a longer wait -- the context is already
+	// cancelled and it ends immediately, on precisely the requests it was meant to protect.
+	state := s.awaitIAMv2Enforcement(ctx, sessionID)
+	if !reused && state == "active" {
+		// SessionsStarted counts sessions that actually started. Incrementing on a row that never got enforced
+		// would put the same lie in the metrics that it would have put on the success page.
 		s.met.SessionsStarted.WithLabelValues("iamv2").Inc()
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session_id": sessionID,
-		"state":      "PENDING_ENFORCEMENT",
+		"state":      state,
+		"enforced":   state == "active",
 		"reused":     reused,
 		"authority":  "iam_v2",
 		"bridge":     nc.Bridge,
@@ -222,8 +283,56 @@ var errEntitlementUnusable = errors.New("entitlement not usable")
 // errDeviceNotOnEntitlement is returned when the device did not acquire the entitlement it is activating.
 var errDeviceNotOnEntitlement = errors.New("device did not acquire this entitlement")
 
+// errIdentityMismatch is returned when the device exists and acquired the entitlement, but the presented
+// MAC or guest network does not match what that device actually is or where it has been seen.
+var errIdentityMismatch = errors.New("device identity does not match the presented network identity")
+
 type maxDevicesError struct{ Limit, Current int }
 
 func (e *maxDevicesError) Error() string { return "max devices reached" }
 
 var _ = context.Background
+
+// awaitIAMv2Enforcement polls durable session state until netd has promoted the session, or the caller's
+// budget runs out. It returns the state actually observed -- never an optimistic one.
+//
+// Polling durable state rather than trusting a signal is deliberate: netd promotes through a controlled
+// writer, and the database is the only place that can answer whether the promotion actually committed.
+func (s *server) awaitIAMv2Enforcement(ctx context.Context, sessionID string) string {
+	deadline := time.Now().Add(iamv2EnforcementWaitMax)
+	if d, ok := ctx.Deadline(); ok {
+		if reserved := d.Add(-iamv2EnforcementReserve); reserved.Before(deadline) {
+			deadline = reserved
+		}
+	}
+	state := "PENDING_ENFORCEMENT"
+	for {
+		var st string
+		var ended *time.Time
+		if err := s.db.QueryRow(ctx,
+			`SELECT state, ended FROM iam_v2.sessions WHERE id=$1`, sessionID).Scan(&st, &ended); err == nil {
+			state = st
+			// A session that ended while we waited must not be reported as progressing toward active.
+			if st == "active" || ended != nil {
+				return st
+			}
+		}
+		if !time.Now().Add(iamv2EnforcementPoll).Before(deadline) {
+			return state
+		}
+		select {
+		case <-ctx.Done():
+			return state
+		case <-time.After(iamv2EnforcementPoll):
+		}
+	}
+}
+
+const (
+	// Bounded so nothing can pin a request forever when there is no caller deadline to derive from.
+	iamv2EnforcementWaitMax = 8 * time.Second
+	// Answer before the caller stops listening, rather than at the same instant.
+	iamv2EnforcementReserve = 150 * time.Millisecond
+	// Short relative to the enforcement producer's one-second cadence.
+	iamv2EnforcementPoll = 100 * time.Millisecond
+)

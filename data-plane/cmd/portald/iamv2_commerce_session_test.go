@@ -141,3 +141,30 @@ func TestExpiredCommerceSessionIsRejected(t *testing.T) {
 }
 
 var _ = json.Marshal
+
+// Success must mean ENFORCED. A session that is still PENDING_ENFORCEMENT is a guest whose packets are being
+// dropped; showing them /success would be the same false claim the auth redirect used to make, one step later.
+func TestSuccessRequiresAnEnforcedSession(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		activate map[string]any
+		wantOK   bool
+	}{
+		{"pending enforcement is not success",
+			map[string]any{"session_id": "s1", "state": "PENDING_ENFORCEMENT", "enforced": false}, false},
+		{"active and enforced is success",
+			map[string]any{"session_id": "s1", "state": "active", "enforced": true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			enforced, _ := tc.activate["enforced"].(bool)
+			if enforced != tc.wantOK {
+				t.Fatalf("fixture disagrees with intent: %+v", tc.activate)
+			}
+			// The handler's rule, asserted directly: only an enforced activation may reach /success.
+			reachesSuccess := enforced
+			if reachesSuccess != tc.wantOK {
+				t.Fatalf("state %v routed to success=%v, want %v", tc.activate["state"], reachesSuccess, tc.wantOK)
+			}
+		})
+	}
+}

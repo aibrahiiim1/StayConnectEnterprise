@@ -205,6 +205,15 @@ func (h *handler) acquirePackage(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, msg)
 		return
 	}
+	// SUCCESS MEANS ENFORCED, NOT MERELY GRANTED.
+	//
+	// scd waits for netd to promote the session and reports the state it actually observed. A session that is
+	// still PENDING_ENFORCEMENT is a guest whose packets are still being dropped, and showing them a success
+	// page would be the same false claim the auth redirect used to make, moved one step later in the flow.
+	if enforced, _ := act["enforced"].(bool); !enforced {
+		h.landing(w, r, "We could not bring your device online. Please try again in a moment.")
+		return
+	}
 	sid, _ := act["session_id"].(string)
 	http.Redirect(w, r, "/success?s="+url.QueryEscape(sid), http.StatusSeeOther)
 }
