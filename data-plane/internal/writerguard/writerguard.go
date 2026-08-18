@@ -81,6 +81,27 @@ func Phase3Requirements() []Requirement {
 			Function: "iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)",
 			Tables:   []string{"site_checkout_grace_config"},
 		},
+		// The CANONICAL audited, versioned grace publication boundary (D32), asserted alongside the raw writer
+		// above rather than instead of it: the raw function still owns the table's trigger guard, but it is no
+		// longer what the product calls.
+		//
+		// Everything that makes a grace change attributable is a property OF THIS FUNCTION -- it is SECURITY
+		// DEFINER so it can validate the actor against public.operators as its owner, it is not executable by
+		// PUBLIC, and it enforces the expected_version check and appends the publication ledger row. None of
+		// that was verified anywhere at startup. A database where this function had been replaced by a
+		// permissive one, re-owned, or granted to PUBLIC would have started normally and gone on serving grace
+		// saves that recorded nothing -- and the resulting audit trail would look complete, because the rows it
+		// did write would be well-formed. Checking it here means such a database refuses to run instead.
+		//
+		// The family is named grace_policy_publication, distinct from the capability-scoped grace_publication
+		// family further down: that one scopes writes to the publications LEDGER, this one is the function that
+		// writes the site's grace CONFIG. Sharing a family name would have made the contract read as though one
+		// requirement covered both, which is exactly the kind of quiet weakening the tier test exists to catch.
+		{
+			Family:   "grace_policy_publication",
+			Function: "iam_v2.publish_checkout_grace_policy(uuid,uuid,uuid,int,int,int,bigint,int,text,int,int,uuid,text)",
+			Tables:   []string{"site_checkout_grace_config"},
+		},
 		{
 			Family:   "accounting",
 			Function: "iam_v2.ingest_absolute_counters(uuid,uuid,uuid,uuid,text,int,bigint,bigint,bigint,timestamptz)",
