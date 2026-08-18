@@ -270,6 +270,14 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 		return nil
 	})
 	if err != nil {
+		// A REFUSAL from inside the transaction must survive as a refusal. Collapsing everything to ErrRepo
+		// turned "that reserved code is not yours" into an opaque repository failure, which the HTTP layer
+		// then reported as 500 internal -- telling an operator the server broke when it had actually made a
+		// deliberate policy decision they could act on.
+		var de *Error
+		if errors.As(err, &de) && de.Code == ErrInvalidInput {
+			return AdminResult{}, de
+		}
 		return AdminResult{}, &Error{Code: ErrRepo, Msg: "publish"}
 	}
 	return res, nil
@@ -419,6 +427,11 @@ func (a *CommerceAdmin) PublishPlanRevision(ctx context.Context, spec PlanPublis
 		return nil
 	})
 	if err != nil {
+		// Same reason as the package path: a reserved-code refusal is a decision, not a repository fault.
+		var de *Error
+		if errors.As(err, &de) && de.Code == ErrInvalidInput {
+			return AdminResult{}, de
+		}
 		return AdminResult{}, &Error{Code: ErrRepo, Msg: "publish plan"}
 	}
 	return res, nil

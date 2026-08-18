@@ -7,6 +7,7 @@ package main
 // guest portal, the admin operator is trusted, so validation reasons are returned verbatim.
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -78,6 +79,14 @@ func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
 		DataQuotaBytes: in.DataQuotaBytes, TimeAccountingMode: in.TimeAccountingMode,
 	})
 	if err != nil {
+		// A domain REFUSAL is not an internal error. Publishing onto a reserved system code is a policy
+		// decision the operator can act on ("that code is not yours"), and reporting it as 500 "internal"
+		// tells them the server broke instead. Only genuinely unexpected failures stay 500.
+		var de *iamv2.Error
+		if errors.As(err, &de) && de.Code == iamv2.ErrInvalidInput {
+			jsonErr(w, http.StatusBadRequest, "bad_request", de.Msg)
+			return
+		}
 		jsonErr(w, http.StatusInternalServerError, "internal", "publish failed")
 		return
 	}
@@ -240,6 +249,14 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 	}
 	res, err := s.commerce.PublishRevision(r.Context(), spec)
 	if err != nil {
+		// A domain REFUSAL is not an internal error. Publishing onto a reserved system code is a policy
+		// decision the operator can act on ("that code is not yours"), and reporting it as 500 "internal"
+		// tells them the server broke instead. Only genuinely unexpected failures stay 500.
+		var de *iamv2.Error
+		if errors.As(err, &de) && de.Code == iamv2.ErrInvalidInput {
+			jsonErr(w, http.StatusBadRequest, "bad_request", de.Msg)
+			return
+		}
 		jsonErr(w, http.StatusInternalServerError, "internal", "publish failed")
 		return
 	}
