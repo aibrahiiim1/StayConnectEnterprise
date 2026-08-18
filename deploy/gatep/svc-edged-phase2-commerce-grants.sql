@@ -84,3 +84,19 @@ GRANT INSERT, UPDATE ON iam_v2.site_checkout_grace_config TO svc_edged;
 -- credential is a separate admin capability and must be granted deliberately
 -- when it is implemented, not acquired as a side effect of being able to create.
 GRANT INSERT, SELECT ON iam_v2.guest_access_accounts TO svc_edged;
+
+-- ---- and the rest of the credential LIFECYCLE ------------------------------
+-- Granting only INSERT/SELECT left a split authority that was worse than either
+-- side alone: create wrote iam_v2 while list, get, patch, set-password,
+-- disconnect and delete still used public.guest_accounts, so an IAM-v2 account
+-- was invisible to the API that had just created it. With every operation now
+-- routed to the configured authority, edged needs UPDATE (patch, password
+-- reset, lockout clear) and DELETE (revoke) on the credential itself.
+GRANT UPDATE, DELETE ON iam_v2.guest_access_accounts TO svc_edged;
+
+-- Disconnect ends the account's live IAM-v2 sessions and the list/get views
+-- report how many devices are currently online for it. Read-only on
+-- entitlements: edged resolves which entitlement belongs to the account but
+-- never alters the grant itself.
+GRANT SELECT, UPDATE ON iam_v2.sessions     TO svc_edged;
+GRANT SELECT         ON iam_v2.entitlements TO svc_edged;

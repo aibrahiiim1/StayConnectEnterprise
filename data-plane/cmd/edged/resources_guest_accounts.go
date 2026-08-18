@@ -69,16 +69,18 @@ func scanGuestAccountEnriched(row interface{ Scan(...any) error }, a *edgeGuestA
 
 func (s *server) guestAccountsRoutes() http.Handler {
 	r := chi.NewRouter()
-	r.Get("/", s.listGuestAccounts)
-	r.Post("/", s.createGuestAccount)
+	// EVERY operation routes through the same authority switch. Switching only create is what produced the
+	// split authority where an IAM-v2 account was invisible to the API that had just created it.
+	r.Get("/", s.acctAuthority(s.listGuestAccounts, s.listGuestAccountsIAMv2))
+	r.Post("/", s.createGuestAccount) // create branches internally (it shares validation with legacy)
 	// Portal visibility toggle (static segment; chi matches it before "/{id}").
 	r.Get("/portal", s.getGuestAccountPortal)
 	r.Post("/portal", s.setGuestAccountPortal)
-	r.Get("/{id}", s.getGuestAccount)
-	r.Patch("/{id}", s.patchGuestAccount)
-	r.Post("/{id}/set-password", s.setGuestAccountPassword)
-	r.Post("/{id}/disconnect", s.disconnectGuestAccountSessions)
-	r.Delete("/{id}", s.deleteGuestAccount)
+	r.Get("/{id}", s.acctAuthority(s.getGuestAccount, s.getGuestAccountIAMv2))
+	r.Patch("/{id}", s.acctAuthority(s.patchGuestAccount, s.patchGuestAccountIAMv2))
+	r.Post("/{id}/set-password", s.acctAuthority(s.setGuestAccountPassword, s.setGuestAccountPasswordIAMv2))
+	r.Post("/{id}/disconnect", s.acctAuthority(s.disconnectGuestAccountSessions, s.disconnectGuestAccountSessionsIAMv2))
+	r.Delete("/{id}", s.acctAuthority(s.deleteGuestAccount, s.deleteGuestAccountIAMv2))
 	return r
 }
 
