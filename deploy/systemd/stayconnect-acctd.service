@@ -11,6 +11,9 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 EnvironmentFile=/etc/stayconnect/acctd.env
+# acctd inspects iam_v2 function privileges at startup and refuses to start if the DB is unreachable,
+# so it hit the same cold-boot race: 8 restarts on the 2026-08-18 boot. Always exits 0; never worse.
+ExecStartPre=/opt/stayconnect/bin/wait-for-site-db.sh
 ExecStart=/opt/stayconnect/bin/acctd
 Restart=always
 RestartSec=2

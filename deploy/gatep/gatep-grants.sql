@@ -215,3 +215,17 @@ END $$;
 -- It lives here, in the Gate-P privilege bootstrap, rather than as an undocumented GRANT typed on one
 -- appliance, so any rebuilt environment reproduces it.
 GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_edged;
+
+-- ...AND FOR THE ACCOUNTING WRITER. acctd enforces the identical boundary and was missed when edged's grant
+-- was written, because edged was the service being debugged that day and nobody asked which OTHER services
+-- run the same check.
+--
+-- The cost of missing it was hidden until a real reboot: acctd refused to start, systemd restarted it every
+-- few seconds under Restart=always, and `systemctl show` answered "active running" whenever it was sampled
+-- during the brief window between a restart and the next failure. Ten restarts in three minutes read as a
+-- healthy service. Only counting restart jobs per boot from the journal exposed it -- the same lesson as
+-- netd, on a different service, found only because this reboot was measured rather than assumed.
+--
+-- Same minimum as above: EXECUTE on the opener, nothing else. acctd still cannot write outside an open
+-- controlled operation.
+GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;

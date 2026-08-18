@@ -30,6 +30,11 @@ EnvironmentFile=/etc/stayconnect/scd.env
 # explicit REFUSED line naming the offending flag, instead of an opaque exit.
 # (The primary gate is the deploy-time check; this is the boot-time backstop.)
 ExecStartPre=/opt/stayconnect/bin/check-phase6-guest-dependency.sh /etc/stayconnect
+# ...and wait for the site DB. The comment above this unit's After= line claimed scd's lazy pgx pool made
+# it immune to a slow database. A measured reboot disproved that: pmsloader issues a query DURING startup
+# and exits 1 when it fails, so scd crash-looped twice on the 2026-08-18 boot for exactly the reason netd
+# did. The gate always exits 0, so the worst case is today's Restart=always behaviour.
+ExecStartPre=/opt/stayconnect/bin/wait-for-site-db.sh
 ExecStart=/opt/stayconnect/bin/scd
 # Always recover. scd normally re-execs in place (same PID), so this only fires
 # on an actual exit/crash.
