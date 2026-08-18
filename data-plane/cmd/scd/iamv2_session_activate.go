@@ -93,6 +93,36 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			return errEntitlementUnusable
 		}
 
+		// THE DEVICE MUST BE THE ONE THAT ACQUIRED THIS ENTITLEMENT.
+		//
+		// Found by adversarial probe, not by review: passing an arbitrary device_id with a real entitlement id
+		// activated a session and consumed a device slot on someone else's grant. The endpoint trusted the
+		// device from the request body, while the accepted Phase-3 grant path derives device identity from the
+		// connection and says explicitly that it is "never from the body".
+		//
+		// The socket is root-only and portald passes the device from its server-side commerce session, so the
+		// browser could not reach this. That is an argument for the caller being careful, not for the boundary
+		// being absent -- an entitlement is a grant to a subject on the device that acquired it, and any
+		// future caller getting this wrong should be refused rather than trusted.
+		//
+		// entitlement -> purchase -> auth_context -> device is the chain that records who actually acquired it.
+		var acquiringDevice string
+		if err := tx.QueryRow(ctx, `
+		    SELECT ac.device_id::text
+		      FROM iam_v2.entitlements e
+		      JOIN iam_v2.purchases p     ON p.id  = e.purchase_id
+		      JOIN iam_v2.auth_contexts ac ON ac.id = p.auth_context_id
+		     WHERE e.id = $1`, req.EntitlementID).Scan(&acquiringDevice); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// No recorded acquisition chain: refuse rather than guess which device may join.
+				return errDeviceNotOnEntitlement
+			}
+			return err
+		}
+		if acquiringDevice != req.DeviceID {
+			return errDeviceNotOnEntitlement
+		}
+
 		// RECONNECT / IDEMPOTENCY. The same device returning to the same entitlement gets the session it
 		// already has rather than a second one. Without this, a retried request -- a lost response, a guest
 		// reloading the page -- would consume another device slot against its own limit.
@@ -158,6 +188,11 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+		if errors.Is(err, errDeviceNotOnEntitlement) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": "DEVICE_NOT_ON_ENTITLEMENT", "authority": "iam_v2"})
+			return
+		}
 		if errors.Is(err, errEntitlementUnusable) {
 			writeJSON(w, http.StatusForbidden, map[string]any{
 				"error": "ENTITLEMENT_UNUSABLE", "authority": "iam_v2"})
@@ -183,6 +218,9 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 }
 
 var errEntitlementUnusable = errors.New("entitlement not usable")
+
+// errDeviceNotOnEntitlement is returned when the device did not acquire the entitlement it is activating.
+var errDeviceNotOnEntitlement = errors.New("device did not acquire this entitlement")
 
 type maxDevicesError struct{ Limit, Current int }
 
