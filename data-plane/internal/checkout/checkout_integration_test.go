@@ -84,24 +84,9 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 	}
 	durPolicy := fmt.Sprintf(`{"end_mode":"GRACE_AFTER_CHECKOUT","grace_duration_seconds":%d,"policy_version":"CHECKOUT_GRACE_V1"}`, dur)
 
-	// The stay family is guarded in the DATABASE: writes require a transaction that has opened a controlled
-	// operation for 'stay'. That is a real Phase-3 invariant, not test scaffolding, so the fixture satisfies
-	// it the way production code does rather than being granted a way around it. A single pooled QueryRow
-	// runs in its own implicit transaction and cannot, which is why the seed now takes an explicit one.
-	tx, txErr := p.Begin(ctx)
-	if txErr != nil {
-		t.Fatalf("seed begin: %v", txErr)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	if _, e := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('stay')`); e != nil {
-		t.Fatalf("seed open controlled operation: %v", e)
-	}
-	err := tx.QueryRow(ctx, `WITH
-	  -- tenants.slug/name and sites.code/name are NOT NULL with no default. These tests are build-tagged
-	  -- AND DSN-gated, so nobody ran them after those columns landed and the fixture stopped being able to
-	  -- seed at all -- the same drift that had already silently disabled the commerce fixtures.
-	  t  AS (INSERT INTO public.tenants(id, slug, name) VALUES (gen_random_uuid(), 'ck-'||substr(md5(random()::text),1,12), 'checkout integration') RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id,code,name) SELECT gen_random_uuid(), id, 'ck-'||substr(md5(random()::text),1,10), 'checkout integration site' FROM t RETURNING id, tenant_id),
+	err := p.QueryRow(ctx, `WITH
+	  t  AS (INSERT INTO public.tenants(id) VALUES (gen_random_uuid()) RETURNING id),
+	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
 	  pi AS (INSERT INTO iam_v2.pms_interfaces(id,tenant_id,site_id,connector_kind,lifecycle_state)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id, 'protel-fias','ACTIVE' FROM si RETURNING id,tenant_id,site_id),
 	  rt AS (INSERT INTO iam_v2.pms_interface_runtime(tenant_id,site_id,pms_interface_id,published_resync_generation,resync_generation_seq)
@@ -133,23 +118,14 @@ func seedBase(t *testing.T, p *pgxpool.Pool, o seedOpts) fixture {
 		pkg = "$3"
 		args = append(args, f.gracePkgRev)
 	}
-	// site_checkout_grace_config is writable ONLY by the owner of publish_checkout_grace_config -- it resolves
-	// to no capability family, so no controlled operation can be opened for it. The fixture publishes through
-	// that function for the same reason production code now does: a raw INSERT is refused however the
-	// transaction is arranged. (The fixture hitting this guard is the same defect that was live in the admin
-	// repository until it was reconciled.)
 	if o.configureTypedPolicy {
-		if _, err := p.Exec(ctx,
-			`SELECT iam_v2.publish_checkout_grace_config($1,$2,`+pkg+`,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE',3600)`,
-			args...); err != nil {
+		if _, err := p.Exec(ctx, `INSERT INTO iam_v2.site_checkout_grace_config
+			(tenant_id,site_id,grace_package_revision_id,grace_duration_seconds,grace_down_kbps,grace_up_kbps,grace_data_quota_bytes,grace_device_limit,grace_device_limit_policy)
+			VALUES ($1,$2,`+pkg+`,3600,4000,1500,524288000,2,'REJECT_NEW_DEVICE')`, args...); err != nil {
 			t.Fatalf("seed grace config: %v", err)
 		}
 	} else {
-		// No typed override: grace_all_or_none requires all six typed fields or none, so they are all NULL and
-		// only the eligibility window (which is NOT NULL) is supplied.
-		if _, err := p.Exec(ctx,
-			`SELECT iam_v2.publish_checkout_grace_config($1,$2,`+pkg+`,NULL,NULL,NULL,NULL,NULL,NULL,3600)`,
-			args...); err != nil {
+		if _, err := p.Exec(ctx, `INSERT INTO iam_v2.site_checkout_grace_config (tenant_id,site_id,grace_package_revision_id) VALUES ($1,$2,`+pkg+`)`, args...); err != nil {
 			t.Fatalf("seed grace config: %v", err)
 		}
 	}
