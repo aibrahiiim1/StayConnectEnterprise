@@ -108,8 +108,18 @@ func (s *server) ensureVoucherKeyGeneration(ctx context.Context, kr iamv2.Vouche
 		return genID, genNo, clear, nil
 	}
 
-	// No usable generation yet: mint generation 1.
-	genNo = 1
+	// No ACTIVE generation: mint the next one.
+	//
+	// The number is max(generation_no)+1, not 1. Hardcoding 1 meant that once an operator superseded
+	// generation 1 there was no active generation, so this branch ran and immediately collided with the
+	// existing generation 1 -- issuance died permanently at the first rotation, while already-issued
+	// vouchers kept working. Found by actually rotating rather than by reading the code.
+	if err := s.db.QueryRow(ctx, `
+	    SELECT COALESCE(MAX(generation_no), 0) + 1
+	      FROM iam_v2.voucher_code_key_generations
+	     WHERE tenant_id=$1 AND site_id=$2`, s.tenID, s.siteID).Scan(&genNo); err != nil {
+		return "", 0, nil, err
+	}
 	clear, sealedNew, nonce, kerr := iamv2.NewVoucherHMACKey(kr, voucherDEKID, s.tenID, s.siteID, genNo)
 	if kerr != nil {
 		return "", 0, nil, kerr

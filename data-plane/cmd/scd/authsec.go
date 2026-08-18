@@ -85,7 +85,9 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 				"(run keybootstrap at deploy): %w", dekPath, err)
 		}
 		kr := iamv2.MapVoucherKeyring{voucherDEKID: dek}
-		authOpts = append(authOpts, iamv2.WithVoucherHMAC(
+		// Candidates, not a single index: after a rotation a voucher issued under the previous generation can
+		// only be found by also trying that generation's key. See newGenerationVoucherHMAC.
+		authOpts = append(authOpts, iamv2.WithVoucherHMACCandidates(
 			newGenerationVoucherHMAC(pool, kr)))
 	}
 	auth, err := iamv2.New(iamCfg, iamRepo, iamv2.NopObserver{}, authOpts...)

@@ -24,77 +24,108 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
-// generationKeyCache avoids re-opening the same sealed key on every login attempt. Keys are held in memory
-// only, never logged, and the cache is dropped on restart along with the process.
+// generationKeyCache holds the opened blind-index keys for one (tenant, site).
+//
+// KEYED BY OWNER, not global. An earlier version used a single package-level cache with no tenant or site in
+// the key: on a multi-site appliance the first site to authenticate would populate it and every other site
+// would then index submitted codes under the WRONG site's key. Every lookup would miss, so vouchers would
+// appear invalid rather than leak across sites -- a fail-closed bug, but a total outage for every site but
+// one, and invisible on a single-site appliance like this DEVELOPMENT one.
+//
+// Keys are held in memory only, never logged, and vanish with the process.
 type generationKeyCache struct {
-	mu       sync.RWMutex
+	mu sync.RWMutex
+	m  map[string]cachedGenerationKeys
+}
+
+type cachedGenerationKeys struct {
 	loadedAt time.Time
 	keys     [][]byte // clear per-generation HMAC keys, newest generation first
 }
 
-var vkCache generationKeyCache
+var vkCache = generationKeyCache{m: map[string]cachedGenerationKeys{}}
 
-// newGenerationVoucherHMAC returns the VoucherHMAC the authenticator calls. It resolves the ACTIVE
-// generation's key and returns that index; the repository looks the index up.
+func vkKey(tenantID, siteID string) string { return tenantID + "|" + siteID }
+
+// newGenerationVoucherHMAC returns the candidate-index function the authenticator calls.
 //
-// Only the newest non-superseded generation is used to compute the index for a NEW lookup, because that is
-// the generation any freshly issued code was indexed under. Older generations remain usable through their
-// own stored indexes -- the voucher row already carries the index computed at issuance, so a rotation never
-// invalidates an unredeemed voucher.
-func newGenerationVoucherHMAC(pool *pgxpool.Pool, kr iamv2.VoucherKeyring) iamv2.VoucherHMAC {
-	return func(ctx context.Context, tenantID, siteID, code string) ([]byte, error) {
+// It returns ONE INDEX PER USABLE GENERATION, newest first, including superseded ones. That is what makes a
+// rotation safe: a voucher issued under generation 1 keeps its generation-1 index forever, so after a
+// rotation to generation 2 the only way it can still be found is for the lookup to try generation 1's key
+// too. Returning just the active key -- which an earlier version did -- silently invalidates every
+// unredeemed voucher the moment a new generation is created.
+func newGenerationVoucherHMAC(pool *pgxpool.Pool, kr iamv2.VoucherKeyring) iamv2.VoucherHMACCandidates {
+	return func(ctx context.Context, tenantID, siteID, code string) ([][]byte, error) {
 		if pool == nil {
 			return nil, fmt.Errorf("voucher hmac: no database pool")
 		}
-		key, err := activeGenerationKey(ctx, pool, kr, tenantID, siteID)
+		keys, err := generationKeys(ctx, pool, kr, tenantID, siteID)
 		if err != nil {
 			return nil, err
 		}
-		return iamv2.VoucherCodeHMAC(key, tenantID, siteID, code), nil
+		out := make([][]byte, 0, len(keys))
+		for _, k := range keys {
+			out = append(out, iamv2.VoucherCodeHMAC(k, tenantID, siteID, code))
+		}
+		return out, nil
 	}
 }
 
-// activeGenerationKey opens the newest non-superseded generation's HMAC key.
-func activeGenerationKey(ctx context.Context, pool *pgxpool.Pool, kr iamv2.VoucherKeyring,
-	tenantID, siteID string) ([]byte, error) {
+// generationKeys opens every generation's HMAC key for this owner, newest generation first.
+//
+// Superseded generations are INCLUDED: supersession stops new issuance under a key, it does not invalidate
+// vouchers already indexed with it. They drop out naturally when their vouchers are redeemed or expire.
+func generationKeys(ctx context.Context, pool *pgxpool.Pool, kr iamv2.VoucherKeyring,
+	tenantID, siteID string) ([][]byte, error) {
 
+	ck := vkKey(tenantID, siteID)
 	vkCache.mu.RLock()
-	fresh := time.Since(vkCache.loadedAt) < 60*time.Second && len(vkCache.keys) > 0
-	if fresh {
-		k := vkCache.keys[0]
-		vkCache.mu.RUnlock()
-		return k, nil
-	}
+	ent, ok := vkCache.m[ck]
 	vkCache.mu.RUnlock()
+	if ok && time.Since(ent.loadedAt) < 60*time.Second && len(ent.keys) > 0 {
+		return ent.keys, nil
+	}
 
-	var genNo int
-	var keyID, nonceB64 string
-	var sealed []byte
-	// One query: generation number, the DEK id that sealed it, the sealed key and its nonce. An earlier
-	// draft read the nonce in a second round trip, which could observe a different generation than the first
-	// query had chosen if a rotation landed between them.
-	if err := pool.QueryRow(ctx, `
+	rows, err := pool.Query(ctx, `
 	    SELECT generation_no, encryption_key_id::text, hmac_key_ciphertext,
 	           COALESCE(aead_params->>'nonce_b64','')
 	      FROM iam_v2.voucher_code_key_generations
-	     WHERE tenant_id=$1 AND site_id=$2 AND superseded_at IS NULL
-	     ORDER BY generation_no DESC
-	     LIMIT 1`, tenantID, siteID).Scan(&genNo, &keyID, &sealed, &nonceB64); err != nil {
-		return nil, fmt.Errorf("voucher hmac: no usable key generation: %w", err)
-	}
-	nonce, err := decodeB64(nonceB64)
+	     WHERE tenant_id=$1 AND site_id=$2
+	     ORDER BY generation_no DESC`, tenantID, siteID)
 	if err != nil {
-		return nil, fmt.Errorf("voucher hmac: generation nonce malformed: %w", err)
+		return nil, fmt.Errorf("voucher hmac: key generations unreadable: %w", err)
 	}
-	clear, err := iamv2.OpenVoucherHMACKey(kr, keyID, tenantID, siteID, genNo, sealed, nonce)
-	if err != nil {
-		return nil, fmt.Errorf("voucher hmac: generation key unopenable: %w", err)
+	defer rows.Close()
+	var keys [][]byte
+	for rows.Next() {
+		var genNo int
+		var keyID, nonceB64 string
+		var sealed []byte
+		if err := rows.Scan(&genNo, &keyID, &sealed, &nonceB64); err != nil {
+			return nil, err
+		}
+		nonce, derr := decodeB64(nonceB64)
+		if derr != nil {
+			// One malformed generation must not blind the others: skip it and keep going, so a single bad
+			// row cannot lock out every voucher at the site.
+			continue
+		}
+		clear, oerr := iamv2.OpenVoucherHMACKey(kr, keyID, tenantID, siteID, genNo, sealed, nonce)
+		if oerr != nil {
+			continue
+		}
+		keys = append(keys, clear)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("voucher hmac: no usable key generation for this site")
 	}
 	vkCache.mu.Lock()
-	vkCache.keys = [][]byte{clear}
-	vkCache.loadedAt = time.Now()
+	vkCache.m[ck] = cachedGenerationKeys{loadedAt: time.Now(), keys: keys}
 	vkCache.mu.Unlock()
-	return clear, nil
+	return keys, nil
 }
 
 func decodeB64(s string) ([]byte, error) { return base64.StdEncoding.DecodeString(s) }

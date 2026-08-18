@@ -59,19 +59,43 @@ func (a *Authenticator) authVoucher(ctx context.Context, req Request) (Result, e
 	if req.Secret == "" {
 		return deny(MethodVoucher, "missing_code"), nil
 	}
-	if a.vhmac == nil {
+	if a.vhmac == nil && a.vhmacAll == nil {
 		return Result{}, &Error{Code: ErrConfig, Msg: "no voucher HMAC configured"}
 	}
 	now := a.now()
-	h, err := a.vhmac(ctx, req.TenantID, req.SiteID, req.Secret)
-	if err != nil {
-		return Result{}, &Error{Code: ErrConfig, Msg: "voucher hmac"}
+	// ROTATION. A voucher's stored index was computed under the key of the generation it pins, so after a
+	// rotation the active key alone cannot match a voucher issued under the previous one. Every usable
+	// generation therefore contributes a candidate index, newest first, and the first that resolves wins.
+	// With a single generation this is exactly the old single-index behaviour.
+	var candidates [][]byte
+	if a.vhmacAll != nil {
+		var err error
+		if candidates, err = a.vhmacAll(ctx, req.TenantID, req.SiteID, req.Secret); err != nil {
+			return Result{}, &Error{Code: ErrConfig, Msg: "voucher hmac"}
+		}
+	} else {
+		h, err := a.vhmac(ctx, req.TenantID, req.SiteID, req.Secret)
+		if err != nil {
+			return Result{}, &Error{Code: ErrConfig, Msg: "voucher hmac"}
+		}
+		candidates = [][]byte{h}
+	}
+	if len(candidates) == 0 {
+		return deny(MethodVoucher, "invalid_code"), nil
 	}
 	var res Result
-	err = a.repo.WithTx(ctx, func(tx Tx) error {
-		id, redeemable, err := tx.ResolveVoucherByHMAC(ctx, req.TenantID, req.SiteID, h, now)
-		if err != nil {
-			return err
+	err := a.repo.WithTx(ctx, func(tx Tx) error {
+		var id string
+		var redeemable bool
+		for _, h := range candidates {
+			var err error
+			id, redeemable, err = tx.ResolveVoucherByHMAC(ctx, req.TenantID, req.SiteID, h, now)
+			if err != nil {
+				return err
+			}
+			if id != "" {
+				break
+			}
 		}
 		if id == "" {
 			res = deny(MethodVoucher, "invalid_code")
@@ -81,8 +105,9 @@ func (a *Authenticator) authVoucher(ctx context.Context, req Request) (Result, e
 			res = deny(MethodVoucher, "not_redeemable")
 			return nil
 		}
-		res, err = a.finalize(ctx, tx, MethodVoucher, Subject{VoucherID: id}, req, now)
-		return err
+		var ferr error
+		res, ferr = a.finalize(ctx, tx, MethodVoucher, Subject{VoucherID: id}, req, now)
+		return ferr
 	})
 	if err != nil {
 		return Result{}, &Error{Code: ErrRepo, Msg: "voucher"}
