@@ -41,9 +41,24 @@ GRANT EXECUTE ON FUNCTION iam_v2.register_class_origin(uuid, uuid, uuid, uuid, t
 -- Accounting ingest: netd samples the accountable class and submits absolute counters.
 GRANT EXECUTE ON FUNCTION iam_v2.ingest_absolute_counters(uuid, uuid, uuid, uuid, text, integer, bigint, bigint, bigint, timestamptz) TO svc_netd;
 
--- Checkout-grace publication and offer recording, both reached by the same Phase-3 surface.
-GRANT EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer) TO svc_netd;
+-- Offer recording, reached by the Phase-3 enforcement surface.
 GRANT EXECUTE ON FUNCTION iam_v2.record_auth_context_offer(uuid, uuid, uuid, uuid, integer, bigint, timestamptz) TO svc_netd;
+
+-- ---- and the grace grant that was never netd's to hold --------------------
+-- This file previously granted svc_netd EXECUTE on iam_v2.publish_checkout_grace_config, under the rationale
+-- "checkout-grace publication and offer recording, both reached by the same Phase-3 surface". They are not the
+-- same surface. Publishing grace policy is a Hotel-Admin commercial action performed by edged; netd is the
+-- network-enforcement owner and has never called that function -- it only ever REFERENCED it, in the startup
+-- boundary self-check, which reads pg_proc and needs no EXECUTE at all.
+--
+-- The over-grant survived the D32 retirement because the retirement was written from the perspective of the
+-- service being fixed. edged's raw path was closed in code and in privilege, and netd -- which nobody was
+-- looking at -- was left holding EXECUTE on the very writer the design had just declared unreachable. That is
+-- the same "granted to the wrong service" mistake that hid the acctd accounting gap and the netd enforcement
+-- gap, in the opposite direction: an unused privilege rather than a missing one, and therefore silent.
+--
+-- Unconditional and idempotent: revoking a privilege that was never granted is a no-op.
+REVOKE EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer) FROM svc_netd;
 
 -- The boundary self-check inspects this before starting; entitlement transitions are driven by the
 -- enforcement lifecycle above.

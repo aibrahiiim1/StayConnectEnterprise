@@ -624,6 +624,18 @@ def _(d):
                "Product-Owner acceptance decision.")
 
 
+# INVERTED: a TRUE statement about an OPEN pull request whose number merely CONTAINS a merged one's.
+#
+# `#?6` matched the "6" inside "#16", so an accurate sentence about the open PR #16 was reported as a stale
+# claim about merged PR #6. The gate then failed on correct text, and the cheapest way to make it pass was to
+# make the text vaguer -- the exact opposite of what this file exists to enforce. Pinned in both directions:
+# the case above still requires a real "#6 is not merged" to be caught.
+@case("a true statement about open PR #16 is not read as a stale claim about merged PR #6", None)
+def _(d):
+    append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",
+               "## Delivery\n\nPR #16 remains open and unmerged pending a separate Product-Owner decision.")
+
+
 @case("a pack entry point describes the merged pull request as still open", "merged-pr-state")
 def _(d):
     append_doc(d, "exports/chatgpt/stayconnectenterprise/00-START-HERE.md",

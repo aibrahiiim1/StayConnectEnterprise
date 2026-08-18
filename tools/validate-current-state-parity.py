@@ -1673,12 +1673,20 @@ def main():
             n = re.escape(str(num))
             # Either the PR is named and then called open, or the "do not merge" instruction is still standing
             # within reach of its number. Bounded so it cannot bridge a sentence end into an unrelated clause.
+            #
+            # The number must not match INSIDE a longer one. `#?6\b` happily matches the "6" of "#16", so a
+            # true statement about PR #16 -- which IS open, and correctly says so -- was reported as a stale
+            # claim about merged PR #6. A false positive is not harmless here: the gate fails on accurate text,
+            # and the cheapest way to make it pass again is to make the text vaguer, which is the opposite of
+            # what this file exists to enforce. The lookbehind also excludes "#", so "#16" cannot be read as
+            # "#" followed by a "6".
+            nb = r"(?<![\w#])#?" + n + r"\b"
             stale = re.compile(
-                r"(?:pull\s+request|\bPR\b)[^.;\n]{0,60}?#?" + n + r"\b(?:[^.;\n]{0,80}?)"
+                r"(?:pull\s+request|\bPR\b)[^.;\n]{0,60}?" + nb + r"(?:[^.;\n]{0,80}?)"
                 r"(?:is|remains|stays|left|be)\s+(?:[^.;\n]{0,30}?)"
                 r"(?:open\s+and\s+unmerged|unmerged|not\s+merged|open,\s*unmerged)|"
-                r"#" + n + r"\b[^.;\n]{0,60}?\bDO\s+NOT\s+MERGE\b|"
-                r"\bDO\s+NOT\s+MERGE\b[^.;\n]{0,60}?#" + n + r"\b",
+                + nb + r"[^.;\n]{0,60}?\bDO\s+NOT\s+MERGE\b|"
+                r"\bDO\s+NOT\s+MERGE\b[^.;\n]{0,60}?" + nb,
                 re.I)
             # ...and the un-numbered form the Plan used, on a surface that is ABOUT that phase, where "the
             # Phase-4 pull request" can only mean this one.

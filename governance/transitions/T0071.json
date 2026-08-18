@@ -1,0 +1,41 @@
+{
+  "transition_id": "T0071",
+  "seq": 71,
+  "timestamp": "2026-08-19T05:30:00Z",
+  "record_type": "D32_PRIVILEGE_BOUNDARY_CLOSED_ACROSS_ALL_RUNTIME_ROLES_AND_EXECUTION_COMPLETE",
+  "previous_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_IAM_V2_TRIAL",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_IAM_V2_TRIAL",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D32",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Executed under the existing D32 decision (T0069, continued at T0070). No new Product-Owner decision is created or implied, and no acceptance is recorded.",
+  "previous_state_note": "The D32 retirement of the raw grace writer was written from the perspective of the service being fixed. edged's raw path was closed in code and in privilege, while svc_netd -- which nobody was looking at -- still held EXECUTE on iam_v2.publish_checkout_grace_config, granted under the mistaken rationale that grace publication and offer recording were 'the same Phase-3 surface'. netd has never called that function, so the over-grant produced no error, no log line and no failing test: the design said the raw path was unreachable and the database disagreed, silently.",
+  "new_state_note": "The boundary is closed across EVERY runtime role and PUBLIC, not only the service that was being debugged. svc_netd's grant is withdrawn, and the canonical Gate-P bootstrap now ends in a fail-closed assertion that enumerates login roles from pg_roles rather than from a hand-maintained list, so a runtime role added later is covered on the day it is created. The assertion has two halves: no runtime role or PUBLIC may EXECUTE the raw writer or perform direct INSERT/UPDATE/DELETE on site_checkout_grace_config, AND svc_edged must still be able to EXECUTE the audited boundary -- because an everything-revoked database would satisfy the first half perfectly while being unable to publish grace at all. The authorized execution of the trial is COMPLETE and awaits Product-Owner REVIEW, which is not acceptance.",
+  "phase_affected_note": "post-roadmap (D31/T0068 DEVELOPMENT trial, continuing under D32/T0069 and T0070)",
+  "evidence": [
+    "Effective-privilege table over every login non-superuser role on the appliance: raw EXECUTE false for svc_scd, svc_edged, svc_netd, svc_acctd and PUBLIC; direct INSERT/UPDATE/DELETE false for all; audited-boundary EXECUTE true for svc_edged only.",
+    "Runtime probe as each real role with literal arguments (no table read to mask the result): all four refused with 'permission denied for function publish_checkout_grace_config'; only svc_edged enters the audited boundary and is then refused by the function's own actor validation.",
+    "The Gate-P assertion proven non-vacuous against five deliberately violating states: a NEW runtime role holding the raw writer, that role holding direct table DML, PUBLIC holding the audited boundary, and the false-secure state in which every raw path is closed but svc_edged cannot publish either. Each raised the specific GATE-P BLOCKER naming the offender; re-applying the canonical bootstrap restored the passing state.",
+    "The canonical path remains functional after the privilege change: PUT /grace published config_version 3 to 4 and iam_v2.grace_package_mismatch_reason returns NULL (ACCEPTED) for the result."
+  ],
+  "boundaries_observed": [
+    "Production untouched; PR #16 unmerged.",
+    "No Product-Owner acceptance is recorded or implied by this transition; execution-complete describes the work, not a judgement of it.",
+    "Emergency Grace remains the separate fail-safe; its reserved codes are refused by the operator publisher.",
+    "No PMS, stay or checkout event is fabricated. Checkout-to-grace supersession remains ENVIRONMENT-BLOCKED on the appliance and proven only at integration level.",
+    "No byte-accounting or portal ARP evidence is fabricated.",
+    "The DEVELOPMENT admin credential remains outside Git, the repository, docs and logs."
+  ],
+  "next": "One Product-Owner review of the DEVELOPMENT trial. No cutover, enablement, Production contact or PR #16 merge is authorized by this record."
+}

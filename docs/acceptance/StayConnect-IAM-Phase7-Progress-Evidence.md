@@ -188,6 +188,58 @@ published. Journal-derived restart counts for this boot are 0 for every service.
 event. It remains proven at integration level against a real database and **ENVIRONMENT-BLOCKED** on the
 appliance. No byte-accounting or ARP/device-presence evidence is claimed.
 
+### The closure was one service wide, not the system
+
+The D32 retirement closed edged's raw path in code and in privilege. It did not close anyone else's. `svc_netd`
+still held `EXECUTE` on `iam_v2.publish_checkout_grace_config`, granted under the rationale that grace
+publication and offer recording were "both reached by the same Phase-3 surface" — they are not; publishing
+grace policy is a Hotel-Admin commercial action performed by edged, and netd has never called that function.
+Because netd never called it, the over-grant produced no error, no log line and no failing test: the design
+said the raw path was unreachable and the database disagreed, silently.
+
+Effective privileges now, over **every** login non-superuser role on the appliance:
+
+| Role | raw writer EXECUTE | audited boundary EXECUTE | direct INSERT/UPDATE/DELETE |
+|---|---|---|---|
+| `svc_scd` | false | false | false |
+| `svc_edged` | false | **true** | false |
+| `svc_netd` | false | false | false |
+| `svc_acctd` | false | false | false |
+| `phase2_runner`, probe roles | false | false | false |
+| `PUBLIC` | false | false | false |
+
+Probed at runtime as each real role, with literal arguments so no table read could mask the result: all four
+are refused with `permission denied for function publish_checkout_grace_config`. Only `svc_edged` enters the
+audited boundary, and is then refused by the function's **own** actor validation — privilege and domain
+validation are visibly separate layers.
+
+**The Gate-P assertion is not vacuous.** The canonical bootstrap now ends in a fail-closed check that
+enumerates roles from `pg_roles` rather than a hand-maintained list, so a runtime role added later is covered
+the day it is created. It was proven against five deliberately violating states:
+
+| Violation | Result |
+|---|---|
+| a NEW runtime role holds the raw writer | `GATE-P BLOCKER (D32): ... d32_probe:EXECUTE-on-raw-writer` |
+| that role holds direct table DML instead | `... d32_probe:direct-DML-on-grace-config` |
+| `PUBLIC` holds the audited boundary | `... PUBLIC:EXECUTE-on-audited-boundary` |
+| every raw path closed **and** `svc_edged` cannot publish either | `... svc_edged cannot EXECUTE the audited boundary either, so grace policy cannot be published at all` |
+| clean state, and again after re-applying the bootstrap | passes |
+
+The fourth case is the one worth keeping: an everything-revoked database satisfies "no raw path is reachable"
+perfectly while being unable to publish grace at all. Asserting only the first half would make a totally broken
+system look maximally secure.
+
+After the privilege change the canonical path still works end to end: `PUT /grace` published `config_version`
+3 → 4 and `iam_v2.grace_package_mismatch_reason` returns NULL (**ACCEPTED**) for the result.
+
+### A governance validator that refused a true sentence
+
+Recording the trial state surfaced a false positive in the parity gate. `#?6` matches the "6" **inside**
+"#16", so an accurate statement about the open PR #16 was reported as a stale claim about merged PR #6. That is
+not harmless: the gate fails on correct text, and the cheapest way to make it pass again is to make the text
+vaguer — the opposite of what the gate exists to enforce. The number boundary is fixed, a real "#6 is not
+merged" is still caught, and an inverted case now pins both directions (72 negative cases, 0 failures).
+
 ---
 
 ## Boundaries observed

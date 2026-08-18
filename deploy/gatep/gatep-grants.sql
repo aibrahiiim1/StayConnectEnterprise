@@ -290,3 +290,81 @@ BEGIN
     EXECUTE 'GRANT SELECT ON public.operators TO iam_v2_owner';
   END IF;
 END $$;
+
+-- ===========================================================================================================
+-- D32 CLOSING ASSERTION -- no runtime role, and not PUBLIC, may reach grace policy any way but the audited one.
+--
+-- WHY AN ASSERTION AND NOT JUST THE REVOKES ABOVE
+-- ----------------------------------------------
+-- The revokes are each written where the matching grant was, which is correct for readability and useless as a
+-- guarantee: they only close the doors somebody remembered. The raw writer stayed reachable by svc_netd through
+-- the entire D32 retirement precisely because that retirement was written from the perspective of the service
+-- being fixed -- edged's raw path was closed in code AND privilege while netd, which nobody was looking at,
+-- kept EXECUTE on the very function the design had just declared unreachable.
+--
+-- An unused privilege is silent. Nothing fails, no log line appears, and the next person to read the design
+-- sees "the raw path is closed" while the database says otherwise. So the property is asserted here directly
+-- against the catalog, over EVERY runtime role rather than a list of the ones we thought of, and the bootstrap
+-- REFUSES to complete if it does not hold.
+--
+-- The property has two halves, and both matter:
+--   1. no runtime role and no PUBLIC may EXECUTE the raw writer, or INSERT/UPDATE/DELETE the config table;
+--   2. the canonical audited boundary MUST still be executable by svc_edged -- an "everything revoked" state
+--      would satisfy half 1 perfectly and leave the product unable to save grace at all.
+-- Asserting only the first half would make a totally broken system look maximally secure.
+DO $$
+DECLARE
+  r record;
+  raw_fn text := 'iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,integer,integer,integer,bigint,integer,text,integer)';
+  pol_fn text := 'iam_v2.publish_checkout_grace_policy(uuid,uuid,uuid,integer,integer,integer,bigint,integer,text,integer,integer,uuid,text)';
+  offenders text := '';
+BEGIN
+  IF to_regprocedure(pol_fn) IS NULL THEN
+    -- Nothing to assert on a database that predates the boundary; a public-schema-only or pre-Phase-3
+    -- database must not fail the whole bootstrap.
+    RETURN;
+  END IF;
+
+  -- Half 1, over every non-superuser login role that is not an owner: the set is taken from pg_roles rather
+  -- than from a hand-maintained list, so a runtime role added later is covered on the day it is created.
+  FOR r IN
+    SELECT rolname FROM pg_roles
+     WHERE rolcanlogin AND NOT rolsuper
+       AND rolname NOT IN ('iam_v2_owner', 'stayconnect')
+  LOOP
+    IF to_regprocedure(raw_fn) IS NOT NULL
+       AND has_function_privilege(r.rolname, raw_fn, 'EXECUTE') THEN
+      offenders := offenders || format(' %s:EXECUTE-on-raw-writer', r.rolname);
+    END IF;
+    IF has_table_privilege(r.rolname, 'iam_v2.site_checkout_grace_config', 'INSERT')
+       OR has_table_privilege(r.rolname, 'iam_v2.site_checkout_grace_config', 'UPDATE')
+       OR has_table_privilege(r.rolname, 'iam_v2.site_checkout_grace_config', 'DELETE') THEN
+      offenders := offenders || format(' %s:direct-DML-on-grace-config', r.rolname);
+    END IF;
+  END LOOP;
+
+  IF to_regprocedure(raw_fn) IS NOT NULL
+     AND has_function_privilege('public', raw_fn, 'EXECUTE') THEN
+    offenders := offenders || ' PUBLIC:EXECUTE-on-raw-writer';
+  END IF;
+  IF has_function_privilege('public', pol_fn, 'EXECUTE') THEN
+    offenders := offenders || ' PUBLIC:EXECUTE-on-audited-boundary';
+  END IF;
+  IF has_table_privilege('public', 'iam_v2.site_checkout_grace_config', 'INSERT')
+     OR has_table_privilege('public', 'iam_v2.site_checkout_grace_config', 'UPDATE')
+     OR has_table_privilege('public', 'iam_v2.site_checkout_grace_config', 'DELETE') THEN
+    offenders := offenders || ' PUBLIC:direct-DML-on-grace-config';
+  END IF;
+
+  IF offenders <> '' THEN
+    RAISE EXCEPTION 'GATE-P BLOCKER (D32): a raw grace mutation path is still reachable:%', offenders;
+  END IF;
+
+  -- Half 2: the audited path must still work for the service that serves the Hotel-Admin surface.
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged')
+     AND NOT has_function_privilege('svc_edged', pol_fn, 'EXECUTE') THEN
+    RAISE EXCEPTION
+      'GATE-P BLOCKER (D32): every raw grace path is closed but svc_edged cannot EXECUTE the audited '
+      'boundary either, so grace policy cannot be published at all';
+  END IF;
+END $$;
