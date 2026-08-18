@@ -1,4 +1,0 @@
-commit 2a5e4a7c4d90ab72af4094479d1143022470f234
-Date:   Tue Aug 18 22:44:19 2026 +0300
-
-    Verify the audited grace boundary itself at startup
