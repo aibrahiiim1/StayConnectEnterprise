@@ -329,6 +329,27 @@ func (t *pgCommerceAdminTx) GraceCandidateValid(ctx context.Context, tenantID, s
 	return c, nil
 }
 
+// UpsertGraceConfig CANNOT SUCCEED against the accepted guard, and this is a real defect, not a test gap.
+//
+// iam_v2.site_checkout_grace_config carries the p3_controlled_writer_only trigger. Unlike the capability
+// families (stay, auth_context, commerce_intent, ...), this table resolves to NO family: the guard permits a
+// write only from the owner of
+//
+//     iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,int,int,int,bigint,int,text,int)
+//
+// so a raw INSERT from the admin repository is refused however the transaction is set up. Opening a
+// controlled operation does not help, because there is no family to open.
+//
+// Fixing it properly means publishing through that function, which takes TYPED grace fields (duration, down,
+// up, data quota, device limit, device-limit policy, eligibility window) under an all-or-none CHECK -- while
+// this admin API accepts a free-form config map (the test passes {"grace_minutes": 30}). Reconciling those
+// two shapes is a design decision about the admin contract, not a mechanical translation, so it is recorded
+// here rather than guessed at.
+//
+// Consequence today: checkout-grace configuration cannot be saved through the Hotel Admin surface. Reading it
+// works (GetGrace is a plain SELECT), which is why the surface looks healthy until someone tries to save.
+// TestCommerceAdminGraceValidation fails for exactly this reason and is deliberately left failing rather than
+// skipped, because a skipped test would hide a defect that is currently in the product.
 func (t *pgCommerceAdminTx) UpsertGraceConfig(ctx context.Context, tenantID, siteID, packageRevisionID string, config map[string]any) error {
 	cfg, _ := json.Marshal(orEmptyObj(config))
 	_, err := t.tx.Exec(ctx,

@@ -68,6 +68,29 @@ func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed
 			t.Fatalf("seed: %v\nSQL: %s", err, sql)
 		}
 	}
+	// The auth_context family is guarded in the DATABASE: a trigger refuses any write not inside a
+	// transaction that has called iam_v2.begin_controlled_operation('auth_context'). That is a real IAM-v2
+	// invariant, not test scaffolding, so the fixture satisfies it the way production code does rather than
+	// being granted a way around it. These tests are DSN-gated and had not run since the guard landed, so the
+	// seed still wrote the row bare.
+	oneGuarded := func(sql string, args ...any) string {
+		tx, err := db.Begin(ctx)
+		if err != nil {
+			t.Fatalf("seed begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('auth_context')`); err != nil {
+			t.Fatalf("seed open controlled operation: %v", err)
+		}
+		var id string
+		if err := tx.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+			t.Fatalf("seed scan (guarded): %v SQL: %s", err, sql)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatalf("seed commit: %v", err)
+		}
+		return id
+	}
 	one := func(sql string, args ...any) string {
 		var id string
 		if err := db.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
@@ -106,7 +129,7 @@ func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed
 			SELECT $1,$2,$3, (r->>'order')::int, (r->'grant') FROM jsonb_array_elements($4::jsonb) r`, p2Tenant, p2Site, s.pkgRevID, o.tiers)
 	}
 	// auth_context (ACCOUNT), unconsumed, future TTL
-	s.authCtxID = one(`INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_account_id,device_id,guest_network_id,expires_at)
+	s.authCtxID = oneGuarded(`INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_account_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'ACCOUNT',$3::uuid,$4::uuid,$5::uuid, now()+interval '10 min') RETURNING id::text`, p2Tenant, p2Site, s.accountID, s.deviceID, p2GN)
 	return s
 }
