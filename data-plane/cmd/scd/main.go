@@ -818,6 +818,9 @@ func main() {
 	// Voucher issuance lives here because the DEK does: scd is root and unix-socket only, edged is the
 	// unprivileged HTTP service. edged proxies to this route.
 	r.Post("/v1/vouchers/issue", s.issueVouchersIAMv2)
+	// Entitlement -> session. Authentication and commerce both land in iam_v2; this is what turns the
+	// resulting entitlement into something the enforcement plane can act on.
+	r.Post("/v1/sessions/activate", s.activateIAMv2Session)
 	r.Post("/v1/sessions/authorize", s.authorize)
 	r.Post("/v1/sessions/authorize-otp", s.authorizeOTP)
 	r.Post("/v1/sessions/authorize-credentials", s.authorizeGuestAccount)
