@@ -626,7 +626,7 @@ def _(d):
 
 # INVERTED: a TRUE statement about an OPEN pull request whose number merely CONTAINS a merged one's.
 #
-# `#?6` matched the "6" inside "#16", so an accurate sentence about the open PR #16 was reported as a stale
+# a bare number match matched the "6" inside "#16", so an accurate sentence about the open PR #16 was reported as a stale
 # claim about merged PR #6. The gate then failed on correct text, and the cheapest way to make it pass was to
 # make the text vaguer -- the exact opposite of what this file exists to enforce. Pinned in both directions:
 # the case above still requires a real "#6 is not merged" to be caught.
