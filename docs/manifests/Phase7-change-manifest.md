@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `fef8af9989a2a9695d5a728912effce09ab582bb`
-- **HEAD commit:** `336de37`
-- **Provenance (generation HEAD = inventory_head):** `336de3723002e26c5980b829420c1cb677ff5d51`  �  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `4c5da12`
+- **Provenance (generation HEAD = inventory_head):** `4c5da12aad9f1131c2cd2b17bc792ef5d7812416`  �  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `post-roadmap/dev-iamv2-trial`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 89
@@ -65,38 +65,38 @@
 | `deploy/systemd/stayconnect-netd.service` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Fix the netd cold-boot DB race and make startup/release gates self-proving |
 | `deploy/systemd/stayconnect-pmsd.service` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Fix the netd cold-boot DB race and make startup/release gates self-proving |
 | `deploy/systemd/stayconnect-scd.service` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Grant acctd the controlled-operation opener; gate scd and acctd on the site DB |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Point current-state authority at D32 and fix two T0069 field shapes |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Point current-state authority at D32 and fix two T0069 field shapes |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Point current-state authority at D32 and fix two T0069 field shapes |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Point current-state authority at D32 and fix two T0069 field shapes |
+| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 336de37: record the appliance-vs-migrations schema divergence |
 | `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_336de37.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 336de37: record the appliance-vs-migrations schema divergence |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 336de37: record the appliance-vs-migrations schema divergence |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 336de37: record the appliance-vs-migrations schema divergence |
+| `exports/chatgpt/phase-evidence/GIT_STAT_4c5da12.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_d0e3904.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 336de37: record the appliance-vs-migrations schema divergence |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 336de37: record the appliance-vs-migrations schema divergence |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 439e8ce: heads, packs, manifest, capability ladder |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 336de37: record the appliance-vs-migrations schema divergence |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 336de37: record the appliance-vs-migrations schema divergence |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 336de37: record the appliance-vs-migrations schema divergence |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Point current-state authority at D32 and fix two T0069 field shapes |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 336de37: record the appliance-vs-migrations schema divergence |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Point current-state authority at D32 and fix two T0069 field shapes |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | D32: system-provisioned hidden per-site CHECKOUT_GRACE, Hotel Admin policy only |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at 85e7456: D32 governance, packs and complete manifest |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Point current-state authority at D32 and fix two T0069 field shapes |
 | `governance/transitions/T0066.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0067.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0068.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Transition receipts: stamp each before the commit that introduced it |
-| `governance/transitions/T0069.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Delivery at 85e7456: D32 governance, packs and complete manifest |
+| `governance/transitions/T0069.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Point current-state authority at D32 and fix two T0069 field shapes |
 | `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Fix the Phase-2 commerce 500, return real admin validation reasons, unskip the commerce tests |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Derive M48's manifest anchor instead of pinning it |
 | `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Fix the Phase-2 commerce 500, return real admin validation reasons, unskip the commerce tests |
@@ -118,12 +118,12 @@
  data-plane/cmd/scd/authsec.go                      |  51 ++-
  data-plane/cmd/scd/commands.go                     |  14 +-
  data-plane/cmd/scd/credentials_handlers.go         |  18 +
- data-plane/cmd/scd/iamv2_guest_authority.go        | 177 +++++++++
+ data-plane/cmd/scd/iamv2_guest_authority.go        | 177 ++++++++
  data-plane/cmd/scd/iamv2_guest_authority_test.go   | 137 +++++++
  data-plane/cmd/scd/iamv2_session_activate.go       | 338 ++++++++++++++++
  data-plane/cmd/scd/main.go                         |  25 ++
  data-plane/cmd/scd/updates.go                      |  17 +-
- data-plane/cmd/scd/voucher_issue_iamv2.go          | 244 ++++++++++++
+ data-plane/cmd/scd/voucher_issue_iamv2.go          | 244 +++++++++++
  data-plane/cmd/scd/voucher_keys.go                 | 147 +++++++
  data-plane/internal/iamv2/adapters.go              |  45 ++-
  data-plane/internal/iamv2/commerce_admin.go        |  27 +-
@@ -161,12 +161,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   8 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   8 +-
  docs/context/StayConnect-IAM-Handoff.md            |   8 +-
- docs/manifests/Phase7-change-manifest.md           | 437 +++++++++++----------
+ docs/manifests/Phase7-change-manifest.md           | 444 ++++++++++++---------
  .../reports/StayConnect-IAM-Phase7-Final-Report.md | 127 +++---
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 314253 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 123612 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42285 bytes
- .../chatgpt/phase-evidence/GIT_STAT_336de37.txt    |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 314246 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 123604 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42281 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_4c5da12.txt    |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_d0e3904.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -177,7 +177,7 @@
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |  12 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   8 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   8 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  66 ++--
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  66 +--
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   8 +-
  .../StayConnect-IAM-Handoff.md                     |   8 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   8 +-
@@ -188,12 +188,12 @@
  governance/transitions/T0066.json                  |   2 +-
  governance/transitions/T0067.json                  |   2 +-
  governance/transitions/T0068.json                  |  62 +++
- governance/transitions/T0069.json                  |  33 ++
+ governance/transitions/T0069.json                  |  34 ++
  tools/tests/current_state_parity/run_negative.py   |  90 +++++
  .../tests/project_state_validator/run_mutations.py |  36 +-
  tools/validate-current-state-parity.py             | 228 +++++++++++
  tools/validate-project-state.sh                    |   2 +-
- 89 files changed, 5430 insertions(+), 467 deletions(-)
+ 89 files changed, 5438 insertions(+), 467 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -202,19 +202,26 @@ M  docs/manifests/Phase7-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_336de37.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_85e7456.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_336de37.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_4c5da12.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 4c5da12 Point current-state authority at D32 and fix two T0069 field shapes
+HISTORICAL: ecc15b3 Delivery at 336de37: record the appliance-vs-migrations schema divergence
 HISTORICAL: 336de37 Revert the checkout integration fixture: I diagnosed it against the wrong schema
 HISTORICAL: c792968 Delivery at 85e7456: D32 governance, packs and complete manifest
 HISTORICAL: 85e7456 D32: system-provisioned hidden per-site CHECKOUT_GRACE, Hotel Admin policy only

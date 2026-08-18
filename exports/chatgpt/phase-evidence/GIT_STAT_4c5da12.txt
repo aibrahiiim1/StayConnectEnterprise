@@ -1,0 +1,4 @@
+commit 4c5da12aad9f1131c2cd2b17bc792ef5d7812416
+Date:   Tue Aug 18 17:24:33 2026 +0300
+
+    Point current-state authority at D32 and fix two T0069 field shapes
