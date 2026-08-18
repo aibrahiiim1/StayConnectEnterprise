@@ -42,6 +42,21 @@ func writeList[T any](w http.ResponseWriter, rows []T) {
 func decodeJSON(r *http.Request, dst any) error {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
+	// UseNumber, or every free-form map[string]any body silently loses integers.
+	//
+	// Grant tiers, duration policies and eligibility rules are carried as
+	// map[string]any. Without this, encoding/json turns their numbers into
+	// float64, and the domain validators accept only json.Number/int/int64 --
+	// deliberately, because they reject anything with a "." or an exponent so a
+	// bandwidth cap can never arrive as 2047.9999999. The two halves disagreed,
+	// so EVERY numeric override sent over HTTP was rejected as
+	// "invalid_grant_tier": publishing a package with a bandwidth or quota
+	// override was impossible through the API.
+	//
+	// It stayed hidden because the unit tests build json.Number values in Go and
+	// call the admin layer directly, never crossing this decoder -- so the tests
+	// exercised a type the HTTP surface could not actually produce.
+	dec.UseNumber()
 	return dec.Decode(dst)
 }
 
