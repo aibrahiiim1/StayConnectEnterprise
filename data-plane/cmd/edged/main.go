@@ -222,8 +222,10 @@ func main() {
 		slog.Error("phase2 commerce config", "err", err)
 		os.Exit(2)
 	}
-	// Wired for the same reason as scd's: the clean-replacement decision makes IAM-v2 the only authority, so
-	// the accepted admin repository is constructed when the master flag is on and left nil while it is off.
+	// Wired for the same reason as scd's: the AUTHORIZED DEVELOPMENT trial (D31/T0068) runs IAM-v2 for real,
+	// so the accepted admin repository is constructed when the master flag is on and left nil while it is off.
+	// This is NOT a Production transition decision -- D31 withdrew the "clean replacement / legacy disposable"
+	// wording as policy that was never approved, and the Production strategy remains OPEN.
 	var commRepo iamv2.CommerceAdminRepository // nil while dark
 	if commCfg.MasterEnabled {
 		if pool == nil {

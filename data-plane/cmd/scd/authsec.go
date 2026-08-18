@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net"
@@ -63,34 +61,32 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 		}
 		iamRepo = iamv2.NewPgRepository(pool)
 	}
-	// THE VOUCHER BLIND-INDEX HMAC.
+	// THE VOUCHER BLIND-INDEX HMAC, RESOLVED FROM THE KEY GENERATION.
 	//
 	// iam_v2.vouchers stores no plaintext code: it holds code_hmac, a blind index the authenticator
-	// recomputes from the submitted code to find the row. Without this option the Authenticator returns
-	// "no voucher HMAC configured" for every VOUCHER attempt -- so the method was enabled by flag and
-	// structurally incapable of succeeding, the second half of the same wiring defect.
+	// recomputes from the submitted code to find the row. Without this option every VOUCHER attempt fails
+	// with "no voucher HMAC configured" -- enabled by flag and structurally incapable of succeeding.
 	//
-	// The key is appliance-local and LOAD-ONLY at runtime, exactly like the OTP ring and the durable
-	// throttle key above: keybootstrap creates it at deploy, scd never mints one. An absent key with the
-	// method enabled is a fail-closed configuration error, not a reason to fall back to legacy.
+	// The key is NOT read straight out of a file. The accepted design (FINAL contract key hierarchy) is
+	// appliance secret store -> DEK -> per-generation voucher code key, and the schema enforces it: each
+	// voucher pins code_key_generation_id, and the generation row carries hmac_key_ciphertext sealed under
+	// encryption_key_id. So the index key is resolved PER GENERATION and opened with the DEK, which is what
+	// makes rotation and supersession possible at all -- a raw file key could never be superseded, and no
+	// voucher could name the key that indexed it.
+	//
+	// An earlier iteration did read the file directly as the HMAC key. That collapsed the DEK and the
+	// blind-index key onto one physical secret and bypassed the generation lifecycle; it is replaced here.
 	var authOpts []iamv2.Option
 	if iamCfg.Enabled(iamv2.MethodVoucher) {
-		vkPath := filepath.Join(c.SecretsDir, "voucher_hmac.key")
-		vkey, err := localkeys.LoadExistingKey(vkPath)
+		dekPath := filepath.Join(c.SecretsDir, voucherDEKFile)
+		dek, err := localkeys.LoadExistingKey(dekPath)
 		if err != nil {
-			return fmt.Errorf("iamv2 VOUCHER is enabled but its blind-index key is unavailable at %s "+
-				"(run keybootstrap at deploy): %w", vkPath, err)
+			return fmt.Errorf("iamv2 VOUCHER is enabled but its code-encryption key is unavailable at %s "+
+				"(run keybootstrap at deploy): %w", dekPath, err)
 		}
-		authOpts = append(authOpts, iamv2.WithVoucherHMAC(func(_ context.Context, tenantID, siteID, code string) ([]byte, error) {
-			// Domain-separated per (tenant, site) so the same code in two sites never shares an index.
-			m := hmac.New(sha256.New, vkey)
-			m.Write([]byte(tenantID))
-			m.Write([]byte{0})
-			m.Write([]byte(siteID))
-			m.Write([]byte{0})
-			m.Write([]byte(code))
-			return m.Sum(nil), nil
-		}))
+		kr := iamv2.MapVoucherKeyring{voucherDEKID: dek}
+		authOpts = append(authOpts, iamv2.WithVoucherHMAC(
+			newGenerationVoucherHMAC(pool, kr)))
 	}
 	auth, err := iamv2.New(iamCfg, iamRepo, iamv2.NopObserver{}, authOpts...)
 	if err != nil {

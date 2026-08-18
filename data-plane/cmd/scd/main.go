@@ -815,6 +815,9 @@ func main() {
 	r.Use(middleware.Timeout(10 * time.Second))
 	r.Get("/v1/health", func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Method("GET", "/metrics", s.met.Handler())
+	// Voucher issuance lives here because the DEK does: scd is root and unix-socket only, edged is the
+	// unprivileged HTTP service. edged proxies to this route.
+	r.Post("/v1/vouchers/issue", s.issueVouchersIAMv2)
 	r.Post("/v1/sessions/authorize", s.authorize)
 	r.Post("/v1/sessions/authorize-otp", s.authorizeOTP)
 	r.Post("/v1/sessions/authorize-credentials", s.authorizeGuestAccount)

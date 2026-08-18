@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/codegen"
 	"github.com/stayconnect/enterprise/data-plane/internal/crockford"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 // generateUniqueCodes produces n codes per opts, then guarantees they do not
@@ -427,7 +430,21 @@ type edgeVoucher struct {
 func (s *server) voucherBatchesRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listVoucherBatches)
-	r.Post("/", s.createVoucherBatch)
+	// Issuance follows the configured VOUCHER authority, exactly as guest accounts follow ACCOUNT. A voucher
+	// issued into the legacy table can never be redeemed while IAM-v2 owns voucher authentication, and vice
+	// versa -- issuing into the domain that will NOT be asked to authenticate is the same class of defect as
+	// the account split, so the two must move together.
+	r.Post("/", func(w http.ResponseWriter, rq *http.Request) {
+		if s.iamv2Cfg.Enabled(iamv2.MethodVoucher) {
+			// Proxied to scd, which owns the voucher DEK. edged never sees the key or a plaintext code
+			// except as the response it relays back to the operator once.
+			var body any
+			_ = json.NewDecoder(rq.Body).Decode(&body)
+			s.scd.proxy(w, rq, http.MethodPost, "/v1/vouchers/issue", body)
+			return
+		}
+		s.createVoucherBatch(w, rq)
+	})
 	r.Get("/{id}", s.getVoucherBatch)
 	r.Get("/{id}/codes", s.listBatchCodes)
 	r.Get("/{id}/codes.csv", s.exportBatchCSV)
