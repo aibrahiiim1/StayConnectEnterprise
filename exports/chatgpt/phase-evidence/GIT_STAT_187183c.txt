@@ -1,0 +1,4 @@
+commit 187183c85391372cd1e35e8efd4c88050c327fe1
+Date:   Tue Aug 18 12:23:14 2026 +0300
+
+    Sync capability ladder and render generated blocks
