@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `fef8af9989a2a9695d5a728912effce09ab582bb`
-- **HEAD commit:** `187183c`
-- **Provenance (generation HEAD = inventory_head):** `198990492d5d663d25360dceea92ff5ad9a33022`  �  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `439e8ce`
+- **Provenance (generation HEAD = inventory_head):** `439e8ce8338a6801c1a7321afd556833b0569b3c`  �  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `post-roadmap/dev-iamv2-trial`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 85
@@ -34,9 +34,9 @@
 | `data-plane/cmd/scd/voucher_issue_iamv2.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Invalidate the voucher key cache when a generation is minted |
 | `data-plane/cmd/scd/voucher_keys.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Invalidate the voucher key cache when a generation is minted |
 | `data-plane/internal/iamv2/adapters.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Fix voucher rotation: try every generation's index, scope the key cache by owner |
-| `data-plane/internal/iamv2/commerce_admin.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Fix the Phase-2 commerce 500, return real admin validation reasons, unskip the commerce tests |
-| `data-plane/internal/iamv2/commerce_admin_repo_pg.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Reconcile checkout grace to the accepted typed publish contract (DSN suite 6/6) |
-| `data-plane/internal/iamv2/commerce_admin_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Fix the Phase-2 commerce 500, return real admin validation reasons, unskip the commerce tests |
+| `data-plane/internal/iamv2/commerce_admin.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Close the grace round trip, and enforce the contract's is_system provenance |
+| `data-plane/internal/iamv2/commerce_admin_repo_pg.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Close the grace round trip, and enforce the contract's is_system provenance |
+| `data-plane/internal/iamv2/commerce_admin_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Close the grace round trip, and enforce the contract's is_system provenance |
 | `data-plane/internal/iamv2/commerce_integration_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Record the checkout-grace defect and the portal/admission proofs |
 | `data-plane/internal/iamv2/commerce_repo_pg.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Enforce single-use voucher redemption |
 | `data-plane/internal/iamv2/iamv2.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Fix voucher rotation: try every generation's index, scope the key cache by owner |
@@ -67,7 +67,7 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Sync capability ladder and render generated blocks |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Sync capability ladder and render generated blocks |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Sync capability ladder and render generated blocks |
-| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: regenerate the manifest after the pack rebuild |
 | `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
@@ -122,9 +122,9 @@
  data-plane/cmd/scd/voucher_issue_iamv2.go          | 244 ++++++++++++
  data-plane/cmd/scd/voucher_keys.go                 | 147 +++++++
  data-plane/internal/iamv2/adapters.go              |  45 ++-
- data-plane/internal/iamv2/commerce_admin.go        |  14 +
- .../internal/iamv2/commerce_admin_repo_pg.go       | 150 +++++++-
- data-plane/internal/iamv2/commerce_admin_test.go   |  16 +-
+ data-plane/internal/iamv2/commerce_admin.go        |  27 +-
+ .../internal/iamv2/commerce_admin_repo_pg.go       | 199 +++++++++-
+ data-plane/internal/iamv2/commerce_admin_test.go   | 114 +++++-
  .../internal/iamv2/commerce_integration_test.go    |  27 +-
  data-plane/internal/iamv2/commerce_repo_pg.go      |  26 ++
  data-plane/internal/iamv2/iamv2.go                 |  31 +-
@@ -185,16 +185,30 @@
  tools/tests/current_state_parity/run_negative.py   |  90 +++++
  tools/validate-current-state-parity.py             | 228 +++++++++++
  tools/validate-project-state.sh                    |   2 +-
- 85 files changed, 4672 insertions(+), 470 deletions(-)
+ 85 files changed, 4826 insertions(+), 476 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
-M  docs/manifests/Phase7-change-manifest.md
+ M exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
+ M exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
+ M exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
+ D exports/chatgpt/phase-evidence/GIT_STAT_187183c.txt
+ M exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
+ M exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+ M exports/chatgpt/phase-evidence/tools/validate-project-state.sh
+ M exports/chatgpt/phase1b-planning/MANIFEST.md
+ M exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
+ M exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+ M exports/chatgpt/stayconnectenterprise/MANIFEST.md
+ M governance/project-state.json
+?? exports/chatgpt/phase-evidence/GIT_STAT_439e8ce.txt
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 439e8ce Close the grace round trip, and enforce the contract's is_system provenance
+HISTORICAL: 6f99dda Delivery: regenerate the manifest after the pack rebuild
 HISTORICAL: 1989904 Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs
 HISTORICAL: 187183c Sync capability ladder and render generated blocks
 HISTORICAL: dbc2e78 Validate the whole trusted identity on activation, and make success mean enforced

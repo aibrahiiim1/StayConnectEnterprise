@@ -477,8 +477,8 @@
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
     "phase4_authoritative_ci_artifact_id": 9177140558,
     "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
-    "acceptance_candidate_head": "187183c85391372cd1e35e8efd4c88050c327fe1",
-    "inventory_head": "187183c85391372cd1e35e8efd4c88050c327fe1",
+    "acceptance_candidate_head": "439e8ce8338a6801c1a7321afd556833b0569b3c",
+    "inventory_head": "439e8ce8338a6801c1a7321afd556833b0569b3c",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -712,9 +712,9 @@
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "187183c85391372cd1e35e8efd4c88050c327fe1",
+  "acceptance_candidate_head": "439e8ce8338a6801c1a7321afd556833b0569b3c",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "187183c85391372cd1e35e8efd4c88050c327fe1",
+  "inventory_head": "439e8ce8338a6801c1a7321afd556833b0569b3c",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
@@ -890,12 +890,17 @@
       "CHECKOUT-GRACE reconciled to the accepted typed contract: writes now go through publish_checkout_grace_config with typed fields as parameters and the free-form remainder in config, the split the grace_config_no_dup_policy_keys constraint mandates. DSN-gated commerce suite is 6/6 against a real database (was 3 when the fixture first ran at all).",
       "ACTIVATION VALIDATES THE WHOLE TRUSTED IDENTITY: wrong MAC on the right device is refused DEVICE_IDENTITY_MISMATCH; an IP resolving to no guest network is refused NO_GUEST_NETWORK; a device belonging to another tenant/site is refused; a coherent identity activates.",
       "PORTAL SUCCESS MEANS ENFORCED: activation waits for netd's promotion, bounded by the caller's deadline, and reports the state observed (enforced=true state=active, matching the database). The portal shows /success only on an enforced session, and SessionsStarted increments only for a session that reached active.",
-      "HOSTILE REVIEW: 0 iam_v2 sessions without an entitlement; every active session (7, across 7 distinct devices, both VOUCHER and ACCOUNT) has exactly one nft authorization -- none claims active unenforced; public.sessions=26 and no legacy session created in over 3 hours (newest 06:18, before the authority switch); no IAM-v2 code path writes public.sessions and no branch falls back to legacy."
+      "HOSTILE REVIEW: 0 iam_v2 sessions without an entitlement; every active session (7, across 7 distinct devices, both VOUCHER and ACCOUNT) has exactly one nft authorization -- none claims active unenforced; public.sessions=26 and no legacy session created in over 3 hours (newest 06:18, before the authority switch); no IAM-v2 code path writes public.sessions and no branch falls back to legacy.",
+      "CHECKOUT-GRACE save -> read -> save is idempotent: the typed grace columns are projected back on read, so an ordinary admin edit cannot publish NULLs over the grace policy. Proven by a round-trip test that writes typed fields plus a free-form key, reads them back, writes the read value, and asserts the typed policy survived.",
+      "GRACE PACKAGE PROVENANCE is enforced: the contract's is_system = true requirement is now validated, and a non-system package carrying the CHECKOUT_GRACE type is refused grace_package_not_system.",
+      "DSN-gated commerce suite 8/8 against a real database.",
+      "Governance mutation-suite BASELINE passes at exact head (structural=PASS keyword=PASS) with sandbox fidelity verified over 1364 files."
     ],
     "NOT_EXERCISED": [
       "Voucher reveal/export: the contract requires operator re-authentication and audit for recovering a code. OpenVoucherCode exists in the codec and NO admin route exposes it -- deliberately unimplemented rather than shipped without the re-auth gate.",
       "Byte accounting (consumed_data_bytes): stays 0 because the test devices are synthetic and pass no packets. Online-time accrual is proven; byte metering needs real traffic and is NOT claimed.",
-      "Live end-to-end checkout-grace configuration: blocked by a SEPARATE pre-existing gap -- PackagePublishSpec has no PackageType field, so the admin API cannot publish a CHECKOUT_GRACE package for grace to point at. The reconciliation itself is proven by the DSN suite against a real grace package."
+      "Live end-to-end checkout-grace configuration: the authoritative sources determine the SHAPE of a valid grace package (is_system=true, CHECKOUT_GRACE, price 0, {NOT_REQUIRED}, valid current revision) but NOT a provisioning path for a hidden, system-owned package. Opening package_type on the operator publisher would manufacture is_system=false packages the contract forbids for grace, so it was deliberately not done. This is a Product-Owner decision about system-package provisioning, not a coding gap.",
+      "Governance mutation MATRIX (53 cases): baseline verified PASS at exact head; the full matrix takes hours (~4 min/case) and was still running when this round closed. NOT claimed as complete."
     ],
     "ENVIRONMENT_BLOCKED": [
       "Phase-5 guest Post-Stay and Phase-6 GUEST Device Self-Service -- no real PMS / Phase-3 PMS-auth source",

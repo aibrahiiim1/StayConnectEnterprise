@@ -1,0 +1,4 @@
+commit 439e8ce8338a6801c1a7321afd556833b0569b3c
+Date:   Tue Aug 18 13:56:20 2026 +0300
+
+    Close the grace round trip, and enforce the contract's is_system provenance
