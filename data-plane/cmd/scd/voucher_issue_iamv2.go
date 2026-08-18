@@ -139,6 +139,9 @@ func (s *server) ensureVoucherKeyGeneration(ctx context.Context, kr iamv2.Vouche
 		s.tenID, s.siteID, genNo, sealedNew, string(params), voucherDEKID).Scan(&genID); err != nil {
 		return "", 0, nil, err
 	}
+	// The authenticator's cached key set no longer describes this site: drop it now so a voucher issued
+	// under this brand-new generation authenticates immediately rather than after the cache TTL.
+	invalidateVoucherKeyCache(s.tenID, s.siteID)
 	return genID, genNo, clear, nil
 }
 

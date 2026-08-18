@@ -47,6 +47,22 @@ var vkCache = generationKeyCache{m: map[string]cachedGenerationKeys{}}
 
 func vkKey(tenantID, siteID string) string { return tenantID + "|" + siteID }
 
+// invalidateVoucherKeyCache drops this owner's cached generation keys.
+//
+// Minting a generation makes the cache WRONG, not merely stale: a code issued under the new key indexes to
+// something none of the cached keys can produce, so it authenticates as "invalid_code" until the TTL expires.
+// That was observable -- the rotation proof needed a 60-second sleep between issuing under a new generation
+// and redeeming, which is not a property any real deployment should have to live with.
+//
+// Issuance runs in this process, so it invalidates directly. The TTL remains as the backstop for a
+// generation minted by some other process or by an operator working in SQL: that case still self-heals
+// within the TTL rather than requiring a restart.
+func invalidateVoucherKeyCache(tenantID, siteID string) {
+	vkCache.mu.Lock()
+	delete(vkCache.m, vkKey(tenantID, siteID))
+	vkCache.mu.Unlock()
+}
+
 // newGenerationVoucherHMAC returns the candidate-index function the authenticator calls.
 //
 // It returns ONE INDEX PER USABLE GENERATION, newest first, including superseded ones. That is what makes a
