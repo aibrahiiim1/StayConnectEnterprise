@@ -2,7 +2,7 @@
 
 - **Base commit:** `fef8af9989a2a9695d5a728912effce09ab582bb`
 - **HEAD commit:** `187183c`
-- **Provenance (generation HEAD = inventory_head):** `187183c85391372cd1e35e8efd4c88050c327fe1`  �  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **Provenance (generation HEAD = inventory_head):** `198990492d5d663d25360dceea92ff5ad9a33022`  �  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `post-roadmap/dev-iamv2-trial`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 85
@@ -67,85 +67,85 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Sync capability ladder and render generated blocks |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Sync capability ladder and render generated blocks |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Sync capability ladder and render generated blocks |
-| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
+| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
 | `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/GIT_STAT_1048d68.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Attribution + containment round (delivery_head): manifest, packs and checksums |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `exports/chatgpt/phase-evidence/GIT_STAT_187183c.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
 | `exports/chatgpt/phase-evidence/GIT_STAT_d0e3904.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Sync capability ladder and render generated blocks |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Sync capability ladder and render generated blocks |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | D31/T0068: correct D30 scope, and make the edged writer grant reproducible |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Sync capability ladder and render generated blocks |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
 | `governance/transitions/T0066.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0067.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0068.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Transition receipts: stamp each before the commit that introduced it |
 | `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Fix the Phase-2 commerce 500, return real admin validation reasons, unskip the commerce tests |
 | `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Fix the Phase-2 commerce 500, return real admin validation reasons, unskip the commerce tests |
-| `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D31/T0068: correct D30 scope, and make the edged writer grant reproducible |
+| `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs |
 
 ## Total diff statistics (`git diff --stat`)
 ```text
  data-plane/cmd/edged/common.go                     |  15 +
- data-plane/cmd/edged/decode_number_test.go         |  54 ++++
- .../cmd/edged/guest_accounts_authority_test.go     | 115 +++++++
+ data-plane/cmd/edged/decode_number_test.go         |  54 +++
+ .../cmd/edged/guest_accounts_authority_test.go     | 115 ++++++
  data-plane/cmd/edged/guest_accounts_iamv2.go       |  65 ++++
- .../cmd/edged/guest_accounts_iamv2_lifecycle.go    | 323 ++++++++++++++++++++
+ .../cmd/edged/guest_accounts_iamv2_lifecycle.go    | 323 ++++++++++++++++
  data-plane/cmd/edged/main.go                       |  20 +-
- data-plane/cmd/edged/resources_guest_accounts.go   |  58 +++-
+ data-plane/cmd/edged/resources_guest_accounts.go   |  58 ++-
  data-plane/cmd/edged/resources_plans_vouchers.go   |  19 +-
- data-plane/cmd/portald/iamv2_commerce_session.go   | 276 +++++++++++++++++
- .../cmd/portald/iamv2_commerce_session_test.go     | 170 +++++++++++
+ data-plane/cmd/portald/iamv2_commerce_session.go   | 276 +++++++++++++
+ .../cmd/portald/iamv2_commerce_session_test.go     | 170 ++++++++
  data-plane/cmd/portald/main.go                     |  15 +
- data-plane/cmd/scd/authsec.go                      |  51 +++-
+ data-plane/cmd/scd/authsec.go                      |  51 ++-
  data-plane/cmd/scd/commands.go                     |  14 +-
- data-plane/cmd/scd/credentials_handlers.go         |  18 ++
- data-plane/cmd/scd/iamv2_guest_authority.go        | 177 +++++++++++
- data-plane/cmd/scd/iamv2_guest_authority_test.go   | 137 +++++++++
- data-plane/cmd/scd/iamv2_session_activate.go       | 338 +++++++++++++++++++++
+ data-plane/cmd/scd/credentials_handlers.go         |  18 +
+ data-plane/cmd/scd/iamv2_guest_authority.go        | 177 +++++++++
+ data-plane/cmd/scd/iamv2_guest_authority_test.go   | 137 +++++++
+ data-plane/cmd/scd/iamv2_session_activate.go       | 338 ++++++++++++++++
  data-plane/cmd/scd/main.go                         |  25 ++
  data-plane/cmd/scd/updates.go                      |  17 +-
- data-plane/cmd/scd/voucher_issue_iamv2.go          | 244 +++++++++++++++
- data-plane/cmd/scd/voucher_keys.go                 | 147 +++++++++
+ data-plane/cmd/scd/voucher_issue_iamv2.go          | 244 ++++++++++++
+ data-plane/cmd/scd/voucher_keys.go                 | 147 +++++++
  data-plane/internal/iamv2/adapters.go              |  45 ++-
  data-plane/internal/iamv2/commerce_admin.go        |  14 +
- .../internal/iamv2/commerce_admin_repo_pg.go       | 150 ++++++++-
+ .../internal/iamv2/commerce_admin_repo_pg.go       | 150 +++++++-
  data-plane/internal/iamv2/commerce_admin_test.go   |  16 +-
  .../internal/iamv2/commerce_integration_test.go    |  27 +-
  data-plane/internal/iamv2/commerce_repo_pg.go      |  26 ++
  data-plane/internal/iamv2/iamv2.go                 |  31 +-
- data-plane/internal/iamv2/voucher_codec.go         | 201 ++++++++++++
- data-plane/internal/iamv2/voucher_codec_test.go    |  57 ++++
- data-plane/internal/iamv2/voucher_rotation_test.go |  83 +++++
+ data-plane/internal/iamv2/voucher_codec.go         | 201 ++++++++++
+ data-plane/internal/iamv2/voucher_codec_test.go    |  57 +++
+ data-plane/internal/iamv2/voucher_rotation_test.go |  83 ++++
  data-plane/internal/keybootstrap/keybootstrap.go   |  16 +
  data-plane/internal/metrics/metrics.go             |  26 +-
  deploy/env/phase6-guest-dependency.md              |  31 ++
  deploy/gatep/gatep-grants.sql                      |  31 ++
  deploy/gatep/svc-acctd-guest-networks-grant.sql    |  16 +
- deploy/gatep/svc-acctd-iamv2-accounting-grants.sql |  55 ++++
- deploy/gatep/svc-edged-phase2-commerce-grants.sql  | 102 +++++++
- deploy/gatep/svc-netd-iamv2-enforcement-grants.sql |  53 ++++
- deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql   |  83 +++++
- .../gatep/svc-scd-iamv2-guest-commerce-grants.sql  |  59 ++++
+ deploy/gatep/svc-acctd-iamv2-accounting-grants.sql |  55 +++
+ deploy/gatep/svc-edged-phase2-commerce-grants.sql  | 102 +++++
+ deploy/gatep/svc-netd-iamv2-enforcement-grants.sql |  53 +++
+ deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql   |  83 ++++
+ .../gatep/svc-scd-iamv2-guest-commerce-grants.sql  |  59 +++
  deploy/gatep/svc-service-health-grants.sql         |  16 +
  deploy/gatep/svc-voucher-iamv2-grants.sql          |  28 ++
- deploy/scripts/check-phase6-guest-dependency.sh    |  21 ++
- deploy/scripts/deploy-hotel-admin.sh               | 123 +++++++-
- deploy/scripts/install-service-units.sh            |  64 ++++
+ deploy/scripts/check-phase6-guest-dependency.sh    |  21 +
+ deploy/scripts/deploy-hotel-admin.sh               | 123 +++++-
+ deploy/scripts/install-service-units.sh            |  64 +++
  deploy/scripts/wait-for-site-db.sh                 |  65 ++++
  deploy/systemd/stayconnect-acctd.service           |   3 +
  deploy/systemd/stayconnect-netd.service            |  12 +-
@@ -155,12 +155,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   8 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   8 +-
  docs/context/StayConnect-IAM-Handoff.md            |   8 +-
- docs/manifests/Phase7-change-manifest.md           | 127 +++++---
- .../reports/StayConnect-IAM-Phase7-Final-Report.md | 127 +++++---
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 313278 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 123191 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42147 bytes
- .../chatgpt/phase-evidence/GIT_STAT_1048d68.txt    |   4 +
+ docs/manifests/Phase7-change-manifest.md           | 427 +++++++++++----------
+ .../reports/StayConnect-IAM-Phase7-Final-Report.md | 127 +++---
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 314245 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 123152 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42285 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_187183c.txt    |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_d0e3904.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -168,7 +168,7 @@
  .../phase-evidence/tools/validate-project-state.sh |   2 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |   6 +-
- .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   4 +-
+ .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |  12 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   8 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   8 +-
  exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  66 ++--
@@ -178,24 +178,24 @@
  .../StayConnect-IAM-Phase1A-Plan.md                |   8 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |   8 +-
  governance/decision-register.json                  |   7 +
- governance/project-state.json                      | 209 ++++++++++---
+ governance/project-state.json                      | 213 ++++++++--
  governance/transitions/T0066.json                  |   2 +-
  governance/transitions/T0067.json                  |   2 +-
- governance/transitions/T0068.json                  |  62 ++++
- tools/tests/current_state_parity/run_negative.py   |  90 ++++++
- tools/validate-current-state-parity.py             | 228 ++++++++++++++
+ governance/transitions/T0068.json                  |  62 +++
+ tools/tests/current_state_parity/run_negative.py   |  90 +++++
+ tools/validate-current-state-parity.py             | 228 +++++++++++
  tools/validate-project-state.sh                    |   2 +-
- 85 files changed, 4526 insertions(+), 304 deletions(-)
+ 85 files changed, 4672 insertions(+), 470 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
- M docs/manifests/Phase7-change-manifest.md
- M governance/project-state.json
+M  docs/manifests/Phase7-change-manifest.md
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 1989904 Governance delivery: heads, complete manifest, rendered blocks, rebuilt packs
 HISTORICAL: 187183c Sync capability ladder and render generated blocks
 HISTORICAL: dbc2e78 Validate the whole trusted identity on activation, and make success mean enforced
 HISTORICAL: 154b074 Reconcile checkout grace to the accepted typed publish contract (DSN suite 6/6)
