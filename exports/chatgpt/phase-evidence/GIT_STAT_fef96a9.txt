@@ -1,0 +1,4 @@
+commit fef96a964bda9a1b8bdf7f270883359a861a120d
+Date:   Tue Aug 18 19:10:11 2026 +0300
+
+    D32 end to end: grace derived from policy, audited boundary, reserved codes closed
