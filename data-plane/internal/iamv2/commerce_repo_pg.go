@@ -448,6 +448,32 @@ func (t *pgCommerceTx) GrantQuotedEntitlement(ctx context.Context, tenantID, sit
 	if err != nil {
 		return "", "", err
 	}
+	// SINGLE-USE: burn the voucher in the SAME transaction that grants the entitlement.
+	//
+	// The Phase-1B credential rule treats only an UNUSED voucher as redeemable, and the canonical states are
+	// UNUSED | REDEEMED | REVOKED | REDEMPTION_EXPIRED -- but nothing ever performed the transition. Measured
+	// on the DEVELOPMENT appliance: vouchers that had been authenticated, quoted, confirmed and turned into a
+	// live entitlement were all still UNUSED, so the same code could be redeemed again and again, each time
+	// producing a fresh auth context and a fresh entitlement. The contract requires single-use redemption.
+	//
+	// The burn belongs HERE, at the grant, not at authentication: a guest who authenticates and never buys
+	// anything must not lose their voucher. And it belongs in this transaction so a grant can never commit
+	// with the voucher still spendable.
+	//
+	// already_granted is the idempotent retry of a grant that already happened, so the UPDATE is written to
+	// be a no-op in that case (the voucher is already REDEEMED and the WHERE clause will not match).
+	if _, err := t.tx.Exec(ctx, `
+	    UPDATE iam_v2.vouchers v
+	       SET state = 'REDEEMED'
+	      FROM iam_v2.entitlements e
+	     WHERE e.id = $1::uuid
+	       AND v.id = e.voucher_id
+	       AND v.tenant_id = $2::uuid AND v.site_id = $3::uuid
+	       AND v.state = 'UNUSED'`, eid, tenantID, siteID); err != nil {
+		return "", "", err
+	}
+	_ = already
+
 	if superseded == nil {
 		return eid, "", nil
 	}
