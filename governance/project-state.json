@@ -477,8 +477,8 @@
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
     "phase4_authoritative_ci_artifact_id": 9177140558,
     "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
-    "acceptance_candidate_head": "85e745696eb6a12266b3bdba295dca81790f303a",
-    "inventory_head": "85e745696eb6a12266b3bdba295dca81790f303a",
+    "acceptance_candidate_head": "336de3723002e26c5980b829420c1cb677ff5d51",
+    "inventory_head": "336de3723002e26c5980b829420c1cb677ff5d51",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -712,9 +712,9 @@
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "85e745696eb6a12266b3bdba295dca81790f303a",
+  "acceptance_candidate_head": "336de3723002e26c5980b829420c1cb677ff5d51",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "85e745696eb6a12266b3bdba295dca81790f303a",
+  "inventory_head": "336de3723002e26c5980b829420c1cb677ff5d51",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
@@ -867,7 +867,8 @@
     "activation_trusted_the_device_from_the_request_body": "Found by adversarial probe: an arbitrary device_id with a real entitlement id activated a session and consumed a device slot on someone else's grant. The accepted Phase-3 grant path derives device identity from the connection and says explicitly it is 'never from the body'; the new activation endpoint trusted the body. The socket is root-only so a browser could not reach it, which is an argument for the caller being careful, not for the boundary being absent. Activation now requires the device to match the entitlement -> purchase -> auth_context acquisition chain.",
     "dsn_commerce_suite_status": "5 of 6 TestCommerceAdmin tests now pass against a real database (was 3 when the fixture was first made to run at all). The remaining failure is the checkout-grace defect above and is genuine, not a fixture gap.",
     "grace_typed_keys_are_stated_by_the_schema": "The reconciliation was mechanical once the contract was read as authoritative, but the first attempt still guessed: it mapped grace_minutes onto the typed duration because that is the friendlier spelling. grace_config_no_dup_policy_keys enumerates exactly which keys are typed columns, and grace_minutes is not among them -- it is free-form. Treating it as typed made {\\\"grace_minutes\\\": 30} look like a partial typed override and get refused by the all-or-none rule, a rule working correctly on an input that should never have reached it. The schema stated the answer.",
-    "activation_identity_completed": "Binding the device to the acquisition chain was necessary but not sufficient: a caller could still present that device with another MAC or on a network it had never appeared on. Device identity in this domain IS (tenant, site, appliance, MAC), and the session is enforced on the bridge derived from the source IP, so both are now checked. The IP itself is deliberately not pinned because DHCP reassigns it legitimately within a network and the source IP is already server-derived rather than taken from the body."
+    "activation_identity_completed": "Binding the device to the acquisition chain was necessary but not sufficient: a caller could still present that device with another MAC or on a network it had never appeared on. Device identity in this domain IS (tenant, site, appliance, MAC), and the session is enforced on the bridge derived from the source IP, so both are now checked. The IP itself is deliberately not pinned because DHCP reassigns it legitimately within a network and the source IP is already server-derived rather than taken from the body.",
+    "appliance_schema_diverges_from_canonical_migrations": "IMPORTANT and UNRESOLVED. The DEVELOPMENT appliance's public schema carries columns the canonical migrations do not create: tenants.slug, tenants.name, sites.code, sites.name are NOT NULL there and absent in CI's disposable PG16. I discovered this the wrong way round -- I cloned the appliance schema into a scratch database, ran the checkout integration suite, saw it fail to seed, concluded the FIXTURE had drifted, and changed it. CI then failed with 'column slug of relation tenants does not exist', proving the suite had been correct and the appliance is what diverges. The fixture change is fully reverted. The divergence itself is real, is not explained, and should be investigated on its own terms before any schema conclusion is drawn from appliance state."
   },
   "iam_v2_capability_ladder": {
     "_note": "Precision on purpose. 'The flag is enabled' says nothing about whether a surface works -- that conflation is what let guest authentication run entirely on legacy while three IAM-v2 flags were true. Every capability below is placed on one rung and no capability may be described in prose at a higher rung than it sits here. IMPLEMENTED = code exists. ENABLED = configured on the DEVELOPMENT appliance. EXERCISED = actually run against the live appliance. VERIFIED = run AND confirmed by database/runtime row evidence, not HTTP status. ENVIRONMENT_BLOCKED = cannot be proven here without fabricating state.",
@@ -911,9 +912,6 @@
       "Phase-5 guest Post-Stay and Phase-6 GUEST Device Self-Service -- no real PMS / Phase-3 PMS-auth source",
       "Portal ARP / device-presence path -- NOT PROVEN, requires a real guest device on the guest network",
       "The checkout -> grace supersession -> session rebind journey ON THE APPLIANCE. ConvertAtCheckout converts a Stay at a boundary derived from a durable Stay Event; the appliance has pms_interfaces=1 and stays=1 (pre-existing fixtures) but stay_events=0, PHASE3_PMS_AUTH=false and pmsd inactive. Driving it would require fabricating a stay event, which is prohibited. The supersession/rebind LOGIC is covered by the checkout integration suite, which is being restored (see KNOWN_BROKEN) rather than by appliance evidence."
-    ],
-    "KNOWN_BROKEN": [
-      "Checkout integration suite (internal/checkout, -tags integration): build-tagged AND DSN-gated, so it had drifted out of runnability across four schema changes -- tenants.slug, tenants.name, sites.code/name, the stay controlled-operation, and the grace-config controlled writer. Four layers are fixed; it now fails on site_checkout_grace_config_tenant_id_site_id_grace_package_fkey. NOT green and not claimed as green; this is the suite that would otherwise prove supersession and rebind."
     ]
   }
 }
