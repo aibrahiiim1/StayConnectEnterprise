@@ -1,4 +1,0 @@
-commit 48a2c5a155ac804e85eb582aff53a3d1ead1e20b
-Date:   Tue Aug 18 15:28:55 2026 +0300
-
-    Derive M48's manifest anchor instead of pinning it

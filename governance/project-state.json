@@ -477,8 +477,8 @@
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
     "phase4_authoritative_ci_artifact_id": 9177140558,
     "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
-    "acceptance_candidate_head": "48a2c5a155ac804e85eb582aff53a3d1ead1e20b",
-    "inventory_head": "48a2c5a155ac804e85eb582aff53a3d1ead1e20b",
+    "acceptance_candidate_head": "85e745696eb6a12266b3bdba295dca81790f303a",
+    "inventory_head": "85e745696eb6a12266b3bdba295dca81790f303a",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -707,14 +707,14 @@
     "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
     "phase7_merge_attribution": "Phase 7 was ACCEPTED_AND_CLOSED under D27/T0064 and MERGED under D28/T0065 (merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The current DEVELOPMENT trial continuation is D31/T0068. D30 is preserved historically and its over-broad Production policy clauses were corrected by D31."
   },
-  "latest_transition_id": "T0068",
+  "latest_transition_id": "T0069",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "48a2c5a155ac804e85eb582aff53a3d1ead1e20b",
+  "acceptance_candidate_head": "85e745696eb6a12266b3bdba295dca81790f303a",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "48a2c5a155ac804e85eb582aff53a3d1ead1e20b",
+  "inventory_head": "85e745696eb6a12266b3bdba295dca81790f303a",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
@@ -810,6 +810,10 @@
       "d30_scope_correction_and_trial": {
         "decision": "D31",
         "transition": "T0068"
+      },
+      "normal_checkout_grace_provisioning": {
+        "decision": "D32",
+        "transition": "T0069"
       }
     }
   },
@@ -896,16 +900,20 @@
       "DSN-gated commerce suite 8/8 against a real database.",
       "Governance mutation-suite BASELINE passes at exact head (structural=PASS keyword=PASS) with sandbox fidelity verified over 1364 files.",
       "CHECKOUT-GRACE free-form clear-to-empty: deleting the last free-form key actually clears it. The config jsonb is written unconditionally, so a key the operator removed cannot survive the save, be returned by the read, and be written back. DSN-gated commerce suite 9/9.",
-      "DELIVERY PROTOCOL corrected: generate-change-manifest --staged reads the INDEX, so packs must be staged BEFORE generation and validation must run AFTER the delivery commit -- validating earlier agrees with a HEAD the manifest was not written for, which is how a locally-green manifest failed GitHub Governance."
+      "DELIVERY PROTOCOL corrected: generate-change-manifest --staged reads the INDEX, so packs must be staged BEFORE generation and validation must run AFTER the delivery commit -- validating earlier agrees with a HEAD the manifest was not written for, which is how a locally-green manifest failed GitHub Governance.",
+      "NORMAL CHECKOUT GRACE is system-provisioned per Site and hidden (D32/T0069): the package converges at startup with is_system=true, active, CHECKOUT_GRACE, price 0; it is absent from the operator catalogue; an operator publish carrying package_type is rejected and creates no non-system CHECKOUT_GRACE package; deactivating the system package is refused while an ordinary package stays operator-controlled; and an operator sets POLICY successfully with the typed field landing in its column and the free-form key in the jsonb. Provisioning is idempotent and does not choose a policy."
     ],
     "NOT_EXERCISED": [
       "Voucher reveal/export: the contract requires operator re-authentication and audit for recovering a code. OpenVoucherCode exists in the codec and NO admin route exposes it -- deliberately unimplemented rather than shipped without the re-auth gate.",
-      "Byte accounting (consumed_data_bytes): stays 0 because the test devices are synthetic and pass no packets. Online-time accrual is proven; byte metering needs real traffic and is NOT claimed.",
-      "Live end-to-end checkout-grace configuration: the authoritative sources determine the SHAPE of a valid grace package (is_system=true, CHECKOUT_GRACE, price 0, {NOT_REQUIRED}, valid current revision) but NOT a provisioning path for a hidden, system-owned package. Opening package_type on the operator publisher would manufacture is_system=false packages the contract forbids for grace, so it was deliberately not done. This is a Product-Owner decision about system-package provisioning, not a coding gap."
+      "Byte accounting (consumed_data_bytes): stays 0 because the test devices are synthetic and pass no packets. Online-time accrual is proven; byte metering needs real traffic and is NOT claimed."
     ],
     "ENVIRONMENT_BLOCKED": [
       "Phase-5 guest Post-Stay and Phase-6 GUEST Device Self-Service -- no real PMS / Phase-3 PMS-auth source",
-      "Portal ARP / device-presence path -- NOT PROVEN, requires a real guest device on the guest network"
+      "Portal ARP / device-presence path -- NOT PROVEN, requires a real guest device on the guest network",
+      "The checkout -> grace supersession -> session rebind journey ON THE APPLIANCE. ConvertAtCheckout converts a Stay at a boundary derived from a durable Stay Event; the appliance has pms_interfaces=1 and stays=1 (pre-existing fixtures) but stay_events=0, PHASE3_PMS_AUTH=false and pmsd inactive. Driving it would require fabricating a stay event, which is prohibited. The supersession/rebind LOGIC is covered by the checkout integration suite, which is being restored (see KNOWN_BROKEN) rather than by appliance evidence."
+    ],
+    "KNOWN_BROKEN": [
+      "Checkout integration suite (internal/checkout, -tags integration): build-tagged AND DSN-gated, so it had drifted out of runnability across four schema changes -- tenants.slug, tenants.name, sites.code/name, the stay controlled-operation, and the grace-config controlled writer. Four layers are fixed; it now fails on site_checkout_grace_config_tenant_id_site_id_grace_package_fkey. NOT green and not claimed as green; this is the suite that would otherwise prove supersession and rebind."
     ]
   }
 }

@@ -1,0 +1,4 @@
+commit 85e745696eb6a12266b3bdba295dca81790f303a
+Date:   Tue Aug 18 16:06:00 2026 +0300
+
+    D32: system-provisioned hidden per-site CHECKOUT_GRACE, Hotel Admin policy only

@@ -594,6 +594,13 @@
       "decided_on": "2026-08-17",
       "phase": "post-roadmap",
       "accepted": true
+    },
+    {
+      "id": "D32",
+      "title": "NORMAL CHECKOUT GRACE IS A HIDDEN, SYSTEM-PROVISIONED PER-SITE PACKAGE (2026-08-18). The Product Owner resolves the provisioning gate left open at D31/T0068. The normal CHECKOUT_GRACE package is provisioned BY THE SYSTEM, one per Site, and is hidden from the operator catalogue: it is never created, edited or published through the operator package publisher, and package_type remains closed on that surface. Hotel Admin controls POLICY ONLY -- which grace package revision is current for the site and the typed grace fields (duration, down, up, data quota, device limit, device-limit policy, eligibility window) -- and never the existence, type, price, settlement or system provenance of the package itself. EMERGENCY GRACE remains a SEPARATE fail-safe and is not merged into this path: it exists precisely for the case where the normal grace package is missing or corrupt at checkout, so implementing normal grace must not remove or weaken it. Scope: DEVELOPMENT appliance only under the D31/T0068 trial. This authorizes no Production action, no PMS enablement and no change to PR #16.",
+      "decided_on": "2026-08-18",
+      "phase": "post-roadmap",
+      "accepted": true
     }
   ]
 }
