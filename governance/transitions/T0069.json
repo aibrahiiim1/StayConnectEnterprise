@@ -1,0 +1,21 @@
+{
+  "transition_id": "T0069",
+  "seq": 69,
+  "timestamp": "2026-08-18T12:56:14Z",
+  "record_type": "PRODUCT_OWNER_DECISION",
+  "previous_state": "Normal CHECKOUT_GRACE provisioning was an OPEN Product-Owner gate. The authoritative sources determined the SHAPE of a valid grace package (is_system=true, CHECKOUT_GRACE, price 0, settlement {NOT_REQUIRED}, valid current revision pinning an enabled plan revision) but not WHO provisions it, so the operator publisher deliberately kept package_type closed and live end-to-end grace stayed unproven.",
+  "new_state": "Normal grace is system-provisioned, one hidden package per Site; Hotel Admin controls policy only. Emergency Grace is preserved unchanged as the separate fail-safe.",
+  "phase_affected": "post-roadmap (D31/T0068 DEVELOPMENT trial)",
+  "decision": "D32",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner instruction, 2026-08-18",
+  "boundaries_observed": [
+    "Production untouched; PR #16 unmerged.",
+    "The operator package publisher still cannot set package_type: normal grace is created by system provisioning, never by an operator publish.",
+    "Emergency Grace remains a separate fail-safe and is not folded into the normal path.",
+    "The checkout trigger is PMS-derived (ConvertAtCheckout converts a Stay at a checkout boundary). No stay, stay event or PMS interface is fabricated on the DEVELOPMENT appliance; the checkout-to-supersession step is proven at integration level against a real database and recorded as ENVIRONMENT-BLOCKED on the appliance.",
+    "No byte-accounting or portal ARP evidence is fabricated."
+  ],
+  "next": "Implement system provisioning of the hidden per-site grace package, keep Hotel Admin to policy only, and prove the journey as far as the absence of a PMS honestly allows."
+}

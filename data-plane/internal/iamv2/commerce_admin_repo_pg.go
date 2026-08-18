@@ -35,6 +35,11 @@ func (r *PgCommerceAdminRepository) ListPackages(ctx context.Context, tenantID, 
 		        (SELECT count(*) FROM iam_v2.internet_package_revisions r WHERE r.package_id = p.id)
 		   FROM iam_v2.internet_packages p
 		  WHERE p.tenant_id=$1 AND p.site_id=$2
+		    -- D32: the system grace package is HIDDEN from the operator catalogue. Excluded here rather than
+		    -- filtered in the handler so every caller of the catalogue gets the same answer -- a listing that
+		    -- showed it would invite an operator to edit or deactivate a package whose existence, type and
+		    -- provenance are not theirs to change, and deactivating it would silently disable checkout grace.
+		    AND p.is_system = false
 		  ORDER BY p.code`, tenantID, siteID)
 	if err != nil {
 		return nil, err
@@ -296,6 +301,22 @@ func (t *pgCommerceAdminTx) SetCurrentRevision(ctx context.Context, packageID, r
 }
 
 func (t *pgCommerceAdminTx) SetPackageActive(ctx context.Context, tenantID, siteID, packageID string, active bool) error {
+	// D32: a SYSTEM package's activation is not the operator's to change.
+	//
+	// The operator surface already required a reason and a password re-confirmation for deactivation, but
+	// both are checks that a determined operator simply satisfies -- neither says "this package is not yours".
+	// Deactivating the system grace package would silently disable checkout grace for the whole site while
+	// every screen still looked normal, so the refusal belongs in the write itself rather than in the UI
+	// affordances around it.
+	var isSystem bool
+	if err := t.tx.QueryRow(ctx,
+		`SELECT is_system FROM iam_v2.internet_packages WHERE id=$1 AND tenant_id=$2 AND site_id=$3`,
+		packageID, tenantID, siteID).Scan(&isSystem); err != nil {
+		return err
+	}
+	if isSystem {
+		return &Error{Code: ErrInvalidInput, Msg: "system package activation is not operator-controlled"}
+	}
 	_, err := t.tx.Exec(ctx,
 		`UPDATE iam_v2.internet_packages SET active=$4 WHERE tenant_id=$1 AND site_id=$2 AND id=$3`,
 		tenantID, siteID, packageID, active)
@@ -525,4 +546,98 @@ func orEmptyObj(m map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return m
+}
+
+// ---- system grace provisioning (D32/T0069) --------------------------------------------------------------
+//
+// A narrow transactional surface: create the hidden per-site system package and its first revision, and
+// nothing else. It deliberately cannot reach the grace CONFIG, because policy belongs to Hotel Admin.
+
+func (r *PgCommerceAdminRepository) WithGraceProvisionTx(ctx context.Context, fn func(GraceProvisionTx) error) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := fn(&pgGraceProvisionTx{tx: tx}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+type pgGraceProvisionTx struct{ tx pgx.Tx }
+
+// SystemGracePackage finds the site's existing system grace package, if any.
+//
+// Matched on is_system AND the reserved code, not on package_type alone: an operator package that merely
+// carries the CHECKOUT_GRACE type must never be adopted as the system package, which is the same distinction
+// the grace validator enforces.
+func (t *pgGraceProvisionTx) SystemGracePackage(ctx context.Context, tenantID, siteID string) (string, string, error) {
+	var pkgID string
+	var revID *string
+	err := t.tx.QueryRow(ctx, `
+	    SELECT id::text, current_revision_id::text
+	      FROM iam_v2.internet_packages
+	     WHERE tenant_id=$1 AND site_id=$2 AND is_system = true AND code = $3`,
+		tenantID, siteID, systemGraceCode).Scan(&pkgID, &revID)
+	if err == pgx.ErrNoRows {
+		return "", "", nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if revID == nil {
+		return pkgID, "", nil
+	}
+	return pkgID, *revID, nil
+}
+
+func (t *pgGraceProvisionTx) CreateSystemGracePackage(ctx context.Context, tenantID, siteID, code string) (string, error) {
+	var id string
+	err := t.tx.QueryRow(ctx, `
+	    INSERT INTO iam_v2.internet_packages (tenant_id, site_id, code, active, is_system)
+	    VALUES ($1,$2,$3,true,true)
+	    RETURNING id::text`, tenantID, siteID, code).Scan(&id)
+	return id, err
+}
+
+// InsertSystemGraceRevision publishes the first CHECKOUT_GRACE revision: free, settlement-not-required, and
+// pinned to an enabled plan revision -- exactly the shape the contract re-validates at every checkout.
+func (t *pgGraceProvisionTx) InsertSystemGraceRevision(ctx context.Context, tenantID, siteID, packageID, planRevisionID string, revNo int, display map[string]any) (string, error) {
+	var id string
+	err := t.tx.QueryRow(ctx, `
+	    INSERT INTO iam_v2.internet_package_revisions
+	      (tenant_id, site_id, package_id, revision_no, service_plan_revision_id, package_type,
+	       price_minor, currency, currency_exponent, settlement_methods, duration_policy, display)
+	    VALUES ($1,$2,$3,$4,$5,'CHECKOUT_GRACE',0,'USD',2,'{NOT_REQUIRED}','{"end_mode":"MANUAL_END"}'::jsonb,$6::jsonb)
+	    RETURNING id::text`,
+		tenantID, siteID, packageID, revNo, planRevisionID, string(graceDisplayJSON(display))).Scan(&id)
+	return id, err
+}
+
+func (t *pgGraceProvisionTx) SetCurrentRevision(ctx context.Context, packageID, revisionID string) error {
+	_, err := t.tx.Exec(ctx,
+		`UPDATE iam_v2.internet_packages SET current_revision_id=$2 WHERE id=$1`, packageID, revisionID)
+	return err
+}
+
+// DefaultPlanRevisionForGrace picks the site's current enabled plan revision to pin.
+//
+// Deterministic (oldest enabled plan by code) rather than "whatever is newest", so provisioning two
+// appliances from the same state produces the same pin instead of depending on publication order.
+func (t *pgGraceProvisionTx) DefaultPlanRevisionForGrace(ctx context.Context, tenantID, siteID string) (string, error) {
+	var rev *string
+	err := t.tx.QueryRow(ctx, `
+	    SELECT p.current_revision_id::text
+	      FROM iam_v2.service_plans p
+	     WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.enabled = true AND p.current_revision_id IS NOT NULL
+	     ORDER BY p.code
+	     LIMIT 1`, tenantID, siteID).Scan(&rev)
+	if err == pgx.ErrNoRows || rev == nil {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return *rev, nil
 }

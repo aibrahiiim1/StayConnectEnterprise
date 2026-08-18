@@ -100,3 +100,22 @@ GRANT UPDATE, DELETE ON iam_v2.guest_access_accounts TO svc_edged;
 -- never alters the grant itself.
 GRANT SELECT, UPDATE ON iam_v2.sessions     TO svc_edged;
 GRANT SELECT         ON iam_v2.entitlements TO svc_edged;
+
+-- ---------------------------------------------------------------------------
+-- D32: the grace POLICY path (Hotel Admin controls policy only)
+--
+-- site_checkout_grace_config resolves to no capability family under
+-- p3_controlled_writer_only: it is writable only by the owner of
+-- publish_checkout_grace_config. edged is the admin surface that saves grace
+-- policy, so it needs EXECUTE on that function. Without it the PUT fails 500
+-- with "permission denied for function publish_checkout_grace_config" while the
+-- READ keeps working, so the surface looks healthy until an operator saves.
+--
+-- (It was granted to svc_netd earlier because netd references it too. netd is
+-- not the caller for the admin policy path; edged is -- the same
+-- granted-the-wrong-service mistake that hid the acctd accounting gap.)
+GRANT EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_config(uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer) TO svc_edged;
+
+-- Provisioning creates the hidden system package row (D32). INSERT only: the
+-- revisions it publishes are append-only and it never deletes.
+GRANT INSERT ON iam_v2.internet_packages TO svc_edged;

@@ -233,6 +233,26 @@ func main() {
 			os.Exit(2)
 		}
 		commRepo = iamv2.NewPgCommerceAdminRepository(pool)
+		// D32: converge the site on its hidden system grace package at startup.
+		//
+		// Here rather than in scd because this repository is the one with the admin write surface, and
+		// because provisioning is an ADMIN-plane concern: it creates the thing Hotel Admin then points policy
+		// at. It is idempotent, so a site that already has one keeps it -- including its immutable revision
+		// history, which live entitlements pin.
+		//
+		// A provisioning failure is logged and does NOT abort startup: the normal grace package being absent
+		// is exactly the condition Emergency Grace exists to cover, so refusing to serve would turn a
+		// degraded path into an outage.
+		if r, perr := iamv2.NewGraceProvisioner(commRepo).EnsureSiteGracePackage(
+			context.Background(), commRepo.(iamv2.GraceProvisionRepository), c.TenantID, c.SiteID); perr != nil {
+			slog.Error("grace provisioning failed; Emergency Grace remains the fallback", "err", perr)
+		} else if r.Skipped != "" {
+			slog.Warn("grace provisioning skipped", "reason", r.Skipped)
+		} else {
+			slog.Info("system grace package converged",
+				"package_id", r.PackageID, "revision_id", r.RevisionID,
+				"created", r.Created, "revision_published", r.RevisionNew)
+		}
 	}
 	commAdmin, err := iamv2.NewCommerceAdmin(commCfg, commRepo, iamv2.NopObserver{})
 	if err != nil {
