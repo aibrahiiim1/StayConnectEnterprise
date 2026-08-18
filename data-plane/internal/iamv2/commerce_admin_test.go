@@ -39,7 +39,7 @@ func newAdmin(t *testing.T, db *pgxpool.Pool) *CommerceAdmin {
 func seedPlanOnly(t *testing.T, db *pgxpool.Pool) (planRevID string) {
 	t.Helper()
 	ctx := context.Background()
-	if _, err := db.Exec(ctx, `INSERT INTO public.guest_networks (id,tenant_id,site_id,name) VALUES ($1,$2,$3,'net') ON CONFLICT (id) DO NOTHING`, p2GN, p2Tenant, p2Site); err != nil {
+	if _, err := db.Exec(ctx, `INSERT INTO public.guest_networks (id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr) VALUES ($1,$2,$3,'net','br-lan','br-guest','10.77.0.1/24','10.77.0.1','10.77.0.0/24') ON CONFLICT (id) DO NOTHING`, p2GN, p2Tenant, p2Site); err != nil {
 		t.Fatalf("seed gn: %v", err)
 	}
 	planID := scan1(t, db, `INSERT INTO iam_v2.service_plans (tenant_id,site_id,code) VALUES ($1,$2,$3) RETURNING id::text`, p2Tenant, p2Site, "ADMPLAN")
@@ -160,7 +160,7 @@ func TestCommerceAdminPublishRejectsInvalid(t *testing.T) {
 
 func TestCommerceAdminServicePlans(t *testing.T) {
 	db := p2DB(t)
-	if _, err := db.Exec(context.Background(), `INSERT INTO public.guest_networks (id,tenant_id,site_id,name) VALUES ($1,$2,$3,'net') ON CONFLICT (id) DO NOTHING`, p2GN, p2Tenant, p2Site); err != nil {
+	if _, err := db.Exec(context.Background(), `INSERT INTO public.guest_networks (id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr) VALUES ($1,$2,$3,'net','br-lan','br-guest','10.77.0.1/24','10.77.0.1','10.77.0.0/24') ON CONFLICT (id) DO NOTHING`, p2GN, p2Tenant, p2Site); err != nil {
 		t.Fatalf("gn: %v", err)
 	}
 	a := newAdmin(t, db)
@@ -189,8 +189,16 @@ func TestCommerceAdminServicePlans(t *testing.T) {
 	// AGGREGATE accounting is capability-disabled
 	bad := spec
 	bad.TimeAccountingMode = "AGGREGATE_ONLINE_TIME"
-	if res, _ := a.PublishPlanRevision(ctx, bad); res.Reason != "invalid_plan_spec" {
-		t.Fatalf("AGGREGATE plan must be rejected, got %+v", res)
+	// The reason must be the SPECIFIC one, not the generic label. The admin
+	// surface returns verbatim validation reasons on purpose (the operator is
+	// trusted, unlike a guest), and collapsing every rejection to
+	// "invalid_plan_spec" made a one-word enum typo cost a debugging cycle.
+	res, _ := a.PublishPlanRevision(ctx, bad)
+	if res.Reason != "unsupported time_accounting_mode" {
+		t.Fatalf("AGGREGATE plan must be rejected with the specific reason, got %+v", res)
+	}
+	if res.Reason == "invalid_plan_spec" {
+		t.Fatalf("admin rejection reason regressed to the generic label")
 	}
 }
 

@@ -76,7 +76,7 @@ func seedFreeCommerce(t *testing.T, db *pgxpool.Pool, opts func(*seedOpts)) seed
 		return id
 	}
 	var s seed
-	ex(`INSERT INTO public.guest_networks (id,tenant_id,site_id,name) VALUES ($1,$2,$3,'net') ON CONFLICT (id) DO NOTHING`, p2GN, p2Tenant, p2Site)
+	ex(`INSERT INTO public.guest_networks (id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr) VALUES ($1,$2,$3,'net','br-lan','br-guest','10.77.0.1/24','10.77.0.1','10.77.0.0/24') ON CONFLICT (id) DO NOTHING`, p2GN, p2Tenant, p2Site)
 	// A MAC OF ITS OWN PER SEED. Device identity is (tenant, site, appliance, MAC), so a fixed literal made
 	// this fixture collide with any other test that had already inserted the same address -- and the symptom
 	// was a unique-violation in a DIFFERENT test, which is the worst place to discover it. The counter is

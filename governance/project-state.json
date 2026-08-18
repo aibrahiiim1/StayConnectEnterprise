@@ -151,7 +151,7 @@
     "7": {
       "status": "ACCEPTED_AND_CLOSED",
       "title": "Cleanup, final docs, full-system re-acceptance",
-      "maturity": "ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity by Product-Owner decision D27 (2026-08-17) at delivery head 16819aa027633b84486999451e8b689a191a15d2 on branch phase/7-full-system-reacceptance (PR #15, which remains OPEN and UNMERGED pending a separate merge decision). The whole IAM domain built across Phases 2-6 was re-proved as ONE system, on an environment rebuilt from repository sources and on the authorized DEVELOPMENT appliance, with every future-facing capability OFF everywhere. Acceptance basis: reconstruction digest e7216a988642c9d5e44ca22478d4972d parts=2686 identical to the appliance; PHASE7_FULL_MATRIX = PASS (strict) gates_run=20 skipped=0 unverdicted_or_crashed=0 pass=1262 fail=0; fidelity mutation suite 23/23; matrix-runner mutation suite 20/20; appliance assembled-system M4 = 70/0; final REAL reboot = 24/0; PROJECT_STATE_MUTATION_TESTS 53/53; CURRENT_STATE_PARITY 23/0; negative parity 57/57; Zero-Stale PASS; required exact-head GitHub Actions green. Three appliance items remain NOT PROVEN and are NOT promoted (a deliberate Central outage drill, a live rollback of the appliance schema, a real purge/archive requiring external receipt authority), and the iam_v2.p5_controlled_operation_open PUBLIC EXECUTE observation is preserved as a hardening / cutover-review finding -- proved INERT on the assembled system, neither a PASS nor a blocker. Acceptance authorizes no merge, no cutover, no enablement, no data migration, no dual read/write, no legacy IAM removal, no real guest, PMS, provider or financial traffic, no paid access, no per-property financial enablement and no programmatic reversal.",
+      "maturity": "ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity by Product-Owner decision D27 (2026-08-17) at delivery head 16819aa027633b84486999451e8b689a191a15d2 on branch phase/7-full-system-reacceptance (PR #15, since MERGED to master under D28/T0065 as merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The whole IAM domain built across Phases 2-6 was re-proved as ONE system, on an environment rebuilt from repository sources and on the authorized DEVELOPMENT appliance, with every future-facing capability OFF everywhere. Acceptance basis: reconstruction digest e7216a988642c9d5e44ca22478d4972d parts=2686 identical to the appliance; PHASE7_FULL_MATRIX = PASS (strict) gates_run=20 skipped=0 unverdicted_or_crashed=0 pass=1262 fail=0; fidelity mutation suite 23/23; matrix-runner mutation suite 20/20; appliance assembled-system M4 = 70/0; final REAL reboot = 24/0; PROJECT_STATE_MUTATION_TESTS 53/53; CURRENT_STATE_PARITY 23/0; negative parity 57/57; Zero-Stale PASS; required exact-head GitHub Actions green. Three appliance items remain NOT PROVEN and are NOT promoted (a deliberate Central outage drill, a live rollback of the appliance schema, a real purge/archive requiring external receipt authority), and the iam_v2.p5_controlled_operation_open PUBLIC EXECUTE observation is preserved as a hardening / cutover-review finding -- proved INERT on the assembled system, neither a PASS nor a blocker. Acceptance authorizes no merge, no cutover, no enablement, no data migration, no dual read/write, no legacy IAM removal, no real guest, PMS, provider or financial traffic, no paid access, no per-property financial enablement and no programmatic reversal.",
       "merged": true,
       "merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
       "merge_decision": "D28",
@@ -321,7 +321,7 @@
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "Finish the DEVELOPMENT-appliance IAM-v2 trial under D31 (transition T0068) by rebuilding Hotel Admin with the accepted ADMIN compile-time flags, provisioning DEVELOPMENT-only test data through supported workflows, and verifying the result end to end on the running appliance. PRODUCTION remains untouched and PRE-LIVE, and no Production IAM transition strategy is approved.",
+  "next_authorized_action": "Continue the authorized DEVELOPMENT-appliance IAM-v2 trial under D31/T0068 on 172.21.60.23. Already COMPLETE and not to be re-listed as pending: the Hotel Admin rebuild with the accepted ADMIN compile-time flags, its deployment (release 20260818-011034, BUILD_ID NNVyTm27nqpjKzi1oxfUj), and DEVELOPMENT admin provisioning and verified login. REMAINING: provision DEVELOPMENT-only test data through supported product workflows and exercise the guest and admin journeys end to end on the running appliance. PRODUCTION remains untouched and PRE-LIVE, and no Production IAM transition strategy is approved.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D31",
@@ -462,7 +462,7 @@
     "guest_portal_upstream_reserve_ms": 200,
     "nft_deployment_architecture": "nftconverge",
     "surgical_foundation_retired_from_procedure": true,
-    "next_step": "Execute the authorized Phase-6 implementation under D25/T0057 on branch phase/6-device-selfservice-and-time-modes: Guest Device Self-Service (optional per appliance, default OFF, local-first) and the AGGREGATE_ONLINE_TIME time mode, delivered DARK, stopping at the acceptance boundary with one pull request open and unmerged for a separate Product-Owner decision. The former value still described Phase-4 WS-L, which closed at D19/T0044 and merged at D20/T0048.",
+    "next_step": "Phase 7 is ACCEPTED_AND_CLOSED (D27/T0064) and MERGED to master (D28/T0065). The roadmap is exhausted. The current activity is the authorized post-roadmap DEVELOPMENT-appliance IAM-v2 trial (D31/T0068) on 172.21.60.23. PRODUCTION remains untouched and PRE-LIVE, and no Production IAM transition strategy is approved.",
     "phase4_c35_status": "ARCHIVE_AND_GATE_COMPLETE__GATE_FAILS_CLOSED__CROSS_CUSTOMER_PURGE_IMPOSSIBLE",
     "phase4_c35_note": "0026 corrects a measured defect: the 0025 gate passed as soon as ANY compliance archive row existed, so the local export written by the same appliance that was about to delete the data authorized the deletion -- self-certification. The gate now requires receipt_verified, and ca_receipt_evidence_matches_flag makes that flag unsettable without a named external authority, a reference and a timestamp -- refused even for the table owner, refused on INSERT, and p4_record_compliance_receipt is granted to NO role. No external archival receipt authority exists in this product, so receipt_verified is false everywhere and CROSS-CUSTOMER PURGE IS CONSEQUENTLY IMPOSSIBLE. That is the delivered behaviour and it is intended: a capability that cannot be performed safely is unavailable rather than available on weaker evidence. scd's purge path reports the exact blocker and the appliance stays fail-closed. The gate is not 'always refuse': recording a receipt with real external evidence opens it, which is proved.",
     "phase4_c35_receipt_authority_exists": false,
@@ -732,7 +732,7 @@
     "development_phases_open_or_authorized": [],
     "phase_8_created": false,
     "last_numbered_development_phase": "7",
-    "only_major_next_lifecycle_gate": "a separate Product-Owner decision. NOT automatically Production go-live: the Product Owner intends a DEVELOPMENT-appliance operational trial with IAM-v2 enabled there first, and that trial is not authorized yet.",
+    "only_major_next_lifecycle_gate": "a separate Product-Owner decision. NOT automatically Production go-live: the Product Owner intends a DEVELOPMENT-appliance operational trial with IAM-v2 enabled there first, and that trial IS authorized and in progress: authorized under D29/T0066 and re-scoped by D31/T0068, running on the DEVELOPMENT appliance 172.21.60.23. Authorizing the DEVELOPMENT trial did NOT authorize any Production IAM transition, which remains an open Product-Owner decision.",
     "outstanding_on_the_phase_7_branch": "none -- PR #15 is merged and closed",
     "phase_7_merged": true,
     "phase_7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
@@ -812,5 +812,25 @@
         "transition": "T0068"
       }
     }
-  }
+  },
+  "authorized_activities": [
+    {
+      "name": "post-roadmap DEVELOPMENT appliance IAM-v2 operational trial",
+      "authorization": "D29/T0066, re-scoped by D31/T0068",
+      "status": "AUTHORIZED_IN_PROGRESS",
+      "scope": "DEVELOPMENT appliance 172.21.60.23 only. Authorizing this did NOT authorize any Production IAM transition."
+    },
+    {
+      "name": "Phase 7 merge to master",
+      "authorization": "D28/T0065",
+      "status": "COMPLETE"
+    }
+  ],
+  "completed_activities": [
+    "Hotel Admin rebuild with the accepted ADMIN compile-time flags",
+    "Hotel Admin deployment release 20260818-011034 BUILD_ID NNVyTm27nqpjKzi1oxfUj",
+    "DEVELOPMENT admin operator provisioning and verified login",
+    "netd cold-boot site-database readiness gate",
+    "scd phase5/phase6 guest-dependency deploy gate and ExecStartPre backstop"
+  ]
 }

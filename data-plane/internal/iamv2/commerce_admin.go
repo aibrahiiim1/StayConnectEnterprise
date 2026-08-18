@@ -2,6 +2,7 @@ package iamv2
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -379,6 +380,19 @@ func (a *CommerceAdmin) PublishPlanRevision(ctx context.Context, spec PlanPublis
 		return AdminResult{}, &Error{Code: ErrInvalidInput, Msg: "publish plan: missing tenant/site/code"}
 	}
 	if err := validatePlanSpec(&spec, a.aggregateOnlineTime); err != nil {
+		// The specific reason, not a generic label. validatePlanSpec already
+		// distinguishes "unknown device_limit_policy" from "out of range" from
+		// "AGGREGATE_ONLINE_TIME requires a positive time_quota_seconds", and
+		// this surface is the trusted admin one -- the file header says
+		// validation reasons are returned verbatim here precisely because the
+		// operator is not a guest. Collapsing all of them to invalid_plan_spec
+		// threw that away and left the operator guessing which of ten fields
+		// was wrong; it cost a real debugging cycle on a one-word enum typo.
+		// Guest-facing surfaces still get their uniform refusal elsewhere.
+		var e *Error
+		if errors.As(err, &e) && e.Msg != "" {
+			return AdminResult{Reason: e.Msg}, nil
+		}
 		return AdminResult{Reason: "invalid_plan_spec"}, nil
 	}
 	var res AdminResult

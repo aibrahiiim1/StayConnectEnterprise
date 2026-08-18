@@ -803,6 +803,86 @@ def _(d):
     io.open(rp, "w", encoding="utf-8", newline="").write(json.dumps(rec, indent=2, ensure_ascii=False) + chr(10))
 
 
+# ---- the contradictions that lived INSIDE the authoritative state file --------------------------------------
+#
+# Every prose rule up to here scanned markdown DOC surfaces. None of them opened
+# governance/project-state.json, so the authority itself was the one surface allowed to contradict its own
+# structured fields -- and it did, in three places at once, through a green gate:
+#
+#   * phase_lifecycle_authority recorded Phase 7 MERGED while /phases/7/maturity still narrated
+#     "PR #15, which remains OPEN and UNMERGED";
+#   * the DEVELOPMENT trial had been authorized (D29/T0066, re-scoped D31/T0068) and was running, while
+#     roadmap_exhaustion still said "that trial is not authorized yet";
+#   * next_authorized_action still asked for the Hotel Admin rebuild, its deployment and the admin login,
+#     all three of which had already completed.
+#
+# The docs were policed and the authority was not. These three cases keep it policed.
+
+@case("the state file narrates a lifecycle-merged phase as an open, unmerged PR",
+      "state-narrates-merged-phase-as-unmerged")
+def _(d):
+    p2 = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p2, encoding="utf-8"))
+    auth = doc.get("phase_lifecycle_authority") or {}
+    merged = [ph for ph, ev in auth.items() if isinstance(ev, dict) and "merged" in ev]
+    if not merged:
+        raise AssertionError("no lifecycle-merged phase in the fixture: this case has no subject")
+    ph = sorted(merged)[0]
+    doc.setdefault("phases", {}).setdefault(str(ph), {})["maturity"] = (
+        "Phase %s was delivered to head 16819aa0 on its branch (PR #15, which remains OPEN and UNMERGED "
+        "pending a separate merge decision)." % ph)
+    io.open(p2, "w", encoding="utf-8", newline="\n").write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+
+
+@case("an activity recorded as authorized and in progress is still called not authorized yet",
+      "authorized-activity-described-as-unauthorized")
+def _(d):
+    p2 = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p2, encoding="utf-8"))
+    acts = [a for a in (doc.get("authorized_activities") or [])
+            if isinstance(a, dict) and str(a.get("status", "")).upper() not in ("PROPOSED", "NOT_AUTHORIZED")]
+    if not acts:
+        raise AssertionError("no authorized activity in the fixture: this case has no subject")
+    name = acts[0]["name"]
+    doc.setdefault("roadmap_exhaustion", {})["only_major_next_lifecycle_gate"] = (
+        "The Product Owner intends a %s, and that trial is not authorized yet." % name)
+    io.open(p2, "w", encoding="utf-8", newline="\n").write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+
+
+@case("next_authorized_action still asks for work already recorded as complete",
+      "completed-work-still-listed-as-next-action")
+def _(d):
+    p2 = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p2, encoding="utf-8"))
+    done = [x for x in (doc.get("completed_activities") or []) if isinstance(x, str)]
+    if not done:
+        raise AssertionError("no completed activity in the fixture: this case has no subject")
+    doc["next_authorized_action"] = (
+        "Continue the authorized DEVELOPMENT trial by carrying out the %s, then verify the result end to end "
+        "on the running appliance." % done[0])
+    io.open(p2, "w", encoding="utf-8", newline="\n").write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+
+
+# ---- and the other half of the contract: a correct scope limit must NOT be flagged --------------------------
+#
+# The first version of authorized-activity-described-as-unauthorized failed the repository over the sentence
+# "Authorizing the DEVELOPMENT trial did NOT authorize any Production IAM transition" -- which is correct, and
+# is exactly the kind of limit the Product Owner requires to be stated. A rule that cannot tell "X is not
+# authorized" from "X does not authorize Y" would train everyone to delete the limits. This case asserts the
+# distinction holds, and it is expected to PASS the validator.
+
+@case("a correct scope limit ('did not authorize any Production transition') is not flagged",
+      None)
+def _(d):
+    p2 = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p2, encoding="utf-8"))
+    doc.setdefault("roadmap_exhaustion", {})["only_major_next_lifecycle_gate"] = (
+        "The Product Owner intends a post-roadmap DEVELOPMENT appliance IAM-v2 operational trial, which is "
+        "authorized and in progress. Authorizing the DEVELOPMENT trial did NOT authorize any Production IAM "
+        "transition, and no Production cutover is authorized.")
+    io.open(p2, "w", encoding="utf-8", newline="\n").write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+
+
 def main():
     print("== baseline: the real repository must PASS ==")
     d = sandbox()
@@ -821,6 +901,16 @@ def main():
             mutate(d)
             rc, out = run(d)
             rules = {c.get("rule") for c in out.get("checks", []) if c.get("status") == "FAIL"}
+            # rule=None inverts the case: this text is CORRECT and must not be flagged. Over-firing is its own
+            # failure mode -- a rule that refuses a true statement teaches people to delete true statements.
+            if rule is None:
+                if rc == 0:
+                    print("  PASS  %s\n        -> correctly not flagged" % name)
+                    passed += 1
+                else:
+                    print("  FAIL  %s\n        -> a correct statement was flagged by %s" % (name, sorted(rules)))
+                    failed += 1
+                continue
             if rc == 0:
                 print("  FAIL  %s\n        -> validator PASSED a contradiction" % name)
                 failed += 1
