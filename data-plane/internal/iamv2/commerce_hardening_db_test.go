@@ -46,19 +46,66 @@ func newAccountChain(t *testing.T, db *pgxpool.Pool) (accountID, deviceID, authC
 		p2Tenant, p2Site, p2Appl, fmt.Sprintf("02:00:00:00:%02x:%02x", (i>>8)&0xff, i&0xff))
 	accountID = scan1(t, db, `INSERT INTO iam_v2.guest_access_accounts (tenant_id,site_id,username,password_hash,enabled) VALUES ($1,$2,$3,'x',true) RETURNING id::text`,
 		p2Tenant, p2Site, fmt.Sprintf("acct-%d", i))
-	authCtxID = scan1(t, db, `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_account_id,device_id,guest_network_id,expires_at)
+	authCtxID = scan1Guarded(t, db, "auth_context", `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_account_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'ACCOUNT',$3::uuid,$4::uuid,$5::uuid, now()+interval '10 min') RETURNING id::text`,
 		p2Tenant, p2Site, accountID, deviceID, p2GN)
 	return
 }
 
 // addAuthContext adds another unconsumed ACCOUNT auth_context (fresh device) for an EXISTING account.
+
+// scan1Guarded runs a seed insert inside a transaction that has opened the named controlled operation.
+//
+// The auth_context and commerce_intent families are guarded in the DATABASE: a trigger refuses any write not
+// inside a transaction that opened a scope for that family. Those are real IAM-v2 invariants, not test
+// scaffolding, so the fixtures satisfy them the way production code does rather than being granted a way
+// around them. A pooled QueryRow runs in its own implicit transaction and cannot, which is why these seeds
+// stopped working once the guards landed -- and why nobody noticed, the suite being DSN-gated.
+// execGuarded is scan1Guarded for statements that return nothing.
+func execGuarded(t *testing.T, db *pgxpool.Pool, family, sql string, args ...any) error {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, family); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, sql, args...); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func scan1Guarded(t *testing.T, db *pgxpool.Pool, family, sql string, args ...any) string {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation($1)`, family); err != nil {
+		t.Fatalf("seed open %s: %v", family, err)
+	}
+	var id string
+	if err := tx.QueryRow(ctx, sql, args...).Scan(&id); err != nil {
+		t.Fatalf("seed scan (%s): %v", family, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed commit: %v", err)
+	}
+	return id
+}
+
 func addAuthContext(t *testing.T, db *pgxpool.Pool, accountID string) (deviceID, authCtxID string) {
 	t.Helper()
 	i := nextSeq()
 	deviceID = scan1(t, db, `INSERT INTO iam_v2.devices (tenant_id,site_id,appliance_id,mac) VALUES ($1,$2,$3::uuid,$4) RETURNING id::text`,
 		p2Tenant, p2Site, p2Appl, fmt.Sprintf("02:00:00:01:%02x:%02x", (i>>8)&0xff, i&0xff))
-	authCtxID = scan1(t, db, `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_account_id,device_id,guest_network_id,expires_at)
+	authCtxID = scan1Guarded(t, db, "auth_context", `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_account_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'ACCOUNT',$3::uuid,$4::uuid,$5::uuid, now()+interval '10 min') RETURNING id::text`,
 		p2Tenant, p2Site, accountID, deviceID, p2GN)
 	return
@@ -71,7 +118,7 @@ func newPrincipalChain(t *testing.T, db *pgxpool.Pool) (principalID, deviceID, a
 	principalID = scan1(t, db, `INSERT INTO iam_v2.guest_principals (tenant_id,display_name) VALUES ($1,$2) RETURNING id::text`, p2Tenant, fmt.Sprintf("guest-%d", i))
 	deviceID = scan1(t, db, `INSERT INTO iam_v2.devices (tenant_id,site_id,appliance_id,mac) VALUES ($1,$2,$3::uuid,$4) RETURNING id::text`,
 		p2Tenant, p2Site, p2Appl, fmt.Sprintf("02:00:00:02:%02x:%02x", (i>>8)&0xff, i&0xff))
-	authCtxID = scan1(t, db, `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_principal_id,device_id,guest_network_id,expires_at)
+	authCtxID = scan1Guarded(t, db, "auth_context", `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,guest_principal_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'OTP',$3::uuid,$4::uuid,$5::uuid, now()+interval '10 min') RETURNING id::text`,
 		p2Tenant, p2Site, principalID, deviceID, p2GN)
 	return
@@ -88,7 +135,7 @@ func newVoucherChain(t *testing.T, db *pgxpool.Pool, pkgRevID string) (voucherID
 		p2Tenant, p2Site, pkgRevID, fmt.Appendf(nil, "hmac-%d", i), gen)
 	deviceID = scan1(t, db, `INSERT INTO iam_v2.devices (tenant_id,site_id,appliance_id,mac) VALUES ($1,$2,$3::uuid,$4) RETURNING id::text`,
 		p2Tenant, p2Site, p2Appl, fmt.Sprintf("02:00:00:03:%02x:%02x", (i>>8)&0xff, i&0xff))
-	authCtxID = scan1(t, db, `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,voucher_id,device_id,guest_network_id,expires_at)
+	authCtxID = scan1Guarded(t, db, "auth_context", `INSERT INTO iam_v2.auth_contexts (tenant_id,site_id,method,voucher_id,device_id,guest_network_id,expires_at)
 		VALUES ($1,$2,'VOUCHER',$3::uuid,$4::uuid,$5::uuid, now()+interval '10 min') RETURNING id::text`,
 		p2Tenant, p2Site, voucherID, deviceID, p2GN)
 	return
@@ -176,8 +223,10 @@ func TestC7OfferQuoteImmutable(t *testing.T) {
 			t.Fatalf("mutation must be rejected: %s", m)
 		}
 	}
-	// the ONLY legal update: consume once (NULL -> timestamp).
-	if _, err := db.Exec(ctx, `UPDATE iam_v2.offer_quotes SET consumed_at=now() WHERE id=$1`, q.QuoteID); err != nil {
+	// the ONLY legal update: consume once (NULL -> timestamp). It is still a commerce_intent write, so it
+	// needs the scope open -- being the one permitted mutation does not exempt it from the family guard.
+	if err := execGuarded(t, db, "commerce_intent",
+		`UPDATE iam_v2.offer_quotes SET consumed_at=now() WHERE id=$1`, q.QuoteID); err != nil {
 		t.Fatalf("one-time consume must be allowed: %v", err)
 	}
 	// re-consume / clear / mutate-after-consume all rejected.
@@ -374,7 +423,7 @@ func TestC2TamperedQuoteRejected(t *testing.T) {
 		{"taxed", `price_minor,currency,currency_exponent,tax_code,tax_amount_minor`, []any{int64(0), "USD", 2, "VAT", int64(5)}},
 	} {
 		dev, ac := addAuthContext(t, db, s.accountID)
-		qid := scan1(t, db, `INSERT INTO iam_v2.offer_quotes
+		qid := scan1Guarded(t, db, "commerce_intent", `INSERT INTO iam_v2.offer_quotes
 			(tenant_id,site_id,auth_context_id,package_revision_id,grant_snapshot,expires_at,`+bad.cols+`)
 			VALUES ($1,$2,$3,$4,$5,now()+interval '5 min',`+phArgs(6, len(bad.vals))+`) RETURNING id::text`,
 			append([]any{p2Tenant, p2Site, ac, s.pkgRevID, snap.Canonical()}, bad.vals...)...)

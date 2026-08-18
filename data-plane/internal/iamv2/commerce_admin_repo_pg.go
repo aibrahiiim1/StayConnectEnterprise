@@ -238,6 +238,25 @@ func (r *PgCommerceAdminRepository) ListPurchases(ctx context.Context, tenantID,
 type pgCommerceAdminTx struct{ tx pgx.Tx }
 
 func (t *pgCommerceAdminTx) UpsertPackage(ctx context.Context, tenantID, siteID, code string) (string, error) {
+	// D32: the operator publisher may not reach a SYSTEM package, including by CODE COLLISION.
+	//
+	// UpsertPackage is an upsert on (tenant, site, code). Publishing a package whose code happens to be the
+	// reserved system grace code would land ON the system row and republish it as an operator package -- the
+	// one door left open after the catalogue was hidden and activation was protected. The database's
+	// reserved-code trigger guards only the EMERGENCY catalog codes, so this one is enforced here.
+	if code == systemGraceCode || code == systemGracePlanCode {
+		return "", &Error{Code: ErrInvalidInput, Msg: "reserved system grace code is not operator-publishable"}
+	}
+	var existingSystem bool
+	if err := t.tx.QueryRow(ctx,
+		`SELECT COALESCE((SELECT is_system FROM iam_v2.internet_packages
+		                   WHERE tenant_id=$1 AND site_id=$2 AND code=$3), false)`,
+		tenantID, siteID, code).Scan(&existingSystem); err != nil {
+		return "", err
+	}
+	if existingSystem {
+		return "", &Error{Code: ErrInvalidInput, Msg: "system package is not operator-publishable"}
+	}
 	var id string
 	err := t.tx.QueryRow(ctx,
 		`INSERT INTO iam_v2.internet_packages (tenant_id, site_id, code, active)
@@ -326,6 +345,11 @@ func (t *pgCommerceAdminTx) SetPackageActive(ctx context.Context, tenantID, site
 // ---- service plans ----
 
 func (t *pgCommerceAdminTx) UpsertPlan(ctx context.Context, tenantID, siteID, code string) (string, error) {
+	// D32: the derived system grace PLAN is not operator-publishable either. A package is only as trustworthy
+	// as the plan revision it pins, so leaving the plan reachable reopens the same door one level down.
+	if code == systemGracePlanCode || code == systemGraceCode {
+		return "", &Error{Code: ErrInvalidInput, Msg: "reserved system grace code is not operator-publishable"}
+	}
 	var id string
 	err := t.tx.QueryRow(ctx,
 		`INSERT INTO iam_v2.service_plans (tenant_id, site_id, code, enabled)

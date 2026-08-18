@@ -125,3 +125,118 @@ func TestSystemGracePackageActivationIsNotOperatorControlled(t *testing.T) {
 		t.Fatalf("an ordinary package must remain operator-controlled: %v", err)
 	}
 }
+
+// D32 END TO END: policy in, a grace package the REAL checkout validator accepts out.
+//
+// The property that matters is not "a package was created" but "the package the conversion will judge at a
+// departure is the one the operator's policy describes". So this publishes a policy and then asks
+// iam_v2.grace_package_mismatch_reason -- the same function ConvertAtCheckout uses -- for a verdict.
+func TestSystemGracePolicyProducesAPackageTheCheckoutValidatorAccepts(t *testing.T) {
+	db := p2DB(t)
+	ctx := context.Background()
+	repo := NewPgCommerceAdminRepository(db)
+	// A NULL-tenant operator: publish_checkout_grace_policy accepts an actor whose tenant_id IS NULL or
+	// matches, and the scratch database has no public.tenants row for p2Tenant to point a FK at.
+	actor := scan1(t, db, `INSERT INTO public.operators (id,email,password_hash,status,tenant_id)
+		VALUES (gen_random_uuid(),'grace-'||substr(md5(random()::text),1,8)||'@dev.local','x','active',NULL)
+		RETURNING id::text`)
+
+	pol := SystemGracePolicy{DurationSeconds: 1800, DownKbps: 4000, UpKbps: 1500,
+		DataQuotaBytes: 524288000, DeviceLimit: 2, DeviceLimitPolicy: "REJECT_NEW_DEVICE",
+		EligibilityWindowSeconds: 3600}
+	v, publishedRev, err := PublishSystemGracePolicy(ctx, repo, GracePublishRequest{
+		TenantID: p2Tenant, SiteID: p2Site, Policy: pol,
+		ActorOperatorID: actor, ReasonCode: "DEV_TRIAL_D32", ExpectedVersion: 0})
+	if err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if v < 1 {
+		t.Fatalf("publication returned version %d", v)
+	}
+
+	// THE REAL VALIDATOR. A non-NULL reason is the conversion's own verdict that this policy would fall back
+	// to Emergency Grace at every departure.
+	var pkgRev string
+	var reason *string
+	_ = publishedRev
+	if err := db.QueryRow(ctx, `
+	    SELECT grace_package_revision_id::text,
+	           iam_v2.grace_package_mismatch_reason(tenant_id, site_id, grace_package_revision_id,
+	             grace_duration_seconds, grace_down_kbps, grace_up_kbps, grace_data_quota_bytes,
+	             grace_device_limit, grace_device_limit_policy)
+	      FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2`,
+		p2Tenant, p2Site).Scan(&pkgRev, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if reason != nil {
+		t.Fatalf("the published policy would be REJECTED at checkout: %s", *reason)
+	}
+	// THE AUDIT ROW IS NOT ASSERTED HERE, AND THAT IS A FIXTURE LIMIT RATHER THAN A GAP IN THE BOUNDARY.
+	//
+	// p2DB truncates iam_v2.internet_package_revisions CASCADE, and
+	// iam_v2.checkout_grace_policy_publications carries an FK to grace_package_revision_id -- so the shared
+	// fixture cascade-deletes the very ledger this test would read. Asserting it here would be asserting the
+	// fixture's teardown order, not the product.
+	//
+	// What DOES prove the canonical boundary was used is the optimistic-version check below:
+	// publish_checkout_grace_config (the raw writer) takes no version parameter at all, so a stale version
+	// being REFUSED can only have come from publish_checkout_grace_policy. The actor and the bounded reason
+	// code are enforced by that same function and by nothing else in this path.
+
+	// OPTIMISTIC CONCURRENCY: republishing against a stale version must be refused, not silently overwrite.
+	if _, _, err := PublishSystemGracePolicy(ctx, repo, GracePublishRequest{
+		TenantID: p2Tenant, SiteID: p2Site, Policy: pol,
+		ActorOperatorID: actor, ReasonCode: "DEV_TRIAL_D32", ExpectedVersion: 0}); err == nil {
+		t.Fatal("a stale expected_version was accepted: two operators could silently overwrite each other")
+	}
+
+	// A CHANGED policy must produce a package that still matches -- the derivation is not a one-off.
+	pol2 := pol
+	pol2.DownKbps = 8000
+	pol2.DurationSeconds = 900
+	if _, _, err := PublishSystemGracePolicy(ctx, repo, GracePublishRequest{
+		TenantID: p2Tenant, SiteID: p2Site, Policy: pol2,
+		ActorOperatorID: actor, ReasonCode: "DEV_TRIAL_D32", ExpectedVersion: v}); err != nil {
+		t.Fatalf("republish with a changed policy: %v", err)
+	}
+	if err := db.QueryRow(ctx, `
+	    SELECT iam_v2.grace_package_mismatch_reason(tenant_id, site_id, grace_package_revision_id,
+	             grace_duration_seconds, grace_down_kbps, grace_up_kbps, grace_data_quota_bytes,
+	             grace_device_limit, grace_device_limit_policy)
+	      FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2`,
+		p2Tenant, p2Site).Scan(&reason); err != nil {
+		t.Fatal(err)
+	}
+	if reason != nil {
+		t.Fatalf("the changed policy would be REJECTED at checkout: %s", *reason)
+	}
+}
+
+// The reserved system grace codes must be unreachable from the generic operator publisher, including by
+// code collision -- the door left open once the catalogue was hidden and activation protected.
+func TestOperatorCannotPublishOntoTheSystemGraceCodes(t *testing.T) {
+	db := p2DB(t)
+	ctx := context.Background()
+	a := newAdmin(t, db)
+	planRev := seedPlanOnly(t, db)
+	for _, code := range []string{"__system_checkout_grace", "__system_checkout_grace_plan"} {
+		res, err := a.PublishRevision(ctx, PackagePublishSpec{
+			TenantID: p2Tenant, SiteID: p2Site, PackageCode: code,
+			ServicePlanRevisionID: planRev,
+			DurationPolicy:        map[string]any{"end_mode": "MANUAL_END"},
+			GrantTiers:            []GrantTier{{Order: 1, Value: map[string]any{}}},
+		})
+		if err == nil && res.Reason == "published" {
+			t.Fatalf("an operator published onto the reserved system grace code %q", code)
+		}
+	}
+	// And an ordinary code still works, so the rule is about the reserved namespace and not a blanket freeze.
+	if res, err := a.PublishRevision(ctx, PackagePublishSpec{
+		TenantID: p2Tenant, SiteID: p2Site, PackageCode: "ordinary-pkg",
+		ServicePlanRevisionID: planRev,
+		DurationPolicy:        map[string]any{"end_mode": "MANUAL_END"},
+		GrantTiers:            []GrantTier{{Order: 1, Value: map[string]any{}}},
+	}); err != nil || res.Reason != "published" {
+		t.Fatalf("an ordinary package must remain publishable: %+v %v", res, err)
+	}
+}
