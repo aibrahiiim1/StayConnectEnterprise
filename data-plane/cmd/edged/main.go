@@ -86,6 +86,12 @@ type server struct {
 	// the master flag is OFF (zero Phase-2 SQL); commerceCfg gates whether the admin routes are mounted.
 	commerce    *iamv2.CommerceAdmin
 	commerceCfg iamv2.CommerceConfig
+	// iamv2Cfg is the IAM-v2 authentication config. edged needs it because credential ISSUANCE must land
+	// in whichever domain will later AUTHENTICATE the credential: with IAM-v2 as the ACCOUNT authority,
+	// an account issued into the legacy table can never be logged in with. Nothing in the runtime issued
+	// IAM-v2 credentials at all before this -- the authentication domain existed and the issuance side of
+	// it did not, so iam_v2.guest_access_accounts sat at 0 rows on an appliance with ACCOUNT enabled.
+	iamv2Cfg iamv2.Config
 
 	// Phase 3 DARK Hotel-Admin PMS/Stay surface. pmsCfg gates whether ANY Phase-3 route is mounted; while
 	// the master flag is OFF the routes do not exist at all and edged issues zero Phase-3 SQL.
@@ -238,6 +244,14 @@ func main() {
 	applyAggregateTimeCapability(commAdmin, p6cfg)
 	s.commerce = commAdmin
 	s.commerceCfg = commCfg
+	// Fail closed on an incoherent IAM-v2 auth config: LoadConfigFromEnv already rejects a per-method flag
+	// set while the master flag is off, and edged must not run with a config scd would refuse.
+	iamAuthCfg, iamAuthErr := iamv2.LoadConfigFromEnv(os.Getenv, true)
+	if iamAuthErr != nil {
+		slog.Error("iamv2 auth config invalid", "err", iamAuthErr)
+		os.Exit(1)
+	}
+	s.iamv2Cfg = iamAuthCfg
 	slog.Info("phase2 dark commerce admin constructed", "flags", commCfg.SafeFlagSummary())
 
 	// Phase 3 DARK Hotel-Admin PMS/Stay surface. All flags default OFF and a child flag set while the master

@@ -65,8 +65,22 @@ GRANT INSERT, UPDATE ON iam_v2.site_checkout_grace_config TO svc_edged;
 
 -- NOT granted, on purpose, and each absence is load-bearing:
 --   * DELETE on anything -- no admin path deletes commerce rows;
---   * any privilege on iam_v2 identity/credential tables (guest accounts,
---     vouchers, sessions, devices) -- the admin commerce surface never reads
---     guest secrets, and the 500 it would raise if it tried is the boundary
---     reporting itself;
+--   * any privilege on iam_v2 vouchers, sessions or devices -- the admin
+--     commerce surface never reads guest secrets or session state, and the 500
+--     it would raise if it tried is the boundary reporting itself.
+--     (guest_access_accounts is the ONE exception, granted at the end of this
+--     file for credential ISSUANCE only, and INSERT/SELECT only -- see there;)
 --   * any privilege on the Phase-4 financial ledger tables.
+
+-- ---------------------------------------------------------------------------
+-- IAM-v2 GUEST-ACCOUNT ISSUANCE (added when the issuance gap was found)
+--
+-- edged had no IAM-v2 issuance path at all, so an appliance with ACCOUNT
+-- enabled authenticated against iam_v2.guest_access_accounts while nothing in
+-- the runtime could ever put a row there. With issuance switched to IAM-v2,
+-- edged needs exactly this and nothing more.
+--
+-- INSERT and SELECT only: no UPDATE and no DELETE. Editing or removing a
+-- credential is a separate admin capability and must be granted deliberately
+-- when it is implemented, not acquired as a side effect of being able to create.
+GRANT INSERT, SELECT ON iam_v2.guest_access_accounts TO svc_edged;

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net"
@@ -54,12 +56,44 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 		}
 		iamRepo = iamv2.NewPgRepository(pool)
 	}
-	auth, err := iamv2.New(iamCfg, iamRepo, iamv2.NopObserver{})
+	// THE VOUCHER BLIND-INDEX HMAC.
+	//
+	// iam_v2.vouchers stores no plaintext code: it holds code_hmac, a blind index the authenticator
+	// recomputes from the submitted code to find the row. Without this option the Authenticator returns
+	// "no voucher HMAC configured" for every VOUCHER attempt -- so the method was enabled by flag and
+	// structurally incapable of succeeding, the second half of the same wiring defect.
+	//
+	// The key is appliance-local and LOAD-ONLY at runtime, exactly like the OTP ring and the durable
+	// throttle key above: keybootstrap creates it at deploy, scd never mints one. An absent key with the
+	// method enabled is a fail-closed configuration error, not a reason to fall back to legacy.
+	var authOpts []iamv2.Option
+	if iamCfg.Enabled(iamv2.MethodVoucher) {
+		vkPath := filepath.Join(c.SecretsDir, "voucher_hmac.key")
+		vkey, err := localkeys.LoadExistingKey(vkPath)
+		if err != nil {
+			return fmt.Errorf("iamv2 VOUCHER is enabled but its blind-index key is unavailable at %s "+
+				"(run keybootstrap at deploy): %w", vkPath, err)
+		}
+		authOpts = append(authOpts, iamv2.WithVoucherHMAC(func(_ context.Context, tenantID, siteID, code string) ([]byte, error) {
+			// Domain-separated per (tenant, site) so the same code in two sites never shares an index.
+			m := hmac.New(sha256.New, vkey)
+			m.Write([]byte(tenantID))
+			m.Write([]byte{0})
+			m.Write([]byte(siteID))
+			m.Write([]byte{0})
+			m.Write([]byte(code))
+			return m.Sum(nil), nil
+		}))
+	}
+	auth, err := iamv2.New(iamCfg, iamRepo, iamv2.NopObserver{}, authOpts...)
 	if err != nil {
 		return fmt.Errorf("iamv2 new: %w", err)
 	}
 	s.iamv2Auth = auth
-	log.Info("iamv2 dark authenticator constructed", "flags", iamCfg.SafeFlagSummary())
+	// KEEP THE CONFIG. The guest entry points must decide authority from the same value this Authenticator
+	// was gated on; reading the environment a second time, or keeping a separate copy, is how the two drift.
+	s.iamv2Cfg = iamCfg
+	log.Info("iamv2 authenticator constructed", "flags", iamCfg.SafeFlagSummary())
 
 	// --- dark Phase-2 commerce (always constructed, inert unless env flags are set) ---
 	commCfg, err := iamv2.LoadCommerceConfigFromEnv(os.Getenv)

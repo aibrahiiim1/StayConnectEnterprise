@@ -194,6 +194,12 @@ type server struct {
 	authThrottle *throttle.Store
 	otpRing      *otpkey.Ring
 	iamv2Auth    *iamv2.Authenticator
+	// iamv2Cfg is the SAME config iamv2Auth was constructed from. The guest entry points consult it to
+	// decide who the authority is, so the switch at the entry point and the Authenticator's own gate can
+	// never disagree -- a disagreement is what let "flag ON" coexist with "legacy served the request".
+	iamv2Cfg iamv2.Config
+	// applianceID is part of IAM-v2 device identity (tenant, site, appliance, MAC).
+	applianceID string
 
 	// Phase 2 dark commerce (commercial packages). commerce is ALWAYS constructed but holds a nil
 	// repository while the master flag is OFF, so it issues zero Phase-2 SQL; commerceCfg gates whether
@@ -366,6 +372,18 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
 		return
 	}
+	// ---- AUTHORITY SWITCH ------------------------------------------------------------------------
+	// When IAM-v2 is the configured authority for VOUCHER, it serves the request and the legacy voucher
+	// and session pipelines below are not reached at all. There is no fallback: if IAM-v2 cannot serve,
+	// authorizeViaIAMv2 refuses. Falling back is precisely the defect -- it produced a working guest, a
+	// 200 response and a public.sessions row while iam_v2 stayed empty.
+	if s.iamv2MethodEnabled(iamv2.MethodVoucher) {
+		if s.authorizeViaIAMv2(w, r, iamv2.MethodVoucher,
+			iamv2.Request{Secret: req.Voucher, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip) {
+			return
+		}
+	}
+
 	red, err := s.vou.Validate(r.Context(), s.tenID, req.Voucher)
 	if err != nil {
 		switch {
@@ -660,6 +678,7 @@ func main() {
 		db:           pool,
 		tenID:        c.TenantID,
 		siteID:       c.SiteID,
+		applianceID:  c.ApplianceID,
 		applID:       c.ApplianceID,
 		ctrlBase:     c.CtrlAPIBase,
 		natsURL:      c.NATSURL,

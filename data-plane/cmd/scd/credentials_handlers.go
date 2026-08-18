@@ -22,6 +22,8 @@ import (
 
 	"github.com/stayconnect/enterprise/data-plane/internal/session"
 	"github.com/stayconnect/enterprise/data-plane/internal/voucher"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 const (
@@ -90,6 +92,22 @@ func (s *server) authorizeGuestAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	username := strings.TrimSpace(req.Username)
+
+	// ---- AUTHORITY SWITCH ------------------------------------------------------------------------
+	// Same contract as the voucher entry point: when IAM-v2 is the configured authority for ACCOUNT it
+	// serves the request, and the legacy guest-account and session pipelines below are not reached.
+	// No fallback -- see iamv2_guest_authority.go for why a fallback is the bug rather than a safety net.
+	//
+	// The throttle below stays on the LEGACY path only. IAM-v2's own adapter owns account lockout
+	// (failed_attempts / locked_until on iam_v2.guest_access_accounts), and running both would charge a
+	// single attempt twice against two different counters.
+	if s.iamv2MethodEnabled(iamv2.MethodAccount) {
+		if s.authorizeViaIAMv2(w, r, iamv2.MethodAccount,
+			iamv2.Request{Username: username, Secret: req.Password,
+				Device: iamv2.DeviceContext{MAC: mac.String()}}, ip) {
+			return
+		}
+	}
 
 	// Layered brute-force throttle (endpoint-wide + username/IP + username/MAC),
 	// applied before the account lookup so it never leaks whether a username

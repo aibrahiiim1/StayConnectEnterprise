@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 type edgeGuestAccount struct {
@@ -271,6 +273,21 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 	if sess := sessFrom(r.Context()); sess != nil {
 		createdBy = sess.OperatorID
 	}
+	// ---- ISSUE INTO THE DOMAIN THAT WILL AUTHENTICATE ---------------------------------------------
+	// A credential must be created in whichever IAM will later be asked to verify it. With IAM-v2 as the
+	// configured ACCOUNT authority, an account written to the legacy table can never be logged in with:
+	// scd looks it up in iam_v2.guest_access_accounts and finds nothing. That was the state of this
+	// appliance -- ACCOUNT enabled, and iam_v2.guest_access_accounts at 0 rows, because the runtime had an
+	// IAM-v2 authentication domain and no IAM-v2 issuance path anywhere.
+	//
+	// This is a SWITCH, not a dual write. Writing both would recreate the split-authority problem in the
+	// issuance direction and leave two credentials that can drift apart.
+	if s.iamv2Cfg.Enabled(iamv2.MethodAccount) {
+		s.createGuestAccountIAMv2(w, r, ctx, in.Username, hash, in.DisplayName, in.Notes, enabled,
+			in.ValidFrom, in.ValidUntil, in.Password, generated)
+		return
+	}
+
 	var a edgeGuestAccount
 	err = scanGuestAccount(s.db.QueryRow(ctx, `
         INSERT INTO guest_accounts (tenant_id, site_id, template_id, username, password_hash,
