@@ -1,7 +1,7 @@
 {
   "transition_id": "T0070",
   "seq": 70,
-  "timestamp": "2026-08-18T18:40:00Z",
+  "timestamp": "2026-08-18T18:30:00Z",
   "record_type": "D32_PRODUCT_PATH_WIRED_AND_LEGACY_GRACE_WRITERS_RETIRED",
   "previous_state": {
     "phase": "7",
