@@ -3,7 +3,12 @@
 # only on a protected unix socket. NEVER on TCP.
 [Unit]
 Description=StayConnect Network Daemon (privileged, guest networks + DHCP)
-After=network-online.target docker.service postgresql.service kea-dhcp4-server.service
+# NOTE: there is deliberately no postgresql.service here. There is no such unit
+# on this appliance -- Postgres runs in the stayconnect-pg container -- and
+# systemd silently ignores After= on a non-existent unit, so naming it only
+# looked like ordering. docker.service orders after the DAEMON, not after the
+# database inside the container, so the real gate is the ExecStartPre below.
+After=network-online.target docker.service kea-dhcp4-server.service
 Wants=network-online.target docker.service
 # Never permanently give up: netd owns the guest networks/DHCP/nftables, so it
 # must always recover automatically after a crash or a dependency delay.
@@ -11,6 +16,11 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+# netd connects to the site DB during startup and exits 1 if that fails, so it
+# is the one daemon the cold-boot docker-proxy race actually crash-loops. The
+# gate always exits 0 (see the script) -- worst case it hands back to
+# Restart=always, exactly today's behaviour, never worse.
+ExecStartPre=/opt/stayconnect/bin/wait-for-site-db.sh
 ExecStart=/opt/stayconnect/bin/netd
 EnvironmentFile=-/etc/stayconnect/netd.env
 User=root

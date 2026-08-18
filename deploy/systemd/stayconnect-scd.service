@@ -3,7 +3,11 @@ Description=StayConnect Session Controller Daemon (scd)
 # docker.service: the site DB (stayconnect-pg) is a container, so order after
 # Docker at cold boot. scd itself uses a lazy pgx pool (no startup Ping), so a
 # slow DB does not crash it — this is ordering, not a hard requirement.
-After=network-online.target docker.service postgresql.service nftables.service
+# No postgresql.service: it does not exist on this appliance (Postgres is the
+# stayconnect-pg container) and systemd ignores After= on a missing unit, so it
+# was never real ordering. scd's pgx pool is lazy, so it tolerates a slow DB
+# anyway -- unlike netd, which is why only netd needed a readiness gate.
+After=network-online.target docker.service nftables.service
 # portald + acctd now Wants= scd (soft) rather than Require=, so they are not
 # stopped when scd stops; Wants= here still pulls them back up when scd starts,
 # so a scd stop/start (re-enrollment, assignment-driven restart, redeploy)
@@ -17,6 +21,15 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 EnvironmentFile=/etc/stayconnect/scd.env
+# FAIL CLOSED before the binary runs. A PMS-dependent guest surface enabled
+# without its Phase-3 auth arm makes scd exit during startup, and because
+# StartLimitIntervalSec=0 systemd then restarts it forever while
+# `systemctl is-active` still answers "active" -- 596 restart jobs on the
+# 2026-08-16 boot of this appliance before anyone looked. Refusing here means
+# the scd binary never executes on such a config and every cycle logs one
+# explicit REFUSED line naming the offending flag, instead of an opaque exit.
+# (The primary gate is the deploy-time check; this is the boot-time backstop.)
+ExecStartPre=/opt/stayconnect/bin/check-phase6-guest-dependency.sh /etc/stayconnect
 ExecStart=/opt/stayconnect/bin/scd
 # Always recover. scd normally re-execs in place (same PID), so this only fires
 # on an actual exit/crash.
