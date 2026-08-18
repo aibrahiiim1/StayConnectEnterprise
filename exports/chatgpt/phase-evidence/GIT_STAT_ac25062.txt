@@ -1,4 +1,0 @@
-commit ac25062a524ef8ede7569bae4f7bfb11da1208ec
-Date:   Wed Aug 19 01:28:38 2026 +0300
-
-    Stamp T0071 before the commit that introduced it
