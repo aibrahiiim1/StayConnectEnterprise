@@ -35,10 +35,21 @@ func (s *server) startUpdateAgent(ctx context.Context, nc *nats.Conn, applianceI
 		return nil
 	}
 	pub := ed25519.PublicKey(raw)
+	// The table is created by migrations, not here. This used to run CREATE TABLE IF NOT EXISTS on every
+	// start, which failed with "permission denied for schema public" on every start too -- svc_scd has no
+	// CREATE on public, deliberately. The error was discarded, so nothing broke and nothing surfaced it
+	// either: a PostgreSQL log line once per service start, forever, for a table that already exists.
+	//
+	// The fix is to stop asking, not to grant a data-plane service DDL rights on the public schema. If the
+	// table is genuinely missing the update agent should be disabled rather than self-heal the schema, so
+	// its absence is checked and reported instead.
 	if s.db != nil {
-		_, _ = s.db.Exec(ctx, `CREATE TABLE IF NOT EXISTS edge_installed_updates (
-            update_id UUID PRIMARY KEY, component TEXT, version TEXT, status TEXT,
-            installed_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
+		var present bool
+		if err := s.db.QueryRow(ctx,
+			`SELECT to_regclass('public.edge_installed_updates') IS NOT NULL`).Scan(&present); err != nil || !present {
+			slog.Warn("updates: edge_installed_updates missing — update agent disabled (run migrations)")
+			return nil
+		}
 	}
 	sub, err := nc.Subscribe("appliances."+applianceID+".updates", func(m *nats.Msg) {
 		s.handleUpdate(ctx, nc, pub, applianceID, m.Data)

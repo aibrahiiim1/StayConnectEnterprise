@@ -26,11 +26,17 @@ func (s *server) startCommandHandler(ctx context.Context, nc *nats.Conn, applian
 		return nil
 	}
 	pub := ed25519.PublicKey(raw)
-	// Exactly-once ledger in the SITE DB (survives reboot).
+	// Exactly-once ledger in the SITE DB (survives reboot). Created by migrations, not here -- same reason as
+	// the update agent: this ran CREATE TABLE on every start and failed on every start with "permission
+	// denied for schema public", discarded, forever. A command ledger that silently did not exist would break
+	// exactly-once execution, so its absence disables the command channel rather than being papered over.
 	if s.db != nil {
-		_, _ = s.db.Exec(ctx, `CREATE TABLE IF NOT EXISTS edge_executed_commands (
-            command_id UUID PRIMARY KEY, command_type TEXT, status TEXT,
-            result JSONB, completed_at TIMESTAMPTZ NOT NULL DEFAULT now())`)
+		var present bool
+		if err := s.db.QueryRow(ctx,
+			`SELECT to_regclass('public.edge_executed_commands') IS NOT NULL`).Scan(&present); err != nil || !present {
+			slog.Warn("commands: edge_executed_commands missing — command channel disabled (run migrations)")
+			return nil
+		}
 	}
 	sub, err := nc.Subscribe("appliances."+applianceID+".commands", func(m *nats.Msg) {
 		s.handleCommand(ctx, nc, pub, applianceID, m.Data)
