@@ -402,14 +402,18 @@ func (t *pgCommerceAdminTx) UpsertGraceConfig(ctx context.Context, tenantID, sit
 	if execErr != nil {
 		return execErr
 	}
-	// The free-form remainder is stored by the same publish call's row; anything the operator supplied that is
-	// not a typed grace field travels in config. When there is nothing left over this is a no-op.
-	if len(g.rest) > 0 {
-		if _, err := t.tx.Exec(ctx,
-			`UPDATE iam_v2.site_checkout_grace_config SET config = $3::jsonb
-			  WHERE tenant_id = $1 AND site_id = $2`, tenantID, siteID, cfg); err != nil {
-			return err
-		}
+	// The free-form remainder is written UNCONDITIONALLY, including when it is empty.
+	//
+	// Skipping the write when there is nothing left over looks like a harmless optimisation and is a silent
+	// data-retention bug: an operator who deletes the last free-form key sends a config with no remainder, the
+	// UPDATE is skipped, and the OLD keys stay in the row. The read then returns them, the UI shows keys the
+	// operator just deleted, and a later save writes them back -- a value that cannot be cleared, only
+	// overwritten. Save -> read -> save has to close for the empty case too, which is exactly the case an
+	// existence check omits.
+	if _, err := t.tx.Exec(ctx,
+		`UPDATE iam_v2.site_checkout_grace_config SET config = $3::jsonb
+		  WHERE tenant_id = $1 AND site_id = $2`, tenantID, siteID, cfg); err != nil {
+		return err
 	}
 	return nil
 }

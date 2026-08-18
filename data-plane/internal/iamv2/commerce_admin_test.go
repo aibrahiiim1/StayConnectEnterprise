@@ -3,6 +3,7 @@ package iamv2
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -360,5 +361,62 @@ func TestCommerceAdminGraceRejectsNonSystemPackage(t *testing.T) {
 	}
 	if res.Reason != "grace_package_not_system" {
 		t.Fatalf("a non-system CHECKOUT_GRACE package was accepted as the grace fallback: %+v", res)
+	}
+}
+
+// CLEARING THE LAST FREE-FORM KEY MUST ACTUALLY CLEAR IT.
+//
+// Writing the config jsonb only when the remainder was non-empty looked like an optimisation and was a
+// retention bug: deleting the last free-form key skipped the UPDATE, so the old keys stayed in the row, the
+// read returned them, and the next save wrote them back. The value could be overwritten but never removed.
+// This is the empty case the existence check omitted, which is the one that matters.
+func TestCommerceAdminGraceFreeFormClearsToEmpty(t *testing.T) {
+	db := p2DB(t)
+	planRev := seedPlanOnly(t, db)
+	a := newAdmin(t, db)
+	ctx := context.Background()
+	pkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active,is_system) VALUES ($1,$2,'GRACECLR',true,true) RETURNING id::text`, p2Tenant, p2Site)
+	rev := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy)
+		VALUES ($1,$2,$3,1,$4,'CHECKOUT_GRACE',0,'USD',2,'{NOT_REQUIRED}','{"end_mode":"MANUAL_END"}') RETURNING id::text`,
+		p2Tenant, p2Site, pkg, planRev)
+	if _, err := db.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2`, rev, pkg); err != nil {
+		t.Fatal(err)
+	}
+
+	// Save WITH a free-form key, confirm it is stored and readable.
+	if res, err := a.SetGrace(ctx, p2Tenant, p2Site, rev,
+		map[string]any{"operator_note": "front desk", "eligibility_window_seconds": 7200}); err != nil || res.Reason != "ok" {
+		t.Fatalf("save with note: %+v %v", res, err)
+	}
+	got, _, err := a.GetGrace(ctx, p2Tenant, p2Site)
+	if err != nil || got.Config["operator_note"] != "front desk" {
+		t.Fatalf("note not stored: %+v %v", got.Config, err)
+	}
+
+	// Now DELETE the last free-form key, keeping a typed field so the save is otherwise identical.
+	if res, err := a.SetGrace(ctx, p2Tenant, p2Site, rev,
+		map[string]any{"eligibility_window_seconds": 7200}); err != nil || res.Reason != "ok" {
+		t.Fatalf("save without note: %+v %v", res, err)
+	}
+	got, _, err = a.GetGrace(ctx, p2Tenant, p2Site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, still := got.Config["operator_note"]; still {
+		t.Fatal("the deleted free-form key survived the save: it can be overwritten but never cleared")
+	}
+	// The typed field must be untouched by the clear.
+	if got.Config["eligibility_window_seconds"] == nil {
+		t.Fatal("clearing the free-form remainder also dropped the typed field")
+	}
+	// And the raw column must genuinely be an empty object, not stale content the read happens to hide.
+	var raw string
+	if err := db.QueryRow(ctx, `SELECT config::text FROM iam_v2.site_checkout_grace_config
+		 WHERE tenant_id=$1 AND site_id=$2`, p2Tenant, p2Site).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(raw, "operator_note") {
+		t.Fatalf("config column still holds the cleared key: %s", raw)
 	}
 }
