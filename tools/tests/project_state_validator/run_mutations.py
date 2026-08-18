@@ -323,6 +323,35 @@ def both_status():
     return structural(), keyword()
 
 # mutation = (name, relpath, op) ; op = ("replace",[(find,repl),...]) | ("append", text)
+
+def _manifest_base_commit():
+    """The base commit the CURRENT phase's change-manifest was generated against.
+
+    M48 mutates that manifest's base so its path/status set stops matching git base..delivery_head. Pinning
+    the value made the case silently expire the first time the manifest was regenerated against a new base:
+    the search string matched nothing, the mutation became a no-op, and the suite aborted on fixture drift
+    without printing a [FAIL] line -- a log that simply stopped mid-matrix.
+
+    The phase is read from project-state exactly as tools/project-state.py picks the manifest, so this reads
+    the same file M48 mutates rather than whichever manifest sorts first.
+    """
+    import re as _re
+    import io as _io
+    import json as _json
+    try:
+        st = _json.load(_io.open(os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))
+        phase = str(st.get("current_phase", "")).strip()
+    except Exception:  # noqa: BLE001
+        phase = ""
+    path = os.path.join(ROOT, "docs", "manifests", "Phase%s-change-manifest.md" % phase)
+    if not phase or not os.path.exists(path):
+        return "NO-MANIFEST-BASE-COMMIT-FOUND"
+    txt = _io.open(path, encoding="utf-8").read()
+    m = _re.search(r"\*\*Base commit:\*\*\s*`([0-9a-f]{40})`", txt)
+    # A string that cannot appear, so a missing base reports drift rather than mutating something unrelated.
+    return m.group(1) if m else "NO-MANIFEST-BASE-COMMIT-FOUND"
+
+
 MUTATIONS = [
  ("M01 Phase 1A NOT_STARTED", "governance/project-state.json",
    ("json_set", [(["phases", "1A", "status"], "NOT_STARTED")])),
@@ -457,8 +486,13 @@ MUTATIONS = [
    ("append", "\n| `zz-fabricated-extra-path.md` | CREATED | `A` | other | OTHER | rollback REMOVES it | fabricated |\n")),
  ("M47 acceptance decision D13 removed from the register", "governance/decision-register.json",
    ("replace", [('"id": "D13"', '"id": "D13-DISABLED"')])),
+ # M48's anchor is DERIVED, not pinned. It used to hardcode the base commit that happened to be current when
+ # the case was written; the moment a delivery regenerated the manifest against a different base, the search
+ # string matched nothing, the mutation became a no-op, and the suite aborted on fixture drift WITHOUT
+ # printing a [FAIL] line -- a green-looking log that simply stopped at M47. Reading the base out of the
+ # manifest keeps the case testing what it is named for however often the manifest is regenerated.
  ("M48 manifest base repointed so its path/status set no longer equals git base..delivery_head", "docs/manifests/Phase7-change-manifest.md",
-   ("replace", [("9cb25b8afc6a4753d75148455c577228c0fbd67a", "a8c3b3caac6baf8ac41fa581fca5350c97219bb8")])),
+   ("replace", [(_manifest_base_commit(), "a8c3b3caac6baf8ac41fa581fca5350c97219bb8")])),
  # --- Phase-3 governance contradiction classes (D14/T0015; DARK; no financial posting; Phase 4 gated) ---
  ("M49 decision D14 removed while Phase 3 is IN_PROGRESS", "governance/decision-register.json",
    ("replace", [('"id": "D14"', '"id": "D14-DISABLED"')])),
