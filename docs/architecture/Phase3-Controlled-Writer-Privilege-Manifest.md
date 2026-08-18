@@ -63,7 +63,8 @@ public-schema rights**.
 | Operation | Eventual caller capability | Never callable by |
 |---|---|---|
 | `apply_entitlement_transition` | the Entitlement-lifecycle capability (Commerce/Checkout/expiry writer) | Hotel-Admin UI roles; `pmsd`; any read-only role |
-| `publish_checkout_grace_config` | Hotel-Admin **Grace-policy publication** capability only | `scd`, `portald`, `acctd`, `pmsd` |
+| `publish_checkout_grace_policy` | Hotel-Admin **Grace-policy publication** capability only — the canonical audited, versioned boundary and the only path the product uses (D32) | `scd`, `portald`, `acctd`, `pmsd` |
+| `publish_checkout_grace_config` | **nothing** — the raw writer is retired (D32). It still owns the `site_checkout_grace_config` trigger guard, so it remains part of the boundary, but EXECUTE is revoked from `svc_edged` and no code path calls it. It records no actor, reason, version or audit row, which is precisely why it is not a caller capability | every runtime role, including Hotel-Admin |
 | `bootstrap_emergency_grace` | **Deployment/System-admin capability only** | `scd`, `portald`, `acctd`, `pmsd`, **and all Hotel-Admin runtime roles** |
 | alert-action writer (when added) | Hotel-Admin alert-management capability (RBAC + step-up) | all service roles |
 | device authorization/deauthorization writer (when added) | the session/enforcement capability | Hotel-Admin UI roles |

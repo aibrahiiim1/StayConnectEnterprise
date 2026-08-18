@@ -136,6 +136,58 @@ The exposure existed only in the damaged scratch database, whose function had be
 grants. Recorded because it was checked rather than assumed, and because the Phase-6 foundation gate detecting
 it is the gate working.
 
+## D32 — the Hotel-Admin grace path, proven from HTTP to the checkout validator
+
+The policy-driven publication path was implemented before it was wired: `PUT /edge/v1/commercial-packages/grace`
+still called the raw writer, so in the running product a grace save recorded no actor, no reason code and no
+version, appended no audit row, and pinned a package the operator had chosen rather than one derived to satisfy
+`iam_v2.grace_package_mismatch_reason`. The guarantees existed in tests and not in the product.
+
+Verified on the DEVELOPMENT appliance (172.21.60.23, DB `stayconnect_site`) against the running `edged`:
+
+| Case | Result |
+|---|---|
+| `expected_version` omitted | `400 bad_request` — publication requires the version last read |
+| stale `expected_version` (1 behind) | `409 GRACE_VERSION_CONFLICT: current version is 1 (caller expected 0)` |
+| future `expected_version` (+7) | `409 GRACE_VERSION_CONFLICT` |
+| `grace_duration_seconds: 0` | `400 validation` — duration must be within 1..604800 |
+| `grace_device_limit_policy: ALLOW_ANY` | `400 validation` — only `REJECT_NEW_DEVICE` is implemented |
+| free-text `reason_code` | `400 validation` — bounded machine code `^[A-Z][A-Z0-9_]{0,63}$` required |
+| operator supplies `grace_package_revision_id` | `400 validation` — the field is retired; the system derives the package |
+| valid publish at the current version | `200` → `config_version` 1→2, derived revision returned |
+| the same request replayed | `409 GRACE_VERSION_CONFLICT` — the version moved |
+
+The published result satisfies the exact validator, and the boundary recorded who changed it:
+
+* `iam_v2.grace_package_mismatch_reason(...) IS NULL` for the live config (**ACCEPTED**);
+* package `__system_checkout_grace`, `is_system = true`, `active`, and the pinned revision **is** its current
+  one; revision `CHECKOUT_GRACE`, price 0, settlement exactly `{NOT_REQUIRED}`, duration policy
+  `{end_mode: GRACE_AFTER_CHECKOUT, grace_duration_seconds: 1800, policy_version: CHECKOUT_GRACE_V1}`;
+* the pinned plan revision carries exactly the published scalars with `time_accounting_mode = VALIDITY_WINDOW`;
+* `iam_v2.checkout_grace_policy_publications` holds the row: `config_version`, `actor` = the **session**
+  operator (never a body-supplied value), `reason_code`, the derived revision and a full `policy_snapshot`.
+
+**Every legacy path is closed in code and in privilege.** As `svc_edged`: the raw writer returns
+`permission denied for function publish_checkout_grace_config`, and a direct table write returns
+`permission denied for table site_checkout_grace_config`. All four reserved catalogue codes
+(`__system_checkout_grace`, `__system_checkout_grace_plan`, `__sys_emergency_grace_pkg__`,
+`__sys_emergency_grace_plan__`) are refused by the operator publisher with one message, before any row is
+touched, while an ordinary code publishes normally. Neither catalogue listing exposes a system object.
+
+Startup now verifies the boundary itself. Granting `PUBLIC` EXECUTE on `publish_checkout_grace_policy` makes
+`edged` refuse the Phase-3 surface — `phase3 writer boundary: PUBLIC holds EXECUTE on
+iam_v2.publish_checkout_grace_policy(...)` — and revoking it restores service. A database where that function
+had been re-owned or opened up would previously have started normally and gone on writing an audit trail that
+looked complete.
+
+After restarting all five services at this head, the published policy is unchanged (`config_version` 3,
+validator **ACCEPTED**, exactly one system package): startup provisioning does not overwrite what an operator
+published. Journal-derived restart counts for this boot are 0 for every service.
+
+**Not proven here, and not fabricated:** the checkout→grace supersession step still requires a PMS checkout
+event. It remains proven at integration level against a real database and **ENVIRONMENT-BLOCKED** on the
+appliance. No byte-accounting or ARP/device-presence evidence is claimed.
+
 ---
 
 ## Boundaries observed
