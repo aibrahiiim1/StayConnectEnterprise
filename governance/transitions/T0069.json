@@ -15,7 +15,7 @@
     "phase_status": "ACCEPTED_AND_CLOSED",
     "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
   },
-  "phase_affected": "post-roadmap (D31/T0068 DEVELOPMENT trial)",
+  "phase_affected": "7",
   "decision": "D32",
   "new_decision_created": true,
   "transition_accepted": true,
@@ -29,5 +29,6 @@
   ],
   "next": "Implement system provisioning of the hidden per-site grace package, keep Hotel Admin to policy only, and prove the journey as far as the absence of a PMS honestly allows.",
   "previous_state_note": "Normal CHECKOUT_GRACE provisioning was an OPEN Product-Owner gate. The authoritative sources determined the SHAPE of a valid grace package (is_system=true, CHECKOUT_GRACE, price 0, settlement {NOT_REQUIRED}, valid current revision pinning an enabled plan revision) but not WHO provisions it, so the operator publisher deliberately kept package_type closed and live end-to-end grace stayed unproven.",
-  "new_state_note": "Normal grace is system-provisioned, one hidden package per Site; Hotel Admin controls policy only. Emergency Grace is preserved unchanged as the separate fail-safe."
+  "new_state_note": "Normal grace is system-provisioned, one hidden package per Site; Hotel Admin controls policy only. Emergency Grace is preserved unchanged as the separate fail-safe.",
+  "phase_affected_note": "post-roadmap (D31/T0068 DEVELOPMENT trial)"
 }
