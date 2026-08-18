@@ -208,8 +208,11 @@ func TestCommerceAdminGraceValidation(t *testing.T) {
 	a := newAdmin(t, db)
 	ctx := context.Background()
 
+	// is_system mirrors the contract: a grace package is a hidden, system-provisioned fallback. The negative
+	// cases below vary type/price/settlement, so system provenance is held constant and correct here and gets
+	// its own case rather than being accidentally entangled with the others.
 	mkPkg := func(code, ptype string, price int64, settlement string) string {
-		pkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active) VALUES ($1,$2,$3,true) RETURNING id::text`, p2Tenant, p2Site, code)
+		pkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active,is_system) VALUES ($1,$2,$3,true,true) RETURNING id::text`, p2Tenant, p2Site, code)
 		rev := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
 			(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy)
 			VALUES ($1,$2,$3,1,$4,$5,$6,'USD',2,$7::text[],'{"end_mode":"MANUAL_END"}'::jsonb) RETURNING id::text`,
@@ -264,5 +267,98 @@ func TestCommerceAdminInspectionPIIFree(t *testing.T) {
 	purchases, _, err := a.Purchases(ctx, p2Tenant, p2Site, 100)
 	if err != nil || len(purchases) != 1 || purchases[0].State != "GRANTED" {
 		t.Fatalf("purchases inspect: %+v %v", purchases, err)
+	}
+}
+
+// SAVE -> READ -> SAVE MUST BE IDEMPOTENT.
+//
+// The typed grace fields live in columns and the rest in the config jsonb. A read that returned only config
+// would omit everything typed, and because the admin UI reads, edits and writes back, the next save would
+// send those fields as absent and publish NULLs over them -- an ordinary edit of an unrelated key silently
+// erasing the grace policy. This asserts the round trip closes, which is the property that makes the split
+// safe rather than merely correct on the way in.
+func TestCommerceAdminGraceRoundTripPreservesTypedFields(t *testing.T) {
+	db := p2DB(t)
+	if _, err := db.Exec(context.Background(),
+		`INSERT INTO public.guest_networks (id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr) VALUES ($1,$2,$3,'net','br-lan','br-guest','10.77.0.1/24','10.77.0.1','10.77.0.0/24') ON CONFLICT (id) DO NOTHING`,
+		p2GN, p2Tenant, p2Site); err != nil {
+		t.Fatalf("gn: %v", err)
+	}
+	a := newAdmin(t, db)
+	ctx := context.Background()
+	planRev := seedPlanOnly(t, db)
+	pkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active,is_system) VALUES ($1,$2,'GRACERT',true,true) RETURNING id::text`, p2Tenant, p2Site)
+	rev := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy)
+		VALUES ($1,$2,$3,1,$4,'CHECKOUT_GRACE',0,'USD',2,'{NOT_REQUIRED}','{"end_mode":"MANUAL_END"}') RETURNING id::text`,
+		p2Tenant, p2Site, pkg, planRev)
+	if _, err := db.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2`, rev, pkg); err != nil {
+		t.Fatal(err)
+	}
+
+	// A configuration with BOTH halves: typed grace fields and a free-form key.
+	in := map[string]any{
+		"eligibility_window_seconds": 7200,
+		"grace_duration_seconds":     1800,
+		"grace_down_kbps":            512,
+		"grace_up_kbps":              256,
+		"grace_data_quota_bytes":     int64(1048576),
+		"grace_device_limit":         2,
+		"grace_device_limit_policy":  "REJECT_NEW_DEVICE",
+		"operator_note":              "front desk",
+	}
+	if res, err := a.SetGrace(ctx, p2Tenant, p2Site, rev, in); err != nil || res.Reason != "ok" {
+		t.Fatalf("first save: %+v %v", res, err)
+	}
+	got, _, err := a.GetGrace(ctx, p2Tenant, p2Site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"eligibility_window_seconds", "grace_duration_seconds", "grace_down_kbps",
+		"grace_up_kbps", "grace_data_quota_bytes", "grace_device_limit", "grace_device_limit_policy",
+		"operator_note"} {
+		if _, ok := got.Config[k]; !ok {
+			t.Fatalf("read dropped %q: a save of this config would publish NULL over it", k)
+		}
+	}
+
+	// Writing back exactly what was read must preserve the policy, not erase it.
+	if res, err := a.SetGrace(ctx, p2Tenant, p2Site, got.GracePackageRevisionID, got.Config); err != nil || res.Reason != "ok" {
+		t.Fatalf("write-back: %+v %v", res, err)
+	}
+	var dur, down, up, lim *int
+	if err := db.QueryRow(ctx, `SELECT grace_duration_seconds, grace_down_kbps, grace_up_kbps, grace_device_limit
+		 FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2`,
+		p2Tenant, p2Site).Scan(&dur, &down, &up, &lim); err != nil {
+		t.Fatal(err)
+	}
+	if dur == nil || *dur != 1800 || down == nil || *down != 512 || up == nil || *up != 256 || lim == nil || *lim != 2 {
+		t.Fatalf("write-back erased the typed policy: dur=%v down=%v up=%v lim=%v", dur, down, up, lim)
+	}
+}
+
+// An operator-published package that merely carries the CHECKOUT_GRACE type must NOT be usable as the grace
+// package. The contract requires is_system = true, re-validated at save and at every checkout, and without a
+// provenance check the type alone would let an ordinary catalogue entry stand in for the system fallback --
+// which is precisely what would exist if the general publisher were opened up to set that type.
+func TestCommerceAdminGraceRejectsNonSystemPackage(t *testing.T) {
+	db := p2DB(t)
+	planRev := seedPlanOnly(t, db)
+	a := newAdmin(t, db)
+	ctx := context.Background()
+	pkg := scan1(t, db, `INSERT INTO iam_v2.internet_packages (tenant_id,site_id,code,active,is_system) VALUES ($1,$2,'NOTSYS',true,false) RETURNING id::text`, p2Tenant, p2Site)
+	rev := scan1(t, db, `INSERT INTO iam_v2.internet_package_revisions
+		(tenant_id,site_id,package_id,revision_no,service_plan_revision_id,package_type,price_minor,currency,currency_exponent,settlement_methods,duration_policy)
+		VALUES ($1,$2,$3,1,$4,'CHECKOUT_GRACE',0,'USD',2,'{NOT_REQUIRED}','{"end_mode":"MANUAL_END"}') RETURNING id::text`,
+		p2Tenant, p2Site, pkg, planRev)
+	if _, err := db.Exec(ctx, `UPDATE iam_v2.internet_packages SET current_revision_id=$1 WHERE id=$2`, rev, pkg); err != nil {
+		t.Fatal(err)
+	}
+	res, err := a.SetGrace(ctx, p2Tenant, p2Site, rev, map[string]any{"operator_note": "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reason != "grace_package_not_system" {
+		t.Fatalf("a non-system CHECKOUT_GRACE package was accepted as the grace fallback: %+v", res)
 	}
 }

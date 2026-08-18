@@ -116,7 +116,10 @@ type GraceCandidate struct {
 	Currency       string
 	CurrencyExp    int
 	SettlementOnly bool // settlement_methods == exactly {NOT_REQUIRED}
-	PlanRevValid   bool
+	// IsSystem is the contract's is_system = true requirement for a grace package. The grace package is a
+	// HIDDEN, system-provisioned fallback, not an operator catalogue entry, and validating it was missing.
+	IsSystem     bool
+	PlanRevValid bool
 }
 
 // QuoteInspect / PurchaseInspect are guest-PII-free inspection rows.
@@ -460,6 +463,14 @@ func (a *CommerceAdmin) SetGrace(ctx context.Context, tenantID, siteID, packageR
 		}
 		if c.PackageType != "CHECKOUT_GRACE" {
 			res = AdminResult{Reason: "grace_package_wrong_type"}
+			return nil
+		}
+		// The contract requires the grace package to be is_system = true, re-validated "at save AND at every
+		// checkout". The type check alone would accept an ordinary operator package that merely carries the
+		// CHECKOUT_GRACE type -- exactly what would exist if the general publisher were opened up to set that
+		// type. Checking provenance is what makes the distinction real rather than nominal.
+		if !c.IsSystem {
+			res = AdminResult{Reason: "grace_package_not_system"}
 			return nil
 		}
 		if c.PriceMinor != 0 || !c.SettlementOnly {

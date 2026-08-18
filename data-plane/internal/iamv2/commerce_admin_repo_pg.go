@@ -122,13 +122,31 @@ func (r *PgCommerceAdminRepository) ListPlanRevisions(ctx context.Context, tenan
 	return out, rows.Err()
 }
 
+// GetGraceConfig returns what SetGrace would have to be given to reproduce the stored configuration.
+//
+// THE ROUND TRIP HAS TO CLOSE. The typed grace fields live in COLUMNS and the rest lives in the config
+// jsonb, so a read that returned only config would omit everything typed -- and since the admin UI reads,
+// edits and writes back, the next save would send those fields as absent and publish NULLs over them. An
+// ordinary edit of an unrelated key would silently erase the grace policy.
+//
+// That asymmetry was introduced by moving the WRITE to the typed columns without moving the read, which is
+// the easy half to forget: the write is the change you are making, the read is the one that has always
+// worked. So the typed columns are projected back under the same key names splitGraceConfig accepts, making
+// save -> read -> save idempotent by construction rather than by care.
 func (r *PgCommerceAdminRepository) GetGraceConfig(ctx context.Context, tenantID, siteID string) (GraceConfig, error) {
 	var gc GraceConfig
 	var rev *string
 	var cfg []byte
+	var eligibility *int
+	var duration, down, up, devLimit *int
+	var quota *int64
+	var devPolicy *string
 	err := r.db.QueryRow(ctx,
-		`SELECT grace_package_revision_id::text, config FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2`,
-		tenantID, siteID).Scan(&rev, &cfg)
+		`SELECT grace_package_revision_id::text, config, eligibility_window_seconds,
+		        grace_duration_seconds, grace_down_kbps, grace_up_kbps, grace_data_quota_bytes,
+		        grace_device_limit, grace_device_limit_policy
+		   FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2`,
+		tenantID, siteID).Scan(&rev, &cfg, &eligibility, &duration, &down, &up, &quota, &devLimit, &devPolicy)
 	if err == pgx.ErrNoRows {
 		return GraceConfig{Config: map[string]any{}}, nil
 	}
@@ -141,6 +159,29 @@ func (r *PgCommerceAdminRepository) GetGraceConfig(ctx context.Context, tenantID
 	gc.Config = map[string]any{}
 	if len(cfg) > 0 {
 		_ = json.Unmarshal(cfg, &gc.Config)
+	}
+	// Project the typed columns back. Only non-NULL values are surfaced: an absent grace override must read
+	// back as absent, not as a set of zeroes that a later save would publish as a real policy.
+	if eligibility != nil {
+		gc.Config["eligibility_window_seconds"] = *eligibility
+	}
+	if duration != nil {
+		gc.Config["grace_duration_seconds"] = *duration
+	}
+	if down != nil {
+		gc.Config["grace_down_kbps"] = *down
+	}
+	if up != nil {
+		gc.Config["grace_up_kbps"] = *up
+	}
+	if quota != nil {
+		gc.Config["grace_data_quota_bytes"] = *quota
+	}
+	if devLimit != nil {
+		gc.Config["grace_device_limit"] = *devLimit
+	}
+	if devPolicy != nil {
+		gc.Config["grace_device_limit_policy"] = *devPolicy
 	}
 	return gc, nil
 }
@@ -307,14 +348,14 @@ func (t *pgCommerceAdminTx) GraceCandidateValid(ctx context.Context, tenantID, s
 	var cexp *int
 	var settlement []string
 	err := t.tx.QueryRow(ctx,
-		`SELECT p.active, r.package_type, r.price_minor, COALESCE(r.currency,''), r.currency_exponent,
+		`SELECT p.active, p.is_system, r.package_type, r.price_minor, COALESCE(r.currency,''), r.currency_exponent,
 		        r.settlement_methods,
 		        EXISTS(SELECT 1 FROM iam_v2.service_plan_revisions spr
 		                WHERE spr.tenant_id=r.tenant_id AND spr.site_id=r.site_id AND spr.id=r.service_plan_revision_id)
 		   FROM iam_v2.internet_package_revisions r
 		   JOIN iam_v2.internet_packages p ON p.id = r.package_id
 		  WHERE r.tenant_id=$1 AND r.site_id=$2 AND r.id=$3`,
-		tenantID, siteID, packageRevisionID).Scan(&c.PackageActive, &c.PackageType, &c.PriceMinor, &c.Currency, &cexp, &settlement, &c.PlanRevValid)
+		tenantID, siteID, packageRevisionID).Scan(&c.PackageActive, &c.IsSystem, &c.PackageType, &c.PriceMinor, &c.Currency, &cexp, &settlement, &c.PlanRevValid)
 	if err == pgx.ErrNoRows {
 		return GraceCandidate{Found: false}, nil
 	}
