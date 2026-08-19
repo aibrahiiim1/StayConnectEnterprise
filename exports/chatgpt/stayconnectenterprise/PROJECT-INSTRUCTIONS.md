@@ -1,14 +1,14 @@
 # StayConnect Enterprise — ChatGPT Project Instructions
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0074 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0075 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
-**Current activity:** `PRODUCTION_IAM_V2_CUTOVER_AND_LEGACY_IAM_RETIREMENT`
+**Current activity:** `FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
-**Single next authorized action:** One Product-Owner determination of the PRODUCTION TARGET, so the already-authorized cutover under D34 (T0074) can execute. Either designate the Production appliance with its host, enrollment identity and access, or confirm that appliance 172.21.60.23 is to be treated as the Production system despite the standing governance record that separates them. The cutover preflight is complete and a verified backup baseline is preserved at /var/backups/stayconnect/pre-cutover-20260819T174950Z on that appliance, holding a parsed custom-format database dump, role and privilege globals, configuration and unit files, service binaries and a SHA256SUMS manifest. Nothing irreversible has been done and PRODUCTION remains untouched and uncontacted.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D34`.
+**Single next authorized action:** Product-Owner provision of the NEW PRODUCTION SERVER and access, plus authorization to execute the fresh deployment on that exact target under D35 (T0075). The authorized Production strategy is Fresh Appliance Deployment: fresh server, fresh OS, clean StayConnect deployment from the authoritative repository, enrollment and claim and signed assignment, required hotel configuration, IAM-v2 as the intended authority from first operation, complete acceptance testing, then a separate Product-Owner Go-Live decision. No DEVELOPMENT database, configuration, service state, identity, account or voucher may be restored or cloned onto it, because the development appliance is evidence and reference only and never an installation source. Before that server exists, nothing is deployed anywhere and 172.21.60.23 is not changed. PRODUCTION remains untouched and PRE-LIVE.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D35`.
 <!-- END GENERATED PROJECT STATE -->
 
 

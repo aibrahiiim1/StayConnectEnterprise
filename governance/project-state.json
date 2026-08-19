@@ -15,9 +15,9 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "7",
-  "current_activity": "PRODUCTION_IAM_V2_CUTOVER_AND_LEGACY_IAM_RETIREMENT",
-  "current_activity_execution_state": "AUTHORIZED_PREFLIGHT_COMPLETE_CUTOVER_ENVIRONMENT_BLOCKED",
-  "current_activity_execution_state_note": "T0073 was accepted and closed at the verified head fff268d. That acceptance is recorded as decision D34, transition T0074, and PR #16 was merged from that exact head as f32aa6f. The Production IAM-v2 cutover and the legacy IAM retirement are AUTHORIZED and their preflight is COMPLETE, but they cannot execute: there is no Production appliance. Central's authoritative registry holds exactly one appliance (SC-BEN1-JS4A-0D9C, hostname radius, last_public_ip 172.21.60.23), which governance designates the DEVELOPMENT appliance, and the Production record still reads that Production has not been contacted. The cutover was deliberately not simulated there, because that would neither be a Production cutover nor leave the development baseline intact. No legacy object, privilege, route, flag or credential has been disabled, revoked or dropped anywhere.",
+  "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+  "current_activity_execution_state": "CLEAN_INSTALL_PATH_VERIFIED_AWAITING_PRODUCT_OWNER_PROVIDED_SERVER",
+  "current_activity_execution_state_note": "The Production model is FRESH APPLIANCE DEPLOYMENT, not an in-place cutover. 172.21.60.23 remains the DEVELOPMENT appliance, is not reclassified, and its legacy baseline is not retired or dropped -- nothing on it was modified during this work and it was read only as reference evidence. No Production appliance exists. The clean-install and disaster-recovery path is reconstructed and VERIFIED from repository sources in a disposable container that never saw any appliance, building 41 public and 74 iam_v2 base tables with zero rows and zero identities. Two blocking gaps are recorded with recommended corrections and two non-blocking findings describe what a clean install still creates and what remains configuration selectable. See docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md.",
   "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -318,15 +318,15 @@
     "Maintain project governance, current-state parity and documentation for the closed phases and completed roadmap."
   ],
   "prohibited_actions": [
-    "Real PMS financial posting, real payment-provider traffic, paid-access activation and per-property financial enablement remain PROHIBITED. The latest accepted decision is D34 (transition T0074), which accepts and closes T0073, authorizes the merge of PR #16, and authorizes a Production IAM-v2 cutover followed by complete legacy IAM retirement as one controlled transition -- and explicitly does NOT authorize real financial PMS posting or payment-provider charges for testing, which stay behind the existing per-property financial gates. The authorized cutover has NOT been executed: it is ENVIRONMENT-BLOCKED for want of a Production appliance, so production data migration, dual read/write, legacy IAM removal and real guest service have not occurred and remain prohibited until that target is determined.",
+    "Real PMS financial posting, real payment-provider traffic, paid-access activation and per-property financial enablement remain PROHIBITED. The latest accepted decision is D35 (transition T0075), which replaces the in-place Production cutover with FRESH PRODUCTION APPLIANCE DEPLOYMENT and authorizes only the preparation and verification of the clean-install path from repository sources. Also prohibited under it: deploying to any new server before the Product Owner provides that server and authorizes execution on it, reclassifying or cutting over 172.21.60.23, retiring or dropping the development legacy baseline, and restoring or cloning any development database, configuration, service state, identity, account or voucher onto a future Production appliance. Production data migration, dual read/write, legacy IAM removal and real guest service have not occurred and remain prohibited.",
     "Enabling any Phase 4, Phase 5 or Phase 6 capability on any environment outside a controlled, restored DEVELOPMENT-appliance validation run.",
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "One Product-Owner determination of the PRODUCTION TARGET, so the already-authorized cutover under D34 (T0074) can execute. Either designate the Production appliance with its host, enrollment identity and access, or confirm that appliance 172.21.60.23 is to be treated as the Production system despite the standing governance record that separates them. The cutover preflight is complete and a verified backup baseline is preserved at /var/backups/stayconnect/pre-cutover-20260819T174950Z on that appliance, holding a parsed custom-format database dump, role and privilege globals, configuration and unit files, service binaries and a SHA256SUMS manifest. Nothing irreversible has been done and PRODUCTION remains untouched and uncontacted.",
+  "next_authorized_action": "Product-Owner provision of the NEW PRODUCTION SERVER and access, plus authorization to execute the fresh deployment on that exact target under D35 (T0075). The authorized Production strategy is Fresh Appliance Deployment: fresh server, fresh OS, clean StayConnect deployment from the authoritative repository, enrollment and claim and signed assignment, required hotel configuration, IAM-v2 as the intended authority from first operation, complete acceptance testing, then a separate Product-Owner Go-Live decision. No DEVELOPMENT database, configuration, service state, identity, account or voucher may be restored or cloned onto it, because the development appliance is evidence and reference only and never an installation source. Before that server exists, nothing is deployed anywhere and 172.21.60.23 is not changed. PRODUCTION remains untouched and PRE-LIVE.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D34",
+  "latest_accepted_po_decision": "D35",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -422,7 +422,7 @@
       "scripts/ci/phase3_evidence.py (modified)"
     ],
     "post_closure_operational_changes_note": "Caddy deployment configuration, the Caddy systemd unit sources and CI/operational tooling changed AFTER Phase-3 closure, under T0026 and T0027. No Phase-3 application binary, migration, schema, IAM-v2 authority, PMS behaviour or financial behaviour changed. Do not claim the whole deploy/ or scripts/ tree is identical to the accepted candidate.",
-    "current_activity": "PRODUCTION_IAM_V2_CUTOVER_AND_LEGACY_IAM_RETIREMENT",
+    "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
     "live_increment9_executed": true,
     "live_increment9_executed_on": "2026-08-10",
     "live_increment9_item_verdicts": {
@@ -709,7 +709,7 @@
     "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
     "phase7_merge_attribution": "Phase 7 was ACCEPTED_AND_CLOSED under D27/T0064 and MERGED under D28/T0065 (merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The current DEVELOPMENT trial continuation is D31/T0068. D30 is preserved historically and its over-broad Production policy clauses were corrected by D31."
   },
-  "latest_transition_id": "T0074",
+  "latest_transition_id": "T0075",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -763,7 +763,8 @@
       "routing": "no deployed Production service is routed to iam_v2",
       "mutation": "none -- Production has not been contacted",
       "legacy_iam": "still the configured Production authentication/routing baseline; NOT retired and NOT deleted",
-      "transition_strategy": "OPEN. No Production IAM transition strategy is approved. Legacy retirement, a no-migration approach and any clean-replacement or cutover sequence each require a separate explicit Product-Owner decision."
+      "transition_strategy": "FRESH PRODUCTION APPLIANCE DEPLOYMENT (D35/T0075). The earlier in-place cutover assumption is SUPERSEDED. The Production target will be a newly provisioned factory-clean server built from repository-controlled sources, enrolled and claimed, assigned by signed assignment, configured through Hotel Admin, with IAM-v2 as the intended authority from first operation. The DEVELOPMENT appliance is never an installation source. Actual deployment awaits the Product-Owner-provided server and a separate Go-Live decision.",
+      "appliance": "NONE EXISTS. No Production appliance has been provisioned, enrolled or contacted."
     },
     "development_appliance": {
       "host": "172.21.60.23",
