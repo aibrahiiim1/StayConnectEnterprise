@@ -68,6 +68,10 @@ func (s *server) pmsInterfacesRoutes() http.Handler {
 	r.Get("/{id}", s.getPMSInterface)
 	r.Get("/{id}/revisions", s.listPMSInterfaceRevisions)
 	r.Get("/{id}/health", s.getPMSInterfaceHealth)
+	// Creating an interface and authoring its configuration. Both were absent, which left the endpoint the
+	// connector dials -- and every timeout, bound and mode it reads -- unreachable from the product.
+	r.Post("/", s.createPMSInterface)
+	r.Post("/{id}/revisions", s.authorPMSInterfaceRevision)
 	r.Post("/{id}/publish", s.publishPMSInterfaceRevision)
 	r.Post("/{id}/secret", s.rotatePMSInterfaceSecret)
 	return r

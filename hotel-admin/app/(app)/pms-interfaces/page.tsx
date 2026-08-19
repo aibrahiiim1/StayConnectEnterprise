@@ -45,6 +45,9 @@ export default function PMSInterfacesPage() {
   const [rows, setRows] = useState<PmsInterface[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [authoring, setAuthoring] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -63,7 +66,37 @@ export default function PMSInterfacesPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-semibold">PMS interfaces</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">PMS interfaces</h1>
+        <Button onClick={() => { setCreating((v) => !v); setNote(null); }}>
+          {creating ? "Cancel" : "Add interface"}
+        </Button>
+      </div>
+
+      {note && <p className="text-sm text-emerald-700">{note}</p>}
+
+      {creating && (
+        <Card>
+          <CardBody>
+            <CreateInterfaceForm
+              onDone={(msg) => { setCreating(false); setNote(msg); void load(); }}
+              onError={setErr}
+            />
+          </CardBody>
+        </Card>
+      )}
+
+      {authoring && (
+        <Card>
+          <CardBody>
+            <AuthorRevisionForm
+              interfaceID={authoring}
+              onDone={(msg) => { setAuthoring(null); setNote(msg); void load(); }}
+              onError={setErr}
+            />
+          </CardBody>
+        </Card>
+      )}
 
       {err && (
         <p role="alert" className="text-sm text-red-600">
@@ -119,12 +152,15 @@ export default function PMSInterfacesPage() {
                         <Badge tone="warn">never set</Badge>
                       )}
                     </TD>
-                    <TD>
+                    <TD className="whitespace-nowrap">
                       <Button
                         onClick={() => setSelected(selected === i.id ? null : i.id)}
                         aria-expanded={selected === i.id}
                       >
                         {selected === i.id ? "Close" : "Open"}
+                      </Button>{" "}
+                      <Button variant="secondary" onClick={() => { setAuthoring(i.id); setNote(null); }}>
+                        Configure
                       </Button>
                     </TD>
                   </TR>
@@ -531,5 +567,166 @@ function RoutingCard({ routes }: { routes: PmsGuestNetworkRoute[] }) {
         )}
       </CardBody>
     </Card>
+  );
+}
+
+// CREATING AN INTERFACE, AND AUTHORING ITS CONFIGURATION.
+//
+// Neither existed. The screen could publish a revision and rotate a credential, but there was no way to
+// create an interface and no way to author a revision -- so the ENDPOINT the connector dials, and every
+// timeout, bound and mode it reads, could not be set from the product at all. Every interface on the
+// DEVELOPMENT appliance existed because a seed script wrote it straight into the database.
+//
+// Every field below is one the running connector actually reads (pmsd.Revision.Validate and
+// pgRepo.LoadInterface). None is decorative, and nothing here invents protocol behaviour: the numbers are
+// starting points an operator is expected to change, not a description of any real PMS.
+function CreateInterfaceForm({ onDone, onError }: {
+  onDone: (msg: string) => void; onError: (e: string | null) => void;
+}) {
+  const [kind, setKind] = useState("protel-fias");
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={async (e) => {
+        e.preventDefault(); setBusy(true); onError(null);
+        try {
+          await api.post("/pms-interfaces", { connector_kind: kind, display_label: label.trim() });
+          onDone("Interface created. It starts with authentication disabled and nothing published — configure a revision, then publish it.");
+        } catch (err: any) { onError(err?.message ?? "Could not create the interface"); }
+        finally { setBusy(false); }
+      }}
+    >
+      <h2 className="font-medium">New PMS interface</h2>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm">
+          Connector
+          <select className="mt-1 block w-full rounded border px-2 py-1" value={kind}
+                  onChange={(e) => setKind(e.target.value)}>
+            {["protel-fias", "opera-fias", "fidelio-fias", "mews", "apaleo", "stub"].map((k) => (
+              <option key={k} value={k}>{k}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
+          Name
+          <input className="mt-1 block w-full rounded border px-2 py-1" value={label} required maxLength={120}
+                 placeholder="Front office Protel" onChange={(e) => setLabel(e.target.value)} />
+        </label>
+      </div>
+      <Button type="submit" disabled={busy}>{busy ? "Creating…" : "Create interface"}</Button>
+    </form>
+  );
+}
+
+function AuthorRevisionForm({ interfaceID, onDone, onError }: {
+  interfaceID: string; onDone: (msg: string) => void; onError: (e: string | null) => void;
+}) {
+  const [f, setF] = useState({
+    endpoint: "", source_timezone: "Africa/Cairo", folio_identity_strategy: "GLOBALLY_UNIQUE",
+    normalization_version: 1, credential_mode: "AUTH_KEY", resync_supported: true,
+    dial_timeout_ms: 5000, read_timeout_ms: 15000, write_timeout_ms: 15000,
+    heartbeat_interval_ms: 30000, heartbeat_timeout_ms: 90000,
+    feed_freshness_ms: 120000, complete_sync_ms: 600000,
+    financial_base_currency: "", financial_base_currency_exponent: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const num = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setF({ ...f, [k]: Number(e.target.value) });
+  const numField = (k: string, label: string, hint?: string) => (
+    <label className="block text-sm">
+      {label}
+      <input type="number" min={1} className="mt-1 block w-full rounded border px-2 py-1"
+             value={String((f as any)[k])} onChange={num(k)} required />
+      {hint && <span className="block text-xs text-gray-500">{hint}</span>}
+    </label>
+  );
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={async (e) => {
+        e.preventDefault(); setBusy(true); onError(null);
+        try {
+          const exp = f.financial_base_currency_exponent;
+          await api.post(`/pms-interfaces/${interfaceID}/revisions`, {
+            ...f,
+            // read_only is sent as true and is not offered as a choice: pmsd refuses any revision whose
+            // read-only capability is absent or false, so a control here would only offer a rejection.
+            read_only: true,
+            financial_base_currency: f.financial_base_currency.trim() || undefined,
+            financial_base_currency_exponent: exp === "" ? undefined : Number(exp),
+          });
+          onDone("Draft revision saved. It is not live until you publish it.");
+        } catch (err: any) { onError(err?.message ?? "Could not save the revision"); }
+        finally { setBusy(false); }
+      }}
+    >
+      <h2 className="font-medium">Configure a revision</h2>
+      <p className="text-xs text-gray-500">
+        Saved as a draft. Publishing it is a separate, confirmed action, and this connection is read-only.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block text-sm">
+          PMS address and port
+          <input className="mt-1 block w-full rounded border px-2 py-1" required placeholder="pms.hotel.local:5010"
+                 value={f.endpoint} onChange={(e) => setF({ ...f, endpoint: e.target.value })} />
+          <span className="block text-xs text-gray-500">host:port the connector dials</span>
+        </label>
+        <label className="block text-sm">
+          PMS time zone
+          <input className="mt-1 block w-full rounded border px-2 py-1" required placeholder="Africa/Cairo"
+                 value={f.source_timezone} onChange={(e) => setF({ ...f, source_timezone: e.target.value })} />
+          <span className="block text-xs text-gray-500">IANA name; arrivals and departures are read in it</span>
+        </label>
+        <label className="block text-sm">
+          Folio identity
+          <select className="mt-1 block w-full rounded border px-2 py-1" value={f.folio_identity_strategy}
+                  onChange={(e) => setF({ ...f, folio_identity_strategy: e.target.value })}>
+            {["UNSET", "GLOBALLY_UNIQUE", "UNIQUE_PER_STAY", "REUSED_SEQUENTIAL"].map((v) => (
+              <option key={v} value={v}>{v}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-sm">
+          Credential mode
+          <select className="mt-1 block w-full rounded border px-2 py-1" value={f.credential_mode}
+                  onChange={(e) => setF({ ...f, credential_mode: e.target.value })}>
+            <option value="AUTH_KEY">AUTH_KEY — a credential is required</option>
+            <option value="NONE">NONE — the PMS link is unauthenticated</option>
+          </select>
+        </label>
+        {numField("normalization_version", "Normalization version")}
+        <label className="block text-sm">
+          Resync supported
+          <select className="mt-1 block w-full rounded border px-2 py-1" value={String(f.resync_supported)}
+                  onChange={(e) => setF({ ...f, resync_supported: e.target.value === "true" })}>
+            <option value="true">yes</option>
+            <option value="false">no</option>
+          </select>
+        </label>
+        {numField("dial_timeout_ms", "Dial timeout (ms)")}
+        {numField("read_timeout_ms", "Read timeout (ms)")}
+        {numField("write_timeout_ms", "Write timeout (ms)")}
+        {numField("heartbeat_interval_ms", "Heartbeat every (ms)")}
+        {numField("heartbeat_timeout_ms", "Heartbeat timeout (ms)", "must exceed the interval")}
+        {numField("feed_freshness_ms", "Feed considered stale after (ms)")}
+        {numField("complete_sync_ms", "Complete sync bound (ms)")}
+        <label className="block text-sm">
+          Financial base currency (optional)
+          <input className="mt-1 block w-full rounded border px-2 py-1" maxLength={3} placeholder="USD"
+                 value={f.financial_base_currency}
+                 onChange={(e) => setF({ ...f, financial_base_currency: e.target.value.toUpperCase() })} />
+        </label>
+        <label className="block text-sm">
+          Currency exponent (optional)
+          <input type="number" min={0} max={4} className="mt-1 block w-full rounded border px-2 py-1"
+                 value={f.financial_base_currency_exponent}
+                 onChange={(e) => setF({ ...f, financial_base_currency_exponent: e.target.value })} />
+          <span className="block text-xs text-gray-500">set together with the currency, or leave both empty</span>
+        </label>
+      </div>
+      <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Save draft revision"}</Button>
+    </form>
   );
 }

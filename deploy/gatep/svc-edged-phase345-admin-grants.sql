@@ -54,7 +54,11 @@ GRANT SELECT ON iam_v2.folios                          TO svc_edged;
 -- generation. These are the ONLY two write targets in the Phase-3 admin source, and the controlled-writer
 -- trigger still governs both: the grant lets edged attempt the write, it does not let it bypass the
 -- operation boundary.
-GRANT UPDATE         ON iam_v2.pms_interfaces                  TO svc_edged;
+-- Creating an interface and authoring a revision are the configuration surface an operator needs to connect
+-- a PMS at all. Both were missing from the product, so both are new here: INSERT on the interface and on the
+-- revision, alongside the UPDATE that publishing already needed.
+GRANT INSERT, UPDATE ON iam_v2.pms_interfaces          TO svc_edged;
+GRANT INSERT         ON iam_v2.pms_interface_revisions TO svc_edged;
 GRANT INSERT, UPDATE ON iam_v2.pms_interface_secret_generations TO svc_edged;
 
 -- ---- Phase 4: financial read surfaces ----------------------------------------------------------------
