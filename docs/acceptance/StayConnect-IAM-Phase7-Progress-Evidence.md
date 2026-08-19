@@ -386,6 +386,41 @@ again**). The form states the failure instead of a phantom check.
 | legacy, no plans | accounts | names the prerequisite | refused |
 | legacy, with plans | accounts + Plan column | the picker | enabled |
 
+### Correction: the legacy plans request also has four outcomes
+
+The previous closure pass modelled the ACCOUNTS fetch four ways and left the PLANS fetch binary.
+`setPlans(pl?.data ?? [])` collapsed *still loading*, *returned nothing* and *failed* into one empty array, and
+every consumer read that array as "no plans exist". So a plans request that **failed** — or one still in
+flight, which happens on every legacy load because plans are fetched after the authority resolves — told the
+operator **"No active guest access plans — create one first"**: an instruction to create something that may
+already exist, and a wrong diagnosis of their own system.
+
+Only a **confirmed successful empty result** may say that. The four outcomes are now distinct, and IAM-v2
+still makes no request at all.
+
+| Plans request | Page guidance | Form access cell | Picker | Submit |
+|---|---|---|---|---|
+| loading | — | "Loading guest access plans…" | no | waits |
+| failed | "Could not load … cannot tell whether any exist" + retry | "Could not load … This does not mean none exist." | no | refused |
+| confirmed empty | "No active guest access plans — create one first" | names the prerequisite | no | refused |
+| confirmed non-empty | — | the picker | yes | enabled |
+| IAM-v2 (never requested) | — | package eligibility rules | no | enabled |
+
+Verified against the deployed bundle by holding the response, then failing it, then returning empty, then
+returning a plan:
+
+```
+LOADING (held)        loading=true  failed=false says-create-one=false picker=0 submit-disabled=true
+FAILED (500)          loading=false failed=true  says-create-one=false picker=0 submit-disabled=true
+CONFIRMED EMPTY       loading=false failed=false says-create-one=true  picker=0 submit-disabled=true
+CONFIRMED NON-EMPTY   loading=false failed=false says-create-one=false picker=1 submit-disabled=false
+```
+
+Five regressions pin the four legacy states and the IAM-v2 no-request case, asserting the visible guidance and
+the form state rather than merely that the page rendered. The loading and failure cases were checked against a
+deliberate re-collapse of the state (both forced to "ok") and both fail there, so they test the distinction
+rather than describe it.
+
 ### Closure pass: a terminal PMS interface accepted configuration
 
 The authoring endpoint selected `connector_kind` purely to prove the interface existed and then threw the

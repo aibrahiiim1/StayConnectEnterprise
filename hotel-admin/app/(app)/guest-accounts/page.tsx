@@ -78,6 +78,15 @@ export default function GuestAccountsPage() {
   // load failed", so a failed load rendered the error banner AND "Loading…" underneath it forever -- the
   // screen contradicting itself, and the same never-finishes-loading shape the Phase-4 screens had.
   const [loadFailed, setLoadFailed] = useState(false);
+  // THE PLANS REQUEST HAS FOUR OUTCOMES, AND `plans: []` CANNOT TELL THEM APART.
+  //
+  // `setPlans(pl?.data ?? [])` collapsed "still loading", "returned nothing" and "failed" into one empty
+  // array, and every consumer read that array as "no plans exist". So a plans request that FAILED, or one
+  // still in flight, told the operator "No active guest access plans — create one first": an instruction to
+  // go and create something that may well already exist. Only a CONFIRMED empty success may say that.
+  //
+  // "na" is the IAM-v2 case, where the request is never made at all.
+  const [plansStatus, setPlansStatus] = useState<"na" | "loading" | "ok" | "failed">("loading");
   // Under IAM-v2 a credential carries no plan. What a guest may acquire is decided by PACKAGE ELIGIBILITY
   // RULES evaluated when packages are listed, so a "guest access plan" on this screen would be a control the
   // backend discards -- and the operator would believe they had chosen what the guest gets.
@@ -97,6 +106,7 @@ export default function GuestAccountsPage() {
     // failure's banner sitting above fresh, correct data.
     setErr(null);
     setLoadFailed(false);
+    setPlansStatus("loading");
     try {
       const [ga, pv] = await Promise.all([
         api.get<ListResp<GuestAccount>>("/guest-accounts"),
@@ -120,9 +130,19 @@ export default function GuestAccountsPage() {
       // rather than the screen.
       if (auth === "iam_v2") {
         setPlans([]);
+        setPlansStatus("na");
       } else {
-        const pl = await api.get<ListResp<GuestAccessPlan>>("/guest-access-plans").catch(() => null);
-        setPlans(pl?.data ?? []);
+        try {
+          const pl = await api.get<ListResp<GuestAccessPlan>>("/guest-access-plans");
+          setPlans(pl.data ?? []);
+          setPlansStatus("ok");
+        } catch {
+          // A failure is NOT an empty result. The distinction is the whole point: an empty success means
+          // "create one", a failure means "we do not know", and telling an operator to create a plan they may
+          // already have is worse than saying nothing.
+          setPlans([]);
+          setPlansStatus("failed");
+        }
       }
       setPortalOn(!!pv.enabled);
     } catch (e: any) {
@@ -307,8 +327,14 @@ export default function GuestAccountsPage() {
         empty and this warning was ALWAYS on screen -- permanently instructing an operator to go and create a
         prerequisite that their site does not have and cannot use.
       */}
-      {planWordingApplies && activePlans.length === 0 && (
+      {planWordingApplies && plansStatus === "ok" && activePlans.length === 0 && (
         <div className="text-sm text-warn mb-4">No active guest access plans — create one first.</div>
+      )}
+      {planWordingApplies && plansStatus === "failed" && (
+        <div className="text-sm text-warn mb-4">
+          Could not load guest access plans, so this screen cannot tell whether any exist.{" "}
+          <button type="button" className="underline" onClick={() => void load()}>Try again</button>
+        </div>
       )}
       {err && <div className="text-err text-sm mb-4">{err}</div>}
       {msg && <div className="text-ok text-sm mb-4">{msg}</div>}
@@ -318,14 +344,14 @@ export default function GuestAccountsPage() {
       {showNew && (
         <Card className="mb-6">
           <CardHeader><CardTitle>New guest account</CardTitle></CardHeader>
-          <CardBody><AccountForm plans={activePlans} planApplies={planApplies} authorityResolved={authority !== null} loadFailed={loadFailed} onSubmit={onCreate} busy={busy} withPassword /></CardBody>
+          <CardBody><AccountForm plans={activePlans} planApplies={planApplies} authorityResolved={authority !== null} loadFailed={loadFailed} plansStatus={plansStatus} onSubmit={onCreate} busy={busy} withPassword /></CardBody>
         </Card>
       )}
 
       {editing && (
         <Card className="mb-6 border-brand">
           <CardHeader><CardTitle>Edit {editing.username}</CardTitle></CardHeader>
-          <CardBody><AccountForm plans={activePlans} allPlans={plans} planApplies={planApplies} authorityResolved={authority !== null} loadFailed={loadFailed} account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
+          <CardBody><AccountForm plans={activePlans} allPlans={plans} planApplies={planApplies} authorityResolved={authority !== null} loadFailed={loadFailed} plansStatus={plansStatus} account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
         </Card>
       )}
 
@@ -400,9 +426,10 @@ export default function GuestAccountsPage() {
 
 // AccountForm is shared by create and edit. `withPassword` shows the create-time
 // password controls; edit uses the separate Set-password panel.
-function AccountForm({ plans, allPlans, planApplies = true, authorityResolved = true, loadFailed = false, account, onSubmit, busy, withPassword, onCancel }: {
+function AccountForm({ plans, allPlans, planApplies = true, authorityResolved = true, loadFailed = false,
+  plansStatus = "ok", account, onSubmit, busy, withPassword, onCancel }: {
   plans: GuestAccessPlan[]; allPlans?: GuestAccessPlan[]; planApplies?: boolean; authorityResolved?: boolean;
-  loadFailed?: boolean; account?: GuestAccount;
+  loadFailed?: boolean; plansStatus?: "na" | "loading" | "ok" | "failed"; account?: GuestAccount;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void; busy: boolean; withPassword?: boolean; onCancel?: () => void;
 }) {
   const [generate, setGenerate] = useState(false);
@@ -460,6 +487,24 @@ function AccountForm({ plans, allPlans, planApplies = true, authorityResolved = 
               : "Checking how this site decides guest access…"}
           </p>
         </div>
+      ) : planApplies && plansStatus === "loading" ? (
+        // In flight. The plans call runs AFTER the authority is known, so this window is real on every
+        // legacy load -- and it used to render the create-a-plan prerequisite, because an unfinished request
+        // and an empty one both left the array empty.
+        <div>
+          <Label>Guest access plan</Label>
+          <p className="text-xs text-muted mt-1.5 leading-relaxed" role="status">Loading guest access plans…</p>
+        </div>
+      ) : planApplies && plansStatus === "failed" ? (
+        // Failed. We do not know whether plans exist, so we say exactly that and say nothing about creating
+        // one -- an operator sent to create a plan they already have would end up with a duplicate and a
+        // wrong diagnosis of their own system.
+        <div>
+          <Label>Guest access plan</Label>
+          <p className="text-xs text-warn mt-1.5 leading-relaxed" role="alert">
+            Could not load guest access plans, so a plan cannot be chosen. This does not mean none exist.
+          </p>
+        </div>
       ) : planApplies && planOptions.length === 0 ? (
         // A `required` <select> with no options cannot be satisfied, so the form silently refuses to submit
         // and nothing on screen says why. On a legacy site a plan is genuinely required, so the honest answer
@@ -493,7 +538,14 @@ function AccountForm({ plans, allPlans, planApplies = true, authorityResolved = 
       <div className="sm:col-span-3"><Label>Notes (optional)</Label><Input name="notes" defaultValue={account?.notes ?? ""} /></div>
       <div className="sm:col-span-3 flex justify-end gap-2">
         {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
-        <Button type="submit" disabled={busy || !authorityResolved || (planApplies && planOptions.length === 0)}>
+        {/*
+          On a legacy site the account cannot be created without a plan, so submission waits while the plans
+          request is in flight, is refused when it failed (nothing can be chosen), and is refused on a
+          confirmed-empty result. Those are three different reasons and the cell above states which applies.
+        */}
+        <Button type="submit" disabled={busy || !authorityResolved
+          || (planApplies && plansStatus !== "ok")
+          || (planApplies && planOptions.length === 0)}>
           {busy ? "Saving…" : account ? "Save changes" : "Create account"}
         </Button>
       </div>

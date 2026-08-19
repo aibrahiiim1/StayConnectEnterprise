@@ -402,3 +402,120 @@ test("a failed load says so, offers a retry, and does not claim to still be chec
   await expect(page.getByText(/Could not load guest accounts/i)).toHaveCount(0);
   await expect(page.getByText(/list failed/i), "the previous error must not linger").toHaveCount(0);
 });
+
+// THE LEGACY PLANS REQUEST HAS FOUR OUTCOMES, AND THEY MUST LOOK DIFFERENT.
+//
+// `setPlans(pl?.data ?? [])` collapsed "still loading", "returned nothing" and "failed" into one empty array,
+// and every consumer read that array as "no plans exist". A plans request that FAILED -- or one still in
+// flight -- therefore told the operator "No active guest access plans — create one first": an instruction to
+// create something that may already exist. Only a CONFIRMED empty success may say that.
+//
+// Each case asserts the VISIBLE guidance and the form state, not merely that the page rendered.
+function legacyBackend(page: Page, plans: (route: Route) => Promise<void> | void) {
+  const json = (status: number, body: unknown) =>
+    ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  return page.route("**/api/edge/v1/**", async (route: Route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*\/api\/edge\/v1/, "");
+    if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
+    if (path === "/guest-accounts")
+      return route.fulfill(json(200, { data: [], meta: { has_more: false }, authority: "legacy" }));
+    if (path === "/guest-accounts/portal") return route.fulfill(json(200, { enabled: false }));
+    if (path === "/guest-access-plans") return plans(route);
+    return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+  });
+}
+const PLANS_OK = (data: unknown[]) => (route: Route) =>
+  route.fulfill({ status: 200, contentType: "application/json",
+    body: JSON.stringify({ data, meta: { has_more: false } }) });
+
+test("legacy plans STILL LOADING is not reported as no plans existing", async ({ page }) => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => { release = r; });
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  await legacyBackend(page, async (route) => { await held; await PLANS_OK([PLAN])(route); });
+
+  await page.goto("/guest-accounts");
+  await page.getByRole("button", { name: /new account/i }).click();
+  await expect(page.getByText(/Loading guest access plans…/i)).toBeVisible();
+  // The instruction that must NOT appear while we do not yet know.
+  await expect(page.getByText(/No active guest access plans/i)).toHaveCount(0);
+  await expect(page.getByText(/No active guest access plan exists yet/i)).toHaveCount(0);
+  await expect(page.locator('select[name="template_id"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /create account/i })).toBeDisabled();
+
+  // ...and once it arrives with a plan, the picker appears and the form works.
+  release();
+  await expect(page.locator('select[name="template_id"]')).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
+});
+
+test("legacy plans FAILING says so, and never says none exist", async ({ page }) => {
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  await legacyBackend(page, (route) =>
+    route.fulfill({ status: 500, contentType: "application/json",
+      body: JSON.stringify({ error: "internal", message: "query failed" }) }));
+
+  await page.goto("/guest-accounts");
+  // Page-level guidance states the uncertainty and offers a retry.
+  await expect(page.getByText(/Could not load guest access plans, so this screen cannot tell whether any exist/i))
+    .toBeVisible();
+  await expect(page.getByText(/No active guest access plans — create one first/i)).toHaveCount(0);
+
+  await page.getByRole("button", { name: /new account/i }).click();
+  await expect(page.getByText(/Could not load guest access plans, so a plan cannot be chosen/i)).toBeVisible();
+  await expect(page.getByText(/This does not mean none exist/i)).toBeVisible();
+  await expect(page.getByText(/No active guest access plan exists yet/i)).toHaveCount(0);
+  await expect(page.locator('select[name="template_id"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /create account/i })).toBeDisabled();
+});
+
+test("legacy plans CONFIRMED EMPTY is the only case that says create one first", async ({ page }) => {
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  await legacyBackend(page, PLANS_OK([]));
+
+  await page.goto("/guest-accounts");
+  await expect(page.getByText(/No active guest access plans — create one first/i)).toBeVisible();
+  await page.getByRole("button", { name: /new account/i }).click();
+  await expect(page.getByText(/No active guest access plan exists yet/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /create account/i })).toBeDisabled();
+});
+
+test("legacy plans CONFIRMED NON-EMPTY offers the picker and no warning", async ({ page }) => {
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  await legacyBackend(page, PLANS_OK([PLAN]));
+
+  await page.goto("/guest-accounts");
+  await expect(page.getByText(/No active guest access plans/i)).toHaveCount(0);
+  await expect(page.getByText(/Could not load guest access plans/i)).toHaveCount(0);
+  await page.getByRole("button", { name: /new account/i }).click();
+  await expect(page.locator('select[name="template_id"]')).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
+});
+
+// ...and none of this reintroduces a plans request under IAM-v2.
+test("IAM-v2 still makes no plans request while the four legacy states exist", async ({ page }) => {
+  const calls: string[] = [];
+  const json = (status: number, body: unknown) =>
+    ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  await page.route("**/api/edge/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*\/api\/edge\/v1/, "");
+    calls.push(path);
+    if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
+    if (path === "/guest-accounts")
+      return route.fulfill(json(200, { data: [IAMV2_ACCOUNT], meta: { has_more: false }, authority: "iam_v2" }));
+    if (path === "/guest-accounts/portal") return route.fulfill(json(200, { enabled: true }));
+    return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+  });
+  await page.goto("/guest-accounts");
+  await expect(page.getByText("devguest2")).toBeVisible();
+  await page.getByRole("button", { name: /new account/i }).click();
+  await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
+  expect(calls).not.toContain("/guest-access-plans");
+  // Scoped to the CONTENT pane, not the whole body: the sidebar's "Guest access plans" entry is a separate
+  // screen that legitimately stays in the menu under either authority. Asserting on the body caught the nav
+  // and would have been "fixed" by removing a menu item that is not this screen's business.
+  const content = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+  expect(content, "the IAM-v2 screen itself must not talk about guest access plans")
+    .not.toMatch(/guest access plans/i);
+});
