@@ -81,16 +81,32 @@ export default function GuestAccountsPage() {
 
   async function load() {
     try {
-      const [ga, pl, pv] = await Promise.all([
+      const [ga, pv] = await Promise.all([
         api.get<ListResp<GuestAccount>>("/guest-accounts"),
-        api.get<ListResp<GuestAccessPlan>>("/guest-access-plans"),
         api.get<{ enabled: boolean }>("/guest-accounts/portal").catch(() => ({ enabled: false })),
       ]);
       setRows(ga.data);
       // The site's authority comes from the LIST ENVELOPE, not from a row: with zero accounts there is no row
       // to ask, and that is exactly when the create form has to decide whether a plan picker belongs on screen.
-      setAuthority(ga.authority ?? null);
-      setPlans(pl.data);
+      const auth = ga.authority ?? null;
+      setAuthority(auth);
+
+      // GUEST ACCESS PLANS ARE FETCHED ONLY WHERE THEY EXIST.
+      //
+      // This used to sit inside the same Promise.all as the accounts themselves, which made a legacy
+      // concept a hard dependency of an IAM-v2 screen: on a site with no plans, or for an operator whose
+      // role cannot read that resource, or any time the legacy endpoint failed, the ENTIRE Guest Accounts
+      // page rendered "Failed to load" -- with the accounts already successfully fetched and sitting unused.
+      //
+      // Under IAM-v2 the answer is not merely optional, it is irrelevant: a credential carries no plan.
+      // So the call is skipped outright there, and where it does apply its failure degrades the plan column
+      // rather than the screen.
+      if (auth === "iam_v2") {
+        setPlans([]);
+      } else {
+        const pl = await api.get<ListResp<GuestAccessPlan>>("/guest-access-plans").catch(() => null);
+        setPlans(pl?.data ?? []);
+      }
       setPortalOn(!!pv.enabled);
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
@@ -219,7 +235,19 @@ export default function GuestAccountsPage() {
           <div className="text-xs text-muted uppercase tracking-wider">Access</div>
           <h1 className="text-2xl font-semibold">Guest accounts</h1>
         </div>
-        <Button onClick={() => { setShowNew((s) => !s); setEditing(null); setPwFor(null); }} disabled={activePlans.length === 0}>
+        {/*
+          THE DEEPEST LEGACY DEPENDENCY ON THIS SCREEN.
+
+          This button was disabled whenever there were no active guest access plans, whatever the authority.
+          Under IAM-v2 a credential carries no plan, so plans are not merely optional there -- they are
+          irrelevant, and on a site with none an operator could never create a guest account AT ALL. The only
+          symptom was a dead button with no explanation.
+
+          It is no longer gated on anything. Where a plan IS a genuine prerequisite -- a legacy site with none
+          -- the FORM says so by name and refuses to submit. A disabled button explains nothing, and a `title`
+          only explains it to someone who already suspected the button and hovered.
+        */}
+        <Button onClick={() => { setShowNew((s) => !s); setEditing(null); setPwFor(null); }}>
           {showNew ? <><X size={14} /> Cancel</> : <><Plus size={14} /> New account</>}
         </Button>
       </div>
@@ -356,7 +384,18 @@ function AccountForm({ plans, allPlans, planApplies = true, account, onSubmit, b
           </div>
         </>
       ) : <div />}
-      {planApplies ? (
+      {planApplies && planOptions.length === 0 ? (
+        // A `required` <select> with no options cannot be satisfied, so the form silently refuses to submit
+        // and nothing on screen says why. On a legacy site a plan is genuinely required, so the honest answer
+        // is to name the missing prerequisite rather than present a control that cannot be used.
+        <div>
+          <Label>Guest access plan</Label>
+          <p className="text-xs text-warn mt-1.5 leading-relaxed">
+            No active guest access plan exists yet. Create one on the Guest access plans screen first — on this
+            site an account cannot be created without one.
+          </p>
+        </div>
+      ) : planApplies ? (
         <div>
           <Label>Guest access plan</Label>
           <select name="template_id" required defaultValue={account?.template_id ?? undefined} className={selectCls}>
@@ -378,7 +417,9 @@ function AccountForm({ plans, allPlans, planApplies = true, account, onSubmit, b
       <div className="sm:col-span-3"><Label>Notes (optional)</Label><Input name="notes" defaultValue={account?.notes ?? ""} /></div>
       <div className="sm:col-span-3 flex justify-end gap-2">
         {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
-        <Button type="submit" disabled={busy}>{busy ? "Saving…" : account ? "Save changes" : "Create account"}</Button>
+        <Button type="submit" disabled={busy || (planApplies && planOptions.length === 0)}>
+          {busy ? "Saving…" : account ? "Save changes" : "Create account"}
+        </Button>
       </div>
     </form>
   );

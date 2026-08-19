@@ -30,6 +30,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -39,6 +40,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // folioIdentityStrategies mirrors the schema CHECK constraint exactly. Listing them here rather than
@@ -157,11 +159,56 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	}
 	raw, _ := json.Marshal(cfg)
 
+	// ALLOCATING revision_no IS A RACE, AND IT WAS LOSING.
+	//
+	// The number came from `(SELECT COALESCE(MAX(revision_no),0)+1 ...)` inside the INSERT. Under READ
+	// COMMITTED that subquery takes its snapshot at statement start and takes no lock, so two operators
+	// saving at the same moment both compute the same number. Proven deterministically against real
+	// PostgreSQL by overlapping two transactions: both allocated revision 9, and the second died with
+	//
+	//     duplicate key value violates unique constraint "pms_interface_revisions_pms_interface_id_revision_no_key"
+	//
+	// which this handler reported as HTTP 500 -- an internal error for a situation that is neither internal
+	// nor an error, and one that leaked an index name to the operator.
+	//
+	// A transaction-scoped advisory lock keyed on the interface makes allocation deterministic: the second
+	// writer waits, then reads a MAX that includes the first row, and BOTH succeed with adjacent numbers.
+	// The lock is per-interface, so authoring on one interface never blocks another, and it is released by
+	// commit or rollback without any unlock path to forget.
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "author failed")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// The wait for that lock is BOUNDED, and running out of patience is not an internal error.
+	//
+	// An unbounded pg_advisory_xact_lock waits as long as it takes. Proven against a real database by holding
+	// the same lock externally for six seconds: the request blocked for 5017ms and then returned HTTP 500 --
+	// because dbCtx caps every statement at ten seconds and the context died first. The lock made allocation
+	// correct and moved the 500 rather than removing it.
+	//
+	// lock_timeout makes the outcome deterministic: acquire it quickly, or fail fast with SQLSTATE 55P03 and
+	// tell the operator something true and actionable. Three seconds is well inside the ten-second request
+	// budget, so the answer is always the handler's own rather than a deadline nobody can interpret.
+	if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '3s'`); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "author failed")
+		return
+	}
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, id); err != nil {
+		if isLockNotAvailable(err) {
+			jsonErr(w, http.StatusConflict, "conflict",
+				"another revision is being created for this interface right now: try again in a moment")
+			return
+		}
+		jsonErr(w, http.StatusInternalServerError, "internal", "author failed")
+		return
+	}
+
 	var revID string
 	var revNo int
-	// revision_no is allocated inside the statement rather than read-then-written: two operators authoring
-	// at once would otherwise compute the same number and one would lose its revision to a unique violation.
-	err := s.db.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 	    INSERT INTO iam_v2.pms_interface_revisions
 	      (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, folio_identity_strategy,
 	       config, normalization_version, financial_base_currency, financial_base_currency_exponent)
@@ -174,7 +221,19 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 		in.NormalizationVersion, nullIfBlankText(in.FinancialBaseCurrency), in.FinancialCurrencyExp,
 	).Scan(&revID, &revNo)
 	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "author failed: "+err.Error())
+		// The lock removes the race between two callers of THIS endpoint. A unique violation can still reach
+		// here if a revision is inserted by some other path that does not take the lock, and that is a
+		// conflict the operator can act on by retrying -- so it is reported as one, with no index name in it.
+		if isUniqueViolation(err) {
+			jsonErr(w, http.StatusConflict, "conflict",
+				"another revision was created for this interface at the same moment: reload and save again")
+			return
+		}
+		jsonErr(w, http.StatusInternalServerError, "internal", "author failed")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "author failed")
 		return
 	}
 	// The endpoint is recorded in the audit; the credential never is, and this path never accepts one --
@@ -282,4 +341,11 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 			"read_only":       true,
 		},
 	}, nil
+}
+
+// isLockNotAvailable reports PostgreSQL's lock_timeout expiry (SQLSTATE 55P03), which is contention rather
+// than failure: the caller can simply try again.
+func isLockNotAvailable(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "55P03"
 }

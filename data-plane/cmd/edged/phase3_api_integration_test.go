@@ -500,3 +500,100 @@ func TestIntegration_API_EveryReadOnlyCollectionAnswers(t *testing.T) {
 		}
 	}
 }
+
+// validRevisionBody is the smallest configuration the authoring endpoint accepts. Every field is one the
+// running connector reads, so a test that drifts from reality fails here rather than in front of an operator.
+func validRevisionBody(endpoint string) map[string]any {
+	return map[string]any{
+		"endpoint": endpoint, "source_timezone": "Africa/Cairo",
+		"folio_identity_strategy": "GLOBALLY_UNIQUE", "normalization_version": 1,
+		"credential_mode": "NONE", "read_only": true, "resync_supported": true,
+		"dial_timeout_ms": 5000, "read_timeout_ms": 15000, "write_timeout_ms": 15000,
+		"heartbeat_interval_ms": 30000, "heartbeat_timeout_ms": 90000,
+		"feed_freshness_ms": 120000, "complete_sync_ms": 600000,
+	}
+}
+
+// WRITE RBAC ON THE NEW AUTHORING SURFACE.
+//
+// Creating an interface and authoring a revision are the configuration surface of the PMS integration, so
+// they must be write-gated like every other mutation. The resource middleware already maps POST to a write
+// permission, but "already does" is exactly the kind of claim that is true until somebody mounts a route
+// somewhere else -- so it is asserted rather than assumed, for both new endpoints.
+func TestIntegration_API_ViewerCannotCreateOrConfigurePMSInterfaces(t *testing.T) {
+	f := newAPI(t, "site_viewer")
+	if status, _ := f.do(t, "GET", "/pms-interfaces", nil); status != 200 {
+		t.Fatal("a viewer must still be able to read the interface list")
+	}
+	if status, body := f.do(t, "POST", "/pms-interfaces",
+		map[string]any{"connector_kind": "stub", "display_label": "viewer attempt"}); status != 403 {
+		t.Fatalf("a viewer created a PMS interface: %d %v", status, body)
+	}
+	if status, body := f.do(t, "POST", "/pms-interfaces/00000000-0000-4000-8000-000000000000/revisions",
+		validRevisionBody("pms.local:5010")); status != 403 {
+		t.Fatalf("a viewer authored a PMS revision: %d %v", status, body)
+	}
+}
+
+// CONCURRENT AUTHORING MUST BE DETERMINISTIC, AND MUST NOT 500.
+//
+// revision_no came from `(SELECT COALESCE(MAX(revision_no),0)+1 ...)` inside the INSERT. Under READ
+// COMMITTED that subquery snapshots at statement start and takes no lock, so two operators saving at the
+// same moment both computed the same number and the second died on
+// pms_interface_revisions_pms_interface_id_revision_no_key -- surfaced as HTTP 500, an internal error for a
+// situation that is neither internal nor an error.
+//
+// With a transaction-scoped advisory lock keyed on the interface, every caller gets its own number. This
+// asserts the property that matters to an operator: nobody sees a 500, nobody silently loses their draft,
+// and the numbers are a contiguous run with no duplicates.
+func TestIntegration_API_ConcurrentRevisionAuthoringIsDeterministic(t *testing.T) {
+	f := newAPI(t)
+	status, body := f.do(t, "POST", "/pms-interfaces",
+		map[string]any{"connector_kind": "stub", "display_label": "concurrency"})
+	if status != 201 {
+		t.Fatalf("create interface: %d %v", status, body)
+	}
+	id, _ := body["id"].(string)
+
+	const n = 8
+	codes := make([]int, n)
+	nos := make([]int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			st, b := f.do(t, "POST", "/pms-interfaces/"+id+"/revisions",
+				validRevisionBody(fmt.Sprintf("pms%d.local:5010", i)))
+			codes[i] = st
+			if v, ok := b["revision_no"].(float64); ok {
+				nos[i] = int(v)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	seen := map[int]bool{}
+	for i, st := range codes {
+		if st != 201 {
+			t.Errorf("concurrent authoring #%d returned %d, want 201 -- a race must not surface as an error", i, st)
+			continue
+		}
+		if seen[nos[i]] {
+			t.Errorf("revision_no %d was handed out twice", nos[i])
+		}
+		seen[nos[i]] = true
+	}
+	if len(seen) != n {
+		t.Fatalf("expected %d distinct revision numbers, got %d", n, len(seen))
+	}
+	for want := 1; want <= n; want++ {
+		if !seen[want] {
+			t.Errorf("revision_no %d is missing: the run is not contiguous", want)
+		}
+	}
+	if got := count(t, f.pool,
+		`SELECT count(*) FROM iam_v2.pms_interface_revisions WHERE pms_interface_id=$1`, id); got != n {
+		t.Fatalf("%d revisions persisted, want %d", got, n)
+	}
+}

@@ -103,3 +103,76 @@ test("the sidebar scrolls independently and the window does not scroll", async (
   expect(m.navScrollable, "the sidebar must be its own scrolling column").toBe(true);
   expect(m.windowScrollable, "the window must not scroll -- that is what moved the menu").toBe(false);
 });
+
+// ZERO PLANS, IAM-v2: the screen must not depend on the legacy resource at all.
+//
+// The plans call used to sit in the same Promise.all as the accounts, so a site with no plans -- or an
+// operator whose role cannot read that resource, or any failure of the legacy endpoint -- rendered the whole
+// Guest Accounts page as "Failed to load", with the accounts already fetched and sitting unused. Under
+// IAM-v2 the answer is not merely optional, it is irrelevant: a credential carries no plan.
+test("IAM-v2 guest accounts work with zero plans, and never call the legacy plans endpoint", async ({ page }) => {
+  const calls: string[] = [];
+  const json = (status: number, body: unknown) =>
+    ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  await page.route("**/api/edge/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*\/api\/edge\/v1/, "");
+    calls.push(path);
+    if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
+    if (path === "/guest-accounts")
+      return route.fulfill(json(200, { data: [IAMV2_ACCOUNT], meta: { has_more: false }, authority: "iam_v2" }));
+    if (path === "/guest-accounts/portal") return route.fulfill(json(200, { enabled: true }));
+    // If the screen asks for plans anyway, answer the way a plan-less site does -- and the assertion below
+    // still fails, because asking at all is the defect.
+    if (path === "/guest-access-plans") return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+    return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+  });
+  await page.goto("/guest-accounts");
+  await expect(page.getByText("devguest2")).toBeVisible();
+  await page.getByRole("button", { name: /new account/i }).click();
+  await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
+  expect(calls, "the IAM-v2 screen must not request the legacy plans resource")
+    .not.toContain("/guest-access-plans");
+});
+
+// ...and the page must survive that endpoint FAILING, on a site where plans do apply.
+test("a failing plans endpoint degrades the plan column, not the whole screen", async ({ page }) => {
+  const json = (status: number, body: unknown) =>
+    ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  await page.route("**/api/edge/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*\/api\/edge\/v1/, "");
+    if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
+    if (path === "/guest-accounts")
+      return route.fulfill(json(200, {
+        data: [{ ...IAMV2_ACCOUNT, authority: undefined, template_id: PLAN.id }],
+        meta: { has_more: false }, authority: "legacy",
+      }));
+    if (path === "/guest-access-plans") return route.fulfill(json(500, { error: "internal", message: "boom" }));
+    if (path === "/guest-accounts/portal") return route.fulfill(json(200, { enabled: true }));
+    return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+  });
+  await page.goto("/guest-accounts");
+  await expect(page.getByText("devguest2"), "the accounts loaded and must still be shown").toBeVisible();
+});
+
+// LEGACY WITH ZERO PLANS: a `required` <select> with no options cannot be satisfied, so the form refused to
+// submit and said nothing. On a legacy site the plan really is a prerequisite, so name it.
+test("legacy with no plans names the missing prerequisite instead of offering a dead form", async ({ page }) => {
+  const json = (status: number, body: unknown) =>
+    ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  await page.route("**/api/edge/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*\/api\/edge\/v1/, "");
+    if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
+    if (path === "/guest-accounts")
+      return route.fulfill(json(200, { data: [], meta: { has_more: false }, authority: "legacy" }));
+    if (path === "/guest-access-plans") return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+    if (path === "/guest-accounts/portal") return route.fulfill(json(200, { enabled: false }));
+    return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+  });
+  await page.goto("/guest-accounts");
+  await page.getByRole("button", { name: /new account/i }).click();
+  await expect(page.getByText(/No active guest access plan exists yet/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /create account/i })).toBeDisabled();
+});
