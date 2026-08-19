@@ -333,6 +333,34 @@ Proven live on the appliance: the IAM-v2 screen issues `/auth/whoami`, `/guest-a
 zero plans under IAM-v2 with the legacy endpoint never called, a failing plans endpoint degrading the plan
 column rather than the screen, and legacy-with-no-plans naming the prerequisite.
 
+### The wording still belonged to the other authority
+
+Cutting the screen loose from the legacy resource left its **prose** behind. Two sentences carried no
+authority test at all:
+
+* the page description — *"each account is bound to a Guest Access Plan (duration, data cap, speed and max
+  devices)"* — which under IAM-v2 describes a binding that does not exist and points at a screen that cannot
+  affect anything the operator is looking at;
+* a standing warning — *"No active guest access plans — create one first"* — rendered whenever `activePlans`
+  was empty. Under IAM-v2 the plans resource is never fetched, so that list is **permanently** empty and the
+  warning was **permanently on screen**, instructing the operator to create a prerequisite their site does not
+  have and cannot use.
+
+A hostile reread of the same screen found a third, narrower instance of the same assumption: `authority` is
+`null` until the first list returns, so anything keyed on the structural default rendered as **legacy** during
+every load. An IAM-v2 operator saw both plan-bound sentences flash on screen on each visit. Structure still
+defaults to the legacy answer — that is the fail-safe direction, asking for a plan IAM-v2 ignores rather than
+omitting one a legacy site needs — but prose is now keyed on a *known* authority and claims nothing until it
+has one.
+
+Verified on the appliance, form closed and form open: no plan-bound wording of any kind, the screen states
+what actually decides access (*package eligibility rules*), and `/guest-access-plans` is never requested.
+
+Five regressions pin both directions, because asserting only the IAM-v2 side would let someone "fix" this by
+deleting guidance a legacy site genuinely needs: IAM-v2 shows none of the four plan-bound phrases (closed and
+open), legacy keeps its description and — with zero plans — keeps its warning, and nothing plan-bound appears
+while the authority is still unknown.
+
 ### PMS revision authoring was a race that surfaced as HTTP 500
 
 `revision_no` came from `(SELECT COALESCE(MAX(revision_no),0)+1 …)` inside the INSERT. Under READ COMMITTED

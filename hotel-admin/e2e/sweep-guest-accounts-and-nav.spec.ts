@@ -58,7 +58,9 @@ test("the plan picker is absent under IAM-v2 authority and present under legacy"
   await page.goto("/guest-accounts");
   await page.getByRole("button", { name: /new account/i }).click();
   await expect(page.locator('select[name="template_id"]')).toHaveCount(0);
-  await expect(page.getByText(/package eligibility rules/i)).toBeVisible();
+  // .first(): under IAM-v2 the phrase now appears twice -- once in the page description and once where the
+  // plan control used to be -- which is the copy being right, not a duplicate to remove.
+  await expect(page.getByText(/package eligibility rules/i).first()).toBeVisible();
 
   // The same screen against a legacy site: the plan IS real there, and must still be offered.
   await page.unrouteAll({ behavior: "ignoreErrors" });
@@ -175,4 +177,95 @@ test("legacy with no plans names the missing prerequisite instead of offering a 
   await page.getByRole("button", { name: /new account/i }).click();
   await expect(page.getByText(/No active guest access plan exists yet/i)).toBeVisible();
   await expect(page.getByRole("button", { name: /create account/i })).toBeDisabled();
+});
+
+// AUTHORITY-SPECIFIC WORDING, ASSERTED FROM BOTH SIDES.
+//
+// Two plan-bound sentences were rendered with no authority test at all: the page description ("each account
+// is bound to a Guest Access Plan") and a standing warning ("No active guest access plans — create one
+// first"). Under IAM-v2 the plans resource is never fetched, so activePlans is permanently empty and that
+// warning was permanently on screen -- telling an operator to go and create a prerequisite their site does
+// not have and cannot use.
+//
+// Both directions are pinned. Asserting only the IAM-v2 side would let someone "fix" it by deleting the
+// legacy guidance, which is correct and needed on a legacy site.
+const PLAN_BOUND_COPY = [
+  /bound to a Guest Access Plan/i,
+  /No active guest access plans/i,
+  /create one first/i,
+  /create a guest access plan/i,
+];
+
+test("IAM-v2 shows no plan-bound wording and no create-a-plan warning anywhere", async ({ page }) => {
+  await installBackend(page, "iam_v2", [IAMV2_ACCOUNT]);
+  await page.goto("/guest-accounts");
+  await expect(page.getByText("devguest2")).toBeVisible();
+  const body = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+  for (const rx of PLAN_BOUND_COPY) {
+    expect(body, `IAM-v2 must not say ${rx}`).not.toMatch(rx);
+  }
+  // ...and it states what actually decides access instead of simply going quiet.
+  await expect(page.getByText(/package eligibility rules/i).first()).toBeVisible();
+
+  // The same must hold with the form open, which is where the plan control used to live.
+  await page.getByRole("button", { name: /new account/i }).click();
+  const withForm = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+  for (const rx of PLAN_BOUND_COPY) {
+    expect(withForm, `IAM-v2 must not say ${rx} with the form open`).not.toMatch(rx);
+  }
+});
+
+test("legacy keeps its plan-bound wording and its create-a-plan guidance", async ({ page }) => {
+  // A legacy site WITH a plan: the description must still explain the binding.
+  await installBackend(page, "legacy", [{ ...IAMV2_ACCOUNT, authority: undefined, template_id: PLAN.id }]);
+  await page.goto("/guest-accounts");
+  await expect(page.getByText(/bound to a Guest Access Plan/i)).toBeVisible();
+  await expect(page.getByText(/No active guest access plans/i)).toHaveCount(0);
+
+  // A legacy site with NONE: the warning is exactly the guidance an operator needs.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const json = (status: number, body: unknown) =>
+    ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.route("**/api/edge/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*\/api\/edge\/v1/, "");
+    if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
+    if (path === "/guest-accounts")
+      return route.fulfill(json(200, { data: [], meta: { has_more: false }, authority: "legacy" }));
+    if (path === "/guest-access-plans") return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+    if (path === "/guest-accounts/portal") return route.fulfill(json(200, { enabled: false }));
+    return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+  });
+  await page.goto("/guest-accounts");
+  await expect(page.getByText(/No active guest access plans/i)).toBeVisible();
+  await expect(page.getByText(/bound to a Guest Access Plan/i)).toBeVisible();
+});
+
+// THE LOAD WINDOW. `authority` is null until the first list returns, so prose keyed on the structural
+// default was rendered as LEGACY during every load -- an IAM-v2 operator saw the plan-bound description and
+// the create-a-plan warning flash on screen each time. A wrong sentence shown briefly is still wrong.
+test("no plan-bound wording appears while the authority is still unknown", async ({ page }) => {
+  const json = (status: number, body: unknown) =>
+    ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => { release = r; });
+  await page.route("**/api/edge/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*\/api\/edge\/v1/, "");
+    if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
+    if (path === "/guest-accounts") {
+      // Hold the answer, so the test observes exactly the window in which the authority is unknown.
+      await held;
+      return route.fulfill(json(200, { data: [IAMV2_ACCOUNT], meta: { has_more: false }, authority: "iam_v2" }));
+    }
+    if (path === "/guest-accounts/portal") return route.fulfill(json(200, { enabled: true }));
+    return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+  });
+  await page.goto("/guest-accounts");
+  await expect(page.getByRole("heading", { name: /guest accounts/i })).toBeVisible();
+  const during = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+  for (const rx of PLAN_BOUND_COPY) {
+    expect(during, `nothing may claim ${rx} before the authority is known`).not.toMatch(rx);
+  }
+  release();
+  await expect(page.getByText("devguest2")).toBeVisible();
 });

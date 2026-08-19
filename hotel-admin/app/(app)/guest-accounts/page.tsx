@@ -77,7 +77,16 @@ export default function GuestAccountsPage() {
   // Under IAM-v2 a credential carries no plan. What a guest may acquire is decided by PACKAGE ELIGIBILITY
   // RULES evaluated when packages are listed, so a "guest access plan" on this screen would be a control the
   // backend discards -- and the operator would believe they had chosen what the guest gets.
+  // planApplies drives STRUCTURE (which controls exist, whether a plan is required). It defaults to the
+  // legacy answer while the authority is still unknown, which is the fail-safe direction: it asks for a plan
+  // that IAM-v2 will ignore rather than omitting one a legacy site genuinely needs.
   const planApplies = authority !== "iam_v2";
+  // planWordingApplies drives PROSE, and prose must never be guessed. `authority` is null until the first
+  // list returns, so anything keyed on planApplies alone is rendered as LEGACY during that window -- meaning
+  // an IAM-v2 operator saw "each account is bound to a Guest Access Plan" and "No active guest access plans
+  // — create one first" flash on screen every single load. A wrong sentence shown briefly is still a wrong
+  // sentence, and it is the one this screen is most likely to be judged by.
+  const planWordingApplies = authority === "legacy";
 
   async function load() {
     try {
@@ -252,11 +261,30 @@ export default function GuestAccountsPage() {
         </Button>
       </div>
 
-      <p className="text-sm text-muted mb-4">
-        Username &amp; Password sign-in for guests — each account is bound to a Guest Access Plan (duration, data cap,
-        speed and max devices) exactly like a voucher, but the guest signs in with a username and password instead of a
-        code. License capacity is appliance-wide; the plan&apos;s <strong>max devices</strong> is enforced per account.
-      </p>
+      {/*
+        THE DESCRIPTION IS AUTHORITY-SPECIFIC, because the two authorities disagree about what an account IS.
+        Telling an IAM-v2 operator that "each account is bound to a Guest Access Plan" is not a stale phrase to
+        tidy up later -- it describes a binding that does not exist, and it sends them to a screen that cannot
+        affect anything they are looking at.
+      */}
+      {authority === null ? (
+        // Nothing authority-specific is claimed until the authority is known.
+        <p className="text-sm text-muted mb-4">
+          Username &amp; Password sign-in for guests — the guest signs in with a username and password instead of a code.
+        </p>
+      ) : planWordingApplies ? (
+        <p className="text-sm text-muted mb-4">
+          Username &amp; Password sign-in for guests — each account is bound to a Guest Access Plan (duration, data cap,
+          speed and max devices) exactly like a voucher, but the guest signs in with a username and password instead of a
+          code. License capacity is appliance-wide; the plan&apos;s <strong>max devices</strong> is enforced per account.
+        </p>
+      ) : (
+        <p className="text-sm text-muted mb-4">
+          Username &amp; Password sign-in for guests — the guest signs in with a username and password instead of a code.
+          What each guest may then take is decided by <strong>package eligibility rules</strong> on the Commercial
+          packages screen, not by anything stored on the account. License capacity is appliance-wide.
+        </p>
+      )}
 
       <div className="mb-4 flex items-center gap-3 text-sm">
         <span>Show <strong>Username &amp; Password</strong> tab on the captive portal:</span>
@@ -264,7 +292,15 @@ export default function GuestAccountsPage() {
         <span className="text-muted text-xs">{portalOn ? "Guests can sign in with an account." : "The tab is hidden until enabled."}</span>
       </div>
 
-      {activePlans.length === 0 && <div className="text-sm text-warn mb-4">No active guest access plans — create one first.</div>}
+      {/*
+        "No active guest access plans — create one first" was rendered whenever activePlans was empty, with no
+        authority test at all. Under IAM-v2 the plans resource is never even fetched, so activePlans is ALWAYS
+        empty and this warning was ALWAYS on screen -- permanently instructing an operator to go and create a
+        prerequisite that their site does not have and cannot use.
+      */}
+      {planWordingApplies && activePlans.length === 0 && (
+        <div className="text-sm text-warn mb-4">No active guest access plans — create one first.</div>
+      )}
       {err && <div className="text-err text-sm mb-4">{err}</div>}
       {msg && <div className="text-ok text-sm mb-4">{msg}</div>}
 
