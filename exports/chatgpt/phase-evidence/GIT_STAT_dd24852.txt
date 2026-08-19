@@ -1,4 +1,0 @@
-commit dd2485297d704598c38c0f3579d0916e6131bf2a
-Date:   Wed Aug 19 14:47:41 2026 +0300
-
-    Stop Guest Accounts speaking the other authority's language
