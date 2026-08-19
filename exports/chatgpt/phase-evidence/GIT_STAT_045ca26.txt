@@ -1,0 +1,4 @@
+commit 045ca2676d90766fad80694ef5e67ed809f53563
+Date:   Thu Aug 20 00:20:55 2026 +0300
+
+    Replace the in-place cutover with a verified fresh-install path
