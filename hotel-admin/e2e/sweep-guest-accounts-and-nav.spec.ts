@@ -361,3 +361,44 @@ test("once resolved as legacy the form requires a plan again", async ({ page }) 
   await expect(page.locator('select[name="template_id"]')).toHaveCount(1);
   await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
 });
+
+// THE FAILURE STATE. `rows === null` was doing double duty as "still loading" and "the load failed", so a
+// failed load showed the error banner AND "Loading…" underneath it forever -- the screen contradicting
+// itself, and the same never-finishes shape the Phase-4 screens had. The form was worse: it went on saying
+// "Checking how this site decides guest access…" when the check had already failed and nothing was pending.
+test("a failed load says so, offers a retry, and does not claim to still be checking", async ({ page }) => {
+  const json = (status: number, body: unknown) =>
+    ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  let fail = true;
+  await page.route("**/api/edge/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*\/api\/edge\/v1/, "");
+    if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
+    if (path === "/guest-accounts") {
+      if (fail) return route.fulfill(json(500, { error: "internal", message: "list failed" }));
+      return route.fulfill(json(200, { data: [IAMV2_ACCOUNT], meta: { has_more: false }, authority: "iam_v2" }));
+    }
+    if (path === "/guest-accounts/portal") return route.fulfill(json(200, { enabled: true }));
+    return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+  });
+
+  await page.goto("/guest-accounts");
+  await expect(page.getByText(/Could not load guest accounts/i)).toBeVisible();
+  await expect(page.getByText("Loading…"), "a failed load must not also claim to be loading").toHaveCount(0);
+
+  // The form must not claim a check is still running, and must not imply a plan prerequisite either.
+  await page.getByRole("button", { name: /new account/i }).click();
+  await expect(page.getByText(/Could not determine how this site decides guest access/i)).toBeVisible();
+  await expect(page.getByText(/Checking how this site decides guest access/i)).toHaveCount(0);
+  const body = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+  for (const rx of PLAN_BOUND_COPY) {
+    expect(body, `a failed load must not claim ${rx}`).not.toMatch(rx);
+  }
+
+  // Retrying recovers, and the stale failure banner does not survive the recovery.
+  fail = false;
+  await page.getByRole("button", { name: /try again/i }).click();
+  await expect(page.getByText("devguest2")).toBeVisible();
+  await expect(page.getByText(/Could not load guest accounts/i)).toHaveCount(0);
+  await expect(page.getByText(/list failed/i), "the previous error must not linger").toHaveCount(0);
+});

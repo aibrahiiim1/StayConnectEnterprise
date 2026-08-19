@@ -361,6 +361,40 @@ deleting guidance a legacy site genuinely needs: IAM-v2 shows none of the four p
 open), legacy keeps its description and — with zero plans — keeps its warning, and nothing plan-bound appears
 while the authority is still unknown.
 
+### Closure pass: the Guest Accounts lifecycle as one model, not four patches
+
+The screen had been fixed symptom by symptom, so the remaining defects were all in the states nobody had
+opened. Reviewed as a single model — unknown, loading, success-empty, success-nonempty, failure — three more
+appeared:
+
+* `rows === null` was doing double duty as *"still loading"* and *"the load failed"*, so a failed load showed
+  the error banner **and** "Loading…" underneath it, forever. The same never-finishes shape the Phase-4
+  screens had.
+* the form went on saying *"Checking how this site decides guest access…"* when the check had already failed
+  and nothing was pending — a second false statement on top of the first.
+* `load()` never cleared the previous error, so a successful retry would have left the old failure banner
+  sitting above fresh, correct data.
+
+The list now has four distinct outcomes, and the failure one offers the only action that helps (**Try
+again**). The form states the failure instead of a phantom check.
+
+| State | List | Form access cell | Submit |
+|---|---|---|---|
+| loading | "Loading…" | "Checking how this site decides guest access…" | waits |
+| failed | "Could not load guest accounts" + **Try again** | "Could not determine…" | waits |
+| IAM-v2 | accounts, no Plan column | package eligibility rules | enabled |
+| legacy, no plans | accounts | names the prerequisite | refused |
+| legacy, with plans | accounts + Plan column | the picker | enabled |
+
+### Closure pass: a terminal PMS interface accepted configuration
+
+The authoring endpoint selected `connector_kind` purely to prove the interface existed and then threw the
+value away. Existence was never the question that mattered: **DECOMMISSIONED is terminal**, so a revision
+authored against it can never be published or dialled, and accepting it silently is how an operator ends up
+believing a retired interface was reconfigured. The backend now refuses with `409` and the UI does not offer
+the button. Verified live: `409` on a decommissioned interface, `404` on an unknown one, `201` on a live one,
+and the refusal leaves no revision behind.
+
 ### PMS revision authoring was a race that surfaced as HTTP 500
 
 `revision_no` came from `(SELECT COALESCE(MAX(revision_no),0)+1 …)` inside the INSERT. Under READ COMMITTED

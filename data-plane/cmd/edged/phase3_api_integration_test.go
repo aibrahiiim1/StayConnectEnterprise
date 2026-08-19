@@ -597,3 +597,49 @@ func TestIntegration_API_ConcurrentRevisionAuthoringIsDeterministic(t *testing.T
 		t.Fatalf("%d revisions persisted, want %d", got, n)
 	}
 }
+
+// A DECOMMISSIONED INTERFACE IS TERMINAL, AND MUST NOT ACCEPT CONFIGURATION.
+//
+// The authoring endpoint originally selected connector_kind purely to prove the interface existed, and threw
+// the value away. Existence is not the question that matters: a revision authored against a decommissioned
+// interface can never be published or dialled, so accepting it silently is how an operator ends up believing
+// a retired interface was reconfigured.
+func TestIntegration_API_DecommissionedInterfaceRefusesConfiguration(t *testing.T) {
+	f := newAPI(t)
+	status, body := f.do(t, "POST", "/pms-interfaces",
+		map[string]any{"connector_kind": "stub", "display_label": "lifecycle"})
+	if status != 201 {
+		t.Fatalf("create interface: %d %v", status, body)
+	}
+	id, _ := body["id"].(string)
+
+	// While it is live, authoring works.
+	if st, b := f.do(t, "POST", "/pms-interfaces/"+id+"/revisions",
+		validRevisionBody("live.local:5010")); st != 201 {
+		t.Fatalf("authoring on a live interface: %d %v", st, b)
+	}
+
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE iam_v2.pms_interfaces SET lifecycle_state='DECOMMISSIONED' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	st, b := f.do(t, "POST", "/pms-interfaces/"+id+"/revisions", validRevisionBody("dead.local:5010"))
+	if st != 409 {
+		t.Fatalf("authoring on a decommissioned interface = %d, want 409: %v", st, b)
+	}
+	// The refusal must leave nothing behind: one revision, the one authored while it was live.
+	if got := count(t, f.pool,
+		`SELECT count(*) FROM iam_v2.pms_interface_revisions WHERE pms_interface_id=$1`, id); got != 1 {
+		t.Fatalf("%d revisions after a refused authoring, want 1", got)
+	}
+}
+
+// An interface that does not exist in THIS tenant and site is a 404, not a 500 and not a silent success.
+func TestIntegration_API_AuthoringAnUnknownInterfaceIsNotFound(t *testing.T) {
+	f := newAPI(t)
+	if st, b := f.do(t, "POST", "/pms-interfaces/00000000-0000-4000-8000-000000000000/revisions",
+		validRevisionBody("nowhere.local:5010")); st != 404 {
+		t.Fatalf("authoring against an unknown interface = %d, want 404: %v", st, b)
+	}
+}

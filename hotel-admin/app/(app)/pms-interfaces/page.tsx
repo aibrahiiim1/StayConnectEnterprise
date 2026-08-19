@@ -159,9 +159,16 @@ export default function PMSInterfacesPage() {
                       >
                         {selected === i.id ? "Close" : "Open"}
                       </Button>{" "}
-                      <Button variant="secondary" onClick={() => { setAuthoring(i.id); setNote(null); }}>
-                        Configure
-                      </Button>
+                      {/*
+                        A DECOMMISSIONED interface is in its terminal state: a revision authored against it
+                        can never be published or dialled. Offering the button and refusing the save at the
+                        backend would be correct but pointless -- the honest surface is not to offer it.
+                      */}
+                      {i.lifecycle_state !== "DECOMMISSIONED" && (
+                        <Button variant="secondary" onClick={() => { setAuthoring(i.id); setNote(null); }}>
+                          Configure
+                        </Button>
+                      )}
                     </TD>
                   </TR>
                 ))}

@@ -74,6 +74,10 @@ export default function GuestAccountsPage() {
   const [pwFor, setPwFor] = useState<GuestAccount | null>(null);
   const [reveal, setReveal] = useState<{ username: string; password: string } | null>(null);
   const [authority, setAuthority] = useState<"iam_v2" | "legacy" | null>(null);
+  // THE LIST HAS THREE OUTCOMES, NOT TWO. `rows === null` was doing double duty as "still loading" and "the
+  // load failed", so a failed load rendered the error banner AND "Loading…" underneath it forever -- the
+  // screen contradicting itself, and the same never-finishes-loading shape the Phase-4 screens had.
+  const [loadFailed, setLoadFailed] = useState(false);
   // Under IAM-v2 a credential carries no plan. What a guest may acquire is decided by PACKAGE ELIGIBILITY
   // RULES evaluated when packages are listed, so a "guest access plan" on this screen would be a control the
   // backend discards -- and the operator would believe they had chosen what the guest gets.
@@ -89,6 +93,10 @@ export default function GuestAccountsPage() {
   const planWordingApplies = authority === "legacy";
 
   async function load() {
+    // Clearing both at entry matters for the RETRY path: without it a successful reload leaves the previous
+    // failure's banner sitting above fresh, correct data.
+    setErr(null);
+    setLoadFailed(false);
     try {
       const [ga, pv] = await Promise.all([
         api.get<ListResp<GuestAccount>>("/guest-accounts"),
@@ -119,6 +127,7 @@ export default function GuestAccountsPage() {
       setPortalOn(!!pv.enabled);
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
+      setLoadFailed(true);
     }
   }
   useEffect(() => { load(); }, []);
@@ -309,14 +318,14 @@ export default function GuestAccountsPage() {
       {showNew && (
         <Card className="mb-6">
           <CardHeader><CardTitle>New guest account</CardTitle></CardHeader>
-          <CardBody><AccountForm plans={activePlans} planApplies={planApplies} authorityResolved={authority !== null} onSubmit={onCreate} busy={busy} withPassword /></CardBody>
+          <CardBody><AccountForm plans={activePlans} planApplies={planApplies} authorityResolved={authority !== null} loadFailed={loadFailed} onSubmit={onCreate} busy={busy} withPassword /></CardBody>
         </Card>
       )}
 
       {editing && (
         <Card className="mb-6 border-brand">
           <CardHeader><CardTitle>Edit {editing.username}</CardTitle></CardHeader>
-          <CardBody><AccountForm plans={activePlans} allPlans={plans} planApplies={planApplies} authorityResolved={authority !== null} account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
+          <CardBody><AccountForm plans={activePlans} allPlans={plans} planApplies={planApplies} authorityResolved={authority !== null} loadFailed={loadFailed} account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
         </Card>
       )}
 
@@ -333,7 +342,15 @@ export default function GuestAccountsPage() {
 
       <Card>
         <CardBody className="p-0">
-          {rows === null ? <EmptyState title="Loading…" /> : filtered.length === 0 ? (
+          {loadFailed ? (
+            // A failed load is not an empty list and not a slow one. Saying so, and offering the one action
+            // that can help, beats a spinner that will never finish.
+            <div className="py-14 text-center text-muted">
+              <div className="text-sm">Could not load guest accounts</div>
+              <div className="text-xs mt-1">The appliance did not answer. Nothing has been changed.</div>
+              <Button className="mt-3" onClick={() => void load()}>Try again</Button>
+            </div>
+          ) : rows === null ? <EmptyState title="Loading…" /> : filtered.length === 0 ? (
             <EmptyState title="No guest accounts" hint="Create one to let guests sign in with a username and password." />
           ) : (
             <Table>
@@ -383,9 +400,9 @@ export default function GuestAccountsPage() {
 
 // AccountForm is shared by create and edit. `withPassword` shows the create-time
 // password controls; edit uses the separate Set-password panel.
-function AccountForm({ plans, allPlans, planApplies = true, authorityResolved = true, account, onSubmit, busy, withPassword, onCancel }: {
+function AccountForm({ plans, allPlans, planApplies = true, authorityResolved = true, loadFailed = false, account, onSubmit, busy, withPassword, onCancel }: {
   plans: GuestAccessPlan[]; allPlans?: GuestAccessPlan[]; planApplies?: boolean; authorityResolved?: boolean;
-  account?: GuestAccount;
+  loadFailed?: boolean; account?: GuestAccount;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void; busy: boolean; withPassword?: boolean; onCancel?: () => void;
 }) {
   const [generate, setGenerate] = useState(false);
@@ -436,7 +453,11 @@ function AccountForm({ plans, allPlans, planApplies = true, authorityResolved = 
         <div>
           <Label>Access</Label>
           <p className="text-xs text-muted mt-1.5 leading-relaxed" role="status">
-            Checking how this site decides guest access…
+            {loadFailed
+              // "Checking…" while the check has already failed is a second false statement on top of the
+              // first: it is not still working, and nothing will change until the operator retries.
+              ? "Could not determine how this site decides guest access. Reload the page and try again."
+              : "Checking how this site decides guest access…"}
           </p>
         </div>
       ) : planApplies && planOptions.length === 0 ? (

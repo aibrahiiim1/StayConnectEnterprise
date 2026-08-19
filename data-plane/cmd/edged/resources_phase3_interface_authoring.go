@@ -150,11 +150,24 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	var kind string
+	// The interface must exist in THIS tenant and site, and must still be configurable.
+	//
+	// connector_kind used to be selected here and then never read -- a value fetched to prove existence and
+	// thrown away. The lifecycle state is the one that actually decides whether authoring means anything:
+	// DECOMMISSIONED is terminal, so a revision written against it is configuration that can never be
+	// published or dialled, and accepting it silently is how an operator ends up believing a retired
+	// interface was reconfigured.
+	var lifecycle string
 	if err := s.db.QueryRow(ctx,
-		`SELECT connector_kind FROM iam_v2.pms_interfaces WHERE id=$1 AND tenant_id=$2 AND site_id=$3`,
-		id, s.tenantID, s.siteID).Scan(&kind); err != nil {
+		`SELECT lifecycle_state FROM iam_v2.pms_interfaces WHERE id=$1 AND tenant_id=$2 AND site_id=$3`,
+		id, s.tenantID, s.siteID).Scan(&lifecycle); err != nil {
 		jsonErr(w, http.StatusNotFound, "not_found", "interface not found")
+		return
+	}
+	if lifecycle == "DECOMMISSIONED" {
+		jsonErr(w, http.StatusConflict, "conflict",
+			"this interface is decommissioned: it cannot be configured, and a revision authored against it "+
+				"could never be published")
 		return
 	}
 	raw, _ := json.Marshal(cfg)
