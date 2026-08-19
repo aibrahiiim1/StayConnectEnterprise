@@ -171,7 +171,7 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	            $4,$5,$6::jsonb,$7,$8,$9)
 	    RETURNING id::text, revision_no`,
 		s.tenantID, s.siteID, id, in.SourceTimezone, in.FolioIdentityStrategy, string(raw),
-		in.NormalizationVersion, nullIfEmpty(in.FinancialBaseCurrency), in.FinancialCurrencyExp,
+		in.NormalizationVersion, nullIfBlankText(in.FinancialBaseCurrency), in.FinancialCurrencyExp,
 	).Scan(&revID, &revNo)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "author failed: "+err.Error())
@@ -187,7 +187,9 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	})
 }
 
-func nullIfEmpty(s string) any {
+// nullIfBlankText, not nullIfEmpty: that name already belongs to a helper in the integration-tagged test
+// files, and a plain `go build ./...` never compiles those, so the collision only appeared in CI.
+func nullIfBlankText(s string) any {
 	if strings.TrimSpace(s) == "" {
 		return nil
 	}
