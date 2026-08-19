@@ -1,0 +1,42 @@
+{
+  "transition_id": "T0075",
+  "seq": 75,
+  "timestamp": "2026-08-19T21:15:55Z",
+  "record_type": "PRODUCTION_STRATEGY_REPLACED_WITH_FRESH_APPLIANCE_DEPLOYMENT_AND_CLEAN_INSTALL_PATH_VERIFIED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "PRODUCTION_IAM_V2_CUTOVER_AND_LEGACY_IAM_RETIREMENT",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "AUTHORIZED_PREFLIGHT_COMPLETE_CUTOVER_ENVIRONMENT_BLOCKED",
+    "lifecycle": "post-roadmap controlled production transition (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "CLEAN_INSTALL_PATH_VERIFIED_AWAITING_PRODUCT_OWNER_PROVIDED_SERVER",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D35",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner instruction, 2026-08-20: replace the in-place cutover strategy with Fresh Production Appliance Deployment, prepare and verify the clean-install path from repository sources only, and change nothing on 172.21.60.23.",
+  "previous_state_note": "D34/T0074 authorized a Production IAM-v2 cutover, which could not execute because no Production appliance existed. The assumed model was an in-place cutover.",
+  "new_state_note": "The Production model is now FRESH APPLIANCE DEPLOYMENT. 172.21.60.23 remains the DEVELOPMENT appliance, is not reclassified, and its legacy baseline is not retired or dropped. No Production appliance exists. The clean-install and disaster-recovery path has been reconstructed and VERIFIED from repository-controlled sources in a disposable container that never saw any appliance: it builds 41 public and 74 iam_v2 base tables with zero rows and zero identities, matching the development appliance's 74 iam_v2 base tables exactly. Two blocking gaps were found and are recorded with recommended corrections, and two non-blocking findings describe what a clean install still creates and what remains configuration-selectable.",
+  "phase_affected_note": "post-roadmap (supersedes the in-place cutover assumption of D34/T0074)",
+  "clean_install_findings": [
+    "BLOCKING A: the IAM-v2 base schema is not in the numbered migration ledger. data-plane/migrations/0009 onwards address iam_v2 objects and nothing in that sequence creates the schema, so a clean database stops at 0009 with 'schema iam_v2 does not exist'. The base schema lives in iam_v2_scratch/migrations/mg1..mg9, a directory documented as SCRATCH and not production code, and those files are not recorded in schema_migrations on the development appliance.",
+    "BLOCKING B: public.guest_networks lacks the composite UNIQUE (tenant_id, site_id, id) that mg1 requires for its cross-schema anchor, so the base schema cannot build. The development appliance lacks that constraint too and its iam_v2.pms_interfaces has no foreign key to guest_networks, so that appliance is not reproducible from the committed mg1 as-is and the two schemas are not identical.",
+    "NON-BLOCKING C: a clean install still creates the superseded guest-auth surface in public (guest_accounts, ticket_templates, vouchers, voucher_batches, sessions, auth_otps, guests) from migrations 0001 and 0006.",
+    "NON-BLOCKING D: the authority switch is call-level rather than build-level across six files, so with IAM-v2 enabled the legacy branches are not taken but remain compiled in and re-selectable by configuration. Making the authority non-selectable on a production build is proposed as a separate Product-Owner work item."
+  ],
+  "boundaries_observed": [
+    "172.21.60.23 unchanged: no schema, privilege, service, configuration or data was modified on it during this work. It was read only as reference evidence.",
+    "No deployment to any new server. No Production appliance exists or was contacted.",
+    "No historical migration or governance evidence deleted. The scratch directory is retained as provenance.",
+    "The reconstruction ran in a disposable container on the workstation and copied no runtime state from any appliance.",
+    "No capability enabled, no PMS, provider or financial traffic, two-NIC model and all permanent product rules preserved."
+  ],
+  "next": "Product-Owner provision of the new Production server and access, plus authorization to execute the fresh deployment on that exact target."
+}

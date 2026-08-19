@@ -615,6 +615,13 @@
       "decided_on": "2026-08-19",
       "phase": "post-roadmap",
       "accepted": true
+    },
+    {
+      "id": "D35",
+      "title": "PRODUCTION STRATEGY REPLACED: FRESH PRODUCTION APPLIANCE DEPLOYMENT, NOT AN IN-PLACE CUTOVER (2026-08-20). The Product Owner supersedes the in-place Production IAM-v2 cutover assumed by D34/T0074. 172.21.60.23 REMAINS THE DEVELOPMENT APPLIANCE and is not to be reclassified, cut over, or have its legacy baseline retired or dropped. NO PRODUCTION APPLIANCE EXISTS. The future Production target is a newly provisioned factory-clean server, and the authorized model is: fresh server, fresh OS, clean StayConnect deployment from the authoritative repository, enrollment and claim and signed assignment, required hotel configuration, IAM-v2 as the intended authority from first operation, complete acceptance testing, then a Product-Owner Go-Live decision. No DEVELOPMENT database, /etc/stayconnect, service state, test identity, account, voucher or other runtime state may be restored or cloned onto the new appliance: the development appliance is evidence and reference only, never an installation source. Authorized now and only now: preparing and VERIFYING the clean-install and disaster-recovery path from repository-controlled sources in a disposable isolated environment, and auditing the fresh-install schema path for superseded pre-IAM-v2 guest-auth objects, routes, privileges, compatibility paths and service dependencies that a clean final installation would unnecessarily create. Historical migrations and governance evidence are RETAINED: the objective is zero superseded ACTIVE runtime dependency on a fresh installation, not destruction of project history. NOT authorized: deployment to any new server, and any change to 172.21.60.23. Actual Production deployment waits for the Product Owner to provide the new server and access and to authorize execution on that exact target.",
+      "decided_on": "2026-08-20",
+      "phase": "post-roadmap",
+      "accepted": true
     }
   ]
 }
