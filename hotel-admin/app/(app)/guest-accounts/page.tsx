@@ -309,14 +309,14 @@ export default function GuestAccountsPage() {
       {showNew && (
         <Card className="mb-6">
           <CardHeader><CardTitle>New guest account</CardTitle></CardHeader>
-          <CardBody><AccountForm plans={activePlans} planApplies={planApplies} onSubmit={onCreate} busy={busy} withPassword /></CardBody>
+          <CardBody><AccountForm plans={activePlans} planApplies={planApplies} authorityResolved={authority !== null} onSubmit={onCreate} busy={busy} withPassword /></CardBody>
         </Card>
       )}
 
       {editing && (
         <Card className="mb-6 border-brand">
           <CardHeader><CardTitle>Edit {editing.username}</CardTitle></CardHeader>
-          <CardBody><AccountForm plans={activePlans} allPlans={plans} planApplies={planApplies} account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
+          <CardBody><AccountForm plans={activePlans} allPlans={plans} planApplies={planApplies} authorityResolved={authority !== null} account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
         </Card>
       )}
 
@@ -383,8 +383,9 @@ export default function GuestAccountsPage() {
 
 // AccountForm is shared by create and edit. `withPassword` shows the create-time
 // password controls; edit uses the separate Set-password panel.
-function AccountForm({ plans, allPlans, planApplies = true, account, onSubmit, busy, withPassword, onCancel }: {
-  plans: GuestAccessPlan[]; allPlans?: GuestAccessPlan[]; planApplies?: boolean; account?: GuestAccount;
+function AccountForm({ plans, allPlans, planApplies = true, authorityResolved = true, account, onSubmit, busy, withPassword, onCancel }: {
+  plans: GuestAccessPlan[]; allPlans?: GuestAccessPlan[]; planApplies?: boolean; authorityResolved?: boolean;
+  account?: GuestAccount;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void; busy: boolean; withPassword?: boolean; onCancel?: () => void;
 }) {
   const [generate, setGenerate] = useState(false);
@@ -420,7 +421,25 @@ function AccountForm({ plans, allPlans, planApplies = true, account, onSubmit, b
           </div>
         </>
       ) : <div />}
-      {planApplies && planOptions.length === 0 ? (
+      {!authorityResolved ? (
+        // THE AUTHORITY IS NOT KNOWN YET, SO NOTHING MAY BE CLAIMED ABOUT WHAT AN ACCOUNT NEEDS.
+        //
+        // planApplies defaults to the LEGACY answer while the first list is still in flight -- the right
+        // default for structure, because asking for a plan IAM-v2 ignores is safer than omitting one a legacy
+        // site needs. But the branch below turns that default into VISIBLE PROSE: with no plans loaded yet it
+        // rendered "No active guest access plan exists yet ... an account cannot be created without one",
+        // which on an IAM-v2 site is simply false and, for the moment it is on screen, is indistinguishable
+        // from a real prerequisite. Opening the form during a slow load was enough to see it.
+        //
+        // So this window states only what is true of it, and submission waits rather than being refused for a
+        // reason that may not apply.
+        <div>
+          <Label>Access</Label>
+          <p className="text-xs text-muted mt-1.5 leading-relaxed" role="status">
+            Checking how this site decides guest access…
+          </p>
+        </div>
+      ) : planApplies && planOptions.length === 0 ? (
         // A `required` <select> with no options cannot be satisfied, so the form silently refuses to submit
         // and nothing on screen says why. On a legacy site a plan is genuinely required, so the honest answer
         // is to name the missing prerequisite rather than present a control that cannot be used.
@@ -453,7 +472,7 @@ function AccountForm({ plans, allPlans, planApplies = true, account, onSubmit, b
       <div className="sm:col-span-3"><Label>Notes (optional)</Label><Input name="notes" defaultValue={account?.notes ?? ""} /></div>
       <div className="sm:col-span-3 flex justify-end gap-2">
         {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
-        <Button type="submit" disabled={busy || (planApplies && planOptions.length === 0)}>
+        <Button type="submit" disabled={busy || !authorityResolved || (planApplies && planOptions.length === 0)}>
           {busy ? "Saving…" : account ? "Save changes" : "Create account"}
         </Button>
       </div>

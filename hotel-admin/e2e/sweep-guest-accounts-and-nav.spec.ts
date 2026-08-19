@@ -269,3 +269,95 @@ test("no plan-bound wording appears while the authority is still unknown", async
   release();
   await expect(page.getByText("devguest2")).toBeVisible();
 });
+
+// OPENING THE FORM WHILE THE AUTHORITY IS STILL UNKNOWN.
+//
+// The page copy was fixed to wait for a known authority, but the FORM was not. planApplies defaults to the
+// legacy answer while the first list is in flight -- correct for structure -- and with no plans loaded yet
+// that default rendered "No active guest access plan exists yet ... an account cannot be created without
+// one", plus a submit button disabled on that basis. On an IAM-v2 site the sentence is false, and while it is
+// on screen it is indistinguishable from a real prerequisite. Opening the form during a slow load was enough.
+//
+// The accounts response is HELD so the window is the whole test rather than a millisecond to race against.
+test("opening the form before the authority resolves implies no plan prerequisite", async ({ page }) => {
+  const json = (status: number, body: unknown) =>
+    ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => { release = r; });
+  await page.route("**/api/edge/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*\/api\/edge\/v1/, "");
+    if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
+    if (path === "/guest-accounts") {
+      await held;
+      return route.fulfill(json(200, { data: [IAMV2_ACCOUNT], meta: { has_more: false }, authority: "iam_v2" }));
+    }
+    if (path === "/guest-accounts/portal") return route.fulfill(json(200, { enabled: true }));
+    return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+  });
+
+  await page.goto("/guest-accounts");
+  await page.getByRole("button", { name: /new account/i }).click();
+  // The form is open and the authority is STILL unknown -- this is the window under test.
+  await expect(page.locator('input[name="username"]')).toBeVisible();
+
+  const during = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+  for (const rx of PLAN_BOUND_COPY) {
+    expect(during, `the open form must not claim ${rx} before the authority is known`).not.toMatch(rx);
+  }
+  expect(during, "it must not name the legacy prerequisite either")
+    .not.toMatch(/an account cannot be created without one/i);
+  // No plan CONTROL may be presented on an assumption, in either direction.
+  await expect(page.locator('select[name="template_id"]')).toHaveCount(0);
+  // Submission waits rather than being refused for a reason that may not apply.
+  await expect(page.getByRole("button", { name: /create account/i })).toBeDisabled();
+  await expect(page.getByText(/Checking how this site decides guest access/i)).toBeVisible();
+
+  // ...and once it resolves as IAM-v2 the form becomes usable with no plan involved at all.
+  release();
+  await expect(page.getByText("devguest2")).toBeVisible();
+  await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
+  await expect(page.locator('select[name="template_id"]')).toHaveCount(0);
+  const after = (await page.locator("body").innerText()).replace(/\s+/g, " ");
+  for (const rx of PLAN_BOUND_COPY) {
+    expect(after, `resolved IAM-v2 must not claim ${rx}`).not.toMatch(rx);
+  }
+});
+
+// THE RESOLVED LEGACY PATH MUST STILL FAIL SAFE. The point of the fix is to stop GUESSING the prerequisite,
+// not to stop enforcing it: once the answer is legacy, a plan is required again.
+test("once resolved as legacy the form requires a plan again", async ({ page }) => {
+  const json = (status: number, body: unknown) =>
+    ({ status, contentType: "application/json", body: JSON.stringify(body) });
+  await page.context().addCookies([{ name: "sc_edge_session", value: "e2e-test", url: "http://127.0.0.1:3123" }]);
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => { release = r; });
+  let plansEmpty = true;
+  await page.route("**/api/edge/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^.*\/api\/edge\/v1/, "");
+    if (path === "/auth/whoami") return route.fulfill(json(200, { email: "a@t.local", roles: ["site_admin"] }));
+    if (path === "/guest-accounts") {
+      await held;
+      return route.fulfill(json(200, { data: [], meta: { has_more: false }, authority: "legacy" }));
+    }
+    if (path === "/guest-access-plans")
+      return route.fulfill(json(200, { data: plansEmpty ? [] : [PLAN], meta: { has_more: false } }));
+    if (path === "/guest-accounts/portal") return route.fulfill(json(200, { enabled: false }));
+    return route.fulfill(json(200, { data: [], meta: { has_more: false } }));
+  });
+
+  await page.goto("/guest-accounts");
+  await page.getByRole("button", { name: /new account/i }).click();
+  await expect(page.getByText(/Checking how this site decides guest access/i)).toBeVisible();
+  release();
+  // Resolved legacy with NO plans: the prerequisite is real, so it is named and submission is refused.
+  await expect(page.getByText(/No active guest access plan exists yet/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /create account/i })).toBeDisabled();
+
+  // Resolved legacy WITH a plan: the picker is back and the form works.
+  plansEmpty = false;
+  await page.reload();
+  await page.getByRole("button", { name: /new account/i }).click();
+  await expect(page.locator('select[name="template_id"]')).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /create account/i })).toBeEnabled();
+});
