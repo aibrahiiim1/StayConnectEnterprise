@@ -1,4 +1,0 @@
-commit b662e9eaf8bde72f9f1af8a5f6ca9c2eebf48227
-Date:   Wed Aug 19 13:14:34 2026 +0300
-
-    Record the plan-independence and concurrency evidence under T0073

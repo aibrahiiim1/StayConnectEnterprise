@@ -1,0 +1,4 @@
+commit a7de570aea69390f94a462cb298dc0c4c8a4516e
+Date:   Wed Aug 19 13:26:55 2026 +0300
+
+    Stop requiring Phase-4 columns on a Phase-3 authoring surface
