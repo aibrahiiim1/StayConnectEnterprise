@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `fef8af9989a2a9695d5a728912effce09ab582bb`
-- **HEAD commit:** `42b7ccc49c2e93f0e7262528fa5e23cfbab0c448`
-- **Provenance (generation HEAD = inventory_head):** `42b7ccc49c2e93f0e7262528fa5e23cfbab0c448`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `42f3d17a0ccba20e474a62696c6b2927c45d694b`
+- **Provenance (generation HEAD = inventory_head):** `42f3d17a0ccba20e474a62696c6b2927c45d694b`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `post-roadmap/dev-iamv2-trial`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 119
@@ -18,11 +18,11 @@
 | `data-plane/cmd/edged/guest_accounts_iamv2.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Make IAM-v2 actually authoritative at the real guest entry points |
 | `data-plane/cmd/edged/guest_accounts_iamv2_lifecycle.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Fix the Guest Accounts crash, the dead plan picker, and the navigation |
 | `data-plane/cmd/edged/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Wire PUT /grace to the D32 policy path and retire every legacy grace writer |
-| `data-plane/cmd/edged/phase3_api_integration_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Cut Guest Accounts loose from legacy plans, and make revision authoring safe |
+| `data-plane/cmd/edged/phase3_api_integration_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Close the T0073 sweep: whole state models, not the states anyone opened |
 | `data-plane/cmd/edged/resources_commerce.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Spell gracePolicyFromConfig correctly |
 | `data-plane/cmd/edged/resources_guest_accounts.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Fix the Guest Accounts crash, the dead plan picker, and the navigation |
 | `data-plane/cmd/edged/resources_phase3.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
-| `data-plane/cmd/edged/resources_phase3_interface_authoring.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Stop requiring Phase-4 columns on a Phase-3 authoring surface |
+| `data-plane/cmd/edged/resources_phase3_interface_authoring.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Close the T0073 sweep: whole state models, not the states anyone opened |
 | `data-plane/cmd/edged/resources_phase3_interfaces.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Give PMS interfaces the configuration surface they never had |
 | `data-plane/cmd/edged/resources_plans_vouchers.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Implement IAM-v2 voucher issuance on the accepted key-generation model |
 | `data-plane/cmd/portald/iamv2_commerce_session.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Validate the whole trusted identity on activation, and make success mean enforced |
@@ -78,36 +78,36 @@
 | `deploy/systemd/stayconnect-netd.service` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Fix the netd cold-boot DB race and make startup/release gates self-proving |
 | `deploy/systemd/stayconnect-pmsd.service` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Fix the netd cold-boot DB race and make startup/release gates self-proving |
 | `deploy/systemd/stayconnect-scd.service` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Grant acctd the controlled-operation opener; gate scd and acctd on the site DB |
-| `docs/acceptance/StayConnect-IAM-Phase7-Progress-Evidence.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Stop Guest Accounts speaking the other authority's language |
+| `docs/acceptance/StayConnect-IAM-Phase7-Progress-Evidence.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Close the T0073 sweep: whole state models, not the states anyone opened |
 | `docs/architecture/Phase3-Controlled-Writer-Privilege-Manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record the D32 grace evidence and correct the privilege manifest |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
-| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
+| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
 | `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_42b7ccc.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
+| `exports/chatgpt/phase-evidence/GIT_STAT_42f3d17.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_d0e3904.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at bdb2161: D33/T0072 acceptance, packs and manifest |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Record D33/T0072: the DEVELOPMENT IAM-v2 trial is accepted and closed |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at dd24852: packs and manifest |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at 42b7ccc: packs and manifest |
 | `governance/transitions/T0066.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0067.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0068.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Transition receipts: stamp each before the commit that introduced it |
@@ -116,16 +116,16 @@
 | `governance/transitions/T0071.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0071 before the commit that introduced it |
 | `governance/transitions/T0072.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Record D33/T0072: the DEVELOPMENT IAM-v2 trial is accepted and closed |
 | `governance/transitions/T0073.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0073 before the commit that introduced it |
-| `hotel-admin/app/(app)/guest-accounts/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Stop the account form assuming a plan before the authority is known |
+| `hotel-admin/app/(app)/guest-accounts/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Close the T0073 sweep: whole state models, not the states anyone opened |
 | `hotel-admin/app/(app)/layout.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Fix the Guest Accounts crash, the dead plan picker, and the navigation |
 | `hotel-admin/app/(app)/license/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
-| `hotel-admin/app/(app)/pms-interfaces/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Give PMS interfaces the configuration surface they never had |
+| `hotel-admin/app/(app)/pms-interfaces/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Close the T0073 sweep: whole state models, not the states anyone opened |
 | `hotel-admin/components/nav.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Fix the Guest Accounts crash, the dead plan picker, and the navigation |
 | `hotel-admin/components/phase4/financial-health-view.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
 | `hotel-admin/components/phase4/financial-recovery-view.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
 | `hotel-admin/components/phase4/manual-review-view.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
 | `hotel-admin/components/phase4/settlements-view.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
-| `hotel-admin/e2e/sweep-guest-accounts-and-nav.spec.ts` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Stop the account form assuming a plan before the authority is known |
+| `hotel-admin/e2e/sweep-guest-accounts-and-nav.spec.ts` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Close the T0073 sweep: whole state models, not the states anyone opened |
 | `hotel-admin/lib/api.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
 | `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Remove a control byte from the parity negative suite |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Derive M48's manifest anchor instead of pinning it |
@@ -135,16 +135,16 @@
 ## Total diff statistics (`git diff --stat`)
 ```text
  data-plane/cmd/edged/common.go                     |  15 +
- data-plane/cmd/edged/decode_number_test.go         |  54 +++
+ data-plane/cmd/edged/decode_number_test.go         |  54 ++
  .../cmd/edged/guest_accounts_authority_test.go     | 115 +++++
  data-plane/cmd/edged/guest_accounts_iamv2.go       |  65 +++
  .../cmd/edged/guest_accounts_iamv2_lifecycle.go    | 331 +++++++++++++
  data-plane/cmd/edged/main.go                       |  45 +-
- .../cmd/edged/phase3_api_integration_test.go       | 127 +++++
+ .../cmd/edged/phase3_api_integration_test.go       | 173 +++++++
  data-plane/cmd/edged/resources_commerce.go         | 174 ++++++-
  data-plane/cmd/edged/resources_guest_accounts.go   |  63 ++-
  data-plane/cmd/edged/resources_phase3.go           |  12 +-
- .../edged/resources_phase3_interface_authoring.go  | 384 +++++++++++++++
+ .../edged/resources_phase3_interface_authoring.go  | 397 +++++++++++++++
  .../cmd/edged/resources_phase3_interfaces.go       |   4 +
  data-plane/cmd/edged/resources_plans_vouchers.go   |  19 +-
  data-plane/cmd/portald/iamv2_commerce_session.go   | 276 +++++++++++
@@ -169,7 +169,7 @@
  data-plane/internal/iamv2/commerce_repo_pg.go      |  26 +
  data-plane/internal/iamv2/concurrency_test.go      |  25 +-
  data-plane/internal/iamv2/grace_policy_publish.go  | 157 ++++++
- .../internal/iamv2/grace_policy_publish_pg.go      | 162 +++++++
+ .../internal/iamv2/grace_policy_publish_pg.go      | 162 ++++++
  data-plane/internal/iamv2/grace_provision.go       | 147 ++++++
  data-plane/internal/iamv2/grace_provision_test.go  | 269 ++++++++++
  .../internal/iamv2/grace_reserved_codes_test.go    |  36 ++
@@ -200,18 +200,18 @@
  deploy/systemd/stayconnect-netd.service            |  12 +-
  deploy/systemd/stayconnect-pmsd.service            |   5 +-
  deploy/systemd/stayconnect-scd.service             |  20 +-
- .../StayConnect-IAM-Phase7-Progress-Evidence.md    | 289 +++++++++++
+ .../StayConnect-IAM-Phase7-Progress-Evidence.md    | 323 ++++++++++++
  .../Phase3-Controlled-Writer-Privilege-Manifest.md |   3 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   8 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   8 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   8 +-
  docs/context/StayConnect-IAM-Handoff.md            |   8 +-
- docs/manifests/Phase7-change-manifest.md           | 540 +++++++++++++--------
+ docs/manifests/Phase7-change-manifest.md           | 542 +++++++++++++--------
  .../reports/StayConnect-IAM-Phase7-Final-Report.md | 127 +++--
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 316173 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 124385 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42544 bytes
- .../chatgpt/phase-evidence/GIT_STAT_42b7ccc.txt    |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 316171 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 124388 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42547 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_42f3d17.txt    |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_d0e3904.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -238,22 +238,22 @@
  governance/transitions/T0071.json                  |  41 ++
  governance/transitions/T0072.json                  |  47 ++
  governance/transitions/T0073.json                  |  38 ++
- hotel-admin/app/(app)/guest-accounts/page.tsx      | 176 +++++--
+ hotel-admin/app/(app)/guest-accounts/page.tsx      | 199 ++++++--
  hotel-admin/app/(app)/layout.tsx                   |  25 +-
  hotel-admin/app/(app)/license/page.tsx             |  10 +-
- hotel-admin/app/(app)/pms-interfaces/page.tsx      | 201 +++++++-
+ hotel-admin/app/(app)/pms-interfaces/page.tsx      | 210 +++++++-
  hotel-admin/components/nav.tsx                     |  19 +-
  .../components/phase4/financial-health-view.tsx    |   4 +-
  .../components/phase4/financial-recovery-view.tsx  |   7 +-
  .../components/phase4/manual-review-view.tsx       |   7 +-
  hotel-admin/components/phase4/settlements-view.tsx |   8 +-
- .../e2e/sweep-guest-accounts-and-nav.spec.ts       | 363 ++++++++++++++
+ .../e2e/sweep-guest-accounts-and-nav.spec.ts       | 404 +++++++++++++++
  hotel-admin/lib/api.ts                             |  29 +-
  tools/tests/current_state_parity/run_negative.py   | 102 ++++
  .../tests/project_state_validator/run_mutations.py |  36 +-
  tools/validate-current-state-parity.py             | 242 ++++++++-
  tools/validate-project-state.sh                    |   2 +-
- 119 files changed, 8476 insertions(+), 632 deletions(-)
+ 119 files changed, 8642 insertions(+), 634 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -262,8 +262,8 @@ M  docs/manifests/Phase7-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_42b7ccc.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_dd24852.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_42b7ccc.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_42f3d17.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -275,6 +275,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 42f3d17 Close the T0073 sweep: whole state models, not the states anyone opened
+HISTORICAL: dbb5295 Delivery at 42b7ccc: packs and manifest
 HISTORICAL: 42b7ccc Stop the account form assuming a plan before the authority is known
 HISTORICAL: 0c1809a Delivery at dd24852: packs and manifest
 HISTORICAL: dd24852 Stop Guest Accounts speaking the other authority's language

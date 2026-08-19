@@ -1,4 +1,0 @@
-commit 42b7ccc49c2e93f0e7262528fa5e23cfbab0c448
-Date:   Wed Aug 19 15:46:23 2026 +0300
-
-    Stop the account form assuming a plan before the authority is known
