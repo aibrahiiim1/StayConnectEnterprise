@@ -1,4 +1,0 @@
-commit 42f3d17a0ccba20e474a62696c6b2927c45d694b
-Date:   Wed Aug 19 16:44:45 2026 +0300
-
-    Close the T0073 sweep: whole state models, not the states anyone opened
