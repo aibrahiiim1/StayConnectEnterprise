@@ -67,7 +67,30 @@ export const api = {
 
 // ------- Types (edged /edge/v1 response shapes) -------
 
-export type ListResp<T> = { data: T[]; meta: { has_more: boolean } };
+// A phase-gated surface that edged has NOT enabled answers 404 "page not found" for every path under it,
+// because the routes are never mounted. Rendered raw, an operator sees "HTTP 404" on a screen the menu just
+// offered them, which reads as a broken product rather than a capability that is deliberately off.
+//
+// This is not something the UI can pre-empt: the screens are compiled in at BUILD time (NEXT_PUBLIC_PHASE*)
+// while mounting is decided at RUNTIME by edged's own flags, so the two can disagree on a given appliance --
+// and on this one they do. Saying so plainly is the honest surface. It is NOT a way to turn the capability
+// on: enabling it is a deliberate deployment decision, made in edged's configuration, not here.
+export function surfaceUnavailableMessage(e: unknown, surface: string): string {
+  if (e instanceof ApiError && e.status === 404) {
+    return `${surface} is not enabled on this appliance. The screens are present in this build, but the ` +
+      `backend does not serve them here, so there is nothing to show. Enabling it is a deployment decision.`;
+  }
+  return (e as { message?: string })?.message ?? `Could not load ${surface.toLowerCase()}`;
+}
+
+export type ListResp<T> = {
+  data: T[];
+  meta: { has_more: boolean };
+  // Which domain answered. Present on surfaces where legacy and IAM-v2 have genuinely different contracts,
+  // so a screen with ZERO rows can still tell which one it is talking to. Per-row authority cannot: an empty
+  // list has no rows to ask.
+  authority?: "iam_v2" | "legacy";
+};
 
 export type Whoami = {
   operator_id: string;
@@ -103,7 +126,9 @@ export type VoucherBatch = {
 // Guest Username/Password account (password is never returned).
 export type GuestAccount = {
   id: string; username: string; display_name?: string | null; notes?: string | null;
-  template_id: string; enabled: boolean;
+  // ABSENT under IAM-v2 authority, which has no template/plan on the credential at all -- see the
+  // guest-accounts screen. Optional so the type cannot promise a field the backend does not send.
+  template_id?: string | null; enabled: boolean;
   valid_from?: string | null; valid_until?: string | null;
   last_login_at?: string | null; login_count: number;
   locked_until?: string | null;

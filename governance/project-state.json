@@ -15,7 +15,9 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "7",
-  "current_activity": "DEVELOPMENT_APPLIANCE_IAM_V2_CLEAN_REPLACEMENT_TRIAL",
+  "current_activity": "DEVELOPMENT_APPLIANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP",
+  "current_activity_execution_state": "EXECUTION_COMPLETE_AWAITING_PRODUCT_OWNER_REVIEW",
+  "current_activity_execution_state_note": "The post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep authorized by D33 has been carried out and its evidence recorded. Execution-complete describes the WORK, not a judgement of it: no Product-Owner acceptance of the sweep has been given. No capability was enabled anywhere -- edged still carries no Phase-4 configuration, and the financial screens now report that rather than being switched on. The guest-VLAN interface has received zero packets, which is an upstream switch trunking matter and is reported rather than repaired.",
   "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -151,9 +153,13 @@
     "7": {
       "status": "ACCEPTED_AND_CLOSED",
       "title": "Cleanup, final docs, full-system re-acceptance",
-      "maturity": "ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity by Product-Owner decision D27 (2026-08-17) at delivery head 16819aa027633b84486999451e8b689a191a15d2 on branch phase/7-full-system-reacceptance (PR #15, which remains OPEN and UNMERGED pending a separate merge decision). The whole IAM domain built across Phases 2-6 was re-proved as ONE system, on an environment rebuilt from repository sources and on the authorized DEVELOPMENT appliance, with every future-facing capability OFF everywhere. Acceptance basis: reconstruction digest e7216a988642c9d5e44ca22478d4972d parts=2686 identical to the appliance; PHASE7_FULL_MATRIX = PASS (strict) gates_run=20 skipped=0 unverdicted_or_crashed=0 pass=1262 fail=0; fidelity mutation suite 23/23; matrix-runner mutation suite 20/20; appliance assembled-system M4 = 70/0; final REAL reboot = 24/0; PROJECT_STATE_MUTATION_TESTS 53/53; CURRENT_STATE_PARITY 23/0; negative parity 57/57; Zero-Stale PASS; required exact-head GitHub Actions green. Three appliance items remain NOT PROVEN and are NOT promoted (a deliberate Central outage drill, a live rollback of the appliance schema, a real purge/archive requiring external receipt authority), and the iam_v2.p5_controlled_operation_open PUBLIC EXECUTE observation is preserved as a hardening / cutover-review finding -- proved INERT on the assembled system, neither a PASS nor a blocker. Acceptance authorizes no merge, no cutover, no enablement, no data migration, no dual read/write, no legacy IAM removal, no real guest, PMS, provider or financial traffic, no paid access, no per-property financial enablement and no programmatic reversal.",
+      "maturity": "ACCEPTED AND CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK maturity by Product-Owner decision D27 (2026-08-17) at delivery head 16819aa027633b84486999451e8b689a191a15d2 on branch phase/7-full-system-reacceptance (PR #15, since MERGED to master under D28/T0065 as merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The whole IAM domain built across Phases 2-6 was re-proved as ONE system, on an environment rebuilt from repository sources and on the authorized DEVELOPMENT appliance, with every future-facing capability OFF everywhere. Acceptance basis: reconstruction digest e7216a988642c9d5e44ca22478d4972d parts=2686 identical to the appliance; PHASE7_FULL_MATRIX = PASS (strict) gates_run=20 skipped=0 unverdicted_or_crashed=0 pass=1262 fail=0; fidelity mutation suite 23/23; matrix-runner mutation suite 20/20; appliance assembled-system M4 = 70/0; final REAL reboot = 24/0; PROJECT_STATE_MUTATION_TESTS 53/53; CURRENT_STATE_PARITY 23/0; negative parity 57/57; Zero-Stale PASS; required exact-head GitHub Actions green. Three appliance items remain NOT PROVEN and are NOT promoted (a deliberate Central outage drill, a live rollback of the appliance schema, a real purge/archive requiring external receipt authority), and the iam_v2.p5_controlled_operation_open PUBLIC EXECUTE observation is preserved as a hardening / cutover-review finding -- proved INERT on the assembled system, neither a PASS nor a blocker. Acceptance authorizes no merge, no cutover, no enablement, no data migration, no dual read/write, no legacy IAM removal, no real guest, PMS, provider or financial traffic, no paid access, no per-property financial enablement and no programmatic reversal.",
       "merged": true,
-      "merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603"
+      "merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
+      "merge_decision": "D28",
+      "merge_transition": "T0065",
+      "acceptance_decision": "D27",
+      "acceptance_transition": "T0064"
     }
   },
   "completed_milestones": [
@@ -301,26 +307,26 @@
     "migration_0011_to_0026_applied_in_production": false,
     "iam_v2_fingerprint_note": "Catalog fingerprint of the CURRENT live appliance schema (0011-0026 applied). The earlier value bd75026f is HISTORICAL and describes the 49-table Phase-1A schema. A catalog fingerprint includes ordinal_position and therefore is not stable across a migration rollback cycle; see iam_v2_scratch/schema_structure_fingerprint.sql for the structural comparison to use after a rollback."
   },
-  "service_routing_state": "Legacy public-schema IAM is the currently CONFIGURED authentication/routing baseline and the only path any deployed service is routed to. No service is routed to iam_v2, which remains dark at 0 rows and is NOT cut over. PRE-LIVE (D24/T0056): StayConnect has NOT yet entered real hotel guest/staff production operation -- no guest and no hotel user currently depends on either path for live service, and the system remains PRE-LIVE under controlled testing. Every numbered development phase is now closed (Phase 7 ACCEPTED_AND_CLOSED, D27/T0064), so the project is no longer under active development; what remains is the separately authorized cutover / go-live decision. The earlier wording, 'the SOLE PRODUCTION authority', described the configuration correctly and implied live hotel operation that has not begun. All four site-DB daemons (scd/edged/acctd/netd) connect under dedicated LEAST-PRIVILEGE Gate-P roles (svc_scd/svc_edged/svc_acctd/svc_netd; NOSUPERUSER, SCRAM) instead of superuser stayconnect -- reboot-validated 2026-07-18. All new auth features (durable throttle, keyed-HMAC OTP, IAM-v2) remain OFF (dark).",
+  "service_routing_state": "PRODUCTION SCOPE. Legacy public-schema IAM is the currently CONFIGURED authentication/routing baseline and the only path any deployed service is routed to. No service is routed to iam_v2, which remains dark at 0 rows and is NOT cut over. PRE-LIVE (D24/T0056): StayConnect has NOT yet entered real hotel guest/staff production operation -- no guest and no hotel user currently depends on either path for live service, and the system remains PRE-LIVE under controlled testing. Every numbered development phase is now closed (Phase 7 ACCEPTED_AND_CLOSED, D27/T0064), so the project is no longer under active development; what remains is the separately authorized cutover / go-live decision. The earlier wording, 'the SOLE PRODUCTION authority', described the configuration correctly and implied live hotel operation that has not begun. All four site-DB daemons (scd/edged/acctd/netd) connect under dedicated LEAST-PRIVILEGE Gate-P roles (svc_scd/svc_edged/svc_acctd/svc_netd; NOSUPERUSER, SCRAM) instead of superuser stayconnect -- reboot-validated 2026-07-18. All new auth features (durable throttle, keyed-HMAC OTP, IAM-v2) remain OFF (dark). DEVELOPMENT SCOPE: this statement does NOT describe the DEVELOPMENT appliance 172.21.60.23, where the authorized D31/T0068 trial has installed the IAM-v2 runtime wiring and enabled selected IAM-v2 surfaces. See environment_scoped_iam_state.",
   "pms_financial_state": "FIAS lookup-only in production. The Phase-4 financial layer is ACCEPTED AND CLOSED at verified LIVE-DARK maturity (D19/T0044) and is DEPLOYED DARK on the development appliance: migrations 0011-0026 applied to iam_v2 (68 tables, 0 rows), five NOLOGIN restricted roles, and the Phase-4 binaries and Hotel-Admin bundle in service. Every Phase-4 flag is OFF, every Phase-4 route returns 404, and no PS has been transmitted, no PA financially accepted, no folio debited, no provider CHARGE or REFUND issued and no paid access granted. folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED and per-property Tier-2 onboarding still mandatory.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
-    "No governance blocker. The numbered Development Roadmap is COMPLETE (Phase 0 FINAL_CLOSED, Phases 1A through 7 ACCEPTED_AND_CLOSED, Phase 7 MERGED under D30/T0067) and no Phase 8 exists. A post-roadmap DEVELOPMENT-appliance IAM-v2 operational trial is authorized under D30/T0067 for the development appliance only. PRODUCTION remains PRE-LIVE with IAM-v2 not cut over; Production go-live and any real guest, PMS, provider or financial activity require their own separate Product-Owner decisions and none is supplied by any current authorization."
+    "No governance blocker. The numbered Development Roadmap is COMPLETE (Phase 0 FINAL_CLOSED, Phases 1A through 7 ACCEPTED_AND_CLOSED, Phase 7 MERGED under D28/T0065) and no Phase 8 exists. The post-roadmap DEVELOPMENT-appliance IAM-v2 trial was ACCEPTED AND CLOSED at 6773f03 / T0071, and a post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep is authorized under D33/T0072 for the development appliance only. (HISTORICAL: the trial was first authorized by D31/T0068 and continued by D32/T0069 and D32/T0070.) PRODUCTION remains PRE-LIVE with IAM-v2 not cut over. Production go-live and any real guest, PMS, provider or financial activity require their own separate Product-Owner decisions and none is supplied by any current authorization."
   ],
   "allowed_actions": [
-    "Deploy the wired IAM-v2 build to the DEVELOPMENT appliance under D30 (transition T0067), enable IAM-v2 as the sole IAM authority there, retire or reset disposable legacy IAM application state as needed, and verify the result end to end on the running services.",
-    "Maintain project governance, current-state parity and documentation for the closed phases and the completed roadmap."
+    "Finish the DEVELOPMENT-appliance IAM-v2 trial under D31 (transition T0068) on the development appliance only, and verify it end to end.",
+    "Maintain project governance, current-state parity and documentation for the closed phases and completed roadmap."
   ],
   "prohibited_actions": [
-    "IAM-v2 production cutover, production data migration, dual read/write, legacy IAM removal, real guest service, real PMS financial posting, real payment-provider traffic, paid-access activation, per-property financial enablement and programmatic reversal. Each is a separate Product-Owner go-live decision and NONE is authorized by any current decision: the latest accepted decision is D30 (transition T0067), which authorizes only the DEVELOPMENT-appliance IAM-v2 operational trial on the development appliance and explicitly authorizes none of them.",
+    "IAM-v2 production cutover, production data migration, dual read/write, legacy IAM removal, real guest service, real PMS financial posting, real payment-provider traffic, paid-access activation, per-property financial enablement and programmatic reversal. Each is a separate Product-Owner go-live decision and NONE is authorized by any current decision: the latest accepted decision is D33 (transition T0072), which closes the DEVELOPMENT-appliance IAM-v2 trial and authorizes only the post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep on the development appliance, and explicitly authorizes none of them. It authorizes no merge of the open trial pull request either.",
     "Enabling any Phase 4, Phase 5 or Phase 6 capability on any environment outside a controlled, restored DEVELOPMENT-appliance validation run.",
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "Deploy the wired IAM-v2 build to the DEVELOPMENT appliance under D30 (transition T0067), enable IAM-v2 as the sole IAM authority there, and verify it end to end on the running services. PRODUCTION is untouched and remains PRE-LIVE, and its future IAM go-live is a clean IAM-v2 replacement requiring its own separate Product-Owner authorization.",
+  "next_authorized_action": "One Product-Owner REVIEW of the post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep carried out under D33 (T0072, T0073) on appliance 172.21.60.23. The authorized execution of that sweep is COMPLETE. Guest Accounts renders and its full IAM-v2 account lifecycle was exercised against the real API, navigation shows exactly one active item on all 38 screens with a sidebar that keeps its position, seven screens that answered HTTP 500 now answer, the Licence screen is wired to the paths edged serves, four Phase-4 screens state that the capability is not enabled here, PMS interfaces gained the create and revision-authoring surface exposing the endpoint host:port and every other value the connector reads, and guest-VLAN DHCP survives a restart and a full reboot. REVIEW IS NOT ACCEPTANCE. No capability was enabled, no device DHCP test is claimed, and the zero-packet VLAN-90 interface is an upstream switch trunking matter reported rather than repaired. An IAM-v2 cutover, any capability enablement, Production contact and the disposition of the trial branch each require their own explicit Product-Owner decision. PRODUCTION remains untouched and PRE-LIVE, and no Production IAM transition strategy is approved.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D30",
+  "latest_accepted_po_decision": "D33",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -416,7 +422,7 @@
       "scripts/ci/phase3_evidence.py (modified)"
     ],
     "post_closure_operational_changes_note": "Caddy deployment configuration, the Caddy systemd unit sources and CI/operational tooling changed AFTER Phase-3 closure, under T0026 and T0027. No Phase-3 application binary, migration, schema, IAM-v2 authority, PMS behaviour or financial behaviour changed. Do not claim the whole deploy/ or scripts/ tree is identical to the accepted candidate.",
-    "current_activity": "DEVELOPMENT_APPLIANCE_IAM_V2_CLEAN_REPLACEMENT_TRIAL",
+    "current_activity": "DEVELOPMENT_APPLIANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP",
     "live_increment9_executed": true,
     "live_increment9_executed_on": "2026-08-10",
     "live_increment9_item_verdicts": {
@@ -458,7 +464,7 @@
     "guest_portal_upstream_reserve_ms": 200,
     "nft_deployment_architecture": "nftconverge",
     "surgical_foundation_retired_from_procedure": true,
-    "next_step": "Execute the authorized Phase-6 implementation under D25/T0057 on branch phase/6-device-selfservice-and-time-modes: Guest Device Self-Service (optional per appliance, default OFF, local-first) and the AGGREGATE_ONLINE_TIME time mode, delivered DARK, stopping at the acceptance boundary with one pull request open and unmerged for a separate Product-Owner decision. The former value still described Phase-4 WS-L, which closed at D19/T0044 and merged at D20/T0048.",
+    "next_step": "Phase 7 is ACCEPTED_AND_CLOSED (D27/T0064) and MERGED to master (D28/T0065). The roadmap is exhausted. The current activity is the authorized post-roadmap DEVELOPMENT-appliance IAM-v2 trial (D31/T0068) on 172.21.60.23. PRODUCTION remains untouched and PRE-LIVE, and no Production IAM transition strategy is approved.",
     "phase4_c35_status": "ARCHIVE_AND_GATE_COMPLETE__GATE_FAILS_CLOSED__CROSS_CUSTOMER_PURGE_IMPOSSIBLE",
     "phase4_c35_note": "0026 corrects a measured defect: the 0025 gate passed as soon as ANY compliance archive row existed, so the local export written by the same appliance that was about to delete the data authorized the deletion -- self-certification. The gate now requires receipt_verified, and ca_receipt_evidence_matches_flag makes that flag unsettable without a named external authority, a reference and a timestamp -- refused even for the table owner, refused on INSERT, and p4_record_compliance_receipt is granted to NO role. No external archival receipt authority exists in this product, so receipt_verified is false everywhere and CROSS-CUSTOMER PURGE IS CONSEQUENTLY IMPOSSIBLE. That is the delivered behaviour and it is intended: a capability that cannot be performed safely is unavailable rather than available on weaker evidence. scd's purge path reports the exact blocker and the appliance stays fail-closed. The gate is not 'always refuse': recording a receipt with real external evidence opens it, which is proved.",
     "phase4_c35_receipt_authority_exists": false,
@@ -473,8 +479,8 @@
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
     "phase4_authoritative_ci_artifact_id": 9177140558,
     "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
-    "acceptance_candidate_head": "34f09e9b818122e3f8642c0684bfa9c4c1fa0d0b",
-    "inventory_head": "34f09e9b818122e3f8642c0684bfa9c4c1fa0d0b",
+    "acceptance_candidate_head": "435a5ab4a52de8c0c4cdf2cda377ada53b129b68",
+    "inventory_head": "435a5ab4a52de8c0c4cdf2cda377ada53b129b68",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -700,16 +706,17 @@
     "phase7_active_milestone": "Phase 7 is COMPLETE and ACCEPTED. M1 (20/20), M2 (22/22), M3 (34/0) and M4 all closed: the complete cross-phase matrix is PHASE7_FULL_MATRIX = PASS (strict) with gates_run=20, skipped=0, unverdicted_or_crashed=0, pass=1262, fail=0; the DEVELOPMENT-appliance assembled-system acceptance is 70/0 with 3 explicit NOT PROVEN lines; and the final REAL reboot is 24/0. Nothing remains to execute.",
     "phase7_authorization_note": "Phase 7 is no longer authorized for execution because it is finished: ACCEPTED_AND_CLOSED at VERIFIED FULL-SYSTEM LIVE-DARK (D27/T0064) and MERGED to master (D28/T0065, merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The numbered Development Roadmap is COMPLETE and no numbered phase is open or authorized.",
     "phase7_merged": true,
-    "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603"
+    "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
+    "phase7_merge_attribution": "Phase 7 was ACCEPTED_AND_CLOSED under D27/T0064 and MERGED under D28/T0065 (merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The current DEVELOPMENT trial continuation is D31/T0068. D30 is preserved historically and its over-broad Production policy clauses were corrected by D31."
   },
-  "latest_transition_id": "T0067",
+  "latest_transition_id": "T0073",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "2e6cb28c3b4dc19090175dd17b9720933fea7641",
+  "acceptance_candidate_head": "72979f5f8df6d18faa4e9227163829d597f4d53c",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "2e6cb28c3b4dc19090175dd17b9720933fea7641",
+  "inventory_head": "72979f5f8df6d18faa4e9227163829d597f4d53c",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
@@ -727,22 +734,15 @@
     "development_phases_open_or_authorized": [],
     "phase_8_created": false,
     "last_numbered_development_phase": "7",
-    "only_major_next_lifecycle_gate": "a separate Product-Owner decision. NOT automatically Production go-live: the Product Owner intends a DEVELOPMENT-appliance operational trial with IAM-v2 enabled there first, and that trial is not authorized yet.",
+    "only_major_next_lifecycle_gate": "a separate Product-Owner decision. NOT automatically Production go-live: the Product Owner intends a DEVELOPMENT-appliance operational trial with IAM-v2 enabled there first, and that trial IS authorized and in progress: authorized under D29/T0066 and re-scoped by D31/T0068, running on the DEVELOPMENT appliance 172.21.60.23. Authorizing the DEVELOPMENT trial did NOT authorize any Production IAM transition, which remains an open Product-Owner decision.",
     "outstanding_on_the_phase_7_branch": "none -- PR #15 is merged and closed",
     "phase_7_merged": true,
     "phase_7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
     "numbered_development_roadmap": "COMPLETE"
   },
   "iam_transition_strategy": {
-    "model": "CLEAN IAM-v2 REPLACEMENT (D30/T0067)",
-    "legacy_iam": "disposable and retired; no data migration",
-    "not_required": [
-      "data migration",
-      "dual read",
-      "dual write",
-      "legacy/new synchronization",
-      "backward-compatible IAM authority mode"
-    ],
+    "development": "IAM-v2 runtime wiring implemented and enabled on the DEVELOPMENT appliance under D30, with scope corrected by D31. IAM-v2 is the intended authority for the trial surfaces that are actually enabled there.",
+    "production_model": "OPEN. No Production IAM transition strategy is approved. Legacy retirement, a no-migration approach and any clean-replacement or cutover sequence all require a separate explicit Product-Owner decision.",
     "preserved_foundations": [
       "appliance enrollment/claim/signed assignment",
       "appliance identity and PKI/mTLS",
@@ -753,16 +753,171 @@
       "Central Control Plane integration",
       "update/recovery/security infrastructure"
     ],
-    "future_production_sequence": [
-      "backup/safety checkpoint",
-      "stop IAM services",
-      "retire legacy IAM authority/application state",
-      "deploy the approved IAM-v2 release",
-      "initialize and configure clean IAM-v2",
-      "start services",
-      "verify",
-      "go live"
+    "legacy_iam": "NOT retired and NOT deleted anywhere. No Production data migrated."
+  },
+  "environment_scoped_iam_state": {
+    "_note": "Environment-scoped on purpose. A global iam_v2_dark answer was true for Production and false for the DEVELOPMENT appliance after the authorized trial, which is a contradiction no single flag can hold. Neither side may be read as describing the other.",
+    "production": {
+      "lifecycle": "PRE-LIVE",
+      "iam_v2": "DARK and NOT cut over",
+      "routing": "no deployed Production service is routed to iam_v2",
+      "mutation": "none -- Production has not been contacted",
+      "legacy_iam": "still the configured Production authentication/routing baseline; NOT retired and NOT deleted",
+      "transition_strategy": "OPEN. No Production IAM transition strategy is approved. Legacy retirement, a no-migration approach and any clean-replacement or cutover sequence each require a separate explicit Product-Owner decision."
+    },
+    "development_appliance": {
+      "host": "172.21.60.23",
+      "authorization": "D31 / T0068 (post-roadmap DEVELOPMENT IAM-v2 trial)",
+      "iam_v2_runtime_wiring": "INSTALLED (PgRepository, PgCommerceRepository, PgCommerceAdminRepository)",
+      "authority_scope": "IAM-v2 is the intended authority for the ENABLED trial surfaces only. This is NOT a claim that the whole IAM-v2 domain is live.",
+      "enabled": [
+        "VOUCHER authentication",
+        "ACCOUNT authentication",
+        "Phase-2 commerce (portal + admin) for the authorized trial",
+        "Phase-3 ADMIN, after the minimum svc_edged opener privilege fix",
+        "Phase-6 ADMIN device surface and AGGREGATE_ONLINE_TIME (the guest surface is OFF -- see below)"
+      ],
+      "deliberately_off": [
+        "Phase-5 guest Post-Stay -- requires real PMS-derived state this environment does not have",
+        "Phase-4 external financial egress (posting, outbox worker, PMS transmit, payment provider)",
+        "OTP and social provider paths -- real external effects",
+        "Phase-3 PMS connector/ingest/auth -- no PMS and pmsd not running",
+        "Phase-6 GUEST device self-service -- ENVIRONMENT-BLOCKED: it requires the Phase-3 PMS auth arm, and this environment has no PMS. Enabling it without that arm crash-loops scd at startup, which is the fail-closed behaviour working. The ADMIN surface and AGGREGATE_ONLINE_TIME are unaffected and remain available."
+      ],
+      "legacy_iam": "NOT retired and NOT deleted on the development appliance either"
+    }
+  },
+  "phase_lifecycle_authority": {
+    "_note": "The authoritative record of which decision/transition carried which lifecycle event. Prose anywhere in current state that attributes one of these events to a different pair is wrong, and the parity rule checks it against this map rather than against a hand-written sentence.",
+    "7": {
+      "accepted_and_closed": {
+        "decision": "D27",
+        "transition": "T0064"
+      },
+      "merged": {
+        "decision": "D28",
+        "transition": "T0065",
+        "merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603"
+      }
+    },
+    "post_roadmap": {
+      "development_trial_authorized": {
+        "decision": "D29",
+        "transition": "T0066"
+      },
+      "development_wiring": {
+        "decision": "D30",
+        "transition": "T0067"
+      },
+      "d30_scope_correction_and_trial": {
+        "decision": "D31",
+        "transition": "T0068"
+      },
+      "normal_checkout_grace_provisioning": {
+        "decision": "D32",
+        "transition": "T0069"
+      }
+    }
+  },
+  "authorized_activities": [
+    {
+      "name": "post-roadmap DEVELOPMENT appliance IAM-v2 operational trial",
+      "authorization": "D29/T0066, re-scoped by D31/T0068",
+      "status": "AUTHORIZED_IN_PROGRESS",
+      "scope": "DEVELOPMENT appliance 172.21.60.23 only. Authorizing this did NOT authorize any Production IAM transition."
+    },
+    {
+      "name": "Phase 7 merge to master",
+      "authorization": "D28/T0065",
+      "status": "COMPLETE"
+    }
+  ],
+  "completed_activities": [
+    "Hotel Admin rebuild with the accepted ADMIN compile-time flags",
+    "Hotel Admin deployment release 20260818-011034 BUILD_ID NNVyTm27nqpjKzi1oxfUj",
+    "DEVELOPMENT admin operator provisioning and verified login",
+    "netd cold-boot site-database readiness gate",
+    "scd phase5/phase6 guest-dependency deploy gate and ExecStartPre backstop"
+  ],
+  "development_trial_findings": {
+    "_note": "Findings from the D31/T0068 DEVELOPMENT trial on 172.21.60.23. Recorded because each one contradicts something that was previously assumed or asserted, and an assumption that survived because nobody measured it is the failure mode this project keeps hitting.",
+    "nrestarts_is_not_boot_evidence": "systemd's NRestarts counter RESETS on a manual `systemctl restart`, so a service that crash-looped 596 times during a boot can report NRestarts=0 minutes later. Per-boot restart counts must be derived from the journal (`journalctl -b N -u UNIT | grep -c 'Scheduled restart job'`), not from NRestarts. On the 2026-08-16 22:01 boot: scd 596, edged 16, acctd 8, hotel-admin 7, netd 2, portald 0, caddy 0 -- while five of those units showed NRestarts=0.",
+    "phantom_postgresql_service_ordering": "stayconnect-{netd,scd,pmsd}.service all declared After=postgresql.service. No such unit exists on this appliance (Postgres is the stayconnect-pg container) and systemd silently ignores After= on a missing unit, so the ordering was a no-op in every one of them. FIXED: removed, and netd -- the only one that connects to the DB during startup -- got a bounded readiness gate that always exits 0.",
+    "svc_edged_had_no_iam_v2_commerce_grants": "The Phase-2 commercial-packages admin surface returned HTTP 500 because svc_edged had never been granted anything on the iam_v2 commerce tables. FIXED with table-and-verb-specific grants (deploy/gatep/svc-edged-phase2-commerce-grants.sql); revisions get INSERT and deliberately no UPDATE, so revision immutability is enforced by the database.",
+    "numeric_grant_overrides_were_unpublishable": "decodeJSON lacked UseNumber, so numbers inside free-form map[string]any bodies decoded to float64 while the commerce validators accept only json.Number/int/int64. EVERY numeric grant override sent over HTTP was rejected as invalid_grant_tier: no package with a bandwidth or quota override could be published through the API at all. Invisible because the commerce tests build json.Number in Go and never cross the HTTP decoder. FIXED and regression-tested at the decoder.",
+    "dsn_gated_tests_were_not_merely_skipped_but_broken": "Five commerce tests are gated on PHASE2_TEST_DSN, so `go test ./...` reported ok while they skipped. Run against a real scratch database they did not merely skip -- the fixture had drifted four NOT NULL columns behind public.guest_networks and could not insert a row. Three now pass; two still fail and are NOT claimed as passing.",
+    "voucher_auth_is_served_by_LEGACY_not_iam_v2": "MEASURED, not inferred. With STAYCONNECT_IAMV2_MASTER=true and STAYCONNECT_IAMV2_VOUCHER=true, redeeming a voucher through the real scd pipeline (/v1/sessions/authorize) incremented public.sessions 24->25 and left iam_v2.sessions, iam_v2.auth_contexts, iam_v2.devices and iam_v2.entitlements ALL unchanged. iam_v2.auth_contexts is 0, so no IAM-v2 auth context has ever been created on this appliance. The flags being true is NOT evidence that IAM-v2 is the authority for guest authentication here; it is not. What IS proven to run on IAM-v2 is the Phase-2 commerce ADMIN surface (plan and package publication, verified against iam_v2 tables under least-privilege grants). The IAM-v2 guest chain (auth_context -> commerce packages -> quote -> confirm -> entitlement -> session) remains UNEXERCISED.",
+    "acctd_was_crash_looping_behind_active_running": "Found ONLY because this reboot was measured. svc_acctd lacked EXECUTE on iam_v2.begin_controlled_operation(text) -- the same grant edged received under D31/T0068, which nobody checked against the OTHER services that enforce the identical boundary. acctd fails closed and refuses to start, systemd restarted it every few seconds, and `systemctl show` answered 'active running' whenever it was sampled between a restart and the next failure: 10 restarts in 3 minutes reading as healthy. FIXED by the minimum grant (opener EXECUTE only, no table write). Verified: 0 restart jobs in a clean window.",
+    "scd_lazy_pool_claim_was_false": "stayconnect-scd.service commented that its lazy pgx pool made it immune to a slow database. A measured reboot disproved it: pmsloader queries DURING startup and exits 1, so scd crash-looped twice on the 2026-08-18 06:10 boot for the same reason netd did. Both scd and acctd now carry the readiness gate.",
+    "reboot_acceptance_result": "Boot chain measured: 2026-08-16 21:58 (scd 1, netd 1); 2026-08-16 22:01 (scd 596, edged 16, acctd 8, hotel-admin 7, netd 2); 2026-08-18 06:10 (scd 2, acctd crash-looping, netd 0 -- the netd fix already holding); 2026-08-18 06:16 boot 572cfd2d: ALL SEVEN SERVICES 0 restart jobs, 0 failures, active running. Post-reboot the admin login, the DEVELOPMENT commerce objects and the voucher journey all still work.",
+    "egress_after_reboot": "The only non-local established connection is scd -> 150.0.0.252:4223, the Central control plane, which is expected and approved. No PMS, payment-provider or other external egress. Stating it as 'zero egress' would be false; the Central link is legitimately present.",
+    "guest_authority_defect_FIXED": "FIXED and MEASURED. The flags claimed IAM-v2 owned guest authentication; the code did not -- scd read the flags, constructed an Authenticator, and both real entry points went on calling the legacy pipelines. Before: a voucher redemption moved public.sessions 24->25 with every iam_v2 table untouched. After: an ACCOUNT login through /v1/sessions/authorize-credentials returns authority=iam_v2 with an auth_context_id and device_id, public.sessions stays at 26, and iam_v2.auth_contexts 0->1, devices 2->3, device_network_appearances 0->1. The chain then continues on IAM-v2: offer_quotes 1->2, purchases 8->9, entitlements 8->9, still with public.sessions unchanged at 26. A wrong password returns AUTH_DENIED/invalid_credentials from iam_v2.",
+    "iam_v2_had_no_credential_issuance_at_all": "The runtime had an IAM-v2 authentication domain and NO IAM-v2 issuance path anywhere: every admin route wrote legacy credentials, and the only INSERTs into iam_v2.guest_access_accounts in the whole repository were test fixtures. So ACCOUNT was enabled and authenticating against a table nothing could populate. Issuance now follows the same authority switch (iam_v2 or legacy, never both). VOUCHER issuance is NOT implemented: iam_v2.vouchers requires an envelope-encrypted code (code_ciphertext, code_nonce, code_key_generation_id) and voucher_code_key_generations is empty, so VOUCHER currently fails closed.",
+    "five_more_privilege_gaps_same_class": "Each found only by exercising a path nobody had exercised: svc_scd had no privileges on the iam_v2 auth tables; the auth_contexts trigger calls p3_controlled_operation_open, a DIFFERENT function from the opener, so granting the opener alone still failed; the device_network_appearances upsert needed UPDATE, which PostgreSQL reports as a bare 'permission denied for table'; svc_scd had nothing on the guest commerce read tables; and the confirm step calls the p4 entitlement kernel functions, which needed EXECUTE. Two further PRE-EXISTING faults surfaced in the PostgreSQL log, both silent behind healthy-looking services: svc_acctd could not read public.guest_networks (once a second, degrading accounting attribution), and three of four services could not write public.appliance_service_health at all -- the table an operator would consult to decide whether the appliance is healthy was being written by nobody.",
+    "production_transition_strategy_remains_OPEN": "A source comment in data-plane/cmd/scd/authsec.go asserted that the Product Owner had decided on a CLEAN IAM-v2 REPLACEMENT, that IAM-v2 is the only IAM authority and that the legacy IAM is disposable. Those are D30's clauses, which D31 explicitly withdrew as never approved. The comment has been corrected. The PRODUCTION IAM transition strategy is OPEN: no replacement, migration, dual-run or legacy-retirement approach is authorized, and wiring a repository for a DEVELOPMENT trial is not a transition decision.",
+    "legacy_plan_dependency_removed_from_iam_v2_issuance": "IAM-v2 account creation required a legacy ticket_templates row ('guest access plan'), validated and then discarded. IAM-v2 does not model access that way: what a subject may acquire is decided by PACKAGE ELIGIBILITY RULES evaluated at listing time, and iam_v2.guest_access_accounts has no template column at all (only an optional assigned_package_id). The requirement changed no IAM-v2 behaviour and existed only so the legacy UI form still submitted -- hidden split authority. Removed under IAM-v2 authority rather than replaced with an invented rule of the same shape; legacy issuance keeps it unchanged.",
+    "account_admin_lifecycle_is_split_authority_MEASURED": "MEASURED, not inferred, and it is a defect introduced by switching CREATE to IAM-v2 without the rest of the lifecycle. GET /edge/v1/guest-accounts returns the LEGACY accounts (ahmed, devguest1) and does NOT return the IAM-v2 accounts (devguest2, devguest3) created moments earlier through that same API. So an operator creates an account under IAM-v2 authority and it immediately disappears from the admin UI, while the accounts they can see are ones IAM-v2 will refuse to authenticate. Create writes iam_v2; list, get, update, enable/disable, password reset, delete and disconnect all still read and write public.guest_accounts. This must be closed before the IAM-v2 account surface can be called usable, and it is the reason the capability ladder places the account admin lifecycle under NOT_EXERCISED rather than VERIFIED.",
+    "voucher_key_model_corrected_from_checkpoint_assumption": "The previous resume checkpoint proposed reusing /etc/stayconnect/secrets/voucher_hmac.key directly as the blind-index HMAC key. Re-reading the FINAL contract key hierarchy showed that is wrong twice: it skips the generation record the schema requires (so nothing rotates and no voucher can name the key that indexed it) and it collapses the encryption and indexing roles onto one physical secret. The file was retired, not reused. Recorded because a plausible checkpoint assumption nearly became the implementation.",
+    "voucher_issuance_placement_follows_the_key": "Issuance was first written in edged because that is where the admin route terminates, and it failed at runtime with the DEK unreadable: edged runs as the unprivileged stayconnect user, the DEK is root-only. The fix was NOT to loosen the key's permissions but to move issuance to scd, which is root and unix-socket only, with edged proxying. The route terminating somewhere is not a reason to put the root of voucher confidentiality there. Grants were corrected to follow the code and svc_edged's overreach revoked.",
+    "further_preexisting_privilege_gaps_seen_in_pg_log": "Observed while diagnosing something else, NOT yet fixed: 'permission denied for schema public' on CREATE TABLE IF NOT EXISTS edge_installed_updates and edge_executed_commands. Some service attempts to self-create those tables at runtime and cannot. Recorded rather than silently ignored; root cause not yet established.",
+    "voucher_rotation_and_cache_defects_FIXED": "Three defects, all in code I had shipped with comments asserting the opposite. (1) The blind index was computed under the ACTIVE generation only, so after a rotation every unredeemed voucher became permanently unfindable; the comment claiming older generations stayed usable 'through their own stored indexes' was a non-sequitur, since a stored index only matches if you compute with the same key. Lookup now supplies one candidate index per generation, newest first, including superseded ones. (2) The opened keys lived in a package-level cache with no tenant/site key, so on a multi-site appliance one site's key would be served to all -- fail-closed but a total voucher outage for every site but one, and invisible on a single-site appliance. Now keyed by (tenant, site). (3) Rotating for real then exposed that ensureVoucherKeyGeneration hardcoded generation 1 for the no-active-generation branch, so the first supersession broke issuance forever while issued vouchers kept working; it now uses max+1.",
+    "runtime_ddl_removed_rather_than_granted": "FIXED. scd ran CREATE TABLE IF NOT EXISTS for edge_installed_updates and edge_executed_commands on every start and failed every time with 'permission denied for schema public', discarding the error. The tables already existed, so nothing broke and nothing surfaced it either. The fix was to stop asking, not to give a data-plane service DDL rights on public: both call sites now check to_regclass and disable their channel if the table is genuinely missing, since a silently absent command ledger would break exactly-once execution. Verified: zero schema-permission errors after restart, both channels subscribed.",
+    "enforcement_plane_was_inert": "netd had neither the Phase-3 flags nor NETD_PHASE3_PRODUCER_UID while acctd was already submitting shaping plans, so netd logged unauthorized_producer on every plan; then its writer boundary refused to run because svc_netd had no USAGE on iam_v2 at all. No session could ever be promoted from PENDING_ENFORCEMENT. Both fixed; enforcement now promotes sessions to active and withdraws leases on disconnect.",
+    "accounting_was_silently_not_writing": "With a live, shaped session, acctd logged 'absolute counter observation refused ... permission denied for function ingest_absolute_counters' once per second while accounting_records stayed at 0. svc_acctd lacked the grant; it had been given to svc_netd, which references the function but is not the caller. acctd does not crash on the refusal, so only watching the log under live traffic surfaced it.",
+    "voucher_single_use_was_never_enforced": "Vouchers that had been fully redeemed into live entitlements were all still UNUSED: nothing performed the UNUSED->REDEEMED transition, so one code could be redeemed repeatedly. Found by a post-reboot negative test. Fixed in the same transaction as the entitlement grant.",
+    "portal_told_guests_they_were_online_when_they_were_not": "The voucher and account portal handlers parsed the legacy session_id/duration_seconds reply and redirected to /success. Under IAM-v2 that reply carries auth_context/device/guest_network and NO session, so both fields unmarshalled empty and the guest was sent to '/success?s=&t=0' -- told they were connected at the moment they had only authenticated. The trust boundary (opaque HttpOnly cookie, server-held pins) already existed in commerce.go and was never issued because IAM-v2 auth was dark. Fixed by adding the issuer plus package selection and acquisition; /success is now reached only after a session exists.",
+    "activation_trusted_the_device_from_the_request_body": "Found by adversarial probe: an arbitrary device_id with a real entitlement id activated a session and consumed a device slot on someone else's grant. The accepted Phase-3 grant path derives device identity from the connection and says explicitly it is 'never from the body'; the new activation endpoint trusted the body. The socket is root-only so a browser could not reach it, which is an argument for the caller being careful, not for the boundary being absent. Activation now requires the device to match the entitlement -> purchase -> auth_context acquisition chain.",
+    "dsn_commerce_suite_status": "5 of 6 TestCommerceAdmin tests now pass against a real database (was 3 when the fixture was first made to run at all). The remaining failure is the checkout-grace defect above and is genuine, not a fixture gap.",
+    "grace_typed_keys_are_stated_by_the_schema": "The reconciliation was mechanical once the contract was read as authoritative, but the first attempt still guessed: it mapped grace_minutes onto the typed duration because that is the friendlier spelling. grace_config_no_dup_policy_keys enumerates exactly which keys are typed columns, and grace_minutes is not among them -- it is free-form. Treating it as typed made {\\\"grace_minutes\\\": 30} look like a partial typed override and get refused by the all-or-none rule, a rule working correctly on an input that should never have reached it. The schema stated the answer.",
+    "activation_identity_completed": "Binding the device to the acquisition chain was necessary but not sufficient: a caller could still present that device with another MAC or on a network it had never appeared on. Device identity in this domain IS (tenant, site, appliance, MAC), and the session is enforced on the bridge derived from the source IP, so both are now checked. The IP itself is deliberately not pinned because DHCP reassigns it legitimately within a network and the source IP is already server-derived rather than taken from the body.",
+    "appliance_schema_diverges_from_canonical_migrations": "RESOLVED -- provenance established, and it is NOT drift. data-plane/migrations/0001_edge_init.up.sql (the EDGE migration set the appliance applies, 0001 through 0047 per schema_migrations) creates public.tenants with slug and name NOT NULL, and sites with code and name. CI's Phase-3 disposable PG16 does not apply 0001_edge_init at all; it builds only the narrower iam_v2 subset those suites need, which is why tenants.slug does not exist there. Two different, both-canonical scopes. The checkout integration fixture is written against the CI subset, so its bare INSERT INTO public.tenants(id) is correct there and cannot work against a full edge schema. My earlier error was treating a scratch database cloned from the APPLIANCE as the reference for what canonical looks like; that fixture change was fully reverted."
+  },
+  "iam_v2_capability_ladder": {
+    "_note": "Precision on purpose. 'The flag is enabled' says nothing about whether a surface works -- that conflation is what let guest authentication run entirely on legacy while three IAM-v2 flags were true. Every capability below is placed on one rung and no capability may be described in prose at a higher rung than it sits here. IMPLEMENTED = code exists. ENABLED = configured on the DEVELOPMENT appliance. EXERCISED = actually run against the live appliance. VERIFIED = run AND confirmed by database/runtime row evidence, not HTTP status. ENVIRONMENT_BLOCKED = cannot be proven here without fabricating state.",
+    "VERIFIED": [
+      "ACCOUNT authentication is IAM-v2-authoritative at /v1/sessions/authorize-credentials: auth_contexts, devices and device_network_appearances all increment and public.sessions does not move",
+      "IAM-v2 guest commerce chain to ENTITLEMENT: eligible packages, quote, confirm, purchase, entitlement, with the pinned package-revision grants (2048/1024 kbps, 2 devices, 3600s) carried into the quote",
+      "IAM-v2 guest-account ISSUANCE through the supported admin API, writing iam_v2 only and never legacy",
+      "Legacy fallback is impossible while a method is enabled: a valid LEGACY voucher is denied by iam_v2, is NOT consumed, and creates no public.sessions or public.guests row",
+      "Auth-context creation is counted as scd_iamv2_auth_contexts_created_total and NOT as sessions_started",
+      "Boot convergence: all seven services at 0 restart jobs and 0 failures, journal-derived",
+      "IAM-v2 ACCOUNT admin lifecycle on one authority: list/get/patch/set-password/disconnect/delete all read and write iam_v2 only. Behavioural loop proven -- an admin PATCH enabled=false makes scd deny that account with both the correct and a freshly reset password, and re-enabling makes the new password authenticate.",
+      "IAM-v2 VOUCHER issuance and redemption on the accepted key-generation model: per-generation HMAC key sealed as hmac_key_ciphertext under a DEK named by encryption_key_id, AEAD code ciphertext/nonce pinned to code_key_generation_id, AAD bound to owner tuples, only last4 in the clear. A code issued through the real admin API authenticates at /v1/sessions/authorize (auth_contexts 4->5, public.sessions unchanged at 26); a valid LEGACY voucher is denied invalid_code, stays unused and creates no legacy session.",
+      "IAM-v2 voucher key ROTATION: generation 1 superseded and generation 2 minted; a voucher issued under generation 1 (S45FV9JV) and one issued under generation 2 (4ZWFS66A) BOTH authenticate, with public.sessions unchanged at 26. Superseded generations remain usable for already-issued vouchers.",
+      "IAM-v2 SESSION-AFTER-GRANT end to end: entitlement -> device admission -> iam_v2.sessions -> netd promotion to active. iam_v2.sessions moved 8->13 across the session while public.sessions stayed at 26 throughout.",
+      "RUNTIME ENFORCEMENT MATCHES THE PINNED REVISION: nft authorizes the guest IP on br-g90 and the tc class runs at 2048Kbit, exactly the pinned service_plan_revision down_kbps; a third device is refused MAX_DEVICES_REACHED limit=2 against the pinned max_concurrent_devices.",
+      "RECONNECT is idempotent: the same device re-activating returns its existing session (reused=true) rather than consuming a second device slot.",
+      "ADMIN DISCONNECT against REAL sessions: admin view reported active_devices=2 from live IAM-v2 session state, disconnect ended both with end_reason=admin_disconnect, and netd withdrew the nft lease.",
+      "AGGREGATE_ONLINE_TIME accrues: consumed_online_seconds advanced against the pinned 3600s quota with time_accounting_mode=AGGREGATE_ONLINE_TIME.",
+      "SINGLE-USE VOUCHER REDEMPTION: first redemption flips the voucher to REDEEMED; a replay is refused not_redeemable with exactly one entitlement on that voucher.",
+      "REBOOT (boot b716e9b7): all seven services 0 restart jobs and 0 failures, enforcement plane up with zero producer/boundary refusals, BUILD_ID and flags intact, and BOTH the voucher and account journeys re-proven to an active enforced session afterwards.",
+      "PORTAL TRUST BOUNDARY: authentication no longer redirects to /success. An IAM-v2 reply issues the server-side commerce session behind an opaque HttpOnly cookie and sends the guest to package selection; /packages and /packages/acquire refuse with no cookie and ignore forged pins in the query string; the pins never appear in the token or redirect; a legacy reply is untouched; an expired cookie stops working.",
+      "VOUCHER KEY ROTATION IS IMMEDIATE: with generations 1 and 2 superseded, a generation-3 voucher issued and redeemed with no wait (previously the cache made new-generation vouchers fail for up to 60s).",
+      "SESSION ADMISSION IS BOUND TO THE ACQUIRING DEVICE: a foreign device_id on a real entitlement is refused DEVICE_NOT_ON_ENTITLEMENT and gains no session; forged and non-ACTIVE entitlement ids are refused ENTITLEMENT_UNUSABLE.",
+      "CHECKOUT-GRACE reconciled to the accepted typed contract: writes now go through publish_checkout_grace_config with typed fields as parameters and the free-form remainder in config, the split the grace_config_no_dup_policy_keys constraint mandates. DSN-gated commerce suite is 6/6 against a real database (was 3 when the fixture first ran at all).",
+      "ACTIVATION VALIDATES THE WHOLE TRUSTED IDENTITY: wrong MAC on the right device is refused DEVICE_IDENTITY_MISMATCH; an IP resolving to no guest network is refused NO_GUEST_NETWORK; a device belonging to another tenant/site is refused; a coherent identity activates.",
+      "PORTAL SUCCESS MEANS ENFORCED: activation waits for netd's promotion, bounded by the caller's deadline, and reports the state observed (enforced=true state=active, matching the database). The portal shows /success only on an enforced session, and SessionsStarted increments only for a session that reached active.",
+      "HOSTILE REVIEW: 0 iam_v2 sessions without an entitlement; every active session (7, across 7 distinct devices, both VOUCHER and ACCOUNT) has exactly one nft authorization -- none claims active unenforced; public.sessions=26 and no legacy session created in over 3 hours (newest 06:18, before the authority switch); no IAM-v2 code path writes public.sessions and no branch falls back to legacy.",
+      "CHECKOUT-GRACE save -> read -> save is idempotent: the typed grace columns are projected back on read, so an ordinary admin edit cannot publish NULLs over the grace policy. Proven by a round-trip test that writes typed fields plus a free-form key, reads them back, writes the read value, and asserts the typed policy survived.",
+      "GRACE PACKAGE PROVENANCE is enforced: the contract's is_system = true requirement is now validated, and a non-system package carrying the CHECKOUT_GRACE type is refused grace_package_not_system.",
+      "DSN-gated commerce suite 8/8 against a real database.",
+      "Governance mutation-suite BASELINE passes at exact head (structural=PASS keyword=PASS) with sandbox fidelity verified over 1364 files.",
+      "CHECKOUT-GRACE free-form clear-to-empty: deleting the last free-form key actually clears it. The config jsonb is written unconditionally, so a key the operator removed cannot survive the save, be returned by the read, and be written back. DSN-gated commerce suite 9/9.",
+      "DELIVERY PROTOCOL corrected: generate-change-manifest --staged reads the INDEX, so packs must be staged BEFORE generation and validation must run AFTER the delivery commit -- validating earlier agrees with a HEAD the manifest was not written for, which is how a locally-green manifest failed GitHub Governance.",
+      "NORMAL CHECKOUT GRACE is system-provisioned per Site and hidden (D32/T0069): the package converges at startup with is_system=true, active, CHECKOUT_GRACE, price 0; it is absent from the operator catalogue; an operator publish carrying package_type is rejected and creates no non-system CHECKOUT_GRACE package; deactivating the system package is refused while an ordinary package stays operator-controlled; and an operator sets POLICY successfully with the typed field landing in its column and the free-form key in the jsonb. Provisioning is idempotent and does not choose a policy.",
+      "D32 NORMAL GRACE IS PRODUCED FROM POLICY AND PASSES THE REAL CHECKOUT VALIDATOR: publishing a policy derives the system plan and package revisions that express it, and iam_v2.grace_package_mismatch_reason -- the same function ConvertAtCheckout uses -- returns NULL for the result. A changed policy re-derives and still matches.",
+      "D32 PUBLICATION USES THE CANONICAL AUDITED, VERSIONED BOUNDARY: publish_checkout_grace_policy, with an active-operator actor, a bounded machine reason code and optimistic concurrency. A stale expected_version is REFUSED, which the raw config writer (no version parameter) could not produce.",
+      "D32 RESERVED CODES ARE UNREACHABLE FROM THE GENERIC OPERATOR PUBLISHER, including by code collision: publishing onto __system_checkout_grace or __system_checkout_grace_plan is refused while ordinary codes remain publishable.",
+      "Full internal/iamv2 DSN-gated suite green, including two further fixtures repaired for the auth_context and commerce_intent controlled-operation guards."
     ],
-    "production_status": "NOT authorized. Requires a separate explicit Product-Owner decision after the DEVELOPMENT trial is satisfactory."
+    "NOT_EXERCISED": [
+      "Voucher reveal/export: the contract requires operator re-authentication and audit for recovering a code. OpenVoucherCode exists in the codec and NO admin route exposes it -- deliberately unimplemented rather than shipped without the re-auth gate.",
+      "Byte accounting (consumed_data_bytes): stays 0 because the test devices are synthetic and pass no packets. Online-time accrual is proven; byte metering needs real traffic and is NOT claimed."
+    ],
+    "ENVIRONMENT_BLOCKED": [
+      "Phase-5 guest Post-Stay and Phase-6 GUEST Device Self-Service -- no real PMS / Phase-3 PMS-auth source",
+      "Portal ARP / device-presence path -- NOT PROVEN, requires a real guest device on the guest network",
+      "The checkout -> grace supersession -> session rebind journey ON THE APPLIANCE. ConvertAtCheckout converts a Stay at a boundary derived from a durable Stay Event; the appliance has pms_interfaces=1 and stays=1 (pre-existing fixtures) but stay_events=0, PHASE3_PMS_AUTH=false and pmsd inactive. Driving it would require fabricating a stay event, which is prohibited. The supersession/rebind LOGIC is covered by the checkout integration suite, which is being restored (see KNOWN_BROKEN) rather than by appliance evidence."
+    ]
   }
 }

@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 type edgeGuestAccount struct {
@@ -67,16 +69,18 @@ func scanGuestAccountEnriched(row interface{ Scan(...any) error }, a *edgeGuestA
 
 func (s *server) guestAccountsRoutes() http.Handler {
 	r := chi.NewRouter()
-	r.Get("/", s.listGuestAccounts)
-	r.Post("/", s.createGuestAccount)
+	// EVERY operation routes through the same authority switch. Switching only create is what produced the
+	// split authority where an IAM-v2 account was invisible to the API that had just created it.
+	r.Get("/", s.acctAuthority(s.listGuestAccounts, s.listGuestAccountsIAMv2))
+	r.Post("/", s.createGuestAccount) // create branches internally (it shares validation with legacy)
 	// Portal visibility toggle (static segment; chi matches it before "/{id}").
 	r.Get("/portal", s.getGuestAccountPortal)
 	r.Post("/portal", s.setGuestAccountPortal)
-	r.Get("/{id}", s.getGuestAccount)
-	r.Patch("/{id}", s.patchGuestAccount)
-	r.Post("/{id}/set-password", s.setGuestAccountPassword)
-	r.Post("/{id}/disconnect", s.disconnectGuestAccountSessions)
-	r.Delete("/{id}", s.deleteGuestAccount)
+	r.Get("/{id}", s.acctAuthority(s.getGuestAccount, s.getGuestAccountIAMv2))
+	r.Patch("/{id}", s.acctAuthority(s.patchGuestAccount, s.patchGuestAccountIAMv2))
+	r.Post("/{id}/set-password", s.acctAuthority(s.setGuestAccountPassword, s.setGuestAccountPasswordIAMv2))
+	r.Post("/{id}/disconnect", s.acctAuthority(s.disconnectGuestAccountSessions, s.disconnectGuestAccountSessionsIAMv2))
+	r.Delete("/{id}", s.acctAuthority(s.deleteGuestAccount, s.deleteGuestAccountIAMv2))
 	return r
 }
 
@@ -189,7 +193,10 @@ func (s *server) listGuestAccounts(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, a)
 	}
-	writeList(w, out)
+	// Stated for the same reason the IAM-v2 list states it: the screen must be able to tell which contract it
+	// is talking to even when there are no accounts yet. Here a guest access plan IS real and IS required, so
+	// saying "legacy" is what keeps the plan picker on screen honestly rather than by default.
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": listMeta{}, "authority": "legacy"})
 }
 
 func (s *server) getGuestAccount(w http.ResponseWriter, r *http.Request) {
@@ -244,7 +251,19 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", msg)
 		return
 	}
-	if in.TemplateID == "" {
+	// THE LEGACY PLAN REQUIREMENT IS LEGACY-ONLY.
+	//
+	// A legacy guest account carries a ticket_template ("guest access plan") that decides what it may do.
+	// IAM-v2 does not work that way: what a subject may acquire is decided by PACKAGE ELIGIBILITY RULES
+	// (AUTH_METHOD, SUBJECT_KIND, DATE_WINDOW, SITE_NETWORK, ...) evaluated when packages are listed, so the
+	// package declares who is eligible rather than the credential declaring what it gets. iam_v2 has no
+	// template column at all -- it has an OPTIONAL assigned_package_id for direct assignment.
+	//
+	// Requiring template_id under IAM-v2 authority would validate a legacy row and then discard it: a
+	// dependency with no effect on any IAM-v2 decision, kept only so the existing UI form still submits. That
+	// is exactly the hidden split authority this trial is meant to remove, so it is dropped here rather than
+	// replaced with an invented rule of equivalent shape.
+	if !s.iamv2Cfg.Enabled(iamv2.MethodAccount) && in.TemplateID == "" {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "template_id (guest access plan) required")
 		return
 	}
@@ -253,10 +272,13 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 	if !s.requireProvisioning(w, r) {
 		return
 	}
-	var tplExists bool
-	if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ticket_templates WHERE id=$1 AND tenant_id=$2 AND is_active)`, in.TemplateID, s.tenantID).Scan(&tplExists); err != nil || !tplExists {
-		jsonErr(w, http.StatusBadRequest, "bad_request", "guest access plan not found or inactive")
-		return
+	// Same reason: under IAM-v2 authority this reads a legacy table whose answer changes no IAM-v2 behaviour.
+	if !s.iamv2Cfg.Enabled(iamv2.MethodAccount) {
+		var tplExists bool
+		if err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM ticket_templates WHERE id=$1 AND tenant_id=$2 AND is_active)`, in.TemplateID, s.tenantID).Scan(&tplExists); err != nil || !tplExists {
+			jsonErr(w, http.StatusBadRequest, "bad_request", "guest access plan not found or inactive")
+			return
+		}
 	}
 	hash, err := hashPassword(in.Password)
 	if err != nil {
@@ -271,6 +293,21 @@ func (s *server) createGuestAccount(w http.ResponseWriter, r *http.Request) {
 	if sess := sessFrom(r.Context()); sess != nil {
 		createdBy = sess.OperatorID
 	}
+	// ---- ISSUE INTO THE DOMAIN THAT WILL AUTHENTICATE ---------------------------------------------
+	// A credential must be created in whichever IAM will later be asked to verify it. With IAM-v2 as the
+	// configured ACCOUNT authority, an account written to the legacy table can never be logged in with:
+	// scd looks it up in iam_v2.guest_access_accounts and finds nothing. That was the state of this
+	// appliance -- ACCOUNT enabled, and iam_v2.guest_access_accounts at 0 rows, because the runtime had an
+	// IAM-v2 authentication domain and no IAM-v2 issuance path anywhere.
+	//
+	// This is a SWITCH, not a dual write. Writing both would recreate the split-authority problem in the
+	// issuance direction and leave two credentials that can drift apart.
+	if s.iamv2Cfg.Enabled(iamv2.MethodAccount) {
+		s.createGuestAccountIAMv2(w, r, ctx, in.Username, hash, in.DisplayName, in.Notes, enabled,
+			in.ValidFrom, in.ValidUntil, in.Password, generated)
+		return
+	}
+
 	var a edgeGuestAccount
 	err = scanGuestAccount(s.db.QueryRow(ctx, `
         INSERT INTO guest_accounts (tenant_id, site_id, template_id, username, password_hash,

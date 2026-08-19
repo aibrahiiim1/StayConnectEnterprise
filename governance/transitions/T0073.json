@@ -1,0 +1,38 @@
+{
+  "transition_id": "T0073",
+  "seq": 73,
+  "timestamp": "2026-08-19T07:20:00Z",
+  "record_type": "POST_ACCEPTANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP_EXECUTED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "AUTHORIZED_AND_IN_PROGRESS",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "EXECUTION_COMPLETE_AWAITING_PRODUCT_OWNER_REVIEW",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D33",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Executed under the existing D33 decision (T0072). No new Product-Owner decision is created or implied, and no acceptance is recorded.",
+  "previous_state_note": "The sweep was authorized and had not been carried out. Several admin screens were unusable, the PMS interface configuration surface did not exist, and a device on the configured guest VLAN obtained no address.",
+  "new_state_note": "The sweep is executed. Guest Accounts renders and its full IAM-v2 lifecycle was exercised against the real API. Navigation shows exactly one active item on all 38 screens and the sidebar keeps its position across navigation. Seven screens that answered HTTP 500 now answer, a Stays listing that referenced a non-existent column is corrected and covered by a test, the Licence screen is wired to the paths edged actually serves, and four Phase-4 screens state that the capability is not enabled here instead of claiming to be loading forever. PMS interfaces gained the create and revision-authoring surface they never had, exposing the endpoint host:port and every other value the implemented connector reads. Kea can persist its own configuration, so guest-VLAN DHCP survives a restart and a full reboot.",
+  "phase_affected_note": "post-roadmap (D33/T0072 hardening sweep)",
+  "boundaries_observed": [
+    "Confined to DEVELOPMENT appliance 172.21.60.23. Production untouched.",
+    "No capability was enabled. edged still carries no Phase-4 configuration, and the financial screens report that rather than being switched on.",
+    "No PMS event, network topology, guest traffic or protocol evidence is fabricated. The VLAN-90 interface has received zero packets and that is reported as an external switch/trunk matter, not repaired or claimed.",
+    "No device DHCP test is claimed: no real client was placed on the guest VLAN.",
+    "The permanent two-NIC model is preserved: ens160 WAN and management, ens192 LAN.",
+    "The trial pull request is untouched, and no merge, cutover, migration or legacy retirement is performed or authorized.",
+    "PMS interfaces created while exercising the new surface are left DECOMMISSIONED and labelled as DEV artifacts; revisions are immutable by design and were not deleted."
+  ],
+  "next": "One Product-Owner review of the post-acceptance hardening and Hotel-Admin usability sweep."
+}

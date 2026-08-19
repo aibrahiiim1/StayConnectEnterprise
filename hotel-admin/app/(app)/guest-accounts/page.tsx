@@ -73,19 +73,81 @@ export default function GuestAccountsPage() {
   const [editing, setEditing] = useState<GuestAccount | null>(null);
   const [pwFor, setPwFor] = useState<GuestAccount | null>(null);
   const [reveal, setReveal] = useState<{ username: string; password: string } | null>(null);
+  const [authority, setAuthority] = useState<"iam_v2" | "legacy" | null>(null);
+  // THE LIST HAS THREE OUTCOMES, NOT TWO. `rows === null` was doing double duty as "still loading" and "the
+  // load failed", so a failed load rendered the error banner AND "Loading…" underneath it forever -- the
+  // screen contradicting itself, and the same never-finishes-loading shape the Phase-4 screens had.
+  const [loadFailed, setLoadFailed] = useState(false);
+  // THE PLANS REQUEST HAS FOUR OUTCOMES, AND `plans: []` CANNOT TELL THEM APART.
+  //
+  // `setPlans(pl?.data ?? [])` collapsed "still loading", "returned nothing" and "failed" into one empty
+  // array, and every consumer read that array as "no plans exist". So a plans request that FAILED, or one
+  // still in flight, told the operator "No active guest access plans — create one first": an instruction to
+  // go and create something that may well already exist. Only a CONFIRMED empty success may say that.
+  //
+  // "na" is the IAM-v2 case, where the request is never made at all.
+  const [plansStatus, setPlansStatus] = useState<"na" | "loading" | "ok" | "failed">("loading");
+  // Under IAM-v2 a credential carries no plan. What a guest may acquire is decided by PACKAGE ELIGIBILITY
+  // RULES evaluated when packages are listed, so a "guest access plan" on this screen would be a control the
+  // backend discards -- and the operator would believe they had chosen what the guest gets.
+  // planApplies drives STRUCTURE (which controls exist, whether a plan is required). It defaults to the
+  // legacy answer while the authority is still unknown, which is the fail-safe direction: it asks for a plan
+  // that IAM-v2 will ignore rather than omitting one a legacy site genuinely needs.
+  const planApplies = authority !== "iam_v2";
+  // planWordingApplies drives PROSE, and prose must never be guessed. `authority` is null until the first
+  // list returns, so anything keyed on planApplies alone is rendered as LEGACY during that window -- meaning
+  // an IAM-v2 operator saw "each account is bound to a Guest Access Plan" and "No active guest access plans
+  // — create one first" flash on screen every single load. A wrong sentence shown briefly is still a wrong
+  // sentence, and it is the one this screen is most likely to be judged by.
+  const planWordingApplies = authority === "legacy";
 
   async function load() {
+    // Clearing both at entry matters for the RETRY path: without it a successful reload leaves the previous
+    // failure's banner sitting above fresh, correct data.
+    setErr(null);
+    setLoadFailed(false);
+    setPlansStatus("loading");
     try {
-      const [ga, pl, pv] = await Promise.all([
+      const [ga, pv] = await Promise.all([
         api.get<ListResp<GuestAccount>>("/guest-accounts"),
-        api.get<ListResp<GuestAccessPlan>>("/guest-access-plans"),
         api.get<{ enabled: boolean }>("/guest-accounts/portal").catch(() => ({ enabled: false })),
       ]);
       setRows(ga.data);
-      setPlans(pl.data);
+      // The site's authority comes from the LIST ENVELOPE, not from a row: with zero accounts there is no row
+      // to ask, and that is exactly when the create form has to decide whether a plan picker belongs on screen.
+      const auth = ga.authority ?? null;
+      setAuthority(auth);
+
+      // GUEST ACCESS PLANS ARE FETCHED ONLY WHERE THEY EXIST.
+      //
+      // This used to sit inside the same Promise.all as the accounts themselves, which made a legacy
+      // concept a hard dependency of an IAM-v2 screen: on a site with no plans, or for an operator whose
+      // role cannot read that resource, or any time the legacy endpoint failed, the ENTIRE Guest Accounts
+      // page rendered "Failed to load" -- with the accounts already successfully fetched and sitting unused.
+      //
+      // Under IAM-v2 the answer is not merely optional, it is irrelevant: a credential carries no plan.
+      // So the call is skipped outright there, and where it does apply its failure degrades the plan column
+      // rather than the screen.
+      if (auth === "iam_v2") {
+        setPlans([]);
+        setPlansStatus("na");
+      } else {
+        try {
+          const pl = await api.get<ListResp<GuestAccessPlan>>("/guest-access-plans");
+          setPlans(pl.data ?? []);
+          setPlansStatus("ok");
+        } catch {
+          // A failure is NOT an empty result. The distinction is the whole point: an empty success means
+          // "create one", a failure means "we do not know", and telling an operator to create a plan they may
+          // already have is worse than saying nothing.
+          setPlans([]);
+          setPlansStatus("failed");
+        }
+      }
       setPortalOn(!!pv.enabled);
     } catch (e: any) {
       setErr(e?.message ?? "Failed to load");
+      setLoadFailed(true);
     }
   }
   useEffect(() => { load(); }, []);
@@ -125,7 +187,7 @@ export default function GuestAccountsPage() {
         generate,
         display_name: (form.get("display_name") as string) || undefined,
         notes: (form.get("notes") as string) || undefined,
-        template_id: form.get("template_id"),
+        template_id: planApplies ? form.get("template_id") : undefined,
         valid_from: (form.get("valid_from") as string) ? new Date(form.get("valid_from") as string).toISOString() : undefined,
         valid_until: (form.get("valid_until") as string) ? new Date(form.get("valid_until") as string).toISOString() : undefined,
       });
@@ -151,7 +213,7 @@ export default function GuestAccountsPage() {
         username: (form.get("username") as string).trim(),
         display_name: (form.get("display_name") as string) || undefined,
         notes: (form.get("notes") as string) || undefined,
-        template_id: form.get("template_id"),
+        template_id: planApplies ? form.get("template_id") : undefined,
         valid_from: (form.get("valid_from") as string) ? new Date(form.get("valid_from") as string).toISOString() : undefined,
         valid_until: (form.get("valid_until") as string) ? new Date(form.get("valid_until") as string).toISOString() : undefined,
       });
@@ -211,16 +273,47 @@ export default function GuestAccountsPage() {
           <div className="text-xs text-muted uppercase tracking-wider">Access</div>
           <h1 className="text-2xl font-semibold">Guest accounts</h1>
         </div>
-        <Button onClick={() => { setShowNew((s) => !s); setEditing(null); setPwFor(null); }} disabled={activePlans.length === 0}>
+        {/*
+          THE DEEPEST LEGACY DEPENDENCY ON THIS SCREEN.
+
+          This button was disabled whenever there were no active guest access plans, whatever the authority.
+          Under IAM-v2 a credential carries no plan, so plans are not merely optional there -- they are
+          irrelevant, and on a site with none an operator could never create a guest account AT ALL. The only
+          symptom was a dead button with no explanation.
+
+          It is no longer gated on anything. Where a plan IS a genuine prerequisite -- a legacy site with none
+          -- the FORM says so by name and refuses to submit. A disabled button explains nothing, and a `title`
+          only explains it to someone who already suspected the button and hovered.
+        */}
+        <Button onClick={() => { setShowNew((s) => !s); setEditing(null); setPwFor(null); }}>
           {showNew ? <><X size={14} /> Cancel</> : <><Plus size={14} /> New account</>}
         </Button>
       </div>
 
-      <p className="text-sm text-muted mb-4">
-        Username &amp; Password sign-in for guests — each account is bound to a Guest Access Plan (duration, data cap,
-        speed and max devices) exactly like a voucher, but the guest signs in with a username and password instead of a
-        code. License capacity is appliance-wide; the plan&apos;s <strong>max devices</strong> is enforced per account.
-      </p>
+      {/*
+        THE DESCRIPTION IS AUTHORITY-SPECIFIC, because the two authorities disagree about what an account IS.
+        Telling an IAM-v2 operator that "each account is bound to a Guest Access Plan" is not a stale phrase to
+        tidy up later -- it describes a binding that does not exist, and it sends them to a screen that cannot
+        affect anything they are looking at.
+      */}
+      {authority === null ? (
+        // Nothing authority-specific is claimed until the authority is known.
+        <p className="text-sm text-muted mb-4">
+          Username &amp; Password sign-in for guests — the guest signs in with a username and password instead of a code.
+        </p>
+      ) : planWordingApplies ? (
+        <p className="text-sm text-muted mb-4">
+          Username &amp; Password sign-in for guests — each account is bound to a Guest Access Plan (duration, data cap,
+          speed and max devices) exactly like a voucher, but the guest signs in with a username and password instead of a
+          code. License capacity is appliance-wide; the plan&apos;s <strong>max devices</strong> is enforced per account.
+        </p>
+      ) : (
+        <p className="text-sm text-muted mb-4">
+          Username &amp; Password sign-in for guests — the guest signs in with a username and password instead of a code.
+          What each guest may then take is decided by <strong>package eligibility rules</strong> on the Commercial
+          packages screen, not by anything stored on the account. License capacity is appliance-wide.
+        </p>
+      )}
 
       <div className="mb-4 flex items-center gap-3 text-sm">
         <span>Show <strong>Username &amp; Password</strong> tab on the captive portal:</span>
@@ -228,7 +321,21 @@ export default function GuestAccountsPage() {
         <span className="text-muted text-xs">{portalOn ? "Guests can sign in with an account." : "The tab is hidden until enabled."}</span>
       </div>
 
-      {activePlans.length === 0 && <div className="text-sm text-warn mb-4">No active guest access plans — create one first.</div>}
+      {/*
+        "No active guest access plans — create one first" was rendered whenever activePlans was empty, with no
+        authority test at all. Under IAM-v2 the plans resource is never even fetched, so activePlans is ALWAYS
+        empty and this warning was ALWAYS on screen -- permanently instructing an operator to go and create a
+        prerequisite that their site does not have and cannot use.
+      */}
+      {planWordingApplies && plansStatus === "ok" && activePlans.length === 0 && (
+        <div className="text-sm text-warn mb-4">No active guest access plans — create one first.</div>
+      )}
+      {planWordingApplies && plansStatus === "failed" && (
+        <div className="text-sm text-warn mb-4">
+          Could not load guest access plans, so this screen cannot tell whether any exist.{" "}
+          <button type="button" className="underline" onClick={() => void load()}>Try again</button>
+        </div>
+      )}
       {err && <div className="text-err text-sm mb-4">{err}</div>}
       {msg && <div className="text-ok text-sm mb-4">{msg}</div>}
 
@@ -237,14 +344,14 @@ export default function GuestAccountsPage() {
       {showNew && (
         <Card className="mb-6">
           <CardHeader><CardTitle>New guest account</CardTitle></CardHeader>
-          <CardBody><AccountForm plans={activePlans} onSubmit={onCreate} busy={busy} withPassword /></CardBody>
+          <CardBody><AccountForm plans={activePlans} planApplies={planApplies} authorityResolved={authority !== null} loadFailed={loadFailed} plansStatus={plansStatus} onSubmit={onCreate} busy={busy} withPassword /></CardBody>
         </Card>
       )}
 
       {editing && (
         <Card className="mb-6 border-brand">
           <CardHeader><CardTitle>Edit {editing.username}</CardTitle></CardHeader>
-          <CardBody><AccountForm plans={activePlans} allPlans={plans} account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
+          <CardBody><AccountForm plans={activePlans} allPlans={plans} planApplies={planApplies} authorityResolved={authority !== null} loadFailed={loadFailed} plansStatus={plansStatus} account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
         </Card>
       )}
 
@@ -261,25 +368,35 @@ export default function GuestAccountsPage() {
 
       <Card>
         <CardBody className="p-0">
-          {rows === null ? <EmptyState title="Loading…" /> : filtered.length === 0 ? (
+          {loadFailed ? (
+            // A failed load is not an empty list and not a slow one. Saying so, and offering the one action
+            // that can help, beats a spinner that will never finish.
+            <div className="py-14 text-center text-muted">
+              <div className="text-sm">Could not load guest accounts</div>
+              <div className="text-xs mt-1">The appliance did not answer. Nothing has been changed.</div>
+              <Button className="mt-3" onClick={() => void load()}>Try again</Button>
+            </div>
+          ) : rows === null ? <EmptyState title="Loading…" /> : filtered.length === 0 ? (
             <EmptyState title="No guest accounts" hint="Create one to let guests sign in with a username and password." />
           ) : (
             <Table>
               <THead>
-                <TR><TH>Username</TH><TH>Name</TH><TH>Plan</TH><TH>Devices</TH><TH>Status</TH><TH>Validity</TH><TH>Last login</TH><TH>Logins</TH><TH></TH></TR>
+                <TR><TH>Username</TH><TH>Name</TH>{planApplies && <TH>Plan</TH>}<TH>Devices</TH><TH>Status</TH><TH>Validity</TH><TH>Last login</TH><TH>Logins</TH><TH></TH></TR>
               </THead>
               <tbody>
                 {filtered.map((a) => {
-                  const p = planById.get(a.template_id);
+                  const p = a.template_id ? planById.get(a.template_id) : undefined;
                   const cap = a.max_devices ?? p?.max_concurrent_devices;
                   return (
                   <TR key={a.id}>
                     <TD className="font-mono">{a.username}</TD>
                     <TD className="text-muted">{a.display_name || "—"}</TD>
-                    <TD className="text-muted">
-                      {p ? p.name : a.template_id.slice(0, 8)}
-                      {p && !p.is_active && <Badge tone="warn" className="ml-1">inactive</Badge>}
-                    </TD>
+                    {planApplies && (
+                      <TD className="text-muted">
+                        {p ? p.name : (a.template_id ? a.template_id.slice(0, 8) : "—")}
+                        {p && !p.is_active && <Badge tone="warn" className="ml-1">inactive</Badge>}
+                      </TD>
+                    )}
                     <TD className="text-muted">{a.active_devices ?? 0}{cap ? ` of ${cap}` : ""}</TD>
                     <TD>
                       <Badge tone={a.enabled ? "ok" : "err"}>{a.enabled ? "enabled" : "disabled"}</Badge>
@@ -309,8 +426,10 @@ export default function GuestAccountsPage() {
 
 // AccountForm is shared by create and edit. `withPassword` shows the create-time
 // password controls; edit uses the separate Set-password panel.
-function AccountForm({ plans, allPlans, account, onSubmit, busy, withPassword, onCancel }: {
-  plans: GuestAccessPlan[]; allPlans?: GuestAccessPlan[]; account?: GuestAccount;
+function AccountForm({ plans, allPlans, planApplies = true, authorityResolved = true, loadFailed = false,
+  plansStatus = "ok", account, onSubmit, busy, withPassword, onCancel }: {
+  plans: GuestAccessPlan[]; allPlans?: GuestAccessPlan[]; planApplies?: boolean; authorityResolved?: boolean;
+  loadFailed?: boolean; plansStatus?: "na" | "loading" | "ok" | "failed"; account?: GuestAccount;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void; busy: boolean; withPassword?: boolean; onCancel?: () => void;
 }) {
   const [generate, setGenerate] = useState(false);
@@ -321,7 +440,7 @@ function AccountForm({ plans, allPlans, account, onSubmit, busy, withPassword, o
   const planOptions = useMemo(() => {
     const list = [...plans];
     if (account && allPlans) {
-      const cur = allPlans.find((p) => p.id === account.template_id);
+      const cur = account.template_id ? allPlans.find((p) => p.id === account.template_id) : undefined;
       if (cur && !list.some((p) => p.id === cur.id)) list.unshift(cur);
     }
     return list;
@@ -346,19 +465,89 @@ function AccountForm({ plans, allPlans, account, onSubmit, busy, withPassword, o
           </div>
         </>
       ) : <div />}
-      <div>
-        <Label>Guest access plan</Label>
-        <select name="template_id" required defaultValue={account?.template_id} className={selectCls}>
-          {planOptions.map((t) => <option key={t.id} value={t.id}>{planLabel(t)}{!t.is_active ? " · inactive" : ""}</option>)}
-        </select>
-      </div>
+      {!authorityResolved ? (
+        // THE AUTHORITY IS NOT KNOWN YET, SO NOTHING MAY BE CLAIMED ABOUT WHAT AN ACCOUNT NEEDS.
+        //
+        // planApplies defaults to the LEGACY answer while the first list is still in flight -- the right
+        // default for structure, because asking for a plan IAM-v2 ignores is safer than omitting one a legacy
+        // site needs. But the branch below turns that default into VISIBLE PROSE: with no plans loaded yet it
+        // rendered "No active guest access plan exists yet ... an account cannot be created without one",
+        // which on an IAM-v2 site is simply false and, for the moment it is on screen, is indistinguishable
+        // from a real prerequisite. Opening the form during a slow load was enough to see it.
+        //
+        // So this window states only what is true of it, and submission waits rather than being refused for a
+        // reason that may not apply.
+        <div>
+          <Label>Access</Label>
+          <p className="text-xs text-muted mt-1.5 leading-relaxed" role="status">
+            {loadFailed
+              // "Checking…" while the check has already failed is a second false statement on top of the
+              // first: it is not still working, and nothing will change until the operator retries.
+              ? "Could not determine how this site decides guest access. Reload the page and try again."
+              : "Checking how this site decides guest access…"}
+          </p>
+        </div>
+      ) : planApplies && plansStatus === "loading" ? (
+        // In flight. The plans call runs AFTER the authority is known, so this window is real on every
+        // legacy load -- and it used to render the create-a-plan prerequisite, because an unfinished request
+        // and an empty one both left the array empty.
+        <div>
+          <Label>Guest access plan</Label>
+          <p className="text-xs text-muted mt-1.5 leading-relaxed" role="status">Loading guest access plans…</p>
+        </div>
+      ) : planApplies && plansStatus === "failed" ? (
+        // Failed. We do not know whether plans exist, so we say exactly that and say nothing about creating
+        // one -- an operator sent to create a plan they already have would end up with a duplicate and a
+        // wrong diagnosis of their own system.
+        <div>
+          <Label>Guest access plan</Label>
+          <p className="text-xs text-warn mt-1.5 leading-relaxed" role="alert">
+            Could not load guest access plans, so a plan cannot be chosen. This does not mean none exist.
+          </p>
+        </div>
+      ) : planApplies && planOptions.length === 0 ? (
+        // A `required` <select> with no options cannot be satisfied, so the form silently refuses to submit
+        // and nothing on screen says why. On a legacy site a plan is genuinely required, so the honest answer
+        // is to name the missing prerequisite rather than present a control that cannot be used.
+        <div>
+          <Label>Guest access plan</Label>
+          <p className="text-xs text-warn mt-1.5 leading-relaxed">
+            No active guest access plan exists yet. Create one on the Guest access plans screen first — on this
+            site an account cannot be created without one.
+          </p>
+        </div>
+      ) : planApplies ? (
+        <div>
+          <Label>Guest access plan</Label>
+          <select name="template_id" required defaultValue={account?.template_id ?? undefined} className={selectCls}>
+            {planOptions.map((t) => <option key={t.id} value={t.id}>{planLabel(t)}{!t.is_active ? " · inactive" : ""}</option>)}
+          </select>
+        </div>
+      ) : (
+        <div>
+          <Label>Access</Label>
+          <p className="text-xs text-muted mt-1.5 leading-relaxed">
+            Decided by <strong>package eligibility rules</strong>, not by this account. Choose which packages a
+            signed-in guest may take on the Commercial packages screen.
+          </p>
+        </div>
+      )}
       <div><Label>Display name (optional)</Label><Input name="display_name" defaultValue={account?.display_name ?? ""} placeholder="Room 101 guest" /></div>
       <div><Label>Valid from (optional)</Label><Input name="valid_from" type="datetime-local" defaultValue={dt(account?.valid_from)} /></div>
       <div><Label>Valid until (optional)</Label><Input name="valid_until" type="datetime-local" defaultValue={dt(account?.valid_until)} /></div>
       <div className="sm:col-span-3"><Label>Notes (optional)</Label><Input name="notes" defaultValue={account?.notes ?? ""} /></div>
       <div className="sm:col-span-3 flex justify-end gap-2">
         {onCancel && <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>}
-        <Button type="submit" disabled={busy}>{busy ? "Saving…" : account ? "Save changes" : "Create account"}</Button>
+        {/*
+          On a legacy site the account cannot be created without a plan, so submission waits while the plans
+          request is in flight, is refused when it failed (nothing can be chosen), and is refused on a
+          confirmed-empty result. Those are three different reasons and the cell above states which applies.
+        */}
+        <Button type="submit" disabled={busy || !authorityResolved
+          || (planApplies && plansStatus !== "ok")
+          || (planApplies && planOptions.length === 0)}>
+          {busy ? "Saving…" : account ? "Save changes" : "Create account"}
+        </Button>
       </div>
     </form>
   );

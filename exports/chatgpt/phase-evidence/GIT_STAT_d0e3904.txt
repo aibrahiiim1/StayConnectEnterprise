@@ -1,4 +1,0 @@
-commit d0e390491bc87df38d5e294a309e3459e1c56784
-Date:   Mon Aug 17 17:40:28 2026 +0300
-
-    Trial-blocker round (delivery_head): manifest, packs and checksums

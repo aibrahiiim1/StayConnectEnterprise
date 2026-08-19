@@ -7,7 +7,11 @@ package main
 // guest portal, the admin operator is trusted, so validation reasons are returned verbatim.
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -78,6 +82,14 @@ func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
 		DataQuotaBytes: in.DataQuotaBytes, TimeAccountingMode: in.TimeAccountingMode,
 	})
 	if err != nil {
+		// A domain REFUSAL is not an internal error. Publishing onto a reserved system code is a policy
+		// decision the operator can act on ("that code is not yours"), and reporting it as 500 "internal"
+		// tells them the server broke instead. Only genuinely unexpected failures stay 500.
+		var de *iamv2.Error
+		if errors.As(err, &de) && de.Code == iamv2.ErrInvalidInput {
+			jsonErr(w, http.StatusBadRequest, "bad_request", de.Msg)
+			return
+		}
 		jsonErr(w, http.StatusInternalServerError, "internal", "publish failed")
 		return
 	}
@@ -134,10 +146,27 @@ func (s *server) getGraceConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, gc)
 }
 
+// setGraceReq is POLICY ONLY (D32).
+//
+// grace_package_revision_id is deliberately absent. Under D32 the operator does not choose a package: the
+// system derives the one that exactly expresses this policy, because the checkout validator demands exact
+// equality between the two and a package the operator picked by hand can only accidentally satisfy it.
+// expected_version is the config_version the operator last read -- mandatory, so two operators editing at
+// once produce one winner and one explicit conflict rather than a silent overwrite.
 type setGraceReq struct {
-	GracePackageRevisionID string         `json:"grace_package_revision_id"`
-	Config                 map[string]any `json:"config"`
+	Config          map[string]any `json:"config"`
+	ExpectedVersion *int           `json:"expected_version"`
+	ReasonCode      string         `json:"reason_code"`
+	// Accepted by the decoder ONLY so that a caller still sending the retired field gets told what changed.
+	// The decoder rejects unknown fields, so without this line an old client's request fails as "bad body" --
+	// a caller reading that would look for a malformed JSON problem that does not exist. It is never used.
+	RetiredPackageRevisionID string `json:"grace_package_revision_id"`
 }
+
+// graceReasonCode bounds the reason code to ^[A-Z][A-Z0-9_]{0,63}$ -- the same shape the audited boundary
+// enforces. Checked here as well so a bad code is a 400 naming the rule, rather than a 409 raised from inside
+// a database function, which reads like a concurrency conflict and is not one.
+var graceReasonCode = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 
 func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 	var in setGraceReq
@@ -145,21 +174,138 @@ func (s *server) setGraceConfig(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
 		return
 	}
-	res, err := s.commerce.SetGrace(r.Context(), s.tenantID, s.siteID, in.GracePackageRevisionID, in.Config)
-	if err != nil {
-		jsonErr(w, http.StatusInternalServerError, "internal", "update failed")
-		return
-	}
-	if res.Disabled {
+	if !s.commerceCfg.AdminOn() {
 		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
 		return
 	}
-	if res.Reason != "ok" {
-		jsonErr(w, http.StatusBadRequest, "validation", res.Reason)
+	if in.RetiredPackageRevisionID != "" {
+		jsonErr(w, http.StatusBadRequest, "validation",
+			"grace_package_revision_id is no longer accepted: the system derives the grace package from the "+
+				"published policy, because the checkout validator requires the two to match exactly")
 		return
 	}
-	s.audit(r, "commercial_grace.configured", "commercial_grace", in.GracePackageRevisionID, nil)
-	writeJSON(w, http.StatusOK, map[string]any{"grace_package_revision_id": in.GracePackageRevisionID})
+	if in.ExpectedVersion == nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request",
+			"expected_version is required: publish against the config_version you last read")
+		return
+	}
+	// The actor is taken from the authenticated SESSION, never from the body. The audited boundary records
+	// who changed what every departing guest receives, and a caller-supplied actor would make that record
+	// worth nothing.
+	sess := sessFrom(r.Context())
+	if sess == nil || sess.OperatorID == "" {
+		jsonErr(w, http.StatusUnauthorized, "unauthenticated", "an operator session is required")
+		return
+	}
+	reason := strings.TrimSpace(in.ReasonCode)
+	if reason == "" {
+		// A bounded default rather than a free-text one: the boundary requires ^[A-Z][A-Z0-9_]{0,63}$, and a
+		// publication with no recorded reason is an unattributable change.
+		reason = "HOTEL_ADMIN_UPDATE"
+	}
+	if !graceReasonCode.MatchString(reason) {
+		jsonErr(w, http.StatusBadRequest, "validation",
+			"reason_code must be a bounded machine code matching ^[A-Z][A-Z0-9_]{0,63}$, not free text")
+		return
+	}
+	pol, perr := gracePolicyFromConfig(in.Config)
+	if perr != nil {
+		jsonErr(w, http.StatusBadRequest, "validation", perr.Error())
+		return
+	}
+	repo, ok := s.commerceRepo.(iamv2.GracePublishRepository)
+	if !ok || repo == nil {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	version, pkgRev, err := iamv2.PublishSystemGracePolicy(ctx, repo, iamv2.GracePublishRequest{
+		TenantID: s.tenantID, SiteID: s.siteID, Policy: pol,
+		ActorOperatorID: sess.OperatorID, ReasonCode: reason, ExpectedVersion: *in.ExpectedVersion,
+	})
+	if err != nil {
+		// Every refusal the boundary raises is actionable by the operator -- a stale version, an invalid
+		// policy, a derivation the checkout validator rejected -- so it is reported as such rather than as an
+		// internal error.
+		var de *iamv2.Error
+		if errors.As(err, &de) && de.Code == iamv2.ErrInvalidInput {
+			jsonErr(w, http.StatusBadRequest, "validation", de.Msg)
+			return
+		}
+		jsonErr(w, http.StatusConflict, "conflict", err.Error())
+		return
+	}
+	// The audit payload records the version and the derived package, never the operator's raw config blob.
+	s.audit(r, "commercial_grace.published", "commercial_grace", pkgRev,
+		map[string]any{"config_version": version, "reason_code": reason})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"grace_package_revision_id": pkgRev,
+		"config_version":            version,
+		"authority":                 "iam_v2",
+	})
+}
+
+// gracePolicyFromConfig maps the operator's typed config keys onto the policy the system derives from.
+//
+// The key names are the ones the schema itself designates as typed (grace_config_no_dup_policy_keys), so the
+// operator-facing vocabulary and the columns cannot drift apart.
+func gracePolicyFromConfig(cfg map[string]any) (iamv2.SystemGracePolicy, error) {
+	num := func(k string) (int64, bool) {
+		v, ok := cfg[k]
+		if !ok {
+			return 0, false
+		}
+		switch n := v.(type) {
+		case json.Number:
+			i, err := n.Int64()
+			return i, err == nil
+		case float64:
+			return int64(n), n == float64(int64(n))
+		case int:
+			return int64(n), true
+		case int64:
+			return n, true
+		}
+		return 0, false
+	}
+	var p iamv2.SystemGracePolicy
+	get := func(k string) (int, error) {
+		n, ok := num(k)
+		if !ok {
+			return 0, fmt.Errorf("%s is required and must be an integer", k)
+		}
+		return int(n), nil
+	}
+	var err error
+	if p.DurationSeconds, err = get("grace_duration_seconds"); err != nil {
+		return p, err
+	}
+	if p.DownKbps, err = get("grace_down_kbps"); err != nil {
+		return p, err
+	}
+	if p.UpKbps, err = get("grace_up_kbps"); err != nil {
+		return p, err
+	}
+	q, ok := num("grace_data_quota_bytes")
+	if !ok {
+		return p, fmt.Errorf("grace_data_quota_bytes is required and must be an integer")
+	}
+	p.DataQuotaBytes = q
+	if p.DeviceLimit, err = get("grace_device_limit"); err != nil {
+		return p, err
+	}
+	pol, _ := cfg["grace_device_limit_policy"].(string)
+	if pol == "" {
+		// The only policy the enforcement path implements; defaulted so an operator supplying the other five
+		// is not tripped by a field with exactly one legal value.
+		pol = "REJECT_NEW_DEVICE"
+	}
+	p.DeviceLimitPolicy = pol
+	if p.EligibilityWindowSeconds, err = get("eligibility_window_seconds"); err != nil {
+		return p, err
+	}
+	return p, nil
 }
 
 func (s *server) listCommerceQuotes(w http.ResponseWriter, r *http.Request) {
@@ -240,6 +386,14 @@ func (s *server) publishCommercialPackage(w http.ResponseWriter, r *http.Request
 	}
 	res, err := s.commerce.PublishRevision(r.Context(), spec)
 	if err != nil {
+		// A domain REFUSAL is not an internal error. Publishing onto a reserved system code is a policy
+		// decision the operator can act on ("that code is not yours"), and reporting it as 500 "internal"
+		// tells them the server broke instead. Only genuinely unexpected failures stay 500.
+		var de *iamv2.Error
+		if errors.As(err, &de) && de.Code == iamv2.ErrInvalidInput {
+			jsonErr(w, http.StatusBadRequest, "bad_request", de.Msg)
+			return
+		}
 		jsonErr(w, http.StatusInternalServerError, "internal", "publish failed")
 		return
 	}

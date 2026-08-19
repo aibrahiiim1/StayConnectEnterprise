@@ -1,7 +1,10 @@
 [Unit]
 Description=StayConnect PMS Connector Daemon (pmsd) — dedicated read-only PMS connector (Phase 3, DARK)
 # Ordering only (pmsd uses a lazy pool and tolerates a slow DB): after network + the site DB container.
-After=network-online.target docker.service postgresql.service
+# postgresql.service removed: no such unit exists here (Postgres is the stayconnect-pg container) and
+# systemd ignores After= on a missing unit, so it never ordered anything. pmsd's lazy pool means it needs
+# no readiness gate; netd, which connects during startup, is the one that did.
+After=network-online.target docker.service
 Wants=network-online.target docker.service
 # Bounded restart window: a genuine crash is retried a few times, then the unit backs off instead of
 # storming. A clean flags-OFF exit is success (Restart=on-failure below), so DARK never restart-loops.

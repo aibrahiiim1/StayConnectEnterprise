@@ -1,0 +1,4 @@
+commit 72979f5f8df6d18faa4e9227163829d597f4d53c
+Date:   Wed Aug 19 19:37:44 2026 +0300
+
+    Model the legacy plans request as four outcomes, not an empty array

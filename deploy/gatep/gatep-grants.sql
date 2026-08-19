@@ -198,3 +198,174 @@ BEGIN
     END IF;
   END LOOP;
 END $$;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- THE CONTROLLED-OPERATION OPENER, FOR THE ADMIN WRITER (added for the DEVELOPMENT IAM-v2 trial, D31/T0068)
+--
+-- edged refuses to serve the Phase-3 admin surface at startup unless the role it connects as can OPEN a
+-- controlled operation: "this process cannot open an auth_context operation (no EXECUTE on
+-- iam_v2.begin_controlled_operation(text)), so every authoritative write in that family would be refused at
+-- the first attempt". That guard is correct -- a writer that cannot open the operation would fail on its first
+-- authoritative write, and failing at startup is better than failing in front of an operator.
+--
+-- This is the MINIMUM that satisfies it: EXECUTE on the opener only. It grants no table write, no schema
+-- create, no ownership and no membership. The controlled-writer trigger still refuses any write that is not
+-- inside an open operation, so the privilege lets edged open one -- it does not let it bypass one.
+--
+-- It lives here, in the Gate-P privilege bootstrap, rather than as an undocumented GRANT typed on one
+-- appliance, so any rebuilt environment reproduces it.
+GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_edged;
+
+-- ...AND FOR THE ACCOUNTING WRITER. acctd enforces the identical boundary and was missed when edged's grant
+-- was written, because edged was the service being debugged that day and nobody asked which OTHER services
+-- run the same check.
+--
+-- The cost of missing it was hidden until a real reboot: acctd refused to start, systemd restarted it every
+-- few seconds under Restart=always, and `systemctl show` answered "active running" whenever it was sampled
+-- during the brief window between a restart and the next failure. Ten restarts in three minutes read as a
+-- healthy service. Only counting restart jobs per boot from the journal exposed it -- the same lesson as
+-- netd, on a different service, found only because this reboot was measured rather than assumed.
+--
+-- Same minimum as above: EXECUTE on the opener, nothing else. acctd still cannot write outside an open
+-- controlled operation.
+GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
+
+-- ===========================================================================================================
+-- D32 -- CHECKOUT GRACE: the audited policy boundary, and the privileges it actually needs.
+--
+-- WHY THIS IS HERE AND NOT IN A SIDE FILE
+-- ---------------------------------------
+-- The reconciler preamble at the top of this file REVOKEs ALL privileges on schema iam_v2 from every svc_*
+-- role before re-granting the allowlist. Any iam_v2 grant that lives in a separate script is therefore
+-- ERASED the next time Gate-P is applied, and the surface it feeds starts failing at some later, unrelated
+-- moment -- exactly the failure shape that made the netd stored-bundle replay so expensive to find. A grant
+-- that a re-run of the canonical bootstrap silently deletes is not reproducible, whatever file it is in.
+--
+-- This was not one stray file. EVERY per-service iam_v2 grant written during the trial lived beside this
+-- bootstrap rather than inside it, so a single Gate-P re-run would have silently disarmed the enforcement
+-- plane, accounting, guest auth, voucher redemption and the commerce surface at once -- each one failing later,
+-- somewhere else, for a reason that would not point back to the re-run. They are all INCLUDED here, after the
+-- revoke, in dependency-free order. \ir resolves relative to THIS file, so it works from any working directory.
+--
+-- Each included file remains individually applicable (that is how they are deployed incrementally), and each is
+-- idempotent, so including them changes nothing about a single-file apply -- it only removes the window in
+-- which the canonical path and the real privilege set disagree.
+\ir svc-service-health-grants.sql
+\ir svc-scd-iamv2-guest-auth-grants.sql
+\ir svc-scd-iamv2-guest-commerce-grants.sql
+\ir svc-voucher-iamv2-grants.sql
+\ir svc-netd-iamv2-enforcement-grants.sql
+\ir svc-acctd-guest-networks-grant.sql
+\ir svc-acctd-iamv2-accounting-grants.sql
+\ir svc-edged-phase2-commerce-grants.sql
+\ir svc-edged-phase345-admin-grants.sql
+
+-- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
+-- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason
+-- code and the version the caller last read, validates the derived package with the same matcher the checkout
+-- conversion uses, and appends to iam_v2.checkout_grace_policy_publications.
+GRANT EXECUTE ON FUNCTION iam_v2.publish_checkout_grace_policy(
+  uuid, uuid, uuid, integer, integer, integer, bigint, integer, text, integer, integer, uuid, text
+) TO svc_edged;
+
+-- ...and on the matcher itself, which the publication path consults BEFORE publishing so a bad derivation is
+-- reported as the specific condition it violated rather than as a generic publication failure.
+GRANT EXECUTE ON FUNCTION iam_v2.grace_package_mismatch_reason(
+  uuid, uuid, uuid, integer, integer, integer, bigint, integer, text
+) TO svc_edged;
+
+-- ---- and the privilege that is NOT the caller's ------------------------------------------------------
+-- iam_v2.publish_checkout_grace_policy is SECURITY DEFINER owned by iam_v2_owner, and it validates the actor
+-- against public.operators. A SECURITY DEFINER function runs as its OWNER, so the privilege that decides
+-- whether that lookup succeeds is iam_v2_owner's -- granting the CALLING service SELECT on public.operators
+-- changes nothing and publication still fails with "permission denied for table operators". That is a genuinely
+-- misleading failure: the caller has every privilege the error appears to be about.
+--
+-- Read-only, and only this table: the actor check reads an operator, it never writes one.
+--
+-- Guarded, because iam_v2_owner exists only where the IAM-v2 domain has been created; on a public-schema-only
+-- database this section must be a no-op rather than an error.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'iam_v2_owner') THEN
+    EXECUTE 'GRANT SELECT ON public.operators TO iam_v2_owner';
+  END IF;
+END $$;
+
+-- ===========================================================================================================
+-- D32 CLOSING ASSERTION -- no runtime role, and not PUBLIC, may reach grace policy any way but the audited one.
+--
+-- WHY AN ASSERTION AND NOT JUST THE REVOKES ABOVE
+-- ----------------------------------------------
+-- The revokes are each written where the matching grant was, which is correct for readability and useless as a
+-- guarantee: they only close the doors somebody remembered. The raw writer stayed reachable by svc_netd through
+-- the entire D32 retirement precisely because that retirement was written from the perspective of the service
+-- being fixed -- edged's raw path was closed in code AND privilege while netd, which nobody was looking at,
+-- kept EXECUTE on the very function the design had just declared unreachable.
+--
+-- An unused privilege is silent. Nothing fails, no log line appears, and the next person to read the design
+-- sees "the raw path is closed" while the database says otherwise. So the property is asserted here directly
+-- against the catalog, over EVERY runtime role rather than a list of the ones we thought of, and the bootstrap
+-- REFUSES to complete if it does not hold.
+--
+-- The property has two halves, and both matter:
+--   1. no runtime role and no PUBLIC may EXECUTE the raw writer, or INSERT/UPDATE/DELETE the config table;
+--   2. the canonical audited boundary MUST still be executable by svc_edged -- an "everything revoked" state
+--      would satisfy half 1 perfectly and leave the product unable to save grace at all.
+-- Asserting only the first half would make a totally broken system look maximally secure.
+DO $$
+DECLARE
+  r record;
+  raw_fn text := 'iam_v2.publish_checkout_grace_config(uuid,uuid,uuid,integer,integer,integer,bigint,integer,text,integer)';
+  pol_fn text := 'iam_v2.publish_checkout_grace_policy(uuid,uuid,uuid,integer,integer,integer,bigint,integer,text,integer,integer,uuid,text)';
+  offenders text := '';
+BEGIN
+  IF to_regprocedure(pol_fn) IS NULL THEN
+    -- Nothing to assert on a database that predates the boundary; a public-schema-only or pre-Phase-3
+    -- database must not fail the whole bootstrap.
+    RETURN;
+  END IF;
+
+  -- Half 1, over every non-superuser login role that is not an owner: the set is taken from pg_roles rather
+  -- than from a hand-maintained list, so a runtime role added later is covered on the day it is created.
+  FOR r IN
+    SELECT rolname FROM pg_roles
+     WHERE rolcanlogin AND NOT rolsuper
+       AND rolname NOT IN ('iam_v2_owner', 'stayconnect')
+  LOOP
+    IF to_regprocedure(raw_fn) IS NOT NULL
+       AND has_function_privilege(r.rolname, raw_fn, 'EXECUTE') THEN
+      offenders := offenders || format(' %s:EXECUTE-on-raw-writer', r.rolname);
+    END IF;
+    IF has_table_privilege(r.rolname, 'iam_v2.site_checkout_grace_config', 'INSERT')
+       OR has_table_privilege(r.rolname, 'iam_v2.site_checkout_grace_config', 'UPDATE')
+       OR has_table_privilege(r.rolname, 'iam_v2.site_checkout_grace_config', 'DELETE') THEN
+      offenders := offenders || format(' %s:direct-DML-on-grace-config', r.rolname);
+    END IF;
+  END LOOP;
+
+  IF to_regprocedure(raw_fn) IS NOT NULL
+     AND has_function_privilege('public', raw_fn, 'EXECUTE') THEN
+    offenders := offenders || ' PUBLIC:EXECUTE-on-raw-writer';
+  END IF;
+  IF has_function_privilege('public', pol_fn, 'EXECUTE') THEN
+    offenders := offenders || ' PUBLIC:EXECUTE-on-audited-boundary';
+  END IF;
+  IF has_table_privilege('public', 'iam_v2.site_checkout_grace_config', 'INSERT')
+     OR has_table_privilege('public', 'iam_v2.site_checkout_grace_config', 'UPDATE')
+     OR has_table_privilege('public', 'iam_v2.site_checkout_grace_config', 'DELETE') THEN
+    offenders := offenders || ' PUBLIC:direct-DML-on-grace-config';
+  END IF;
+
+  IF offenders <> '' THEN
+    RAISE EXCEPTION 'GATE-P BLOCKER (D32): a raw grace mutation path is still reachable:%', offenders;
+  END IF;
+
+  -- Half 2: the audited path must still work for the service that serves the Hotel-Admin surface.
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged')
+     AND NOT has_function_privilege('svc_edged', pol_fn, 'EXECUTE') THEN
+    RAISE EXCEPTION
+      'GATE-P BLOCKER (D32): every raw grace path is closed but svc_edged cannot EXECUTE the audited '
+      'boundary either, so grace policy cannot be published at all';
+  END IF;
+END $$;

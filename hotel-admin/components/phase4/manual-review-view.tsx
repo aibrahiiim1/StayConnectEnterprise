@@ -21,6 +21,7 @@ import {
   ReviewActionDoc,
   ReviewPostingDetail,
   ReviewQueueRow,
+  surfaceUnavailableMessage,
 } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
@@ -62,7 +63,7 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
       setActions(a.actions ?? []);
       setErr(null);
     } catch (e: any) {
-      setErr(e?.message ?? "Could not load the review queue");
+      setErr(surfaceUnavailableMessage(e, "Manual financial review"));
     }
   }, []);
 
@@ -106,6 +107,10 @@ export function ManualReviewView({ canAct = true }: { canAct?: boolean }) {
     }
   }
 
+  // The error is rendered BEFORE the loading guard. When the load fails the state variable is never set,
+  // so a guard placed first returns "Loading…" forever and the alert further down is unreachable -- the
+  // screen tells the operator it is still working when it has already given up.
+  if (err) return <p role="alert" className="text-sm text-red-700">{err}</p>;
   if (!rows) return <p role="status">Loading the review queue…</p>;
 
   const spec = actions.find((a) => a.action === action);

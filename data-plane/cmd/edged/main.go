@@ -86,6 +86,16 @@ type server struct {
 	// the master flag is OFF (zero Phase-2 SQL); commerceCfg gates whether the admin routes are mounted.
 	commerce    *iamv2.CommerceAdmin
 	commerceCfg iamv2.CommerceConfig
+	// commerceRepo is the same repository the admin engine holds. The grace publication path needs it
+	// directly because D32 publication is not an admin-engine operation: it derives system catalogue rows and
+	// goes through the canonical audited boundary, neither of which the operator-facing engine may do.
+	commerceRepo iamv2.CommerceAdminRepository
+	// iamv2Cfg is the IAM-v2 authentication config. edged needs it because credential ISSUANCE must land
+	// in whichever domain will later AUTHENTICATE the credential: with IAM-v2 as the ACCOUNT authority,
+	// an account issued into the legacy table can never be logged in with. Nothing in the runtime issued
+	// IAM-v2 credentials at all before this -- the authentication domain existed and the issuance side of
+	// it did not, so iam_v2.guest_access_accounts sat at 0 rows on an appliance with ACCOUNT enabled.
+	iamv2Cfg iamv2.Config
 
 	// Phase 3 DARK Hotel-Admin PMS/Stay surface. pmsCfg gates whether ANY Phase-3 route is mounted; while
 	// the master flag is OFF the routes do not exist at all and edged issues zero Phase-3 SQL.
@@ -216,8 +226,10 @@ func main() {
 		slog.Error("phase2 commerce config", "err", err)
 		os.Exit(2)
 	}
-	// Wired for the same reason as scd's: the clean-replacement decision makes IAM-v2 the only authority, so
-	// the accepted admin repository is constructed when the master flag is on and left nil while it is off.
+	// Wired for the same reason as scd's: the AUTHORIZED DEVELOPMENT trial (D31/T0068) runs IAM-v2 for real,
+	// so the accepted admin repository is constructed when the master flag is on and left nil while it is off.
+	// This is NOT a Production transition decision -- D31 withdrew the "clean replacement / legacy disposable"
+	// wording as policy that was never approved, and the Production strategy remains OPEN.
 	var commRepo iamv2.CommerceAdminRepository // nil while dark
 	if commCfg.MasterEnabled {
 		if pool == nil {
@@ -225,6 +237,26 @@ func main() {
 			os.Exit(2)
 		}
 		commRepo = iamv2.NewPgCommerceAdminRepository(pool)
+		// D32: converge the site on its hidden system grace package at startup.
+		//
+		// Here rather than in scd because this repository is the one with the admin write surface, and
+		// because provisioning is an ADMIN-plane concern: it creates the thing Hotel Admin then points policy
+		// at. It is idempotent, so a site that already has one keeps it -- including its immutable revision
+		// history, which live entitlements pin.
+		//
+		// A provisioning failure is logged and does NOT abort startup: the normal grace package being absent
+		// is exactly the condition Emergency Grace exists to cover, so refusing to serve would turn a
+		// degraded path into an outage.
+		if r, perr := iamv2.NewGraceProvisioner(commRepo).EnsureSiteGracePackage(
+			context.Background(), commRepo.(iamv2.GraceProvisionRepository), c.TenantID, c.SiteID); perr != nil {
+			slog.Error("grace provisioning failed; Emergency Grace remains the fallback", "err", perr)
+		} else if r.Skipped != "" {
+			slog.Warn("grace provisioning skipped", "reason", r.Skipped)
+		} else {
+			slog.Info("system grace package converged",
+				"package_id", r.PackageID, "revision_id", r.RevisionID,
+				"created", r.Created, "revision_published", r.RevisionNew)
+		}
 	}
 	commAdmin, err := iamv2.NewCommerceAdmin(commCfg, commRepo, iamv2.NopObserver{})
 	if err != nil {
@@ -237,7 +269,16 @@ func main() {
 	// either way.
 	applyAggregateTimeCapability(commAdmin, p6cfg)
 	s.commerce = commAdmin
+	s.commerceRepo = commRepo
 	s.commerceCfg = commCfg
+	// Fail closed on an incoherent IAM-v2 auth config: LoadConfigFromEnv already rejects a per-method flag
+	// set while the master flag is off, and edged must not run with a config scd would refuse.
+	iamAuthCfg, iamAuthErr := iamv2.LoadConfigFromEnv(os.Getenv, true)
+	if iamAuthErr != nil {
+		slog.Error("iamv2 auth config invalid", "err", iamAuthErr)
+		os.Exit(1)
+	}
+	s.iamv2Cfg = iamAuthCfg
 	slog.Info("phase2 dark commerce admin constructed", "flags", commCfg.SafeFlagSummary())
 
 	// Phase 3 DARK Hotel-Admin PMS/Stay surface. All flags default OFF and a child flag set while the master

@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { canRead } from "@/lib/roles";
@@ -120,6 +121,22 @@ export function Nav({
   onLogout, email, roles,
 }: { onLogout: () => void; email?: string; roles: string[] }) {
   const path = usePathname();
+
+  // ACTIVE = the LONGEST href this path matches, not every href it starts with.
+  //
+  // `path.startsWith(it.href)` marked several items active at once, because these are siblings rather than a
+  // parent and its children: "/network" is the Guest networks LEAF, so standing on "/network/dhcp" lit up both
+  // "DHCP & leases" and "Guest networks". Two highlighted rows in a menu is not a cosmetic issue -- the
+  // highlight is the only thing telling an operator which screen they are on.
+  //
+  // The "/" in the child test matters too: plain startsWith would make a hypothetical "/networkfoo" light up
+  // "/network", matching on a shared prefix that is not a path boundary at all.
+  const activeHref = useMemo(() => {
+    const matches = SECTIONS.flatMap((sec) => sec.items.map((it) => it.href))
+      .filter((href) => path === href || path.startsWith(href + "/"));
+    return matches.sort((a, b) => b.length - a.length)[0] ?? null;
+  }, [path]);
+
   return (
     <aside className="w-56 shrink-0 border-r border-border bg-panel flex flex-col">
       <div className="px-5 py-5 border-b border-border">
@@ -136,7 +153,7 @@ export function Nav({
                 {sec.title}
               </div>
               {visible.map((it) => {
-                const active = path.startsWith(it.href);
+                const active = it.href === activeHref;
                 const Icon = it.icon;
                 return (
                   <Link

@@ -1035,6 +1035,234 @@ def main():
             else:
                 ok("%s never denies contact in the same claim that reports observations" % latest_rid)
 
+    # ---- 8f. AN ENVIRONMENT CALLED DARK WHILE ITS OWN RECORD SAYS IAM-v2 IS ENABLED THERE ------------------
+    #
+    # The DEVELOPMENT trial enabled IAM-v2 on one appliance while Production stayed dark. The global claims --
+    # "iam_v2 is dark", "no deployed service is routed to iam_v2", "legacy IAM is the configured baseline" --
+    # were then true of one environment and false of the other, and nothing noticed, because every rule read
+    # them as one answer about one world.
+    #
+    # The rule is general: if the state records a per-environment block saying IAM-v2 is ENABLED or WIRED in
+    # some environment, then a global dark/not-routed claim must say which environment it speaks for.
+    envs = state.get("environment_scoped_iam_state") or {}
+    enabled_envs = []
+    for name, body in envs.items():
+        if not isinstance(body, dict):
+            continue
+        blob = json.dumps(body).lower()
+        if ("enabled" in blob or "installed" in blob) and "not cut over" not in blob:
+            enabled_envs.append(name)
+    if enabled_envs:
+        SCOPED = re.compile(r"\bproduction scope\b|\bproduction only\b|\bon production\b|\bproduction:", re.I)
+        DARKISH = re.compile(r"\biam[_ ]?v2 is dark\b|\bremains dark\b|\bno service is routed to iam_v2\b|"
+                             r"\bno deployed service is routed\b", re.I)
+        for field in ("service_routing_state", "database_schema_state", "blockers"):
+            val = state.get(field)
+            for text in ([val] if isinstance(val, str) else (val if isinstance(val, list) else [])):
+                if not isinstance(text, str) or not DARKISH.search(text):
+                    continue
+                if not SCOPED.search(text):
+                    bad("unscoped-dark-claim-vs-enabled-environment",
+                        "%s makes a global IAM-v2 dark/not-routed claim while %s is recorded as having IAM-v2 "
+                        "enabled or wired; the claim must name the environment it speaks for"
+                        % (field, ", ".join(enabled_envs)), STATE)
+        ok("global IAM-v2 dark claims name their environment, given %s is enabled" % ", ".join(enabled_envs))
+
+    # ---- 8g. A DECISION ATTRIBUTED TO A TRANSITION THAT DOES NOT CARRY IT --------------------------------
+    #
+    # "D31/T0067" survived several rounds of review. Both ids are real, both appear in the register and the
+    # ledger, and every existing rule was satisfied -- so nothing noticed that T0067 records D30's wiring while
+    # D31 is carried by T0068. A pairing can be wrong while both halves are valid, and that is exactly the
+    # shape that reads as authoritative and is not.
+    #
+    # General: wherever current state writes "Dnn/Tmmmm" or "Dnn (transition Tmmmm)", the named transition must
+    # actually record that decision.
+    PAIR = re.compile(r"\b(D\d+)\s*(?:/|\s*\(transition\s*)\s*(T\d{4})\b")
+    seen = {}
+    for _f, txt in [(k, v) for k, v in state.items() if isinstance(v, str)] + \
+                   [(k, x) for k, v in state.items() if isinstance(v, list)
+                    for x in v if isinstance(x, str)]:
+        for dec, tr in PAIR.findall(txt):
+            seen.setdefault((dec, tr), _f)
+    bad_pairs = []
+    for (dec, tr), where in sorted(seen.items()):
+        rp = os.path.join(TRANSITIONS_DIR, "%s.json" % tr)
+        if not os.path.exists(rp):
+            bad_pairs.append("%s cites %s/%s but %s.json does not exist" % (where, dec, tr, tr))
+            continue
+        try:
+            rec = json.load(io.open(rp, encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        if str(rec.get("decision", "")).strip() != dec:
+            bad_pairs.append("%s cites %s/%s but %s records decision %r"
+                             % (where, dec, tr, tr, rec.get("decision")))
+    if bad_pairs:
+        bad("decision-transition-attribution",
+            "current state pairs a decision with a transition that does not carry it -- %s"
+            % " | ".join(bad_pairs[:3]), STATE)
+    else:
+        ok("every decision/transition pair in current state is carried by the transition it names")
+
+    # ---- 8h. AN EVENT ATTRIBUTED TO THE WRONG (BUT VALID) DECISION/TRANSITION PAIR -----------------------
+    #
+    # "Phase 7 merged under D31/T0068" passed rule 8g, because D31 really is carried by T0068. The PAIR was
+    # valid and the ATTRIBUTION was false: that pair belongs to the post-roadmap DEVELOPMENT trial, not to the
+    # merge, which was D28/T0065. Proving a pair exists is not proving it describes the event it is attached to.
+    #
+    # So the lifecycle events carry STRUCTURED fields (phase_lifecycle_authority) and prose is checked against
+    # them. This generalises to any event in that map, and needs no sentence-specific pattern.
+    auth = state.get("phase_lifecycle_authority") or {}
+    EVENT_WORDS = {"merged": r"merged", "accepted_and_closed": r"accepted[ _]and[ _]closed|accepted and closed"}
+    claims = []
+    for ph, events in auth.items():
+        if not isinstance(events, dict):
+            continue
+        for ev, rec in events.items():
+            if not isinstance(rec, dict) or ev not in EVENT_WORDS:
+                continue
+            want = "%s/%s" % (rec.get("decision"), rec.get("transition"))
+            # TEMPERED GAP. A plain [^.;!?]{0,40}? let "...ACCEPTED_AND_CLOSED and Phase 7 is MERGED to
+            # master (D28/T0065)" match the ACCEPTED event against the MERGE pair -- the rule inventing a
+            # contradiction inside a correct sentence. No other event keyword may sit between the event
+            # word and the pair it is judged against.
+            gap = r"(?:(?!merged|accepted)[^.;!?])"
+            rx = re.compile(r"\b(?:phase[\s\-]*%s\b%s{0,60}?)?(?:%s)\b%s{0,40}?\b(D\d+/T\d{4})\b"
+                            % (re.escape(str(ph)), gap, EVENT_WORDS[ev], gap), re.I)
+            for _f, txt in [(k, v) for k, v in state.items() if isinstance(v, str)] + \
+                           [(k, x) for k, v in state.items() if isinstance(v, list)
+                            for x in v if isinstance(x, str)]:
+                for m in rx.finditer(txt):
+                    got = m.group(1)
+                    if got != want and str(ph) in m.group(0).lower().replace("phase", "").replace(" ", ""):
+                        claims.append("%s attributes phase %s '%s' to %s, but the lifecycle record says %s"
+                                      % (_f, ph, ev, got, want))
+    if claims:
+        bad("event-attribution-vs-lifecycle-record",
+            "current state attributes a lifecycle event to a decision/transition that did not carry it -- %s"
+            % " | ".join(sorted(set(claims))[:3]), STATE)
+    else:
+        ok("every lifecycle-event attribution in current state matches phase_lifecycle_authority")
+
+    # ---- 8i. THE AUTHORITATIVE STATE FILE CONTRADICTING ITS OWN LIFECYCLE FIELDS -------------------------
+    #
+    # merged-phase-still-called-unmerged (rule 8c) scans markdown DOC surfaces. It never opened
+    # governance/project-state.json -- so the state file was free to record Phase 7 as merged in
+    # phase_lifecycle_authority while /phases/7/maturity still narrated "PR #15, which remains OPEN and
+    # UNMERGED", and every validator stayed green. The docs were policed; the authority was not.
+    #
+    # These three rules read the STATE's own string values and judge them against the STATE's own structured
+    # fields. They are driven entirely by those fields, so a new phase or a new authorized activity is covered
+    # the moment it is recorded -- no sentence patterns to maintain.
+    def _state_strings():
+        """Every string value in the state, with a path, so a violation names where it lives."""
+        out = []
+
+        def walk(o, path):
+            if isinstance(o, dict):
+                for k, v in o.items():
+                    walk(v, path + "/" + str(k))
+            elif isinstance(o, list):
+                for i, v in enumerate(o):
+                    walk(v, "%s/[%d]" % (path, i))
+            elif isinstance(o, str):
+                out.append((path, o))
+        walk(state, "")
+        return out
+
+    STATE_STRINGS = _state_strings()
+    _auth = state.get("phase_lifecycle_authority") or {}
+
+    # (a) a phase the lifecycle records as MERGED must not be narrated as open/unmerged anywhere in the state.
+    OPEN_CLAIM = re.compile(r"\bOPEN\s+AND\s+UNMERGED\b|\bremains?\s+(?:OPEN|UNMERGED)\b"
+                            r"|\bstill\s+(?:open|unmerged)\b|\bnot\s+(?:yet\s+)?merged\b", re.I)
+    HIST = re.compile(r"\bwas\s+(?:previously|formerly)\b|\bat\s+the\s+time\b|\bhistorical(?:ly)?\b"
+                      r"|\bsince\s+MERGED\b|\bno\s+longer\b", re.I)
+    open_hits = []
+    for ph, events in _auth.items():
+        if not isinstance(events, dict) or "merged" not in events:
+            continue
+        for path, txt in STATE_STRINGS:
+            for sent in re.split(r"(?<=[.;!?])\s+", txt):
+                if not OPEN_CLAIM.search(sent) or HIST.search(sent):
+                    continue
+                # only if this sentence is actually about that phase or its PR
+                if re.search(r"\bphase[\s\-]*%s\b" % re.escape(str(ph)), sent, re.I) or \
+                   re.search(r"\bPR\s*#?\d+\b", sent, re.I):
+                    open_hits.append("%s: %s" % (path, " ".join(sent.split())[:120]))
+    if open_hits:
+        bad("state-narrates-merged-phase-as-unmerged",
+            "project-state records the phase as MERGED in phase_lifecycle_authority but still narrates it as "
+            "open/unmerged -- %s" % " | ".join(sorted(set(open_hits))[:3]), STATE)
+    else:
+        ok("no state prose narrates a lifecycle-merged phase as open or unmerged")
+
+    # (b) an activity the state records as AUTHORIZED must not also be called unauthorized.
+    #     Driven by authorized_activities[*].{name,authorization,status}; nothing is hard-coded.
+    #     STATIVE forms only. "the trial is not authorized" is the contradiction; "authorizing the trial did
+    #     NOT authorize any Production transition" is a correct and important scope limit, and an earlier
+    #     version of this rule failed the file over exactly that sentence. The difference is grammatical: the
+    #     transitive use takes an object ("authorize any/the/a X"), so it is excluded explicitly.
+    UNAUTH = re.compile(r"\b(?:is|was|are|were|remains?|stays?)\s+not\s+(?:yet\s+)?authoriz\w*"
+                        r"|\bnot\s+(?:yet\s+)?been\s+authoriz\w*"
+                        r"|\b(?:is|was|remains?)\s+unauthoriz\w*"
+                        r"|\bawaiting\s+authoriz\w*"
+                        r"|\bnot\s+authorized\s+yet\b", re.I)
+    AUTH_TRANSITIVE = re.compile(r"\bauthoriz\w*\s+(?:any|a|an|the|no|further|additional)\b", re.I)
+    acts = state.get("authorized_activities") or []
+    unauth_hits = []
+    for act in acts:
+        if not isinstance(act, dict):
+            continue
+        name = str(act.get("name", "")).strip()
+        if not name or str(act.get("status", "")).upper() in ("PROPOSED", "NOT_AUTHORIZED"):
+            continue
+        # Match on the activity's distinctive keywords rather than the whole phrase, so a paraphrase in
+        # prose ("that trial") is still caught when it names the same subject.
+        keys = [w for w in re.findall(r"[A-Za-z][A-Za-z\-]{3,}", name) if w.lower() not in
+                ("the", "and", "with", "from", "that", "this", "appliance")]
+        if not keys:
+            continue
+        for path, txt in STATE_STRINGS:
+            for sent in re.split(r"(?<=[.;!?])\s+", txt):
+                if not UNAUTH.search(sent) or HIST.search(sent):
+                    continue
+                # "did not authorize any X" is a scope limit, not a claim about this activity's own status.
+                if AUTH_TRANSITIVE.search(sent) and not re.search(
+                        r"\b(?:is|was|remains?)\s+not\s+(?:yet\s+)?authoriz", sent, re.I):
+                    continue
+                if sum(1 for k in keys if re.search(r"\b%s\b" % re.escape(k), sent, re.I)) >= 2:
+                    unauth_hits.append("%s (%s): %s" % (path, name, " ".join(sent.split())[:110]))
+    if acts:
+        if unauth_hits:
+            bad("authorized-activity-described-as-unauthorized",
+                "project-state records the activity as authorized but prose still calls it unauthorized -- %s"
+                % " | ".join(sorted(set(unauth_hits))[:3]), STATE)
+        else:
+            ok("no authorized activity is described anywhere in state as not yet authorized")
+
+    # (c) work the state records as COMPLETE must not still be listed as a pending next action.
+    #     Driven by completed_activities[*] -- a plain list of short labels.
+    done = [x for x in (state.get("completed_activities") or []) if isinstance(x, str)]
+    nxt = state.get("next_authorized_action")
+    stale_next = []
+    if done and isinstance(nxt, str):
+        # Only the part of the sentence that is actually a pending instruction: text after an explicit
+        # REMAINING/ still-to-do marker is pending; text after COMPLETE is a record, not a next action.
+        pending = re.split(r"\bAlready\s+COMPLETE\b|\bCOMPLETE\s+and\s+not\b", nxt, 1, flags=re.I)[0]
+        for label in done:
+            toks = [w for w in re.findall(r"[A-Za-z][A-Za-z\-]{3,}", label)
+                    if w.lower() not in ("the", "and", "with", "from", "that", "this")]
+            if len(toks) >= 2 and all(re.search(r"\b%s\b" % re.escape(t), pending, re.I) for t in toks):
+                stale_next.append(label)
+    if done and isinstance(nxt, str):
+        if stale_next:
+            bad("completed-work-still-listed-as-next-action",
+                "next_authorized_action still asks for work recorded in completed_activities -- %s"
+                % "; ".join(sorted(set(stale_next))[:3]), STATE)
+        else:
+            ok("next_authorized_action asks for no work already recorded as complete")
+
     # ---- 9. TRANSITION / PHASE-STATUS COHERENCE --------------------------------------------------------------------
     #
     # THE FALSE PASS THIS CLOSES. T0044 recorded new_state.phase_status = ACCEPTED_AND_CLOSED for phase 4, and
@@ -1445,12 +1673,20 @@ def main():
             n = re.escape(str(num))
             # Either the PR is named and then called open, or the "do not merge" instruction is still standing
             # within reach of its number. Bounded so it cannot bridge a sentence end into an unrelated clause.
+            #
+            # The number must not match INSIDE a longer one. `#?6\b` happily matches the "6" of "#16", so a
+            # true statement about PR #16 -- which IS open, and correctly says so -- was reported as a stale
+            # claim about merged PR #6. A false positive is not harmless here: the gate fails on accurate text,
+            # and the cheapest way to make it pass again is to make the text vaguer, which is the opposite of
+            # what this file exists to enforce. The lookbehind also excludes "#", so "#16" cannot be read as
+            # "#" followed by a "6".
+            nb = r"(?<![\w#])#?" + n + r"\b"
             stale = re.compile(
-                r"(?:pull\s+request|\bPR\b)[^.;\n]{0,60}?#?" + n + r"\b(?:[^.;\n]{0,80}?)"
+                r"(?:pull\s+request|\bPR\b)[^.;\n]{0,60}?" + nb + r"(?:[^.;\n]{0,80}?)"
                 r"(?:is|remains|stays|left|be)\s+(?:[^.;\n]{0,30}?)"
                 r"(?:open\s+and\s+unmerged|unmerged|not\s+merged|open,\s*unmerged)|"
-                r"#" + n + r"\b[^.;\n]{0,60}?\bDO\s+NOT\s+MERGE\b|"
-                r"\bDO\s+NOT\s+MERGE\b[^.;\n]{0,60}?#" + n + r"\b",
+                + nb + r"[^.;\n]{0,60}?\bDO\s+NOT\s+MERGE\b|"
+                r"\bDO\s+NOT\s+MERGE\b[^.;\n]{0,60}?" + nb,
                 re.I)
             # ...and the un-numbered form the Plan used, on a surface that is ABOUT that phase, where "the
             # Phase-4 pull request" can only mean this one.

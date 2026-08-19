@@ -2,6 +2,7 @@ package iamv2
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -104,6 +105,11 @@ type PlanSummary struct {
 type GraceConfig struct {
 	GracePackageRevisionID string         `json:"grace_package_revision_id"`
 	Config                 map[string]any `json:"config"`
+	// ConfigVersion is what the operator must send back as expected_version when publishing. Without it on the
+	// read, the mandatory optimistic-concurrency check on the write would be unsatisfiable through the product:
+	// the caller would have to guess the number that decides whether their change is accepted. Zero means
+	// nothing is published yet, which is also the correct expected_version for a first publication.
+	ConfigVersion int `json:"config_version"`
 }
 
 // GraceCandidate describes a candidate grace package revision for validation.
@@ -115,7 +121,10 @@ type GraceCandidate struct {
 	Currency       string
 	CurrencyExp    int
 	SettlementOnly bool // settlement_methods == exactly {NOT_REQUIRED}
-	PlanRevValid   bool
+	// IsSystem is the contract's is_system = true requirement for a grace package. The grace package is a
+	// HIDDEN, system-provisioned fallback, not an operator catalogue entry, and validating it was missing.
+	IsSystem     bool
+	PlanRevValid bool
 }
 
 // QuoteInspect / PurchaseInspect are guest-PII-free inspection rows.
@@ -266,6 +275,14 @@ func (a *CommerceAdmin) PublishRevision(ctx context.Context, spec PackagePublish
 		return nil
 	})
 	if err != nil {
+		// A REFUSAL from inside the transaction must survive as a refusal. Collapsing everything to ErrRepo
+		// turned "that reserved code is not yours" into an opaque repository failure, which the HTTP layer
+		// then reported as 500 internal -- telling an operator the server broke when it had actually made a
+		// deliberate policy decision they could act on.
+		var de *Error
+		if errors.As(err, &de) && de.Code == ErrInvalidInput {
+			return AdminResult{}, de
+		}
 		return AdminResult{}, &Error{Code: ErrRepo, Msg: "publish"}
 	}
 	return res, nil
@@ -379,6 +396,19 @@ func (a *CommerceAdmin) PublishPlanRevision(ctx context.Context, spec PlanPublis
 		return AdminResult{}, &Error{Code: ErrInvalidInput, Msg: "publish plan: missing tenant/site/code"}
 	}
 	if err := validatePlanSpec(&spec, a.aggregateOnlineTime); err != nil {
+		// The specific reason, not a generic label. validatePlanSpec already
+		// distinguishes "unknown device_limit_policy" from "out of range" from
+		// "AGGREGATE_ONLINE_TIME requires a positive time_quota_seconds", and
+		// this surface is the trusted admin one -- the file header says
+		// validation reasons are returned verbatim here precisely because the
+		// operator is not a guest. Collapsing all of them to invalid_plan_spec
+		// threw that away and left the operator guessing which of ten fields
+		// was wrong; it cost a real debugging cycle on a one-word enum typo.
+		// Guest-facing surfaces still get their uniform refusal elsewhere.
+		var e *Error
+		if errors.As(err, &e) && e.Msg != "" {
+			return AdminResult{Reason: e.Msg}, nil
+		}
 		return AdminResult{Reason: "invalid_plan_spec"}, nil
 	}
 	var res AdminResult
@@ -402,6 +432,11 @@ func (a *CommerceAdmin) PublishPlanRevision(ctx context.Context, spec PlanPublis
 		return nil
 	})
 	if err != nil {
+		// Same reason as the package path: a reserved-code refusal is a decision, not a repository fault.
+		var de *Error
+		if errors.As(err, &de) && de.Code == ErrInvalidInput {
+			return AdminResult{}, de
+		}
 		return AdminResult{}, &Error{Code: ErrRepo, Msg: "publish plan"}
 	}
 	return res, nil
@@ -419,58 +454,21 @@ func (a *CommerceAdmin) GetGrace(ctx context.Context, tenantID, siteID string) (
 	return gc, false, nil
 }
 
-// SetGrace validates and stores the site checkout-grace package. It creates NO grace entitlement or
-// checkout behavior (that is Phase 3); it only records which package revision would be used, and only if
-// that revision is active, CHECKOUT_GRACE, free, exactly NOT_REQUIRED and pinned to a valid plan revision.
-func (a *CommerceAdmin) SetGrace(ctx context.Context, tenantID, siteID, packageRevisionID string, config map[string]any) (AdminResult, error) {
-	if !a.cfg.AdminOn() {
-		a.obs.Event("phase2.disabled", map[string]string{"op": "set_grace"})
-		return AdminResult{Disabled: true, Reason: "phase2_disabled"}, nil
-	}
-	if tenantID == "" || siteID == "" || packageRevisionID == "" {
-		return AdminResult{}, &Error{Code: ErrInvalidInput, Msg: "set_grace: missing tenant/site/package_revision"}
-	}
-	var res AdminResult
-	err := a.repo.WithTx(ctx, func(tx CommerceAdminTx) error {
-		c, err := tx.GraceCandidateValid(ctx, tenantID, siteID, packageRevisionID)
-		if err != nil {
-			return err
-		}
-		if !c.Found {
-			res = AdminResult{Reason: "grace_package_not_found"}
-			return nil
-		}
-		if !c.PackageActive {
-			res = AdminResult{Reason: "grace_package_inactive"}
-			return nil
-		}
-		if c.PackageType != "CHECKOUT_GRACE" {
-			res = AdminResult{Reason: "grace_package_wrong_type"}
-			return nil
-		}
-		if c.PriceMinor != 0 || !c.SettlementOnly {
-			res = AdminResult{Reason: "grace_package_not_free"}
-			return nil
-		}
-		if _, cerr := ValidateCurrency(c.Currency, c.CurrencyExp); cerr != nil {
-			res = AdminResult{Reason: "grace_package_bad_currency"}
-			return nil
-		}
-		if !c.PlanRevValid {
-			res = AdminResult{Reason: "grace_package_bad_plan"}
-			return nil
-		}
-		if err := tx.UpsertGraceConfig(ctx, tenantID, siteID, packageRevisionID, config); err != nil {
-			return err
-		}
-		res = AdminResult{Reason: "ok"}
-		return nil
-	})
-	if err != nil {
-		return AdminResult{}, &Error{Code: ErrRepo, Msg: "set_grace"}
-	}
-	return res, nil
-}
+// SetGrace is RETIRED (D32) and deliberately no longer exists.
+//
+// It took a packageRevisionID CHOSEN BY THE OPERATOR and validated it against a list of properties. That was
+// the right design while an operator picked the grace package, and it cannot be made right now: the checkout
+// conversion judges the pinned revision with iam_v2.grace_package_mismatch_reason, which demands EXACT
+// equality between the published policy and the revision's plan scalars, duration policy and declared policy
+// version. A package the operator selected can satisfy that only by coincidence, and the property list here
+// checked none of those equalities -- so a save could succeed and the grace still never convert.
+//
+// The replacement is PublishSystemGracePolicy: the operator supplies POLICY, the system derives the plan and
+// package revisions that express it exactly, the same matcher the conversion uses is consulted before the
+// write, and publication goes through the audited, versioned boundary with an actor and a reason code.
+//
+// The name is left documented rather than silently deleted because "where did SetGrace go" is the first
+// question anyone reading the old call sites will have.
 
 // Quotes / Purchases return guest-PII-free inspection rows (read-only).
 func (a *CommerceAdmin) Quotes(ctx context.Context, tenantID, siteID string, limit int) ([]QuoteInspect, bool, error) {

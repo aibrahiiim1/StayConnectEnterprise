@@ -38,10 +38,17 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 	}
 	// THE REPOSITORY IS WIRED WHEN, AND ONLY WHEN, THE MASTER FLAG IS ON.
 	//
-	// This used to return an error here, because wiring a real repository was deferred to the cutover. The
-	// Product Owner has since decided the transition is a CLEAN IAM-v2 REPLACEMENT rather than a migration:
-	// IAM-v2 is the only IAM authority and the legacy IAM is disposable. So the repository the accepted phases
-	// already built (iamv2.PgRepository, over the same pool this daemon already holds) is constructed here.
+	// This used to return an error here, because wiring a real repository was deferred to the cutover. It is
+	// wired now so that the AUTHORIZED DEVELOPMENT trial (D31/T0068) can run IAM-v2 for real on a development
+	// appliance; the repository the accepted phases already built (iamv2.PgRepository, over the same pool this
+	// daemon already holds) is constructed here.
+	//
+	// WHAT THIS DOES NOT MEAN. An earlier version of this comment said the Product Owner had decided on a
+	// "CLEAN IAM-v2 REPLACEMENT", that IAM-v2 is the only IAM authority and that the legacy IAM is disposable.
+	// That was D30's wording, and D31 explicitly withdrew it as policy the Product Owner had never approved.
+	// The PRODUCTION IAM transition strategy is OPEN: no replacement, migration, dual-run or legacy-retirement
+	// approach is authorized, and nothing in this file may be read as adopting one. Wiring a repository for a
+	// development trial is not a transition decision.
 	//
 	// The nil-while-dark behaviour is deliberately unchanged: with the master flag OFF the authenticator is
 	// still constructed with NO repository, so it short-circuits to DecisionDisabled without ever issuing an
@@ -54,12 +61,44 @@ func (s *server) initAuthSecurity(ctx context.Context, pool *pgxpool.Pool, c cfg
 		}
 		iamRepo = iamv2.NewPgRepository(pool)
 	}
-	auth, err := iamv2.New(iamCfg, iamRepo, iamv2.NopObserver{})
+	// THE VOUCHER BLIND-INDEX HMAC, RESOLVED FROM THE KEY GENERATION.
+	//
+	// iam_v2.vouchers stores no plaintext code: it holds code_hmac, a blind index the authenticator
+	// recomputes from the submitted code to find the row. Without this option every VOUCHER attempt fails
+	// with "no voucher HMAC configured" -- enabled by flag and structurally incapable of succeeding.
+	//
+	// The key is NOT read straight out of a file. The accepted design (FINAL contract key hierarchy) is
+	// appliance secret store -> DEK -> per-generation voucher code key, and the schema enforces it: each
+	// voucher pins code_key_generation_id, and the generation row carries hmac_key_ciphertext sealed under
+	// encryption_key_id. So the index key is resolved PER GENERATION and opened with the DEK, which is what
+	// makes rotation and supersession possible at all -- a raw file key could never be superseded, and no
+	// voucher could name the key that indexed it.
+	//
+	// An earlier iteration did read the file directly as the HMAC key. That collapsed the DEK and the
+	// blind-index key onto one physical secret and bypassed the generation lifecycle; it is replaced here.
+	var authOpts []iamv2.Option
+	if iamCfg.Enabled(iamv2.MethodVoucher) {
+		dekPath := filepath.Join(c.SecretsDir, voucherDEKFile)
+		dek, err := localkeys.LoadExistingKey(dekPath)
+		if err != nil {
+			return fmt.Errorf("iamv2 VOUCHER is enabled but its code-encryption key is unavailable at %s "+
+				"(run keybootstrap at deploy): %w", dekPath, err)
+		}
+		kr := iamv2.MapVoucherKeyring{voucherDEKID: dek}
+		// Candidates, not a single index: after a rotation a voucher issued under the previous generation can
+		// only be found by also trying that generation's key. See newGenerationVoucherHMAC.
+		authOpts = append(authOpts, iamv2.WithVoucherHMACCandidates(
+			newGenerationVoucherHMAC(pool, kr)))
+	}
+	auth, err := iamv2.New(iamCfg, iamRepo, iamv2.NopObserver{}, authOpts...)
 	if err != nil {
 		return fmt.Errorf("iamv2 new: %w", err)
 	}
 	s.iamv2Auth = auth
-	log.Info("iamv2 dark authenticator constructed", "flags", iamCfg.SafeFlagSummary())
+	// KEEP THE CONFIG. The guest entry points must decide authority from the same value this Authenticator
+	// was gated on; reading the environment a second time, or keeping a separate copy, is how the two drift.
+	s.iamv2Cfg = iamCfg
+	log.Info("iamv2 authenticator constructed", "flags", iamCfg.SafeFlagSummary())
 
 	// --- dark Phase-2 commerce (always constructed, inert unless env flags are set) ---
 	commCfg, err := iamv2.LoadCommerceConfigFromEnv(os.Getenv)

@@ -184,6 +184,12 @@ func (h *handler) authVoucher(w http.ResponseWriter, r *http.Request) {
 		h.landing(w, r, msg)
 		return
 	}
+	// IAM-v2 replies carry auth_context/device/guest_network and NO session: the guest has authenticated,
+	// not connected. tryIAMv2Auth issues the trusted server-side commerce session and sends them to package
+	// selection. A legacy reply falls through to the unchanged path below.
+	if h.tryIAMv2Auth(w, r, payload) {
+		return
+	}
 	var ok2 struct {
 		SessionID       string `json:"session_id"`
 		DurationSeconds int    `json:"duration_seconds"`
@@ -242,6 +248,12 @@ func (h *handler) authCredentials(w http.ResponseWriter, r *http.Request) {
 			msg = "Too many attempts. Please wait a minute and try again."
 		}
 		h.landing(w, r, msg)
+		return
+	}
+	// IAM-v2 replies carry auth_context/device/guest_network and NO session: the guest has authenticated,
+	// not connected. tryIAMv2Auth issues the trusted server-side commerce session and sends them to package
+	// selection. A legacy reply falls through to the unchanged path below.
+	if h.tryIAMv2Auth(w, r, payload) {
 		return
 	}
 	var ok2 struct {
@@ -369,6 +381,9 @@ func (h *handler) routes() http.Handler {
 		r.Post("/api/commerce/confirm", h.commerceConfirm)
 	}
 
+	// Package selection: reachable only with a valid commerce session, which only IAM-v2 auth issues.
+	r.Get("/packages", h.packagesPage)
+	r.Post("/packages/acquire", h.acquirePackage)
 	r.Get("/success", h.success)
 	r.Post("/logout", h.logout)
 	r.Get("/status", h.status)

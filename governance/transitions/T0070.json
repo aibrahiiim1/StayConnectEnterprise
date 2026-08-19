@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0070",
+  "seq": 70,
+  "timestamp": "2026-08-18T18:30:00Z",
+  "record_type": "D32_PRODUCT_PATH_WIRED_AND_LEGACY_GRACE_WRITERS_RETIRED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_IAM_V2_TRIAL",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_IAM_V2_TRIAL",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D32",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Executed under the existing D32 decision (T0069). No new Product-Owner decision is created or implied.",
+  "previous_state_note": "D32 existed as a policy-driven publication path that nothing called. PUT /edge/v1/commercial-packages/grace still invoked the RAW writer iam_v2.publish_checkout_grace_config through CommerceAdmin.SetGrace, so in the running product a grace save recorded no actor, no reason code and no version, appended no audit row, and pinned a package the operator had chosen rather than one derived to satisfy iam_v2.grace_package_mismatch_reason. The privilege that makes the audited boundary work (iam_v2_owner's SELECT on public.operators, needed because the boundary is SECURITY DEFINER) lived in a standalone SQL file outside the canonical Gate-P bootstrap.",
+  "new_state_note": "The Hotel-Admin product path is policy-only and audited end to end: PUT /grace accepts typed policy plus a mandatory expected_version and a bounded reason code, takes the actor from the authenticated session, derives the system plan and package revisions, consults the same matcher the checkout conversion uses, and publishes through iam_v2.publish_checkout_grace_policy. Every legacy grace writer is retired in code AND revoked in privilege. All per-service iam_v2 grants are now applied from the canonical Gate-P bootstrap, which previously revoked them on every re-run.",
+  "phase_affected_note": "post-roadmap (D31/T0068 DEVELOPMENT trial, continuing under D32/T0069)",
+  "boundaries_observed": [
+    "Production untouched; PR #16 unmerged.",
+    "Emergency Grace remains the separate fail-safe; its reserved codes are refused by the operator publisher rather than folded into the normal path.",
+    "No PMS, stay or checkout event is fabricated. The checkout-to-supersession step remains proven at integration level against a real database and ENVIRONMENT-BLOCKED on the appliance.",
+    "No byte-accounting or portal ARP evidence is fabricated.",
+    "The DEVELOPMENT admin credential remains outside Git, the repository, docs and logs."
+  ],
+  "next": "Product-Owner review of the DEVELOPMENT trial. No cutover, enablement, Production contact or PR #16 merge is authorized by this record."
+}

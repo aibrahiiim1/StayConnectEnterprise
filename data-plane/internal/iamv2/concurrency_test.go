@@ -196,7 +196,30 @@ func TestAuthContextConsumeAndDoubleConsume(t *testing.T) {
 	})
 
 	// expired: force expiry, then consume -> expired
-	db.Exec(ctx, `UPDATE iam_v2.auth_contexts SET expires_at = now() - interval '1 hour' WHERE id=$1`, res2.AuthContextID)
+	// Force expiry THROUGH the controlled operation, and check the error.
+	//
+	// This was a bare db.Exec whose error was discarded. The auth_context family is guarded by
+	// p3_controlled_writer_only, so the raw UPDATE was refused, the row never expired, consume then SUCCEEDED,
+	// and the assertion below failed with "expired context must return expired, got " -- an empty code that
+	// reads as broken expiry handling and was in fact broken test setup. A silent setup failure turns a passing
+	// assertion into no assertion at all, which is the more expensive of the two bugs.
+	expireTx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := expireTx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('auth_context')`); err != nil {
+		_ = expireTx.Rollback(ctx)
+		t.Fatalf("opening the auth_context operation failed: %v", err)
+	}
+	if _, err := expireTx.Exec(ctx,
+		`UPDATE iam_v2.auth_contexts SET expires_at = now() - interval '1 hour' WHERE id=$1`,
+		res2.AuthContextID); err != nil {
+		_ = expireTx.Rollback(ctx)
+		t.Fatalf("forcing expiry failed, so the case below would test nothing: %v", err)
+	}
+	if err := expireTx.Commit(ctx); err != nil {
+		t.Fatalf("committing the forced expiry failed: %v", err)
+	}
 	_ = repo.WithTx(ctx, func(tx Tx) error {
 		_, err := tx.ConsumeAuthContext(ctx, ConsumeAuthContextRequest{AuthContextID: res2.AuthContextID, TenantID: testTenant, SiteID: testSite, ExpectedMethod: MethodAccount, ExpectedDeviceID: res2.DeviceID, ExpectedGuestNetworkID: testGN, Now: time.Now()})
 		if CodeOf(err) != ErrACExpired {

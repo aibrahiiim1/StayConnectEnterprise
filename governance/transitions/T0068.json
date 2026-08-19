@@ -1,0 +1,62 @@
+{
+  "transition_id": "T0068",
+  "seq": 68,
+  "timestamp": "2026-08-17T18:30:00Z",
+  "record_type": "D30_SCOPE_CORRECTION_AND_DEVELOPMENT_TRIAL_PRIVILEGE_FIX",
+  "previous_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_IAM_V2_CLEAN_REPLACEMENT_TRIAL",
+    "phase_status": "ACCEPTED_AND_CLOSED"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_IAM_V2_TRIAL",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D31",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner direction of 2026-08-17: correct the delivery and governance state, reconcile D30 truthfully, diagnose the svc_edged writer privilege from runtime facts, and finish the DEVELOPMENT hands-on surface on a dedicated branch with one open PR.",
+  "d30_correction": {
+    "preserved": "D30 remains in the register unchanged as the historical record of what was written.",
+    "authorized_and_true": [
+      "DEVELOPMENT-only IAM-v2 runtime wiring",
+      "the DEVELOPMENT operational trial on 172.21.60.23",
+      "IAM-v2 as the intended authority for the ENABLED DEVELOPMENT trial surfaces",
+      "Production untouched and PRE-LIVE"
+    ],
+    "not_an_approved_policy": [
+      "permanent legacy-IAM retirement",
+      "a no-migration Production strategy",
+      "any Production clean-replacement or cutover procedure"
+    ],
+    "future_production_model": "OPEN -- requires a separate explicit Product-Owner decision"
+  },
+  "privilege_diagnosis": {
+    "identity": "svc_edged (the EDGED_DB_URL role) on database stayconnect_site",
+    "measured_as_that_identity": {
+      "current_user": "svc_edged",
+      "current_database": "stayconnect_site",
+      "to_regprocedure": "iam_v2.begin_controlled_operation(text) resolves",
+      "has_schema_privilege(iam_v2, USAGE)": true,
+      "has_function_privilege(begin_controlled_operation(text), EXECUTE)": true
+    },
+    "why_the_earlier_grant_appeared_not_to_work": "The earlier attempt issued TWO grants in one psql -c: the opener, and a second on iam_v2.p5_begin_controlled_operation(text). psql runs a multi-statement -c as a single implicit transaction, so the second statement failing on a signature that does not match rolled the first one back with it. The privilege was never actually granted at that moment, which is why edged still refused after the restart. Granting the opener alone succeeds, and the guard then passes.",
+    "minimum_granted": "EXECUTE on iam_v2.begin_controlled_operation(text) only -- no table write, no schema create, no ownership, no membership",
+    "repository_controlled": "deploy/gatep/gatep-grants.sql",
+    "result": "PHASE3_ADMIN re-enabled; edged active, 0 restarts, /edge/v1/health 200, no writer-guard refusal"
+  },
+  "boundaries_observed": [
+    "no Production contact",
+    "no Production cutover or go-live",
+    "no legacy IAM retired or deleted",
+    "no Production data migrated",
+    "no real PMS financial posting",
+    "no payment-provider traffic",
+    "no paid-access activation",
+    "no superuser or broad iam_v2 write privileges granted"
+  ],
+  "next": "Finish the DEVELOPMENT hands-on surface: rebuild Hotel Admin with the accepted ADMIN compile-time flags, provision DEVELOPMENT-only test data through supported workflows, and verify end to end on the running appliance."
+}

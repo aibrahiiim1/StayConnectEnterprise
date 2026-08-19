@@ -470,3 +470,176 @@ func count(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
 	}
 	return n
 }
+
+// EVERY READ-ONLY ADMIN COLLECTION MUST ACTUALLY ANSWER.
+//
+// The Stays screen returned "query failed" on every request, because the listing ordered by
+// `s.updated_at` -- a column iam_v2.stays does not have. It could never have worked against any database
+// built from these migrations, and it survived because the route was MOUNTED in this harness but never
+// CALLED: mounting proves the route exists, not that its SQL is valid.
+//
+// A handler that swallows the driver error turns a schema mismatch into an opaque 500, so the cheapest
+// possible guard is to ask each collection for its first page and insist on a 200. That is enough to
+// execute the SQL, which is where this class of defect lives -- a missing column, a renamed table, a
+// projection that drifted from the schema.
+func TestIntegration_API_EveryReadOnlyCollectionAnswers(t *testing.T) {
+	f := newAPI(t)
+	for _, path := range []string{
+		"/pms-stays",
+		"/pms-events",
+		"/pms-resolutions",
+		"/pms-interfaces",
+		"/pms-routing",
+		"/pms-source-conflicts",
+		"/operational-alerts",
+		"/checkout-grace",
+	} {
+		status, body := f.do(t, "GET", path, nil)
+		if status != 200 {
+			t.Errorf("GET %s = %d (%v) -- the collection must answer, not fail", path, status, body)
+		}
+	}
+}
+
+// validRevisionBody is the smallest configuration the authoring endpoint accepts. Every field is one the
+// running connector reads, so a test that drifts from reality fails here rather than in front of an operator.
+func validRevisionBody(endpoint string) map[string]any {
+	return map[string]any{
+		"endpoint": endpoint, "source_timezone": "Africa/Cairo",
+		"folio_identity_strategy": "GLOBALLY_UNIQUE", "normalization_version": 1,
+		"credential_mode": "NONE", "read_only": true, "resync_supported": true,
+		"dial_timeout_ms": 5000, "read_timeout_ms": 15000, "write_timeout_ms": 15000,
+		"heartbeat_interval_ms": 30000, "heartbeat_timeout_ms": 90000,
+		"feed_freshness_ms": 120000, "complete_sync_ms": 600000,
+	}
+}
+
+// WRITE RBAC ON THE NEW AUTHORING SURFACE.
+//
+// Creating an interface and authoring a revision are the configuration surface of the PMS integration, so
+// they must be write-gated like every other mutation. The resource middleware already maps POST to a write
+// permission, but "already does" is exactly the kind of claim that is true until somebody mounts a route
+// somewhere else -- so it is asserted rather than assumed, for both new endpoints.
+func TestIntegration_API_ViewerCannotCreateOrConfigurePMSInterfaces(t *testing.T) {
+	f := newAPI(t, "site_viewer")
+	if status, _ := f.do(t, "GET", "/pms-interfaces", nil); status != 200 {
+		t.Fatal("a viewer must still be able to read the interface list")
+	}
+	if status, body := f.do(t, "POST", "/pms-interfaces",
+		map[string]any{"connector_kind": "stub", "display_label": "viewer attempt"}); status != 403 {
+		t.Fatalf("a viewer created a PMS interface: %d %v", status, body)
+	}
+	if status, body := f.do(t, "POST", "/pms-interfaces/00000000-0000-4000-8000-000000000000/revisions",
+		validRevisionBody("pms.local:5010")); status != 403 {
+		t.Fatalf("a viewer authored a PMS revision: %d %v", status, body)
+	}
+}
+
+// CONCURRENT AUTHORING MUST BE DETERMINISTIC, AND MUST NOT 500.
+//
+// revision_no came from `(SELECT COALESCE(MAX(revision_no),0)+1 ...)` inside the INSERT. Under READ
+// COMMITTED that subquery snapshots at statement start and takes no lock, so two operators saving at the
+// same moment both computed the same number and the second died on
+// pms_interface_revisions_pms_interface_id_revision_no_key -- surfaced as HTTP 500, an internal error for a
+// situation that is neither internal nor an error.
+//
+// With a transaction-scoped advisory lock keyed on the interface, every caller gets its own number. This
+// asserts the property that matters to an operator: nobody sees a 500, nobody silently loses their draft,
+// and the numbers are a contiguous run with no duplicates.
+func TestIntegration_API_ConcurrentRevisionAuthoringIsDeterministic(t *testing.T) {
+	f := newAPI(t)
+	status, body := f.do(t, "POST", "/pms-interfaces",
+		map[string]any{"connector_kind": "stub", "display_label": "concurrency"})
+	if status != 201 {
+		t.Fatalf("create interface: %d %v", status, body)
+	}
+	id, _ := body["id"].(string)
+
+	const n = 8
+	codes := make([]int, n)
+	nos := make([]int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			st, b := f.do(t, "POST", "/pms-interfaces/"+id+"/revisions",
+				validRevisionBody(fmt.Sprintf("pms%d.local:5010", i)))
+			codes[i] = st
+			if v, ok := b["revision_no"].(float64); ok {
+				nos[i] = int(v)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	seen := map[int]bool{}
+	for i, st := range codes {
+		if st != 201 {
+			t.Errorf("concurrent authoring #%d returned %d, want 201 -- a race must not surface as an error", i, st)
+			continue
+		}
+		if seen[nos[i]] {
+			t.Errorf("revision_no %d was handed out twice", nos[i])
+		}
+		seen[nos[i]] = true
+	}
+	if len(seen) != n {
+		t.Fatalf("expected %d distinct revision numbers, got %d", n, len(seen))
+	}
+	for want := 1; want <= n; want++ {
+		if !seen[want] {
+			t.Errorf("revision_no %d is missing: the run is not contiguous", want)
+		}
+	}
+	if got := count(t, f.pool,
+		`SELECT count(*) FROM iam_v2.pms_interface_revisions WHERE pms_interface_id=$1`, id); got != n {
+		t.Fatalf("%d revisions persisted, want %d", got, n)
+	}
+}
+
+// A DECOMMISSIONED INTERFACE IS TERMINAL, AND MUST NOT ACCEPT CONFIGURATION.
+//
+// The authoring endpoint originally selected connector_kind purely to prove the interface existed, and threw
+// the value away. Existence is not the question that matters: a revision authored against a decommissioned
+// interface can never be published or dialled, so accepting it silently is how an operator ends up believing
+// a retired interface was reconfigured.
+func TestIntegration_API_DecommissionedInterfaceRefusesConfiguration(t *testing.T) {
+	f := newAPI(t)
+	status, body := f.do(t, "POST", "/pms-interfaces",
+		map[string]any{"connector_kind": "stub", "display_label": "lifecycle"})
+	if status != 201 {
+		t.Fatalf("create interface: %d %v", status, body)
+	}
+	id, _ := body["id"].(string)
+
+	// While it is live, authoring works.
+	if st, b := f.do(t, "POST", "/pms-interfaces/"+id+"/revisions",
+		validRevisionBody("live.local:5010")); st != 201 {
+		t.Fatalf("authoring on a live interface: %d %v", st, b)
+	}
+
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE iam_v2.pms_interfaces SET lifecycle_state='DECOMMISSIONED' WHERE id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
+
+	st, b := f.do(t, "POST", "/pms-interfaces/"+id+"/revisions", validRevisionBody("dead.local:5010"))
+	if st != 409 {
+		t.Fatalf("authoring on a decommissioned interface = %d, want 409: %v", st, b)
+	}
+	// The refusal must leave nothing behind: one revision, the one authored while it was live.
+	if got := count(t, f.pool,
+		`SELECT count(*) FROM iam_v2.pms_interface_revisions WHERE pms_interface_id=$1`, id); got != 1 {
+		t.Fatalf("%d revisions after a refused authoring, want 1", got)
+	}
+}
+
+// An interface that does not exist in THIS tenant and site is a 404, not a 500 and not a silent success.
+func TestIntegration_API_AuthoringAnUnknownInterfaceIsNotFound(t *testing.T) {
+	f := newAPI(t)
+	if st, b := f.do(t, "POST", "/pms-interfaces/00000000-0000-4000-8000-000000000000/revisions",
+		validRevisionBody("nowhere.local:5010")); st != 404 {
+		t.Fatalf("authoring against an unknown interface = %d, want 404: %v", st, b)
+	}
+}

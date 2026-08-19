@@ -32,6 +32,22 @@ import (
 // OTPPrefix is the generation-key file prefix (files are "<prefix>_<gen>.key").
 const OTPPrefix = "otp_hmac"
 
+// VoucherHMACKeyFile is the appliance-local blind-index key for iam_v2.vouchers.
+//
+// iam_v2.vouchers stores no plaintext code -- only code_hmac, which the authenticator recomputes from the
+// submitted code to find the row. scd loads this key at startup when IAM-v2 VOUCHER is the configured
+// authority and refuses to start without it, so it is created here at deploy time exactly like the OTP and
+// throttle keys: minted once, never overwritten, never minted by the running daemon.
+const VoucherHMACKeyFile = "voucher_hmac.key"
+
+// BootstrapVoucherHMACKey creates the voucher blind-index key file if absent (deployment). It never
+// overwrites an existing key -- doing so would orphan every voucher already indexed under the old key --
+// and is safe to run repeatedly.
+func BootstrapVoucherHMACKey(path string) error {
+	_, err := localkeys.CreateKeyIfAbsent(path)
+	return err
+}
+
 // DB is the minimal database surface keybootstrap needs (satisfied by *pgxpool.Pool).
 type DB interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)

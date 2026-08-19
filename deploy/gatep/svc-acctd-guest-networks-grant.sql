@@ -1,0 +1,16 @@
+-- svc_acctd: SELECT on public.guest_networks.
+--
+-- Found in the PostgreSQL log while diagnosing something else entirely: acctd
+-- was issuing
+--
+--     SELECT DISTINCT bridge_name FROM public.guest_networks
+--
+-- once per second and getting "permission denied for table guest_networks" every
+-- time. The service reports active/running and does not crash, so nothing
+-- surfaced it -- the failure lived only in the database log. acctd needs the
+-- bridge list to attribute accounting to the right guest network, so this was
+-- silently degrading accounting rather than failing loudly.
+--
+-- svc_netd, svc_scd and svc_edged already had this SELECT; acctd was simply
+-- missed. Read-only: acctd never writes guest network configuration.
+GRANT SELECT ON public.guest_networks TO svc_acctd;

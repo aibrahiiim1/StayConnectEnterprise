@@ -1,0 +1,47 @@
+{
+  "transition_id": "T0072",
+  "seq": 72,
+  "timestamp": "2026-08-19T06:00:00Z",
+  "record_type": "DEVELOPMENT_TRIAL_ACCEPTED_AND_CLOSED_AND_HARDENING_SWEEP_AUTHORIZED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_IAM_V2_TRIAL",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "EXECUTION_COMPLETE_AWAITING_PRODUCT_OWNER_REVIEW",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "AUTHORIZED_AND_IN_PROGRESS",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D33",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner instruction, 2026-08-19: explicit acceptance and closure of the DEVELOPMENT Appliance IAM-v2 trial at the verified 6773f03 / T0071 maturity, and separate authorization of a post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep.",
+  "accepted_at_head": "6773f032b5b63429d17fa6141b1bbd1b3ec601ee",
+  "accepted_at_transition": "T0071",
+  "previous_state_note": "The trial was execution-complete and awaiting one Product-Owner review. Review is not acceptance, so the trial remained open and no acceptance existed.",
+  "new_state_note": "The DEVELOPMENT Appliance IAM-v2 trial is ACCEPTED AND CLOSED at 6773f03 / T0071. Acceptance closes the trial that was carried out; it promotes nothing that the trial did not prove. A separate post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep is authorized on 172.21.60.23 only, and is the current activity.",
+  "phase_affected_note": "post-roadmap (the numbered Development Roadmap remains COMPLETE; there is no Phase 8)",
+  "items_explicitly_not_promoted_by_this_acceptance": [
+    "The checkout-to-grace supersession step: it requires a real PMS checkout event and is proven only at integration level against a real database. It remains ENVIRONMENT_BLOCKED on the appliance.",
+    "The guest Post-Stay journey (Phase 5): remains ENVIRONMENT_BLOCKED.",
+    "GUEST Device Self-Service (Phase 6): remains ENVIRONMENT_BLOCKED.",
+    "Byte-accounting evidence and ARP or device-presence evidence: never claimed, and not claimed now.",
+    "No maturity, phase status or capability enablement changes anywhere as a result of this acceptance."
+  ],
+  "boundaries_observed": [
+    "This acceptance authorizes NO merge of PR #16, which remains OPEN.",
+    "No Production contact, cutover or mutation.",
+    "No real PMS, provider or financial traffic.",
+    "No data migration and no legacy IAM retirement.",
+    "The authorized sweep is confined to DEVELOPMENT appliance 172.21.60.23.",
+    "The permanent two-NIC model is preserved: WAN plus LAN only, with WAN also management.",
+    "No PMS event, network topology, guest traffic or protocol evidence may be fabricated."
+  ],
+  "next": "Execute the authorized post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep on 172.21.60.23."
+}

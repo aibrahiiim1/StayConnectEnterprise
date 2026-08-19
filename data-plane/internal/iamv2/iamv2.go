@@ -202,12 +202,13 @@ type Clock func() time.Time
 // Authenticator is the dark entry point. When a method is disabled it returns DecisionDisabled
 // WITHOUT touching the repository — the core production-safety property.
 type Authenticator struct {
-	cfg   Config
-	repo  Repository
-	obs   Observer
-	now   Clock
-	ttl   time.Duration
-	vhmac VoucherHMAC // computes the voucher code HMAC (scratch/enabled only)
+	cfg      Config
+	repo     Repository
+	obs      Observer
+	now      Clock
+	ttl      time.Duration
+	vhmac    VoucherHMAC           // computes the voucher code HMAC (scratch/enabled only)
+	vhmacAll VoucherHMACCandidates // one index per key generation; preferred when set (rotation)
 }
 
 // New builds an Authenticator. repo may be nil in production (it is never used while flags are OFF).
@@ -239,6 +240,24 @@ func WithTTL(d time.Duration) Option { return func(a *Authenticator) { a.ttl = d
 
 // WithVoucherHMAC sets the voucher HMAC computer.
 func WithVoucherHMAC(v VoucherHMAC) Option { return func(a *Authenticator) { a.vhmac = v } }
+
+// WithVoucherHMACCandidates supplies EVERY blind index a submitted code could have, newest key generation
+// first. Rotation is why this exists.
+//
+// A voucher's code_hmac is computed at issuance under the key of the generation it pins. After a rotation
+// the active generation's key is different, so an index computed under the active key alone can never match
+// a voucher issued under the previous one -- every unredeemed voucher would silently stop working the moment
+// a new generation was created. The accepted design requires the opposite ("old-unsuperseded/unredeemed
+// voucher usability"), and the per-voucher code_key_generation_id pin only makes sense if lookup considers
+// more than one generation.
+//
+// When set, this takes precedence over WithVoucherHMAC.
+func WithVoucherHMACCandidates(v VoucherHMACCandidates) Option {
+	return func(a *Authenticator) { a.vhmacAll = v }
+}
+
+// VoucherHMACCandidates returns one blind index per usable key generation, newest first.
+type VoucherHMACCandidates func(ctx context.Context, tenantID, siteID, code string) ([][]byte, error)
 
 // VoucherHMAC computes the blind-index HMAC of a voucher code for a tenant/site.
 type VoucherHMAC func(ctx context.Context, tenantID, siteID, code string) ([]byte, error)

@@ -29,10 +29,13 @@ type Registry struct {
 	BuildInfo prometheus.Gauge
 	Uptime    prometheus.GaugeFunc
 
-	SessionsActive    prometheus.Gauge
-	SessionsStarted   *prometheus.CounterVec // labels: method
-	SessionsClosed    *prometheus.CounterVec // labels: reason
-	SessionBytesTotal *prometheus.CounterVec // labels: direction (up|down)
+	SessionsActive  prometheus.Gauge
+	SessionsStarted *prometheus.CounterVec // labels: method
+	// AuthContextsCreated counts IAM-v2 authentications that produced an auth_context. Deliberately separate
+	// from SessionsStarted: authentication success is not access, and conflating them hid that distinction.
+	AuthContextsCreated *prometheus.CounterVec // labels: method
+	SessionsClosed      *prometheus.CounterVec // labels: reason
+	SessionBytesTotal   *prometheus.CounterVec // labels: direction (up|down)
 
 	OTPIssued *prometheus.CounterVec // labels: channel (email|sms)
 	OTPVerify *prometheus.CounterVec // labels: channel, result (ok|bad|expired|locked)
@@ -87,6 +90,19 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 	r.SessionsStarted = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name:        "scd_sessions_started_total",
 		Help:        "Sessions started, by auth method.",
+		ConstLabels: constLabels,
+	}, []string{"method"})
+
+	// AUTH CONTEXTS ARE NOT SESSIONS.
+	//
+	// The IAM-v2 guest entry points first establish an auth_context and a device; a SESSION only exists later,
+	// after the guest selects a package and the entitlement is granted and activated. Counting the auth step as
+	// scd_sessions_started_total inflated the session rate, made started/closed permanently unbalanced, and
+	// would have shown a healthy "sessions starting" signal on an appliance where no guest ever reached the
+	// network. Operator health must correspond to actual session state, so the auth step gets its own counter.
+	r.AuthContextsCreated = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name:        "scd_iamv2_auth_contexts_created_total",
+		Help:        "IAM-v2 auth contexts created, by auth method. NOT sessions: an auth context precedes package selection, entitlement and activation.",
 		ConstLabels: constLabels,
 	}, []string{"method"})
 
@@ -189,7 +205,7 @@ func New(version string, constLabels prometheus.Labels) *Registry {
 
 	reg.MustRegister(
 		r.BuildInfo, r.Uptime,
-		r.SessionsActive, r.SessionsStarted, r.SessionsClosed, r.SessionBytesTotal,
+		r.SessionsActive, r.SessionsStarted, r.SessionsClosed, r.SessionBytesTotal, r.AuthContextsCreated,
 		r.OTPIssued, r.OTPVerify,
 		r.PMSValidate, r.PMSValidateDuration, r.PMSStatus, r.PMSCacheSize,
 		r.NFTOps, r.ReaperClosed, r.NATSReconnects,
