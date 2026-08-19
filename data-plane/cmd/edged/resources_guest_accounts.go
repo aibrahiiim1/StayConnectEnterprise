@@ -193,7 +193,10 @@ func (s *server) listGuestAccounts(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, a)
 	}
-	writeList(w, out)
+	// Stated for the same reason the IAM-v2 list states it: the screen must be able to tell which contract it
+	// is talking to even when there are no accounts yet. Here a guest access plan IS real and IS required, so
+	// saying "legacy" is what keeps the plan picker on screen honestly rather than by default.
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": listMeta{}, "authority": "legacy"})
 }
 
 func (s *server) getGuestAccount(w http.ResponseWriter, r *http.Request) {

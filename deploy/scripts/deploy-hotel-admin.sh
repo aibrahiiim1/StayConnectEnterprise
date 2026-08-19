@@ -164,7 +164,7 @@ package() {
     tar czf hotel-admin-deploy.tgz -C .deploy/app .
     # Verify the TARBALL too, not just the staging dir: tar has its own ways to
     # lose a path, and the tarball is the only artefact that actually ships.
-    tar tzf hotel-admin-deploy.tgz | grep -q '^\./\.next/BUILD_ID$' || die "tarball is missing ./.next/BUILD_ID"
+    grep -q '^\./\.next/BUILD_ID$' <<<"$(tar tzf hotel-admin-deploy.tgz)" || die "tarball is missing ./.next/BUILD_ID"
     tar tzf hotel-admin-deploy.tgz | grep -q '^\./\.next/static/' || die "tarball is missing ./.next/static/"
     echo ">> wrote $(pwd)/hotel-admin-deploy.tgz (BUILD_ID=$dst_id)"
   )
@@ -178,9 +178,19 @@ install() {
 
   # Reject a malformed bundle before anything is extracted. ./.next/BUILD_ID is
   # the specific path that goes missing when the hidden .next dir is dropped.
-  tar tzf "$tarball" | grep -q '^\./server.js$'        || die "tarball does not look like a standalone bundle (no ./server.js)"
-  tar tzf "$tarball" | grep -q '^\./\.next/BUILD_ID$'  || die "tarball has no ./.next/BUILD_ID — the hidden .next dir is missing; repackage with 'cp -a .next/standalone/.'"
-  tar tzf "$tarball" | grep -q '^\./\.next/static/'    || die "tarball has no ./.next/static/"
+  #
+  # The listing is materialised ONCE instead of being piped into three `grep -q`s.
+  #
+  # `tar tzf ... | grep -q PATTERN` is not the harmless idiom it looks like under `set -o pipefail`. grep -q
+  # exits the instant it matches, the write end of the pipe closes, tar dies of SIGPIPE, and pipefail reports
+  # the PIPELINE as failed -- so a check that SUCCEEDED takes the `|| die` branch. Whether it bites depends on
+  # WHERE the match sits in the listing: ./server.js is near the end, so grep drains the stream and tar exits
+  # cleanly, while ./.next/BUILD_ID is the sixth entry, so grep leaves almost the whole archive unread. That is
+  # why this bundle was rejected with "the hidden .next dir is missing" while the file was demonstrably there.
+  local listing; listing="$(tar tzf "$tarball")"
+  grep -q '^\./server.js$'       <<<"$listing" || die "tarball does not look like a standalone bundle (no ./server.js)"
+  grep -q '^\./\.next/BUILD_ID$' <<<"$listing" || die "tarball has no ./.next/BUILD_ID — the hidden .next dir is missing; repackage with 'cp -a .next/standalone/.'"
+  grep -q '^\./\.next/static/'   <<<"$listing" || die "tarball has no ./.next/static/"
 
   local stamp; stamp="$(date -u +%Y%m%d-%H%M%S)"
   local rel="$RELEASES_DIR/$stamp"

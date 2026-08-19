@@ -67,7 +67,14 @@ export const api = {
 
 // ------- Types (edged /edge/v1 response shapes) -------
 
-export type ListResp<T> = { data: T[]; meta: { has_more: boolean } };
+export type ListResp<T> = {
+  data: T[];
+  meta: { has_more: boolean };
+  // Which domain answered. Present on surfaces where legacy and IAM-v2 have genuinely different contracts,
+  // so a screen with ZERO rows can still tell which one it is talking to. Per-row authority cannot: an empty
+  // list has no rows to ask.
+  authority?: "iam_v2" | "legacy";
+};
 
 export type Whoami = {
   operator_id: string;
@@ -103,7 +110,9 @@ export type VoucherBatch = {
 // Guest Username/Password account (password is never returned).
 export type GuestAccount = {
   id: string; username: string; display_name?: string | null; notes?: string | null;
-  template_id: string; enabled: boolean;
+  // ABSENT under IAM-v2 authority, which has no template/plan on the credential at all -- see the
+  // guest-accounts screen. Optional so the type cannot promise a field the backend does not send.
+  template_id?: string | null; enabled: boolean;
   valid_from?: string | null; valid_until?: string | null;
   last_login_at?: string | null; login_count: number;
   locked_until?: string | null;

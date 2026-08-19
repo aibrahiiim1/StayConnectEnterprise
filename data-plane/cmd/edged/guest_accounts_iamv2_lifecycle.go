@@ -117,7 +117,15 @@ func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) 
 		jsonErr(w, http.StatusInternalServerError, "internal", "list failed")
 		return
 	}
-	writeList(w, out)
+	// The AUTHORITY is stated on the ENVELOPE, not only on each row.
+	//
+	// Per-row authority answers "who owns this record", which is useless to a screen that has no records: an
+	// empty site cannot tell whether it is running IAM-v2 or legacy, so the operator-facing form has to guess.
+	// It guessed wrong -- it kept presenting a mandatory "Guest access plan" picker that IAM-v2 ignores
+	// entirely, because under IAM-v2 what a guest may acquire is decided by PACKAGE ELIGIBILITY RULES, not by
+	// a plan attached to the credential. A required control whose value is discarded is worse than a missing
+	// one: the operator believes they have chosen what the guest gets.
+	writeJSON(w, http.StatusOK, map[string]any{"data": out, "meta": listMeta{}, "authority": "iam_v2"})
 }
 
 func (s *server) getGuestAccountIAMv2(w http.ResponseWriter, r *http.Request) {

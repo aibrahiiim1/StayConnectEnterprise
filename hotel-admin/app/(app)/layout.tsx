@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Nav } from "@/components/nav";
 import { api, Whoami } from "@/lib/api";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const mainRef = useRef<HTMLElement | null>(null);
   const [me, setMe] = useState<Whoami | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -39,6 +41,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return () => { cancelled = true; clearInterval(iv); };
   }, [router]);
 
+  // With the CONTENT as the scrolling element, the window no longer scrolls, so Next's scroll-to-top on
+  // navigation has nothing to reset. Reset the content pane explicitly instead -- otherwise an operator who
+  // scrolled to the bottom of one screen would open the next one already scrolled halfway down it.
+  useEffect(() => { mainRef.current?.scrollTo({ top: 0 }); }, [pathname]);
+
   async function onLogout() {
     try { await api.post("/auth/logout"); } catch {}
     router.replace("/login");
@@ -49,9 +56,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!me) return null;
 
   return (
-    <div className="min-h-screen flex">
+    // THE SIDEBAR "JUMPING BACK TO THE TOP" WAS THE WINDOW SCROLLING, NOT THE MENU MOVING.
+    //
+    // `min-h-screen` is a MINIMUM: on a long screen the flex container grew past the viewport, the sidebar
+    // stretched with it, and its own `overflow-y-auto` never engaged -- so reaching a lower item such as
+    // WAN / LAN settings meant scrolling the WHOLE WINDOW down. Clicking it then navigated, Next.js reset the
+    // window to the top as it is supposed to, and the menu appeared to snap back.
+    //
+    // `h-screen` + `overflow-hidden` bounds the container to the viewport. The sidebar becomes a real
+    // independently-scrolling column whose position survives navigation (the layout is not remounted between
+    // routes), and the page content scrolls in its own pane.
+    <div className="h-screen flex overflow-hidden">
       <Nav email={me.email} roles={me.roles ?? []} onLogout={onLogout} />
-      <main className="flex-1 min-w-0">{children}</main>
+      <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto">{children}</main>
     </div>
   );
 }

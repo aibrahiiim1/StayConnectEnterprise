@@ -73,6 +73,11 @@ export default function GuestAccountsPage() {
   const [editing, setEditing] = useState<GuestAccount | null>(null);
   const [pwFor, setPwFor] = useState<GuestAccount | null>(null);
   const [reveal, setReveal] = useState<{ username: string; password: string } | null>(null);
+  const [authority, setAuthority] = useState<"iam_v2" | "legacy" | null>(null);
+  // Under IAM-v2 a credential carries no plan. What a guest may acquire is decided by PACKAGE ELIGIBILITY
+  // RULES evaluated when packages are listed, so a "guest access plan" on this screen would be a control the
+  // backend discards -- and the operator would believe they had chosen what the guest gets.
+  const planApplies = authority !== "iam_v2";
 
   async function load() {
     try {
@@ -82,6 +87,9 @@ export default function GuestAccountsPage() {
         api.get<{ enabled: boolean }>("/guest-accounts/portal").catch(() => ({ enabled: false })),
       ]);
       setRows(ga.data);
+      // The site's authority comes from the LIST ENVELOPE, not from a row: with zero accounts there is no row
+      // to ask, and that is exactly when the create form has to decide whether a plan picker belongs on screen.
+      setAuthority(ga.authority ?? null);
       setPlans(pl.data);
       setPortalOn(!!pv.enabled);
     } catch (e: any) {
@@ -125,7 +133,7 @@ export default function GuestAccountsPage() {
         generate,
         display_name: (form.get("display_name") as string) || undefined,
         notes: (form.get("notes") as string) || undefined,
-        template_id: form.get("template_id"),
+        template_id: planApplies ? form.get("template_id") : undefined,
         valid_from: (form.get("valid_from") as string) ? new Date(form.get("valid_from") as string).toISOString() : undefined,
         valid_until: (form.get("valid_until") as string) ? new Date(form.get("valid_until") as string).toISOString() : undefined,
       });
@@ -151,7 +159,7 @@ export default function GuestAccountsPage() {
         username: (form.get("username") as string).trim(),
         display_name: (form.get("display_name") as string) || undefined,
         notes: (form.get("notes") as string) || undefined,
-        template_id: form.get("template_id"),
+        template_id: planApplies ? form.get("template_id") : undefined,
         valid_from: (form.get("valid_from") as string) ? new Date(form.get("valid_from") as string).toISOString() : undefined,
         valid_until: (form.get("valid_until") as string) ? new Date(form.get("valid_until") as string).toISOString() : undefined,
       });
@@ -237,14 +245,14 @@ export default function GuestAccountsPage() {
       {showNew && (
         <Card className="mb-6">
           <CardHeader><CardTitle>New guest account</CardTitle></CardHeader>
-          <CardBody><AccountForm plans={activePlans} onSubmit={onCreate} busy={busy} withPassword /></CardBody>
+          <CardBody><AccountForm plans={activePlans} planApplies={planApplies} onSubmit={onCreate} busy={busy} withPassword /></CardBody>
         </Card>
       )}
 
       {editing && (
         <Card className="mb-6 border-brand">
           <CardHeader><CardTitle>Edit {editing.username}</CardTitle></CardHeader>
-          <CardBody><AccountForm plans={activePlans} allPlans={plans} account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
+          <CardBody><AccountForm plans={activePlans} allPlans={plans} planApplies={planApplies} account={editing} onSubmit={onSaveEdit} busy={busy} onCancel={() => setEditing(null)} /></CardBody>
         </Card>
       )}
 
@@ -266,20 +274,22 @@ export default function GuestAccountsPage() {
           ) : (
             <Table>
               <THead>
-                <TR><TH>Username</TH><TH>Name</TH><TH>Plan</TH><TH>Devices</TH><TH>Status</TH><TH>Validity</TH><TH>Last login</TH><TH>Logins</TH><TH></TH></TR>
+                <TR><TH>Username</TH><TH>Name</TH>{planApplies && <TH>Plan</TH>}<TH>Devices</TH><TH>Status</TH><TH>Validity</TH><TH>Last login</TH><TH>Logins</TH><TH></TH></TR>
               </THead>
               <tbody>
                 {filtered.map((a) => {
-                  const p = planById.get(a.template_id);
+                  const p = a.template_id ? planById.get(a.template_id) : undefined;
                   const cap = a.max_devices ?? p?.max_concurrent_devices;
                   return (
                   <TR key={a.id}>
                     <TD className="font-mono">{a.username}</TD>
                     <TD className="text-muted">{a.display_name || "—"}</TD>
-                    <TD className="text-muted">
-                      {p ? p.name : a.template_id.slice(0, 8)}
-                      {p && !p.is_active && <Badge tone="warn" className="ml-1">inactive</Badge>}
-                    </TD>
+                    {planApplies && (
+                      <TD className="text-muted">
+                        {p ? p.name : (a.template_id ? a.template_id.slice(0, 8) : "—")}
+                        {p && !p.is_active && <Badge tone="warn" className="ml-1">inactive</Badge>}
+                      </TD>
+                    )}
                     <TD className="text-muted">{a.active_devices ?? 0}{cap ? ` of ${cap}` : ""}</TD>
                     <TD>
                       <Badge tone={a.enabled ? "ok" : "err"}>{a.enabled ? "enabled" : "disabled"}</Badge>
@@ -309,8 +319,8 @@ export default function GuestAccountsPage() {
 
 // AccountForm is shared by create and edit. `withPassword` shows the create-time
 // password controls; edit uses the separate Set-password panel.
-function AccountForm({ plans, allPlans, account, onSubmit, busy, withPassword, onCancel }: {
-  plans: GuestAccessPlan[]; allPlans?: GuestAccessPlan[]; account?: GuestAccount;
+function AccountForm({ plans, allPlans, planApplies = true, account, onSubmit, busy, withPassword, onCancel }: {
+  plans: GuestAccessPlan[]; allPlans?: GuestAccessPlan[]; planApplies?: boolean; account?: GuestAccount;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void; busy: boolean; withPassword?: boolean; onCancel?: () => void;
 }) {
   const [generate, setGenerate] = useState(false);
@@ -321,7 +331,7 @@ function AccountForm({ plans, allPlans, account, onSubmit, busy, withPassword, o
   const planOptions = useMemo(() => {
     const list = [...plans];
     if (account && allPlans) {
-      const cur = allPlans.find((p) => p.id === account.template_id);
+      const cur = account.template_id ? allPlans.find((p) => p.id === account.template_id) : undefined;
       if (cur && !list.some((p) => p.id === cur.id)) list.unshift(cur);
     }
     return list;
@@ -346,12 +356,22 @@ function AccountForm({ plans, allPlans, account, onSubmit, busy, withPassword, o
           </div>
         </>
       ) : <div />}
-      <div>
-        <Label>Guest access plan</Label>
-        <select name="template_id" required defaultValue={account?.template_id} className={selectCls}>
-          {planOptions.map((t) => <option key={t.id} value={t.id}>{planLabel(t)}{!t.is_active ? " · inactive" : ""}</option>)}
-        </select>
-      </div>
+      {planApplies ? (
+        <div>
+          <Label>Guest access plan</Label>
+          <select name="template_id" required defaultValue={account?.template_id ?? undefined} className={selectCls}>
+            {planOptions.map((t) => <option key={t.id} value={t.id}>{planLabel(t)}{!t.is_active ? " · inactive" : ""}</option>)}
+          </select>
+        </div>
+      ) : (
+        <div>
+          <Label>Access</Label>
+          <p className="text-xs text-muted mt-1.5 leading-relaxed">
+            Decided by <strong>package eligibility rules</strong>, not by this account. Choose which packages a
+            signed-in guest may take on the Commercial packages screen.
+          </p>
+        </div>
+      )}
       <div><Label>Display name (optional)</Label><Input name="display_name" defaultValue={account?.display_name ?? ""} placeholder="Room 101 guest" /></div>
       <div><Label>Valid from (optional)</Label><Input name="valid_from" type="datetime-local" defaultValue={dt(account?.valid_from)} /></div>
       <div><Label>Valid until (optional)</Label><Input name="valid_until" type="datetime-local" defaultValue={dt(account?.valid_until)} /></div>
