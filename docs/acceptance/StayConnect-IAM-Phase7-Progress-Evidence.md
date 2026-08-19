@@ -240,6 +240,113 @@ not harmless: the gate fails on correct text, and the cheapest way to make it pa
 vaguer — the opposite of what the gate exists to enforce. The number boundary is fixed, a real "#6 is not
 merged" is still caught, and an inverted case now pins both directions (72 negative cases, 0 failures).
 
+## D33/T0072 — post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep
+
+Carried out on 172.21.60.23 as a real operator would, in a real browser, after the trial was accepted and
+closed. Everything below was found by opening screens and using them, not by reading code.
+
+### Guest Accounts crashed, and the reason was worse than the crash
+
+The row renderer dereferenced `template_id`, which IAM-v2 accounts do not have, so the first real account
+white-screened the page: `Cannot read properties of undefined (reading 'slice')`. The API was healthy
+throughout, which is why it presented as a backend fault.
+
+Underneath it, the create form still demanded a **Guest access plan** that IAM-v2 discards entirely — under
+IAM-v2 what a guest may acquire is decided by package eligibility rules, not by a plan on the credential. An
+operator choosing one believed they had decided what the guest gets. The screen could not tell which contract
+it was talking to on a site with no accounts, so both list endpoints now state the authority on the envelope.
+
+The complete supported lifecycle was then exercised against the real API: create with one-time password
+reveal, read-back, patch, disable, read-back, set-password, disconnect, re-enable, duplicate username refused
+`409`, delete, `404` after delete.
+
+### The navigation "jumping back to the top" was the window scrolling
+
+`min-h-screen` is a minimum, so a long page grew the layout past the viewport, the sidebar stretched with it,
+and its `overflow-y-auto` never engaged. Reaching **WAN / LAN settings** meant scrolling the whole window;
+clicking it navigated, Next.js reset the window to the top as it should, and the menu appeared to snap back.
+
+Separately, `path.startsWith(href)` lit up more than one item: these are siblings, not parent and child —
+`/network` is the Guest networks leaf — so `/network/dhcp` highlighted both it and **DHCP & leases**.
+
+Verified live: **exactly one active item on all 38 screens**, sidebar scroll position `1082` before and after
+navigating, window `scrollY` 0, content pane reset to 0.
+
+### Seven screens answered 500, and one query could never have worked
+
+| Screen | Cause |
+|---|---|
+| PMS interfaces, PMS routing, Source conflicts, Online time, Device self-service | `svc_edged` had no privilege on the Phase-3/4/5 `iam_v2` tables — the same missing-grant shape as the Phase-2 commerce surface |
+| Stays | the listing ordered by `s.updated_at`, a column `iam_v2.stays` does not have |
+| Licence | the screen read `/license/status` and posted to `/license/install`; edged serves `/license` for both |
+
+The Stays defect survived because the route was **mounted** in the integration harness but never **called**.
+A test now GETs every read-only collection, so the next projection that drifts from the schema fails in CI.
+
+The licence read was wrapped in `.catch(() => null)`, so it failed silently and the page rendered as though
+the appliance had no licence — the one thing a licensing screen must never say incorrectly.
+
+### Financial screens that said "Loading…" forever
+
+edged carries no `STAYCONNECT_PHASE4_*` configuration, so it mounts no financial routes, while the bundle is
+built with `NEXT_PUBLIC_PHASE4_ADMIN=1`. Three of the four rendered their loading guard **before** their
+error, so a 404 left the state unset and the screen claimed to still be working. They now say the capability
+is not enabled here and that enabling it is a deployment decision. **Nothing was enabled.**
+
+### PMS interfaces had no configuration surface at all
+
+The screen could publish an existing revision and rotate a credential. It could not create an interface and
+could not author a revision, so the **endpoint the connector dials (host:port)** and every timeout, bound,
+mode, timezone and folio strategy were unreachable from the product. Every interface on this appliance exists
+because a seed script wrote it into the database.
+
+Two endpoints now exist, and the field list is read off the implementation — `pmsd.Revision.Validate()` and
+`pgRepo.LoadInterface()` — not designed: endpoint, source timezone, folio identity strategy, normalization
+version, credential mode, resync support, four timeouts, two heartbeat bounds, feed freshness, complete-sync
+bound, optional currency pair. `read_only` is sent as true and is not offered as a choice, because pmsd
+refuses any revision whose read-only capability is absent or false. An authored revision is a **draft**;
+publishing remains the separate password-confirmed action it already was.
+
+Driven in a real browser: create → confirmation, a Configure form exposing all **15** fields, `pms.local`
+refused with *"endpoint must be host:port"*, and a valid save confirmed as a draft. Interfaces created while
+testing are left **DECOMMISSIONED** and labelled as DEV artifacts, because revisions are immutable by design.
+
+### DHCP on the guest VLAN: an appliance fault, and an external one
+
+**The appliance fault, found and fixed.** Kea's on-disk config was the pre-guest-network default — `br-lan`,
+`10.10.0.0/24`, no VLAN subnet at all. netd applies the real config over the control socket and then calls
+`config-write`, which was failing:
+
+```
+Error during write-config: Unable to open file /etc/kea/kea-dhcp4.conf for writing
+```
+
+Kea runs as `_kea`; `/etc/kea` and the file are root-owned. So every network apply was recorded as **FAILED**
+even when the live `config-set` had succeeded — the "failed" rows in Config history beside changes that
+visibly took effect — and every cold start reverted DHCP to the wrong network.
+
+Reproduced exactly: restarting Kea brought it back on `10.10.0.1:67` serving `10.10.0.0/24`, with **no
+listener on the guest bridge at all**. Restarting netd reconciled it back, which is why the fault looked
+intermittent and always seemed fine when anyone checked after touching the network.
+
+After the fix, proven at the strongest level available — a **full reboot**:
+
+| After reboot | Observed |
+|---|---|
+| DHCP listener | `10.20.0.1:67` on `br-g90` |
+| on-disk config | `br-g90/10.20.0.1`, subnet `10.20.0.0/22` |
+| services | scd, portald, netd, acctd, edged, hotel-admin, stayconnect-caddy all active |
+| restart jobs this boot | 0 for every service |
+
+**The external fault, which is not the appliance's and is not fixed here.** `ens192.90` has received **zero
+packets** since it was created (RX 0 bytes / 0 packets; TX 41), and the lease file holds nothing but its
+header. No 802.1Q VLAN-90 tagged frame has ever reached this appliance. The upstream switch port feeding the
+LAN NIC must trunk VLAN 90; until it does, no device on that VLAN can reach DHCP whatever the appliance is
+configured to do. Stated from interface counters, not assumed — **no device test is claimed and none was
+performed.**
+
+The two-NIC model is untouched: `ens160` WAN and management, `ens192` LAN.
+
 ---
 
 ## Boundaries observed
