@@ -608,6 +608,13 @@
       "decided_on": "2026-08-19",
       "phase": "post-roadmap",
       "accepted": true
+    },
+    {
+      "id": "D34",
+      "title": "T0073 POST-ACCEPTANCE HARDENING SWEEP ACCEPTED AND CLOSED, PR #16 MERGE AUTHORIZED, AND THE PRODUCTION IAM-v2 CUTOVER PLUS LEGACY IAM RETIREMENT AUTHORIZED AS ONE CONTROLLED TRANSITION (2026-08-19). The Product Owner ACCEPTS AND CLOSES the post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep recorded at T0073, AUTHORIZES the governed merge of PR #16 into master from the verified accepted exact head, and AUTHORIZES a Production IAM-v2 cutover followed by complete retirement of the legacy IAM runtime, to be carried out as a single controlled transition with a cutover preflight, a preserved backup baseline, an identified no-return boundary, an atomic complete-domain cutover (never partial per-service or per-flow), and a staged disable-revoke-then-drop retirement proven before any irreversible step. ZERO LEGACY means zero ACTIVE runtime or operational dependency, NOT destruction of project history: historical governance, acceptance evidence and audit history are retained and marked HISTORICAL or SUPERSEDED rather than deleted. This authorization does NOT authorize real financial PMS posting or payment-provider charges for testing; external financial effects remain behind the existing per-property financial gates. All permanent product rules are preserved: Central Control Plane on a separate server, exactly two NICs with WAN also management, local-first edge operation, enrollment and claim identity, multi-PMS namespace rules, RN+G# posting safety, UNKNOWN financial safety, no implicit FX, and every previously accepted security boundary.",
+      "decided_on": "2026-08-19",
+      "phase": "post-roadmap",
+      "accepted": true
     }
   ]
 }

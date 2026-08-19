@@ -1,0 +1,45 @@
+{
+  "transition_id": "T0074",
+  "seq": 74,
+  "timestamp": "2026-08-19T17:30:00Z",
+  "record_type": "T0073_ACCEPTED_AND_CLOSED_AND_PRODUCTION_TRANSITION_AUTHORIZED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "DEVELOPMENT_APPLIANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "EXECUTION_COMPLETE_AWAITING_PRODUCT_OWNER_REVIEW",
+    "lifecycle": "post-roadmap DEVELOPMENT activity (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "PRODUCTION_IAM_V2_CUTOVER_AND_LEGACY_IAM_RETIREMENT",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "AUTHORIZED_PREFLIGHT_COMPLETE_CUTOVER_ENVIRONMENT_BLOCKED",
+    "lifecycle": "post-roadmap controlled production transition (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D34",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner instruction, 2026-08-19: accept and close T0073, merge PR #16, execute the Production IAM-v2 cutover, and retire the legacy IAM runtime as one controlled transition.",
+  "accepted_at_head": "fff268d0af174c0d201af6e3258145ea64195bcd",
+  "accepted_activity": "T0073",
+  "previous_state_note": "The hardening and Hotel-Admin usability sweep was execution-complete and awaiting one Product-Owner review. No acceptance existed.",
+  "new_state_note": "T0073 is ACCEPTED AND CLOSED at the verified head fff268d. The governed merge of PR #16 is authorized and performed from that exact head. The Production IAM-v2 cutover and legacy IAM retirement are AUTHORIZED, and their preflight is complete, but they are ENVIRONMENT-BLOCKED: no Production appliance exists to cut over. Central's authoritative appliance registry contains exactly one appliance (serial SC-BEN1-JS4A-0D9C, hostname radius, last_public_ip 172.21.60.23), which governance designates the DEVELOPMENT appliance, and the Production record still reads 'none -- Production has not been contacted'. The cutover is deliberately NOT simulated on the development appliance, because doing so would neither be a Production cutover nor leave the development baseline intact.",
+  "phase_affected_note": "post-roadmap (D33/T0072 trial acceptance, D33/T0073 sweep, now D34/T0074)",
+  "items_explicitly_not_promoted": [
+    "The Production IAM-v2 cutover is NOT performed and is NOT claimed. Production remains PRE-LIVE and uncontacted.",
+    "Legacy IAM retirement is NOT performed. No legacy schema, privilege, route, flag or credential has been dropped, revoked or disabled anywhere.",
+    "No capability was enabled. No real PMS, provider or financial traffic occurred.",
+    "The guest-VLAN device DHCP path remains ENVIRONMENT_BLOCKED: ens192.90 has received zero packets, an upstream switch trunking matter.",
+    "Checkout-to-grace supersession, guest Post-Stay and GUEST Device Self-Service remain ENVIRONMENT_BLOCKED as before."
+  ],
+  "boundaries_observed": [
+    "Production untouched and uncontacted; no irreversible boundary was crossed on assumption.",
+    "The cutover was not simulated on the DEVELOPMENT appliance and no Production evidence is fabricated.",
+    "Central Control Plane remains a separate server; the two-NIC model with WAN also management is unchanged.",
+    "No external financial effect: no PMS posting, no provider charge, per-property financial gates untouched.",
+    "Historical governance and acceptance evidence are retained, not deleted."
+  ],
+  "next": "One Product-Owner determination of the Production target: either designate the Production appliance (host, enrollment identity and access) so the authorized cutover can execute against it, or confirm that 172.21.60.23 is to be treated as the Production system, at which point the authorized cutover and staged legacy retirement proceed there."
+}

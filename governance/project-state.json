@@ -15,9 +15,9 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "7",
-  "current_activity": "DEVELOPMENT_APPLIANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP",
-  "current_activity_execution_state": "EXECUTION_COMPLETE_AWAITING_PRODUCT_OWNER_REVIEW",
-  "current_activity_execution_state_note": "The post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep authorized by D33 has been carried out and its evidence recorded. Execution-complete describes the WORK, not a judgement of it: no Product-Owner acceptance of the sweep has been given. No capability was enabled anywhere -- edged still carries no Phase-4 configuration, and the financial screens now report that rather than being switched on. The guest-VLAN interface has received zero packets, which is an upstream switch trunking matter and is reported rather than repaired.",
+  "current_activity": "PRODUCTION_IAM_V2_CUTOVER_AND_LEGACY_IAM_RETIREMENT",
+  "current_activity_execution_state": "AUTHORIZED_PREFLIGHT_COMPLETE_CUTOVER_ENVIRONMENT_BLOCKED",
+  "current_activity_execution_state_note": "T0073 was accepted and closed at the verified head fff268d. That acceptance is recorded as decision D34, transition T0074, and PR #16 was merged from that exact head as f32aa6f. The Production IAM-v2 cutover and the legacy IAM retirement are AUTHORIZED and their preflight is COMPLETE, but they cannot execute: there is no Production appliance. Central's authoritative registry holds exactly one appliance (SC-BEN1-JS4A-0D9C, hostname radius, last_public_ip 172.21.60.23), which governance designates the DEVELOPMENT appliance, and the Production record still reads that Production has not been contacted. The cutover was deliberately not simulated there, because that would neither be a Production cutover nor leave the development baseline intact. No legacy object, privilege, route, flag or credential has been disabled, revoked or dropped anywhere.",
   "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -318,15 +318,15 @@
     "Maintain project governance, current-state parity and documentation for the closed phases and completed roadmap."
   ],
   "prohibited_actions": [
-    "IAM-v2 production cutover, production data migration, dual read/write, legacy IAM removal, real guest service, real PMS financial posting, real payment-provider traffic, paid-access activation, per-property financial enablement and programmatic reversal. Each is a separate Product-Owner go-live decision and NONE is authorized by any current decision: the latest accepted decision is D33 (transition T0072), which closes the DEVELOPMENT-appliance IAM-v2 trial and authorizes only the post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep on the development appliance, and explicitly authorizes none of them. It authorizes no merge of the open trial pull request either.",
+    "Real PMS financial posting, real payment-provider traffic, paid-access activation and per-property financial enablement remain PROHIBITED. The latest accepted decision is D34 (transition T0074), which accepts and closes T0073, authorizes the merge of PR #16, and authorizes a Production IAM-v2 cutover followed by complete legacy IAM retirement as one controlled transition -- and explicitly does NOT authorize real financial PMS posting or payment-provider charges for testing, which stay behind the existing per-property financial gates. The authorized cutover has NOT been executed: it is ENVIRONMENT-BLOCKED for want of a Production appliance, so production data migration, dual read/write, legacy IAM removal and real guest service have not occurred and remain prohibited until that target is determined.",
     "Enabling any Phase 4, Phase 5 or Phase 6 capability on any environment outside a controlled, restored DEVELOPMENT-appliance validation run.",
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "One Product-Owner REVIEW of the post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep carried out under D33 (T0072, T0073) on appliance 172.21.60.23. The authorized execution of that sweep is COMPLETE. Guest Accounts renders and its full IAM-v2 account lifecycle was exercised against the real API, navigation shows exactly one active item on all 38 screens with a sidebar that keeps its position, seven screens that answered HTTP 500 now answer, the Licence screen is wired to the paths edged serves, four Phase-4 screens state that the capability is not enabled here, PMS interfaces gained the create and revision-authoring surface exposing the endpoint host:port and every other value the connector reads, and guest-VLAN DHCP survives a restart and a full reboot. REVIEW IS NOT ACCEPTANCE. No capability was enabled, no device DHCP test is claimed, and the zero-packet VLAN-90 interface is an upstream switch trunking matter reported rather than repaired. An IAM-v2 cutover, any capability enablement, Production contact and the disposition of the trial branch each require their own explicit Product-Owner decision. PRODUCTION remains untouched and PRE-LIVE, and no Production IAM transition strategy is approved.",
+  "next_authorized_action": "One Product-Owner determination of the PRODUCTION TARGET, so the already-authorized cutover under D34 (T0074) can execute. Either designate the Production appliance with its host, enrollment identity and access, or confirm that appliance 172.21.60.23 is to be treated as the Production system despite the standing governance record that separates them. The cutover preflight is complete and a verified backup baseline is preserved at /var/backups/stayconnect/pre-cutover-20260819T174950Z on that appliance, holding a parsed custom-format database dump, role and privilege globals, configuration and unit files, service binaries and a SHA256SUMS manifest. Nothing irreversible has been done and PRODUCTION remains untouched and uncontacted.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D33",
+  "latest_accepted_po_decision": "D34",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -422,7 +422,7 @@
       "scripts/ci/phase3_evidence.py (modified)"
     ],
     "post_closure_operational_changes_note": "Caddy deployment configuration, the Caddy systemd unit sources and CI/operational tooling changed AFTER Phase-3 closure, under T0026 and T0027. No Phase-3 application binary, migration, schema, IAM-v2 authority, PMS behaviour or financial behaviour changed. Do not claim the whole deploy/ or scripts/ tree is identical to the accepted candidate.",
-    "current_activity": "DEVELOPMENT_APPLIANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP",
+    "current_activity": "PRODUCTION_IAM_V2_CUTOVER_AND_LEGACY_IAM_RETIREMENT",
     "live_increment9_executed": true,
     "live_increment9_executed_on": "2026-08-10",
     "live_increment9_item_verdicts": {
@@ -709,14 +709,14 @@
     "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
     "phase7_merge_attribution": "Phase 7 was ACCEPTED_AND_CLOSED under D27/T0064 and MERGED under D28/T0065 (merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The current DEVELOPMENT trial continuation is D31/T0068. D30 is preserved historically and its over-broad Production policy clauses were corrected by D31."
   },
-  "latest_transition_id": "T0073",
+  "latest_transition_id": "T0074",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "72979f5f8df6d18faa4e9227163829d597f4d53c",
+  "acceptance_candidate_head": "5eddecaff4977b1fe304e4585e2ff749e95658f3",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "72979f5f8df6d18faa4e9227163829d597f4d53c",
+  "inventory_head": "5eddecaff4977b1fe304e4585e2ff749e95658f3",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",

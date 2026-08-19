@@ -1,0 +1,4 @@
+commit 5eddecaff4977b1fe304e4585e2ff749e95658f3
+Date:   Wed Aug 19 20:50:47 2026 +0300
+
+    Accept T0073, merge PR #16, and stop at the Production target question
