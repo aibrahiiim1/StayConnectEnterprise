@@ -311,6 +311,56 @@ Driven in a real browser: create → confirmation, a Configure form exposing all
 refused with *"endpoint must be host:port"*, and a valid save confirmed as a draft. Interfaces created while
 testing are left **DECOMMISSIONED** and labelled as DEV artifacts, because revisions are immutable by design.
 
+### Guest Accounts still depended on a concept IAM-v2 does not have
+
+Two dependencies remained after the first pass, and the second made the screen unusable rather than merely
+fragile:
+
+* the plans call sat inside the same `Promise.all` as the accounts, so any failure of that legacy endpoint —
+  a site with none, a role that cannot read it, a 500 — rendered the **whole** page as "Failed to load" with
+  the accounts already fetched and sitting unused;
+* the **New account** button was disabled whenever `activePlans` was empty, *whatever the authority*. Under
+  IAM-v2 a credential carries no plan, so on a plan-less site an operator could never create an account at
+  all. The only symptom was a dead button with no explanation.
+
+Removing the plans fetch under IAM-v2 exposed the second immediately — the new regressions failed on their
+first run, which is what they are for. The button is now gated on nothing. Where a plan is a genuine
+prerequisite (a legacy site with none) the **form** names it and refuses to submit, because a disabled button
+explains nothing and a `title` only explains it to someone who already suspected the button and hovered.
+
+Proven live on the appliance: the IAM-v2 screen issues `/auth/whoami`, `/guest-accounts` and
+`/guest-accounts/portal` — and **does not request `/guest-access-plans` at all**. Three regressions pin it:
+zero plans under IAM-v2 with the legacy endpoint never called, a failing plans endpoint degrading the plan
+column rather than the screen, and legacy-with-no-plans naming the prerequisite.
+
+### PMS revision authoring was a race that surfaced as HTTP 500
+
+`revision_no` came from `(SELECT COALESCE(MAX(revision_no),0)+1 …)` inside the INSERT. Under READ COMMITTED
+that subquery snapshots at statement start and takes no lock. Hammering the endpoint did **not** reveal it —
+the window is sub-millisecond and 8 concurrent requests all succeeded — so it was proven deterministically by
+overlapping two real transactions:
+
+```
+session 1:  9        INSERT 0 1   COMMIT
+session 2:  ERROR: duplicate key value violates unique constraint
+            "pms_interface_revisions_pms_interface_id_revision_no_key"
+            DETAIL: Key (pms_interface_id, revision_no)=(…, 9) already exists.
+```
+
+Through the handler that was an HTTP 500 that leaked the index name. A transaction-scoped advisory lock keyed
+on the interface fixes the allocation — but that alone **moved** the 500 rather than removing it: holding the
+same lock externally for six seconds made the request block for 5017 ms and then fail on `dbCtx`'s ten-second
+cap. The wait is now bounded with `SET LOCAL lock_timeout`, and `55P03` is reported as the conflict it is.
+
+| Scenario (real PostgreSQL, on the appliance) | Result |
+|---|---|
+| 12 concurrent authorings on one interface | 12 × `201`, revision numbers 1–12, no duplicates, **no 500** |
+| the lock held externally for 6 s | `409` after 3021 ms — *"try again in a moment"* |
+| the lock held externally for 1 s | the request waits and returns `201` |
+
+Integration tests cover both properties: a `site_viewer` cannot create an interface or author a revision
+(`403` on each), and eight concurrent authorings yield eight distinct contiguous numbers with no `500`.
+
 ### DHCP on the guest VLAN: an appliance fault, and an external one
 
 **The appliance fault, found and fixed.** Kea's on-disk config was the pre-guest-network default — `br-lan`,
