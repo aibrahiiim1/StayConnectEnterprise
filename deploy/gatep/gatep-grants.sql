@@ -258,6 +258,7 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-acctd-guest-networks-grant.sql
 \ir svc-acctd-iamv2-accounting-grants.sql
 \ir svc-edged-phase2-commerce-grants.sql
+\ir svc-edged-phase345-admin-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason

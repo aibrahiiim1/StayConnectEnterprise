@@ -11,7 +11,7 @@
 // act around: the detail lives behind Manual Review, where every decision is audited.
 
 import { useCallback, useEffect, useState } from "react";
-import { api, FinancialHealth } from "@/lib/api";
+import { api, FinancialHealth, surfaceUnavailableMessage } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,7 @@ export function FinancialHealthView() {
       setHealth(r.health);
       setErr(null);
     } catch (e: any) {
-      setErr(e?.message ?? "Could not load financial health");
+      setErr(surfaceUnavailableMessage(e, "The financial subsystem"));
     } finally {
       setLoading(false);
     }

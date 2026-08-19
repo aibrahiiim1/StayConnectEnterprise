@@ -22,6 +22,7 @@ import {
   RecoveryStatus,
   ZeroAttemptQueue,
   ZeroAttemptRow,
+  surfaceUnavailableMessage,
 } from "@/lib/api";
 import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
@@ -78,7 +79,7 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
       setZero(z);
       setErr(null);
     } catch (e: any) {
-      setErr(e?.message ?? "Could not load recovery state");
+      setErr(surfaceUnavailableMessage(e, "Financial recovery"));
     }
   }, []);
 
@@ -154,6 +155,10 @@ export function FinancialRecoveryView({ canAct = true }: { canAct?: boolean }) {
     }
   }
 
+  // The error is rendered BEFORE the loading guard. When the load fails the state variable is never set,
+  // so a guard placed first returns "Loading…" forever and the alert further down is unreachable -- the
+  // screen tells the operator it is still working when it has already given up.
+  if (err) return <p role="alert" className="text-sm text-red-700">{err}</p>;
   if (!status) return <p role="status">Loading recovery state…</p>;
 
   if (!status.Active) {

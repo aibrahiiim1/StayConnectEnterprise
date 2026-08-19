@@ -97,7 +97,11 @@ export default function LicensePage() {
     try {
       const [s, l] = await Promise.all([
         api.get<SetupStatus>("/setup/status"),
-        api.get<LicenseStatus>("/license/status").catch(() => null),
+        // edged serves the license at "/license" -- there is no "/license/status". The wrong path 404ed on
+        // every load, and because the call is wrapped in .catch(() => null) it failed SILENTLY: the screen
+        // rendered as though the appliance had no license at all, which is the one thing a licensing page
+        // must never say incorrectly.
+        api.get<LicenseStatus>("/license").catch(() => null),
       ]);
       setSt(s); if (l) setLs(l); setErr(null);
     } catch (e) {
@@ -123,7 +127,9 @@ export default function LicensePage() {
     setUploading(true); setUploadErr(null); setUploadMsg(null);
     try {
       const text = await file.text();
-      await api.postRaw("/license/install", text.trim());
+      // Install is POST "/license", not "/license/install". Uploading a real licence file answered 404,
+      // so the operator saw an upload failure with no reason that pointed anywhere useful.
+      await api.postRaw("/license", text.trim());
       setUploadMsg("License file accepted and installed.");
       await load();
     } catch (err) {

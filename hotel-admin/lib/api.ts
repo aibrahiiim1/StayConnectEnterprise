@@ -67,6 +67,22 @@ export const api = {
 
 // ------- Types (edged /edge/v1 response shapes) -------
 
+// A phase-gated surface that edged has NOT enabled answers 404 "page not found" for every path under it,
+// because the routes are never mounted. Rendered raw, an operator sees "HTTP 404" on a screen the menu just
+// offered them, which reads as a broken product rather than a capability that is deliberately off.
+//
+// This is not something the UI can pre-empt: the screens are compiled in at BUILD time (NEXT_PUBLIC_PHASE*)
+// while mounting is decided at RUNTIME by edged's own flags, so the two can disagree on a given appliance --
+// and on this one they do. Saying so plainly is the honest surface. It is NOT a way to turn the capability
+// on: enabling it is a deliberate deployment decision, made in edged's configuration, not here.
+export function surfaceUnavailableMessage(e: unknown, surface: string): string {
+  if (e instanceof ApiError && e.status === 404) {
+    return `${surface} is not enabled on this appliance. The screens are present in this build, but the ` +
+      `backend does not serve them here, so there is nothing to show. Enabling it is a deployment decision.`;
+  }
+  return (e as { message?: string })?.message ?? `Could not load ${surface.toLowerCase()}`;
+}
+
 export type ListResp<T> = {
   data: T[];
   meta: { has_more: boolean };

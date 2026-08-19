@@ -470,3 +470,33 @@ func count(t *testing.T, p *pgxpool.Pool, q string, args ...any) int {
 	}
 	return n
 }
+
+// EVERY READ-ONLY ADMIN COLLECTION MUST ACTUALLY ANSWER.
+//
+// The Stays screen returned "query failed" on every request, because the listing ordered by
+// `s.updated_at` -- a column iam_v2.stays does not have. It could never have worked against any database
+// built from these migrations, and it survived because the route was MOUNTED in this harness but never
+// CALLED: mounting proves the route exists, not that its SQL is valid.
+//
+// A handler that swallows the driver error turns a schema mismatch into an opaque 500, so the cheapest
+// possible guard is to ask each collection for its first page and insist on a 200. That is enough to
+// execute the SQL, which is where this class of defect lives -- a missing column, a renamed table, a
+// projection that drifted from the schema.
+func TestIntegration_API_EveryReadOnlyCollectionAnswers(t *testing.T) {
+	f := newAPI(t)
+	for _, path := range []string{
+		"/pms-stays",
+		"/pms-events",
+		"/pms-resolutions",
+		"/pms-interfaces",
+		"/pms-routing",
+		"/pms-source-conflicts",
+		"/operational-alerts",
+		"/checkout-grace",
+	} {
+		status, body := f.do(t, "GET", path, nil)
+		if status != 200 {
+			t.Errorf("GET %s = %d (%v) -- the collection must answer, not fail", path, status, body)
+		}
+	}
+}

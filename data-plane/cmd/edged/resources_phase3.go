@@ -67,9 +67,19 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
+	// ORDERED BY ARRIVAL, because iam_v2.stays HAS NO updated_at.
+	//
+	// This listing ordered by s.updated_at, a column that does not exist in the schema, so every request to
+	// the Stays screen failed with "query failed" -- a 500 the handler produced by swallowing
+	// `column s.updated_at does not exist`. The screen could never have worked against any database built
+	// from these migrations; nothing listed stays through this endpoint in any test, so nothing said so.
+	//
+	// Arrival is the ordering an operator actually wants (most recent stays first) and it is a column the
+	// schema really keeps. Inventing an updated_at to satisfy the old query would have been the other way to
+	// make this compile, and it would have added a timestamp nothing maintains.
 	rows, err := s.db.Query(ctx, `SELECT `+stayCols+` FROM iam_v2.stays s
 		WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
-		ORDER BY s.updated_at DESC NULLS LAST, s.id LIMIT 200`, s.tenantID, statusArg)
+		ORDER BY s.arrival DESC NULLS LAST, s.id LIMIT 200`, s.tenantID, statusArg)
 	if err != nil {
 		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
 		return
