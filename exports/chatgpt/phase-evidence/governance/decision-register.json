@@ -601,6 +601,13 @@
       "decided_on": "2026-08-18",
       "phase": "post-roadmap",
       "accepted": true
+    },
+    {
+      "id": "D33",
+      "title": "DEVELOPMENT APPLIANCE IAM-v2 TRIAL ACCEPTED AND CLOSED, AND A POST-ACCEPTANCE DEVELOPMENT HARDENING AND HOTEL-ADMIN USABILITY SWEEP IS AUTHORIZED (2026-08-19). The Product Owner ACCEPTS AND CLOSES the DEVELOPMENT Appliance IAM-v2 trial at the verified 6773f03 / T0071 maturity. Every item recorded as ENVIRONMENT_BLOCKED or NOT_PROVEN remains EXACTLY UNPROMOTED by this acceptance -- in particular the checkout-to-grace supersession step (which requires a real PMS checkout event and is proven only at integration level against a real database), the guest Post-Stay journey, GUEST Device Self-Service, and any byte-accounting or ARP device-presence claim. This acceptance authorizes NO merge of PR #16, NO Production contact or cutover, NO real PMS, provider or financial traffic, NO data migration and NO legacy IAM retirement. SEPARATELY AUTHORIZED: a post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep on appliance 172.21.60.23 ONLY, carried out as a real operator would -- fixing the Guest Accounts page error and exercising the complete supported IAM-v2 account-admin lifecycle through the real Hotel Admin and API, fixing the left navigation so deep items such as VLAN and LAN settings do not jump the menu back to the top, a screen-by-screen and form-by-form walkthrough of every accessible screen, dialog and create/edit flow exercising safe supported actions with validation and read-back, verification that PMS Interface creation and editing expose every configuration value genuinely required by the approved contract and the implemented backend (including address and port and all other required real fields), and investigation and repair of the DHCP/VLAN failure in which a real device on the configured VLAN obtained no IP. The permanent two-NIC model is preserved: WAN plus LAN only, with WAN also management. No PMS event, network topology, guest traffic or protocol evidence may be fabricated.",
+      "decided_on": "2026-08-19",
+      "phase": "post-roadmap",
+      "accepted": true
     }
   ]
 }
