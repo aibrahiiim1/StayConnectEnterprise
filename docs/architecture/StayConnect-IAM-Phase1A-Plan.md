@@ -1,14 +1,14 @@
 # StayConnect IAM — Phase 1A Execution Plan (Core Domain & Persistence Foundation)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0073 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0074 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
-**Current activity:** `DEVELOPMENT_APPLIANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP`
+**Current activity:** `PRODUCTION_IAM_V2_CUTOVER_AND_LEGACY_IAM_RETIREMENT`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **iam_v2:** 68 tables, 0 rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.
-**Single next authorized action:** One Product-Owner REVIEW of the post-acceptance DEVELOPMENT hardening and Hotel-Admin usability sweep carried out under D33 (T0072, T0073) on appliance 172.21.60.23. The authorized execution of that sweep is COMPLETE. Guest Accounts renders and its full IAM-v2 account lifecycle was exercised against the real API, navigation shows exactly one active item on all 38 screens with a sidebar that keeps its position, seven screens that answered HTTP 500 now answer, the Licence screen is wired to the paths edged serves, four Phase-4 screens state that the capability is not enabled here, PMS interfaces gained the create and revision-authoring surface exposing the endpoint host:port and every other value the connector reads, and guest-VLAN DHCP survives a restart and a full reboot. REVIEW IS NOT ACCEPTANCE. No capability was enabled, no device DHCP test is claimed, and the zero-packet VLAN-90 interface is an upstream switch trunking matter reported rather than repaired. An IAM-v2 cutover, any capability enablement, Production contact and the disposition of the trial branch each require their own explicit Product-Owner decision. PRODUCTION remains untouched and PRE-LIVE, and no Production IAM transition strategy is approved.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D33`.
+**Single next authorized action:** One Product-Owner determination of the PRODUCTION TARGET, so the already-authorized cutover under D34 (T0074) can execute. Either designate the Production appliance with its host, enrollment identity and access, or confirm that appliance 172.21.60.23 is to be treated as the Production system despite the standing governance record that separates them. The cutover preflight is complete and a verified backup baseline is preserved at /var/backups/stayconnect/pre-cutover-20260819T174950Z on that appliance, holding a parsed custom-format database dump, role and privilege globals, configuration and unit files, service binaries and a SHA256SUMS manifest. Nothing irreversible has been done and PRODUCTION remains untouched and uncontacted.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D34`.
 <!-- END GENERATED PROJECT STATE -->
 
 
