@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `fef8af9989a2a9695d5a728912effce09ab582bb`
-- **HEAD commit:** `045ca2676d90766fad80694ef5e67ed809f53563`
-- **Provenance (generation HEAD = inventory_head):** `045ca2676d90766fad80694ef5e67ed809f53563`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `3e82f6db62d9c5e88a35d9b417a4cf191ea24b10`
+- **Provenance (generation HEAD = inventory_head):** `3e82f6db62d9c5e88a35d9b417a4cf191ea24b10`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `post-roadmap/dev-iamv2-trial`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 124
@@ -86,30 +86,30 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Replace the in-place cutover with a verified fresh-install path |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Replace the in-place cutover with a verified fresh-install path |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Replace the in-place cutover with a verified fresh-install path |
-| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
+| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
 | `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_045ca26.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/phase-evidence/GIT_STAT_3e82f6d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_d0e3904.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Replace the in-place cutover with a verified fresh-install path |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Replace the in-place cutover with a verified fresh-install path |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 5eddeca: D34/T0074, packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Replace the in-place cutover with a verified fresh-install path |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Replace the in-place cutover with a verified fresh-install path |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
 | `governance/transitions/T0066.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0067.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0068.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Transition receipts: stamp each before the commit that introduced it |
@@ -119,7 +119,7 @@
 | `governance/transitions/T0072.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Record D33/T0072: the DEVELOPMENT IAM-v2 trial is accepted and closed |
 | `governance/transitions/T0073.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0073 before the commit that introduced it |
 | `governance/transitions/T0074.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Accept T0073, merge PR #16, and stop at the Production target question |
-| `governance/transitions/T0075.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Replace the in-place cutover with a verified fresh-install path |
+| `governance/transitions/T0075.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0075 from the commit clock instead of by hand |
 | `hotel-admin/app/(app)/guest-accounts/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Model the legacy plans request as four outcomes, not an empty array |
 | `hotel-admin/app/(app)/layout.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Fix the Guest Accounts crash, the dead plan picker, and the navigation |
 | `hotel-admin/app/(app)/license/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
@@ -161,7 +161,7 @@
  data-plane/cmd/scd/credentials_handlers.go         |  18 +
  data-plane/cmd/scd/iamv2_guest_authority.go        | 177 +++++++
  data-plane/cmd/scd/iamv2_guest_authority_test.go   | 137 +++++
- data-plane/cmd/scd/iamv2_session_activate.go       | 338 ++++++++++++
+ data-plane/cmd/scd/iamv2_session_activate.go       | 338 +++++++++++++
  data-plane/cmd/scd/main.go                         |  25 +
  data-plane/cmd/scd/updates.go                      |  17 +-
  data-plane/cmd/scd/voucher_issue_iamv2.go          | 244 +++++++++
@@ -196,7 +196,7 @@
  deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql   |  83 +++
  .../gatep/svc-scd-iamv2-guest-commerce-grants.sql  |  59 +++
  deploy/gatep/svc-service-health-grants.sql         |  16 +
- deploy/gatep/svc-voucher-iamv2-grants.sql          |  28 +
+ deploy/gatep/svc-voucher-iamv2-grants.sql          |  28 ++
  deploy/kea/systemd/override.conf                   |  31 ++
  deploy/scripts/check-phase6-guest-dependency.sh    |  21 +
  deploy/scripts/deploy-hotel-admin.sh               | 133 ++++-
@@ -213,12 +213,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   8 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   8 +-
  docs/context/StayConnect-IAM-Handoff.md            |   8 +-
- docs/manifests/Phase7-change-manifest.md           | 565 +++++++++++++--------
+ docs/manifests/Phase7-change-manifest.md           | 560 +++++++++++++--------
  .../reports/StayConnect-IAM-Phase7-Final-Report.md | 127 +++--
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 314657 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 125484 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42348 bytes
- .../chatgpt/phase-evidence/GIT_STAT_045ca26.txt    |   4 +
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 125475 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42349 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_3e82f6d.txt    |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_d0e3904.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -263,7 +263,7 @@
  .../tests/project_state_validator/run_mutations.py |  36 +-
  tools/validate-current-state-parity.py             | 242 ++++++++-
  tools/validate-project-state.sh                    |   2 +-
- 124 files changed, 9266 insertions(+), 634 deletions(-)
+ 124 files changed, 9261 insertions(+), 634 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -272,26 +272,21 @@ M  docs/manifests/Phase7-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_045ca26.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_5eddeca.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_045ca26.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_3e82f6d.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/governance/decision-register.json
-M  exports/chatgpt/phase-evidence/tools/validate-project-state.sh
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 3e82f6d Stamp T0075 from the commit clock instead of by hand
+HISTORICAL: 619c013 Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest
 HISTORICAL: 045ca26 Replace the in-place cutover with a verified fresh-install path
 HISTORICAL: 56a36ce Delivery at 5eddeca: D34/T0074, packs and manifest
 HISTORICAL: 5eddeca Accept T0073, merge PR #16, and stop at the Production target question
