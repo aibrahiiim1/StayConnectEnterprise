@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `fef8af9989a2a9695d5a728912effce09ab582bb`
-- **HEAD commit:** `c4e13a97e100341daeef7cc3200acc75ec20ebef`
-- **Provenance (generation HEAD = inventory_head):** `c4e13a97e100341daeef7cc3200acc75ec20ebef`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `0f740e9f9a0c7efa6fef92e4e4b7f410454090e0`
+- **Provenance (generation HEAD = inventory_head):** `0f740e9f9a0c7efa6fef92e4e4b7f410454090e0`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `post-roadmap/dev-iamv2-trial`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 119
@@ -22,7 +22,7 @@
 | `data-plane/cmd/edged/resources_commerce.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Spell gracePolicyFromConfig correctly |
 | `data-plane/cmd/edged/resources_guest_accounts.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Fix the Guest Accounts crash, the dead plan picker, and the navigation |
 | `data-plane/cmd/edged/resources_phase3.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
-| `data-plane/cmd/edged/resources_phase3_interface_authoring.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Give PMS interfaces the configuration surface they never had |
+| `data-plane/cmd/edged/resources_phase3_interface_authoring.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Rename nullIfEmpty, which already existed behind the integration build tag |
 | `data-plane/cmd/edged/resources_phase3_interfaces.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Give PMS interfaces the configuration surface they never had |
 | `data-plane/cmd/edged/resources_plans_vouchers.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Implement IAM-v2 voucher issuance on the accepted key-generation model |
 | `data-plane/cmd/portald/iamv2_commerce_session.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Validate the whole trusted identity on activation, and make success mean enforced |
@@ -84,30 +84,30 @@
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
-| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
+| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
 | `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
-| `exports/chatgpt/phase-evidence/GIT_STAT_c4e13a9.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
+| `exports/chatgpt/phase-evidence/GIT_STAT_0f740e9.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_d0e3904.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at bdb2161: D33/T0072 acceptance, packs and manifest |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Record T0073: the hardening and usability sweep is executed |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Record D33/T0072: the DEVELOPMENT IAM-v2 trial is accepted and closed |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at 905f7eb: T0073, packs and manifest for the sweep |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at c4e13a9: packs and manifest |
 | `governance/transitions/T0066.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0067.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0068.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Transition receipts: stamp each before the commit that introduced it |
@@ -144,7 +144,7 @@
  data-plane/cmd/edged/resources_commerce.go         | 174 ++++++-
  data-plane/cmd/edged/resources_guest_accounts.go   |  63 ++-
  data-plane/cmd/edged/resources_phase3.go           |  12 +-
- .../edged/resources_phase3_interface_authoring.go  | 283 +++++++++++
+ .../edged/resources_phase3_interface_authoring.go  | 285 +++++++++++
  .../cmd/edged/resources_phase3_interfaces.go       |   4 +
  data-plane/cmd/edged/resources_plans_vouchers.go   |  19 +-
  data-plane/cmd/portald/iamv2_commerce_session.go   | 276 +++++++++++
@@ -206,12 +206,12 @@
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   8 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   8 +-
  docs/context/StayConnect-IAM-Handoff.md            |   8 +-
- docs/manifests/Phase7-change-manifest.md           | 529 +++++++++++++--------
+ docs/manifests/Phase7-change-manifest.md           | 531 +++++++++++++--------
  .../reports/StayConnect-IAM-Phase7-Final-Report.md | 127 +++--
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 316172 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 124368 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42543 bytes
- .../chatgpt/phase-evidence/GIT_STAT_c4e13a9.txt    |   4 +
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 124390 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42545 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_0f740e9.txt    |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_d0e3904.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -253,7 +253,7 @@
  .../tests/project_state_validator/run_mutations.py |  36 +-
  tools/validate-current-state-parity.py             | 242 +++++++++-
  tools/validate-project-state.sh                    |   2 +-
- 119 files changed, 7824 insertions(+), 621 deletions(-)
+ 119 files changed, 7828 insertions(+), 621 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -262,8 +262,8 @@ M  docs/manifests/Phase7-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_905f7eb.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_c4e13a9.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_0f740e9.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_c4e13a9.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -275,6 +275,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 0f740e9 Rename nullIfEmpty, which already existed behind the integration build tag
+HISTORICAL: a5f0d12 Delivery at c4e13a9: packs and manifest
 HISTORICAL: c4e13a9 Stamp T0073 before the commit that introduced it
 HISTORICAL: b01165b Delivery at 905f7eb: T0073, packs and manifest for the sweep
 HISTORICAL: 905f7eb Record T0073: the hardening and usability sweep is executed

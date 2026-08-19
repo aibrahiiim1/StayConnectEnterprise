@@ -1,0 +1,4 @@
+commit 0f740e9f9a0c7efa6fef92e4e4b7f410454090e0
+Date:   Wed Aug 19 10:37:39 2026 +0300
+
+    Rename nullIfEmpty, which already existed behind the integration build tag
