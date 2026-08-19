@@ -1,7 +1,7 @@
 {
   "transition_id": "T0073",
   "seq": 73,
-  "timestamp": "2026-08-19T07:30:00Z",
+  "timestamp": "2026-08-19T07:20:00Z",
   "record_type": "POST_ACCEPTANCE_HARDENING_AND_HOTEL_ADMIN_USABILITY_SWEEP_EXECUTED",
   "previous_state": {
     "phase": "7",
