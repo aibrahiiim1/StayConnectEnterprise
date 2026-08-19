@@ -206,20 +206,46 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// THE FINANCIAL CURRENCY PAIR IS A PHASE-4 COLUMN, AND THIS IS A PHASE-3 SURFACE.
+	//
+	// financial_base_currency and its exponent are added by migration 0011. Naming them unconditionally made
+	// the whole endpoint fail on any deployment that stops at 0010 -- which is exactly what the Phase-3 CI
+	// schema is, and it turned every authoring request there into a 500. The appliance carries every
+	// migration, so the defect was invisible on it.
+	//
+	// So the columns are named only when the operator actually supplied a currency. Authoring without one --
+	// the only sensible thing to do before Phase 4 exists -- works on both schemas, and asking for a currency
+	// where the schema cannot store it is refused with the reason rather than an internal error.
+	cur := strings.TrimSpace(in.FinancialBaseCurrency)
 	var revID string
 	var revNo int
-	err = tx.QueryRow(ctx, `
-	    INSERT INTO iam_v2.pms_interface_revisions
-	      (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, folio_identity_strategy,
-	       config, normalization_version, financial_base_currency, financial_base_currency_exponent)
-	    VALUES ($1,$2,$3,
-	            (SELECT COALESCE(MAX(revision_no),0)+1 FROM iam_v2.pms_interface_revisions
-	              WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3),
-	            $4,$5,$6::jsonb,$7,$8,$9)
-	    RETURNING id::text, revision_no`,
-		s.tenantID, s.siteID, id, in.SourceTimezone, in.FolioIdentityStrategy, string(raw),
-		in.NormalizationVersion, nullIfBlankText(in.FinancialBaseCurrency), in.FinancialCurrencyExp,
-	).Scan(&revID, &revNo)
+	const revNoExpr = `(SELECT COALESCE(MAX(revision_no),0)+1 FROM iam_v2.pms_interface_revisions
+	                     WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3)`
+	if cur == "" {
+		err = tx.QueryRow(ctx, `
+		    INSERT INTO iam_v2.pms_interface_revisions
+		      (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, folio_identity_strategy,
+		       config, normalization_version)
+		    VALUES ($1,$2,$3,`+revNoExpr+`,$4,$5,$6::jsonb,$7)
+		    RETURNING id::text, revision_no`,
+			s.tenantID, s.siteID, id, in.SourceTimezone, in.FolioIdentityStrategy, string(raw),
+			in.NormalizationVersion).Scan(&revID, &revNo)
+	} else {
+		err = tx.QueryRow(ctx, `
+		    INSERT INTO iam_v2.pms_interface_revisions
+		      (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, folio_identity_strategy,
+		       config, normalization_version, financial_base_currency, financial_base_currency_exponent)
+		    VALUES ($1,$2,$3,`+revNoExpr+`,$4,$5,$6::jsonb,$7,$8,$9)
+		    RETURNING id::text, revision_no`,
+			s.tenantID, s.siteID, id, in.SourceTimezone, in.FolioIdentityStrategy, string(raw),
+			in.NormalizationVersion, cur, in.FinancialCurrencyExp).Scan(&revID, &revNo)
+		if isUndefinedColumn(err) {
+			jsonErr(w, http.StatusBadRequest, "validation",
+				"this deployment cannot store a financial base currency for a PMS interface: leave the "+
+					"currency and exponent empty, or deploy the financial migrations first")
+			return
+		}
+	}
 	if err != nil {
 		// The lock removes the race between two callers of THIS endpoint. A unique violation can still reach
 		// here if a revision is inserted by some other path that does not take the lock, and that is a
@@ -348,4 +374,11 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 func isLockNotAvailable(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "55P03"
+}
+
+// isUndefinedColumn reports PostgreSQL's undefined_column (42703), which here means the deployment predates
+// the migration that adds the column rather than anything the request got wrong about its own shape.
+func isUndefinedColumn(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42703"
 }
