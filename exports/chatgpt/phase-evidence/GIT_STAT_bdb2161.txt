@@ -1,4 +1,0 @@
-commit bdb2161b634195a71deed28e62e85b6faf1b972f
-Date:   Wed Aug 19 09:30:06 2026 +0300
-
-    Record D33/T0072: the DEVELOPMENT IAM-v2 trial is accepted and closed
