@@ -1,0 +1,49 @@
+{
+  "transition_id": "T0076",
+  "seq": 76,
+  "timestamp": "2026-08-20T00:00:00Z",
+  "record_type": "CLEAN_INSTALL_PATH_HARDENED_AND_DEVELOPMENT_RECONCILIATION_CORRECTED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "CLEAN_INSTALL_PATH_VERIFIED_AWAITING_PRODUCT_OWNER_PROVIDED_SERVER",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "CLEAN_INSTALL_PATH_HARDENED_TWO_BLOCKERS_REMAIN_AWAITING_PRODUCT_OWNER_PROVIDED_SERVER",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D35",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Executed under the existing D35 decision (T0075). No new Product-Owner architecture decision is created: the authoritative baseline is the already-approved FINAL contract and Phase-1A evidence.",
+  "previous_state_note": "The first clean-install audit misattributed the cross-schema foreign key to iam_v2.pms_interfaces, queried pg_constraint for an object MG-0 creates as a unique INDEX, and therefore reported that the development appliance lacked the contract-defined anchor and had diverged from committed mg1. It also claimed an exact match to the appliance on the strength of a table count.",
+  "new_state_note": "Both claims are RETRACTED. Re-queried read-only, the appliance carries guest_networks_tsi_anchor valid and ready with exactly the contract definition, and iam_v2.guest_network_pms_map carries the composite FK to public.guest_networks (tenant_id, site_id, id) -- precisely what the Phase-1A live-dark acceptance records. Nothing drifted and there are not two competing baselines. The clean-install path is now production-grade in the repository: the accepted IAM base and MG-0 are promoted into an ordered, ledger-recorded path before 0009, the IAM ownership roles come from deploy/gatep/gatep-iam-roles.sql instead of the scratch fixture, three service-created tables are declared by migration 0048, the reconstruction uses the appliance's own TimescaleDB image and the real Gate-P role and grant path, and a semantic comparison covering columns, constraints, indexes, triggers, functions, ownership, memberships and grants shows the structural surface IDENTICAL.",
+  "phase_affected_note": "post-roadmap (D35/T0075 fresh-deployment preparation)",
+  "corrected_findings": [
+    "RETRACTED: committed mg1 does not FK pms_interfaces to guest_networks. The anchor belongs to iam_v2.guest_network_pms_map (tenant_id, site_id, guest_network_id) -> public.guest_networks (tenant_id, site_id, id).",
+    "RETRACTED: the development appliance did not lose the anchor. MG-0 creates it as a unique INDEX and the earlier check queried pg_constraint, which cannot see one. guest_networks_tsi_anchor is present, valid and ready with the exact contract definition.",
+    "RETRACTED: 'matches the appliance exactly' rested on a table count and is replaced by a semantic catalog comparison.",
+    "CORRECTED: IAM base and MG-0 promoted to data-plane/migrations/iam_base/, applied between 0008 and 0009 and recorded in schema_migrations. iam_v2_scratch retained as provenance only.",
+    "CORRECTED: edge_executed_commands, edge_installed_updates and edge_offline_packages were created by scd at runtime and are now declared by migration 0048.",
+    "CORRECTED: iam_v2_owner and iam_v2_migrator promoted from the scratch fixture into deploy/gatep/gatep-iam-roles.sql.",
+    "CORRECTED: the reconstruction uses timescale/timescaledb:2.16.1-pg16, without which the hypertable insert-blocker triggers were silently absent."
+  ],
+  "remaining_blockers": [
+    "OWNERSHIP: 26 iam_v2 objects created by migrations 0009+ are owned by the platform role in a clean build and by iam_v2_owner on the appliance. Those migrations must run as the platform role because they maintain public.schema_migrations. An explicit ownership-reassertion step is required before a production install, because ownership decides what the SECURITY DEFINER boundary functions execute as.",
+    "CONFIGURATION-SELECTABLE LEGACY AUTHORITY: treated as a Production-readiness blocker per the zero-superseded-active-dependency objective. The authority switch is call-level across six files, so legacy guest-auth remains compiled in and selectable by configuration. Per-object assessment recorded: guest_accounts, ticket_templates, vouchers, voucher_batches, sessions, auth_otps and guests are superseded; operators, operator_roles, tenants, sites, appliances, guest_networks, audit_log and accounting_records are retained platform foundations."
+  ],
+  "boundaries_observed": [
+    "172.21.60.23 NOT modified. Every query against it was read-only reference evidence.",
+    "No deployment to any server. No Production appliance exists or was contacted.",
+    "No historical migration, scratch file or governance evidence deleted.",
+    "The reconstruction ran in disposable containers on the workstation and copied no runtime state.",
+    "No capability enabled, no PMS, provider or financial traffic, two-NIC model and all permanent product rules preserved."
+  ],
+  "next": "Product-Owner provision of the new Production server and access, plus a decision on the two remaining blockers: the ownership-reassertion step and the removal of the configuration-selectable legacy authority."
+}
