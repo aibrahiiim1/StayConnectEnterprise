@@ -1,4 +1,0 @@
-commit 905f7ebeba8dfefd7c26e677e1cf555f4e4a0217
-Date:   Wed Aug 19 10:25:57 2026 +0300
-
-    Record T0073: the hardening and usability sweep is executed

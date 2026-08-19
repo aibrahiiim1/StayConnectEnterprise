@@ -1,0 +1,4 @@
+commit c4e13a97e100341daeef7cc3200acc75ec20ebef
+Date:   Wed Aug 19 10:26:42 2026 +0300
+
+    Stamp T0073 before the commit that introduced it
