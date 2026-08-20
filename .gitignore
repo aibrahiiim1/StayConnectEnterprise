@@ -45,3 +45,4 @@ __pycache__/
 # evidence lives in docs/evidence/phase4/, which is what a reviewer should read.
 .phase4-evidence/
 .cleanroom/
+.cleanroom-baseline/
