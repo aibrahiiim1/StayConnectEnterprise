@@ -59,3 +59,47 @@ func (s *server) endActiveSessionByIP(ctx context.Context, ip net.IP, reason str
 		s.tenID, s.siteID, ip.String(), reason)
 	return err
 }
+
+// reserveLicensedSlot admits one more concurrent guest on THIS APPLIANCE, or refuses.
+//
+// SCOPE IS THE APPLIANCE, NOT THE SITE AND NOT THE TENANT. One licence is issued per appliance -- it is bound
+// to that appliance's hardware serial and WAN MAC -- so two appliances under the same customer and the same
+// site must admit guests concurrently, each enforcing only its own limit, with no cross-appliance
+// serialization and no capacity leaking between them. The superseded session manager scoped and locked on the
+// appliance id for exactly this reason. The scope moved with the authority; it did not change.
+//
+// COUNTING INSIDE THE TRANSACTION IS NOT ENOUGH. Under READ COMMITTED two concurrent activations both read
+// the pre-insert count, both find the last slot free, and both insert -- which is precisely how a licensed
+// limit gets exceeded by the number of simultaneous logins. The advisory lock makes check-then-insert atomic.
+// It is taken on the APPLIANCE id, so contention is confined to one appliance's admissions, and it is a
+// transaction-scoped lock, so it is released on commit AND on rollback without any unlock path to forget.
+//
+// iam_v2.sessions carries no appliance_id; the DEVICE does, and a session's device is where the appliance
+// identity lives. The join is the accurate scope rather than a convenience.
+//
+// A non-positive limit means unlimited. Central Control Plane availability plays no part: the number comes
+// from the signed licence on disk, so guest admission stays local-first and survives an outage.
+//
+// It must be called INSIDE the same transaction that inserts the session. Called anywhere else it proves
+// nothing, because the lock would be gone before the row existed.
+func reserveLicensedSlot(ctx context.Context, tx pgx.Tx, applianceID string, limit int64) error {
+	if limit <= 0 {
+		return nil // unlimited
+	}
+	if _, err := tx.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 7))`, applianceID); err != nil {
+		return err
+	}
+	var online int64
+	if err := tx.QueryRow(ctx, `
+	    SELECT count(*) FROM iam_v2.sessions se
+	      JOIN iam_v2.devices d ON d.id = se.device_id
+	     WHERE d.appliance_id = $1::uuid AND se.ended IS NULL
+	       AND se.state IN ('active','PENDING_ENFORCEMENT')`, applianceID).Scan(&online); err != nil {
+		return err
+	}
+	if online >= limit {
+		return &licenseCapacityError{Limit: limit, Current: online}
+	}
+	return nil
+}

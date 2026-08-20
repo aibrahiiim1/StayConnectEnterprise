@@ -140,6 +140,21 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-production-build --
           bash -c "go build -tags stayconnect_production ./... && go vet -tags stayconnect_production ./... && go test -tags stayconnect_production ./internal/iamv2/... -count=1"
 
+      # THE FACTORY-CLEAN PRODUCTION BASELINE. A new appliance is built from the baseline, not from the
+      # historical migrations, and must never construct the superseded guest-IAM tables -- not even
+      # transiently. The verifier arms a DDL event trigger on the empty database before the first object
+      # exists, so a baseline that built one cannot finish, and then compares the resulting catalog fact by
+      # fact against the upgrade path's end state so the two cannot drift.
+      # Both paths, in order: the upgrade path first so its catalog exists, then the baseline,
+      # which compares itself against it. Running the baseline alone would still prove "never
+      # constructed" but would silently skip the agreement check, and drift between the two is
+      # the failure that matters most.
+      - name: Factory-clean Production baseline (current-only, disposable PG)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh factory-clean-baseline --
+          bash -c "bash $GITHUB_WORKSPACE/scripts/clean-install-reconstruction.sh &&
+                   bash $GITHUB_WORKSPACE/scripts/factory-clean-baseline-verify.sh"
+
       - name: go test -race (all Phase-3 concurrency-sensitive paths)
         working-directory: data-plane
         # pmsd, resolver, auth context, stay grant, checkout, scd, acctd, netd, and the controlled-writer guard.

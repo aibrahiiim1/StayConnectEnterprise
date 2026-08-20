@@ -21,7 +21,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MIG="$ROOT/data-plane/migrations"
 BASE="$MIG/iam_base"
 GATEP="$ROOT/deploy/gatep"
-C="sc-cleanroom-$$"
+# CLEANROOM_NAME lets a caller (the baseline generator) name the container it will dump from.
+C="${CLEANROOM_NAME:-sc-cleanroom-$$}"
 OUT="${CLEANROOM_OUT:-$ROOT/.cleanroom}"
 REF="${CLEANROOM_REFERENCE:-}"
 mkdir -p "$OUT"
@@ -47,7 +48,12 @@ bad()  { printf '  FAIL: %s\n' "$*"; fail=1; }
 # TimescaleDB is present. Reconstructing on plain postgres builds a schema that looks complete and silently
 # lacks them, which is exactly the class of difference a table count cannot see.
 echo "== blank PostgreSQL cluster (never saw any appliance) =="
-docker run -d --name "$C" -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=stayconnect_site \
+# CLEANROOM_PORT publishes 5432 so a process on the host can reach the built schema. Unset by
+# default: the reconstruction itself talks to the container through docker exec and needs no port.
+PORTARG=""
+[ -n "${CLEANROOM_PORT:-}" ] && PORTARG="-p ${CLEANROOM_PORT}:5432"
+# shellcheck disable=SC2086  # PORTARG is empty or exactly two words; quoting would pass "" as an arg
+docker run -d --name "$C" $PORTARG -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=stayconnect_site \
   "${CLEANROOM_IMAGE:-timescale/timescaledb:2.16.1-pg16}" >/dev/null
 # The TimescaleDB image starts a TEMPORARY server to run its initialisation, then shuts it down and starts
 # the real one. pg_isready -- and even a successful query -- can therefore hit a server that is about to

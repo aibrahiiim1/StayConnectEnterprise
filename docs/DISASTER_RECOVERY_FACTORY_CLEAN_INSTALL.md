@@ -43,35 +43,60 @@ run on a production appliance.**
 
 ---
 
-## 2. The ordered install path
+## 2. Two install paths, and which one a Production appliance uses
 
-Order is load-bearing, and it is not the numeric order of the files:
+A brand-new Production appliance and an existing installation reach the same schema by different routes, and
+conflating them is what the Zero-Legacy criterion rejects.
+
+### 2a. FACTORY-CLEAN BASELINE — what a NEW Production appliance uses
 
 ```
-0. timescale/timescaledb:2.16.1-pg16                    the appliance's own image (see §4E)
+0. timescale/timescaledb:2.16.1-pg16                    the appliance's own image (§4E)
 1. deploy/gatep/gatep-roles.sql                         the four runtime service roles, no passwords
-2. data-plane/migrations/0001..0008                     public platform (0002 creates public.guest_networks)
-3. deploy/gatep/gatep-iam-roles.sql                     iam_v2_owner + iam_v2_migrator, CREATE + REFERENCES
-4. data-plane/migrations/iam_base/mg0_guest_networks_tsi_anchor.sql
-                                                        the contract-defined tenant/site anchor
-5. data-plane/migrations/iam_base/mg1..mg9              the IAM-v2 domain, applied AS iam_v2_owner
-6. data-plane/migrations/0009..0049                     everything that builds on the IAM domain;
-                                                        0049 removes the superseded guest-IAM domain (§4H)
-7. deploy/gatep/gatep-iam-ownership.sql                 assert iam_v2 ownership (see §4F) — BEFORE the grants
-8. deploy/gatep/gatep-grants.sql                        least-privilege grants + fail-closed assertions
+2. deploy/gatep/gatep-iam-roles.sql                     iam_v2_owner + iam_v2_migrator
+3. data-plane/migrations/baseline/0000_production_baseline.sql
+                                                        the CURRENT schema, and only the current schema
+4. deploy/gatep/gatep-iam-roles.sql                     again: its REFERENCES grant needs guest_networks
+5. deploy/gatep/gatep-iam-ownership.sql                 assert iam_v2 ownership (§4F)
+6. deploy/gatep/gatep-grants.sql                        least-privilege grants + fail-closed assertions
 ```
 
-Step 7 precedes step 8 so the privilege bootstrap is applied to the final ownership state rather than to an
-intermediate one.
+**The superseded guest-IAM tables are never constructed on this path — not even transiently.** That is
+stronger than "the final catalog is clean", and the difference is not academic: a create-then-drop install
+leaves those tables in every WAL segment, in any backup taken mid-install, and in the install log a reviewer
+reads. Proved by `scripts/factory-clean-baseline-verify.sh`, which arms a **DDL event trigger on the empty
+database before the first object exists**; any `CREATE TABLE` of a superseded name aborts the install. A
+catalog check afterwards cannot tell "never created" from "created and dropped". This can, and it was
+verified by deliberately appending `CREATE TABLE public.vouchers` to the baseline and watching it refuse.
 
-Every step, base steps included, is recorded in `schema_migrations`. Steps 4-5 sit between `0008` and `0009`
-because `0009` is the first migration to address `iam_v2` objects, and `mg1` in turn needs
-`public.guest_networks` from `0002`.
+The baseline is **generated, not hand-maintained** — `scripts/generate-production-baseline.sh` dumps the end
+state of the upgrade path — and the verifier compares the two catalogs fact by fact, so the paths cannot
+drift into new and existing appliances running different schemas.
 
-Run `scripts/clean-install-reconstruction.sh` to build and verify this path in a disposable container. It
-touches no appliance, seeds no identity, and reports what the build actually produced.
+### 2b. UPGRADE PATH — what an EXISTING installation uses
 
----
+```
+0-3. as above, then
+4.  data-plane/migrations/0001..0008                    public platform (0002 creates public.guest_networks)
+5.  data-plane/migrations/iam_base/mg0..mg9             the anchor, then the IAM-v2 domain
+6.  data-plane/migrations/0009..0049                    0049 removes the superseded guest-IAM domain (§4H)
+7.  Gate-P ownership and grants
+```
+
+This path still creates the superseded tables and then drops them, because that is what actually happened to
+those installations. History is not rewritten.
+
+### 2c. Migration 0049 is a one-way boundary
+
+`0049` is **destructive and non-reconstructive**. Its down migration deliberately does **not** recreate
+`sessions`, `guests`, `guest_accounts`, `vouchers`, `voucher_batches`, `ticket_templates` or `payments`; it
+restores only the two nullable columns it dropped, so the boundary can be crossed in an upgrade rehearsal
+without pretending the data came back.
+
+**The rollback contract for 0049 is a restore, not a DDL step.** Before applying it: take a full database
+backup and verify it restores. If an installation must return to the superseded domain, restore that backup.
+Recreating empty tables no code can read would give back the risk and none of the function, and would leave
+an operator believing they had rolled back when they had only rebuilt the shape.
 
 ## 3. Corrections to the first audit
 
@@ -300,41 +325,60 @@ code can read are the risk without the function, and a real rollback is a restor
 
 ## 5. Factory-clean verification evidence
 
-`scripts/clean-install-reconstruction.sh`, blank `timescale/timescaledb:2.16.1-pg16` container on a
-workstation, never connected to any appliance. 59 install steps applied, all recorded in the ledger.
+### 5a. The factory-clean BASELINE path (what Production uses)
+
+`scripts/factory-clean-baseline-verify.sh`, blank `timescale/timescaledb:2.16.1-pg16`, never connected to
+any appliance:
 
 ```
-CLEAN_INSTALL_RECONSTRUCTION = PASS
-guest_networks_tsi_anchor present and valid, definition matches the contract
-guest_network_pms_map composite FK to guest_networks present
-gatep-iam-ownership.sql applied; re-applied cleanly (idempotent)
-every iam_v2 table, view, sequence, function and procedure is owned by iam_v2_owner
-all 67 SECURITY DEFINER functions in iam_v2 execute as iam_v2_owner
-schema iam_v2 is owned by iam_v2_owner
-PRODUCTION build: refuses every configuration that would select the superseded guest authority
-DEVELOPMENT build: keeps the configurable behaviour the accepted trial evidence depends on
-none of the superseded guest-IAM tables exist
-no foreign key references any removed object
-auth_otps and social_oauth_states carry no access-plan coupling
-the IAM-v2 guest domain is present and is the only one
-public tables 37 | iam_v2 tables 74 | identity-bearing tables all 0 rows
+FACTORY_CLEAN_BASELINE = PASS (current-only: the superseded guest-IAM tables were never constructed)
+tripwire armed before a single object exists
+baseline applied with the tripwire armed throughout
+none exist  ·  no foreign key references any of them
+every iam_v2 object is owned by iam_v2_owner
+every SECURITY DEFINER function executes as iam_v2_owner
+guest_networks_tsi_anchor present and valid  ·  guest_network_pms_map composite FK present
+every identity-bearing table is empty
+catalog facts: 8104  ·  IDENTICAL to the upgrade path's end state
 ```
 
-`public` went from 44 tables to **37**: the seven superseded guest-IAM tables are absent from a factory-clean
-Production schema, not merely unreachable. The IAM-v2 guest domain (`sessions`, `guest_principals`,
-`guest_access_accounts`, `vouchers`, `voucher_batches`, `entitlements`, `internet_packages`) is present and
-**empty** — a principal, account, voucher or session arrives through enrolment, licensing and Hotel-Admin
-configuration, never with the schema.
+The tripwire was checked by appending `CREATE TABLE public.vouchers` to the baseline: the install aborted.
+A verifier that cannot fail is not evidence.
 
-The comparison against the development-appliance reference is no longer the acceptance test and is
-deliberately **not** reproduced here as a parity claim: that appliance still carries the superseded domain, so
-the two schemas are now *supposed* to differ. What the earlier comparison established — that columns,
-constraints, indexes, triggers and schema ownership were otherwise identical, and that every runtime service
-role had an identical EXECUTE surface — remains in the T0077/T0078 record for audit.
+### 5b. The UPGRADE path
+
+`scripts/clean-install-reconstruction.sh`, 59 ledger-recorded steps, `CLEAN_INSTALL_RECONSTRUCTION = PASS`,
+ending with none of the superseded tables, no foreign key referencing them, and the IAM-v2 guest domain
+present and empty. `public` 44 → 37 tables.
+
+### 5c. The licensed concurrent-guest gate
+
+Scope resolved from the accepted implementation, not assumed: **per APPLIANCE**. One licence is issued per
+appliance and bound to its hardware serial and WAN MAC, and the superseded session manager took a
+transaction advisory lock on the appliance id and counted that appliance's sessions. The scope moved with the
+authority; it did not change. `iam_v2.sessions` carries no `appliance_id` — the DEVICE does — so the count
+joins through it.
+
+Four integration tests in `cmd/scd/license_capacity_integration_test.go`, against a real PostgreSQL:
+
+| Test | Proves |
+|---|---|
+| `ForcedInterleavingCannotOverfill` | two transactions held open across the check-then-insert window; the second **blocks** and is refused |
+| `LastSlotIsRaceSafe` | 16 simultaneous contenders for one slot → exactly 1 admitted, 15 refused, never over the licence |
+| `AppliancesAreIndependent` | appliance A full does not block B; B's guests do not count against A; B enforces its own limit |
+| `AppliancesRaceIndependently` | both appliances race for their own last slot at once; each ends at exactly its own limit |
+| `UnlimitedDoesNotSerialize` | a non-positive limit takes no lock and refuses nothing |
+
+**Each was checked by breaking the thing it guards.** Removing the advisory lock fails
+`ForcedInterleavingCannotOverfill`; widening the scope from appliance to site fails both independence tests.
+The 16-way stress test alone did **not** catch a missing lock — it passed three runs without one — which is
+why the forced-interleaving test exists and why the stress test is not the evidence.
+
+Central Control Plane availability plays no part: the limit is read from the signed licence on disk, so guest
+admission remains local-first.
 
 **Build and test.** `go build`, `go vet` and `go test ./...` pass on both the development build and the
-production build (`-tags stayconnect_production`); the Hotel-Admin Next build is clean with the superseded
-pages removed.
+production build (`-tags stayconnect_production`); the Hotel-Admin Next build and 83 Playwright tests pass.
 
 ## 6. Disaster-recovery / fresh-install procedure
 

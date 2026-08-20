@@ -42,4 +42,19 @@ END $$;
 -- iam_v2.guest_network_pms_map (tenant_id, site_id, guest_network_id)
 --   -> public.guest_networks (tenant_id, site_id, id), through guest_networks_tsi_anchor.
 -- REFERENCES only -- not SELECT, not INSERT. The IAM domain anchors to the platform, it does not read it.
-GRANT REFERENCES ON public.guest_networks TO iam_v2_owner;
+-- GUARDED so this file is ORDER-INDEPENDENT.
+--
+-- Two install paths need it in opposite orders. The UPGRADE path runs this before migration 0009, by which
+-- point 0002 has created public.guest_networks. The factory-clean BASELINE path carries its own privileges,
+-- which name iam_v2_owner, so the roles must exist BEFORE the baseline is applied -- and at that moment
+-- guest_networks does not exist yet.
+--
+-- Rather than pick an order that breaks one of them, the grant is skipped when its target is absent and the
+-- file is applied again after the schema exists. It is idempotent either way.
+DO $$ BEGIN
+  IF to_regclass('public.guest_networks') IS NOT NULL THEN
+    EXECUTE 'GRANT REFERENCES ON public.guest_networks TO iam_v2_owner';
+  ELSE
+    RAISE NOTICE 'public.guest_networks does not exist yet; re-run this file after the schema is built';
+  END IF;
+END $$;
