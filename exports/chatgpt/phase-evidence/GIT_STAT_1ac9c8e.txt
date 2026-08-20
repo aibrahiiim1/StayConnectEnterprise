@@ -1,0 +1,4 @@
+commit 1ac9c8ebe8c9212f5212e252aca749c32fc1d103
+Date:   Thu Aug 20 13:20:23 2026 +0300
+
+    Remove the legacy authority dimension from the Guest Accounts screen
