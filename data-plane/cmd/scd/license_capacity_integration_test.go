@@ -38,7 +38,6 @@ type capFixture struct {
 	pool       *pgxpool.Pool
 	tenant     string
 	site       string
-	entitle    string
 	applianceA string
 	applianceB string
 }
@@ -63,7 +62,8 @@ func newCapFixture(t *testing.T) *capFixture {
 		Scan(&f.applianceA, &f.applianceB); err != nil {
 		t.Fatalf("appliance ids: %v", err)
 	}
-	f.mint(t)
+	// Once per fixture, before anything runs concurrently.
+	f.ensureTenantSite(t)
 	return f
 }
 
@@ -75,6 +75,15 @@ func (f *capFixture) mint(t *testing.T) string {
 	t.Helper()
 	ctx := context.Background()
 	p := f.pool
+	// TENANT AND SITE, BUILT FOR WHICHEVER SCHEMA THIS IS.
+	//
+	// The reconstruction schema requires public.tenants.slug and name and public.sites.code and name; the
+	// Phase-3 integration schema the CI suites run against does not have them. Rather than pick one and fail
+	// on the other, the required text columns are discovered and filled. Hard-coding either shape made this
+	// suite pass locally and fail in CI for a reason that had nothing to do with the licence.
+	// mint returns its entitlement rather than storing it on the fixture: it runs concurrently, and a shared
+	// field handed every caller the SAME entitlement, so the per-entitlement device limit refused instead of
+	// the licence -- the wrong gate, and a green run that proved nothing.
 	// The minimal real chain an iam_v2.sessions row requires: tenant, site, service plan revision, package
 	// revision, purchase, entitlement. Every column filled here is NOT NULL with no default -- nothing is
 	// invented for convenience, and nothing beyond the chain is created, because anything extra would only
@@ -82,22 +91,14 @@ func (f *capFixture) mint(t *testing.T) string {
 	// The commerce writes below cross the accepted CONTROLLED-WRITER boundary, so the fixture opens the same
 	// controlled operation the product opens rather than being exempted from it. A fixture that could write
 	// where the runtime cannot would be testing a database this product never runs against.
+	var ent string
 	if err := pgx.BeginFunc(ctx, p, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT iam_v2.begin_controlled_operation('commerce_intent')`); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `WITH
-	  t   AS (INSERT INTO public.tenants(id,slug,name)
-	          VALUES (COALESCE(NULLIF($1,'')::uuid, gen_random_uuid()),
-	                  'cap-'||substr(gen_random_uuid()::text,1,8), 'cap fixture')
-	          ON CONFLICT (id) DO UPDATE SET name = public.tenants.name
-	          RETURNING id),
-	  si  AS (INSERT INTO public.sites(id,tenant_id,code,name)
-	          SELECT COALESCE(NULLIF($2,'')::uuid, gen_random_uuid()), id,
-	                 'cap-'||substr(gen_random_uuid()::text,1,8), 'cap site'
-	          FROM t
-	          ON CONFLICT (id) DO UPDATE SET name = public.sites.name
-	          RETURNING id, tenant_id),
+	  t   AS (SELECT $1::uuid AS id),
+	  si  AS (SELECT $2::uuid AS id, $1::uuid AS tenant_id),
 	  sp  AS (INSERT INTO iam_v2.service_plans(id,tenant_id,site_id,code)
 	          SELECT gen_random_uuid(), si.tenant_id, si.id, 'cap-plan-'||substr(gen_random_uuid()::text,1,8)
 	          FROM si RETURNING id, tenant_id, site_id),
@@ -124,8 +125,7 @@ func (f *capFixture) mint(t *testing.T) string {
 	          SELECT gen_random_uuid(), pu.tenant_id, pu.site_id, gp.id, pu.id, '{}'::jsonb, spr.id,
 	                 ipr.id, 'CONTINUOUS', 'FIXED_AT', 'ACTIVE'
 	          FROM pu, spr, ipr, gp RETURNING id, tenant_id, site_id)
-	SELECT e.tenant_id::text, e.site_id::text, e.id::text FROM e`, f.tenant, f.site).
-			Scan(&f.tenant, &f.site, &f.entitle); err != nil {
+	SELECT e.id::text FROM e`, f.tenant, f.site).Scan(&ent); err != nil {
 			return err
 		}
 		// ACTIVE is not a value you write; it is a state you transition into, and the coherence constraint
@@ -133,12 +133,63 @@ func (f *capFixture) mint(t *testing.T) string {
 		// its initial transition in ONE transaction. The fixture does the same rather than back-dating a
 		// status onto the row.
 		_, err := tx.Exec(ctx,
-			`SELECT iam_v2.apply_entitlement_transition($1::uuid,'ACTIVE',now(),'GRANT')`, f.entitle)
+			`SELECT iam_v2.apply_entitlement_transition($1::uuid,'ACTIVE',now(),'GRANT')`, ent)
 		return err
 	}); err != nil {
 		t.Fatalf("fixture chain: %v", err)
 	}
-	return f.entitle
+	return ent
+}
+
+// ensureTenantSite creates the fixture's tenant and site once, filling any NOT NULL text column the local
+// schema happens to require.
+func (f *capFixture) ensureTenantSite(t *testing.T) {
+	t.Helper()
+	if f.tenant != "" {
+		return
+	}
+	ctx := context.Background()
+	if err := f.pool.QueryRow(ctx, `SELECT gen_random_uuid()::text, gen_random_uuid()::text`).
+		Scan(&f.tenant, &f.site); err != nil {
+		t.Fatalf("ids: %v", err)
+	}
+	for _, spec := range []struct {
+		table string
+		cols  string
+		vals  string
+		args  []any
+	}{
+		{"public.tenants", "id", "$1::uuid", []any{f.tenant}},
+		{"public.sites", "id, tenant_id", "$1::uuid, $2::uuid", []any{f.site, f.tenant}},
+	} {
+		cols, vals := spec.cols, spec.vals
+		rows, err := f.pool.Query(ctx, `
+		    SELECT column_name FROM information_schema.columns
+		     WHERE table_schema = split_part($1,'.',1) AND table_name = split_part($1,'.',2)
+		       AND is_nullable = 'NO' AND column_default IS NULL
+		       AND data_type IN ('text','character varying')`, spec.table)
+		if err != nil {
+			t.Fatalf("%s columns: %v", spec.table, err)
+		}
+		var extra []string
+		for rows.Next() {
+			var c string
+			if err := rows.Scan(&c); err != nil {
+				rows.Close()
+				t.Fatalf("scan: %v", err)
+			}
+			extra = append(extra, c)
+		}
+		rows.Close()
+		for _, c := range extra {
+			cols += ", " + c
+			vals += ", 'cap-'||substr(gen_random_uuid()::text,1,8)"
+		}
+		if _, err := f.pool.Exec(ctx,
+			"INSERT INTO "+spec.table+" ("+cols+") VALUES ("+vals+")", spec.args...); err != nil {
+			t.Fatalf("%s insert: %v", spec.table, err)
+		}
+	}
 }
 
 // device creates a device owned by the given appliance and returns its id.
