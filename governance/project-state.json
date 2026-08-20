@@ -15,9 +15,9 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "7",
-  "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
-  "current_activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
-  "current_activity_execution_state_note": "READY (T0081, corrected by T0082) against the Product Owner's stronger criterion, now satisfied in the form it was actually asked for. A brand-new Production appliance is built from a FACTORY-CLEAN BASELINE (data-plane/migrations/baseline/) that NEVER constructs the superseded guest-IAM tables at any point -- proved by a DDL event trigger armed on the empty database before the first object exists, with the tripwire itself verified by making it fire. The baseline is generated from the upgrade path's end state and the two catalogs are compared fact by fact (8104, identical), so new and existing appliances cannot drift apart. Migrations 0001-0049 are preserved as the upgrade path; 0049 is a destructive, non-reconstructive boundary whose rollback contract is a verified pre-upgrade backup restore, not DDL. The licensed concurrent-guest cap is scoped PER APPLIANCE -- resolved from the accepted implementation, not assumed -- and serialized by a transaction advisory lock on the appliance id inside the same transaction that inserts the session, with adversarial concurrency tests each verified by breaking the guarantee they protect. 172.21.60.23 remains the DEVELOPMENT appliance, unmodified and uncontacted; nothing is deployed anywhere; no Production appliance exists. See docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md.",
+  "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
+  "current_activity_execution_state": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ENROLLMENT_CLAIM_ASSIGNMENT",
+  "current_activity_execution_state_note": "THE FRESH PRODUCTION APPLIANCE EXISTS AND IS DEPLOYED. 172.21.60.25 (hostname sce, Ubuntu 22.04.5) was provisioned factory-clean from git c72b49e958a408c468bfb2c5da97b21a4f383a7d with binaries built -tags stayconnect_production. First-bring-up fixes were then applied live -- the edged and netd binaries and the Hotel-Admin bundle rebuilt, the two hypertables registered, Kea installed -- and those fixes were afterwards committed to repository master as 1c55d7f7a36547665457edb7ee2af1016b4ccdca. The running appliance therefore corresponds to no single commit and none is claimed for it; see production_appliance.runtime_provenance. Its database was built from the Zero-Legacy factory-clean baseline -- 74 iam_v2 tables, 37 public tables, none of the superseded guest-IAM tables, zero identity rows -- so IAM-v2 is structurally the sole guest-IAM authority from first operation. This was a fresh deployment, NOT a cutover: nothing was copied from the DEVELOPMENT appliance, which was never contacted. The appliance is PRE-LIVE and awaiting onboarding: NOT ENROLLED, NOT CLAIMED, NO SIGNED ASSIGNMENT and UNLICENSED, with no tenant or site pinned anywhere. LAN ens192 is present and intentionally unconfigured because no guest topology has been supplied; Kea is installed but not started for the same reason. There has been NO guest, PMS, payment or financial traffic, and NO Go-Live. Hotel Admin is available for the Product Owner at https://172.21.60.25/. See docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md.",
   "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK (DEVELOPMENT appliance) + VERIFIED ZERO-LEGACY FACTORY-CLEAN BASELINE (Fresh Production repository)",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -328,7 +328,7 @@
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "Product-Owner provision of the NEW PRODUCTION SERVER and access, plus authorization to execute the fresh deployment on that exact target under D35. The repository-side Fresh Production readiness work is COMPLETE against the Zero-Legacy criterion (T0081). The authorized strategy is Fresh Appliance Deployment: fresh server, fresh OS, clean deployment from the authoritative repository following the ordered install path in docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md -- binaries built with -tags stayconnect_production -- enrollment and claim and signed assignment, required hotel configuration, IAM-v2 as the only guest IAM authority from first operation, complete acceptance testing, then a separate Product-Owner Go-Live decision. No DEVELOPMENT database, configuration, service state, identity, account or voucher may be restored or cloned onto it. Until that server exists nothing is deployed anywhere and 172.21.60.23 is not changed. PRODUCTION remains untouched and PRE-LIVE.",
+  "next_authorized_action": "MANUAL APPLIANCE ONBOARDING on the deployed Fresh Production appliance 172.21.60.25, beginning with ENROLLMENT. The server is provisioned and running; provisioning is no longer the next action. In order: (1) issue a bootstrap token from the Central Control Plane and enrol the appliance through the local setup wizard; (2) claim it and let the SIGNED ASSIGNMENT resolve its tenant and site -- no identity may be seeded or copied; (3) install the signed licence; (4) configure LAN/guest networking through Hotel Admin, at which point Kea starts; (5) configure packages, access policy and PMS interfaces; (6) acceptance test. A separate Product-Owner Go-Live decision remains required, and this state authorizes no guest, PMS, payment or financial traffic. 172.21.60.23 remains the DEVELOPMENT reference appliance and is not to be changed.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D35",
@@ -427,7 +427,7 @@
       "scripts/ci/phase3_evidence.py (modified)"
     ],
     "post_closure_operational_changes_note": "Caddy deployment configuration, the Caddy systemd unit sources and CI/operational tooling changed AFTER Phase-3 closure, under T0026 and T0027. No Phase-3 application binary, migration, schema, IAM-v2 authority, PMS behaviour or financial behaviour changed. Do not claim the whole deploy/ or scripts/ tree is identical to the accepted candidate.",
-    "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
     "live_increment9_executed": true,
     "live_increment9_executed_on": "2026-08-10",
     "live_increment9_item_verdicts": {
@@ -769,13 +769,13 @@
   "environment_scoped_iam_state": {
     "_note": "Environment-scoped on purpose. A global iam_v2_dark answer was true for Production and false for the DEVELOPMENT appliance after the authorized trial, which is a contradiction no single flag can hold. Neither side may be read as describing the other.",
     "production": {
-      "lifecycle": "PRE-LIVE",
-      "iam_v2": "SOLE GUEST-IAM AUTHORITY, structurally, on a fresh deployment. Not dark and not a cutover: no Production appliance exists yet, and the baseline one will be built from has no other implementation to be dark against.",
-      "routing": "no deployed Production service exists to route, because no Production appliance exists. On a fresh deployment there is no legacy guest-IAM path to route to.",
-      "mutation": "none -- Production has not been contacted",
+      "lifecycle": "PRE-LIVE, deployed, awaiting onboarding",
+      "iam_v2": "SOLE GUEST-IAM AUTHORITY, structurally, on the deployed Fresh Production appliance. Not dark and not a cutover: the superseded guest-IAM runtime and schema are absent from the product it was built from, so there is no other implementation for it to be dark against.",
+      "routing": "the appliance is deployed and its services are running, but it is PRE-LIVE and awaiting assignment, so no guest traffic is served. There is no legacy guest-IAM path to route to on a fresh deployment.",
+      "mutation": "the appliance was provisioned by this work; the DEVELOPMENT appliance was not contacted and nothing was copied from it",
       "legacy_iam": "ABSENT from the Fresh Production baseline: the superseded guest-IAM runtime and schema are not part of the product a new appliance is built from. It is NOT the configured authority for Fresh Production and cannot become it. Untouched on the DEVELOPMENT appliance; historical migrations and evidence preserved.",
       "transition_strategy": "FRESH PRODUCTION APPLIANCE DEPLOYMENT, ZERO-LEGACY (D35; T0080-T0082). A newly provisioned server is built factory-clean from the current-only repository baseline, enrolled and claimed, assigned by signed assignment and configured through Hotel Admin, with IAM-v2 as the sole guest-IAM authority from first operation. There is no IAM transition to perform on it, because there is nothing to transition FROM: the superseded guest-IAM runtime and schema are absent from the product. This supersedes the earlier in-place cutover assumption and the earlier OPEN status. Actual deployment awaits the Product-Owner-provided server and a separate Go-Live decision.",
-      "appliance": "NONE EXISTS. No Production appliance has been provisioned, enrolled or contacted."
+      "appliance": "DEPLOYED: 172.21.60.25 (hostname sce), factory-clean from the Zero-Legacy baseline, PRE-LIVE and awaiting enrollment/claim/signed assignment."
     },
     "development_appliance": {
       "host": "172.21.60.23",
@@ -933,8 +933,8 @@
     ]
   },
   "fresh_production_baseline": {
-    "_note": "THE REPOSITORY BASELINE A NEW PRODUCTION APPLIANCE IS BUILT FROM. This is NOT a description of any running system, and it is NOT a cutover of the DEVELOPMENT appliance or of any legacy Production installation. No Production appliance exists. Read development_reference_appliance for the other scope; neither may be read as describing the other.",
-    "appliance": "NONE EXISTS. No Production appliance has been provisioned, enrolled or contacted.",
+    "_note": "The repository baseline a Production appliance is built from, AND the record of the appliance now built from it. This is NOT a cutover of the DEVELOPMENT appliance or of any legacy Production installation. Read development_reference_appliance for the other scope; neither describes the other.",
+    "appliance": "DEPLOYED. 172.21.60.25 (hostname sce) was provisioned factory-clean from this baseline and is running. It is PRE-LIVE and awaiting onboarding.",
     "install_path": "FACTORY-CLEAN, CURRENT-ONLY: data-plane/migrations/baseline/0000_production_baseline.sql. The superseded guest-IAM tables are never constructed, not even transiently, which is asserted by a DDL event trigger armed on the empty database before the first object exists.",
     "iam_v2_tables": 74,
     "public_tables": 37,
@@ -954,5 +954,33 @@
     "iam_v2_tables_live": 68,
     "iam_v2_tables_live_note": "68 is this appliance's LIVE value at its last read, not the current repository baseline. A factory-clean build from the current repository produces 74. The difference is that this appliance has not been rebuilt, which is the intended state: it is evidence of what was accepted, not a target.",
     "cutover_performed": false
+  },
+  "production_appliance": {
+    "_note": "THE FRESH PRODUCTION APPLIANCE, AS DEPLOYED. Built factory-clean from data-plane/migrations/baseline/0000_production_baseline.sql -- not by replaying migrations 0001..0049, and not by copying anything from the DEVELOPMENT appliance.",
+    "host": "172.21.60.25",
+    "hostname": "sce",
+    "os": "Ubuntu 22.04.5 LTS",
+    "initial_deployment_source_sha": "c72b49e958a408c468bfb2c5da97b21a4f383a7d",
+    "runtime_provenance": "MIXED, and deliberately not stated as a single SHA. The appliance was provisioned from c72b49e958a408c468bfb2c5da97b21a4f383a7d. First-bring-up defects were then fixed and the corrected components were rebuilt and deployed LIVE onto it before those fixes were committed: the edged and netd binaries and the Hotel-Admin bundle were replaced, the two TimescaleDB hypertables (audit_log, accounting_records) were registered on the live database, and Kea was installed. The remaining binaries -- scd, acctd, portald and the rest -- are still the c72b49e builds. Those same fixes were subsequently committed to repository master as 1c55d7f7a36547665457edb7ee2af1016b4ccdca, so the appliance is content-equivalent to master for the components that were replaced and to c72b49e for the components that were not. No single commit describes what is running, and none is claimed.",
+    "repository_master_sha": "1c55d7f7a36547665457edb7ee2af1016b4ccdca",
+    "redeploy_note": "A redeploy from current master with deploy/scripts/provision-fresh-appliance.sh would make the whole appliance correspond to a single commit. It has not been done and is not authorized here.",
+    "build_tag": "stayconnect_production (confirmed at runtime: scd reports build=production)",
+    "deployment_model": "FRESH APPLIANCE DEPLOYMENT, Zero-Legacy. Not an upgrade and not a cutover.",
+    "schema": "factory-clean: 74 iam_v2 tables, 37 public tables, zero superseded guest-IAM tables, zero identity rows",
+    "guest_iam_authority": "IAM-v2, structurally and solely, from first operation",
+    "lifecycle": "PRE-LIVE",
+    "enrollment": "NOT ENROLLED. Awaiting a Central-issued bootstrap token.",
+    "claim": "NOT CLAIMED",
+    "signed_assignment": "NONE. No tenant or site is pinned anywhere on the appliance.",
+    "license": "UNLICENSED. No signed licence installed; the production build refuses permissive/dev licensing.",
+    "wan_interface": "ens160 (also the management interface): 172.21.60.25/24, gateway 172.21.60.1",
+    "lan_interface": "ens192: present and INTENTIONALLY UNCONFIGURED. No guest topology has been supplied, so none was invented. Kea is installed but deliberately not started: it binds the LAN bridge, which does not exist until guest networking is configured.",
+    "hotel_admin": "https://172.21.60.25/ (Caddy local-CA certificate, dual-SAN hotel.stayconnect.local + 172.21.60.25)",
+    "services_running": "scd, edged, acctd, netd, portald, hotel-admin, caddy; postgres/redis/nats containers",
+    "guest_traffic": "NONE",
+    "pms_traffic": "NONE",
+    "payment_or_financial_traffic": "NONE",
+    "go_live": "NOT PERFORMED and NOT authorized",
+    "development_appliance_contact": "NONE. Nothing was copied from or sent to 172.21.60.23."
   }
 }

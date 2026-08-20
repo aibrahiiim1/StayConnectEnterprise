@@ -10,10 +10,34 @@
 # before expiry, then: systemctl reload stayconnect-caddy
 #
 # Env overrides: HA_DNS, HA_IP, CADDY_CA_DIR, HA_DIR
+#
+# HA_IP has NO baked-in default. It used to default to 172.21.60.23 -- the DEVELOPMENT reference appliance --
+# which meant running this on any other machine minted a certificate for someone else's address, and the IP
+# SAN silently did not match the host it was serving. An address is a property of the machine, not of the
+# script, so it is derived from this host's own default route and otherwise demanded explicitly. Nothing is
+# invented.
+#
+# The supported path for the appliance is deploy/scripts/hotel-admin-cert-manager.sh, which reads the
+# management interface from netd's configuration; this script is the manual fallback.
 set -euo pipefail
 
 HA_DNS="${HA_DNS:-hotel.stayconnect.local}"
-HA_IP="${HA_IP:-172.21.60.23}"
+# Derive the management/WAN address from the interface that carries the default route.
+detect_mgmt_ip() {
+  local iface ip
+  iface="$(ip -o -4 route show default 2>/dev/null | awk '{print $5}' | head -1)" || true
+  [ -n "${iface:-}" ] || return 1
+  ip="$(ip -o -4 addr show "$iface" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)" || true
+  [ -n "${ip:-}" ] || return 1
+  printf '%s' "$ip"
+}
+HA_IP="${HA_IP:-$(detect_mgmt_ip || true)}"
+if [ -z "${HA_IP:-}" ]; then
+  echo "ERROR: cannot determine this host's management IP, and HA_IP was not set." >&2
+  echo "       Re-run as: HA_IP=<this appliance's management IP> $0" >&2
+  echo "       Refusing to guess: a wrong IP SAN produces a certificate that silently fails to match." >&2
+  exit 2
+fi
 CA="${CADDY_CA_DIR:-/var/lib/caddy/.local/share/caddy/pki/authorities/local}"
 D="${HA_DIR:-/etc/caddy/hotel-admin}"
 DAYS="${HA_DAYS:-730}"

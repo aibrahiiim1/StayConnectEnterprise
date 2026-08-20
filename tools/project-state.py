@@ -66,6 +66,7 @@ def render_block(st):
     ph = st["phases"]
     fp = st["fresh_production_baseline"]
     dev = st["development_reference_appliance"]
+    prod = st.get("production_appliance")
     def s(k): return ph[k]["status"]
     if s('1B') == "IN_PROGRESS":
         p1b_note = "(DARK — implementation in progress; no production iam_v2 use)"
@@ -84,10 +85,21 @@ def render_block(st):
         # CONFIGURED authentication/routing baseline", which is the DEVELOPMENT appliance's history and is
         # the opposite of the Fresh Production baseline, where the superseded guest-IAM runtime and schema
         # do not exist at all.
-        f"**Fresh Production baseline (repository; NO appliance exists yet):** "
+        # The appliance line is DERIVED, not hardcoded. It read "NO appliance exists yet" as a literal, so
+        # the day one was deployed the generated block contradicted the state it is generated from.
+        f"**Fresh Production baseline{'' if prod else ' (repository; no appliance deployed yet)'}:** "
         f"{fp['iam_v2_tables']} iam_v2 tables, {fp['public_tables']} public tables, ZERO identity rows. "
         f"Factory-clean and current-only: the superseded guest-IAM runtime and schema are ABSENT, so IAM-v2 "
         f"is structurally the sole guest-IAM authority from first operation. Not a cutover.",
+    ] + ([
+        f"**Fresh Production appliance ({prod['host']}, {prod['hostname']}):** DEPLOYED factory-clean from "
+        f"`{prod['initial_deployment_source_sha'][:7]}`; first-bring-up fixes were then applied live and "
+        f"afterwards committed to master (`{prod['repository_master_sha'][:7]}`), so no single commit "
+        f"describes what is running. {prod['lifecycle']}. Enrollment, claim and signed "
+        f"assignment are NOT complete and it is {prod['license'].split('.')[0].lower()}; no tenant or site "
+        f"is pinned. LAN is intentionally unconfigured. No guest, PMS, payment or financial traffic; no "
+        f"Go-Live. Hotel Admin: {prod['hotel_admin'].split(' ')[0]}",
+    ] if prod else []) + [
         f"**Development reference appliance ({dev['host']}):** UNTOUCHED by this work and NOT cut over. "
         f"Retains the historical live-dark runtime its accepted evidence records, including its superseded "
         f"guest-IAM schema ({dev['iam_v2_tables_live']} iam_v2 tables live). Reference and evidence only, "
