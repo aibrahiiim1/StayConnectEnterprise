@@ -16,8 +16,8 @@
   },
   "current_phase": "7",
   "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
-  "current_activity_execution_state": "CLEAN_INSTALL_PATH_HARDENED_TWO_BLOCKERS_REMAIN_AWAITING_PRODUCT_OWNER_PROVIDED_SERVER",
-  "current_activity_execution_state_note": "The Production model is FRESH APPLIANCE DEPLOYMENT. 172.21.60.23 remains the DEVELOPMENT appliance and was NOT modified -- every query against it was read-only reference evidence. An earlier audit claim that it had lost the contract-defined guest-network anchor is RETRACTED: MG-0 creates that anchor as a unique INDEX and the check queried pg_constraint, which cannot see one. The appliance carries guest_networks_tsi_anchor valid and ready with the exact contract definition, and iam_v2.guest_network_pms_map carries the composite FK to public.guest_networks. There are not two competing baselines. The clean-install path is now production-grade in the repository and verified semantically: columns, constraints, indexes, triggers and schema ownership are IDENTICAL to the appliance. Two blockers remain before a production install: ownership reassertion for 26 iam_v2 objects, and removal of the configuration-selectable legacy authentication authority. See docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md.",
+  "current_activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
+  "current_activity_execution_state_note": "The Production model is FRESH APPLIANCE DEPLOYMENT. 172.21.60.23 remains the DEVELOPMENT appliance and was NOT modified. The repository-side readiness work is COMPLETE: both Production-readiness blockers recorded by T0076 are closed and verified (T0077). Ownership of the IAM-v2 domain is asserted by deploy/gatep/gatep-iam-ownership.sql as an explicit install step before the grants and fails closed on any object it cannot converge or any SECURITY DEFINER function left executing as the wrong owner. The guest IAM authority is LOCKED on the production BUILD -- build tag stayconnect_production, not a runtime flag and not a caller argument, because a switch that decides which IAM authority is in force must not be reachable by the configuration it governs (corrected in T0078). An attempt to configure the superseded guest-auth path is a startup refusal, not a silent downgrade; builds without the tag, including the DEVELOPMENT appliance, keep the behaviour their accepted evidence depends on. Proven in a clean-room build from an empty isolated environment on timescale/timescaledb:2.16.1-pg16 through the real Gate-P path: 58 ledger-recorded steps, the contract anchor and its mapping FK present, every iam_v2 object owned by iam_v2_owner, all 67 SECURITY DEFINER functions executing as it, zero identity rows, and no trial or probe role. Columns, constraints, indexes, triggers and schema ownership are identical to the appliance reference and every remaining difference is named and in the correct direction. The superseded guest-auth TABLES are deliberately NOT dropped: public.payments and public.social_oauth_states are current and still foreign-key into them, so the no-current-dependency proof does not hold. The claim is zero superseded ACTIVE runtime dependency for guest IAM, not that the tables do not exist. See docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md.",
   "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -323,7 +323,7 @@
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "Product-Owner provision of the NEW PRODUCTION SERVER and access, plus authorization to execute the fresh deployment on that exact target under D35 (T0075). The authorized Production strategy is Fresh Appliance Deployment: fresh server, fresh OS, clean StayConnect deployment from the authoritative repository, enrollment and claim and signed assignment, required hotel configuration, IAM-v2 as the intended authority from first operation, complete acceptance testing, then a separate Product-Owner Go-Live decision. No DEVELOPMENT database, configuration, service state, identity, account or voucher may be restored or cloned onto it, because the development appliance is evidence and reference only and never an installation source. Before that server exists, nothing is deployed anywhere and 172.21.60.23 is not changed. PRODUCTION remains untouched and PRE-LIVE.",
+  "next_authorized_action": "Product-Owner provision of the NEW PRODUCTION SERVER and access, plus authorization to execute the fresh deployment on that exact target under D35. The repository-side Fresh Production readiness work is COMPLETE and both blockers recorded by T0076 are verified closed (T0077), so nothing in the repository now stands in the way. The authorized Production strategy is Fresh Appliance Deployment: fresh server, fresh OS, clean StayConnect deployment from the authoritative repository following the ordered install path in docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md, enrollment and claim and signed assignment, required hotel configuration, IAM-v2 as the only guest IAM authority from first operation, complete acceptance testing, then a separate Product-Owner Go-Live decision. No DEVELOPMENT database, configuration, service state, identity, account or voucher may be restored or cloned onto it, because the development appliance is evidence and reference only and never an installation source. Until that server exists nothing is deployed anywhere and 172.21.60.23 is not changed. PRODUCTION remains untouched and PRE-LIVE.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
   "latest_accepted_po_decision": "D35",
@@ -479,8 +479,8 @@
     "phase4_dependency_gate_model": "TRIAGED (investigated, written up) is NOT ACCEPTED. Acceptance lives only in governance/dependency-acceptances.json, names GHSA ids rather than packages, and requires decided_by, decision_ref, decided_on and expires_on; an expired or stale acceptance fails. The gate previously carried ACCEPTED='next postcss' inside the script, which let the delivery agent grant itself an exception. scripts/ci/phase4-dependency-gate-selftest.sh runs the same judgement file CI runs against synthetic audits, 7/7.",
     "phase4_authoritative_ci_artifact_id": 9177140558,
     "phase4_authoritative_ci_artifact_digest": "sha256:aacb6e9f687f872632b36a1dfe5c4598340d2108d1e70f31ee6c48cae93ba52d",
-    "acceptance_candidate_head": "435a5ab4a52de8c0c4cdf2cda377ada53b129b68",
-    "inventory_head": "435a5ab4a52de8c0c4cdf2cda377ada53b129b68",
+    "acceptance_candidate_head": "77f18e75dc1e27972d46f4eb522e5b1804591926",
+    "inventory_head": "77f18e75dc1e27972d46f4eb522e5b1804591926",
     "phase4_delivery_head_ci_run_id": 31658169886,
     "phase4_delivery_head_ci_head": "b895f412d67c9c177b2f00cfd5c14baf6c73383d",
     "phase4_delivery_head_ci_conclusion": "success",
@@ -709,14 +709,14 @@
     "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
     "phase7_merge_attribution": "Phase 7 was ACCEPTED_AND_CLOSED under D27/T0064 and MERGED under D28/T0065 (merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The current DEVELOPMENT trial continuation is D31/T0068. D30 is preserved historically and its over-broad Production policy clauses were corrected by D31."
   },
-  "latest_transition_id": "T0076",
+  "latest_transition_id": "T0078",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "00617e56fba202e17c0555228b3d6018c2b3fe3e",
+  "acceptance_candidate_head": "77f18e75dc1e27972d46f4eb522e5b1804591926",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "00617e56fba202e17c0555228b3d6018c2b3fe3e",
+  "inventory_head": "77f18e75dc1e27972d46f4eb522e5b1804591926",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",

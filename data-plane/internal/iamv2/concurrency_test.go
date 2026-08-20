@@ -12,15 +12,21 @@ import (
 // ---- item 4: config loader (unit) -----------------------------------------
 
 func TestLoadConfigFromEnv(t *testing.T) {
-	env := func(m map[string]string) Getenv { return func(k string) string { return m[k] } }
-	// default production: everything OFF, valid, no stub
-	cfg, err := LoadConfigFromEnv(env(nil), true)
-	if err != nil || cfg.MasterEnabled || cfg.AllowSocialStub {
-		t.Fatalf("default must be all-off/no-stub: %+v %v", cfg, err)
-	}
-	for _, m := range []Method{MethodVoucher, MethodAccount, MethodOTP, MethodSocial} {
-		if cfg.Methods[m] {
-			t.Fatalf("%s must default OFF", m)
+	// default: everything OFF, valid, no stub.
+	//
+	// This is the DEVELOPMENT-build contract and it still holds there. A production build deliberately
+	// contradicts it -- the guest IAM authority is locked to IAM-v2 and an all-off configuration is a startup
+	// refusal, not a valid dark default -- so the assertion is scoped to the build it describes rather than
+	// weakened for both. The production side is proven in guest_authority_e2e_production_test.go.
+	if !productionBuild {
+		cfg, err := LoadConfigFromEnv(env(nil), true)
+		if err != nil || cfg.MasterEnabled || cfg.AllowSocialStub {
+			t.Fatalf("default must be all-off/no-stub: %+v %v", cfg, err)
+		}
+		for _, m := range []Method{MethodVoucher, MethodAccount, MethodOTP, MethodSocial} {
+			if cfg.Methods[m] {
+				t.Fatalf("%s must default OFF", m)
+			}
 		}
 	}
 	// malformed boolean => startup failure
@@ -32,7 +38,7 @@ func TestLoadConfigFromEnv(t *testing.T) {
 		t.Fatal("method-on-master-off must fail startup")
 	}
 	// production profile refuses the stub even if the flag is set
-	cfg, err = LoadConfigFromEnv(env(map[string]string{EnvMaster: "true", EnvSocial: "true", EnvSocialStub: "true"}), true)
+	cfg, err := LoadConfigFromEnv(env(map[string]string{EnvMaster: "true", EnvSocial: "true", EnvSocialStub: "true"}), true)
 	if err != nil || cfg.AllowSocialStub {
 		t.Fatalf("production must refuse the stub: %+v %v", cfg, err)
 	}

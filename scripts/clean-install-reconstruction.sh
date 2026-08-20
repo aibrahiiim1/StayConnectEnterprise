@@ -131,21 +131,41 @@ for f in $(ls "$MIG"/*.up.sql | sort); do
   # public platform objects as well as iam_v2 ones. Running them as iam_v2_owner fails immediately with
   # "permission denied for table schema_migrations" -- the IAM owner is deliberately not a platform writer.
   #
-  # The consequence is recorded rather than papered over: iam_v2 objects CREATED by migrations 0009+ end up
-  # owned by the platform role here, while on the appliance they are owned by iam_v2_owner. See the
-  # OUTSTANDING ownership item in docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md -- the installer needs an
-  # explicit ownership-reassertion step, and inventing one inside this verifier would hide the gap it exists
-  # to expose.
+  # The consequence is that iam_v2 objects CREATED by migrations 0009+ are left owned by the platform role at
+  # this point. That is closed by an explicit install step -- deploy/gatep/gatep-iam-ownership.sql, applied
+  # below from the repository, exactly as a real install applies it -- and NOT by anything invented in this
+  # verifier. The ownership that results is then compared like any other catalog fact, so a build that fails
+  # to converge shows up as a difference rather than as silence.
   apply_one "$f" "$n" stayconnect
 done
 note "install steps applied: $applied"
+
+echo
+echo "== Gate-P ownership assertion, from the real path =="
+# BEFORE the grants, so the privilege bootstrap is applied to the FINAL ownership state. Ownership is not a
+# tidy-up: the IAM boundary functions are SECURITY DEFINER and execute as their owner, so this step decides
+# what the whole boundary runs with. The file fails closed on anything it cannot converge.
+if MSYS_NO_PATHCONV=1 docker exec -i "$C" psql -U postgres -d stayconnect_site -v ON_ERROR_STOP=1      -f /tmp/gatep/gatep-iam-ownership.sql >"$OUT/iam-ownership.log" 2>&1; then
+  note "gatep-iam-ownership.sql applied, including its fail-closed assertions"
+else
+  bad "gatep-iam-ownership.sql did not apply: $(tail -1 "$OUT/iam-ownership.log")"
+fi
+# APPLIED TWICE ON PURPOSE. The disaster-recovery procedure re-runs this step on a rebuild, and a step
+# documented as idempotent that has only ever been run once is a claim, not a property.
+if MSYS_NO_PATHCONV=1 docker exec -i "$C" psql -U postgres -d stayconnect_site -v ON_ERROR_STOP=1      -f /tmp/gatep/gatep-iam-ownership.sql >"$OUT/iam-ownership-2.log" 2>&1; then
+  note "re-applied cleanly: the ownership step is idempotent"
+else
+  bad "gatep-iam-ownership.sql is NOT idempotent: $(tail -1 "$OUT/iam-ownership-2.log")"
+fi
 
 echo
 echo "== Gate-P grants and fail-closed assertions, from the real path =="
 # Copied into the container and run with -f, not piped: gatep-grants.sql uses \ir to include the
 # per-service grant files, and \ir resolves relative to the FILE being executed. Fed through stdin there is
 # no such location and every include fails -- which would silently skip most of the privilege bootstrap.
-docker cp "$GATEP" "$C:/tmp/gatep" >/dev/null
+# The tree was copied to /tmp/gatep once, before the install chain. Repeating `docker cp` into a directory
+# that already exists NESTS it at /tmp/gatep/gatep and leaves the first copy in place, so a later edit ends
+# up verified against whichever copy psql happened to read.
 # MSYS_NO_PATHCONV: under Git Bash on Windows the container-side path /tmp/gatep/... is rewritten into a
 # Windows path before docker ever sees it, and psql then reports a file that was never asked for.
 if MSYS_NO_PATHCONV=1 docker exec -i "$C" psql -U postgres -d stayconnect_site -v ON_ERROR_STOP=1      -f /tmp/gatep/gatep-grants.sql >"$OUT/grants.log" 2>&1; then
@@ -185,6 +205,56 @@ mapfk="$(psql_q -c "SELECT count(*) FROM pg_constraint
                        AND confrelid='public.guest_networks'::regclass")"
 [ "$mapfk" = "1" ] && note "guest_network_pms_map composite FK to guest_networks present" \
                    || bad "guest_network_pms_map composite FK to guest_networks is ABSENT"
+
+echo
+echo "== REQUIRED: deterministic IAM-v2 ownership =="
+# Asserted here in the verifier as well as in the install file, and asserted SEMANTICALLY -- by asking the
+# catalog who owns each object, not by trusting that the ownership step reported success. Any object left
+# behind is named, because an ownership check whose failure mode is a count tells the next reader nothing.
+badown="$(psql_q -c "SELECT COALESCE(string_agg(name||' -> '||owner, ', '), '') FROM (
+    SELECT n.nspname||'.'||c.relname AS name, pg_get_userbyid(c.relowner) AS owner
+      FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+     WHERE n.nspname='iam_v2' AND c.relkind IN ('r','v','m','p','S')
+       AND pg_get_userbyid(c.relowner) <> 'iam_v2_owner'
+    UNION ALL
+    SELECT n.nspname||'.'||p.proname, pg_get_userbyid(p.proowner)
+      FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='iam_v2' AND pg_get_userbyid(p.proowner) <> 'iam_v2_owner') x")"
+[ -z "$badown" ] && note "every iam_v2 table, view, sequence, function and procedure is owned by iam_v2_owner"                  || bad "iam_v2 objects owned by the wrong role: $badown"
+# The SECURITY DEFINER boundary specifically. Stated separately from the sweep above because this is the one
+# that changes what the system can do, not merely what the catalog says.
+secdef_total="$(psql_q -c "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                            WHERE n.nspname='iam_v2' AND p.prosecdef")"
+secdef_bad="$(psql_q -c "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+                          WHERE n.nspname='iam_v2' AND p.prosecdef
+                            AND pg_get_userbyid(p.proowner) <> 'iam_v2_owner'")"
+[ "$secdef_bad" = "0" ] && note "all $secdef_total SECURITY DEFINER functions in iam_v2 execute as iam_v2_owner"                         || bad "$secdef_bad of $secdef_total SECURITY DEFINER functions execute as the wrong owner"
+schemaown="$(psql_q -c "SELECT pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname='iam_v2'")"
+[ "$schemaown" = "iam_v2_owner" ] && note "schema iam_v2 is owned by iam_v2_owner"                                   || bad "schema iam_v2 is owned by $schemaown"
+
+echo
+echo "== REQUIRED: the superseded guest-auth authority cannot be selected by configuration =="
+# A build is not free of the superseded authority merely because nothing currently selects it. This runs the
+# real production-profile config loader against hostile environments and requires each one to REFUSE, so the
+# proof is a property of the shipped binary rather than of the environment file it happens to be given.
+# It is run against the PRODUCTION BUILD -- `-tags stayconnect_production`, the compilation a Production
+# appliance ships -- and against the development build too, because the property being proven is that the two
+# differ in exactly the intended way and that neither can be talked out of it by configuration.
+if command -v go >/dev/null 2>&1; then
+  if (cd "$ROOT/data-plane" && go build -tags stayconnect_production ./...         && go test -tags stayconnect_production ./internal/iamv2/ -count=1) >"$OUT/authority-lock.log" 2>&1; then
+    note "PRODUCTION build: refuses every configuration that would select the superseded guest authority"
+    note "  (explicit disable, master off, and unset all proven; see $OUT/authority-lock.log)"
+  else
+    bad "the guest authority lock did not hold on the production build: $(tail -3 "$OUT/authority-lock.log")"
+  fi
+  if (cd "$ROOT/data-plane" && go test ./internal/iamv2/ -count=1) >"$OUT/authority-dev.log" 2>&1; then
+    note "DEVELOPMENT build: keeps the configurable behaviour the accepted trial evidence depends on"
+  else
+    bad "the development build regressed: $(tail -3 "$OUT/authority-dev.log")"
+  fi
+else
+  bad "go toolchain unavailable: the guest-authority lock could not be proven, so this run is not acceptance evidence"
+fi
 
 echo
 echo "== factory-clean: schema built, nothing seeded =="

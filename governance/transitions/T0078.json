@@ -1,0 +1,51 @@
+{
+  "transition_id": "T0078",
+  "seq": 78,
+  "timestamp": "2026-08-20T01:43:23Z",
+  "record_type": "GUEST_AUTHORITY_LOCK_KEYED_ON_THE_PRODUCTION_BUILD_CORRECTION",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D35",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Executed under the existing D35 decision, as an ordinary defect correction within the authorized repository-only Fresh Production readiness work. No new architecture decision is created and the execution state does not change.",
+  "previous_state_note": "T0077 recorded the guest-authority lock as keyed on the productionProfile argument of LoadConfigFromEnv, described there as 'the production profile that edged and scd already pass'.",
+  "new_state_note": "That was a DEFECT and is CORRECTED. productionProfile is a caller argument that both live services already pass as true, INCLUDING on the DEVELOPMENT appliance, so the lock as first written would have refused to start there and would have changed the behaviour the accepted development trial depends on. The accepted dark-era assertion that every method defaults OFF caught it. The lock is now keyed on a BUILD TAG, stayconnect_production, which is also the seam the Product Owner named ('the final Production build') and the correct one on its own terms: a switch that decides which IAM authority is in force must not be reachable by the configuration it governs. The Production binary carries the answer inside it, and Config.SafeFlagSummary reports build=production or build=development at startup so the running profile is visible in a log rather than inferred. Both blockers remain CLOSED; the clean-room proof was re-run in full against the corrected implementation and still passes.",
+  "phase_affected_note": "post-roadmap (D35 fresh-deployment preparation)",
+  "correction": {
+    "defect": "the lock was keyed on LoadConfigFromEnv's productionProfile argument, which is hardcoded true at both live call sites (data-plane/cmd/edged/main.go and data-plane/cmd/scd/authsec.go) and therefore also binds the DEVELOPMENT appliance",
+    "detected_by": "the accepted test TestLoadConfigFromEnv in data-plane/internal/iamv2/concurrency_test.go, which asserts the dark-era all-off default",
+    "correction": "keyed on the build tag stayconnect_production via data-plane/internal/iamv2/build_profile_production.go and build_profile_development.go",
+    "scoped_not_weakened": "the dark-default assertion is scoped to the development build rather than relaxed for both: on a Production binary an all-off configuration is a startup refusal, not a valid dark default",
+    "both_builds_proven": "guest_authority_lock_test.go takes the build constant as a parameter so one run proves both sides; guest_authority_e2e_production_test.go and guest_authority_e2e_development_test.go drive the real loader end to end, one under each tag; CI builds, vets and tests the production tag; the clean-install verifier runs both",
+    "install_path": "docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md now specifies 'go build -tags stayconnect_production ./...' as a required install step and names the build=production log line that confirms it. Without that step the lock would be real but unreachable."
+  },
+  "verification": {
+    "clean_room_rerun": "CLEAN_INSTALL_RECONSTRUCTION = PASS, re-run in full against the corrected implementation on timescale/timescaledb:2.16.1-pg16 through the real Gate-P path",
+    "ownership": "every iam_v2 object owned by iam_v2_owner; all 67 SECURITY DEFINER functions execute as it; schema iam_v2 owned by it",
+    "authority": "PRODUCTION build refuses every configuration that would select the superseded guest authority; DEVELOPMENT build keeps the configurable behaviour the accepted trial evidence depends on",
+    "go": "go build, go vet and go test all pass on BOTH builds; go vet -tags integration passes",
+    "catalog_diff_unchanged": "the semantic comparison against the development appliance reference is byte-identical to the pre-correction run (1471 reference-only facts, 203 clean-build-only), confirming the correction touched no schema, ownership or privilege outcome"
+  },
+  "boundaries_observed": [
+    "Repository-only work. 172.21.60.23 NOT modified and NOT contacted for this correction.",
+    "No deployment to any server. No Production appliance exists or was contacted.",
+    "No real PMS, payment-provider or financial traffic.",
+    "The accepted DEVELOPMENT trial behaviour is preserved exactly -- that is what this correction protects.",
+    "No historical migration, scratch file or governance evidence deleted; T0077 is left intact and this receipt corrects it in the append-only ledger rather than editing it."
+  ],
+  "next": "Product-Owner provision of the NEW PRODUCTION SERVER and access, plus authorization to execute the fresh deployment on that exact target under D35. The repository-side readiness work is complete."
+}
