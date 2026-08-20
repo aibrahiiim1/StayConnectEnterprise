@@ -1,0 +1,71 @@
+{
+  "transition_id": "T0079",
+  "seq": 79,
+  "timestamp": "2026-08-20T07:55:53Z",
+  "record_type": "FRESH_PRODUCTION_READINESS_PULL_REQUEST_MERGED_TO_MASTER",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
+    "merged": true,
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D35",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner merge authorization: merge PR #20 at the exact verified head 7f3c0d0800afdcc5bd7f7fa0c9679466d3f00410 into master, verify the resulting authoritative head, run and confirm the required post-merge CI and governance checks, and stop. It explicitly does NOT authorize deployment anywhere, any change to 172.21.60.23, or contact with PMS, payment providers or financial systems.",
+  "previous_state_note": "T0077 closed the two Production-readiness blockers recorded by T0076 and advanced the execution state to READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT; T0078 corrected the guest-authority lock to be keyed on the production build tag rather than on a caller argument. Both were delivered on post-roadmap/dev-iamv2-trial and were not yet on master.",
+  "new_state_note": "PR #20 is MERGED at the exact approved head. The merge introduced NO content: master's tree is byte-identical to the approved head's tree, and the approved head is an ancestor of master. The execution state is unchanged by the merge -- it was already READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT and master now carries that record along with T0077 and T0078 intact, deploy/gatep/gatep-iam-ownership.sql, the stayconnect_production guest-authority lock, and the factory-clean install path. The merge authorizes no deployment, no capability enablement and no cutover.",
+  "phase_affected_note": "post-roadmap (D35 fresh-deployment preparation)",
+  "merge": {
+    "pull_request": 20,
+    "branch": "post-roadmap/dev-iamv2-trial",
+    "base": "master",
+    "merged_head": "7f3c0d0800afdcc5bd7f7fa0c9679466d3f00410",
+    "merge_commit": "02cc833db17d55be5a8c7a3356102569a0ef2ea2",
+    "base_before_merge": "6e174945b9338250651c37a248db566bd8a00892",
+    "merge_method": "merge",
+    "history": "full delivery history preserved; not squashed",
+    "expected_head_guard": "the merge request carried sha=7f3c0d0800afdcc5bd7f7fa0c9679466d3f00410, so a moved head would have been refused rather than silently merged",
+    "tree_identity": "master tree ae6e49b2de7940e2806aa7de33fa3fd32652ad94 is byte-identical to the approved head's tree; the approved head is an ancestor of master",
+    "content_introduced_by_the_merge": "none",
+    "base_advance_note": "master had advanced by one commit (6e17494, the PR #19 merge) whose tree is identical to c101956, an ancestor of the approved head. That base advance therefore introduced no content either, which is why merging the exact approved head produced an identical tree.",
+    "ci_at_the_merged_head": "pre-merge on 7f3c0d0: Project Governance 32324812558 SUCCESS; Phase 3 Software 32324812683 SUCCESS; Phase 4 Financial Core 32324812573 SUCCESS; Phase 5 Post-Stay and Transfer 32324812612 SUCCESS",
+    "ci_post_merge_on_master": "Project Governance 32345236515 SUCCESS; Phase 3 Software 32345236533 SUCCESS; Phase 4 Financial Core 32345236536 SUCCESS; Phase 5 Post-Stay and Transfer 32345236511 SUCCESS -- all four on push to master at 02cc833",
+    "merged_at": "2026-08-20T07:42:19Z"
+  },
+  "post_merge_verification": {
+    "authoritative_master_head": "02cc833db17d55be5a8c7a3356102569a0ef2ea2",
+    "parents": "6e174945b9338250651c37a248db566bd8a00892 (previous master) and 7f3c0d0800afdcc5bd7f7fa0c9679466d3f00410 (the approved head)",
+    "working_tree": "clean; git status reports no changes on master",
+    "governance_gates_on_master": "PROJECT_STATE_GOVERNANCE PASS; GENERATED_BLOCKS PASS; ZERO_STALE_LEFTOVERS PASS; CURRENT_STATE_PARITY 50/50 PASS; TRANSITION_TIMESTAMPS PASS",
+    "readiness_state_present": "current_activity_execution_state = READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
+    "blockers_closed_on_master": "governance/transitions/T0077.json and T0078.json present; deploy/gatep/gatep-iam-ownership.sql present; data-plane/internal/iamv2/guest_authority_lock.go and build_profile_production.go present; data-plane/migrations/iam_base/mg0_guest_networks_tsi_anchor.sql and scripts/clean-install-reconstruction.sh present"
+  },
+  "runtime_effect": {
+    "deployment": "none",
+    "capability_enablement": "none",
+    "iam_v2": "unchanged; no cutover",
+    "development_appliance": "172.21.60.23 NOT modified and NOT contacted for this merge. The merge changed nothing that runs there -- it introduced no content at all -- so there was nothing to verify on it, and the authorization for this action explicitly excludes changing it.",
+    "production": "no Production appliance exists; none was contacted",
+    "pms_payment_financial": "no contact with any PMS, payment provider or financial system"
+  },
+  "boundaries_observed": [
+    "Merged only the exact approved head, guarded by an expected-head sha on the merge request.",
+    "No deployment anywhere. 172.21.60.23 unchanged and uncontacted.",
+    "No PMS, payment-provider or financial contact.",
+    "No historical migration, transition or evidence deleted; T0077 and T0078 are preserved verbatim.",
+    "No superseded table dropped; the no-current-dependency proof still does not hold (T0077 §bounded_dependency_review).",
+    "Central Control Plane on a separate server, two-NIC model, local-first edge, enrollment/claim identity, multi-PMS namespace rules, RN+G# posting safety, UNKNOWN financial safety, no implicit FX and all accepted security boundaries preserved."
+  ],
+  "next": "Product-Owner provision of the NEW PRODUCTION SERVER and access, plus authorization to execute the fresh deployment on that exact target under D35. The repository-side readiness work is complete and now on master."
+}
