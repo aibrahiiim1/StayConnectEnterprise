@@ -1,7 +1,7 @@
 {
   "transition_id": "T0083",
   "seq": 83,
-  "timestamp": "2026-08-21T00:00:00Z",
+  "timestamp": "2026-08-20T22:12:35Z",
   "record_type": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_STATE_SYNCHRONIZATION",
   "previous_state": {
     "phase": "7",
