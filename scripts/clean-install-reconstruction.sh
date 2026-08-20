@@ -26,7 +26,16 @@ OUT="${CLEANROOM_OUT:-$ROOT/.cleanroom}"
 REF="${CLEANROOM_REFERENCE:-}"
 mkdir -p "$OUT"
 
-cleanup() { docker rm -f "$C" >/dev/null 2>&1 || true; }
+# CLEANROOM_KEEP=1 leaves the container running so the built schema can be interrogated afterwards. The
+# container name is printed at the end; it is the caller's job to remove it.
+cleanup() {
+  if [ "${CLEANROOM_KEEP:-0}" = "1" ]; then
+    printf '  cleanroom container left running for inspection: %s
+' "$C"
+    return
+  fi
+  docker rm -f "$C" >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
 
 fail=0
@@ -257,10 +266,45 @@ else
 fi
 
 echo
+echo "== REQUIRED: zero superseded guest-IAM tables in the factory-clean schema =="
+# The Production criterion is PHYSICAL absence, not unreachability. Asked of the built schema itself, so a
+# migration that silently failed to drop one shows up here rather than in production.
+legacy="$(psql_q -c "SELECT COALESCE(string_agg(tablename, ', ' ORDER BY tablename), '') FROM pg_tables
+                      WHERE schemaname='public' AND tablename IN
+                        ('sessions','guests','guest_accounts','vouchers','voucher_batches',
+                         'ticket_templates','payments')")"
+[ -z "$legacy" ] && note "none of the superseded guest-IAM tables exist"                  || bad "superseded guest-IAM table(s) still present: $legacy"
+# And nothing may still point at them -- a surviving FK would mean the drop took a current dependency with it.
+dangling="$(psql_q -c "SELECT count(*) FROM pg_constraint c
+                        JOIN pg_class r ON r.oid=c.confrelid
+                        JOIN pg_namespace n ON n.oid=r.relnamespace
+                       WHERE c.contype='f' AND n.nspname='public' AND r.relname IN
+                         ('sessions','guests','guest_accounts','vouchers','voucher_batches',
+                          'ticket_templates','payments')")"
+[ "$dangling" = "0" ] && note "no foreign key references any removed object"                       || bad "$dangling foreign key(s) still reference a removed object"
+# The retained challenge/nonce stores must have lost the access-plan coupling that was their only tie to the
+# superseded domain.
+coupling="$(psql_q -c "SELECT count(*) FROM information_schema.columns
+                        WHERE table_schema='public' AND column_name='template_id'
+                          AND table_name IN ('auth_otps','social_oauth_states')")"
+[ "$coupling" = "0" ] && note "auth_otps and social_oauth_states carry no access-plan coupling"                       || bad "$coupling retained table(s) still carry template_id"
+# IAM-v2 must be the only guest-IAM structure left standing.
+iamv2_guest="$(psql_q -c "SELECT count(*) FROM pg_tables WHERE schemaname='iam_v2' AND tablename IN
+                            ('sessions','guest_principals','guest_access_accounts','vouchers',
+                             'voucher_batches','entitlements','internet_packages')")"
+[ "$iamv2_guest" = "7" ] && note "the IAM-v2 guest domain is present and is the only one"                          || bad "expected 7 core IAM-v2 guest tables, found $iamv2_guest"
+
+echo
 echo "== factory-clean: schema built, nothing seeded =="
 psql_q -c "SELECT '  public tables : '||count(*) FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'"
 psql_q -c "SELECT '  iam_v2 tables : '||count(*) FROM information_schema.tables WHERE table_schema='iam_v2' AND table_type='BASE TABLE'"
-for t in tenants sites appliances operators guest_accounts vouchers ticket_templates; do
+# The IAM-v2 guest domain must also be EMPTY on a factory-clean install: no principal, account, voucher or
+# session arrives with the schema. They arrive through enrolment, licensing and Hotel-Admin configuration.
+for t in guest_principals guest_access_accounts vouchers sessions entitlements; do
+  n="$(psql_q -c "SELECT count(*) FROM iam_v2.$t" 2>/dev/null || echo '?')"
+  [ "$n" = "0" ] || bad "iam_v2.$t is not empty on a factory-clean install ($n rows)"
+done
+for t in tenants sites appliances operators; do
   n="$(psql_q -c "SELECT count(*) FROM public.$t" 2>/dev/null || echo '?')"
   [ "$n" = "0" ] || bad "public.$t is not empty on a factory-clean install ($n rows)"
 done

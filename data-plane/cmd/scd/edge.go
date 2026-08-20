@@ -134,10 +134,8 @@ func (s *server) licenseStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	// Live usage against the licensed concurrent-online-guest cap.
 	var current int64 = -1
-	if s.sess != nil {
-		if n, err := s.sess.ActiveCount(r.Context()); err == nil {
-			current = n
-		}
+	if n, err := s.activeSessionCount(r.Context()); err == nil {
+		current = int64(n)
 	}
 	maxGuests := s.lic.MaxConcurrentOnlineGuests()
 	var remaining any = "unlimited"
@@ -409,12 +407,15 @@ func (s *server) telemetryLoop(ctx context.Context, started time.Time) {
 func (s *server) enqueueUsage(ctx context.Context) {
 	var active, today int64
 	var upToday, downToday int64
+	// Telemetry counts from the single session authority. Aggregates only -- no guest PII.
 	_ = s.db.QueryRow(ctx,
-		`SELECT count(*) FROM sessions WHERE state = 'active'`).Scan(&active)
+		`SELECT count(*) FROM iam_v2.sessions WHERE tenant_id=$1 AND site_id=$2 AND state = 'active'`,
+		s.tenID, s.siteID).Scan(&active)
 	_ = s.db.QueryRow(ctx, `
         SELECT count(*), COALESCE(sum(bytes_up),0), COALESCE(sum(bytes_down),0)
-          FROM sessions WHERE started_at >= date_trunc('day', now())
-    `).Scan(&today, &upToday, &downToday)
+          FROM iam_v2.sessions
+         WHERE tenant_id=$1 AND site_id=$2 AND started >= date_trunc('day', now())
+    `, s.tenID, s.siteID).Scan(&today, &upToday, &downToday)
 	err := s.obx.Enqueue(ctx, "usage", map[string]any{
 		"active_sessions":  active,
 		"sessions_today":   today,

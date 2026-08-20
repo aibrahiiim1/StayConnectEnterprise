@@ -50,14 +50,12 @@ import (
 	"github.com/stayconnect/enterprise/data-plane/internal/outbox"
 	"github.com/stayconnect/enterprise/data-plane/internal/pms"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsloader"
-	"github.com/stayconnect/enterprise/data-plane/internal/session"
 	"github.com/stayconnect/enterprise/data-plane/internal/shape"
 	"github.com/stayconnect/enterprise/data-plane/internal/sms"
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/socialloader"
 	"github.com/stayconnect/enterprise/data-plane/internal/startupbackoff"
 	"github.com/stayconnect/enterprise/data-plane/internal/throttle"
-	"github.com/stayconnect/enterprise/data-plane/internal/voucher"
 	"github.com/stayconnect/enterprise/data-plane/internal/writerguard"
 	lic "github.com/stayconnect/enterprise/license"
 )
@@ -179,8 +177,6 @@ func removeDirContents(dir string) error {
 type server struct {
 	nft       *nftSync // wraps nft.Client with NATS replication; API unchanged
 	shp       *shape.Client
-	vou       *voucher.Store
-	sess      *session.Manager
 	mail      mail.Mailer
 	sms       sms.Sender
 	socialReg *social.Registry
@@ -372,90 +368,13 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "TOO_MANY_ATTEMPTS"})
 		return
 	}
-	// ---- AUTHORITY SWITCH ------------------------------------------------------------------------
-	// When IAM-v2 is the configured authority for VOUCHER, it serves the request and the legacy voucher
-	// and session pipelines below are not reached at all. There is no fallback: if IAM-v2 cannot serve,
-	// authorizeViaIAMv2 refuses. Falling back is precisely the defect -- it produced a working guest, a
-	// 200 response and a public.sessions row while iam_v2 stayed empty.
-	if s.iamv2MethodEnabled(iamv2.MethodVoucher) {
-		if s.authorizeViaIAMv2(w, r, iamv2.MethodVoucher,
-			iamv2.Request{Secret: req.Voucher, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip) {
-			return
-		}
-	}
-
-	red, err := s.vou.Validate(r.Context(), s.tenID, req.Voucher)
-	if err != nil {
-		switch {
-		case errors.Is(err, voucher.ErrNotFound):
-			httpErr(w, http.StatusNotFound, "voucher not found")
-		case errors.Is(err, voucher.ErrExpired),
-			errors.Is(err, voucher.ErrExhausted),
-			errors.Is(err, voucher.ErrRevoked):
-			httpErr(w, http.StatusForbidden, err.Error())
-		default:
-			slog.Error("validate", "err", err)
-			httpErr(w, http.StatusInternalServerError, "internal")
-		}
-		return
-	}
-
-	// ATOMIC licensed-capacity gate + session creation: the cap from the LOCAL
-	// signed license is checked under an advisory lock inside the same
-	// transaction that inserts the session row, so simultaneous logins can
-	// never exceed the licensed limit. A rejected guest gets a clear
-	// LICENSE_CAPACITY_REACHED and NO nft/shaping/accounting/session state —
-	// portal, DHCP and DNS keep working and existing sessions are untouched.
-	au, err := s.sess.Start(r.Context(), mac, ip, red.VoucherID, red.MaxDevices, red.DurationSeconds)
-	if err != nil {
-		if devErr := (*session.MaxDevicesError)(nil); errors.As(err, &devErr) {
-			writeJSON(w, http.StatusForbidden, map[string]any{
-				"error": "MAX_DEVICES_REACHED", "limit": devErr.Limit, "current": devErr.Current,
-			})
-			return
-		}
-		if capErr := (*session.CapacityError)(nil); errors.As(err, &capErr) {
-			writeJSON(w, http.StatusForbidden, map[string]any{
-				"error":   "LICENSE_CAPACITY_REACHED",
-				"limit":   capErr.Limit,
-				"current": capErr.Current,
-			})
-			return
-		}
-		slog.Error("session start", "err", err)
-		httpErr(w, http.StatusInternalServerError, "session start failed")
-		return
-	}
-	nc := s.resolveNetwork(r.Context(), ip)
-	ttl := time.Duration(red.DurationSeconds) * time.Second
-	if err := s.nft.Allow(r.Context(), nc.Bridge, ip, ttl); err != nil {
-		slog.Error("nft allow", "err", err)
-		_ = s.sess.End(context.Background(), ip, "policy")
-		httpErr(w, http.StatusInternalServerError, "nft allow failed")
-		return
-	}
-	if err := s.shp.AddSession(r.Context(), nc.Bridge, ip, red.DownKbps, red.UpKbps); err != nil {
-		slog.Error("shape add", "err", err)
-		_ = s.nft.Deny(context.Background(), nc.Bridge, ip)
-		_ = s.sess.End(context.Background(), ip, "policy")
-		httpErr(w, http.StatusInternalServerError, "shape add failed")
-		return
-	}
-	s.recordSessionNetwork(r.Context(), au.SessionID, nc)
-	if err := s.vou.Activate(r.Context(), red.VoucherID); err != nil {
-		slog.Warn("voucher activate", "err", err)
-	}
-	s.met.SessionsStarted.WithLabelValues("voucher").Inc()
-
-	resp := authorizeResp{
-		SessionID:       au.SessionID,
-		GuestID:         au.GuestID,
-		DurationSeconds: red.DurationSeconds,
-	}
-	if au.ExpiresAt != nil {
-		resp.ExpiresAt = au.ExpiresAt.Format(time.RFC3339)
-	}
-	writeJSON(w, http.StatusOK, resp)
+	// IAM-v2 IS THE GUEST AUTHORITY. There is no second implementation to fall back to and no switch to
+	// choose one: the superseded voucher and public.sessions pipelines that used to sit below this point have
+	// been REMOVED from the product, not merely made unreachable.
+	//
+	// authorizeViaIAMv2 always handles the request -- success or refusal -- so there is nothing after it.
+	s.authorizeViaIAMv2(w, r, iamv2.MethodVoucher,
+		iamv2.Request{Secret: req.Voucher, Device: iamv2.DeviceContext{MAC: mac.String()}}, ip)
 }
 
 type revokeReq struct {
@@ -488,7 +407,7 @@ func (s *server) revoke(w http.ResponseWriter, r *http.Request) {
 	default:
 		req.Reason = "admin"
 	}
-	if err := s.sess.End(r.Context(), ip, req.Reason); err != nil {
+	if err := s.endActiveSessionByIP(r.Context(), ip, req.Reason); err != nil {
 		slog.Error("session end", "err", err)
 		httpErr(w, http.StatusInternalServerError, "session end failed")
 		return
@@ -503,7 +422,7 @@ func (s *server) status(w http.ResponseWriter, r *http.Request) {
 		httpErr(w, http.StatusBadRequest, "bad ip")
 		return
 	}
-	id, active, err := s.sess.FindActive(r.Context(), ip)
+	id, active, err := s.findActiveSessionByIP(r.Context(), ip)
 	if err != nil {
 		slog.Error("find active", "err", err)
 		httpErr(w, http.StatusInternalServerError, "lookup failed")
@@ -667,8 +586,6 @@ func main() {
 	s := &server{
 		nft:          newNFTSync(nft.New(), nil, c.ApplianceID, c.SiteID),
 		shp:          shape.New(),
-		vou:          &voucher.Store{DB: pool},
-		sess:         &session.Manager{DB: pool, TenantID: c.TenantID, SiteID: c.SiteID, ApplianceID: c.ApplianceID},
 		mail:         mail.NewStub(c.MailLogPath),
 		sms:          sms.NewStub(c.SMSLogPath),
 		socialReg:    socialReg,
@@ -776,10 +693,10 @@ func main() {
 		WANMAC:                 s.hw.WANMAC,
 	})
 	s.lic.Load(rootCtx)
-	// The concurrent-online-guest cap comes DIRECTLY from the local signed
-	// license and is enforced atomically inside session creation. Central
-	// availability plays no part in guest authorization.
-	s.sess.LicensedLimit = s.lic.MaxConcurrentOnlineGuests
+	// The concurrent-online-guest cap still comes DIRECTLY from the local signed licence and is still
+	// enforced atomically inside session creation -- it now lives in the IAM-v2 activation transaction
+	// (iamv2_session_activate.go), which reads s.lic itself. Central availability plays no part in guest
+	// authorization.
 	if ident != nil && c.CtrlAPIBase != "" {
 		priv := ident.PrivateKey()
 		applID := ident.ApplianceID
@@ -829,7 +746,10 @@ func main() {
 	r.Post("/v1/auth/otp/issue", s.otpIssue)
 	r.Post("/v1/auth/social/start", s.socialStart)
 	r.Post("/v1/sessions/authorize-social", s.authorizeSocial)
-	r.Post("/v1/auth/pms/verify", s.pmsVerify)
+	// /v1/auth/pms/verify is REMOVED. It resolved a stay and then created a public.sessions row through the
+	// superseded pipeline. The current PMS guest path is Phase 3: /v1/phase3/auth/pms/resolve then
+	// /v1/phase3/auth/pms/grant, which derives identity from the connection rather than the body and grants
+	// through the IAM-v2 entitlement model.
 	r.Post("/v1/admin/pms/{name}/test", s.pmsAdminTest)
 	r.Get("/v1/admin/pms/{name}/cache", s.pmsAdminCache)
 	r.Get("/v1/admin/pms/{name}/health", s.pmsAdminHealth)
@@ -970,9 +890,9 @@ func main() {
 		}()
 	}
 	go s.pmsHealthFlushLoop(rootCtx)
-	// Phase 6.4 — session reaper. Closes expired/idle rows that acctd
-	// can't see (no traffic = no accounting tick).
-	go s.startReaperLoop(rootCtx)
+	// The legacy session reaper is REMOVED with the public.sessions domain it swept. Expiry in the current
+	// model is entitlement exhaustion, owned by internal/enforce over iam_v2.sessions and its entitlement
+	// bindings -- a single authority deciding when access ends.
 	// Edge-first refactor: walled-garden rules from the (site) DB are now
 	// actually enforced — reconciled into the nft walled_garden_ip set.
 	go s.gardenReconcileLoop(rootCtx)
@@ -1040,30 +960,11 @@ func main() {
 			if err := s.startUpdateAgent(rootCtx, nc, c.ApplianceID, envOr("SCD_UPDATE_PUB", "/etc/stayconnect/update-signing.pub")); err != nil {
 				slog.Warn("update agent: failed", "err", err)
 			}
-			// Boot reconcile: rebuild our local set from DB so we don't
-			// start empty (important for a backup promoted to active or
-			// a plain crash-restart).
-			rctx, cancel := context.WithTimeout(rootCtx, 10*time.Second)
-			applied, err := s.reconcileNFTFromDB(rctx, c.SiteID)
-			cancel()
-			if err != nil {
-				slog.Warn("nft reconcile failed", "err", err)
-			} else if applied > 0 {
-				slog.Info("nft reconciled from DB", "entries", applied)
-			}
-			// Re-assert per-session shaping/accounting classes for active
-			// sessions. Kernel tc state is lost on reboot (IFB devices vanish)
-			// and unknown to a freshly-promoted backup; this rebuilds the
-			// download+upload classes so accounting resumes without waiting
-			// for guests to re-authenticate.
-			rctx2, cancel2 := context.WithTimeout(rootCtx, 30*time.Second)
-			shaped, err := s.reconcileShapingFromDB(rctx2, c.SiteID)
-			cancel2()
-			if err != nil {
-				slog.Warn("shaping reconcile failed", "err", err)
-			} else if shaped > 0 {
-				slog.Info("shaping reconciled from DB", "sessions", shaped)
-			}
+			// Boot reconcile of the legacy nft set and the legacy per-session shaping classes is REMOVED
+			// along with public.sessions. Phase-3 enforcement reconciles the authorization set from
+			// iam_v2.sessions in netd, and acctd re-asserts the accountable classes it owns; rebuilding
+			// them a second time from a different table is how two authorities come to disagree about
+			// who is on the network.
 		}
 	}
 

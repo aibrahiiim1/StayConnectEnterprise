@@ -181,6 +181,30 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
+		// LICENSED CONCURRENT-GUEST CAP, from the LOCAL signed licence, counted inside the same transaction
+		// that inserts. This is the site-wide limit the appliance is licensed for, which is a different
+		// question from the per-entitlement device limit below: one guest with a five-device plan can be
+		// within their plan and still be the guest who would take the site past its licence.
+		//
+		// It moved here from the superseded session manager, which enforced it while it owned session
+		// creation. Removing that manager without moving the cap would have quietly removed the licence
+		// limit itself -- an unlicensed appliance that still works is worse than one that refuses.
+		//
+		// A non-positive limit means unlimited. Central availability plays no part: the number comes from the
+		// signed licence on disk.
+		if lim := s.lic.MaxConcurrentOnlineGuests(); lim > 0 {
+			var online int64
+			if err := tx.QueryRow(ctx, `
+			    SELECT count(*) FROM iam_v2.sessions
+			     WHERE tenant_id=$1 AND site_id=$2 AND ended IS NULL
+			       AND state IN ('active','PENDING_ENFORCEMENT')`, s.tenID, s.siteID).Scan(&online); err != nil {
+				return err
+			}
+			if online >= lim {
+				return &licenseCapacityError{Limit: lim, Current: online}
+			}
+		}
+
 		// DEVICE LIMIT, enforced against the PINNED plan revision, counted inside the same transaction that
 		// inserts. Counting outside it is the classic way two simultaneous logins both see "one slot left".
 		var inUse int
@@ -224,6 +248,14 @@ func (s *server) activateIAMv2Session(w http.ResponseWriter, r *http.Request) {
 			ip.String(), mac.String(), nc.Bridge).Scan(&sessionID)
 	})
 	if err != nil {
+		var cap *licenseCapacityError
+		if errors.As(err, &cap) {
+			writeJSON(w, http.StatusForbidden, map[string]any{
+				"error": "LICENSE_CAPACITY_REACHED", "limit": cap.Limit, "current": cap.Current,
+				"authority": "iam_v2",
+			})
+			return
+		}
 		var dev *maxDevicesError
 		if errors.As(err, &dev) {
 			writeJSON(w, http.StatusForbidden, map[string]any{
@@ -336,3 +368,14 @@ const (
 	// Short relative to the enforcement producer's one-second cadence.
 	iamv2EnforcementPoll = 100 * time.Millisecond
 )
+
+// licenseCapacityError reports that admitting this session would take the site past the concurrent-guest
+// limit in its local signed licence. It carries the limit and the current count so the portal can say which
+// wall the guest hit, and it is deliberately distinct from maxDevicesError: "your plan allows fewer devices"
+// and "this property is at its licensed capacity" are different facts and lead to different actions.
+type licenseCapacityError struct {
+	Limit   int64
+	Current int64
+}
+
+func (e *licenseCapacityError) Error() string { return "licensed concurrent-guest capacity reached" }

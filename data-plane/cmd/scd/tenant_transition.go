@@ -27,18 +27,12 @@ import (
 //     the transition record itself is written here.
 var tenantOwnedTables = []string{
 	// children / leaves first (FK dependents)
-	"sessions",
-	"guest_accounts",
 	"auth_otps",
 	"pms_attempts",
 	"accounting_records",
 	"social_oauth_states",
 	"stripe_events",
-	"payments",
-	"vouchers",
-	"guests",
 	// parents
-	"voucher_batches",
 	"walled_garden_rules",
 	"notification_providers",
 	"pms_providers",
@@ -47,7 +41,6 @@ var tenantOwnedTables = []string{
 	"operator_roles",
 	"operators",
 	"tenant_effective_limits",
-	"ticket_templates",
 }
 
 // hasForeignTenantData reports whether the site DB holds ANY tenant-owned row that

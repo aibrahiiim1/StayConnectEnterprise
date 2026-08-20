@@ -1,0 +1,41 @@
+{
+  "transition_id": "T0080",
+  "seq": 80,
+  "timestamp": "2026-08-20T08:30:00Z",
+  "record_type": "READY_WITHDRAWN_ZERO_LEGACY_CRITERION_SUPERSEDES_IT",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "ZERO_LEGACY_FRESH_PRODUCTION_BASELINE_CLEANUP",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ZERO_LEGACY_FRESH_PRODUCTION_BASELINE_IN_PROGRESS_READY_WITHDRAWN",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D35",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner clarification of the final Production requirement, starting from authoritative master f3b6856d3d04bc93d420442e20b91da22b603d3d. Fresh Production does NOT mean 'superseded guest IAM remains present but cannot be selected'; it means PHYSICAL zero-superseded guest IAM in the current product. Repository-only work; not Phase 8. No deployment, no change to 172.21.60.23, no Production contact, no PMS/payment-provider/financial traffic.",
+  "previous_state_note": "T0077-T0079 closed the two T0076 blockers and recorded READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT on master. That readiness rested on a weaker criterion: the superseded guest-auth tables remained present and their runtime implementation remained compiled in, made unreachable by a production-build authority lock rather than removed.",
+  "new_state_note": "READY IS WITHDRAWN. It is not a regression of accepted work and no accepted evidence is retracted -- the criterion itself was superseded before any deployment. The repository must not claim readiness against a criterion the Product Owner has replaced. Readiness will be restored only when the Zero-Legacy criterion is verified: no superseded guest-IAM implementation, fallback branch or dead legacy authority code in the Production runtime; no configuration, environment variable, route, API, startup option or service path able to select or depend on it; no Production binary containing it; no superseded guest-IAM tables in the factory-clean Production schema once every current inbound dependency is safely migrated; zero copied DEVELOPMENT data; and all platform foundations intact.",
+  "phase_affected_note": "post-roadmap (D35 fresh-deployment preparation)",
+  "criterion_superseded": {
+    "old": "zero superseded ACTIVE runtime dependency for guest IAM: the tables exist but no configuration can make them the guest authority",
+    "new": "PHYSICAL zero-superseded guest IAM: the implementation and the tables are absent from the current product and from the factory-clean Production schema",
+    "why_the_old_one_was_not_enough": "an unselectable implementation is still an implementation. It ships in the binary, it is still maintained, its tables still exist to be written by anything with the privilege, and the only thing standing between it and the guest authority is a build flag."
+  },
+  "boundaries_observed": [
+    "Repository-only. 172.21.60.23 NOT modified and NOT contacted.",
+    "No deployment. No Production appliance provisioned or contacted.",
+    "No PMS, payment-provider or financial traffic.",
+    "Git history, historical migrations, accepted evidence and governance records preserved for audit; nothing erased merely to remove old terminology.",
+    "All permanent product rules preserved."
+  ],
+  "next": "Complete the bounded Zero-Legacy Fresh Production Baseline cleanup and re-verify by factory-clean reconstruction. Only then may READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT be restored."
+}

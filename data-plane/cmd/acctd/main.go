@@ -246,161 +246,24 @@ type activeSession struct {
 	voucherBytes int64
 }
 
+// loop is retained as the accounting tick's entry point, but the LEGACY PASS IS GONE.
+//
+// It used to read tc counters for every row in public.sessions, write public.accounting_records, update the
+// session's byte columns and enforce the voucher's data/time quota by calling back into scd. All of that
+// belonged to the superseded session domain: the quotas came from ticket_templates through vouchers, and the
+// records were keyed by a public.sessions id.
+//
+// The current authority is Phase 3. netd is the only shaping writer (ADR-0002); phase3.accountingPass reads
+// each live iam_v2.sessions row's absolute counters and submits them through the controlled ingest, and
+// entitlement exhaustion -- not a per-voucher byte cap -- is what ends access, decided by internal/enforce.
+//
+// Nothing replaces the legacy pass here because something already had: the two ran side by side, and the
+// legacy one stood down whenever Phase 3 owned accounting. Removing it makes permanent the state the system
+// was already reaching at runtime, and removes the possibility of two writers disagreeing about one guest's
+// usage.
 func (a *acctd) loop(ctx context.Context) error {
-	// When Phase-3 owns enforcement, netd is the ONLY shaping writer (ADR-0002) and Phase-3 sessions are
-	// accounted by their own pass. The legacy loop stands down entirely rather than measuring and shaping a
-	// second, overlapping view of the same guests — two writers to one set of tc classes is a race with no
-	// owner, and that is precisely what the single-owner decision exists to remove.
-	if a.p3.ownsAccounting() {
-		a.prev = snapshot{}
-		return nil
-	}
-	sessions, err := a.loadActive(ctx)
-	if err != nil {
-		return err
-	}
-	if len(sessions) == 0 {
-		a.prev = snapshot{}
-		return nil
-	}
-
-	// Read tc counters once per device. Download counts live on the guest
-	// bridge (dst = guest IP); upload counts live on the bridge's IFB
-	// (src = guest IP, captured pre-SNAT via the ingress redirect). Each
-	// device serves exactly one guest subnet, so (device, minor) uniquely
-	// identifies a session — traffic can never be attributed across networks.
-	downCache := map[string]map[int]shape.ClassBytes{}
-	upCache := map[string]map[int]shape.ClassBytes{}
-	readDown := func(bridge string) map[int]shape.ClassBytes {
-		if m, ok := downCache[bridge]; ok {
-			return m
-		}
-		m, _ := a.shp.ReadClasses(ctx, bridge)
-		downCache[bridge] = m
-		return m
-	}
-	readUp := func(bridge string) map[int]shape.ClassBytes {
-		ifb := shape.IFBName(bridge)
-		if m, ok := upCache[ifb]; ok {
-			return m
-		}
-		m, _ := a.shp.ReadClasses(ctx, ifb)
-		upCache[ifb] = m
-		return m
-	}
-
-	now := time.Now()
-	next := snapshot{}
-
-	for _, s := range sessions {
-		minor, ok := shape.MinorForIP(s.ip)
-		if !ok {
-			continue
-		}
-		curUp := readUp(s.bridge)[minor].Bytes
-		curDown := readDown(s.bridge)[minor].Bytes
-		next[s.id] = snapEntry{BytesUp: curUp, BytesDown: curDown}
-
-		prev, seen := a.prev[s.id]
-		if !seen {
-			// First observation of this session (fresh auth, or an acctd/scd
-			// restart, or a reboot that rebuilt the class). Adopt the current
-			// counter as the baseline and write nothing, so already-persisted
-			// totals are never double-counted. Subsequent ticks measure deltas.
-			continue
-		}
-
-		dUp := int64(curUp) - int64(prev.BytesUp)
-		dDown := int64(curDown) - int64(prev.BytesDown)
-		if dUp < 0 { // class was re-created (counter reset) — count from zero
-			dUp = int64(curUp)
-		}
-		if dDown < 0 {
-			dDown = int64(curDown)
-		}
-
-		if dUp != 0 || dDown != 0 {
-			// This is the LEGACY session domain (public.sessions). Phase-3 sessions live in iam_v2.sessions and
-			// are accounted by their own pass (phase3.accountingPass) — mixing the two here is what made an
-			// earlier attempt call the Phase-3 ingest with ids it could never resolve.
-			_, _ = a.db.Exec(ctx, `
-				INSERT INTO accounting_records (ts, session_id, tenant_id, appliance_id, bytes_up, bytes_down)
-				VALUES ($1, $2, $3, $4, $5, $6)
-			`, now, s.id, s.tid, a.applID, dUp, dDown)
-
-			s.totalUp += dUp
-			s.totalDown += dDown
-			_, _ = a.db.Exec(ctx, `
-				UPDATE sessions SET bytes_up = $2, bytes_down = $3, last_activity_at = $4
-				 WHERE id = $1
-			`, s.id, s.totalUp, s.totalDown, now)
-		}
-
-		// Quota enforcement (bytes + time). Data is enforced on the voucher's
-		// AGGREGATE across all its devices (voucherBytes at load + this tick's
-		// delta), so a data cap is shared, not multiplied, across devices. Time
-		// is a per-session backstop; the authoritative wall-clock window is the
-		// session's expires_at, which the scd reaper enforces.
-		if s.vid != "" {
-			aggBytes := s.voucherBytes + dUp + dDown
-			elapsed := int(now.Sub(s.startedAt).Seconds())
-			if s.dataCap > 0 && aggBytes >= s.dataCap {
-				a.revoke(ctx, s.ip.String(), "quota_bytes")
-				continue
-			}
-			if s.durSec > 0 && elapsed >= s.durSec {
-				a.revoke(ctx, s.ip.String(), "quota_time")
-				continue
-			}
-		}
-	}
-
-	// prev is replaced (not merged) so revoked/closed sessions drop out and
-	// their baselines don't linger.
-	a.prev = next
+	a.prev = snapshot{}
 	return nil
-}
-
-// loadActive returns every active session for this tenant with its network
-// placement (ingress bridge) and quota limits.
-func (a *acctd) loadActive(ctx context.Context) ([]activeSession, error) {
-	rows, err := a.db.Query(ctx, `
-		SELECT s.id, s.tenant_id, COALESCE(s.voucher_id::text,''),
-		       host(s.ip), COALESCE(s.ingress_interface, ''),
-		       s.started_at, s.bytes_up, s.bytes_down,
-		       COALESCE(t.data_cap_bytes, 0), COALESCE(t.duration_seconds, 0),
-		       COALESCE((SELECT SUM(s2.bytes_up + s2.bytes_down) FROM sessions s2
-		                  WHERE s.voucher_id IS NOT NULL AND s2.voucher_id = s.voucher_id),
-		                s.bytes_up + s.bytes_down)
-		  FROM sessions s
-		  LEFT JOIN vouchers v ON v.id = s.voucher_id
-		  LEFT JOIN ticket_templates t ON t.id = v.template_id
-		 WHERE s.tenant_id = $1
-		   AND s.state = 'active'
-	`, a.tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []activeSession
-	for rows.Next() {
-		var s activeSession
-		var ipStr, bridge string
-		if err := rows.Scan(&s.id, &s.tid, &s.vid, &ipStr, &bridge,
-			&s.startedAt, &s.totalUp, &s.totalDown, &s.dataCap, &s.durSec, &s.voucherBytes); err != nil {
-			return nil, err
-		}
-		s.ip = net.ParseIP(ipStr)
-		if s.ip == nil {
-			continue
-		}
-		if bridge == "" {
-			bridge = a.legacyBridge
-		}
-		s.bridge = bridge
-		out = append(out, s)
-	}
-	return out, rows.Err()
 }
 
 func (a *acctd) revoke(ctx context.Context, ip, reason string) {

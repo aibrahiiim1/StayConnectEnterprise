@@ -192,7 +192,7 @@ func (s *server) natsRevoke(ctx context.Context, raw []byte) ([]byte, int) {
 	if reason == "" {
 		reason = "admin"
 	}
-	if err := s.sess.End(ctx, ip, reason); err != nil {
+	if err := s.endActiveSessionByIP(ctx, ip, reason); err != nil {
 		slog.Error("nats revoke: session end", "err", err)
 		return jerr("internal", "session end failed"), 500
 	}

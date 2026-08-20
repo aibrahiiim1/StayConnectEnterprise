@@ -28,7 +28,7 @@ type tableSpec struct {
 	Note  string
 }
 
-// scoped-appliance subquery shared by sessions / accounting_records.
+// scoped-appliance subquery used by accounting_records.
 const siteAppliances = "(SELECT id FROM appliances WHERE tenant_id = $1 AND site_id = $2)"
 
 // keepOperators: the tenant's operators MINUS those whose ONLY role is
@@ -45,13 +45,12 @@ const keepOperators = `tenant_id = $1 AND (
 // Scoping rules:
 //   - tenants / sites: the single row for this tenant / site.
 //   - appliances: this site's rows.
-//   - sessions / accounting_records: rows whose appliance belongs to this
+//   - accounting_records: rows whose appliance belongs to this
 //     site (they carry appliance scoping in addition to tenant_id).
-//   - pms_providers / walled_garden_rules / payments: tenant-wide rows
+//   - pms_providers / walled_garden_rules: tenant-wide rows
 //     (site_id IS NULL) plus rows explicitly for this site.
 //   - everything else: tenant-scoped. NOTE for multi-site tenants: tables
-//     without a site_id column (vouchers, ticket_templates, guests,
-//     voucher_batches, auth_otps, pms_attempts, provider configs, ...)
+//     without a site_id column (auth_otps, pms_attempts, provider configs, ...)
 //     cannot be split automatically — all tenant rows are copied. Split
 //     manually before migrating a second site of the same tenant.
 var migrationTables = []tableSpec{
@@ -92,55 +91,6 @@ var migrationTables = []tableSpec{
 		Note:  "platform_admin role rows dropped",
 	},
 	{
-		Name:  "ticket_templates",
-		Where: "tenant_id = $1",
-		PK:    "id",
-		FKs:   []fkRef{{"tenant_id", "tenants", "id"}},
-		Note:  "tenant-scoped (no site_id)",
-	},
-	{
-		Name:  "voucher_batches",
-		Where: "tenant_id = $1",
-		PK:    "id",
-		FKs: []fkRef{
-			{"tenant_id", "tenants", "id"},
-			{"template_id", "ticket_templates", "id"},
-			{"created_by", "operators", "id"},
-		},
-		Note: "tenant-scoped (no site_id)",
-	},
-	{
-		Name:  "vouchers",
-		Where: "tenant_id = $1",
-		PK:    "id",
-		FKs: []fkRef{
-			{"tenant_id", "tenants", "id"},
-			{"template_id", "ticket_templates", "id"},
-			{"batch_id", "voucher_batches", "id"},
-		},
-		Note: "tenant-scoped (no site_id)",
-	},
-	{
-		Name:  "guests",
-		Where: "tenant_id = $1",
-		PK:    "id",
-		FKs:   []fkRef{{"tenant_id", "tenants", "id"}},
-		Note:  "tenant-scoped (no site_id)",
-	},
-	{
-		Name:  "sessions",
-		Where: "tenant_id = $1 AND appliance_id IN " + siteAppliances,
-		PK:    "id",
-		FKs: []fkRef{
-			{"tenant_id", "tenants", "id"},
-			{"site_id", "sites", "id"},
-			{"appliance_id", "appliances", "id"},
-			{"guest_id", "guests", "id"},
-			{"voucher_id", "vouchers", "id"},
-		},
-		Note: "scoped via this site's appliances",
-	},
-	{
 		Name:  "accounting_records",
 		Where: "tenant_id = $1 AND appliance_id IN " + siteAppliances,
 		PK:    "", // hypertable, no PK: skip-if-dest-non-empty strategy
@@ -153,7 +103,6 @@ var migrationTables = []tableSpec{
 		FKs: []fkRef{
 			{"tenant_id", "tenants", "id"},
 			{"appliance_id", "appliances", "id"},
-			{"template_id", "ticket_templates", "id"},
 		},
 		Note: "tenant-scoped (no site_id)",
 	},
@@ -164,7 +113,6 @@ var migrationTables = []tableSpec{
 		FKs: []fkRef{
 			{"tenant_id", "tenants", "id"},
 			{"appliance_id", "appliances", "id"},
-			{"template_id", "ticket_templates", "id"},
 		},
 		Note: "tenant-scoped (no site_id)",
 	},
@@ -209,18 +157,6 @@ var migrationTables = []tableSpec{
 		PK:    "id",
 		FKs:   []fkRef{{"tenant_id", "tenants", "id"}},
 		Note:  "tenant-scoped (no site_id)",
-	},
-	{
-		Name:  "payments",
-		Where: "tenant_id = $1 AND (site_id IS NULL OR site_id = $2)",
-		PK:    "id",
-		FKs: []fkRef{
-			{"tenant_id", "tenants", "id"},
-			{"site_id", "sites", "id"},
-			{"template_id", "ticket_templates", "id"},
-			{"voucher_id", "vouchers", "id"},
-		},
-		Note: "tenant rows for this site (or site_id IS NULL)",
 	},
 	{
 		Name:  "stripe_events",

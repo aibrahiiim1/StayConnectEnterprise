@@ -315,17 +315,6 @@ func (s *server) deleteGuestAccountIAMv2(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 }
 
-// acctAuthority picks the handler that matches the configured guest-account authority.
-//
-// It is a router-level choice on purpose. Branching inside each handler invites exactly the drift that
-// caused the original defect: one handler gets the check and six do not, and nothing tells you which.
-// Reading the route table now shows every operation is paired, or the pairing is visibly missing.
-func (s *server) acctAuthority(legacy, iam http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if s.iamv2AccountAuthority() {
-			iam(w, r)
-			return
-		}
-		legacy(w, r)
-	}
-}
+// acctAuthority is REMOVED. It dispatched each guest-account route between a legacy handler and an IAM-v2
+// one. With the superseded implementation gone there is nothing to dispatch between, and a switch with one
+// destination is dead code that quietly asserts a second destination might return.

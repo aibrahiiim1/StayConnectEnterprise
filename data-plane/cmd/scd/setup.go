@@ -38,17 +38,15 @@ func (s *server) setupStatus(w http.ResponseWriter, r *http.Request) {
 			}
 			maxGuests := s.lic.MaxConcurrentOnlineGuests()
 			lic["max_concurrent_online_guests"] = maxGuests
-			if s.sess != nil {
-				if n, err := s.sess.ActiveCount(r.Context()); err == nil {
-					lic["current_online_guests"] = n
-					if maxGuests > 0 {
-						rem := maxGuests - n
-						if rem < 0 {
-							rem = 0
-						}
-						lic["remaining_capacity"] = rem
-						lic["usage_percent"] = float64(n) / float64(maxGuests) * 100
+			if n, err := s.activeSessionCount(r.Context()); err == nil {
+				lic["current_online_guests"] = n
+				if maxGuests > 0 {
+					rem := maxGuests - int64(n)
+					if rem < 0 {
+						rem = 0
 					}
+					lic["remaining_capacity"] = rem
+					lic["usage_percent"] = float64(n) / float64(maxGuests) * 100
 				}
 			}
 		} else {

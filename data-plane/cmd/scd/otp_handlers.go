@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,14 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
 	"github.com/stayconnect/enterprise/data-plane/internal/mail"
 	"github.com/stayconnect/enterprise/data-plane/internal/otp"
 	"github.com/stayconnect/enterprise/data-plane/internal/phone"
-	"github.com/stayconnect/enterprise/data-plane/internal/session"
 	"github.com/stayconnect/enterprise/data-plane/internal/sms"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/voucher"
 )
 
 // ---- /v1/tenant/auth-methods ------------------------------------------------
@@ -241,55 +239,26 @@ func (s *server) authorizeOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.met.OTPVerify.WithLabelValues(v.Channel, "ok").Inc()
 
-	// Resolve template parameters (duration / data cap / shaping).
-	red := &voucher.Redeemed{}
-	if v.TemplateID != "" {
-		r2, err := s.vou.LoadTemplate(r.Context(), v.TemplateID)
-		if err == nil {
-			red = r2
-		}
+	// THE CHALLENGE IS VERIFIED; THE IDENTITY IS IAM-v2's.
+	//
+	// public.auth_otps is a TRANSIENT challenge store and is deliberately not part of the IAM-v2 identity
+	// model -- the accepted decision (D2) is that the OTP challenge is verified upstream and only the
+	// verified factor crosses into iam_v2, where authOTPIdentity maps it to a principal identity. So this
+	// handler verifies the code and then hands the factor to the single guest authority.
+	//
+	// What was REMOVED here is the superseded pipeline that followed: a legacy access-plan lookup to derive
+	// duration and shaping, a public.sessions row, and direct nft/shaping calls. Duration, data cap and
+	// shaping are not properties of the credential in the current model -- they come from the package the
+	// guest selects in the commerce flow after authentication.
+	factorType := "EMAIL"
+	if v.Channel != "email" {
+		factorType = "PHONE"
 	}
-
-	// Atomic licensed-capacity gate + session creation (see main.go authorize).
-	au, err := s.sess.StartOTP(r.Context(), mac, ip, v.Channel, v.Destination, red.DurationSeconds)
-	if err != nil {
-		if capErr := (*session.CapacityError)(nil); errors.As(err, &capErr) {
-			writeJSON(w, http.StatusForbidden, map[string]any{
-				"error": "LICENSE_CAPACITY_REACHED", "limit": capErr.Limit, "current": capErr.Current,
-			})
-			return
-		}
-		slog.Error("session start (otp)", "err", err)
-		httpErr(w, http.StatusInternalServerError, "session start failed")
-		return
-	}
-	nc := s.resolveNetwork(r.Context(), ip)
-	ttl := time.Duration(red.DurationSeconds) * time.Second
-	if err := s.nft.Allow(r.Context(), nc.Bridge, ip, ttl); err != nil {
-		slog.Error("nft allow", "err", err)
-		_ = s.sess.End(context.Background(), ip, "policy")
-		httpErr(w, http.StatusInternalServerError, "nft allow failed")
-		return
-	}
-	if err := s.shp.AddSession(r.Context(), nc.Bridge, ip, red.DownKbps, red.UpKbps); err != nil {
-		slog.Error("shape add", "err", err)
-		_ = s.nft.Deny(context.Background(), nc.Bridge, ip)
-		_ = s.sess.End(context.Background(), ip, "policy")
-		httpErr(w, http.StatusInternalServerError, "shape add failed")
-		return
-	}
-	s.recordSessionNetwork(r.Context(), au.SessionID, nc)
-	s.met.SessionsStarted.WithLabelValues("otp").Inc()
-
-	resp := authorizeResp{
-		SessionID:       au.SessionID,
-		GuestID:         au.GuestID,
-		DurationSeconds: red.DurationSeconds,
-	}
-	if au.ExpiresAt != nil {
-		resp.ExpiresAt = au.ExpiresAt.Format(time.RFC3339)
-	}
-	writeJSON(w, http.StatusOK, resp)
+	s.authorizeViaIAMv2(w, r, iamv2.MethodOTP, iamv2.Request{
+		FactorType:  factorType,
+		FactorValue: v.Destination,
+		Device:      iamv2.DeviceContext{MAC: mac.String()},
+	}, ip)
 }
 
 // ---- helpers ---------------------------------------------------------------

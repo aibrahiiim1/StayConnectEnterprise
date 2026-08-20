@@ -101,21 +101,34 @@ func assertIAMv2Authority(t *testing.T, rec *httptest.ResponseRecorder) {
 	}
 }
 
-// The other half of the contract: with the method DISABLED, the switch must not engage at all, so the
-// legacy path is reached exactly as before. Proven by the nil legacy dependency panicking -- if the switch
-// wrongly swallowed a disabled method, no panic would occur and this test would fail.
-func TestDisabledMethodStillReachesLegacy(t *testing.T) {
+// THE OTHER HALF OF THE CONTRACT, INVERTED BY THE ZERO-LEGACY BASELINE.
+//
+// This used to assert that a DISABLED method still reached the legacy pipeline -- that the switch was inert
+// when IAM-v2 was not the configured authority. That contract is deliberately gone: there is no legacy
+// pipeline to reach. The entry point now serves IAM-v2 unconditionally, so the assertion is inverted rather
+// than deleted, because "there is no longer anywhere else to go" is the property worth pinning.
+//
+// The nil legacy dependency that the old test relied on to panic is the proof: if any legacy path survived
+// under a disabled method, this would panic instead of answering.
+func TestDisabledMethodNoLongerReachesAnyLegacyPath(t *testing.T) {
 	s := authoritySrv(t, iamv2.Config{MasterEnabled: false, Methods: map[iamv2.Method]bool{}})
-	reached := func() (r bool) {
-		defer func() { r = recover() != nil }()
-		postJSON(t, s.authorize, map[string]string{
+	panicked := func() (p bool) {
+		defer func() { p = recover() != nil }()
+		rec := postJSON(t, s.authorize, map[string]string{
 			"ip": "10.77.0.51", "mac": "02:de:00:00:00:01", "voucher": "ANYCODE",
 		})
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("response was not JSON: %s", rec.Body.String())
+		}
+		if body["authority"] != "iam_v2" {
+			t.Fatalf("a disabled method must still be answered by iam_v2, not by a surviving legacy "+
+				"path: %v", body)
+		}
 		return false
 	}()
-	if !reached {
-		t.Fatal("with VOUCHER disabled the legacy pipeline must still be reached; the authority switch " +
-			"must be inert when IAM-v2 is not the configured authority")
+	if panicked {
+		t.Fatal("a legacy pipeline was still reachable: the entry point must serve IAM-v2 unconditionally")
 	}
 }
 

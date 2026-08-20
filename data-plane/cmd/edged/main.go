@@ -362,16 +362,21 @@ func main() {
 			r.With(s.requireRole("network", permWrite)).Post("/hotel-admin-cert/rotate", s.hotelAdminCertRotate)
 
 			mountResource(r, s, "operators", s.operatorsRoutes)
-			mountResource(r, s, "guest-access-plans", s.guestAccessPlansRoutes)
-			mountResource(r, s, "voucher-batches", s.voucherBatchesRoutes)
-			mountResource(r, s, "vouchers", s.vouchersRoutes)
+			// guest-access-plans, voucher-batches and vouchers are REMOVED. They were the operator surface
+			// over public.ticket_templates, public.voucher_batches and public.vouchers -- the superseded
+			// commerce and credential domain. The current surface is "commercial-packages" below: service
+			// plans and internet packages in iam_v2, with vouchers issued through scd against
+			// iam_v2.vouchers. Two operator surfaces over two competing plan models is how an operator ends
+			// up editing the plan that nothing reads.
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
 			mountResource(r, s, "sessions", s.sessionsRoutes)
 			mountResource(r, s, "pms-providers", s.pmsProvidersRoutes)
 			mountResource(r, s, "auth-methods", s.authMethodsRoutes)
 			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
 			mountResource(r, s, "portal-branding", s.brandingRoutes)
-			mountResource(r, s, "payments", s.paymentsRoutes)
+			// payments is REMOVED. It was a read-only list over public.payments, a Stripe-session record
+			// keyed to a superseded voucher and access plan. The current financial surface is
+			// "financial-ops" below, over the Phase-4 iam_v2 payment transactions and settlements.
 			mountResource(r, s, "stripe-accounts", s.stripeAccountsRoutes)
 			mountResource(r, s, "notification-providers", s.notificationProvidersRoutes)
 			mountResource(r, s, "social-providers", s.socialProvidersRoutes)
