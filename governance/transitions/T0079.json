@@ -1,7 +1,7 @@
 {
   "transition_id": "T0079",
   "seq": 79,
-  "timestamp": "2026-08-20T03:30:00Z",
+  "timestamp": "2026-08-20T07:55:53Z",
   "record_type": "FRESH_PRODUCTION_READINESS_PULL_REQUEST_MERGED_TO_MASTER",
   "previous_state": {
     "phase": "7",
@@ -41,7 +41,7 @@
     "base_advance_note": "master had advanced by one commit (6e17494, the PR #19 merge) whose tree is identical to c101956, an ancestor of the approved head. That base advance therefore introduced no content either, which is why merging the exact approved head produced an identical tree.",
     "ci_at_the_merged_head": "pre-merge on 7f3c0d0: Project Governance 32324812558 SUCCESS; Phase 3 Software 32324812683 SUCCESS; Phase 4 Financial Core 32324812573 SUCCESS; Phase 5 Post-Stay and Transfer 32324812612 SUCCESS",
     "ci_post_merge_on_master": "Project Governance 32345236515 SUCCESS; Phase 3 Software 32345236533 SUCCESS; Phase 4 Financial Core 32345236536 SUCCESS; Phase 5 Post-Stay and Transfer 32345236511 SUCCESS -- all four on push to master at 02cc833",
-    "merged_at": "2026-08-20T03:19:00Z"
+    "merged_at": "2026-08-20T07:42:19Z"
   },
   "post_merge_verification": {
     "authoritative_master_head": "02cc833db17d55be5a8c7a3356102569a0ef2ea2",
