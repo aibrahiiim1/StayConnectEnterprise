@@ -230,12 +230,20 @@ echo "== REQUIRED: the superseded guest-auth authority cannot be selected by con
 # A build is not free of the superseded authority merely because nothing currently selects it. This runs the
 # real production-profile config loader against hostile environments and requires each one to REFUSE, so the
 # proof is a property of the shipped binary rather than of the environment file it happens to be given.
+# It is run against the PRODUCTION BUILD -- `-tags stayconnect_production`, the compilation a Production
+# appliance ships -- and against the development build too, because the property being proven is that the two
+# differ in exactly the intended way and that neither can be talked out of it by configuration.
 if command -v go >/dev/null 2>&1; then
-  if (cd "$ROOT/data-plane" && go test ./internal/iamv2/ -run 'Production|GuestAuthority|ExternalEffect|NonProduction' -count=1)         >"$OUT/authority-lock.log" 2>&1; then
-    note "production profile refuses every configuration that would select the superseded guest authority"
+  if (cd "$ROOT/data-plane" && go build -tags stayconnect_production ./...         && go test -tags stayconnect_production ./internal/iamv2/ -count=1) >"$OUT/authority-lock.log" 2>&1; then
+    note "PRODUCTION build: refuses every configuration that would select the superseded guest authority"
     note "  (explicit disable, master off, and unset all proven; see $OUT/authority-lock.log)"
   else
-    bad "the guest authority lock did not hold: $(tail -3 "$OUT/authority-lock.log")"
+    bad "the guest authority lock did not hold on the production build: $(tail -3 "$OUT/authority-lock.log")"
+  fi
+  if (cd "$ROOT/data-plane" && go test ./internal/iamv2/ -count=1) >"$OUT/authority-dev.log" 2>&1; then
+    note "DEVELOPMENT build: keeps the configurable behaviour the accepted trial evidence depends on"
+  else
+    bad "the development build regressed: $(tail -3 "$OUT/authority-dev.log")"
   fi
 else
   bad "go toolchain unavailable: the guest-authority lock could not be proven, so this run is not acceptance evidence"

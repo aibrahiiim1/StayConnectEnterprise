@@ -17,6 +17,11 @@ package iamv2
 // select the superseded path is a STARTUP FAILURE rather than a silent downgrade. Fail closed: refuse to
 // serve rather than serve from the wrong authority.
 //
+// The lock is keyed on a BUILD TAG (`stayconnect_production`, see build_profile_*.go), not on a runtime flag
+// or a caller argument. A switch that decides which IAM authority is in force must not itself be reachable by
+// the configuration it governs. The DEVELOPMENT appliance is built WITHOUT that tag and keeps the behaviour
+// its accepted trial evidence depends on.
+//
 // WHAT IS NOT LOCKED, AND WHY
 // ---------------------------
 //   * MethodOTP and MethodSocial reach EXTERNAL providers (SMS, email, an OAuth identity provider). Locking
@@ -40,13 +45,24 @@ func GuestAuthorityLocked(m Method) bool {
 	return false
 }
 
-// enforceGuestAuthorityLock rejects any production configuration that would select the superseded guest-auth
-// authority, and forces the locked methods on.
+// BuildProfile names the build the binary was produced from: "production" when built with
+// `-tags stayconnect_production`, "development" otherwise. Reported in SafeFlagSummary at startup so the
+// running profile is visible in a log rather than inferred.
+func BuildProfile() string {
+	if productionBuild {
+		return "production"
+	}
+	return "development"
+}
+
+// enforceGuestAuthorityLock rejects any configuration that would select the superseded guest-auth authority,
+// and forces the locked methods on. `locked` is the production-build constant; it is a parameter only so the
+// behaviour of BOTH builds can be proven from either one.
 //
 // It runs at STARTUP, before anything is served. An appliance whose configuration disagrees with the locked
 // authority does not come up degraded -- it does not come up.
-func enforceGuestAuthorityLock(c *Config, productionProfile bool, get Getenv) error {
-	if !productionProfile {
+func enforceGuestAuthorityLock(c *Config, locked bool, get Getenv) error {
+	if !locked {
 		// Development and test builds keep the configurable behaviour, because the DEVELOPMENT appliance
 		// deliberately exercises both authorities and its accepted evidence depends on being able to.
 		return nil

@@ -60,10 +60,15 @@ func LoadConfigFromEnv(get Getenv, productionProfile bool) (Config, error) {
 		stub = false
 	}
 	cfg := Config{MasterEnabled: master, Methods: methods, AllowSocialStub: stub}
-	// The guest IAM authority is LOCKED on a production build: IAM-v2 is the only one, and a configuration
+	// The guest IAM authority is LOCKED on a production BUILD: IAM-v2 is the only one, and a configuration
 	// that tries to select the superseded public-schema path is a startup failure rather than a silent
 	// downgrade. Applied BEFORE Validate so the locked methods are validated in their final state.
-	if err := enforceGuestAuthorityLock(&cfg, productionProfile, get); err != nil {
+	//
+	// Keyed on productionBuild, NOT on productionProfile. productionProfile is a caller argument that both
+	// live services already pass as true, including on the DEVELOPMENT appliance -- keying the lock on it
+	// would change the behaviour the development trial was accepted with. Which IAM authority is in force is
+	// decided by the binary, not by an argument or an env file.
+	if err := enforceGuestAuthorityLock(&cfg, productionBuild, get); err != nil {
 		return Config{}, err
 	}
 	if err := cfg.Validate(); err != nil {
@@ -85,5 +90,9 @@ func (c Config) SafeFlagSummary() string {
 	}
 	b.WriteString(" social_stub=")
 	b.WriteString(strconv.FormatBool(c.AllowSocialStub))
+	// The build profile is reported at startup because it, not the flags above, decides whether the guest
+	// authority is locked. An operator reading a log must be able to tell which binary is running.
+	b.WriteString(" build=")
+	b.WriteString(BuildProfile())
 	return b.String()
 }

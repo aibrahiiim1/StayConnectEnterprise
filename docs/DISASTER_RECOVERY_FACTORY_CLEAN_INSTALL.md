@@ -176,8 +176,17 @@ Per the Production objective of zero superseded **active** runtime dependency, a
 taken* is not removed: it is one environment variable, one bad rollback or one half-restored env file away from
 being the authority again — and it would fail **towards** the superseded system rather than refusing to run.
 
-Closed by **`data-plane/internal/iamv2/guest_authority_lock.go`**, applied inside `LoadConfigFromEnv` on the
-production profile — the profile both `edged` and `scd` already pass. On a production build:
+Closed by **`data-plane/internal/iamv2/guest_authority_lock.go`**, applied inside `LoadConfigFromEnv` and keyed
+on a **build tag**, `stayconnect_production` (`build_profile_production.go` / `build_profile_development.go`).
+
+Keyed on the build, not on the `productionProfile` argument: that argument is already passed as `true` by both
+live services, **including on the DEVELOPMENT appliance**, so keying the lock on it would have changed the
+behaviour the development trial was accepted with. And a switch that decides which IAM authority is in force
+must not be reachable by the configuration it governs — the Production binary carries the answer inside it.
+`Config.SafeFlagSummary()` reports `build=production` or `build=development` at startup, so which binary is
+running is visible in a log rather than inferred.
+
+On a production build:
 
 * `STAYCONNECT_IAMV2_VOUCHER` or `..._ACCOUNT` set to `false`/`0` is a **startup refusal** naming the exact
   variable and why, not a silent downgrade;
@@ -190,16 +199,26 @@ or OAuth provider, and that is gated by its own decision. They can still only ev
 redirected to a superseded implementation. Operator authentication is untouched: `public.operators` is a live
 platform foundation, not superseded guest IAM (§4G table below).
 
-Development and test builds keep the configurable behaviour, because the DEVELOPMENT appliance deliberately
-exercises both authorities and its accepted evidence depends on being able to.
+Builds **without** the tag — the DEVELOPMENT appliance and every ordinary `go build` — keep the configurable
+behaviour, because the DEVELOPMENT appliance deliberately exercises both authorities and its accepted evidence
+depends on being able to.
 
-Proven by `data-plane/internal/iamv2/guest_authority_lock_test.go`, and re-run inside the clean-install
-verifier so the property is evidenced by the same artifact as the schema:
+Proven on **both** builds. `guest_authority_lock_test.go` drives the lock with the build constant supplied
+explicitly, so a single run proves both sides; `guest_authority_e2e_production_test.go` and
+`guest_authority_e2e_development_test.go` then prove the real loader end to end, one under each tag. CI builds,
+vets and tests the production tag as well as the development one, because a production-only build tag that CI
+never compiles is a build tag nobody has proven. The clean-install verifier re-runs both, so the property is
+evidenced by the same artifact as the schema:
 
 ```
-production profile refuses every configuration that would select the superseded guest authority
+PRODUCTION build: refuses every configuration that would select the superseded guest authority
   (explicit disable, master off, and unset all proven)
+DEVELOPMENT build: keeps the configurable behaviour the accepted trial evidence depends on
 ```
+
+The one assertion this deliberately contradicts is the dark-era "everything defaults OFF" default in
+`concurrency_test.go`. It is scoped to the development build rather than weakened for both: on a Production
+binary an all-off configuration is a startup refusal, not a valid dark default.
 
 ### H. Bounded dependency review of the superseded guest-auth objects  ·  **physical removal NOT yet provable**
 
@@ -305,8 +324,12 @@ run as the platform role in the first place.
 4. **Build the schema** in the order of §2. Record every step in `schema_migrations`.
 5. **Apply `deploy/gatep/gatep-grants.sql`.** It re-asserts least privilege and ends in fail-closed
    assertions; a failure here is a stop, not a warning.
-6. **Install binaries and units** from `deploy/systemd/` and the built `data-plane/cmd/*`; install the
-   Hotel-Admin bundle with `deploy/scripts/deploy-hotel-admin.sh install`.
+6. **Build the binaries with the production tag** — `go build -tags stayconnect_production ./...` in
+   `data-plane/`. This is not optional and it is not cosmetic: without the tag the guest IAM authority stays
+   configurable and the superseded path is one environment variable away (§4G). Confirm it after start-up —
+   the `edged` and `scd` logs must report `build=production` in the IAM-v2 flag summary. Install binaries and
+   units from `deploy/systemd/`; install the Hotel-Admin bundle with `deploy/scripts/deploy-hotel-admin.sh
+   install`.
 7. **Network baseline** from `deploy/netplan/`, `deploy/nftables/`, `deploy/kea/`, `deploy/caddy/`.
 8. **Enrol and claim** the appliance against the Central Control Plane; wait for the **signed assignment**
    to resolve tenant and site. Do **not** set `EDGED_TENANT_ID` / `EDGED_SITE_ID`.

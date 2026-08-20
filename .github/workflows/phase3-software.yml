@@ -130,6 +130,16 @@ jobs:
         working-directory: data-plane
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-unit -- bash $GITHUB_WORKSPACE/scripts/ci/go-test-counted.sh go-unit ./... -count=1"
 
+      # The PRODUCTION binary is a different compilation: `-tags stayconnect_production` locks the guest IAM
+      # authority to IAM-v2 so no configuration can select the superseded path. Built and tested here as well
+      # as the development build, because a production-only build tag that CI never compiles is a build tag
+      # nobody has proven.
+      - name: go build + test (production build tag)
+        working-directory: data-plane
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh go-production-build --
+          bash -c "go build -tags stayconnect_production ./... && go vet -tags stayconnect_production ./... && go test -tags stayconnect_production ./internal/iamv2/... -count=1"
+
       - name: go test -race (all Phase-3 concurrency-sensitive paths)
         working-directory: data-plane
         # pmsd, resolver, auth context, stay grant, checkout, scd, acctd, netd, and the controlled-writer guard.
