@@ -1,0 +1,79 @@
+{
+  "transition_id": "T0077",
+  "seq": 77,
+  "timestamp": "2026-08-20T01:10:00Z",
+  "record_type": "FRESH_PRODUCTION_READINESS_BLOCKERS_CLOSED_AND_VERIFIED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "CLEAN_INSTALL_PATH_HARDENED_TWO_BLOCKERS_REMAIN_AWAITING_PRODUCT_OWNER_PROVIDED_SERVER",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D35",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Executed under the existing D35 decision. The Product Owner authorized completion of the remaining repository-only Fresh Production readiness work -- closing the two blockers recorded by T0076 -- before any appliance deployment, and directed that the state advance to READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT only once those blockers are verified closed. No new architecture decision is created.",
+  "previous_state_note": "T0076 recorded the factory-clean install path as hardened but carrying two Production-readiness blockers: iam_v2 objects created by migrations 0009+ were left owned by the platform role in a clean build, and the superseded guest-auth authority remained selectable by configuration.",
+  "new_state_note": "Both blockers are CLOSED and verified semantically in a clean-room build from an empty isolated environment on the Production-equivalent image, through the real Gate-P path. Ownership is now asserted by deploy/gatep/gatep-iam-ownership.sql as an explicit install step before the grants, so the privilege bootstrap lands on the final ownership state; it fails closed on any object it cannot converge and on any SECURITY DEFINER function left executing as the wrong owner. The guest IAM authority is locked on the production profile by data-plane/internal/iamv2/guest_authority_lock.go: an explicit attempt to disable IAM-v2 for vouchers or accounts, and the master switch being off, are both STARTUP REFUSALS rather than silent downgrades. The verifier proves ownership by asking the catalog, names any exception instead of counting it, reports ownership as an ordinary catalog fact, and re-runs the authority-lock tests, so neither property is asserted only by the thing being tested.",
+  "phase_affected_note": "post-roadmap (D35 fresh-deployment preparation)",
+  "blockers_closed": [
+    "OWNERSHIP -- CLOSED. deploy/gatep/gatep-iam-ownership.sql reassigns every table, view, materialised view, sequence, function and procedure in iam_v2 to iam_v2_owner, takes the schema itself, and asserts both outcomes fail-closed. Clean-room result: every iam_v2 object owned by iam_v2_owner; all 67 SECURITY DEFINER functions in iam_v2 execute as iam_v2_owner; schema iam_v2 owned by iam_v2_owner.",
+    "CONFIGURATION-SELECTABLE LEGACY AUTHORITY -- CLOSED for the production runtime. enforceGuestAuthorityLock is applied inside LoadConfigFromEnv on the production profile that edged and scd already pass. STAYCONNECT_IAMV2_VOUCHER or _ACCOUNT set to false/0 is a startup refusal naming the exact variable; the master switch cannot be off; with nothing configured both locked methods come up as IAM-v2. OTP and social remain configurable because they reach external providers gated by their own decisions, and can only ever be configured on, never redirected to a superseded implementation. Development and test builds keep the configurable behaviour, so the accepted DEVELOPMENT trial evidence remains reproducible."
+  ],
+  "bounded_dependency_review": {
+    "scope": "the superseded public-schema guest-auth objects only; no unrelated product redesign",
+    "method": "read-only inbound foreign-key, view and function inspection on the development appliance, plus a repository reference count for each object",
+    "superseded": [
+      "guest_accounts",
+      "ticket_templates",
+      "vouchers",
+      "voucher_batches",
+      "sessions (guest sessions)",
+      "auth_otps",
+      "guests"
+    ],
+    "retained_platform_foundations": [
+      "operators",
+      "operator_roles",
+      "tenants",
+      "sites",
+      "appliances",
+      "guest_networks",
+      "audit_log",
+      "accounting_records"
+    ],
+    "outcome": "PHYSICAL REMOVAL NOT PROVABLE IN THIS PASS AND THEREFORE NOT DONE. public.payments and public.social_oauth_states are CURRENT and still foreign-key into ticket_templates and vouchers, so dropping those parents today would break code that is not superseded. Per the instruction to remove superseded tables only after proving no current required dependency, that proof does not hold and the tables stay. Migrating payments and social_oauth_states onto IAM-v2 parents is the prerequisite and is its own bounded work item. No view or function references the superseded set.",
+    "claim_being_made": "a fresh Production appliance creates these tables EMPTY and no configuration can make them the guest authority, so it has zero superseded ACTIVE runtime dependency for guest IAM. The claim is not that the tables do not exist."
+  },
+  "verification": {
+    "environment": "disposable container on the workstation, never connected to any appliance",
+    "image": "timescale/timescaledb:2.16.1-pg16 (the Production-equivalent image)",
+    "path": "real Gate-P path: gatep-roles.sql, gatep-iam-roles.sql, gatep-iam-ownership.sql, gatep-grants.sql -- no stand-in roles and no ad-hoc SQL",
+    "install_steps_applied": 58,
+    "ledger": "every migration and base step recorded in schema_migrations",
+    "result": "CLEAN_INSTALL_RECONSTRUCTION = PASS",
+    "anchor": "guest_networks_tsi_anchor present and valid, definition matches the contract; guest_network_pms_map composite FK to public.guest_networks present",
+    "identity_data": "public tables 44, iam_v2 tables 74, every identity-bearing table 0 rows; none of the appliance's trial or probe roles exist",
+    "semantic_parity": "COLUMN, CONSTRAINT, INDEX, TRIGGER and SCHEMAOWNER identical to the development appliance reference. Every remaining difference is named and directional: 6 tables and 107 functions where the clean build owns as iam_v2_owner and the appliance still owns as stayconnect (the clean build is the correct one); five scratch-fixture roles and three test-probe identities that a clean install correctly does not create; and iam_v2_owner grants on public.schema_migrations, an ad-hoc development grant the clean build deliberately lacks.",
+    "runtime_privilege_parity": "EXACT. Every runtime service role has an identical EXECUTE surface in both: svc_scd 171, svc_edged 167, svc_acctd 173, svc_netd 173, sc_commerce_runtime 165, sc_payment_runtime 171, sc_payment_outcome 165, sc_financial_operator 171, sc_financial_readonly 164. None appears in the diff.",
+    "authority_lock": "the production-profile config loader refuses every hostile configuration -- explicit disable, master off -- and forces the locked methods on when unset"
+  },
+  "boundaries_observed": [
+    "Repository-only work. 172.21.60.23 NOT modified; the only appliance data used was the read-only reference catalog already captured, used for comparison.",
+    "No deployment to any server. No Production appliance exists or was contacted.",
+    "No real PMS, payment-provider or financial traffic.",
+    "No historical migration, scratch file or governance evidence deleted; iam_v2_scratch retained as provenance.",
+    "No superseded table dropped, because the no-current-dependency proof does not hold.",
+    "Central Control Plane on a separate server, two-NIC model, local-first edge, enrollment/claim identity, multi-PMS namespace rules, RN+G# posting safety, UNKNOWN financial safety, no implicit FX and all accepted security boundaries preserved."
+  ],
+  "next": "Product-Owner provision of the NEW PRODUCTION SERVER and access, plus authorization to execute the fresh deployment on that exact target under D35. The repository-side readiness work is complete."
+}

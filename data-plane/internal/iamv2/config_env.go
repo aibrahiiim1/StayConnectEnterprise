@@ -60,6 +60,12 @@ func LoadConfigFromEnv(get Getenv, productionProfile bool) (Config, error) {
 		stub = false
 	}
 	cfg := Config{MasterEnabled: master, Methods: methods, AllowSocialStub: stub}
+	// The guest IAM authority is LOCKED on a production build: IAM-v2 is the only one, and a configuration
+	// that tries to select the superseded public-schema path is a startup failure rather than a silent
+	// downgrade. Applied BEFORE Validate so the locked methods are validated in their final state.
+	if err := enforceGuestAuthorityLock(&cfg, productionProfile, get); err != nil {
+		return Config{}, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}

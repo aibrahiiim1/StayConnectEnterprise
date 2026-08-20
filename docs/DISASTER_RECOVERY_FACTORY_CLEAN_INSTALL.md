@@ -56,8 +56,12 @@ Order is load-bearing, and it is not the numeric order of the files:
                                                         the contract-defined tenant/site anchor
 5. data-plane/migrations/iam_base/mg1..mg9              the IAM-v2 domain, applied AS iam_v2_owner
 6. data-plane/migrations/0009..0048                     everything that builds on the IAM domain
-7. deploy/gatep/gatep-grants.sql                        least-privilege grants + fail-closed assertions
+7. deploy/gatep/gatep-iam-ownership.sql                 assert iam_v2 ownership (see §4F) — BEFORE the grants
+8. deploy/gatep/gatep-grants.sql                        least-privilege grants + fail-closed assertions
 ```
+
+Step 7 precedes step 8 so the privilege bootstrap is applied to the final ownership state rather than to an
+intermediate one.
 
 Every step, base steps included, is recorded in `schema_migrations`. Steps 4-5 sit between `0008` and `0009`
 because `0009` is the first migration to address `iam_v2` objects, and `mg1` in turn needs
@@ -135,25 +139,72 @@ The appliance runs **`timescale/timescaledb:2.16.1-pg16`**. Reconstructing on pl
 omitted the `ts_insert_blocker` hypertable triggers on `public.accounting_records` and `public.audit_log` —
 a difference no table count can see. The reconstruction now uses the same image and the triggers match.
 
-### F. **OUTSTANDING** — ownership of `iam_v2` objects created by migrations `0009`+
+### F. Ownership of `iam_v2` objects created by migrations `0009`+  ·  **CLOSED**
 
-26 objects differ. On the appliance they are owned by `iam_v2_owner`; a clean build leaves them owned by the
-platform role, because migrations `0009`+ must run as the platform role — they maintain
-`public.schema_migrations` and public objects, and running them as `iam_v2_owner` fails immediately with
-`permission denied for table schema_migrations`.
+Migrations `0009`+ must run as the platform role — they maintain `public.schema_migrations` and public objects,
+and running them as `iam_v2_owner` fails immediately with `permission denied for table schema_migrations`. The
+consequence was that every `iam_v2` object those migrations created was left owned by the platform role.
 
-**This is a real blocker for a production install**, because it decides what the `SECURITY DEFINER` boundary
-functions execute as. The correction is an explicit ownership-reassertion step in the installer
-(`ALTER … OWNER TO iam_v2_owner` across `iam_v2`, asserted afterwards), authored deliberately rather than
-improvised inside the verifier — the verifier's job is to expose this, not to hide it.
+That is not cosmetic. The IAM boundary functions are `SECURITY DEFINER` and **execute as their owner**, so
+ownership decides what the whole boundary can reach; a schema that agrees on every column, constraint and index
+and disagrees on ownership is a different security model wearing the same shape.
 
-### G. **BLOCKER** — the legacy guest-auth authority is configuration-selectable
+Closed by **`deploy/gatep/gatep-iam-ownership.sql`**, an explicit install step (§2 step 7). It reassigns every
+table, view, materialised view, sequence, function and procedure in `iam_v2` to `iam_v2_owner`, takes the schema
+itself, and then **fails closed** twice: once naming any object left behind, once requiring every `SECURITY
+DEFINER` function in `iam_v2` to execute as `iam_v2_owner`. It is idempotent, so it is safe on a rebuild.
 
-Per the Production objective of zero superseded **active** runtime dependency, this is a **Production-readiness
-blocker**, not an observation. The authority switch is call-level (`if s.iamv2Cfg.Enabled(...)`) across six
-files, so legacy remains compiled in and selectable by configuration.
+The verifier does not take the step's word for it. `scripts/clean-install-reconstruction.sh` asks the catalog
+who owns each object afterwards, names any exception rather than counting them, and reports ownership as an
+ordinary catalog fact in the semantic comparison — so a build that fails to converge shows up as a difference,
+not as silence.
 
-Per-object assessment of the superseded `public` guest-auth surface:
+```
+every iam_v2 table, view, sequence, function and procedure is owned by iam_v2_owner
+all 67 SECURITY DEFINER functions in iam_v2 execute as iam_v2_owner
+schema iam_v2 is owned by iam_v2_owner
+```
+
+**One consequence, recorded rather than acted on:** the development appliance carries this same drift — 107
+functions and 6 tables in `iam_v2` owned by `stayconnect` — because the same migrations ran the same way there.
+A factory-clean build is now *more* correct than the appliance on this point. 172.21.60.23 was **not** modified;
+it is reference evidence, not an installation source.
+
+### G. The superseded guest-auth authority was configuration-selectable  ·  **CLOSED for the production runtime**
+
+Per the Production objective of zero superseded **active** runtime dependency, a fallback that merely *isn't
+taken* is not removed: it is one environment variable, one bad rollback or one half-restored env file away from
+being the authority again — and it would fail **towards** the superseded system rather than refusing to run.
+
+Closed by **`data-plane/internal/iamv2/guest_authority_lock.go`**, applied inside `LoadConfigFromEnv` on the
+production profile — the profile both `edged` and `scd` already pass. On a production build:
+
+* `STAYCONNECT_IAMV2_VOUCHER` or `..._ACCOUNT` set to `false`/`0` is a **startup refusal** naming the exact
+  variable and why, not a silent downgrade;
+* the master switch cannot be off either, since that would leave every method disabled — precisely how the
+  runtime behaved before IAM-v2 existed;
+* with nothing configured at all, both locked methods come up as IAM-v2.
+
+`MethodOTP` and `MethodSocial` are deliberately **not** locked on: enabling them reaches an external SMS, email
+or OAuth provider, and that is gated by its own decision. They can still only ever be configured *on* — never
+redirected to a superseded implementation. Operator authentication is untouched: `public.operators` is a live
+platform foundation, not superseded guest IAM (§4G table below).
+
+Development and test builds keep the configurable behaviour, because the DEVELOPMENT appliance deliberately
+exercises both authorities and its accepted evidence depends on being able to.
+
+Proven by `data-plane/internal/iamv2/guest_authority_lock_test.go`, and re-run inside the clean-install
+verifier so the property is evidenced by the same artifact as the schema:
+
+```
+production profile refuses every configuration that would select the superseded guest authority
+  (explicit disable, master off, and unset all proven)
+```
+
+### H. Bounded dependency review of the superseded guest-auth objects  ·  **physical removal NOT yet provable**
+
+The authority is closed; the **tables** are a separate question, and the honest answer is that a physical drop
+is not provable in this pass. Reviewed read-only on the development appliance:
 
 | Object | Verdict |
 |---|---|
@@ -165,9 +216,28 @@ Per-object assessment of the superseded `public` guest-auth surface:
 | `tenants`, `sites`, `appliances`, `guest_networks` | **RETAIN** — platform identity and networking foundations |
 | `audit_log`, `accounting_records` | **RETAIN** — TimescaleDB hypertables, still current |
 
-Removing the superseded objects and the configurable fallback is a code and schema change of real size. It is
-recorded here as the remaining Production-readiness blocker and proposed as its own Product-Owner work item;
-historical migrations and evidence are preserved either way.
+Inbound foreign keys into the superseded set, and what still holds them:
+
+```
+public.payments             -> ticket_templates, vouchers      still referenced by edged (resources_site.go)
+public.social_oauth_states  -> ticket_templates                still referenced (3 call sites)
+public.voucher_batches      -> ticket_templates
+public.vouchers             -> ticket_templates, voucher_batches
+public.auth_otps            -> ticket_templates
+public.guest_accounts       -> ticket_templates
+public.sessions             -> guest_accounts, guests, vouchers
+```
+
+No view or function references them. But `payments` and `social_oauth_states` are **current** and still
+foreign-key into `ticket_templates` and `vouchers`, so dropping those parents today would break code that is
+not superseded. Per the instruction to remove superseded tables only after proving no current required
+dependency, **that proof does not hold and the tables stay.** Migrating `payments` and `social_oauth_states`
+onto IAM-v2 parents is the prerequisite, and it is its own bounded work item — deliberately not expanded into
+here. Historical migrations and evidence are preserved either way.
+
+A factory-clean install creates these tables **empty** and no configuration can make them the guest authority,
+so a fresh Production appliance has zero superseded *active* runtime dependency for guest IAM. That is the claim
+being made; "the tables do not exist" is not.
 
 ## 5. Semantic reconstruction evidence
 
@@ -179,9 +249,14 @@ CLEAN_INSTALL_RECONSTRUCTION = PASS
 public tables 44 · iam_v2 tables 74 · identity tables all 0
 guest_networks_tsi_anchor present and valid, definition matches the contract
 guest_network_pms_map composite FK to guest_networks present
+every iam_v2 table, view, sequence, function and procedure is owned by iam_v2_owner
+all 67 SECURITY DEFINER functions in iam_v2 execute as iam_v2_owner
+schema iam_v2 is owned by iam_v2_owner
+production profile refuses every configuration that would select the superseded guest authority
 ```
 
-Semantic comparison against the development appliance's catalog (read-only reference, 9,639 facts):
+Semantic comparison against the development appliance's catalog (read-only reference; 8,371 facts in the clean
+build). Every remaining difference is named and directional — none is unexplained:
 
 | Fact type | only in appliance | only in clean build | reading |
 |---|---:|---:|---|
@@ -190,14 +265,36 @@ Semantic comparison against the development appliance's catalog (read-only refer
 | INDEX | 0 | 0 | identical |
 | TRIGGER | 0 | 0 | identical, hypertable blockers included |
 | SCHEMAOWNER | 0 | 0 | identical |
-| OWNER | 26 | 26 | **outstanding — §4F** |
-| FUNCTION | 182 | 182 | same functions, owner differs (same cause as OWNER) |
-| TABLEGRANT | 184 | 182 | follows ownership |
-| FUNCGRANT | 1464 | 0 | appliance carries extra trial/probe roles; a clean install correctly has none |
-| MEMBERSHIP | 2 | 0 | `p3_guard_probe` / `p3_noexec_probe` — trial artifacts, correctly absent |
+| OWNER | 6 | 6 | same 6 tables; appliance `stayconnect`, clean build `iam_v2_owner` — **§4F, clean build correct** |
+| FUNCTION | 107 | 107 | same 107 functions; owner differs, same cause |
+| TABLEGRANT | 44 | 42 | 42 follow the ownership move; the extra 2 are §4F-note below |
+| FUNCGRANT | 1312 | 48 | 8 roles absent from a clean install (below); 48 are the owner's own, from owning the 107 |
+| MEMBERSHIP | 2 | 0 | `p3_guard_probe` / `p3_noexec_probe` → `phase2_runner` — trial artifacts, correctly absent |
 
-**The structural surface is identical.** The remaining differences are ownership (§4F, outstanding) and the
-absence of trial-only roles, which is the desired direction for a clean install.
+**The structural surface is identical**, and the ownership, function and grant differences all resolve to three
+causes, each in the correct direction:
+
+1. **Ownership convergence (§4F).** The clean build owns the IAM domain as `iam_v2_owner`; the appliance leaves
+   107 functions and 6 tables owned by `stayconnect`. The 42 `TABLEGRANT` rows are the owner's implicit
+   privileges on those 6 tables moving with them, and the 48 `FUNCGRANT` rows are `iam_v2_owner` and
+   `iam_v2_migrator` gaining `EXECUTE` by owning what they should own.
+2. **Roles a clean install correctly does not create.** Five scratch-fixture roles — `iam_v2_svc_scd`,
+   `iam_v2_svc_edged`, `iam_v2_svc_acctd`, `iam_v2_svc_portald`, `iam_v2_svc_hoteladm` — from
+   `iam_v2_scratch/roles.sql`, whose own header reads *"Scratch-only role model"*. Nothing connects as them: the
+   runtime services connect as `svc_scd`, `svc_edged`, `svc_acctd` and `svc_netd`. Their 164 `FUNCGRANT` rows
+   each are simply the `PUBLIC` default surface every role gets, not a bespoke privilege.
+3. **Test identities.** `phase2_runner`, `p3_guard_probe`, `p3_noexec_probe` — Phase-2/3 privilege probes. A
+   factory-clean install has none, which is the requirement.
+
+**Privilege parity for the roles that actually run is exact.** Every runtime service role has an identical
+`EXECUTE` surface in both: `svc_scd` 171, `svc_edged` 167, `svc_acctd` 173, `svc_netd` 173, `sc_commerce_runtime`
+165, `sc_payment_runtime` 171, `sc_payment_outcome` 165, `sc_financial_operator` 171, `sc_financial_readonly`
+164. Not one appears in the diff.
+
+The two remaining `TABLEGRANT` rows are `iam_v2_owner` holding `SELECT` and `INSERT` on
+`public.schema_migrations` **on the appliance only** — an ad-hoc grant from development. The clean build
+deliberately lacks it: the IAM owner is not a platform ledger writer, which is precisely why migrations `0009`+
+run as the platform role in the first place.
 
 ## 6. Disaster-recovery / fresh-install procedure
 
@@ -215,7 +312,8 @@ absence of trial-only roles, which is the desired direction for a clean install.
    to resolve tenant and site. Do **not** set `EDGED_TENANT_ID` / `EDGED_SITE_ID`.
 9. **Install the licence** through Hotel Admin.
 10. **Configure the hotel** through Hotel Admin: networks, packages, access policy, PMS interfaces.
-11. **Acceptance test**, then a Product-Owner **Go-Live** decision. IAM-v2 is the intended authority from
+11. **Acceptance test**, then a Product-Owner **Go-Live** decision. IAM-v2 is the only guest IAM authority: on
+    a production build it cannot be configured off, and an attempt to do so is a startup refusal (§4G).
     first operation; legacy guest-auth is never configured on.
 
 **Never** restore a database dump, `/etc/stayconnect`, an identity or assignment document, or a licence from
