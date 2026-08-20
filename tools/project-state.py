@@ -94,11 +94,15 @@ def render_block(st):
     ] + ([
         f"**Fresh Production appliance ({prod['host']}, {prod['hostname']}):** DEPLOYED factory-clean from "
         f"`{prod['initial_deployment_source_sha'][:7]}`; first-bring-up fixes were then applied live and "
-        f"afterwards committed to master (`{prod['repository_master_sha'][:7]}`), so no single commit "
+        f"afterwards committed (`{prod['first_bringup_fixes_commit_sha'][:7]}`), so no single commit "
         f"describes what is running. {prod['lifecycle']}. Enrollment, claim and signed "
         f"assignment are NOT complete and it is {prod['license'].split('.')[0].lower()}; no tenant or site "
-        f"is pinned. LAN is intentionally unconfigured. No guest, PMS, payment or financial traffic; no "
-        f"Go-Live. Hotel Admin: {prod['hotel_admin'].split(' ')[0]}",
+        f"is pinned. {prod['lan_interface'].split(':')[0]} is "
+        f"{'intentionally unconfigured' if 'UNCONFIGURED' in prod['lan_interface'].upper() else 'configured'}. "
+        f"Guest traffic: {prod['guest_traffic'].lower()}; PMS: {prod['pms_traffic'].lower()}; "
+        f"payment/financial: {prod['payment_or_financial_traffic'].lower()}. "
+        f"Go-Live: {prod['go_live'].split('.')[0].lower()}. "
+        f"Hotel Admin: {prod['hotel_admin'].split(' ')[0]}",
     ] if prod else []) + [
         f"**Development reference appliance ({dev['host']}):** UNTOUCHED by this work and NOT cut over. "
         f"Retains the historical live-dark runtime its accepted evidence records, including its superseded "

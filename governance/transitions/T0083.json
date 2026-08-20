@@ -1,0 +1,58 @@
+{
+  "transition_id": "T0083",
+  "seq": 83,
+  "timestamp": "2026-08-21T00:00:00Z",
+  "record_type": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_STATE_SYNCHRONIZATION",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ENROLLMENT_CLAIM_ASSIGNMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D35",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Executed under the EXISTING D35 decision, which authorized the Fresh Production deployment on 172.21.60.25. This receipt records an already-executed deployment; it is state synchronization, not a new Product-Owner decision and not a new numbered phase.",
+  "previous_state_note": "The repository was READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT: the Zero-Legacy factory-clean baseline was verified and no Production appliance had been provisioned.",
+  "new_state_note": "The Fresh Production appliance EXISTS and is deployed. 172.21.60.25 (hostname sce, Ubuntu 22.04.5) was provisioned factory-clean from the Zero-Legacy baseline -- 74 iam_v2 tables, 37 public tables, none of the superseded guest-IAM tables, zero identity rows -- so IAM-v2 is structurally the sole guest-IAM authority from first operation. This was a fresh deployment, NOT a cutover: nothing was copied from the DEVELOPMENT appliance, which was never contacted. The appliance is PRE-LIVE and awaiting onboarding, and the single next action is manual ENROLLMENT.",
+  "phase_affected_note": "post-roadmap (D35 fresh-deployment execution)",
+  "deployment": {
+    "host": "172.21.60.25",
+    "hostname": "sce",
+    "os": "Ubuntu 22.04.5 LTS",
+    "initial_deployment_source_sha": "c72b49e958a408c468bfb2c5da97b21a4f383a7d",
+    "build_tag": "stayconnect_production (confirmed at runtime: scd reports build=production)",
+    "schema": "factory-clean from data-plane/migrations/baseline/0000_production_baseline.sql; 74 iam_v2 tables, 37 public tables, zero superseded guest-IAM tables, zero identity rows. Migrations 0001..0049 were NOT replayed.",
+    "runtime_provenance": "MIXED, and no single runtime SHA is claimed. Provisioned from c72b49e. First-bring-up defects were then fixed and the corrected components deployed live before those fixes were committed: the edged and netd binaries and the Hotel-Admin bundle were replaced, the two TimescaleDB hypertables (audit_log, accounting_records) were registered on the live database, and Kea was installed. scd, acctd, portald and the rest are still the c72b49e builds. Those fixes are contained in commit 1c55d7f7a36547665457edb7ee2af1016b4ccdca.",
+    "first_bringup_fixes_commit_sha": "1c55d7f7a36547665457edb7ee2af1016b4ccdca"
+  },
+  "appliance_state": {
+    "lifecycle": "PRE-LIVE",
+    "enrollment": "NOT ENROLLED — awaiting a Central-issued bootstrap token",
+    "claim": "NOT CLAIMED",
+    "signed_assignment": "NONE — no tenant or site is pinned anywhere on the appliance",
+    "license": "UNLICENSED — no signed licence installed; the production build refuses permissive/dev licensing",
+    "wan": "ens160 (also management): 172.21.60.25/24, gateway 172.21.60.1",
+    "lan": "ens192 present and INTENTIONALLY UNCONFIGURED — no guest topology was supplied, so none was invented. Kea is installed but deliberately not started: it binds the LAN bridge.",
+    "hotel_admin": "https://172.21.60.25/"
+  },
+  "boundaries_observed": [
+    "No guest traffic.",
+    "No PMS traffic.",
+    "No payment-provider or financial traffic.",
+    "No Go-Live.",
+    "172.21.60.23 was NOT contacted and NOT modified; nothing was copied from it.",
+    "No identity was seeded or copied: enrollment, claim and signed assignment remain outstanding.",
+    "Central Control Plane remains a separate server; the two-NIC model, local-first edge operation, least-privilege service roles, IAM-v2 ownership and SECURITY DEFINER boundaries are preserved."
+  ],
+  "next": "Manual ENROLLMENT of 172.21.60.25. Each later onboarding milestone -- claim, signed assignment, licence, LAN/guest networking, packages and PMS, acceptance -- advances the state as it completes."
+}
