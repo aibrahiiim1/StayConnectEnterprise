@@ -115,6 +115,33 @@ mapfk="$(psql_q -c "SELECT count(*) FROM pg_constraint WHERE conrelid='iam_v2.gu
 [ "$mapfk" = "1" ] && note "guest_network_pms_map composite FK present" || bad "mapping FK absent"
 
 echo
+echo "== REQUIRED: the hypertables accept writes =="
+# THE CATALOG COMPARISON CANNOT SEE THIS. A --schema-only dump reproduces the table, its columns, its
+# constraints, its indexes AND its ts_insert_blocker trigger, but not the TimescaleDB registration that makes
+# the table a hypertable. Both sides then look identical while the restored one refuses every INSERT with
+# "invalid INSERT on the root table of hypertable". It reached a Production appliance: every audit_log write
+# failed from first boot, and the operator saw it only as a warning in a log.
+#
+# So this is asserted by WRITING, not by comparing. A structural check is what missed it the first time.
+hyper="$(psql_q -c "SELECT count(*) FROM timescaledb_information.hypertables")"
+[ "$hyper" -ge 2 ] && note "$hyper hypertables registered"                    || bad "expected at least 2 registered hypertables, found $hyper"
+for t in audit_log accounting_records; do
+  # `|| true` on the capture: under `set -e` a failing command substitution ends the script, which is how an
+  # earlier version of this check silently stopped the whole verifier at this line instead of reporting.
+  err="$(psql_run -tAqc "INSERT INTO public.$t (ts) VALUES (now())" 2>&1 || true)"
+  case "$err" in
+    *"invalid INSERT on the root table of hypertable"*)
+      bad "public.$t is NOT a registered hypertable: every write is blocked" ;;
+    "")
+      psql_run -tAqc "DELETE FROM public.$t WHERE ts > now() - interval '1 minute'" >/dev/null 2>&1 || true
+      note "public.$t accepts an INSERT" ;;
+    *)
+      # A NOT NULL / FK complaint means the write reached the TABLE, which is what is being proven here.
+      note "public.$t reached its own constraints (hypertable registration is live)" ;;
+  esac
+done
+
+echo
 echo "== REQUIRED: nothing seeded =="
 for t in tenants sites appliances operators; do
   n="$(psql_q -c "SELECT count(*) FROM public.$t" 2>/dev/null || echo '?')"

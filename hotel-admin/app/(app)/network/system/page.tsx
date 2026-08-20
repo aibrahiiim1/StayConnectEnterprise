@@ -270,7 +270,7 @@ export default function NetworkSettingsPage() {
             {state.lan.dhcp_enabled && <Row k="DHCP range" v={<code>{state.lan.dhcp_start} – {state.lan.dhcp_end}</code>} />}
             {state.lan.dhcp_enabled && <Row k="Lease time" v={`${state.lan.dhcp_lease_seconds}s`} />}
             <Row k="DNS to clients" v={<code>{state.lan.dns.join(", ")}</code>} />
-            <Row k="Bridge members" v={<code>{state.lan.members.join(", ") || "—"}</code>} />
+            <Row k="Bridge members" v={<code>{(state.lan.members ?? []).join(", ") || "—"}</code>} />
           </div>
         </div>
       </details>

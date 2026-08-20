@@ -9,6 +9,8 @@
 // Env:
 //
 //	KEYBOOTSTRAP_DSN      operational/migration DSN (role permitted to write otp_hmac_key_generations)
+//	                      also creates the voucher code-encryption key (DEK) that a production build
+//	                      requires, because IAM-v2 VOUCHER cannot be configured off there
 //	SCD_SECRETS_DIR       directory for appliance-local key files (default /etc/stayconnect/secrets)
 package main
 
@@ -21,6 +23,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stayconnect/enterprise/data-plane/internal/keybootstrap"
+	"github.com/stayconnect/enterprise/data-plane/internal/localkeys"
 )
 
 func envOr(k, def string) string {
@@ -48,7 +51,18 @@ func main() {
 	}
 	log.Printf("keybootstrap: throttle key ready at %s", throttlePath)
 
-	// 2) OTP generation-1 key + DB lifecycle metadata, validated together.
+	// 2) Voucher code-encryption key (DEK). On a production build IAM-v2 VOUCHER is locked ON, so scd
+	// refuses to start without this key and its own error names this tool: "run keybootstrap at deploy".
+	// It was not created here, so a factory-clean production appliance crash-looped on first boot with a
+	// message pointing at a step that did not do it. Runtime is load-only by design; creation belongs at
+	// deployment, which is here.
+	dekPath := filepath.Join(secretsDir, "voucher_dek.key")
+	if _, err := localkeys.CreateKeyIfAbsent(dekPath); err != nil {
+		log.Fatalf("keybootstrap: voucher DEK: %v", err)
+	}
+	log.Printf("keybootstrap: voucher code-encryption key ready at %s", dekPath)
+
+	// 3) OTP generation-1 key + DB lifecycle metadata, validated together.
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		log.Fatalf("keybootstrap: db connect: %v", err)

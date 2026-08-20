@@ -165,6 +165,16 @@ func (s *server) brandingRoutes() http.Handler {
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
 		ctx, cancel := dbCtx(req)
 		defer cancel()
+		// AN UNASSIGNED APPLIANCE HAS NO TENANT, AND THAT IS NOT AN INTERNAL ERROR.
+		//
+		// Before enrollment/claim/signed assignment, s.tenantID is empty. This query then asks Postgres to
+		// compare a uuid column against '', which fails, and the operator was told "branding load failed" --
+		// a message that describes a broken system rather than an unconfigured one, on a factory-clean
+		// appliance where being unconfigured is the expected state.
+		if s.tenantID == "" {
+			writeAwaitingAssignment(w, "portal branding")
+			return
+		}
 		var raw []byte
 		if err := s.db.QueryRow(ctx,
 			`SELECT branding FROM tenants WHERE id = $1`, s.tenantID).Scan(&raw); err != nil {

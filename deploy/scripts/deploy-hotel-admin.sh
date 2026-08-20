@@ -164,8 +164,13 @@ package() {
     tar czf hotel-admin-deploy.tgz -C .deploy/app .
     # Verify the TARBALL too, not just the staging dir: tar has its own ways to
     # lose a path, and the tarball is the only artefact that actually ships.
-    grep -q '^\./\.next/BUILD_ID$' <<<"$(tar tzf hotel-admin-deploy.tgz)" || die "tarball is missing ./.next/BUILD_ID"
-    tar tzf hotel-admin-deploy.tgz | grep -q '^\./\.next/static/' || die "tarball is missing ./.next/static/"
+    # MATERIALISE THE LISTING ONCE, for the same reason install() does it below: under `set -o pipefail`,
+    # `tar tzf ... | grep -q PATTERN` reports a PIPELINE failure when grep matches early and exits, because
+    # the closed pipe kills tar with SIGPIPE. ./.next/static/ sits near the front of this archive, so the
+    # check failed on a bundle that was demonstrably complete and blocked the deployment.
+    local listing; listing="$(tar tzf hotel-admin-deploy.tgz)"
+    grep -q '^\./\.next/BUILD_ID$' <<<"$listing" || die "tarball is missing ./.next/BUILD_ID"
+    grep -q '^\./\.next/static/'   <<<"$listing" || die "tarball is missing ./.next/static/"
     echo ">> wrote $(pwd)/hotel-admin-deploy.tgz (BUILD_ID=$dst_id)"
   )
 }

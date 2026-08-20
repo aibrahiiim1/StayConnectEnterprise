@@ -11512,14 +11512,6 @@ CREATE TRIGGER sg_guard BEFORE DELETE OR UPDATE ON iam_v2.pms_interface_secret_g
 -- Name: accounting_records ts_insert_blocker; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER ts_insert_blocker BEFORE INSERT ON public.accounting_records FOR EACH ROW EXECUTE FUNCTION _timescaledb_functions.insert_blocker();
-
-
---
--- Name: audit_log ts_insert_blocker; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER ts_insert_blocker BEFORE INSERT ON public.audit_log FOR EACH ROW EXECUTE FUNCTION _timescaledb_functions.insert_blocker();
 
 
 --
@@ -14207,3 +14199,8 @@ GRANT SELECT,INSERT,DELETE ON TABLE public.walled_garden_rules TO svc_edged;
 -- PostgreSQL database dump complete
 --
 
+
+-- TimescaleDB hypertable registration. A --schema-only dump does not carry it, and without this the
+-- tables exist, match every catalog comparison, and refuse every INSERT.
+SELECT public.create_hypertable('public.accounting_records', 'ts', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE, migrate_data => TRUE);
+SELECT public.create_hypertable('public.audit_log', 'ts', chunk_time_interval => INTERVAL '7 days', if_not_exists => TRUE, migrate_data => TRUE);

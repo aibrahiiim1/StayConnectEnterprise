@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"time"
 )
@@ -22,6 +24,17 @@ func newKeaClient(socket string) *keaClient { return &keaClient{socket: socket} 
 func (k *keaClient) cmd(command string, args any) (map[string]any, error) {
 	c, err := net.DialTimeout("unix", k.socket, 5*time.Second)
 	if err != nil {
+		// AN ABSENT SOCKET IS "DHCP IS NOT RUNNING YET", NOT A FAULT.
+		//
+		// Kea binds the LAN bridge, so on a factory-clean appliance it cannot start until guest networking
+		// has been configured. The raw dial error reached the operator verbatim -- "connect: no such file or
+		// directory" -- which reads as a broken appliance rather than an unconfigured one, and names a path
+		// they can do nothing with.
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("DHCP is not running yet: Kea has no control socket at %s. "+
+				"Kea serves the LAN bridge, so it starts once guest networking is configured on this "+
+				"appliance", k.socket)
+		}
 		return nil, fmt.Errorf("kea dial: %w", err)
 	}
 	defer c.Close()

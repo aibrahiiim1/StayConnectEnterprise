@@ -301,3 +301,21 @@ func runSeedAdmin(args []string) error {
 	slog.Info("seeded site admin", "email", *email, "id", id)
 	return nil
 }
+
+// writeAwaitingAssignment answers a tenant- or site-scoped surface on an appliance that has not yet received
+// its signed assignment.
+//
+// It returns 200 with an EMPTY result and an explicit reason, not an error. The distinction matters to the
+// operator: a factory-clean appliance before enrollment/claim/assignment is working exactly as designed, and
+// the previous behaviour -- a uuid comparison against ” failing, surfaced as "the appliance did not answer"
+// -- described a broken machine. The screens read `data` and render an empty state; `awaiting_assignment`
+// lets them say WHY it is empty instead of implying a fault.
+func writeAwaitingAssignment(w http.ResponseWriter, what string) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data":                []any{},
+		"meta":                map[string]any{"has_more": false},
+		"awaiting_assignment": true,
+		"reason": "This appliance has not been assigned to a site yet, so there is no " + what +
+			" to show. Complete enrollment, claim and signed assignment first.",
+	})
+}

@@ -28,6 +28,13 @@
 #   ROLES       pg_dump never dumps roles. Not all of this system's roles come from Gate-P: migration 0017
 #               and its successors create the least-privilege financial roles. Without them the baseline
 #               installs grants naming roles that do not exist.
+#   HYPERTABLES a --schema-only dump of a TimescaleDB database emits the plain table AND its
+#               ts_insert_blocker trigger, but NOT the TimescaleDB catalog registration that makes the
+#               table a hypertable. The restored table therefore has a trigger that refuses every INSERT
+#               into an unregistered root -- "invalid INSERT on the root table of hypertable" -- and
+#               audit_log and accounting_records silently reject every write on a freshly deployed
+#               appliance. Caught in Production bring-up, not in the catalog comparison, because the
+#               comparison sees the same columns, constraints, indexes and triggers on both sides.
 #   PRIVILEGES  --no-privileges looks right -- ownership and grants are Gate-P's job -- but the migrations do
 #               not only CREATE, they REVOKE. Migration 0010 revokes EXECUTE on the raw grace writer from
 #               PUBLIC, and the D32 boundary assertion in gatep-grants.sql checks exactly that. Dumped
@@ -63,6 +70,19 @@ docker exec "$C" psql -U postgres -d stayconnect_site -tAqc \
     ORDER BY rolname" | sed '/^$/d' > "$OUT/.roles.tmp"
 echo "  $(wc -l < "$OUT/.roles.tmp") role(s)"
 
+echo "== hypertables =="
+# Captured from the SOURCE database's own TimescaleDB catalog, so the baseline re-registers exactly what
+# the upgrade path built -- table, time column and chunk interval -- rather than a hardcoded guess.
+docker exec "$C" psql -U postgres -d stayconnect_site -tAqc   "SELECT format('SELECT public.create_hypertable(%L, %L, chunk_time_interval => INTERVAL %L, if_not_exists => TRUE, migrate_data => TRUE);',
+                 h.hypertable_schema||'.'||h.hypertable_name, d.column_name, d.time_interval)
+     FROM timescaledb_information.hypertables h
+     JOIN timescaledb_information.dimensions d
+       ON d.hypertable_schema = h.hypertable_schema AND d.hypertable_name = h.hypertable_name
+    WHERE d.dimension_number = 1
+    ORDER BY 1" | sed '/^$/d' > "$OUT/.hyper.tmp"
+echo "  $(wc -l < "$OUT/.hyper.tmp") hypertable(s)"
+[ -s "$OUT/.hyper.tmp" ] || { echo "  FAIL: the source database registers no hypertables -- refusing to write a baseline that would silently block audit_log/accounting_records writes"; exit 1; }
+
 echo "== dumping the CURRENT schema (no data, no ownership; privileges KEPT) =="
 docker exec "$C" pg_dump -U postgres -d stayconnect_site \
   --schema-only --no-owner --schema=public --schema=iam_v2 2>/dev/null \
@@ -89,12 +109,19 @@ docker exec "$C" pg_dump -U postgres -d stayconnect_site \
   echo "-- Roles created by the migrations rather than by Gate-P. Idempotent, so a rebuild is safe."
   cat "$OUT/.roles.tmp"
   echo ""
-  # pg_dump emits CREATE SCHEMA public, which every database already has. Left in, it aborts the very first
-  # statement of a fresh install.
+  # Two edits to the dump:
+  #   CREATE SCHEMA public  -- already present on every database; left in, it aborts the first statement.
+  #   ts_insert_blocker     -- dropped, because create_hypertable() installs its own below. Restoring the
+  #                            dumped trigger onto an UNREGISTERED table is exactly what blocks every write.
   sed -e 's/^CREATE SCHEMA public;$/-- CREATE SCHEMA public;  -- always present; see generate-production-baseline.sh/' \
+      -e '/^CREATE TRIGGER ts_insert_blocker/,/;[[:space:]]*$/d' \
       "$OUT/.schema.tmp"
+  echo ""
+  echo "-- TimescaleDB hypertable registration. A --schema-only dump does not carry it, and without this the"
+  echo "-- tables exist, match every catalog comparison, and refuse every INSERT."
+  cat "$OUT/.hyper.tmp"
 } > "$OUT/0000_production_baseline.sql"
-rm -f "$OUT/.schema.tmp" "$OUT/.ext.tmp" "$OUT/.roles.tmp"
+rm -f "$OUT/.schema.tmp" "$OUT/.ext.tmp" "$OUT/.roles.tmp" "$OUT/.hyper.tmp"
 docker rm -f "$C" >/dev/null 2>&1 || true
 
 echo "  wrote $OUT/0000_production_baseline.sql ($(wc -l < "$OUT/0000_production_baseline.sql") lines)"

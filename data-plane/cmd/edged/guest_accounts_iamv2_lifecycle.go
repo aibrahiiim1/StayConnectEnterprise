@@ -92,6 +92,14 @@ func scanIAMv2Account(row interface{ Scan(...any) error }, a *iamv2Account) erro
 }
 
 func (s *server) listGuestAccountsIAMv2(w http.ResponseWriter, r *http.Request) {
+	// Guest accounts are tenant/site scoped, and a factory-clean appliance has neither until its signed
+	// assignment arrives. Querying anyway compares a uuid column against '' and fails, which reached the
+	// operator as "Could not load guest accounts -- the appliance did not answer": a report of a broken
+	// appliance, on an appliance that is working exactly as intended.
+	if s.tenantID == "" || s.siteID == "" {
+		writeAwaitingAssignment(w, "guest accounts")
+		return
+	}
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	rows, err := s.db.Query(ctx, `SELECT `+iamv2AccountCols+`
