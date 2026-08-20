@@ -152,7 +152,9 @@ and disagrees on ownership is a different security model wearing the same shape.
 Closed by **`deploy/gatep/gatep-iam-ownership.sql`**, an explicit install step (§2 step 7). It reassigns every
 table, view, materialised view, sequence, function and procedure in `iam_v2` to `iam_v2_owner`, takes the schema
 itself, and then **fails closed** twice: once naming any object left behind, once requiring every `SECURITY
-DEFINER` function in `iam_v2` to execute as `iam_v2_owner`. It is idempotent, so it is safe on a rebuild.
+DEFINER` function in `iam_v2` to execute as `iam_v2_owner`. The verifier applies it **twice** — the DR
+procedure re-runs this step on a rebuild, and a step documented as idempotent that has only ever been run once
+is a claim rather than a property.
 
 The verifier does not take the step's word for it. `scripts/clean-install-reconstruction.sh` asks the catalog
 who owns each object afterwards, names any exception rather than counting them, and reports ownership as an

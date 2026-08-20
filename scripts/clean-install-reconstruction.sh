@@ -150,6 +150,13 @@ if MSYS_NO_PATHCONV=1 docker exec -i "$C" psql -U postgres -d stayconnect_site -
 else
   bad "gatep-iam-ownership.sql did not apply: $(tail -1 "$OUT/iam-ownership.log")"
 fi
+# APPLIED TWICE ON PURPOSE. The disaster-recovery procedure re-runs this step on a rebuild, and a step
+# documented as idempotent that has only ever been run once is a claim, not a property.
+if MSYS_NO_PATHCONV=1 docker exec -i "$C" psql -U postgres -d stayconnect_site -v ON_ERROR_STOP=1      -f /tmp/gatep/gatep-iam-ownership.sql >"$OUT/iam-ownership-2.log" 2>&1; then
+  note "re-applied cleanly: the ownership step is idempotent"
+else
+  bad "gatep-iam-ownership.sql is NOT idempotent: $(tail -1 "$OUT/iam-ownership-2.log")"
+fi
 
 echo
 echo "== Gate-P grants and fail-closed assertions, from the real path =="
