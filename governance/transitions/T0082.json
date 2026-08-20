@@ -1,7 +1,7 @@
 {
   "transition_id": "T0082",
   "seq": 82,
-  "timestamp": "2026-08-20T12:00:00Z",
+  "timestamp": "2026-08-20T12:14:56Z",
   "record_type": "ZERO_LEGACY_CORRECTION_PASS_CURRENT_ONLY_BASELINE_AND_LICENSED_CAPACITY",
   "previous_state": {
     "phase": "7",
