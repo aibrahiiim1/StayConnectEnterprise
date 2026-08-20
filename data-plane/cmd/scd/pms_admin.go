@@ -141,7 +141,7 @@ func (s *server) pmsHealthFlushOnce(ctx context.Context) {
 	// COUNT, partial index makes it constant-time).
 	var n int
 	if err := s.db.QueryRow(ctx, `
-        SELECT count(*) FROM sessions
+        SELECT count(*) FROM iam_v2.sessions
          WHERE tenant_id = $1 AND site_id = $2 AND state = 'active'
     `, s.tenID, s.siteID).Scan(&n); err == nil {
 		s.met.SetActive(n)

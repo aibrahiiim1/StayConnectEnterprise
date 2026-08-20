@@ -2,33 +2,36 @@ package iamv2
 
 // THE GUEST IAM AUTHORITY IS NOT CONFIGURABLE ON A PRODUCTION BUILD.
 //
-// WHY THIS FILE EXISTS
-// --------------------
-// The Production objective is zero superseded ACTIVE runtime dependency. Until now the guest authority was
-// chosen per method by environment variable: with STAYCONNECT_IAMV2_VOUCHER unset the voucher path fell back
-// to the superseded public-schema implementation, and the same for accounts, OTP and social. Every legacy
-// branch stayed compiled in and one environment variable away from being live again.
+// WHAT THIS GUARD IS NOW
+// ----------------------
+// It is a DEFENSIVE ASSERTION, and that is a downgrade in its importance which is worth stating plainly.
 //
-// A fallback that only "isn't taken" is not removed. It is a configuration mistake, a bad rollback, or a
-// half-restored env file away from being the authority again -- and it would fail in the direction of the
-// superseded system rather than refusing to run.
+// It was written when the superseded guest-auth implementation was still compiled in and one environment
+// variable away from being the authority. It is retained now that the implementation itself has been removed
+// -- the public-schema credential, session, voucher and plan tables are gone, and so is the code that read
+// them -- so there is no longer a second authority for a setting to select.
 //
-// So on a production build the guest IAM authority is LOCKED to IAM-v2, and any configuration that tries to
-// select the superseded path is a STARTUP FAILURE rather than a silent downgrade. Fail closed: refuse to
-// serve rather than serve from the wrong authority.
+// WHY KEEP IT AT ALL
+// ------------------
+// Because the failure it catches did not go away with the code. A configuration that says
+// STAYCONNECT_IAMV2_VOUCHER=false is a statement of intent by whoever wrote it: they believe there is
+// another authority and they want it. There isn't. Without this guard the appliance would start, report
+// VOUCHER disabled, and refuse every guest with no explanation of why the operator's setting had no effect.
+// With it, the appliance refuses to start and names the exact variable.
 //
-// The lock is keyed on a BUILD TAG (`stayconnect_production`, see build_profile_*.go), not on a runtime flag
-// or a caller argument. A switch that decides which IAM authority is in force must not itself be reachable by
-// the configuration it governs. The DEVELOPMENT appliance is built WITHOUT that tag and keeps the behaviour
-// its accepted trial evidence depends on.
+// So it no longer guards a selectable implementation; it guards against a configuration that has become
+// meaningless, which is a real and likely mistake during an upgrade from a pre-removal release.
 //
 // WHAT IS NOT LOCKED, AND WHY
 // ---------------------------
 //   * MethodOTP and MethodSocial reach EXTERNAL providers (SMS, email, an OAuth identity provider). Locking
 //     them ON would enable outbound effects that are gated by their own Product-Owner decisions, so they stay
-//     configurable -- but they can only ever be configured ON, never redirected to the superseded path.
+//     configurable -- and there is no longer any implementation for them to be redirected to.
 //   * Operator authentication is untouched. public.operators is a live platform foundation, not superseded
 //     guest IAM, and iam_v2.publish_checkout_grace_policy validates its actor against it.
+//
+// The lock is keyed on a BUILD TAG (`stayconnect_production`, see build_profile_*.go). The DEVELOPMENT
+// appliance is built WITHOUT that tag and keeps the behaviour its accepted trial evidence depends on.
 
 // lockedGuestMethods are the guest IAM methods whose authority is IAM-v2 and cannot be configured otherwise.
 // VOUCHER and ACCOUNT are the two credential families that have a superseded public-schema implementation

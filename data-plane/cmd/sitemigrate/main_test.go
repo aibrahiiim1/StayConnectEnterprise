@@ -74,12 +74,15 @@ func TestFKOrder(t *testing.T) {
 // TestMigrationTableSet pins the exact table set so an accidental edit is
 // caught, and checks per-spec invariants.
 func TestMigrationTableSet(t *testing.T) {
+	// The superseded guest-IAM tables -- ticket_templates, voucher_batches, vouchers, guests, sessions and
+	// payments -- are NOT here, because they no longer exist. Site migration moves what the product has, and
+	// asserting the exact set is what makes an accidental re-addition visible: a table reappearing in this
+	// list would mean the superseded domain had come back somewhere.
 	want := []string{
 		"tenants", "sites", "appliances", "operators", "operator_roles",
-		"ticket_templates", "voucher_batches", "vouchers", "guests", "sessions",
 		"accounting_records", "auth_otps", "social_oauth_states", "pms_providers",
 		"pms_attempts", "walled_garden_rules", "notification_providers",
-		"social_oauth_providers", "stripe_accounts", "payments", "stripe_events",
+		"social_oauth_providers", "stripe_accounts", "stripe_events",
 		"audit_log",
 	}
 	if len(migrationTables) != len(want) {

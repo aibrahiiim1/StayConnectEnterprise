@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -15,11 +14,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/licstate"
-	"github.com/stayconnect/enterprise/data-plane/internal/session"
 	"github.com/stayconnect/enterprise/data-plane/internal/social"
 	"github.com/stayconnect/enterprise/data-plane/internal/tenantcfg"
-	"github.com/stayconnect/enterprise/data-plane/internal/voucher"
 )
 
 // ---- /v1/auth/social/start --------------------------------------------------
@@ -82,16 +80,20 @@ func (s *server) socialStart(w http.ResponseWriter, r *http.Request) {
 	}
 	expires := time.Now().Add(10 * time.Minute)
 
+	// The state row is an OAuth HANDSHAKE nonce: it binds the callback to the device that started the
+	// flow and nothing else. It no longer carries an access-plan id -- in the current model the guest
+	// authenticates first and chooses a package afterwards in the commerce flow, so pinning a plan at
+	// handshake time was the superseded coupling, not a requirement of OAuth.
 	_, err = s.db.Exec(r.Context(), `
         INSERT INTO social_oauth_states
-          (state, tenant_id, appliance_id, template_id, provider,
+          (state, tenant_id, appliance_id, provider,
            client_ip, client_mac, redirect_uri, user_agent, expires_at)
         VALUES
-          ($1, $2, NULLIF($3,'')::uuid, NULLIF($4,'')::uuid, $5,
-           CASE WHEN $6 = '' THEN NULL ELSE $6::inet END,
-           CASE WHEN $7 = '' THEN NULL ELSE $7::macaddr END,
-           $8, NULLIF($9,''), $10)
-    `, state, s.tenID, s.applID, method.TemplateID, req.Provider,
+          ($1, $2, NULLIF($3,'')::uuid, $4,
+           CASE WHEN $5 = '' THEN NULL ELSE $5::inet END,
+           CASE WHEN $6 = '' THEN NULL ELSE $6::macaddr END,
+           $7, NULLIF($8,''), $9)
+    `, state, s.tenID, s.applID, req.Provider,
 		req.IP, req.MAC, req.RedirectURI, r.UserAgent(), expires)
 	if err != nil {
 		slog.Error("social state insert", "err", err)
@@ -147,7 +149,6 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		stTenant, stProvider, stRedirect string
 		stClientIP                       *string
 		stClientMAC                      *string
-		stTemplate                       *string
 		stExpires                        time.Time
 		stConsumed                       *time.Time
 	)
@@ -160,11 +161,10 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 
 	err = tx.QueryRow(r.Context(), `
         SELECT tenant_id::text, provider, redirect_uri,
-               host(client_ip), client_mac::text, template_id::text,
-               expires_at, consumed_at
+               host(client_ip), client_mac::text, expires_at, consumed_at
           FROM social_oauth_states WHERE state = $1 FOR UPDATE
     `, req.State).Scan(&stTenant, &stProvider, &stRedirect,
-		&stClientIP, &stClientMAC, &stTemplate, &stExpires, &stConsumed)
+		&stClientIP, &stClientMAC, &stExpires, &stConsumed)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpErr(w, http.StatusBadRequest, "unknown state — possible CSRF")
@@ -241,57 +241,21 @@ func (s *server) authorizeSocial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve template parameters (duration / data cap / shaping).
-	red := &voucher.Redeemed{}
-	if stTemplate != nil && *stTemplate != "" {
-		if r2, err := s.vou.LoadTemplate(r.Context(), *stTemplate); err == nil {
-			red = r2
-		}
-	}
-
-	// Atomic licensed-capacity gate + session creation, then data plane (see
-	// main.go authorize). Reuses the OTP/email path for guest upsert: it stamps
-	// email + verified_at, which is exactly what we want for a verified social
-	// login ("attach to existing guest if email matches").
-	au, err := s.sess.StartOTP(r.Context(), mac, ip, "email", info.Email, red.DurationSeconds)
-	if err != nil {
-		if capErr := (*session.CapacityError)(nil); errors.As(err, &capErr) {
-			writeJSON(w, http.StatusForbidden, map[string]any{
-				"error": "LICENSE_CAPACITY_REACHED", "limit": capErr.Limit, "current": capErr.Current,
-			})
-			return
-		}
-		slog.Error("session start (social)", "err", err)
-		httpErr(w, http.StatusInternalServerError, "session start failed")
-		return
-	}
-	nc := s.resolveNetwork(r.Context(), ip)
-	ttl := time.Duration(red.DurationSeconds) * time.Second
-	if err := s.nft.Allow(r.Context(), nc.Bridge, ip, ttl); err != nil {
-		slog.Error("nft allow", "err", err)
-		_ = s.sess.End(context.Background(), ip, "policy")
-		httpErr(w, http.StatusInternalServerError, "nft allow failed")
-		return
-	}
-	if err := s.shp.AddSession(r.Context(), nc.Bridge, ip, red.DownKbps, red.UpKbps); err != nil {
-		slog.Error("shape add", "err", err)
-		_ = s.nft.Deny(context.Background(), nc.Bridge, ip)
-		_ = s.sess.End(context.Background(), ip, "policy")
-		httpErr(w, http.StatusInternalServerError, "shape add failed")
-		return
-	}
-	s.recordSessionNetwork(r.Context(), au.SessionID, nc)
-	s.met.SessionsStarted.WithLabelValues("social").Inc()
-
-	resp := authorizeResp{
-		SessionID:       au.SessionID,
-		GuestID:         au.GuestID,
-		DurationSeconds: red.DurationSeconds,
-	}
-	if au.ExpiresAt != nil {
-		resp.ExpiresAt = au.ExpiresAt.Format(time.RFC3339)
-	}
-	writeJSON(w, http.StatusOK, resp)
+	// THE IDENTITY IS VERIFIED BY THE PROVIDER; THE PRINCIPAL IS IAM-v2's.
+	//
+	// social_oauth_states is the OAuth handshake nonce store and is deliberately not part of the IAM-v2
+	// identity model, exactly as public.auth_otps is not: the provider exchange happens here and only the
+	// verified, issuer-scoped subject crosses into iam_v2, where authSocialIdentity maps it to a principal
+	// identity in iam_v2.guest_principal_identities.
+	//
+	// What was REMOVED is the superseded pipeline that followed: a legacy access-plan lookup for duration
+	// and shaping, a public.sessions row, and direct nft/shaping calls. Access comes from the package the
+	// guest selects after authenticating, not from the credential they used.
+	s.authorizeViaIAMv2(w, r, iamv2.MethodSocial, iamv2.Request{
+		FactorIssuer: req.Provider,
+		FactorValue:  info.Email,
+		Device:       iamv2.DeviceContext{MAC: mac.String()},
+	}, ip)
 }
 
 // ---- helpers ----------------------------------------------------------------

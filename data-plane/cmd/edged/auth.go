@@ -153,8 +153,8 @@ const (
 // has permWrite everywhere. Matrix per docs/ROLE_AND_SCOPE_MATRIX.md.
 var rolePerms = map[string]map[string]perm{
 	"hotel_it_manager": {
-		"guest-access-plans": permWrite, "voucher-batches": permWrite, "guest-accounts": permWrite,
-		"vouchers": permWrite, "sessions": permWrite, "pms-providers": permWrite,
+		"guest-accounts": permWrite,
+		"sessions":       permWrite, "pms-providers": permWrite,
 		"auth-methods": permWrite, "walled-garden": permWrite,
 		"portal-branding": permWrite, "notification-providers": permWrite,
 		"social-providers": permWrite, "stripe-accounts": permWrite,
@@ -182,7 +182,7 @@ var rolePerms = map[string]map[string]perm{
 		// financial-ops mirrors financial-review deliberately: it is the same readership looking at the
 		// same money from a different angle, and two permissions for one boundary is how they drift apart.
 		"financial-ops": permRead,
-		"payments":      permRead, "operators": permRead, "audit": permRead,
+		"operators":     permRead, "audit": permRead,
 		"reports": permRead, "backups": permRead, "license": permRead,
 		// Phase 6 (DARK): the per-appliance Guest Device Self-Service setting. WRITE belongs here for the
 		// same reason auth-methods does -- it decides which capabilities the property offers its guests,
@@ -193,7 +193,7 @@ var rolePerms = map[string]map[string]perm{
 		"diagnostics": permWrite,
 	},
 	"front_office_operator": {
-		"voucher-batches": permWrite, "guest-accounts": permWrite, "vouchers": permWrite, "sessions": permWrite,
+		"guest-accounts": permWrite, "sessions": permWrite,
 		// Phase 3 (DARK): front desk reads stays/events and triages alerts, but never edits the grace policy.
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
@@ -204,12 +204,11 @@ var rolePerms = map[string]map[string]perm{
 		// else. Reset is a rotation; revoke is terminal for the episode.
 		"post-stay-profiles": permWrite,
 		// The front desk is where a guest moving between the group's properties actually presents.
-		"stay-transfers":     permWrite,
-		"financial-review":   permRead,
-		"financial-ops":      permRead,
-		"guest-access-plans": permRead, "pms-providers": permRead,
-		"auth-methods": permRead, "walled-garden": permRead, "payments": permRead,
-		"reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
+		"stay-transfers":   permWrite,
+		"financial-review": permRead,
+		"financial-ops":    permRead,
+		"pms-providers":    permRead,
+		"auth-methods":     permRead, "walled-garden": permRead, "reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
 		// Phase 6 (DARK): the desk may SEE whether the property offers guest device self-service -- it is
 		// the answer to "why can't I remove my old phone" -- but changing a property capability is not a
 		// desk action.
@@ -217,15 +216,15 @@ var rolePerms = map[string]map[string]perm{
 		"diagnostics":               permRead,
 	},
 	"guest_relations_operator": {
-		"voucher-batches": permWrite, "guest-accounts": permWrite, "vouchers": permWrite, "sessions": permWrite,
+		"guest-accounts": permWrite, "sessions": permWrite,
 		"pms-stays": permRead, "pms-events": permRead, "operational-alerts": permWrite, "checkout-grace": permRead,
 		// Read-only on the integration: the front desk needs to see whether the PMS is reachable before
 		// telling a guest to try again, but must not be able to publish or rotate anything.
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		"post-stay-profiles": permWrite,
 		"stay-transfers":     permWrite,
-		"guest-access-plans": permRead, "pms-providers": permRead,
-		"auth-methods": permRead, "payments": permRead, "reports": permRead,
+		"pms-providers":      permRead,
+		"auth-methods":       permRead, "reports": permRead,
 		"audit": permRead, "license": permRead, "backups": permRead, "walled-garden": permRead,
 		// Phase 6 (DARK): same readership as the front desk, for the same reason -- guest relations answers
 		// the same question and changes no property capability.
@@ -233,12 +232,11 @@ var rolePerms = map[string]map[string]perm{
 		"diagnostics":               permRead,
 	},
 	"voucher_operator": {
-		"voucher-batches": permWrite, "guest-accounts": permWrite, "vouchers": permWrite,
-		"guest-access-plans": permRead, "sessions": permRead, "reports": permRead,
+		"guest-accounts": permWrite, "sessions": permRead, "reports": permRead,
 		"license": permRead, "diagnostics": permRead,
 	},
 	"payments_operator": {
-		"payments": permWrite, "stripe-accounts": permRead,
+		"stripe-accounts": permRead,
 		// Phase 6 (DARK): read-only, which is this role's established relationship with everything that is
 		// not money. It is on the list rather than absent because "read-only on everything else" is the
 		// documented semantic, and silently omitting a resource would narrow the role by accident.
@@ -251,10 +249,8 @@ var rolePerms = map[string]map[string]perm{
 		"diagnostics": permRead,
 	},
 	"site_viewer": {
-		"guest-access-plans": permRead, "voucher-batches": permRead, "guest-accounts": permRead, "vouchers": permRead,
-		"sessions": permRead, "pms-providers": permRead, "auth-methods": permRead,
-		"walled-garden": permRead, "portal-branding": permRead, "payments": permRead,
-		"notification-providers": permRead, "social-providers": permRead,
+		"guest-accounts": permRead, "sessions": permRead, "pms-providers": permRead, "auth-methods": permRead,
+		"walled-garden": permRead, "portal-branding": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"stripe-accounts": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,
 		"commercial-packages": permRead,

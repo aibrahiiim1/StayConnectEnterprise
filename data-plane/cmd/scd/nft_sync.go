@@ -149,110 +149,14 @@ func startNFTSyncSubscriber(ctx context.Context, s *server, nc *nats.Conn, siteI
 // skipped — the reaper will close them shortly. Rows with NULL expires_at
 // (unlimited tenants) get a long TTL via the kernel default and survive
 // until explicitly revoked.
-func (s *server) reconcileNFTFromDB(ctx context.Context, siteID string) (int, error) {
-	rows, err := s.db.Query(ctx, `
-        SELECT host(ip), COALESCE(ingress_interface, ''),
-               CASE
-                 WHEN expires_at IS NULL THEN NULL
-                 ELSE EXTRACT(epoch FROM (expires_at - now()))::int
-               END AS ttl_seconds
-          FROM sessions
-         WHERE tenant_id = $1
-           AND site_id = $2
-           AND state = 'active'
-           AND (expires_at IS NULL OR expires_at > now())
-    `, s.tenID, siteID)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	applied := 0
-	for rows.Next() {
-		var ipStr, iface string
-		var ttlSec *int
-		if err := rows.Scan(&ipStr, &iface, &ttlSec); err != nil {
-			return applied, err
-		}
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			continue
-		}
-		// Sessions created before Phase 19 (or on the legacy network) have no
-		// recorded ingress interface; fall back to the legacy bridge so the
-		// concatenated auth set element is well-formed.
-		if iface == "" {
-			iface = s.legacyBridge
-		}
-		// 0 means "kernel default / no timeout" — used for unlimited
-		// sessions. Otherwise floor at 60s so we don't add a row that's
-		// about to expire within the same kernel tick.
-		ttl := 0
-		if ttlSec != nil {
-			ttl = *ttlSec
-			if ttl < 60 {
-				ttl = 60
-			}
-		}
-		s.nft.applyLocal(ctx, nftOp{Op: "add", Iface: iface, IP: ip.String(), TTLSeconds: ttl})
-		applied++
-	}
-	return applied, rows.Err()
-}
 
-// reconcileShapingFromDB re-establishes the per-session tc shaping/accounting
-// classes (download on the guest bridge, upload on its IFB) for every active
-// session, using each session's recorded ingress bridge and its plan's rate
-// caps. Kernel tc state does not survive a reboot (IFB devices are recreated
-// empty) and is unknown to a freshly-promoted backup, so this is what keeps the
-// accounting pipeline continuous across scd restarts and appliance reboots.
-// Best-effort per row: one bad session never blocks the rest.
-func (s *server) reconcileShapingFromDB(ctx context.Context, siteID string) (int, error) {
-	rows, err := s.db.Query(ctx, `
-        SELECT host(s.ip), COALESCE(s.ingress_interface, ''),
-               COALESCE(t.down_kbps, 0), COALESCE(t.up_kbps, 0)
-          FROM sessions s
-          LEFT JOIN vouchers v ON v.id = s.voucher_id
-          LEFT JOIN ticket_templates t ON t.id = v.template_id
-         WHERE s.tenant_id = $1
-           AND s.site_id = $2
-           AND s.state = 'active'
-           AND (s.expires_at IS NULL OR s.expires_at > now())
-    `, s.tenID, siteID)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	type row struct {
-		ip       net.IP
-		bridge   string
-		down, up int
-	}
-	var pending []row
-	for rows.Next() {
-		var ipStr, iface string
-		var down, up int
-		if err := rows.Scan(&ipStr, &iface, &down, &up); err != nil {
-			return len(pending), err
-		}
-		ip := net.ParseIP(ipStr)
-		if ip == nil {
-			continue
-		}
-		if iface == "" {
-			iface = s.legacyBridge
-		}
-		pending = append(pending, row{ip: ip, bridge: iface, down: down, up: up})
-	}
-	if err := rows.Err(); err != nil {
-		return 0, err
-	}
-	applied := 0
-	for _, p := range pending {
-		if err := s.shp.AddSession(ctx, p.bridge, p.ip, p.down, p.up); err != nil {
-			slog.Warn("shaping reconcile: add session", "ip", p.ip.String(), "bridge", p.bridge, "err", err)
-			continue
-		}
-		applied++
-	}
-	return applied, nil
-}
+// THE LEGACY RECONCILERS ARE GONE.
+//
+// reconcileNFTFromDB and reconcileShapingFromDB rebuilt the firewall set and the shaping classes from
+// public.sessions. That table is the superseded session domain and no longer exists: the current authority
+// is iam_v2.sessions, authorized through netd (cmd/netd/phase3_enforcement.go) and accounted by acctd
+// (cmd/acctd/phase3_accounting.go), which own their own reconciliation.
+//
+// Two reconcilers writing one nft set is the collision internal/nft/nft.go warns about, so removing the
+// legacy one is not merely cleanup -- it removes the possibility of the two disagreeing about who is
+// allowed on the network.

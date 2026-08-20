@@ -41,24 +41,7 @@ func (s *server) resolveNetwork(ctx context.Context, ip net.IP) netContext {
 
 // recordSessionNetwork stamps the session row with its network context after
 // creation. Best-effort: a failure here never fails the authorization.
-func (s *server) recordSessionNetwork(ctx context.Context, sessionID string, nc netContext) {
-	if sessionID == "" || nc.NetworkID == "" {
-		return
-	}
-	var vlanArg any
-	if nc.VLANID != nil {
-		vlanArg = *nc.VLANID
-	}
-	var gwArg any
-	if nc.GatewayIP != "" {
-		gwArg = nc.GatewayIP
-	}
-	_, _ = s.db.Exec(ctx, `
-        UPDATE sessions
-           SET guest_network_id = $2::uuid,
-               vlan_id = $3,
-               ingress_interface = NULLIF($4,''),
-               gateway_ip = $5::inet
-         WHERE id = $1
-    `, sessionID, nc.NetworkID, vlanArg, nc.Bridge, gwArg)
-}
+
+// recordSessionNetwork is REMOVED. It stamped the resolved bridge and guest_network onto a public.sessions
+// row. In the current model the device's network is pinned on the IAM-v2 auth_context and device at
+// authentication time (internal/iamv2/adapters.go finalize), so there is no second place to record it.

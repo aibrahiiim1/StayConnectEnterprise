@@ -396,7 +396,9 @@ func (s *server) deleteGuestNetwork(w http.ResponseWriter, r *http.Request) {
 	var enabled bool
 	var active int
 	_ = s.db.QueryRow(ctx, `SELECT enabled FROM guest_networks WHERE id=$1`, id).Scan(&enabled)
-	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE guest_network_id=$1 AND state='active'`, id).Scan(&active)
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.sessions se
+	           JOIN iam_v2.device_network_appearances a ON a.device_id = se.device_id
+	          WHERE a.guest_network_id=$1 AND se.state='active'`, id).Scan(&active)
 	if enabled {
 		jsonErr(w, http.StatusConflict, "conflict", "disable the network before deleting it")
 		return
@@ -441,7 +443,9 @@ func (s *server) guestNetworkStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var active int
-	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE guest_network_id=$1 AND state='active'`, id).Scan(&active)
+	_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.sessions se
+	           JOIN iam_v2.device_network_appearances a ON a.device_id = se.device_id
+	          WHERE a.guest_network_id=$1 AND se.state='active'`, id).Scan(&active)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": id, "bridge_name": bridge, "enabled": enabled, "active_clients": active,
 	})

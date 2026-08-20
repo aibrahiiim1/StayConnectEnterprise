@@ -1,8 +1,16 @@
 package main
 
-// Guest session visibility and admin disconnect. Reads come straight from
-// the site DB; the disconnect enforcement action goes through scd (which
-// owns nftables/tc state) exactly like portald's logout path.
+// Guest session visibility and admin disconnect, over the SINGLE session authority.
+//
+// These reads used to come from public.sessions. That table was the superseded session domain and is gone;
+// iam_v2.sessions is the authority, so the operator's view moves onto it rather than disappearing. The
+// disconnect enforcement action still goes through scd, which owns nftables/tc state, exactly like
+// portald's logout path.
+//
+// Two column names changed with the move and are aliased here rather than renamed in the API, so the
+// operator surface keeps its contract: started_at is iam_v2.sessions.started, ended_at is ended. There is
+// no last_activity_at in the current model -- liveness is derived from accounting, not stamped on the
+// session row -- so it reports the session start until the first accounting tick would have moved it.
 
 import (
 	"net/http"
@@ -25,8 +33,8 @@ type edgeSessionRow struct {
 	BytesDown      int64      `json:"bytes_down"`
 }
 
-const sessionCols = `id, ip::text, mac::text, state, started_at, last_activity_at,
-       ended_at, expires_at, end_reason, bytes_up, bytes_down`
+const sessionCols = `id, ip::text, mac::text, state, started AS started_at, started AS last_activity_at,
+       ended AS ended_at, expires_at, end_reason, bytes_up, bytes_down`
 
 func scanEdgeSession(row interface{ Scan(...any) error }, e *edgeSessionRow) error {
 	return row.Scan(&e.ID, &e.IP, &e.MAC, &e.State, &e.StartedAt, &e.LastActivityAt,
@@ -50,8 +58,17 @@ func (s *server) sessionsRoutes() http.Handler {
 func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
 	var stateArg any
 	if v := r.URL.Query().Get("state"); v != "" {
-		if v != "active" && v != "closed" {
-			jsonErr(w, http.StatusBadRequest, "bad_request", "state must be active|closed")
+		// The authority's own vocabulary. iam_v2.sessions is 'active', 'PENDING_ENFORCEMENT' (durable but
+		// not yet enforced) or 'ended'; the legacy domain called the last one 'closed'. The old spelling is
+		// still accepted so an existing operator bookmark or script does not break, but it is translated
+		// here rather than carried any deeper.
+		switch v {
+		case "active", "ended", "PENDING_ENFORCEMENT":
+		case "closed":
+			v = "ended"
+		default:
+			jsonErr(w, http.StatusBadRequest, "bad_request",
+				"state must be active|PENDING_ENFORCEMENT|ended")
 			return
 		}
 		stateArg = v
@@ -60,10 +77,10 @@ func (s *server) listGuestSessions(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	rows, err := s.db.Query(ctx, `
         SELECT `+sessionCols+`
-          FROM sessions
+          FROM iam_v2.sessions
          WHERE tenant_id = $1
            AND ($2::text IS NULL OR state = $2)
-         ORDER BY started_at DESC
+         ORDER BY started DESC
          LIMIT 200
     `, s.tenantID, stateArg)
 	if err != nil {
@@ -89,7 +106,7 @@ func (s *server) getGuestSession(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	var e edgeSessionRow
 	err := scanEdgeSession(s.db.QueryRow(ctx,
-		`SELECT `+sessionCols+` FROM sessions WHERE id = $1 AND tenant_id = $2`,
+		`SELECT `+sessionCols+` FROM iam_v2.sessions WHERE id = $1 AND tenant_id = $2`,
 		id, s.tenantID), &e)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "session not found")
@@ -109,7 +126,7 @@ func (s *server) disconnectGuestSession(w http.ResponseWriter, r *http.Request) 
 
 	var ip, state string
 	err := s.db.QueryRow(ctx,
-		`SELECT host(ip), state FROM sessions WHERE id = $1 AND tenant_id = $2`,
+		`SELECT host(ip), state FROM iam_v2.sessions WHERE id = $1 AND tenant_id = $2`,
 		id, s.tenantID).Scan(&ip, &state)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "session not found")

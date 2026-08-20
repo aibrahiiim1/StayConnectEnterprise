@@ -352,7 +352,7 @@ func (h *handler) routes() http.Handler {
 	r.Get("/auth/social/callback", h.socialCallback)
 	r.Get("/api/oauth/stub/authorize", h.stubAuthorize)
 	r.Post("/api/oauth/stub/authorize-confirm", h.stubAuthorizeConfirm)
-	r.Post("/auth/pms/verify", h.authPMS)
+	// The legacy /auth/pms/verify hop is REMOVED; /auth/pms/phase3 below is the current PMS guest flow.
 	// Phase 3 (DARK): the Stay-resolution guest flow. It is mounted unconditionally because it is a pure
 	// proxy — scd does not mount its Phase-3 endpoints while dark, so this path answers with the same uniform
 	// non-success a wrong room gets. A guest can therefore never tell whether the feature exists here.

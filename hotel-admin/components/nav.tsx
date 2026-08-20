@@ -50,10 +50,13 @@ const SECTIONS: Section[] = [
   {
     title: "Access",
     items: [
-      { href: "/guest-access-plans", label: "Guest access plans", icon: FileText, resource: "guest-access-plans" },
-      { href: "/voucher-batches",    label: "Voucher batches",    icon: Ticket,   resource: "voucher-batches" },
-      { href: "/guest-accounts",     label: "Guest accounts",     icon: KeyRound, resource: "guest-accounts" },
+      // "Guest access plans" and "Voucher batches" are GONE, not hidden. They were the operator surface over
+      // the superseded ticket_templates / voucher_batches / vouchers tables, which no longer exist.
+      // "Commercial packages" is the current surface for what a guest can buy; vouchers are issued against
+      // the IAM-v2 domain. Leaving the old entries pointing at removed endpoints would have given the
+      // operator two plan models to choose between, one of which nothing reads.
       { href: "/commercial-packages", label: "Commercial packages", icon: Package, resource: "commercial-packages", enabled: PHASE2_ADMIN },
+      { href: "/guest-accounts",     label: "Guest accounts",     icon: KeyRound, resource: "guest-accounts" },
       { href: "/sessions",           label: "Sessions",           icon: Monitor,  resource: "sessions" },
       { href: "/guest-device-self-service", label: "Guest devices", icon: Smartphone, resource: "guest-device-self-service", enabled: PHASE6_ADMIN },
       // Live access state, so it rides the sessions resource rather than introducing a role-matrix row for a
@@ -83,7 +86,9 @@ const SECTIONS: Section[] = [
       { href: "/stay-transfers",     label: "Cross-PMS transfer", icon: Send,     resource: "stay-transfers",     enabled: PHASE5_ADMIN },
       { href: "/notifications",    label: "Notifications", icon: Send,     resource: "notification-providers" },
       { href: "/social-providers", label: "Social login",  icon: KeyRound, resource: "social-providers" },
-      { href: "/payments",         label: "Payments",      icon: Wallet,   resource: "payments" },
+      // "Payments" is GONE: it listed public.payments, a Stripe-session record keyed to a superseded voucher
+      // and access plan. The current financial surfaces are Financial health / Manual review / Settlements /
+      // Financial recovery above, over the Phase-4 IAM-v2 payment and settlement model.
     ],
   },
   {

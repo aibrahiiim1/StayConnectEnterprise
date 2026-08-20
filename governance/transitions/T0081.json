@@ -1,0 +1,75 @@
+{
+  "transition_id": "T0081",
+  "seq": 81,
+  "timestamp": "2026-08-20T09:45:12Z",
+  "record_type": "ZERO_LEGACY_FRESH_PRODUCTION_BASELINE_VERIFIED_READY_RESTORED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "ZERO_LEGACY_FRESH_PRODUCTION_BASELINE_CLEANUP",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ZERO_LEGACY_FRESH_PRODUCTION_BASELINE_IN_PROGRESS_READY_WITHDRAWN",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "phase_affected": "7",
+  "decision": "D35",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner clarified final Production requirement (T0080): PHYSICAL zero-superseded guest IAM. Repository-only; not Phase 8. Readiness restored only after verification, as directed.",
+  "previous_state_note": "T0080 withdrew READY because the criterion it rested on had been superseded before any deployment.",
+  "new_state_note": "The Zero-Legacy Fresh Production Baseline is COMPLETE and VERIFIED, so READY is restored. The superseded guest-IAM implementation and its tables are absent from the product, not merely unreachable: public went from 44 tables to 37, no foreign key references any removed object, and the IAM-v2 guest domain is the only one. Proven by factory-clean reconstruction from an empty isolated environment on the Production-equivalent image through the real Gate-P path.",
+  "phase_affected_note": "post-roadmap (D35 fresh-deployment preparation)",
+  "removed_runtime": [
+    "scd: the legacy voucher and guest-account authorization pipelines, the legacy OTP and social session pipelines, the legacy PMS verify endpoint and handler, the legacy session reaper, the legacy nft and shaping boot reconcilers, and recordSessionNetwork.",
+    "acctd: the legacy accounting pass over public.sessions, including its per-voucher data/time quota enforcement.",
+    "edged: the guest-access-plans, voucher-batches, vouchers and payments operator surfaces; the superseded half of the guest-accounts surface; and the acctAuthority dispatch switch.",
+    "portald: the legacy /auth/pms/verify hop.",
+    "internal/session and internal/voucher: the superseded session and voucher domains, deleted.",
+    "hotel-admin: the Guest access plans, Voucher batches and Payments pages, their nav entries and their role-matrix rows."
+  ],
+  "removed_tables": [
+    "public.sessions",
+    "public.guests",
+    "public.guest_accounts",
+    "public.vouchers",
+    "public.voucher_batches",
+    "public.ticket_templates",
+    "public.payments"
+  ],
+  "retained_and_why": {
+    "public.auth_otps": "transient OTP CHALLENGE store. Per accepted decision D2 the challenge is verified upstream and only the verified factor crosses into iam_v2; delivery scaffolding, not an identity store. Its template_id column and FK were dropped.",
+    "public.social_oauth_states": "OAuth HANDSHAKE nonce store, same basis. template_id dropped: pinning an access plan at handshake time was the superseded coupling.",
+    "public.social_oauth_providers": "tenant provider configuration; never depended on the superseded set.",
+    "public.otp_hmac_key_generations and auth_throttle_buckets": "key generations and durable throttle state; current.",
+    "public.accounting_records": "TimescaleDB hypertable holding the historical accounting series. Phase-3 accounting writes iam_v2.accounting_records; destroying an accounting series is not a schema cleanup.",
+    "platform foundations": "tenants, sites, appliances, operators, operator_roles, guest_networks, networking, audit, enrolment/claim/signed-assignment and licensing: all intact and untouched."
+  },
+  "defect_found_and_fixed": "The site-wide LICENSED CONCURRENT-GUEST CAP existed only inside the superseded session manager, which owned session creation. Removing that manager would have removed the licence limit itself -- an unlicensed appliance that still works. It was moved into the IAM-v2 activation transaction (cmd/scd/iamv2_session_activate.go), counted in the same transaction that inserts, against the same local signed licence, refusing with LICENSE_CAPACITY_REACHED.",
+  "verification": {
+    "environment": "disposable container on the workstation, never connected to any appliance",
+    "image": "timescale/timescaledb:2.16.1-pg16",
+    "path": "real Gate-P path; 59 ledger-recorded install steps",
+    "result": "CLEAN_INSTALL_RECONSTRUCTION = PASS",
+    "zero_superseded_tables": "none of sessions, guests, guest_accounts, vouchers, voucher_batches, ticket_templates or payments exist; public 44 -> 37 tables",
+    "zero_dangling_references": "no foreign key references any removed object; auth_otps and social_oauth_states carry no template_id",
+    "sole_authority": "the IAM-v2 guest domain is present and is the only one -- structural, not a runtime switch",
+    "ownership": "every iam_v2 object owned by iam_v2_owner; all 67 SECURITY DEFINER functions execute as it; schema owned by it; the ownership step is idempotent, proven by applying it twice",
+    "anchor": "guest_networks_tsi_anchor valid with the contract definition; guest_network_pms_map composite FK present",
+    "identity_data": "every identity-bearing table 0 rows, in public and in the IAM-v2 guest domain; no trial or probe role",
+    "build_and_test": "go build, go vet and go test pass on the development build AND the production build (-tags stayconnect_production); Hotel-Admin Next build clean"
+  },
+  "boundaries_observed": [
+    "Repository-only. 172.21.60.23 NOT modified and NOT contacted.",
+    "No deployment. No Production appliance provisioned or contacted.",
+    "No PMS, payment-provider or financial traffic.",
+    "Git history, migrations 0001-0048, accepted evidence and governance records preserved; 0049 removes the superseded domain at the end of the chain rather than rewriting how it was built.",
+    "Central Control Plane on a separate server, two-NIC model, local-first edge, enrolment/claim identity, multi-PMS namespace rules, RN+G# posting safety, UNKNOWN financial safety, no implicit FX and all accepted security boundaries preserved."
+  ],
+  "next": "Product-Owner provision of the NEW PRODUCTION SERVER and access, plus authorization to execute the fresh deployment on that exact target under D35."
+}

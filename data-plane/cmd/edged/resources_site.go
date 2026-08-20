@@ -196,49 +196,13 @@ func (s *server) brandingRoutes() http.Handler {
 	return r
 }
 
-// ----- payments (read-only history; refunds are a Stripe-console action for now) ----
-
-type paymentRow struct {
-	ID              string     `json:"id"`
-	Status          string     `json:"status"`
-	AmountCents     int64      `json:"amount_cents"`
-	Currency        string     `json:"currency"`
-	StripeSessionID string     `json:"stripe_session_id"`
-	VoucherID       *string    `json:"voucher_id,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
-	CompletedAt     *time.Time `json:"completed_at,omitempty"`
-}
-
-func (s *server) paymentsRoutes() http.Handler {
-	r := chi.NewRouter()
-	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
-		ctx, cancel := dbCtx(req)
-		defer cancel()
-		rows, err := s.db.Query(ctx, `
-            SELECT id, status, amount_cents, currency, stripe_session_id,
-                   voucher_id::text, created_at, completed_at
-              FROM payments WHERE tenant_id = $1
-             ORDER BY created_at DESC LIMIT 200
-        `, s.tenantID)
-		if err != nil {
-			jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
-			return
-		}
-		defer rows.Close()
-		var out []paymentRow
-		for rows.Next() {
-			var p paymentRow
-			if err := rows.Scan(&p.ID, &p.Status, &p.AmountCents, &p.Currency,
-				&p.StripeSessionID, &p.VoucherID, &p.CreatedAt, &p.CompletedAt); err != nil {
-				jsonErr(w, http.StatusInternalServerError, "internal", "scan failed")
-				return
-			}
-			out = append(out, p)
-		}
-		writeList(w, out)
-	})
-	return r
-}
+// PAYMENTS ARE NOT SERVED FROM HERE ANY MORE.
+//
+// This was a read-only list over public.payments -- a Stripe-session record keyed to a superseded voucher and
+// access plan. The current financial surface is the Phase-4 one in resources_phase4_finops.go, over
+// iam_v2.payment_transactions and iam_v2.v_financial_settlements, which is where refunds, chargebacks and
+// settlement state actually live. Keeping a second, thinner list beside it meant an operator could read a
+// payment history that the financial authority did not recognise.
 
 // ----- local audit log ----------------------------------------------------------------
 
@@ -301,18 +265,27 @@ func (s *server) reportsRoutes() http.Handler {
 		defer cancel()
 		out := map[string]any{}
 
+		// COUNTED FROM THE SINGLE SESSION AUTHORITY. These read iam_v2.sessions; they used to read
+		// public.sessions and public.vouchers, which is why an operator watching this page during the
+		// IAM-v2 trial saw zero activity while guests were online.
 		var active, today, sess7d, vUnused, vActive int64
 		var upToday, downToday int64
-		_ = s.db.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE state = 'active'`).Scan(&active)
+		_ = s.db.QueryRow(ctx, `SELECT count(*) FROM iam_v2.sessions
+		     WHERE tenant_id=$1 AND state = 'active'`, s.tenantID).Scan(&active)
 		_ = s.db.QueryRow(ctx, `
             SELECT count(*), COALESCE(sum(bytes_up),0), COALESCE(sum(bytes_down),0)
-              FROM sessions WHERE started_at >= date_trunc('day', now())
-        `).Scan(&today, &upToday, &downToday)
+              FROM iam_v2.sessions WHERE tenant_id=$1 AND started >= date_trunc('day', now())
+        `, s.tenantID).Scan(&today, &upToday, &downToday)
 		_ = s.db.QueryRow(ctx,
-			`SELECT count(*) FROM sessions WHERE started_at >= now() - interval '7 days'`).Scan(&sess7d)
-		_ = s.db.QueryRow(ctx,
-			`SELECT count(*) FILTER (WHERE state = 'unused'), count(*) FILTER (WHERE state = 'active') FROM vouchers`).
-			Scan(&vUnused, &vActive)
+			`SELECT count(*) FROM iam_v2.sessions
+			  WHERE tenant_id=$1 AND started >= now() - interval '7 days'`, s.tenantID).Scan(&sess7d)
+		// iam_v2 vouchers carry a status rather than the legacy state vocabulary: an unredeemed voucher is
+		// ISSUED, and one that has been redeemed is REDEEMED. "active" in the old sense -- a voucher with a
+		// live session -- is a property of the entitlement now, not of the voucher.
+		_ = s.db.QueryRow(ctx, `
+		    SELECT count(*) FILTER (WHERE status = 'ISSUED'),
+		           count(*) FILTER (WHERE status = 'REDEEMED')
+		      FROM iam_v2.vouchers WHERE tenant_id=$1`, s.tenantID).Scan(&vUnused, &vActive)
 
 		out["active_sessions"] = active
 		out["sessions_today"] = today
@@ -322,6 +295,9 @@ func (s *server) reportsRoutes() http.Handler {
 		out["vouchers_unused"] = vUnused
 		out["vouchers_active"] = vActive
 
+		// TOP PACKAGES, not top legacy plans. The name kept its wire key so the dashboard card does not
+		// break, but the thing being counted is the internet package an entitlement was granted from --
+		// the current commercial object -- rather than a ticket_template.
 		type topPlan struct {
 			TemplateID string `json:"template_id"`
 			Name       string `json:"name"`
@@ -329,13 +305,13 @@ func (s *server) reportsRoutes() http.Handler {
 		}
 		var top []topPlan
 		rows, err := s.db.Query(ctx, `
-            SELECT t.id, t.name, count(se.id) AS n
-              FROM sessions se
-              JOIN vouchers v ON v.id = se.voucher_id
-              JOIN ticket_templates t ON t.id = v.template_id
-             WHERE se.started_at >= now() - interval '7 days'
-             GROUP BY t.id, t.name ORDER BY n DESC LIMIT 5
-        `)
+            SELECT p.id::text, p.name, count(se.id) AS n
+              FROM iam_v2.sessions se
+              JOIN iam_v2.entitlements e ON e.id = se.entitlement_id
+              JOIN iam_v2.internet_packages p ON p.id = e.package_id
+             WHERE se.tenant_id = $1 AND se.started >= now() - interval '7 days'
+             GROUP BY p.id, p.name ORDER BY n DESC LIMIT 5
+        `, s.tenantID)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
