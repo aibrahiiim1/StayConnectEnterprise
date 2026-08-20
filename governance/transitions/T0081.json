@@ -1,7 +1,7 @@
 {
   "transition_id": "T0081",
   "seq": 81,
-  "timestamp": "2026-08-20T10:00:00Z",
+  "timestamp": "2026-08-20T09:45:12Z",
   "record_type": "ZERO_LEGACY_FRESH_PRODUCTION_BASELINE_VERIFIED_READY_RESTORED",
   "previous_state": {
     "phase": "7",
