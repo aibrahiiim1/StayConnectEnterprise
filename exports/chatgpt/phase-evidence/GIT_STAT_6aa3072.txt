@@ -1,0 +1,4 @@
+commit 6aa3072a6ad76f5243c39c0f2b60a83e3c7d703a
+Date:   Thu Aug 20 04:48:23 2026 +0300
+
+    Record T0078: the lock is keyed on the production build
