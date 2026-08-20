@@ -64,6 +64,8 @@ def git(*a):
 # ---------- generated block ----------
 def render_block(st):
     ph = st["phases"]
+    fp = st["fresh_production_baseline"]
+    dev = st["development_reference_appliance"]
     def s(k): return ph[k]["status"]
     if s('1B') == "IN_PROGRESS":
         p1b_note = "(DARK — implementation in progress; no production iam_v2 use)"
@@ -77,7 +79,21 @@ def render_block(st):
         f"**Current activity:** `{st['current_activity']}`",
         f"**Phase status:** 0 {s('0')} · 1A **{s('1A')}** (DARK, NOT CUT OVER) · 1B {s('1B')} {p1b_note} · 2 {s('2')} · 3 {s('3')} · 4 {s('4')} · 5 {s('5')} · 6 {s('6')} · 7 {s('7')}",
         f"**Phase 1A maturity:** {ph['1A']['maturity']}",
-        f"**iam_v2:** {st['database_schema_state']['iam_v2_tables']} tables, {st['database_schema_state']['iam_v2_rows']} rows, dark; no service routed; no data migration; legacy public schema is the currently CONFIGURED authentication/routing baseline. PRE-LIVE (D24): no real hotel guest or staff depends on either path for live service yet.",
+        # TWO SCOPES, RENDERED SEPARATELY. A single iam_v2 line used to serve both and could only be wrong
+        # about one of them: it said "dark; no service routed; legacy public schema is the currently
+        # CONFIGURED authentication/routing baseline", which is the DEVELOPMENT appliance's history and is
+        # the opposite of the Fresh Production baseline, where the superseded guest-IAM runtime and schema
+        # do not exist at all.
+        f"**Fresh Production baseline (repository; NO appliance exists yet):** "
+        f"{fp['iam_v2_tables']} iam_v2 tables, {fp['public_tables']} public tables, ZERO identity rows. "
+        f"Factory-clean and current-only: the superseded guest-IAM runtime and schema are ABSENT, so IAM-v2 "
+        f"is structurally the sole guest-IAM authority from first operation. Not a cutover.",
+        f"**Development reference appliance ({dev['host']}):** UNTOUCHED by this work and NOT cut over. "
+        f"Retains the historical live-dark runtime its accepted evidence records, including its superseded "
+        f"guest-IAM schema ({dev['iam_v2_tables_live']} iam_v2 tables live). Reference and evidence only, "
+        f"never an installation source.",
+        f"**Lifecycle:** PRE-LIVE (D24): no real hotel guest or staff depends on StayConnect for live "
+        f"service yet.",
         f"**Single next authorized action:** {st['next_authorized_action']}",
         f"**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `{st['latest_accepted_po_decision']}`.",
         END]
@@ -172,6 +188,50 @@ def cmd_validate(deep=True, manifest_equality=True):
         for a in allowed:
             if re.search(r"execute\s+(the\s+)?(approved\s+)?phase\s*1b", str(a), re.I):
                 fail("stale-state contradiction: next action is Product-Owner acceptance but allowed_actions still say execute Phase 1B")
+    # C2: READY FOR FRESH PRODUCTION cannot coexist with a current claim that the superseded guest IAM is
+    # the configured Production authority. Those two describe different systems, and for a while the
+    # repository asserted both: the execution state said READY while service_routing_state still opened
+    # "Legacy public-schema IAM is the currently CONFIGURED authentication/routing baseline". That reading
+    # matters -- it is the one sentence an operator would use to decide what a new appliance authenticates
+    # with.
+    #
+    # The DEVELOPMENT appliance genuinely still has the superseded schema, so the rule is not "never mention
+    # legacy". It is: once READY, no CURRENT-scope field may say legacy IS the configured authority without
+    # naming the scope it belongs to.
+    if "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT" in str(st.get("current_activity_execution_state", "")):
+        legacy_authority = re.compile(
+            r"legacy[^.]{0,80}(is|remains)[^.]{0,40}(the\s+)?(currently\s+)?"
+            r"(configured|sole|production)[^.]{0,40}(authentication|authority|routing|baseline)", re.I)
+        for field in ("service_routing_state", "current_maturity", "current_activity_execution_state_note",
+                      "next_authorized_action"):
+            txt = str(st.get(field, ""))
+            m = legacy_authority.search(txt)
+            if m:
+                window = txt[max(0, m.start() - 220):m.end() + 220]
+                if not re.search(r"DEVELOPMENT|historical|172\.21\.60\.23", window, re.I):
+                    fail(f"stale-state contradiction: execution state is READY_FOR_FRESH_PRODUCTION_"
+                         f"APPLIANCE_DEPLOYMENT but {field} says the superseded guest IAM is the configured "
+                         f"authority, with no DEVELOPMENT/historical scope on it: '{m.group(0)[:90]}'")
+        # And the two Phase-1B evidence flags must carry an explicit historical scope, so nothing downstream
+        # can read them as current. They are true statements ABOUT PHASE 1B; they are not current state.
+        p1be = st.get("phase1b_execution", {}) or {}
+        for flag in ("production_iam_v2_access_authorized", "legacy_production_authoritative"):
+            if flag in p1be and not re.search(
+                    r"historical", str(p1be.get(flag + "_scope", "")), re.I):
+                fail(f"phase1b_execution.{flag} is present but has no *_scope field labelling it HISTORICAL; "
+                     f"once READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT is recorded, Phase-1B evidence "
+                     f"must not be readable as current state")
+        # The two scopes must both be stated, and stated apart.
+        for req in ("fresh_production_baseline", "development_reference_appliance"):
+            if req not in st:
+                fail(f"execution state is READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT but {req} is "
+                     f"absent: the Fresh Production baseline and the DEVELOPMENT appliance must be stated "
+                     f"separately, because neither describes the other")
+        dev = st.get("development_reference_appliance", {}) or {}
+        if dev.get("cutover_performed") is not False or dev.get("modified_by_zero_legacy_work") is not False:
+            fail("development_reference_appliance must record cutover_performed=false and "
+                 "modified_by_zero_legacy_work=false: 172.21.60.23 was not changed by this work")
+
     # D: after T0010, no current-state field may present the stale authoritative HEAD or "Production unchanged/untouched".
     if str(st.get("latest_transition_id", "")) >= "T0010":
         # EVERY phase's maturity string is a current-state field too. This list used to name only 1B's, so a

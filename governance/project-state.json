@@ -18,7 +18,7 @@
   "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
   "current_activity_execution_state": "READY_FOR_FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT",
   "current_activity_execution_state_note": "READY (T0081, corrected by T0082) against the Product Owner's stronger criterion, now satisfied in the form it was actually asked for. A brand-new Production appliance is built from a FACTORY-CLEAN BASELINE (data-plane/migrations/baseline/) that NEVER constructs the superseded guest-IAM tables at any point -- proved by a DDL event trigger armed on the empty database before the first object exists, with the tripwire itself verified by making it fire. The baseline is generated from the upgrade path's end state and the two catalogs are compared fact by fact (8104, identical), so new and existing appliances cannot drift apart. Migrations 0001-0049 are preserved as the upgrade path; 0049 is a destructive, non-reconstructive boundary whose rollback contract is a verified pre-upgrade backup restore, not DDL. The licensed concurrent-guest cap is scoped PER APPLIANCE -- resolved from the accepted implementation, not assumed -- and serialized by a transaction advisory lock on the appliance id inside the same transaction that inserts the session, with adversarial concurrency tests each verified by breaking the guarantee they protect. 172.21.60.23 remains the DEVELOPMENT appliance, unmodified and uncontacted; nothing is deployed anywhere; no Production appliance exists. See docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md.",
-  "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK",
+  "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK (DEVELOPMENT appliance) + VERIFIED ZERO-LEGACY FACTORY-CLEAN BASELINE (Fresh Production repository)",
   "phase1b_execution": {
     "implementation_authorized": true,
     "authorized_on": "2026-07-17",
@@ -30,7 +30,9 @@
     "gate_p_least_privilege_cutover": true,
     "dark_features_enabled": false,
     "transition_id": "T0011",
-    "transition_accepted": true
+    "transition_accepted": true,
+    "production_iam_v2_access_authorized_scope": "HISTORICAL PHASE-1B EVIDENCE. Records that Phase-1B did not authorize iam_v2 access on the then-current Production model. It does NOT describe the Fresh Production baseline, where IAM-v2 is the sole guest-IAM authority by construction. Must not be read as, or used to derive, current state.",
+    "legacy_production_authoritative_scope": "HISTORICAL PHASE-1B EVIDENCE. Records that the superseded public-schema IAM was the configured authority under the Phase-1B in-place model. That model is SUPERSEDED (D35): the Fresh Production baseline contains no superseded guest-IAM runtime or schema. Must not be read as, or used to derive, current state."
   },
   "phase2_execution": {
     "implementation_authorized": true,
@@ -272,13 +274,14 @@
     "dark_created_in_production": true,
     "cutover_performed": false,
     "gate_p_least_privilege_cutover": true,
-    "runtime_security_infra_deployed_dark": true
+    "runtime_security_infra_deployed_dark": true,
+    "_note": "HISTORICAL. These flags describe the Phase-1A/1B live-dark work on the DEVELOPMENT appliance and the then-current in-place Production model. They do not describe the Fresh Production baseline, on which there is nothing to cut over to or from."
   },
   "database_schema_state": {
     "production_db": "stayconnect_site",
     "iam_v2_tables": 68,
     "iam_v2_rows": 0,
-    "iam_v2_tables_note": "CURRENT LIVE VALUE, development appliance: 68 base tables, 7 views, 111 functions, ZERO rows, every object owned by iam_v2_owner. HISTORICAL: migration 0010_phase3_stay_resolution was applied on 2026-08-10 and took iam_v2 from 49 to 62 base tables plus one view (recorded at the time as '63 tables', counting the view as a relation); the Phase-4 chain 0011 through 0026 was applied on 2026-08-13 under the WS-L live-DARK deployment (T0043) and took it to 68. Phase 4 is DARK: the schema exists and nothing writes to it. Production was never migrated and its ledger still ends at 0010.",
+    "iam_v2_tables_note": "SCOPE MATTERS HERE. 68 is the DEVELOPMENT appliance's live value at its last read; the current factory-clean repository baseline produces 74 IAM-v2 base tables (see fresh_production_baseline). The development appliance has not been rebuilt from the current baseline and is not meant to be. HISTORICAL: migration 0010 took iam_v2 from 49 to 62 base tables plus one view on 2026-08-10, and the Phase-4 chain 0011-0026 took it to 68 on 2026-08-13 under the WS-L live-DARK deployment (T0043). No Production appliance was ever migrated; none exists.",
     "migration_0010_applied_production": true,
     "migration_0010_applied_on": "2026-08-10",
     "iam_v2_fingerprint": "5c59f5f9902dcdc6a8164176f67cf64c",
@@ -305,9 +308,11 @@
     "migration_0011_to_0026_applied_on_appliance": true,
     "migration_0011_to_0026_applied_on": "2026-08-13",
     "migration_0011_to_0026_applied_in_production": false,
-    "iam_v2_fingerprint_note": "Catalog fingerprint of the CURRENT live appliance schema (0011-0026 applied). The earlier value bd75026f is HISTORICAL and describes the 49-table Phase-1A schema. A catalog fingerprint includes ordinal_position and therefore is not stable across a migration rollback cycle; see iam_v2_scratch/schema_structure_fingerprint.sql for the structural comparison to use after a rollback."
+    "iam_v2_fingerprint_note": "Catalog fingerprint of the CURRENT live appliance schema (0011-0026 applied). The earlier value bd75026f is HISTORICAL and describes the 49-table Phase-1A schema. A catalog fingerprint includes ordinal_position and therefore is not stable across a migration rollback cycle; see iam_v2_scratch/schema_structure_fingerprint.sql for the structural comparison to use after a rollback.",
+    "iam_v2_tables_scope": "DEVELOPMENT appliance live value",
+    "fresh_production_iam_v2_tables": 74
   },
-  "service_routing_state": "PRODUCTION SCOPE. Legacy public-schema IAM is the currently CONFIGURED authentication/routing baseline and the only path any deployed service is routed to. No service is routed to iam_v2, which remains dark at 0 rows and is NOT cut over. PRE-LIVE (D24/T0056): StayConnect has NOT yet entered real hotel guest/staff production operation -- no guest and no hotel user currently depends on either path for live service, and the system remains PRE-LIVE under controlled testing. Every numbered development phase is now closed (Phase 7 ACCEPTED_AND_CLOSED, D27/T0064), so the project is no longer under active development; what remains is the separately authorized cutover / go-live decision. The earlier wording, 'the SOLE PRODUCTION authority', described the configuration correctly and implied live hotel operation that has not begun. All four site-DB daemons (scd/edged/acctd/netd) connect under dedicated LEAST-PRIVILEGE Gate-P roles (svc_scd/svc_edged/svc_acctd/svc_netd; NOSUPERUSER, SCRAM) instead of superuser stayconnect -- reboot-validated 2026-07-18. All new auth features (durable throttle, keyed-HMAC OTP, IAM-v2) remain OFF (dark). DEVELOPMENT SCOPE: this statement does NOT describe the DEVELOPMENT appliance 172.21.60.23, where the authorized D31/T0068 trial has installed the IAM-v2 runtime wiring and enabled selected IAM-v2 surfaces. See environment_scoped_iam_state.",
+  "service_routing_state": "TWO SCOPES, AND NEITHER DESCRIBES THE OTHER. See fresh_production_baseline and development_reference_appliance.\n\nFRESH PRODUCTION (repository baseline; NO APPLIANCE EXISTS): a new Production appliance is built factory-clean and current-only. The superseded guest-IAM runtime and schema are ABSENT from the product, so IAM-v2 is structurally the sole guest-IAM authority from first operation. There is no legacy path to route to, no configuration that could select one, and this is NOT a cutover from the DEVELOPMENT appliance or from any legacy Production installation. PRE-LIVE: no real hotel guest or staff depends on StayConnect for live service.\n\nDEVELOPMENT APPLIANCE 172.21.60.23: untouched by this work and NOT cut over. It retains the historical live-dark runtime its accepted evidence records, including its superseded guest-IAM schema. It is reference and evidence only and is never an installation source.\n\nUnchanged in both scopes: all four site-DB daemons (scd/edged/acctd/netd) connect under dedicated LEAST-PRIVILEGE Gate-P roles (NOSUPERUSER, SCRAM), and every numbered development phase is closed (Phase 7 ACCEPTED_AND_CLOSED, D27/T0064).",
   "pms_financial_state": "FIAS lookup-only in production. The Phase-4 financial layer is ACCEPTED AND CLOSED at verified LIVE-DARK maturity (D19/T0044) and is DEPLOYED DARK on the development appliance: migrations 0011-0026 applied to iam_v2 (68 tables, 0 rows), five NOLOGIN restricted roles, and the Phase-4 binaries and Hotel-Admin bundle in service. Every Phase-4 flag is OFF, every Phase-4 route returns 404, and no PS has been transmitted, no PA financially accepted, no folio debited, no provider CHARGE or REFUND issued and no paid access granted. folio_identity_strategy DEFAULT 'UNSET' fail-closed. No programmatic reversal (v1). Hotel ID 2 financially UNAPPROVED and per-property Tier-2 onboarding still mandatory.",
   "network_ha_state": "Two physical NICs (WAN=management, LAN=guest). Local-first/offline supported. HA failover NOT designed/implemented/accepted; HA-sync transport is an open decision.",
   "blockers": [
@@ -748,7 +753,7 @@
   },
   "iam_transition_strategy": {
     "development": "IAM-v2 runtime wiring implemented and enabled on the DEVELOPMENT appliance under D30, with scope corrected by D31. IAM-v2 is the intended authority for the trial surfaces that are actually enabled there.",
-    "production_model": "OPEN. No Production IAM transition strategy is approved. Legacy retirement, a no-migration approach and any clean-replacement or cutover sequence all require a separate explicit Product-Owner decision.",
+    "production_model": "FRESH PRODUCTION APPLIANCE DEPLOYMENT, ZERO-LEGACY (D35; T0080-T0082). A newly provisioned server is built factory-clean from the current-only repository baseline, enrolled and claimed, assigned by signed assignment and configured through Hotel Admin, with IAM-v2 as the sole guest-IAM authority from first operation. There is no IAM transition to perform on it, because there is nothing to transition FROM: the superseded guest-IAM runtime and schema are absent from the product. This supersedes the earlier in-place cutover assumption and the earlier OPEN status. Actual deployment awaits the Product-Owner-provided server and a separate Go-Live decision.",
     "preserved_foundations": [
       "appliance enrollment/claim/signed assignment",
       "appliance identity and PKI/mTLS",
@@ -759,17 +764,17 @@
       "Central Control Plane integration",
       "update/recovery/security infrastructure"
     ],
-    "legacy_iam": "NOT retired and NOT deleted anywhere. No Production data migrated."
+    "legacy_iam": "REMOVED FROM THE PRODUCT (T0081): the superseded guest-IAM runtime and its tables no longer exist in the repository, so a new Production appliance never has them. NOT retired or deleted on the DEVELOPMENT appliance, which is untouched and retains its historical state. Historical migrations 0001..0049 and all accepted evidence are preserved for audit."
   },
   "environment_scoped_iam_state": {
     "_note": "Environment-scoped on purpose. A global iam_v2_dark answer was true for Production and false for the DEVELOPMENT appliance after the authorized trial, which is a contradiction no single flag can hold. Neither side may be read as describing the other.",
     "production": {
       "lifecycle": "PRE-LIVE",
-      "iam_v2": "DARK and NOT cut over",
-      "routing": "no deployed Production service is routed to iam_v2",
+      "iam_v2": "SOLE GUEST-IAM AUTHORITY, structurally, on a fresh deployment. Not dark and not a cutover: no Production appliance exists yet, and the baseline one will be built from has no other implementation to be dark against.",
+      "routing": "no deployed Production service exists to route, because no Production appliance exists. On a fresh deployment there is no legacy guest-IAM path to route to.",
       "mutation": "none -- Production has not been contacted",
-      "legacy_iam": "still the configured Production authentication/routing baseline; NOT retired and NOT deleted",
-      "transition_strategy": "FRESH PRODUCTION APPLIANCE DEPLOYMENT (D35/T0075). The earlier in-place cutover assumption is SUPERSEDED. The Production target will be a newly provisioned factory-clean server built from repository-controlled sources, enrolled and claimed, assigned by signed assignment, configured through Hotel Admin, with IAM-v2 as the intended authority from first operation. The DEVELOPMENT appliance is never an installation source. Actual deployment awaits the Product-Owner-provided server and a separate Go-Live decision.",
+      "legacy_iam": "ABSENT from the Fresh Production baseline: the superseded guest-IAM runtime and schema are not part of the product a new appliance is built from. It is NOT the configured authority for Fresh Production and cannot become it. Untouched on the DEVELOPMENT appliance; historical migrations and evidence preserved.",
+      "transition_strategy": "FRESH PRODUCTION APPLIANCE DEPLOYMENT, ZERO-LEGACY (D35; T0080-T0082). A newly provisioned server is built factory-clean from the current-only repository baseline, enrolled and claimed, assigned by signed assignment and configured through Hotel Admin, with IAM-v2 as the sole guest-IAM authority from first operation. There is no IAM transition to perform on it, because there is nothing to transition FROM: the superseded guest-IAM runtime and schema are absent from the product. This supersedes the earlier in-place cutover assumption and the earlier OPEN status. Actual deployment awaits the Product-Owner-provided server and a separate Go-Live decision.",
       "appliance": "NONE EXISTS. No Production appliance has been provisioned, enrolled or contacted."
     },
     "development_appliance": {
@@ -926,5 +931,28 @@
       "Portal ARP / device-presence path -- NOT PROVEN, requires a real guest device on the guest network",
       "The checkout -> grace supersession -> session rebind journey ON THE APPLIANCE. ConvertAtCheckout converts a Stay at a boundary derived from a durable Stay Event; the appliance has pms_interfaces=1 and stays=1 (pre-existing fixtures) but stay_events=0, PHASE3_PMS_AUTH=false and pmsd inactive. Driving it would require fabricating a stay event, which is prohibited. The supersession/rebind LOGIC is covered by the checkout integration suite, which is being restored (see KNOWN_BROKEN) rather than by appliance evidence."
     ]
+  },
+  "fresh_production_baseline": {
+    "_note": "THE REPOSITORY BASELINE A NEW PRODUCTION APPLIANCE IS BUILT FROM. This is NOT a description of any running system, and it is NOT a cutover of the DEVELOPMENT appliance or of any legacy Production installation. No Production appliance exists. Read development_reference_appliance for the other scope; neither may be read as describing the other.",
+    "appliance": "NONE EXISTS. No Production appliance has been provisioned, enrolled or contacted.",
+    "install_path": "FACTORY-CLEAN, CURRENT-ONLY: data-plane/migrations/baseline/0000_production_baseline.sql. The superseded guest-IAM tables are never constructed, not even transiently, which is asserted by a DDL event trigger armed on the empty database before the first object exists.",
+    "iam_v2_tables": 74,
+    "public_tables": 37,
+    "superseded_guest_iam": "ABSENT. public.sessions, guests, guest_accounts, vouchers, voucher_batches, ticket_templates and payments do not exist and no foreign key references them.",
+    "guest_iam_authority": "IAM-v2, STRUCTURALLY AND SOLELY, from first operation. Not a runtime switch: there is no second implementation to select and no configuration that could select one.",
+    "licensed_capacity": "PER APPLIANCE, serialized by a transaction advisory lock on the appliance id inside the transaction that inserts the session. Read from the signed licence on disk, so admission is local-first.",
+    "identity_data": "ZERO. Every identity-bearing table in public and in the IAM-v2 guest domain is empty; a tenant, site, operator, principal, account or voucher arrives through enrolment, licensing and Hotel-Admin configuration, never with the schema.",
+    "upgrade_path_note": "Migrations 0001..0049 are retained as the UPGRADE path for existing installations and still create the superseded tables before 0049 removes them, because that is what actually happened to them. 0049 is a destructive, non-reconstructive boundary whose rollback contract is a verified pre-upgrade backup restore, not DDL.",
+    "verified_by": "scripts/factory-clean-baseline-verify.sh (FACTORY_CLEAN_BASELINE = PASS; 8104 catalog facts identical to the upgrade path's end state) -- T0082"
+  },
+  "development_reference_appliance": {
+    "_note": "THE DEVELOPMENT APPLIANCE, AS ITS ACCEPTED EVIDENCE RECORDS IT. Historical/live-dark runtime state, UNTOUCHED by the Zero-Legacy work. Nothing here describes the Fresh Production baseline, and nothing here has been cut over, migrated or changed.",
+    "host": "172.21.60.23",
+    "classification": "DEVELOPMENT. Reference and evidence only, NEVER an installation source.",
+    "modified_by_zero_legacy_work": false,
+    "runtime_state": "Whatever its accepted trial evidence records (D31/T0068 onward): the IAM-v2 runtime wiring is installed with selected surfaces enabled, and its superseded guest-IAM schema and runtime are STILL PRESENT there. The repository no longer builds that shape; this appliance was not rebuilt to match.",
+    "iam_v2_tables_live": 68,
+    "iam_v2_tables_live_note": "68 is this appliance's LIVE value at its last read, not the current repository baseline. A factory-clean build from the current repository produces 74. The difference is that this appliance has not been rebuilt, which is the intended state: it is evidence of what was accepted, not a target.",
+    "cutover_performed": false
   }
 }
