@@ -16,8 +16,8 @@
   },
   "current_phase": "7",
   "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION",
-  "current_activity_execution_state": "CLEAN_INSTALL_PATH_VERIFIED_AWAITING_PRODUCT_OWNER_PROVIDED_SERVER",
-  "current_activity_execution_state_note": "The Production model is FRESH APPLIANCE DEPLOYMENT, not an in-place cutover. 172.21.60.23 remains the DEVELOPMENT appliance, is not reclassified, and its legacy baseline is not retired or dropped -- nothing on it was modified during this work and it was read only as reference evidence. No Production appliance exists. The clean-install and disaster-recovery path is reconstructed and VERIFIED from repository sources in a disposable container that never saw any appliance, building 41 public and 74 iam_v2 base tables with zero rows and zero identities. Two blocking gaps are recorded with recommended corrections and two non-blocking findings describe what a clean install still creates and what remains configuration selectable. See docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md.",
+  "current_activity_execution_state": "CLEAN_INSTALL_PATH_HARDENED_TWO_BLOCKERS_REMAIN_AWAITING_PRODUCT_OWNER_PROVIDED_SERVER",
+  "current_activity_execution_state_note": "The Production model is FRESH APPLIANCE DEPLOYMENT. 172.21.60.23 remains the DEVELOPMENT appliance and was NOT modified -- every query against it was read-only reference evidence. An earlier audit claim that it had lost the contract-defined guest-network anchor is RETRACTED: MG-0 creates that anchor as a unique INDEX and the check queried pg_constraint, which cannot see one. The appliance carries guest_networks_tsi_anchor valid and ready with the exact contract definition, and iam_v2.guest_network_pms_map carries the composite FK to public.guest_networks. There are not two competing baselines. The clean-install path is now production-grade in the repository and verified semantically: columns, constraints, indexes, triggers and schema ownership are IDENTICAL to the appliance. Two blockers remain before a production install: ownership reassertion for 26 iam_v2 objects, and removal of the configuration-selectable legacy authentication authority. See docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md.",
   "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -709,14 +709,14 @@
     "phase7_merge_commit": "9c57c2b5a29eb886cf317912a9eb6a6da8ccb603",
     "phase7_merge_attribution": "Phase 7 was ACCEPTED_AND_CLOSED under D27/T0064 and MERGED under D28/T0065 (merge commit 9c57c2b5a29eb886cf317912a9eb6a6da8ccb603). The current DEVELOPMENT trial continuation is D31/T0068. D30 is preserved historically and its over-broad Production policy clauses were corrected by D31."
   },
-  "latest_transition_id": "T0075",
+  "latest_transition_id": "T0076",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
   },
-  "acceptance_candidate_head": "3e82f6db62d9c5e88a35d9b417a4cf191ea24b10",
+  "acceptance_candidate_head": "00617e56fba202e17c0555228b3d6018c2b3fe3e",
   "acceptance_candidate_head_note": "acceptance_candidate_head == inventory_head: the committed HEAD immediately before the final delivery-only commit, and the generation/provenance HEAD of the Phase-6 change manifest. delivery_head is that commit plus one delivery-only commit; the manifest is generated from the STAGED tree so its path set already covers the complete base..delivery_head diff.",
-  "inventory_head": "3e82f6db62d9c5e88a35d9b417a4cf191ea24b10",
+  "inventory_head": "00617e56fba202e17c0555228b3d6018c2b3fe3e",
   "delivery_head_note": "delivery_head (the Phase-6 PR HEAD) = inventory_head + one delivery-only commit. Its exact 40-character SHA is recorded in the PR body and verified to resolve on the authoritative remote before the delivery is reported.",
   "roadmap_exhaustion": {
     "recorded_by": "D28 / T0065 (2026-08-17)",
