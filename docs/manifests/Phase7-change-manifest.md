@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `fef8af9989a2a9695d5a728912effce09ab582bb`
-- **HEAD commit:** `6aa3072a6ad76f5243c39c0f2b60a83e3c7d703a`
-- **Provenance (generation HEAD = inventory_head):** `6aa3072a6ad76f5243c39c0f2b60a83e3c7d703a`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `77f18e75dc1e27972d46f4eb522e5b1804591926`
+- **Provenance (generation HEAD = inventory_head):** `77f18e75dc1e27972d46f4eb522e5b1804591926`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `post-roadmap/dev-iamv2-trial`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 150
@@ -102,37 +102,37 @@
 | `deploy/systemd/stayconnect-netd.service` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Fix the netd cold-boot DB race and make startup/release gates self-proving |
 | `deploy/systemd/stayconnect-pmsd.service` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Fix the netd cold-boot DB race and make startup/release gates self-proving |
 | `deploy/systemd/stayconnect-scd.service` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Grant acctd the controlled-operation opener; gate scd and acctd on the site DB |
-| `docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Key the guest-authority lock on the production build, not on a caller argument |
+| `docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Prove the ownership step is idempotent instead of asserting it |
 | `docs/acceptance/StayConnect-IAM-Phase7-Progress-Evidence.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Model the legacy plans request as four outcomes, not an empty array |
 | `docs/architecture/Phase3-Controlled-Writer-Privilege-Manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record the D32 grace evidence and correct the privilege manifest |
 | `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0078: the lock is keyed on the production build |
 | `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0078: the lock is keyed on the production build |
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0078: the lock is keyed on the production build |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Record T0078: the lock is keyed on the production build |
-| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
+| `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
 | `docs/reports/StayConnect-IAM-Phase7-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Attribution + containment round (delivery_head): manifest, packs and checksums |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
-| `exports/chatgpt/phase-evidence/GIT_STAT_6aa3072.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
+| `exports/chatgpt/phase-evidence/GIT_STAT_77f18e7.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_d0e3904.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | Post-fef8 correction (delivery_head): regenerated manifest, packs and checksums |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 045ca26: D35/T0075, clean-install path, packs and manifest |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Record T0078: the lock is keyed on the production build |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Record T0078: the lock is keyed on the production build |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at e682d84: T0077, blockers closed, packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Replace the in-place cutover with a verified fresh-install path |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Record T0078: the lock is keyed on the production build |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
 | `governance/transitions/T0066.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0067.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Transition receipts: stamp each before the commit that introduced it |
 | `governance/transitions/T0068.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Transition receipts: stamp each before the commit that introduced it |
@@ -145,7 +145,7 @@
 | `governance/transitions/T0075.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0075 from the commit clock instead of by hand |
 | `governance/transitions/T0076.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0076 from the commit clock |
 | `governance/transitions/T0077.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Close both Fresh Production readiness blockers in the repository |
-| `governance/transitions/T0078.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Record T0078: the lock is keyed on the production build |
+| `governance/transitions/T0078.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Delivery at 6aa3072: T0078, production build tag, packs and manifest |
 | `hotel-admin/app/(app)/guest-accounts/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Model the legacy plans request as four outcomes, not an empty array |
 | `hotel-admin/app/(app)/layout.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Fix the Guest Accounts crash, the dead plan picker, and the navigation |
 | `hotel-admin/app/(app)/license/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
@@ -157,7 +157,7 @@
 | `hotel-admin/components/phase4/settlements-view.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
 | `hotel-admin/e2e/sweep-guest-accounts-and-nav.spec.ts` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Model the legacy plans request as four outcomes, not an empty array |
 | `hotel-admin/lib/api.ts` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make seven broken admin screens work, and three more tell the truth |
-| `scripts/clean-install-reconstruction.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Key the guest-authority lock on the production build, not on a caller argument |
+| `scripts/clean-install-reconstruction.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Prove the ownership step is idempotent instead of asserting it |
 | `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Remove a control byte from the parity negative suite |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Derive M48's manifest anchor instead of pinning it |
 | `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Close the grace boundary across every runtime role, and assert it fail-closed |
@@ -197,7 +197,7 @@
  .../internal/iamv2/build_profile_development.go    |  10 +
  .../internal/iamv2/build_profile_production.go     |  11 +
  data-plane/internal/iamv2/commerce_admin.go        | 104 ++--
- .../internal/iamv2/commerce_admin_repo_pg.go       | 375 +++++++++++-
+ .../internal/iamv2/commerce_admin_repo_pg.go       | 375 ++++++++++++-
  data-plane/internal/iamv2/commerce_admin_test.go   | 154 +++--
  .../internal/iamv2/commerce_hardening_db_test.go   |  63 ++-
  .../internal/iamv2/commerce_integration_test.go    |  27 +-
@@ -255,19 +255,19 @@
  deploy/systemd/stayconnect-netd.service            |  12 +-
  deploy/systemd/stayconnect-pmsd.service            |   5 +-
  deploy/systemd/stayconnect-scd.service             |  20 +-
- docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md    | 344 +++++++++++
+ docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md    | 346 ++++++++++++
  .../StayConnect-IAM-Phase7-Progress-Evidence.md    | 358 ++++++++++++
  .../Phase3-Controlled-Writer-Privilege-Manifest.md |   3 +-
  .../StayConnect-IAM-Phase0-Contract.md             |   8 +-
  docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   8 +-
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   8 +-
  docs/context/StayConnect-IAM-Handoff.md            |   8 +-
- docs/manifests/Phase7-change-manifest.md           | 626 ++++++++++++++-------
+ docs/manifests/Phase7-change-manifest.md           | 622 ++++++++++++++-------
  .../reports/StayConnect-IAM-Phase7-Final-Report.md | 127 +++--
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 315495 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 125481 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42466 bytes
- .../chatgpt/phase-evidence/GIT_STAT_6aa3072.txt    |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 313238 -> 315494 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 122600 -> 125484 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42137 -> 42465 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_77f18e7.txt    |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_d0e3904.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   8 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -310,12 +310,12 @@
  hotel-admin/components/phase4/settlements-view.tsx |   8 +-
  .../e2e/sweep-guest-accounts-and-nav.spec.ts       | 521 +++++++++++++++++
  hotel-admin/lib/api.ts                             |  29 +-
- scripts/clean-install-reconstruction.sh            | 309 ++++++++++
+ scripts/clean-install-reconstruction.sh            | 316 +++++++++++
  tools/tests/current_state_parity/run_negative.py   | 102 ++++
  .../tests/project_state_validator/run_mutations.py |  36 +-
  tools/validate-current-state-parity.py             | 242 +++++++-
  tools/validate-project-state.sh                    |   2 +-
- 150 files changed, 11242 insertions(+), 644 deletions(-)
+ 150 files changed, 11247 insertions(+), 644 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -324,25 +324,21 @@ M  docs/manifests/Phase7-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_6aa3072.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_e682d84.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_6aa3072.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_77f18e7.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 M  governance/project-state.json
-M  governance/transitions/T0078.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 77f18e7 Prove the ownership step is idempotent instead of asserting it
+HISTORICAL: 8f9ae43 Delivery at 6aa3072: T0078, production build tag, packs and manifest
 HISTORICAL: 6aa3072 Record T0078: the lock is keyed on the production build
 HISTORICAL: 7b5995a Key the guest-authority lock on the production build, not on a caller argument
 HISTORICAL: 1c07530 Delivery at e682d84: T0077, blockers closed, packs and manifest

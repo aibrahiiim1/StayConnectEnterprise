@@ -1,0 +1,4 @@
+commit 77f18e75dc1e27972d46f4eb522e5b1804591926
+Date:   Thu Aug 20 05:08:20 2026 +0300
+
+    Prove the ownership step is idempotent instead of asserting it
