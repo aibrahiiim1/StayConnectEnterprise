@@ -88,7 +88,22 @@ if [ -f "$HOSTS" ]; then
 fi
 
 if [ -n "$dns_ip" ]; then
-  ok "$FQDN resolves in DNS -> $dns_ip"
+  ok "$FQDN resolves in DNS -> $dns_ip (via ${SC_DNS_ANSWERED_BY})"
+  # UNANIMITY IS REQUIRED, not a majority and not "at least one".
+  #
+  # systemd-resolved accepts NXDOMAIN as a valid answer and does not try the next server. If one configured
+  # resolver knows this name and another denies it, the appliance resolves it or does not depending on which
+  # server resolved is currently using -- and it changes that on its own. The cutover would appear to work,
+  # and Central would drop out later for no visible reason.
+  if [ -n "${SC_DNS_DENIERS:-}" ]; then
+    bad "these configured resolvers return NXDOMAIN for $FQDN: ${SC_DNS_DENIERS}
+        Resolution would be a coin toss: systemd-resolved treats NXDOMAIN as a real answer and does not
+        fall back to the next server. Remove them from this appliance's resolver list, or make them
+        resolve the name, before cutting over."
+    fail=1
+  else
+    ok "every configured resolver agrees (no NXDOMAIN from any of them)"
+  fi
   if [ -n "$hosts_line" ]; then
     hosts_ip="$(printf '%s' "$hosts_line" | sed 's/^[0-9]*://' | awk '{print $1}')"
     if [ "$hosts_ip" != "$dns_ip" ]; then

@@ -131,14 +131,30 @@ sc_dns_lookup() {
   fi
 
   command -v dig >/dev/null 2>&1 || { SC_DNS_ANSWERED_BY="dig-missing"; return 1; }
+
+  # EVERY configured server is queried, not just until one answers.
+  #
+  # systemd-resolved does not fail over on NXDOMAIN -- that is a valid answer, so it is accepted and
+  # returned. A host configured with one resolver that knows an internal name and another that
+  # authoritatively denies it therefore resolves that name or not depending on which server resolved
+  # happens to be using, and it switches between them on its own. "Some upstream knows it" is not what an
+  # application experiences; it is a coin toss that looks fine whenever you test it and fails later.
+  #
+  # SC_DNS_DENIERS lists the servers that deny the name, so a caller can refuse rather than gamble.
+  SC_DNS_DENIERS=""
+  local found=""
   for s in $servers; do
     ip="$(dig "@$s" +short +time=3 +tries=1 "$host" A 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
     if [ -n "$ip" ]; then
-      SC_DNS_ANSWERED_BY="$s"
-      printf '%s' "$ip"
-      return 0
+      [ -n "$found" ] || { found="$ip"; SC_DNS_ANSWERED_BY="$s"; }
+    else
+      SC_DNS_DENIERS="${SC_DNS_DENIERS}${SC_DNS_DENIERS:+ }$s"
     fi
   done
+  if [ -n "$found" ]; then
+    printf '%s' "$found"
+    return 0
+  fi
   SC_DNS_ANSWERED_BY="$(printf '%s' "$servers" | tr '\n' ' ')"
   return 1
 }
