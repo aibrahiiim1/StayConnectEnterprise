@@ -150,7 +150,8 @@ if [ "$fail" = 0 ] || [ -n "$dns_ip" ]; then
     bad "no certificate retrieved from $MTLS_HOST:$MTLS_PORT — is the port reachable?
         Central opens it with deploy/scripts/central-firewall.sh; a filtered port times out silently."
     fail=1
-  elif openssl x509 -in "$mtls_pem" -noout -checkhost "$FQDN" 2>/dev/null | grep -q "does match"; then
+  elif { checkhost="$(openssl x509 -in "$mtls_pem" -noout -checkhost "$FQDN" 2>/dev/null || true)";
+         printf '%s' "$checkhost" | grep "does match" >/dev/null 2>&1; }; then
     ok "mTLS listener on $MTLS_HOST:$MTLS_PORT presents a certificate valid for $FQDN"
   else
     bad "mTLS listener on $MTLS_HOST:$MTLS_PORT does not present a certificate valid for $FQDN.

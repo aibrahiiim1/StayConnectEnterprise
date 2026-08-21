@@ -84,8 +84,9 @@ ip_names+=("127.0.0.1")
 # appliance would have to re-validate for no reason.
 if [ "$FORCE" = 0 ] && [ -s "$CADDY_CRT" ]; then
   missing=0
+  cur_names="$(names_of "$CADDY_CRT")"
   for n in "${dns_names[@]}" "${ip_names[@]}"; do
-    names_of "$CADDY_CRT" | grep -qE "(DNS|IPAddress):${n}(,|$)" || { say "missing name: $n"; missing=1; }
+    printf '%s' "$cur_names" | grep -E "(DNS|IPAddress):${n}(,|$)" >/dev/null 2>&1 || { say "missing name: $n"; missing=1; }
   done
   if [ "$missing" = 0 ]; then
     say "current certificate already covers every configured name — nothing to do"
@@ -122,8 +123,9 @@ openssl x509 -req -in "$TMP/server.csr" -CA "$TLSDIR/ca.crt" -CAkey "$TLSDIR/ca.
 # VERIFY BEFORE SWITCHING. A certificate that does not chain, or that is missing a name, must never reach
 # the live path -- the old one is strictly better than a broken new one.
 openssl verify -CAfile "$TLSDIR/ca.crt" "$TMP/server.crt" >/dev/null || die "issued certificate does not chain to the Central CA"
+new_names="$(names_of "$TMP/server.crt")"
 for n in "${dns_names[@]}" "${ip_names[@]}"; do
-  names_of "$TMP/server.crt" | grep -qE "(DNS|IPAddress):${n}(,|$)" || die "issued certificate is missing $n"
+  printf '%s' "$new_names" | grep -E "(DNS|IPAddress):${n}(,|$)" >/dev/null 2>&1 || die "issued certificate is missing $n"
 done
 say "verified: chains to the Central CA and carries every configured name"
 

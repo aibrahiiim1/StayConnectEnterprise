@@ -65,7 +65,11 @@ for s in $(printf '%s\n' "${SC_DNS_ANSWERED_BY}" ); do KEEP="$KEEP $s"; done
 say ""
 say "checking that the remaining resolver(s) can still resolve public names ($PROBE_PUBLIC):"
 for s in $KEEP; do
-  if dig "@$s" +short +time=3 +tries=1 "$PROBE_PUBLIC" A 2>/dev/null | grep -qE '^[0-9]+\.'; then
+  # CAPTURE, THEN TEST. `dig ... | grep -q` under `set -o pipefail` reports failure even on a match:
+  # grep -q exits at the first hit, dig gets SIGPIPE, and pipefail returns the pipeline as failed. This
+  # check refused a resolver that answers correctly 8 times out of 8.
+  probe="$(dig "@$s" +short +time=3 +tries=1 "$PROBE_PUBLIC" A 2>/dev/null || true)"
+  if printf '%s' "$probe" | grep -E '^[0-9]+\.' >/dev/null 2>&1; then
     ok "$s resolves $PROBE_PUBLIC"
   else
     bad "$s cannot resolve $PROBE_PUBLIC. Removing the public resolvers would break apt, container pulls

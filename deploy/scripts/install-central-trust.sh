@@ -56,7 +56,8 @@ SRC="${1:-}"
 
 openssl x509 -in "$SRC" -noout >/dev/null 2>&1 || die "$SRC is not a PEM certificate"
 # A server certificate installed as a trust anchor would silently fail to validate anything.
-openssl x509 -in "$SRC" -noout -text | grep -q "CA:TRUE" || die "$SRC is not a CA certificate (basicConstraints CA:TRUE missing)"
+certtext="$(openssl x509 -in "$SRC" -noout -text 2>/dev/null || true)"
+printf '%s' "$certtext" | grep "CA:TRUE" >/dev/null 2>&1 || die "$SRC is not a CA certificate (basicConstraints CA:TRUE missing)"
 
 subject="$(openssl x509 -in "$SRC" -noout -subject | sed 's/^subject=//')"
 if [ -s "$DEST" ] && cmp -s "$SRC" "$DEST"; then
