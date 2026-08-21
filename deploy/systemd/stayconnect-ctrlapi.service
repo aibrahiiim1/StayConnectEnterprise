@@ -7,6 +7,13 @@ Requires=docker.service
 [Service]
 Type=simple
 EnvironmentFile=/etc/stayconnect/ctrlapi.env
+# THE FLEET-WIDE APPLIANCE ENDPOINT, LAST SO IT WINS.
+#
+# Installed from the versioned deploy/config/central-endpoint.env by install-central-endpoint.sh. It is
+# read after ctrlapi.env deliberately: the endpoint appliances dial is a property of the fleet, not of this
+# host, and a stale hand-edited value in ctrlapi.env must not be able to override it. Optional (`-`) so a
+# host that has not installed it yet still starts, with offline activation disabled and saying so.
+EnvironmentFile=-/etc/stayconnect/central-endpoint.env
 ExecStart=/opt/stayconnect/bin/ctrlapi serve
 Restart=on-failure
 RestartSec=2

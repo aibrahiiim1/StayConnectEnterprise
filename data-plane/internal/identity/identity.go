@@ -287,3 +287,60 @@ func (s *Store) load() (*Identity, error) {
 	id.privKey = ed25519.PrivateKey(priv)
 	return &id, nil
 }
+
+// EnsureLocalKeypair creates and persists an identity keypair WITHOUT contacting Central, and returns the
+// identity. If one already exists it is returned unchanged.
+//
+// This exists for OFFLINE FIRST ACTIVATION: a factory-clean appliance with no route to Central still has to
+// prove possession of a key before Central will bind an activation package to it. The key is generated here,
+// on the appliance, and the private half never leaves — the activation request carries only the public half
+// and a signature made with the private one.
+//
+// ApplianceID is deliberately left EMPTY. Only Central mints appliance ids, and only the signed assignment
+// carries tenant and site; generating a keypair locally does not make an appliance identity, it makes the
+// evidence that one can be issued.
+func (s *Store) EnsureLocalKeypair() (*Identity, error) {
+	if id, err := s.load(); err == nil {
+		return id, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("identity load: %w", err)
+	}
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return nil, fmt.Errorf("mkdir %s: %w", s.Dir, err)
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate key: %w", err)
+	}
+	hw := hwid.Detect()
+	id := &Identity{Serial: hw.Serial, PublicKeyB64: base64.RawStdEncoding.EncodeToString(pub), privKey: priv}
+	// Key first (0600), then identity.json, so a crash between the two leaves a key with no claim rather
+	// than a claim with no key.
+	if err := writeFileAtomic(s.keyPath(), priv, 0o600); err != nil {
+		return nil, fmt.Errorf("write key: %w", err)
+	}
+	b, _ := json.Marshal(id)
+	if err := writeFileAtomic(s.idPath(), b, 0o644); err != nil {
+		return nil, fmt.Errorf("write identity.json: %w", err)
+	}
+	return id, nil
+}
+
+// AdoptApplianceID records the appliance id Central minted for an offline first activation. It refuses to
+// overwrite an existing, different id: an appliance has one identity, and silently repointing it is exactly
+// the confusion this whole subsystem exists to prevent.
+func (s *Store) AdoptApplianceID(applianceID string) error {
+	id, err := s.load()
+	if err != nil {
+		return err
+	}
+	if id.ApplianceID != "" && id.ApplianceID != applianceID {
+		return fmt.Errorf("identity already bound to appliance %s", id.ApplianceID)
+	}
+	if id.ApplianceID == applianceID {
+		return nil
+	}
+	id.ApplianceID = applianceID
+	b, _ := json.Marshal(id)
+	return writeFileAtomic(s.idPath(), b, 0o644)
+}

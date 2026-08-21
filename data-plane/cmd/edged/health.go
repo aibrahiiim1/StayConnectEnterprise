@@ -40,6 +40,15 @@ const (
 	stFailed     = "failed"     // inactive/failed and should be up
 	stStarting   = "starting"   // first-time activation window
 	stUnknown    = "unknown"
+	// stWaiting means the service is INTENTIONALLY not running because a prerequisite it needs does not
+	// exist yet -- not that it failed. Kea is the case that forced this state to exist: it binds the LAN
+	// bridge, so on a factory-clean appliance it cannot start until an operator configures guest
+	// networking. Calling that "failed" told operators their new appliance was broken AND held boot
+	// convergence open forever, because a service that is not supposed to start can never become healthy.
+	//
+	// It is NOT a way to make health green. It applies only while the prerequisite is genuinely absent;
+	// the moment it exists the normal check runs and a real failure is reported as a real failure.
+	stWaiting = "waiting"
 )
 
 // bootConvergeDeadline is how long after boot all critical services have to
@@ -55,21 +64,28 @@ type svcSpec struct {
 	// sanitized detail string, and (optionally) the dependency name responsible
 	// for a failure so the UI can show "degraded because <dep>".
 	Check func(ctx context.Context, s *server) (ok bool, detail, dep string)
+	// Applicable answers "is this service supposed to be running here YET?".
+	// nil means always. When it returns false the service is reported as
+	// stWaiting with the given reason and Check is not run at all -- there is
+	// nothing to probe. It must return TRUE whenever it cannot tell, so an
+	// unreadable prerequisite can never suppress a real failure.
+	Applicable func(ctx context.Context, s *server) (applicable bool, reason string)
 }
 
 // services is the supervised set. Order = display order.
 func (s *server) services() []svcSpec {
 	return []svcSpec{
-		{"scd", "stayconnect-scd.service", true, checkSCD},
-		{"edged", "stayconnect-edged.service", true, checkEdged},
-		{"netd", "stayconnect-netd.service", true, checkNetd},
-		{"portald", "stayconnect-portald.service", true, checkPortald},
-		{"acctd", "stayconnect-acctd.service", true, checkAcctd},
-		{"hotel-admin", "stayconnect-hotel-admin.service", true, checkHotelAdmin},
-		{"caddy", "stayconnect-caddy.service", true, checkCaddy},
-		{"kea", "kea-dhcp4-server.service", true, checkKea},
-		{"unbound", "unbound.service", true, checkUnbound},
-		{"postgres", "docker.service", true, checkPostgres},
+		{Name: "scd", Unit: "stayconnect-scd.service", Critical: true, Check: checkSCD},
+		{Name: "edged", Unit: "stayconnect-edged.service", Critical: true, Check: checkEdged},
+		{Name: "netd", Unit: "stayconnect-netd.service", Critical: true, Check: checkNetd},
+		{Name: "portald", Unit: "stayconnect-portald.service", Critical: true, Check: checkPortald},
+		{Name: "acctd", Unit: "stayconnect-acctd.service", Critical: true, Check: checkAcctd},
+		{Name: "hotel-admin", Unit: "stayconnect-hotel-admin.service", Critical: true, Check: checkHotelAdmin},
+		{Name: "caddy", Unit: "stayconnect-caddy.service", Critical: true, Check: checkCaddy},
+		// Kea is critical ONCE guest networking exists, and not applicable before it. See keaApplicable.
+		{Name: "kea", Unit: "kea-dhcp4-server.service", Critical: true, Check: checkKea, Applicable: keaApplicable},
+		{Name: "unbound", Unit: "unbound.service", Critical: true, Check: checkUnbound},
+		{Name: "postgres", Unit: "docker.service", Critical: true, Check: checkPostgres},
 	}
 }
 
@@ -196,9 +212,43 @@ func (s *server) pollOne(ctx context.Context, spec svcSpec) {
 	now := time.Now()
 	sd := systemdShow(ctx, spec.Unit)
 	bk := startupbackoff.Load(spec.Name)
-	ok, detail, dep := spec.Check(ctx, s)
-
 	prev := s.loadHealth(ctx, spec.Name)
+
+	// A service whose prerequisite does not exist yet is reported as waiting, and nothing is probed --
+	// there is no surface to probe. Failure counters are cleared rather than carried, because a service
+	// that is not supposed to be running is not accumulating failures.
+	if spec.Applicable != nil {
+		if applicable, reason := spec.Applicable(ctx, s); !applicable {
+			waiting := serviceHealth{
+				Service:        spec.Name,
+				State:          stWaiting,
+				ProcessState:   strings.TrimSpace(sd.ActiveState + "/" + sd.SubState),
+				HealthOK:       nil, // no check was run; false would claim one failed
+				HealthDetail:   sanitizeDetail(reason),
+				RestartCount:   sd.NRestarts,
+				RestartsWindow: bk.CountInWindow,
+				RestartWindowS: int(startupbackoff.Window / time.Second),
+				BackoffLevel:   bk.Level,
+				BackoffMS:      bk.LastDelayMS,
+				Critical:       spec.Critical,
+				UpdatedAt:      now,
+				// History is preserved: if this service failed for real before the prerequisite went
+				// away, that record does not get erased by the transition.
+				LastFailureAt:  prev.LastFailureAt,
+				LastFailureRsn: prev.LastFailureRsn,
+				LastHealthyAt:  prev.LastHealthyAt,
+				LastRecoveryAt: prev.LastRecoveryAt,
+			}
+			if prev.State != "" && prev.State != stWaiting {
+				s.recordRecovery(ctx, spec.Name, "waiting", reason,
+					"not applicable until its configuration prerequisite exists", 0, "waiting", 0, "system")
+			}
+			s.saveHealth(ctx, waiting)
+			return
+		}
+	}
+
+	ok, detail, dep := spec.Check(ctx, s)
 
 	cur := serviceHealth{
 		Service:        spec.Name,
@@ -237,7 +287,10 @@ func (s *server) pollOne(ctx context.Context, spec svcSpec) {
 
 	healthyNow := cur.State == stHealthy
 	unhealthyNow := cur.State == stDegraded || cur.State == stFailed || cur.State == stCrashLoop
-	wasHealthy := prev.State == stHealthy || prev.State == "" || prev.State == stUnknown
+	// stWaiting counts as "was healthy" for transition bookkeeping: coming out of waiting into a failure is
+	// a NEW failure worth recording, and coming out of waiting into healthy is a first start, not a
+	// recovery from an incident that never happened.
+	wasHealthy := prev.State == stHealthy || prev.State == "" || prev.State == stUnknown || prev.State == stWaiting
 
 	switch {
 	case healthyNow:
@@ -436,6 +489,16 @@ func (s *server) bootConvergeInit(ctx context.Context) {
 		bid, now, now.Add(bootConvergeDeadline), req)
 }
 
+// blocksConvergence reports whether a service in this state keeps boot convergence open.
+//
+// stWaiting does NOT. A service that is intentionally not running because its configuration prerequisite
+// does not exist cannot ever become healthy on a factory-clean appliance, so counting it as pending meant
+// every new appliance reported "failed to converge" forever -- and buried any genuine convergence failure
+// underneath a permanent false one.
+func blocksConvergence(state string) bool {
+	return state != stHealthy && state != stWaiting
+}
+
 func (s *server) bootConvergeStep(ctx context.Context) {
 	var converged, alertOpen bool
 	var deadline time.Time
@@ -448,10 +511,15 @@ func (s *server) bootConvergeStep(ctx context.Context) {
 		return
 	}
 	// Which required services are not yet healthy?
+	//
+	// stWaiting SATISFIES convergence. A service that is intentionally not running because its
+	// configuration prerequisite does not exist cannot ever become healthy on a factory-clean appliance,
+	// so counting it as pending meant every new appliance reported "failed to converge" forever -- and
+	// buried any genuine convergence failure underneath a permanent false one.
 	var pending []string
 	for _, name := range required {
 		h := s.loadHealth(ctx, name)
-		if h.State != stHealthy {
+		if blocksConvergence(h.State) {
 			pending = append(pending, name)
 		}
 	}
@@ -582,9 +650,13 @@ func (s *server) allHealth(ctx context.Context) []serviceHealth {
 
 // overallHealth derives the appliance-level state + per-state counts.
 func overallHealth(all []serviceHealth) (string, map[string]int) {
-	counts := map[string]int{stHealthy: 0, stDegraded: 0, stRecovering: 0, stCrashLoop: 0, stFailed: 0, stStarting: 0, stUnknown: 0}
+	counts := map[string]int{stHealthy: 0, stDegraded: 0, stRecovering: 0, stCrashLoop: 0, stFailed: 0,
+		stStarting: 0, stUnknown: 0, stWaiting: 0}
 	worst := stHealthy
-	rank := map[string]int{stHealthy: 0, stStarting: 1, stRecovering: 2, stDegraded: 3, stCrashLoop: 4, stFailed: 5, stUnknown: 3}
+	// stWaiting ranks with healthy: it is a correct, expected state, not a degradation. Ranking it any
+	// higher would leave every unconfigured appliance permanently amber for no actionable reason.
+	rank := map[string]int{stHealthy: 0, stWaiting: 0, stStarting: 1, stRecovering: 2, stDegraded: 3,
+		stCrashLoop: 4, stFailed: 5, stUnknown: 3}
 	for _, h := range all {
 		counts[h.State]++
 		if h.Critical && rank[h.State] > rank[worst] {

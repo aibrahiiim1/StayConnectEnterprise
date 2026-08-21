@@ -25,7 +25,17 @@ function LoginInner() {
 
   const [email, setEmail] = useState("admin@stayconnect.local");
   const [password, setPassword] = useState("");
-  const [tenantSlug, setTenantSlug] = useState("dev");
+  // NO DEFAULT ORG SLUG.
+  //
+  // This defaulted to "dev", which put the word "dev" on the Production sign-in screen and read as an
+  // environment or tenant selector. It is neither: normal email/password sign-in ignores it entirely, and it
+  // exists ONLY to look up which SSO providers an organisation has configured. Operators reasonably mistook
+  // it for the appliance Tenant/Site selection.
+  //
+  // It now starts empty and the whole SSO block stays collapsed until someone asks for it, so the default
+  // sign-in screen is exactly two fields. The SSO capability itself is unchanged.
+  const [tenantSlug, setTenantSlug] = useState("");
+  const [ssoOpen, setSsoOpen] = useState(false);
   const [providers, setProviders] = useState<SSOProvider[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -92,31 +102,61 @@ function LoginInner() {
             </Button>
           </form>
 
-          {/* SSO section. The tenant slug is a per-org disambiguator until we
-              have email-domain-based discovery. */}
-          <div className="mt-6 pt-4 border-t border-border space-y-3">
-            <Label htmlFor="tenant">Org slug</Label>
-            <Input
-              id="tenant"
-              value={tenantSlug}
-              onChange={(e) => setTenantSlug(e.target.value.trim().toLowerCase())}
-              placeholder="acme"
-            />
-            {providers.length === 0 ? (
-              <div className="text-xs text-muted">
-                No single sign-on configured for <span className="font-mono">{tenantSlug || "—"}</span>.
-              </div>
+          {/* SINGLE SIGN-ON, collapsed by default and clearly scoped to SSO alone. */}
+          <div className="mt-6 pt-4 border-t border-border">
+            {!ssoOpen ? (
+              <button
+                type="button"
+                onClick={() => setSsoOpen(true)}
+                className="text-xs text-muted hover:text-fg underline underline-offset-2"
+              >
+                Use single sign-on instead
+              </button>
             ) : (
-              <div className="space-y-2">
-                {providers.map((p) => (
-                  <a
-                    key={p.name}
-                    href={ssoStartHref(p)}
-                    className="block text-center px-4 py-2 rounded-md border border-border bg-panel2 hover:bg-[#222735] text-sm font-medium"
-                  >
-                    Sign in with {p.display_name}
-                  </a>
-                ))}
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="tenant">Organisation slug</Label>
+                  <p className="text-xs text-muted mt-1 mb-1.5">
+                    Only used to look up your organisation&apos;s single sign-on providers. It is not your
+                    hotel, site or appliance, and email &amp; password sign-in above ignores it.
+                  </p>
+                  <Input
+                    id="tenant"
+                    value={tenantSlug}
+                    onChange={(e) => setTenantSlug(e.target.value.trim().toLowerCase())}
+                    placeholder="your-organisation"
+                    autoFocus
+                  />
+                </div>
+                {tenantSlug === "" ? (
+                  <div className="text-xs text-muted">
+                    Enter your organisation slug to see its sign-on providers.
+                  </div>
+                ) : providers.length === 0 ? (
+                  <div className="text-xs text-muted">
+                    No single sign-on is configured for{" "}
+                    <span className="font-mono">{tenantSlug}</span>. Use email and password above.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {providers.map((p) => (
+                      <a
+                        key={p.name}
+                        href={ssoStartHref(p)}
+                        className="block text-center px-4 py-2 rounded-md border border-border bg-panel2 hover:bg-[#222735] text-sm font-medium"
+                      >
+                        Sign in with {p.display_name}
+                      </a>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSsoOpen(false)}
+                  className="text-xs text-muted hover:text-fg underline underline-offset-2"
+                >
+                  Back to email sign-in
+                </button>
               </div>
             )}
           </div>

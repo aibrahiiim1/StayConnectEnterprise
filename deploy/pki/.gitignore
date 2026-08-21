@@ -1,0 +1,5 @@
+# NO KEY MATERIAL IN GIT. Not the private signing key (it would hand the fleet away), and not the public
+# one either (it is vendor material, not source — see README.md).
+*
+!.gitignore
+!README.md

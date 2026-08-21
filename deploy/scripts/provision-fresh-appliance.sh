@@ -120,10 +120,58 @@ KEYBOOTSTRAP_DSN="postgres://stayconnect:stayconnect@127.0.0.1:5432/stayconnect_
 for k in throttle.key voucher_dek.key otp_hmac_1.key; do
   [ -s "$ETC/secrets/$k" ] || die "keybootstrap did not produce $k"
 done
+# VENDOR TRUST KEY -- the PUBLIC verification half only.
+#
+# Optional for the online path, REQUIRED before this appliance may accept an offline activation package:
+# the package is believable only because it is signed by a key pinned here FIRST, before it arrived.
+#
+# Two supply routes, both part of the normal install rather than a manual step somebody remembers:
+#
+#   deploy/pki/vendor-license.pub   the deployment slot. Whatever builds the deploy tree drops the vendor's
+#                                   public key here and every appliance built from it is pinned.
+#   VENDOR_PUB=/path/to/key.pub     an explicit override for a one-off or a different vendor key.
+#
+# Installing is idempotent and refuses to replace a DIFFERENT key without --force, so re-running
+# provisioning on an appliance that is already in service can never silently re-point its trust root.
+VENDOR_PUB_SLOT="$DEPLOY/pki/vendor-license.pub"
+if [ -n "${VENDOR_PUB:-}" ]; then
+  bash "$DEPLOY/scripts/install-vendor-trust-key.sh" "$VENDOR_PUB"
+elif [ -s "$VENDOR_PUB_SLOT" ]; then
+  bash "$DEPLOY/scripts/install-vendor-trust-key.sh" "$VENDOR_PUB_SLOT"
+elif [ -s "$ETC/vendor-license.pub" ]; then
+  say "vendor trust key already installed ($(bash "$DEPLOY/scripts/install-vendor-trust-key.sh" --show | tail -1))"
+else
+  say "NOTE: no vendor trust key installed. Online activation is unaffected; OFFLINE first activation will"
+  say "      refuse every package until one is pinned. Put the vendor's PUBLIC key at"
+  say "      $VENDOR_PUB_SLOT and re-run, or run deploy/scripts/install-vendor-trust-key.sh directly."
+fi
 say "credentials ok"
 
 # ---------------------------------------------------------------- 6. service environment (NO IDENTITY)
+#
+# CENTRAL IS A NAME, NOT AN ADDRESS, AND IT COMES FROM VERSIONED CONFIGURATION.
+#
+# CENTRAL_BASE is the endpoint this appliance will dial for the rest of its life. It is resolved by
+# lib-central-endpoint.sh: the environment wins, then deploy/config/central-endpoint.env, then it stops.
+# There is no fallback in code -- a plausible-looking default would point appliances at DNS that may not
+# exist, and nobody would find out until a site was already installed.
+#
+#   bash provision-fresh-appliance.sh                                   # the shipped Production endpoint
+#   CENTRAL_BASE=https://central.lab.internal bash provision-...        # a lab or staging install
+#
+# The connection is always appliance-initiated OUTBOUND over the WAN. Central never dials in, never needs a
+# port-forward, and never needs to reach the hotel LAN. The appliance API is also a different surface from
+# the human admin UI, so the UI can later require MFA/VPN/Zero-Trust without becoming a runtime dependency
+# of a hotel's connectivity.
 say "environment"
+# shellcheck source=lib-central-endpoint.sh
+. "$DEPLOY/scripts/lib-central-endpoint.sh"
+sc_load_central_endpoint "$DEPLOY"
+sc_validate_central_base "$CENTRAL_BASE"
+if [ -n "${CENTRAL_MTLS_BASE:-}" ]; then
+  sc_validate_central_base "${CENTRAL_MTLS_BASE}" CENTRAL_MTLS_BASE
+fi
+sc_report_central_dns "$CENTRAL_BASE"
 # NO TENANT OR SITE ID IS EVER WRITTEN HERE. Identity arrives only through enrollment -> claim -> signed
 # assignment. Seeding it would be indistinguishable from cloning another appliance.
 . "$ETC/.dsn"
@@ -134,8 +182,8 @@ umask 027
 [ -f "$ETC/scd.env" ] || cat > "$ETC/scd.env" <<EOF
 SCD_DB_URL=${SCD_DB_URL}
 SCD_SOCKET=/run/stayconnect/scd.sock
-SCD_CTRLAPI_BASE=${CENTRAL_BASE:-https://150.0.0.252}
-SCD_MTLS_BASE=${CENTRAL_MTLS_BASE:-https://150.0.0.252:8443}
+SCD_CTRLAPI_BASE=${CENTRAL_BASE}
+SCD_MTLS_BASE=${CENTRAL_MTLS_BASE:-${CENTRAL_BASE}:8443}
 SCD_AUTO_REGISTER=true
 SCD_NATS_URL=nats://127.0.0.1:4222
 SCD_METRICS_ADDR=127.0.0.1:9101
@@ -206,8 +254,24 @@ journalctl -u stayconnect-scd -n 200 --no-pager | grep -q 'build=production' \
 say "services ok (scd reports build=production)"
 
 echo
-say "PROVISIONED. Awaiting, in order:"
-say "  1. enrollment (bootstrap token from Central) -> claim -> signed assignment"
-say "  2. signed licence"
-say "  3. LAN/guest networking through Hotel Admin (Kea starts once the LAN bridge exists)"
+say "PROVISIONED — factory clean, no tenant, no site, no licence. Activate it one of two ways:"
+say ""
+say "  ONLINE (normal). This appliance registers itself at $CENTRAL_BASE and waits. In the control"
+say "  panel: Onboarding -> pick it under Pending activation -> choose Customer, Site and licence"
+say "  terms -> Activate. Nothing is typed on the appliance."
+say ""
+say "  OFFLINE (no route to Central). Hotel Admin -> Setup/Activation -> Download activation request,"
+say "  import it in the control panel, Activate, then upload the activation package back here."
+if [ -s "$ETC/vendor-license.pub" ]; then
+  say "  Vendor trust key is pinned, so offline activation is available."
+else
+  say "  NOTE: no vendor trust key is pinned, so OFFLINE activation will refuse every package. Online is fine."
+fi
+say ""
+say "Enrollment tokens are NOT part of either path — they are a recovery lever, under Advanced."
+say ""
+say "Then, when the hotel's guest networking is designed: LAN/guest networks through Hotel Admin."
+say "Until that exists, DHCP correctly reports 'waiting', not a failure — Kea serves the LAN bridge,"
+say "which does not exist yet, and it is not started against an unconfigured LAN to make health green."
+say ""
 say "Hotel Admin: https://$(ip -o -4 addr show "$WAN_IFACE" | awk '{print $4}' | cut -d/ -f1)/"

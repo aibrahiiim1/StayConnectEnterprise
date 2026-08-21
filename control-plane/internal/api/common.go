@@ -174,3 +174,13 @@ func IsNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 func DBCtx(r *http.Request) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(r.Context(), 10*time.Second)
 }
+
+// AssignmentBaseFrom exposes the assignment signer to other API bases that must mint a signed assignment as
+// part of a larger operation — offline first activation, which has to put one inside its package. It returns
+// nil when no assignment key is configured, so callers disable the feature rather than emit an unsigned one.
+func AssignmentBaseFrom(b *Base) *AssignmentBase {
+	if b == nil || b.AssignKey == nil {
+		return nil
+	}
+	return &AssignmentBase{Base: b, SignKey: b.AssignKey}
+}

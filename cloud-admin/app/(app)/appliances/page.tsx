@@ -191,8 +191,9 @@ export default function AppliancesPage() {
         Most appliances install <strong>zero-touch</strong>: a factory-clean box with internet self-registers and
         appears under <a href="/onboarding" className="text-brand hover:underline">Onboarding</a> as
         <em> Pending activation</em>, where you pick its customer, site and license terms and click Activate — no token.
-        Mint an <strong>enrollment token</strong> below only for the advanced / manual install path (pre-registering a
-        box, or an offline installer who will type a code).
+        <strong>Enrollment tokens are not part of normal activation.</strong> An appliance registers itself
+        and is activated from <strong>Onboarding</strong>. Mint a token below only as a recovery lever — a box
+        that cannot self-register, or one being deliberately re-attached.
       </p>
       {allCustomers && (
         <div className="text-sm text-warn mb-4">

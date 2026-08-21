@@ -287,13 +287,50 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
+	configured, healthy, detail := s.keaStatus(r.Context())
 	writeJSON(w, 200, map[string]any{
 		"service": "netd", "version": version,
-		"kea_healthy": s.kea.Healthy(),
+		// TWO DIFFERENT QUESTIONS, DELIBERATELY NOT CONFLATED: is Kea supposed to be running on this
+		// appliance yet, and -- only if it is -- is it healthy? Reporting a single boolean made an
+		// intentionally-idle Kea indistinguishable from a broken one.
+		"kea_configured": configured,
+		"kea_healthy":    healthy,
+		"kea_detail":     detail,
 		// Phase-3 shaping is reported here because netd is its only writer (ADR-0002): if a submitted plan
 		// could not be put in force, this is where it becomes visible.
 		"phase3_shaping": s.phase3.status(),
 	})
+}
+
+// keaStatus separates "Kea has nothing to serve yet" from "Kea is broken".
+//
+// Kea binds the LAN bridge, which does not exist until an operator has APPLIED AND CONFIRMED a guest
+// network. Before that it is deliberately stopped, and calling that a failed service told every operator
+// their brand-new appliance was faulty -- while also holding boot convergence open forever, since a service
+// that is never meant to start on a factory-clean box can never become healthy.
+//
+// The prerequisite is the CONFIRMED active revision, not the draft rows in guest_networks: a draft an
+// operator typed and walked away from has not configured anything, and must not make Kea's absence a fault.
+func (s *server) keaStatus(ctx context.Context) (configured, healthy bool, detail string) {
+	qctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	id, _, err := s.st.CurrentActive(qctx)
+	switch {
+	case err != nil:
+		// We could not read the prerequisite. FAIL TOWARDS REPORTING: an unreadable store must never be
+		// the reason a genuinely broken Kea is presented as "waiting".
+		configured = true
+	default:
+		configured = id != ""
+	}
+	if !configured {
+		return false, false, "waiting for guest networking: Kea serves the LAN bridge, which exists only " +
+			"once a guest network has been applied and confirmed on this appliance"
+	}
+	if s.kea.Healthy() {
+		return true, true, "Kea DHCP answering status-get on its control socket"
+	}
+	return true, false, "Kea DHCP is not answering its control socket, but a guest network is configured"
 }
 
 func (s *server) interfaces(w http.ResponseWriter, r *http.Request) {

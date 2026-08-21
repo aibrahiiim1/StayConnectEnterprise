@@ -131,6 +131,15 @@ export default function SetupEnrollmentPage() {
   const [serial, setSerial] = useState("");
   const [busy, setBusy] = useState(false);
   const [tokenSubmitted, setTokenSubmitted] = useState(false);
+  // TWO PATHS, AND ONLY TWO. Online is the default and needs nothing typed. Offline is for an appliance with
+  // no route to the control panel. The enrollment token is neither: it is a recovery lever, so it lives
+  // under Advanced rather than in front of every installer.
+  const [mode, setMode] = useState<"online" | "offline">("online");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [pkgText, setPkgText] = useState("");
+  const [pkgBusy, setPkgBusy] = useState(false);
+  const [pkgErr, setPkgErr] = useState<string | null>(null);
+  const [pkgOk, setPkgOk] = useState<string | null>(null);
   const [enrollErr, setEnrollErr] = useState<string | null>(null);
   const [enrollNote, setEnrollNote] = useState<string | null>(null);
   const serialPrefilled = useRef(false);
@@ -181,6 +190,75 @@ export default function SetupEnrollmentPage() {
 
   const enrolled = st?.enrolled === true;
   const locked = st?.locked === true || enrolled;
+
+  // Applies a signed Activation Package / signed licence produced by the control panel. The appliance
+  // verifies the vendor signature, the binding to THIS appliance, expiry and single-use before anything is
+  // written; a wrong-appliance, replayed or older file is refused and nothing changes.
+  // FIRST ACTIVATION, OFFLINE. Downloads the request this appliance emits; the operator carries it to the
+  // control panel and brings back one package.
+  async function downloadActivationRequest() {
+    setPkgErr(null); setPkgOk(null);
+    try {
+      const req = await api.get<Record<string, unknown>>("/setup/activation-request");
+      const blob = new Blob([JSON.stringify(req, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `activation-request-${st?.serial || "appliance"}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setPkgOk("Activation request downloaded. Import it in the control panel under Onboarding → Offline.");
+    } catch (e: unknown) {
+      setPkgErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // Applies either a first-activation package or a signed licence. The appliance decides which by shape and
+  // verifies each on its own terms; a file for another appliance, a replay or an older licence is refused
+  // and nothing changes.
+  async function applyActivationPackage(text: string) {
+    setPkgErr(null); setPkgOk(null); setPkgBusy(true);
+    try {
+      const pkg = JSON.parse(text);
+      const isFirstActivation = typeof pkg?.request_id === "string" && pkg?.assignment != null;
+      const r = await api.post<{ status?: string; tenant_id?: string; license_installed?: boolean }>(
+        isFirstActivation ? "/setup/activation-package" : "/setup/offline-import", pkg);
+      setPkgOk(isFirstActivation
+        ? "Activated. Assignment, trust material and licence installed; the appliance is restarting."
+        : (r.license_installed ? "Signed licence applied." : "Package applied."));
+      setPkgText("");
+      await load();
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setPkgErr(m.includes("JSON") ? "That file is not a valid activation package." : m);
+    } finally {
+      setPkgBusy(false);
+    }
+  }
+
+  async function applyPackage(text: string) {
+    setPkgErr(null); setPkgOk(null); setPkgBusy(true);
+    try {
+      const pkg = JSON.parse(text);
+      const r = await api.post<{ status?: string; package_id?: string; license_installed?: boolean }>(
+        "/setup/offline-import", pkg);
+      setPkgOk(r.license_installed ? "Signed licence applied." : "Package applied.");
+      setPkgText("");
+      await load();
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setPkgErr(m.includes("JSON") ? "That file is not a valid activation package." : m);
+    } finally {
+      setPkgBusy(false);
+    }
+  }
+
+  function onPackageFile(f: File | null) {
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => { const t = String(rd.result ?? ""); setPkgText(t); void applyActivationPackage(t); };
+    rd.readAsText(f);
+  }
 
   async function submitEnroll() {
     if (locked || !writable || busy) return;
@@ -243,35 +321,111 @@ export default function SetupEnrollmentPage() {
         </Card>
       )}
 
-      {/* ---------- CONNECT FORM (not yet enrolled) ---------- */}
+      {/* ---------- ACTIVATION: TWO PATHS ---------- */}
       {!enrolled && !locked && (
         <Card>
           <CardBody className="space-y-4">
             <div>
-              <div className="text-base font-semibold">Connect this appliance to the control panel</div>
+              <div className="text-base font-semibold">Activate this appliance</div>
               <p className="text-sm text-muted">
-                Most appliances connect <b>automatically</b> once they reach the internet — no code needed. The box
-                self-registers and appears in the control panel under <b>Onboarding</b> as <em>Pending activation</em>,
-                where an operator activates it. Only use the manual code below if your installer gave you an
-                <b> enrollment token</b> (minted in the control panel under <b>Appliances → Enrollment token</b>).
+                Choose how this appliance reaches the control panel. Everything else — claiming, assignment,
+                certificates and convergence — happens on its own and is shown under Advanced.
               </p>
             </div>
-            <div>
-              <Label htmlFor="enroll-token">Enrollment code</Label>
-              <Input id="enroll-token" type="password" autoComplete="off" placeholder="paste the token"
-                value={token} onChange={(e) => setToken(e.target.value)} disabled={!writable || busy} />
+
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setMode("online")}
+                className={"flex-1 rounded-md border px-4 py-3 text-left " +
+                  (mode === "online" ? "border-brand bg-brand/10" : "border-border bg-panel2 hover:bg-[#222735]")}>
+                <div className="text-sm font-medium">Online <span className="text-xs text-muted">· recommended</span></div>
+                <div className="text-xs text-muted">This appliance can reach the control panel.</div>
+              </button>
+              <button type="button" onClick={() => setMode("offline")}
+                className={"flex-1 rounded-md border px-4 py-3 text-left " +
+                  (mode === "offline" ? "border-brand bg-brand/10" : "border-border bg-panel2 hover:bg-[#222735]")}>
+                <div className="text-sm font-medium">Offline</div>
+                <div className="text-xs text-muted">No route to the control panel; use a file.</div>
+              </button>
             </div>
-            <div>
-              <Label htmlFor="enroll-serial">Serial</Label>
-              <Input id="enroll-serial" autoComplete="off" placeholder="appliance serial"
-                value={serial} onChange={(e) => setSerial(e.target.value)} disabled={!writable || busy} />
-              <p className="mt-1 text-xs text-muted">Give this serial to whoever generates the token so it locks to this box.</p>
+
+            {mode === "online" ? (
+              <div className="rounded-md border border-border bg-panel2 p-4 space-y-2">
+                <div className="text-sm font-medium">Nothing to do here.</div>
+                <p className="text-sm text-muted">
+                  This appliance registers itself as soon as it reaches the control panel. Ask your operator
+                  to open <b>Onboarding</b> there, find it under <em>Pending activation</em> by its serial{" "}
+                  <code className="text-xs">{st?.serial || "—"}</code>, choose the customer, site and licence
+                  terms, and press <b>Activate</b> once. This page then follows along by itself.
+                </p>
+                <div className="flex items-center gap-2 pt-1 text-xs text-muted">
+                  <Check label="Control panel reachable" ok={net?.central_https_443} />
+                </div>
+                {net?.central_https_443 === false && (
+                  <p className="text-xs text-warn">
+                    This appliance cannot reach the control panel right now. Fix connectivity under
+                    <b> WAN / LAN settings</b>, or use the Offline path.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-md border border-border bg-panel2 p-4 space-y-4">
+                <div>
+                  <div className="text-sm font-medium">Step 1 — download the activation request</div>
+                  <p className="text-sm text-muted">
+                    This appliance creates its own identity and writes a request describing it. The request
+                    contains no secret: the private key stays on this appliance and never leaves it.
+                  </p>
+                  <Button className="mt-2" variant="secondary" disabled={!writable}
+                    onClick={() => void downloadActivationRequest()}>
+                    Download activation request
+                  </Button>
+                </div>
+                <div className="border-t border-border pt-3">
+                  <div className="text-sm font-medium">Step 2 — in the control panel</div>
+                  <p className="text-sm text-muted">
+                    Open <b>Onboarding → Offline activation</b>, import the request, choose the customer, site
+                    and licence terms, then generate the activation package.
+                  </p>
+                </div>
+                <div className="border-t border-border pt-3">
+                  <div className="text-sm font-medium">Step 3 — upload the activation package</div>
+                  <p className="text-sm text-muted">
+                    One file completes activation: the signed assignment, the trust material and the signed
+                    licence. It is bound to this appliance, single-use and expiring. Anything else — another
+                    appliance, a replay, a tampered or older file — is refused and nothing is changed.
+                  </p>
+                  <Input className="mt-2" type="file" accept=".json,application/json" disabled={!writable || pkgBusy}
+                    onChange={(e) => onPackageFile(e.target.files?.[0] ?? null)} />
+                </div>
+                {pkgErr && <div className="rounded border border-[#6b2128] bg-[#3a1418] p-2 text-sm text-err">{pkgErr}</div>}
+                {pkgOk && <div className="text-sm text-ok">{pkgOk}</div>}
+                {pkgBusy && <div className="flex items-center gap-2 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Checking and applying…</div>}
+              </div>
+            )}
+            {!writable && <p className="text-xs text-muted">Your role can&apos;t activate this appliance (network write required).</p>}
+          </CardBody>
+        </Card>
+      )}
+
+      {/* ---------- OFFLINE LICENCE RENEWAL (already assigned) ---------- */}
+      {enrolled && (
+        <Card>
+          <CardBody className="space-y-3">
+            <div className="text-base font-semibold">Licence</div>
+            <div className="flex items-center gap-2 text-sm">
+              <Badge tone={licenseTone(lic?.state)}>{lic?.state || "unknown"}</Badge>
+              {lic?.valid_until && <span className="text-muted">valid until {lic.valid_until}</span>}
             </div>
-            {enrollErr && <div className="rounded border border-[#6b2128] bg-[#3a1418] p-2 text-sm text-err">{enrollErr}</div>}
-            <Button onClick={submitEnroll} disabled={!writable || busy || !token.trim() || !serial.trim()} className="w-full">
-              {busy ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" /> Connecting…</> : "Connect"}
-            </Button>
-            {!writable && <p className="text-xs text-muted">Your role can&apos;t enroll this appliance (network write required).</p>}
+            <p className="text-sm text-muted">
+              To renew offline: generate the new licence in the control panel under <b>Commercial →
+              Licenses</b>, download it, and upload it here. An older licence than the one installed is
+              refused, so a renewal can never roll you backwards.
+            </p>
+            <Input type="file" accept=".json,application/json" disabled={!writable || pkgBusy}
+              onChange={(e) => onPackageFile(e.target.files?.[0] ?? null)} />
+            {pkgErr && <div className="rounded border border-[#6b2128] bg-[#3a1418] p-2 text-sm text-err">{pkgErr}</div>}
+            {pkgOk && <div className="text-sm text-ok">{pkgOk}</div>}
+            {pkgBusy && <div className="flex items-center gap-2 text-sm text-muted"><Loader2 className="h-4 w-4 animate-spin" /> Checking and applying…</div>}
           </CardBody>
         </Card>
       )}
@@ -316,15 +470,55 @@ export default function SetupEnrollmentPage() {
         <Card><CardBody className="text-sm text-muted">This appliance is enrolled; waiting on the control panel to finish setup…</CardBody></Card>
       )}
 
-      {/* ---------- TECHNICAL DETAILS (collapsed) ---------- */}
+      {/* ---------- ADVANCED / RECOVERY ---------- */}
       <div>
-        <button className="inline-flex items-center gap-1 text-sm text-muted hover:text-text" onClick={() => setShowDetails((v) => !v)}>
-          <ChevronRight className={"h-4 w-4 transition-transform " + (showDetails ? "rotate-90" : "")} />
-          {showDetails ? "Hide technical details" : `Show technical details (${STAGES.length} checks)`}
+        <button className="inline-flex items-center gap-1 text-sm text-muted hover:text-text" onClick={() => setShowAdvanced((v) => !v)}>
+          <ChevronRight className={"h-4 w-4 transition-transform " + (showAdvanced ? "rotate-90" : "")} />
+          {showAdvanced ? "Hide advanced" : "Advanced / recovery"}
         </button>
       </div>
 
-      {showDetails && (
+      {showAdvanced && !enrolled && (
+        <Card>
+          <CardBody className="space-y-4">
+            <div>
+              <div className="text-base font-semibold">Enrollment token</div>
+              <p className="text-sm text-muted">
+                <b>Not part of normal activation.</b> An appliance registers itself online, and an operator
+                activates it from the control panel. A token is for recovery — a box that cannot self-register,
+                or one being re-attached deliberately. It is minted in the control panel under
+                <b> Appliances → Enrollment token</b> and should be locked to this serial.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="enroll-token">Enrollment code</Label>
+              <Input id="enroll-token" type="password" autoComplete="off" placeholder="paste the token"
+                value={token} onChange={(e) => setToken(e.target.value)} disabled={!writable || busy} />
+            </div>
+            <div>
+              <Label htmlFor="enroll-serial">Serial</Label>
+              <Input id="enroll-serial" autoComplete="off" placeholder="appliance serial"
+                value={serial} onChange={(e) => setSerial(e.target.value)} disabled={!writable || busy} />
+              <p className="mt-1 text-xs text-muted">Give this serial to whoever mints the token so it locks to this box.</p>
+            </div>
+            {enrollErr && <div className="rounded border border-[#6b2128] bg-[#3a1418] p-2 text-sm text-err">{enrollErr}</div>}
+            <Button onClick={submitEnroll} disabled={!writable || busy || !token.trim() || !serial.trim()} className="w-full">
+              {busy ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" /> Connecting…</> : "Connect with token"}
+            </Button>
+          </CardBody>
+        </Card>
+      )}
+
+      {showAdvanced && (
+        <div>
+          <button className="inline-flex items-center gap-1 text-sm text-muted hover:text-text" onClick={() => setShowDetails((v) => !v)}>
+            <ChevronRight className={"h-4 w-4 transition-transform " + (showDetails ? "rotate-90" : "")} />
+            {showDetails ? "Hide diagnostics" : `Diagnostics (${STAGES.length} checks)`}
+          </button>
+        </div>
+      )}
+
+      {showAdvanced && showDetails && (
         <div className="space-y-4">
           <Card>
             <StepHeader title="Onboarding progress" icon={<ServerCog className="h-4 w-4" />} />

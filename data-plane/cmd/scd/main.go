@@ -693,6 +693,10 @@ func main() {
 		WANMAC:                 s.hw.WANMAC,
 	})
 	s.lic.Load(rootCtx)
+	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
+	// whether an interrupted activation completed means asking whether the licence actually landed. Either
+	// finishes the activation or rolls it back to unassigned; never leaves it half-applied.
+	s.recoverInterruptedActivation()
 	// The concurrent-online-guest cap still comes DIRECTLY from the local signed licence and is still
 	// enforced atomically inside session creation -- it now lives in the IAM-v2 activation transaction
 	// (iamv2_session_activate.go), which reads s.lic itself. Central availability plays no part in guest
@@ -771,6 +775,10 @@ func main() {
 	r.Get("/v1/setup/status", s.setupStatus)
 	r.Post("/v1/setup/enroll", s.setupEnroll)
 	r.Post("/v1/setup/offline-import", s.setupOfflineImport)
+	// OFFLINE FIRST ACTIVATION. Separate from offline-import above, which carries a licence to an appliance
+	// that is already assigned; these two carry a factory-clean appliance all the way to assigned+licensed.
+	r.Get("/v1/setup/activation-request", s.setupActivationRequest)
+	r.Post("/v1/setup/activation-package", s.setupActivationPackage)
 
 	// Phase 2 (DARK): guest-portal commerce routes are mounted ONLY when the portal surface is ON. While
 	// dark they are ABSENT (404) and the commerce engine holds a nil repository, so zero Phase-2 SQL runs.
