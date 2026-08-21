@@ -172,6 +172,26 @@ if [ -n "${CENTRAL_MTLS_BASE:-}" ]; then
   sc_validate_central_base "${CENTRAL_MTLS_BASE}" CENTRAL_MTLS_BASE
 fi
 sc_report_central_dns "$CENTRAL_BASE"
+
+# CENTRAL'S CA MUST BE TRUSTED BEFORE THE APPLIANCE EVER DIALS IT.
+#
+# Central presents a certificate from a private CA. Without it in the system trust store every outbound
+# call fails verification -- and self-registration treats that exactly like an unreachable Central: it gives
+# up quietly and retries. The appliance then reports "awaiting enrollment: run the local setup wizard",
+# which sends the operator to a wizard while the real problem is that it never trusted Central at all.
+# A live Production appliance sat in that state for a day.
+#
+# Supply it the same way as the vendor key: the deployment slot, or an explicit path.
+CENTRAL_CA_SLOT="$DEPLOY/pki/central-ca.crt"
+if [ -n "${CENTRAL_CA:-}" ]; then
+  bash "$DEPLOY/scripts/install-central-trust.sh" "$CENTRAL_CA"
+elif [ -s "$CENTRAL_CA_SLOT" ]; then
+  bash "$DEPLOY/scripts/install-central-trust.sh" "$CENTRAL_CA_SLOT"
+else
+  say "NOTE: no Central CA supplied, so this appliance cannot verify Central's certificate and will never"
+  say "      self-register. Put Central's CA at $CENTRAL_CA_SLOT (from"
+  say "      /opt/stayconnect/central/tls/ca.crt on Central) and re-run, or pass CENTRAL_CA=/path/ca.crt."
+fi
 # NO TENANT OR SITE ID IS EVER WRITTEN HERE. Identity arrives only through enrollment -> claim -> signed
 # assignment. Seeding it would be indistinguishable from cloning another appliance.
 . "$ETC/.dsn"

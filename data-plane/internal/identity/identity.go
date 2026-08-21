@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -230,7 +231,18 @@ func (s *Store) register(ctx context.Context, ctrlBase string) (*Identity, error
 	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		// Central unreachable — not fatal; retry on a later boot/loop.
+		// Central unreachable — NOT FATAL, and retried on a later boot/loop. A hotel's uplink being down
+		// is not a reason for the appliance to refuse to start.
+		//
+		// BUT IT MUST NOT BE SILENT. This returned nil,nil with nothing written anywhere, so the only trace
+		// left was the caller's "awaiting enrollment: no appliance identity; run the local setup wizard" --
+		// which points the operator at a wizard when the actual cause is that the appliance cannot verify
+		// Central's certificate, or cannot reach it at all. On a live Production appliance that read as a
+		// setup problem for a full day while the appliance had simply never trusted Central's CA.
+		slog.Warn("appliance self-registration could not reach Central; will retry",
+			"endpoint", ctrlBase+"/v1/appliances/register", "err", err,
+			"hint", "TLS verification failure? the appliance must trust Central's CA — "+
+				"deploy/scripts/install-central-trust.sh")
 		return nil, nil
 	}
 	defer resp.Body.Close()
