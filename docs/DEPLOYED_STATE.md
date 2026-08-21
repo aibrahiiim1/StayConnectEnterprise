@@ -5,13 +5,19 @@ configuration, no PMS or payment traffic.
 
 ## What is deployed
 
-| | Host | Commit |
-|---|---|---|
-| Central source + tooling | `sc-central` (150.0.0.252) | `4be7adfec80752d938afca6974c13aa4a872692b` |
-| ctrlapi binary | same | `5477a2b` (control-plane source unchanged since) |
-| cloud-admin bundle | same | `5477a2b` (cloud-admin source unchanged since) |
-| Appliance source + tooling | `sce` (172.21.60.25) | `4be7adfec80752d938afca6974c13aa4a872692b` |
-| scd / edged / netd / hotel-admin | same | scd `469697a`, edged+netd `97a9b9d`, hotel-admin `5477a2b` |
+Branch head at deployment: `802557b`. Binaries are stamped with the commit they were **built from**; where
+that is older than the head, the source for that component is byte-identical between the two (verified with
+`git diff` over the component's paths), so the artifact is current.
+
+| | Host | Built from | Current? |
+|---|---|---|---|
+| Central source + tooling | `sc-central` (150.0.0.252) | `802557b` | head |
+| ctrlapi binary | same | `5477a2b` | yes — `control-plane/` unchanged since |
+| cloud-admin bundle | same | `5477a2b` | yes — `cloud-admin/` unchanged since |
+| Appliance source + tooling | `sce` (172.21.60.25) | `802557b` | head |
+| scd | same | `4be7adf` | yes — `data-plane/` unchanged since |
+| edged, netd | same | `97a9b9d` | yes — their `cmd/` trees unchanged since |
+| hotel-admin bundle | same | `5477a2b` | yes — `hotel-admin/` unchanged since |
 
 Branch `post-roadmap/activation-fqdn-kea-deploy`, PR #23, **unmerged** by instruction.
 
