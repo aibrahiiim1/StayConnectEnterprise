@@ -94,8 +94,17 @@ sc_validate_central_base() {
   esac
 }
 
-# sc_dns_lookup prints the A record for a host, asking a REAL nameserver, and sets SC_DNS_ANSWERED_BY to
-# whichever one answered. Empty output (and non-zero) means DNS genuinely does not have the name.
+# sc_dns_lookup resolves a host against REAL nameservers and reports the outcome in globals:
+#
+#	SC_DNS_IP           the A record, empty when DNS does not have the name
+#	SC_DNS_ANSWERED_BY  which server answered (or why no answer was possible)
+#	SC_DNS_DENIERS      configured servers that returned NXDOMAIN for it
+#
+# Returns non-zero when nothing resolved.
+#
+# IT SETS GLOBALS RATHER THAN PRINTING because `x="$(sc_dns_lookup ...)"` runs the function in a subshell,
+# where every variable it sets dies with that subshell. The caller then reads an unset variable -- under
+# `set -u` that aborts, and without it the check silently sees an empty denier list and passes.
 #
 # THE TRAP THIS EXISTS TO AVOID, WHICH CAUGHT THIS SCRIPT ITSELF:
 #
@@ -110,7 +119,7 @@ sc_validate_central_base() {
 # answer.
 sc_dns_lookup() {
   local host="$1" servers="" s ip
-  SC_DNS_ANSWERED_BY=""
+  SC_DNS_IP=""; SC_DNS_ANSWERED_BY=""; SC_DNS_DENIERS=""
 
   if [ -n "${CENTRAL_DNS_SERVER:-}" ]; then
     servers="$CENTRAL_DNS_SERVER"
@@ -141,7 +150,6 @@ sc_dns_lookup() {
   # application experiences; it is a coin toss that looks fine whenever you test it and fails later.
   #
   # SC_DNS_DENIERS lists the servers that deny the name, so a caller can refuse rather than gamble.
-  SC_DNS_DENIERS=""
   local found=""
   for s in $servers; do
     ip="$(dig "@$s" +short +time=3 +tries=1 "$host" A 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
@@ -152,7 +160,7 @@ sc_dns_lookup() {
     fi
   done
   if [ -n "$found" ]; then
-    printf '%s' "$found"
+    SC_DNS_IP="$found"
     return 0
   fi
   SC_DNS_ANSWERED_BY="$(printf '%s' "$servers" | tr '\n' ' ')"
@@ -172,12 +180,15 @@ sc_report_central_dns() {
     in_hosts=1
   fi
 
-  local dns_ip dns_server
-  dns_ip="$(sc_dns_lookup "$host")" || true
-  dns_server="${SC_DNS_ANSWERED_BY:-}"
+  sc_dns_lookup "$host" || true
+  local dns_ip="${SC_DNS_IP:-}"
 
   if [ -n "$dns_ip" ]; then
-    say "$host resolves in DNS -> $dns_ip (answered by ${dns_server:-a real nameserver})"
+    say "$host resolves in DNS -> $dns_ip (answered by ${SC_DNS_ANSWERED_BY:-a real nameserver})"
+    if [ -n "${SC_DNS_DENIERS:-}" ]; then
+      say "NOTE: these resolvers DENY the name: ${SC_DNS_DENIERS}. systemd-resolved accepts NXDOMAIN as a"
+      say "      real answer and does not try the next server, so resolution here is not deterministic."
+    fi
     if [ "$in_hosts" = 1 ]; then
       say "NOTE: /etc/hosts also pins $host. DNS answers now, so the local line is redundant and will"
       say "      shadow DNS if the address ever changes. Remove it: appliance-central-cutover.sh"

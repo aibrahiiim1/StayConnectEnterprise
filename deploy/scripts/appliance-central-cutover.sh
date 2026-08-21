@@ -71,7 +71,8 @@ echo "Resolution"
 
 # 1. REAL DNS. sc_dns_lookup queries the upstream nameservers, never the local stub -- on a
 #    systemd-resolved host the stub answers from /etc/hosts, so "dig" alone proves nothing.
-dns_ip="$(sc_dns_lookup "$FQDN")" || true
+sc_dns_lookup "$FQDN" || true
+dns_ip="${SC_DNS_IP:-}"
 case "${SC_DNS_ANSWERED_BY:-}" in
   none-identifiable)
     bad "cannot identify a real nameserver to query (only a loopback stub, which reads /etc/hosts).
