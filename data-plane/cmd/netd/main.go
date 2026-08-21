@@ -92,6 +92,8 @@ func main() {
 		unboundFrag:   envOr("NETD_UNBOUND_FRAG", "/etc/unbound/unbound.conf.d/stayconnect-guest.conf"),
 		keaLeaseCSV:   envOr("NETD_KEA_LEASE_CSV", "/var/lib/kea/kea-leases4.csv"),
 		keaSocket:     envOr("NETD_KEA_SOCKET", "/run/kea/kea4-ctrl-socket"),
+		keaConfFile:   envOr("NETD_KEA_CONF", "/etc/kea/kea-dhcp4.conf"),
+		keaUnit:       envOr("NETD_KEA_UNIT", "kea-dhcp4-server.service"),
 		confirmWindow: confirmWindow,
 		legacyBridge:  envOr("NETD_LEGACY_BRIDGE", "br-lan"),
 		dryRun:        dryRun,

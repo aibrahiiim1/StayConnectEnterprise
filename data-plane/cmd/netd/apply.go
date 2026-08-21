@@ -19,15 +19,20 @@ import (
 // swapped atomically. A watchdog auto-rolls-back if the operator does not
 // confirm within confirmWindow.
 type applier struct {
-	st            *store
-	kea           *keaClient
-	topo          netcfg.Topology
-	generatedDir  string // /etc/stayconnect/generated/network
-	netplanFile   string // /etc/netplan/50-stayconnect-guest.yaml
-	nftPath       string
-	unboundFrag   string // /etc/unbound/unbound.conf.d/stayconnect-guest.conf
-	keaLeaseCSV   string
-	keaSocket     string
+	st           *store
+	kea          *keaClient
+	topo         netcfg.Topology
+	generatedDir string // /etc/stayconnect/generated/network
+	netplanFile  string // /etc/netplan/50-stayconnect-guest.yaml
+	nftPath      string
+	unboundFrag  string // /etc/unbound/unbound.conf.d/stayconnect-guest.conf
+	keaLeaseCSV  string
+	keaSocket    string
+	// keaConfFile / keaUnit are used ONLY to bootstrap Kea the first time guest networking is configured:
+	// it cannot be reached over its control socket until it is running, and it cannot run until it has a
+	// config file. Afterwards every change goes through the socket and neither of these is touched.
+	keaConfFile   string
+	keaUnit       string
 	confirmWindow time.Duration
 	// legacyBridge is never surgically managed (it is adopted as-is).
 	legacyBridge string

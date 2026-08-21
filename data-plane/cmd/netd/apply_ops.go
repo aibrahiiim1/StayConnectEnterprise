@@ -83,6 +83,19 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 	// want. Structural validation already ran via netcfg.ValidateSet.
 	dhcp4 := netcfg.RenderKeaDhcp4(intent, a.topo, a.keaLeaseCSV, a.keaSocket)
 	if !a.dryRun {
+		// FIRST CONFIGURATION HAS TO START KEA, NOT TALK TO IT.
+		//
+		// config-set reaches Kea through its control socket, and that socket exists only while Kea is
+		// running. On a factory-clean appliance Kea has never run — provisioning installs it stopped and
+		// disabled on purpose, because it binds the guest bridge and that bridge does not exist yet. So
+		// the first apply deadlocked: Kea could not start without configuration, and netd would not
+		// configure it without the socket. Every first guest network failed with
+		// "Kea has no control socket at /run/kea/kea4-ctrl-socket", and no amount of retrying changed it.
+		//
+		// The bridge exists by now (l2l3 ran above), so this is the moment Kea can legitimately start.
+		if err := a.bootstrapKeaIfStopped(ctx, intent); err != nil {
+			return err
+		}
 		if err := a.kea.ConfigSet(dhcp4); err != nil {
 			return err
 		}
@@ -316,6 +329,84 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		_ = os.WriteFile(a.netplanFile, raw, 0o600)
 	}
 	_ = a.markRolledBack(ctx, failedID, reason)
+}
+
+// writeFileAtomic writes via a temp file in the same directory and renames, so a reader (or a Kea that is
+// starting) never observes a half-written config.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
+}
+
+// bootstrapKeaIfStopped brings Kea up the first time guest networking is configured.
+//
+// It is a no-op whenever Kea is already answering, so the steady state is unchanged: every later apply
+// goes through the control socket exactly as before. This runs only to break the one deadlock — a service
+// that cannot start without configuration it can only receive while running.
+//
+// Writing the file AND enabling the unit are both required. The file is what lets Kea start at all; the
+// enable is what makes it come back after a reboot, since provisioning deliberately left it disabled.
+func (a *applier) bootstrapKeaIfStopped(ctx context.Context, intent []netcfg.GuestNetwork) error {
+	if a.kea.Healthy() {
+		return nil // already running — nothing to bootstrap
+	}
+	raw, err := netcfg.RenderKeaFile(intent, a.topo, a.keaLeaseCSV, a.keaSocket)
+	if err != nil {
+		return fmt.Errorf("render kea config: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(a.keaConfFile), 0o755); err != nil {
+		return fmt.Errorf("kea config dir: %w", err)
+	}
+	if err := writeFileAtomic(a.keaConfFile, raw, 0o644); err != nil {
+		return fmt.Errorf("write kea config: %w", err)
+	}
+	// The socket directory is Kea's, and a missing one stops it before it can report why.
+	if err := os.MkdirAll(filepath.Dir(a.keaSocket), 0o755); err != nil {
+		return fmt.Errorf("kea socket dir: %w", err)
+	}
+	slog.Info("kea: first guest network — starting DHCP", "config", a.keaConfFile, "unit", a.keaUnit)
+	if err := a.runFn(ctx, "systemctl", "enable", "--now", a.keaUnit); err != nil {
+		return fmt.Errorf("start %s: %w", a.keaUnit, err)
+	}
+	// Wait for the control socket. Kea creates it once it has bound its interfaces, so this is also the
+	// signal that it accepted the bridge — and without it the config-set below would fail for a reason
+	// that reads like the deadlock we just removed.
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if a.kea.Healthy() {
+			slog.Info("kea: DHCP is running", "socket", a.keaSocket)
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("kea did not come up within 20s after starting %s (check: journalctl -u %s)",
+				a.keaUnit, a.keaUnit)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 func (a *applier) pushKeaFile(raw []byte) error {
