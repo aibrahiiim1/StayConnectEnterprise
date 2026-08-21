@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -55,6 +56,27 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 		}
 	}
 	a.st.Event(ctx, revID, "l2l3", true, map[string]any{"bridges": len(desired)})
+
+	// LET THE BRIDGES COME UP BEFORE ANYTHING IS TOLD TO USE THEM.
+	//
+	// `ip link add` returns immediately, but a bridge is not RUNNING until a member has settled — a moment
+	// later. Kea checks IFF_RUNNING when it binds and refuses an interface that is not:
+	//
+	//	DHCPSRV_OPEN_SOCKET_FAIL failed to open socket: the interface br-g-xxxx is not running
+	//	DHCPSRV_NO_SOCKETS_OPEN  no interface configured to listen to DHCP traffic
+	//
+	// It then keeps running, answers status-get, serves the right subnet in config-get — and holds no DHCP
+	// socket at all. Guests send DHCPDISCOVER into silence, which from their side is indistinguishable from
+	// a dead cable.
+	//
+	// The first apply on a clean appliance hid this, because starting Kea from scratch took long enough for
+	// the bridge to settle on its own. Rolling back and re-applying does not: the bridge is destroyed and
+	// recreated, and the config is pushed into the gap.
+	if !a.dryRun {
+		if err := a.waitBridgesRunning(ctx, desired); err != nil {
+			return err
+		}
+	}
 
 	// Persistence: write the netplan file + validate (no apply — the live
 	// state is already correct via ip commands).
@@ -341,6 +363,50 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		_ = os.WriteFile(a.netplanFile, raw, 0o600)
 	}
 	_ = a.markRolledBack(ctx, failedID, reason)
+}
+
+// bridgeRunning reports whether a bridge is operationally up — what Kea means by "running".
+func bridgeRunning(name string) bool {
+	st, err := os.ReadFile(filepath.Join("/sys/class/net", name, "operstate"))
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(st)) == "up"
+}
+
+// waitBridgesRunning blocks until every desired guest bridge is operationally up.
+//
+// Bounded, and non-fatal on timeout for a reason: a bridge whose only member is an unplugged NIC will
+// never come up, and that must not make the apply fail — the operator may well be configuring the network
+// before the cable is in. What must not happen is silently configuring Kea against it, so the timeout is
+// reported and the later listening check decides whether DHCP is actually usable.
+func (a *applier) waitBridgesRunning(ctx context.Context, desired map[string]netcfg.GuestNetwork) error {
+	if len(desired) == 0 {
+		return nil
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var pending []string
+		for br := range desired {
+			if !bridgeRunning(br) {
+				pending = append(pending, br)
+			}
+		}
+		if len(pending) == 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			sort.Strings(pending)
+			slog.Warn("guest bridges are not operationally up yet; continuing",
+				"bridges", pending, "note", "a bridge whose member NIC is unplugged stays down until it is connected")
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
 }
 
 // keaListeningOn reports whether a UDP socket is bound to ip:67 (or to 0.0.0.0:67).
