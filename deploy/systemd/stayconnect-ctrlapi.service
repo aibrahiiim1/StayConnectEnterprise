@@ -20,6 +20,20 @@ RestartSec=2
 User=root
 Group=root
 ProtectSystem=full
+# ProtectSystem=full MAKES /etc READ-ONLY, AND CENTRAL KEEPS ITS KEY MATERIAL THERE.
+#
+# ctrlapi does not only read /etc/stayconnect, it writes to it: the mTLS server certificate is rotated
+# before expiry (verify-before-switch, previous kept as .prev), and the per-purpose command/update signing
+# keys are created on first start if absent. Without this, every one of those writes fails with
+# "read-only file system".
+#
+# That failure was invisible. Certificate rotation happens once every couple of years, logs a warning, and
+# keeps serving the old certificate -- so the first symptom would have been an expired certificate and a
+# fleet unable to complete mTLS, years after the cause was introduced. It only surfaced now because adding
+# a name to the certificate made ctrlapi try to re-issue one on startup.
+#
+# Narrow on purpose: the rest of /etc stays read-only.
+ReadWritePaths=/etc/stayconnect
 NoNewPrivileges=yes
 
 [Install]
