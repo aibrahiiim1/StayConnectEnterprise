@@ -106,14 +106,29 @@ sc_report_central_dns() {
   if [ -f /etc/hosts ] && grep -qiE "^[^#]*[[:space:]]${host}([[:space:]]|$)" /etc/hosts 2>/dev/null; then
     in_hosts=1
   fi
-  if command -v getent >/dev/null 2>&1 && getent hosts "$host" >/dev/null 2>&1; then
+
+  # ASK DNS DIRECTLY, NOT THE RESOLVER STACK.
+  #
+  # getent consults /etc/hosts first, so a hosts entry makes it report success and the two cases become
+  # indistinguishable -- which is how a stopgap on one machine gets mistaken for a published record, and
+  # then the next appliance cannot reach Central at all. dig/host bypass the hosts file entirely.
+  local dns_ip=""
+  if command -v dig >/dev/null 2>&1; then
+    dns_ip="$(dig +short +time=3 +tries=1 "$host" A 2>/dev/null | grep -E '^[0-9]+\.' | head -1 || true)"
+  elif command -v host >/dev/null 2>&1; then
+    dns_ip="$(host -t A "$host" 2>/dev/null | awk '/has address/ {print $NF; exit}' || true)"
+  fi
+
+  if [ -n "$dns_ip" ]; then
+    say "$host resolves in DNS -> $dns_ip"
     if [ "$in_hosts" = 1 ]; then
-      say "NOTE: $host resolves via /etc/hosts on THIS machine only."
-      say "      That is a local stopgap, not the product's dependency. The next appliance will not have it."
-      say "      Publish $host in DNS before this fleet grows."
-    else
-      say "$host resolves in DNS"
+      say "NOTE: /etc/hosts also pins $host. DNS answers now, so the local line is redundant and will"
+      say "      shadow DNS if the address ever changes. Remove it: appliance-central-cutover.sh"
     fi
+  elif [ "$in_hosts" = 1 ]; then
+    say "NOTE: $host resolves via /etc/hosts on THIS machine only — DNS does NOT answer for it."
+    say "      That is a local stopgap, not the product's dependency. The next appliance will not have it."
+    say "      Publish $host in DNS before this fleet grows."
   else
     say "NOTE: $host does not resolve here yet. That is expected for an offline install, and expected"
     say "      before the DNS record is published. This appliance will reach Central once it does;"
