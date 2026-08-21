@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -93,7 +94,7 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 		// "Kea has no control socket at /run/kea/kea4-ctrl-socket", and no amount of retrying changed it.
 		//
 		// The bridge exists by now (l2l3 ran above), so this is the moment Kea can legitimately start.
-		if err := a.bootstrapKeaIfStopped(ctx, intent); err != nil {
+		if err := a.bootstrapKeaIfStopped(ctx, revID, intent); err != nil {
 			return err
 		}
 		if err := a.kea.ConfigSet(dhcp4); err != nil {
@@ -261,6 +262,13 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		}
 		_ = os.Remove(a.netplanFile)
 		_ = os.Remove(a.unboundFrag)
+		// AND PUT KEA BACK. This branch is the first-ever apply, which is exactly the case that may have
+		// started Kea for the first time. Without this the appliance kept a running, enabled DHCP server
+		// configured for a guest network that had just been torn down — not the factory-clean state it
+		// began in, and not a state anyone chose.
+		if !a.dryRun {
+			a.restoreKeaPreBootstrap(ctx)
+		}
 		_ = a.markRolledBack(ctx, failedID, reason)
 		return
 	}
@@ -358,6 +366,117 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 	return os.Rename(name, path)
 }
 
+// keaPreBootstrap is Kea's state BEFORE netd started it for the first time, so a first apply that never
+// gets confirmed can put the appliance back exactly as it was.
+//
+// It lives on disk, not in memory. The rollback that needs it is often triggered by the confirmation
+// watchdog, and that watchdog also runs at boot to recover from a crash during pending_confirmation — by
+// which time the process that did the bootstrap is gone. A marker held in a variable would be lost in
+// precisely the case it exists for.
+type keaPreBootstrap struct {
+	RevisionID   string    `json:"revision_id"`
+	CapturedAt   time.Time `json:"captured_at"`
+	UnitEnabled  bool      `json:"unit_enabled"`
+	UnitActive   bool      `json:"unit_active"`
+	ConfigExists bool      `json:"config_exists"`
+}
+
+func (a *applier) keaPreBootstrapPath() string {
+	return filepath.Join(a.generatedDir, "kea-pre-bootstrap.json")
+}
+func (a *applier) keaPreBootstrapConf() string {
+	return filepath.Join(a.generatedDir, "kea-pre-bootstrap.conf")
+}
+
+// captureKeaPreBootstrap records what to return to, and copies any existing config aside. It runs before a
+// single byte of Kea's state is changed.
+func (a *applier) captureKeaPreBootstrap(ctx context.Context, revID string) error {
+	st := keaPreBootstrap{RevisionID: revID, CapturedAt: time.Now().UTC()}
+
+	// `systemctl is-enabled/is-active` exit non-zero for disabled/inactive units, which is an answer, not
+	// a failure — so the output is what matters, not the error.
+	if out, _ := a.output(ctx, "systemctl", "is-enabled", a.keaUnit); strings.TrimSpace(string(out)) == "enabled" {
+		st.UnitEnabled = true
+	}
+	if out, _ := a.output(ctx, "systemctl", "is-active", a.keaUnit); strings.TrimSpace(string(out)) == "active" {
+		st.UnitActive = true
+	}
+	if raw, err := os.ReadFile(a.keaConfFile); err == nil {
+		st.ConfigExists = true
+		if err := writeFileAtomic(a.keaPreBootstrapConf(), raw, 0o644); err != nil {
+			return fmt.Errorf("back up existing kea config: %w", err)
+		}
+	} else {
+		_ = os.Remove(a.keaPreBootstrapConf()) // no stale backup from an earlier attempt
+	}
+
+	b, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(a.generatedDir, 0o755); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(a.keaPreBootstrapPath(), b, 0o644); err != nil {
+		return fmt.Errorf("record kea pre-bootstrap state: %w", err)
+	}
+	slog.Info("kea: recorded pre-bootstrap state for rollback",
+		"enabled", st.UnitEnabled, "active", st.UnitActive, "config_existed", st.ConfigExists)
+	return nil
+}
+
+// restoreKeaPreBootstrap puts Kea back exactly as it was found, and is a no-op when netd never started it.
+//
+// This is the half that was missing. The first apply has no previous confirmed revision to fall back to,
+// so rollback tore down the bridge, the netplan and the unbound fragment — and left Kea running, enabled
+// and serving DHCP for a guest network that no longer exists. A factory-clean appliance has to come back
+// factory-clean, or the next attempt starts from a state nobody chose.
+func (a *applier) restoreKeaPreBootstrap(ctx context.Context) {
+	raw, err := os.ReadFile(a.keaPreBootstrapPath())
+	if err != nil {
+		return // netd did not bootstrap Kea; its state is not ours to change
+	}
+	var st keaPreBootstrap
+	if json.Unmarshal(raw, &st) != nil {
+		slog.Warn("kea: pre-bootstrap marker unreadable; leaving Kea as-is for operator attention")
+		return
+	}
+
+	// Order matters: stop before restoring the config, so Kea is never running against a file that is
+	// half-way between two states.
+	if !st.UnitActive {
+		if err := a.run(ctx, "systemctl", "stop", a.keaUnit); err != nil {
+			slog.Warn("kea: could not stop during rollback", "unit", a.keaUnit, "err", err)
+		}
+	}
+	if !st.UnitEnabled {
+		if err := a.run(ctx, "systemctl", "disable", a.keaUnit); err != nil {
+			slog.Warn("kea: could not disable during rollback", "unit", a.keaUnit, "err", err)
+		}
+	}
+	if st.ConfigExists {
+		if prev, rerr := os.ReadFile(a.keaPreBootstrapConf()); rerr == nil {
+			if werr := writeFileAtomic(a.keaConfFile, prev, 0o644); werr != nil {
+				slog.Warn("kea: could not restore the previous config", "err", werr)
+			}
+		}
+	} else {
+		// There was no config before this apply, so leaving ours behind would be leaving guest-network
+		// configuration active on an appliance that has none.
+		_ = os.Remove(a.keaConfFile)
+	}
+	slog.Info("kea: restored pre-bootstrap state",
+		"enabled", st.UnitEnabled, "active", st.UnitActive, "config_restored", st.ConfigExists)
+	a.clearKeaPreBootstrap()
+}
+
+// clearKeaPreBootstrap discards the saved state once it can no longer be needed — the revision is
+// confirmed, so Kea stays enabled and running, which is the point of confirming it.
+func (a *applier) clearKeaPreBootstrap() {
+	_ = os.Remove(a.keaPreBootstrapPath())
+	_ = os.Remove(a.keaPreBootstrapConf())
+}
+
 // bootstrapKeaIfStopped brings Kea up the first time guest networking is configured.
 //
 // It is a no-op whenever Kea is already answering, so the steady state is unchanged: every later apply
@@ -366,9 +485,15 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 //
 // Writing the file AND enabling the unit are both required. The file is what lets Kea start at all; the
 // enable is what makes it come back after a reboot, since provisioning deliberately left it disabled.
-func (a *applier) bootstrapKeaIfStopped(ctx context.Context, intent []netcfg.GuestNetwork) error {
+// Both are recorded first, so both can be undone.
+func (a *applier) bootstrapKeaIfStopped(ctx context.Context, revID string, intent []netcfg.GuestNetwork) error {
 	if a.kea.Healthy() {
 		return nil // already running — nothing to bootstrap
+	}
+	// CAPTURE BEFORE CHANGING ANYTHING. If this fails we have not touched Kea yet, so refusing here leaves
+	// the appliance exactly as it was rather than starting something we could not undo.
+	if err := a.captureKeaPreBootstrap(ctx, revID); err != nil {
+		return err
 	}
 	raw, err := netcfg.RenderKeaFile(intent, a.topo, a.keaLeaseCSV, a.keaSocket)
 	if err != nil {
@@ -385,26 +510,34 @@ func (a *applier) bootstrapKeaIfStopped(ctx context.Context, intent []netcfg.Gue
 		return fmt.Errorf("kea socket dir: %w", err)
 	}
 	slog.Info("kea: first guest network — starting DHCP", "config", a.keaConfFile, "unit", a.keaUnit)
-	if err := a.runFn(ctx, "systemctl", "enable", "--now", a.keaUnit); err != nil {
+	// a.run, NOT a.runFn. runFn is the test seam and is nil in production, so calling it directly panicked
+	// with a nil pointer dereference the first time this ran on the appliance — inside an HTTP handler,
+	// where chi's Recoverer turned it into a 500 and the apply never reached its own error path. The
+	// revision was left stuck in "applying" with no kea event and no rollback recorded.
+	if err := a.run(ctx, "systemctl", "enable", "--now", a.keaUnit); err != nil {
 		return fmt.Errorf("start %s: %w", a.keaUnit, err)
 	}
 	// Wait for the control socket. Kea creates it once it has bound its interfaces, so this is also the
 	// signal that it accepted the bridge — and without it the config-set below would fail for a reason
 	// that reads like the deadlock we just removed.
-	deadline := time.Now().Add(20 * time.Second)
+	wait := a.keaStartTimeout
+	if wait <= 0 {
+		wait = 20 * time.Second
+	}
+	deadline := time.Now().Add(wait)
 	for {
 		if a.kea.Healthy() {
 			slog.Info("kea: DHCP is running", "socket", a.keaSocket)
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("kea did not come up within 20s after starting %s (check: journalctl -u %s)",
-				a.keaUnit, a.keaUnit)
+			return fmt.Errorf("kea did not come up within %s after starting %s (check: journalctl -u %s)",
+				wait, a.keaUnit, a.keaUnit)
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(time.Second):
+		case <-time.After(200 * time.Millisecond):
 		}
 	}
 }
