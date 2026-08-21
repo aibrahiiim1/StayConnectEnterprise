@@ -164,8 +164,16 @@ func (m *Manager) apiBase() (string, *http.Client) {
 	return m.ctrlBase, http.DefaultClient
 }
 
-// Ensure loads an existing local certificate, or performs the full
-// CSR→issue→fetch→store flow if none is present (or the current one is invalid).
+// ErrCertPending means Central has our CSR but has not issued a certificate yet. It is a WAITING state,
+// never a failure: first issuance is gated on a human pressing Activate, which may be minutes, hours or
+// days after the appliance was installed.
+var ErrCertPending = errors.New("certificate not issued yet (awaiting activation)")
+
+// Ensure loads an existing local certificate, or makes ONE bootstrap attempt if none is present.
+//
+// It no longer blocks for ten minutes waiting for issuance. Callers that need the certificate for the life
+// of the process use EnsureUntilInstalled; callers that only want it if it happens to be ready (the NATS
+// transport choice at startup) get a fast answer instead of a startup stall.
 func (m *Manager) Ensure(ctx context.Context) error {
 	if err := m.ensureMTLSKey(); err != nil {
 		return err
@@ -173,7 +181,166 @@ func (m *Manager) Ensure(ctx context.Context) error {
 	if err := m.loadLocal(); err == nil {
 		return nil
 	}
-	return m.enrollCert(ctx)
+	return m.bootstrapOnce(ctx)
+}
+
+// EnsureUntilInstalled keeps trying until the certificate is installed, the service is shutting down, or
+// Central reports something genuinely terminal.
+//
+// WHY THIS EXISTS. The bootstrap used to be a single ten-minute window starting at boot, and on expiry the
+// caller logged a warning and returned — killing the certificate lifecycle for the life of the process.
+// On the Production appliance the CSR was submitted at 15:10:46, the window closed at 15:20:46, and the
+// operator issued the certificate at 15:21:45. Fifty-nine seconds. The appliance never asked again.
+//
+// Nothing downstream could work after that: the assignment channel is mTLS-only, so the signed assignment,
+// the licence and convergence were all blocked behind a certificate that was sitting on Central, ready to
+// collect. The only recovery was a restart nobody knew to perform.
+//
+// A waiting appliance and a broken one are not the same thing, and only the second is worth giving up on.
+func (m *Manager) EnsureUntilInstalled(ctx context.Context) error {
+	const (
+		first = 15 * time.Second
+		cap   = 5 * time.Minute
+	)
+	delay := first
+	attempt := 0
+	for {
+		attempt++
+		err := m.Ensure(ctx)
+		if err == nil {
+			if attempt > 1 {
+				slog.Info("appliancecert: certificate acquired after waiting", "attempts", attempt)
+			}
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		// Report the first few attempts, then only as the backoff itself lengthens, so an appliance that
+		// waits a week for activation does not write a log line every fifteen seconds for a week.
+		if attempt <= 3 || delay >= cap {
+			if errors.Is(err, ErrCertPending) {
+				slog.Info("appliancecert: waiting for the certificate to be issued",
+					"attempt", attempt, "retry_in", delay.String(),
+					"note", "issued when an operator activates this appliance in the control panel")
+			} else {
+				slog.Warn("appliancecert: certificate bootstrap attempt failed; will retry",
+					"attempt", attempt, "retry_in", delay.String(), "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		if delay < cap {
+			delay *= 2
+			if delay > cap {
+				delay = cap
+			}
+		}
+	}
+}
+
+// bootstrapOnce COLLECTS BEFORE IT SUBMITS.
+//
+// Central's SubmitCSR inserts a new request row on every call, so a retry loop that always posts a CSR
+// would leave a trail of duplicate pending requests for one appliance — and an operator approving "the"
+// request would be picking one of many. So the existing protocol state decides:
+//
+//	issued   collect and install it. No CSR: the certificate already exists.
+//	pending  Central is holding our CSR. Wait. Submitting another would only add noise.
+//	none     genuinely nothing on file — this is the only case that warrants a CSR.
+//
+// The local mTLS private key is never regenerated here; ensureMTLSKey keeps the existing one, so a CSR
+// submitted earlier still matches the key the certificate will be bound to.
+func (m *Manager) bootstrapOnce(ctx context.Context) error {
+	status, certPEM, caPEM, err := m.collect(ctx)
+	if err != nil {
+		return err
+	}
+	switch status {
+	case "issued":
+		return m.installCollected(ctx, certPEM, caPEM)
+	case "pending":
+		return ErrCertPending
+	}
+	// "none" (or anything unrecognised): no request on file, so submit one.
+	if err := m.submitCSR(ctx); err != nil {
+		return err
+	}
+	// One immediate re-collect: an already-activated appliance is auto-issued the moment the CSR lands,
+	// so this usually completes the bootstrap without waiting for the next retry.
+	status, certPEM, caPEM, err = m.collect(ctx)
+	if err != nil {
+		return err
+	}
+	if status == "issued" {
+		return m.installCollected(ctx, certPEM, caPEM)
+	}
+	return ErrCertPending
+}
+
+// collect asks Central what it holds for this appliance. It changes nothing.
+func (m *Manager) collect(ctx context.Context) (status, certPEM, caPEM string, err error) {
+	var out struct {
+		Status         string `json:"status"`
+		CertificatePEM string `json:"certificate_pem"`
+		CAChain        string `json:"ca_chain"`
+	}
+	base, cl := m.apiBase()
+	if _, err := m.signedDoWith(ctx, cl, base, http.MethodGet, "/v1/appliance/certificate", nil, &out); err != nil {
+		return "", "", "", fmt.Errorf("cert fetch: %w", err)
+	}
+	return out.Status, out.CertificatePEM, out.CAChain, nil
+}
+
+func (m *Manager) installCollected(ctx context.Context, certPEM, caPEM string) error {
+	if certPEM == "" {
+		// Status said issued but nothing came with it: treat as still waiting rather than as success.
+		return ErrCertPending
+	}
+	if err := m.store(ctx, []byte(certPEM), []byte(caPEM)); err != nil {
+		return err
+	}
+	slog.Info("appliancecert: certificate issued + installed", "fpr", m.fpr)
+	return nil
+}
+
+// rotateCert renews an EXISTING certificate before expiry.
+//
+// Rotation must submit a CSR — that is the whole operation, and Central auto-issues for an appliance that
+// already holds a valid certificate. It deliberately does not collect-first like the bootstrap does:
+// collecting would return the certificate we are trying to replace and quietly do nothing, so the appliance
+// would sail past its expiry believing it had rotated.
+func (m *Manager) rotateCert(ctx context.Context) error {
+	if err := m.submitCSR(ctx); err != nil {
+		return err
+	}
+	status, certPEM, caPEM, err := m.collect(ctx)
+	if err != nil {
+		return err
+	}
+	if status != "issued" || certPEM == "" {
+		return ErrCertPending
+	}
+	return m.installCollected(ctx, certPEM, caPEM)
+}
+
+func (m *Manager) submitCSR(ctx context.Context) error {
+	csrPEM, err := m.makeCSR()
+	if err != nil {
+		return err
+	}
+	// Prefer the mTLS transport when a cert already exists (rotation); the very first bootstrap CSR falls
+	// back to the HTTPS ingress.
+	base, cl := m.apiBase()
+	body, _ := json.Marshal(map[string]string{"csr_pem": string(csrPEM)})
+	if _, err := m.signedDoWith(ctx, cl, base, http.MethodPost, "/v1/appliance/csr", body, nil); err != nil {
+		return fmt.Errorf("csr submit: %w", err)
+	}
+	slog.Info("appliancecert: CSR submitted")
+	return nil
 }
 
 // loadLocal loads client.crt + ca.crt from disk into a live mTLS client.
@@ -218,51 +385,6 @@ func (m *Manager) installPEM(certPEM, caPEM []byte) error {
 	m.ready = true
 	m.mu.Unlock()
 	return nil
-}
-
-// enrollCert generates a CSR, submits it over the signed-auth channel, polls
-// for issuance, then stores + installs the cert.
-func (m *Manager) enrollCert(ctx context.Context) error {
-	csrPEM, err := m.makeCSR()
-	if err != nil {
-		return err
-	}
-	// Prefer mTLS transport when a cert already exists (rotation); the very
-	// first bootstrap CSR falls back to the HTTPS ingress.
-	base, cl := m.apiBase()
-	body, _ := json.Marshal(map[string]string{"csr_pem": string(csrPEM)})
-	if _, err := m.signedDoWith(ctx, cl, base, http.MethodPost, "/v1/appliance/csr", body, nil); err != nil {
-		return fmt.Errorf("csr submit: %w", err)
-	}
-	// Poll for issuance (first issuance may await Platform approval; rotation
-	// is auto-issued so the first poll usually succeeds).
-	deadline := time.Now().Add(10 * time.Minute)
-	for {
-		var out struct {
-			Status         string `json:"status"`
-			CertificatePEM string `json:"certificate_pem"`
-			CAChain        string `json:"ca_chain"`
-		}
-		fb, fcl := m.apiBase()
-		if _, err := m.signedDoWith(ctx, fcl, fb, http.MethodGet, "/v1/appliance/certificate", nil, &out); err != nil {
-			return fmt.Errorf("cert fetch: %w", err)
-		}
-		if out.Status == "issued" && out.CertificatePEM != "" {
-			if err := m.store(ctx, []byte(out.CertificatePEM), []byte(out.CAChain)); err != nil {
-				return err
-			}
-			slog.Info("appliancecert: certificate issued + installed", "fpr", m.fpr)
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return errors.New("cert issuance timed out (awaiting Platform approval?)")
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(15 * time.Second):
-		}
-	}
 }
 
 // store writes cert + CA atomically (0644 — public material) then installs.
@@ -349,7 +471,7 @@ func (m *Manager) MaybeRotate(ctx context.Context, within time.Duration) error {
 	oldCert, _ := os.ReadFile(m.certPath())
 	oldCA, _ := os.ReadFile(m.caPath())
 	slog.Info("appliancecert: rotating certificate before expiry", "not_after", na)
-	if err := m.enrollCert(ctx); err != nil {
+	if err := m.rotateCert(ctx); err != nil {
 		return err
 	}
 	if _, err := m.MTLSHello(ctx); err != nil {

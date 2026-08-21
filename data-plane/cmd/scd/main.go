@@ -241,6 +241,10 @@ type server struct {
 
 	// certMgr owns the mTLS client-certificate lifecycle (nil if disabled).
 	certMgr *appliancecert.Manager
+	// noMTLSLogged counts consecutive assignment polls skipped because the mTLS certificate is not ready.
+	// Only the assignment agent touches it, and only from its own goroutine, so it needs no lock. It
+	// exists to make "waiting for the certificate" visible without writing a line every 30 seconds.
+	noMTLSLogged int
 	// natsConn is the live NATS connection (nil if not connected).
 	natsConn *nats.Conn
 	// identityKeyFpr is the fingerprint of the identity-signing public key
@@ -1079,8 +1083,12 @@ func main() {
 			s.certMgr = certMgr
 		}
 		go func() {
-			if err := certMgr.Ensure(rootCtx); err != nil {
-				slog.Warn("appliancecert: ensure failed", "err", err)
+			// KEEP TRYING. This used to be a single Ensure() whose ten-minute window started at boot; on
+			// expiry it logged a warning and returned, ending the certificate lifecycle for the life of the
+			// process and taking the assignment channel (mTLS-only), the licence and convergence with it.
+			// First issuance waits on a human pressing Activate, which is not an event with a deadline.
+			if err := certMgr.EnsureUntilInstalled(rootCtx); err != nil {
+				slog.Warn("appliancecert: certificate bootstrap stopped", "err", err)
 				return
 			}
 			if out, err := certMgr.MTLSHello(rootCtx); err != nil {

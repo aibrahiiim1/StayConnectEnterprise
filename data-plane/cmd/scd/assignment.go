@@ -286,8 +286,24 @@ func (s *server) fetchAssignment(ctx context.Context, _ string) (*assignment.Doc
 	}
 	cl, base, ready := s.mtlsTransport()
 	if !ready || base == "" {
-		return nil, false // mTLS not ready — assignment is mTLS-only, no fallback
+		// mTLS not ready — assignment is mTLS-only, so there is no fallback and this poll can do nothing.
+		//
+		// SAY SO, PERIODICALLY. This returned silently, so an appliance blocked here polled every thirty
+		// seconds for as long as it was up and wrote nothing at all. On the Production appliance that meant
+		// twenty-five minutes of an operator's activation appearing to hang with no error anywhere: the
+		// certificate had not been collected, and the one line that would have said so did not exist.
+		//
+		// Not every poll: once a minute at first and then far less often, because an appliance waiting for
+		// activation is in a NORMAL state and must not fill the journal while it waits.
+		s.noMTLSLogged++
+		if n := s.noMTLSLogged; n == 1 || n == 2 || n%20 == 0 {
+			slog.Info("assignment: waiting for the mTLS client certificate before fetching the assignment",
+				"polls_blocked", n,
+				"note", "the certificate is issued when this appliance is activated in the control panel")
+		}
+		return nil, false
 	}
+	s.noMTLSLogged = 0
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/appliance/assignment", nil)
 	resp, err := cl.Do(req)
 	if err != nil {
