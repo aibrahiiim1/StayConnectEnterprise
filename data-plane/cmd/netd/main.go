@@ -98,8 +98,17 @@ func main() {
 	}
 
 	// Refresh interface inventory at boot.
+	//
+	// A FAILURE HERE MUST NOT BE SILENT. Guest-network validation reads this inventory to decide which
+	// interfaces exist, so an empty table makes every parent interface fail with interface_not_found —
+	// naming an interface the operator can see in the wizard's own dropdown. The error was discarded, so
+	// the one message that explained it (a missing UPDATE grant, needed by the ON CONFLICT DO UPDATE)
+	// was never written anywhere, and the symptom pointed at the hardware instead.
 	if ifaces, err := Discover(rootCtx); err == nil {
-		_ = st.SyncInterfaces(rootCtx, ifaces, topo.MgmtInterface, topo.WANInterface)
+		if err := st.SyncInterfaces(rootCtx, ifaces, topo.MgmtInterface, topo.WANInterface); err != nil {
+			slog.Error("interface inventory sync FAILED — guest-network validation will report every "+
+				"parent interface as not found until this is fixed", "err", err)
+		}
 	} else {
 		slog.Warn("interface discovery failed", "err", err)
 	}
@@ -339,7 +348,12 @@ func (s *server) interfaces(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 500, map[string]string{"error": err.Error()})
 		return
 	}
-	_ = s.st.SyncInterfaces(r.Context(), ifaces, s.topo.MgmtInterface, s.topo.WANInterface)
+	// Same here: this is the refresh the wizard triggers, and its failure is what makes validation
+	// disagree with the list of interfaces the wizard just displayed.
+	if err := s.st.SyncInterfaces(r.Context(), ifaces, s.topo.MgmtInterface, s.topo.WANInterface); err != nil {
+		slog.Error("interface inventory sync FAILED — guest-network validation will report every "+
+			"parent interface as not found until this is fixed", "err", err)
+	}
 	// Overlay the operator-assigned role/protected flag from the inventory so the
 	// UI can tell which interfaces may parent a guest network. Discover() alone
 	// leaves Role empty, which made every interface non-selectable in the wizard.
