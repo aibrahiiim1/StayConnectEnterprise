@@ -193,16 +193,25 @@ say "scd restarted; waiting for it to reach Central"
 sleep 12
 
 # VERIFY, AND UNDO IF IT DID NOT WORK. Losing Central is silent, so it must not be left to a human noticing.
-if journalctl -u stayconnect-scd --no-pager --since "-2min" 2>/dev/null \
-     | grep -qE '"msg":"(identity loaded|assignment: agent started)"'; then
+#
+# Captured, not piped into grep -q: under pipefail, grep -q exiting at the first match SIGPIPEs journalctl
+# and the pipeline reports failure. Here that would roll back a cutover that had actually succeeded.
+scdlog="$(journalctl -u stayconnect-scd --no-pager --since "-2min" 2>/dev/null || true)"
+reached="$(printf '%s' "$scdlog" | grep -oE '"msg":"(identity loaded|assignment: agent started)"[^}]*' || true)"
+
+# Reaching Central by name is the point, so it is checked directly too, with verification ON.
+health="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$CENTRAL_BASE/healthz" 2>/dev/null || true)"
+
+if [ -n "$reached" ] && [ "$health" = "200" ]; then
   say ""
   say "CUT OVER. This appliance now reaches Central by name."
-  journalctl -u stayconnect-scd --no-pager --since "-2min" 2>/dev/null \
-    | grep -oE '"msg":"(identity loaded|assignment: agent started)"[^}]*' | tail -2 | sed 's/^/  /'
+  printf '%s\n' "$reached" | tail -2 | sed 's/^/  /'
+  say "  $CENTRAL_BASE/healthz -> 200 (certificate verified)"
   exit 0
 fi
 
 say "verification FAILED after the switch — rolling back rather than leaving this appliance cut off"
+say "  scd reached Central: $([ -n "$reached" ] && echo yes || echo no)   healthz: ${health:-no response}"
 cp -a "$ENV_FILE.pre-cutover.$STAMP" "$ENV_FILE"
 [ -f "$HOSTS.pre-cutover.$STAMP" ] && cp -a "$HOSTS.pre-cutover.$STAMP" "$HOSTS"
 systemctl restart stayconnect-scd
