@@ -13,8 +13,10 @@ Two milestones worth naming:
 
 - **`253674c2be15cb11d0f746baf73e2c07f1a4d4f2`** — the activation / licensing / FQDN / Kea deployment,
   verified end to end.
-- **`b448abe`** — the last commit that changes runtime behaviour. Everything after it is deployment tooling
-  (the DNS-gated cutover script, the corrected DNS check, Central's firewall rule) and this document.
+- **`469697a`** — the last commit that changes runtime behaviour (Go source or a systemd unit). Everything
+  after it is deployment tooling and documentation: the DNS-gated cutover, the resolver alignment, Central's
+  firewall rule and the checks that were fixed along the way. That is why the binaries below, built before
+  the head, are still current.
 
 Binaries are stamped with the commit they were **built from**. Where that is older than the head, the source
 for that component is byte-identical between the two — checked with `git diff` over the component's paths —
