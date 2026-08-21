@@ -45,9 +45,20 @@ that configuration (`sc-central.echofusion.com`, `150.0.0.252`, `127.0.0.1`), an
 certificate that does not cover them all. Central's public TLS certificate is issued by
 `central-mint-tls.sh` from the same source and now carries the FQDN alongside the names already in use.
 
-**The appliance still dials `https://150.0.0.252`.** That is deliberate: see the DNS blocker below.
-The mTLS base is `:9443` — the product's real port. It read `:8443` in configuration and provisioning, which
-nothing has ever listened on.
+**The appliance dials `https://sc-central.echofusion.com`** — cut over 2026-08-21T15:10:45Z with
+`appliance-central-cutover.sh --apply`, after DNS was published on the FortiGate (172.21.60.1). mTLS is
+`sc-central.echofusion.com:9443` — the product's real port; configuration and provisioning read `:8443`,
+which nothing has ever listened on.
+
+The `/etc/hosts` stopgap is **gone** (backup at `/etc/hosts.pre-cutover.20260821T151045Z`). Resolution is
+now genuine DNS: `resolvectl` reports *"acquired via protocol DNS, link ens160"* rather than the
+*"Data from: synthetic"* that marks a hosts-file answer. Rollback: `--rollback`, or
+`/etc/stayconnect/scd.env.pre-cutover.20260821T151045Z`.
+
+Verified after the switch, with certificate verification on: `/healthz` and `/readyz` both 200 by name,
+mTLS port reachable by name, `identity loaded` and `assignment: agent started` against
+`ctrl_base=https://sc-central.echofusion.com`, and a Central-side heartbeat at 15:11:16Z — after the
+cutover, so it is the new endpoint being used.
 
 ## Trust material
 
@@ -83,53 +94,34 @@ network is applied and confirmed, Kea is checked normally and a real failure is 
 ## Next step
 
 Manual Product-Owner **Online Activation**: Pending appliance → Customer / Site / licence → Activate. The
-appliance is registered, its assignment agent is running, and it is waiting for exactly that.
+appliance is registered by name, its assignment agent is running against
+`https://sc-central.echofusion.com`, and it is waiting for exactly that.
 
-## Genuine remaining blocker — DNS (two parts)
+No blocker remains. Both parts of the DNS problem are closed.
 
-**`sc-central.echofusion.com` still returns NXDOMAIN.** Re-verified 2026-08-21 after the record was
-reported published:
+## DNS — resolved
 
-```
-dig @150.0.0.11 sc-central.echofusion.com A   ->  status: NXDOMAIN
-dig @8.8.8.8    sc-central.echofusion.com A   ->  status: NXDOMAIN
-dig @172.21.60.1 …                            ->  timed out (not a working resolver)
-dig @150.0.0.11 echofusion.com SOA            ->  launch1.spaceship.net. ... 1782408490
-dig @150.0.0.11 echofusion.com NS             ->  launch1.spaceship.net. launch2.spaceship.net.
-dig @150.0.0.11 csr-dc-01.coralsearesorts.com ->  150.0.0.11        (control: the server works)
-```
+`sc-central.echofusion.com` → `150.0.0.252`, published on the **FortiGate (172.21.60.1)**, which is the
+appliance's resolver. Confirmed on the Production appliance itself, querying that server directly rather
+than the local stub.
 
-### 1. The record does not exist anywhere the appliance can see
+### The appliance's second resolver had to go first
 
-**150.0.0.11 is not authoritative for `echofusion.com`.** It forwards to Spaceship, and that zone's SOA
-serial `1782408490` is unchanged from before the record was said to be added — so the public zone has not
-changed, and there is no internal zone for the name either. A record at Spaceship would also be wrong on its
-own: it would have to name a publicly-routable address, and Central is at `150.0.0.252`.
+It was configured with `172.21.60.1` **and** `8.8.8.8`. The FortiGate serves the name; 8.8.8.8 returns
+NXDOMAIN, because the name is internal.
 
-**What to create**, on the internal DNS server 150.0.0.11 (Windows DNS):
+That is not a harmless spare. systemd-resolved falls back on a timeout or SERVFAIL — "no answer" — but
+NXDOMAIN is a *real* answer, so it is accepted and returned. `resolvectl` was reporting
+`Current DNS Server: 8.8.8.8` at the time. The appliance would have resolved Central or not depending on
+which server resolved happened to be using, switching on its own: registration and heartbeat stopping and
+restarting for no visible reason, guests unaffected, and nobody able to reproduce it.
 
-> A **primary zone named `sc-central.echofusion.com`**, containing a single **A record at the zone apex**
-> (leave the name field blank / `@`) → **`150.0.0.252`**.
+`appliance-dns-align.sh --apply` removed 8.8.8.8 from both netplan files — commented rather than deleted,
+with the reason and date — after first confirming the FortiGate resolves public names, since apt, container
+pulls and certificate issuance depend on that. It verifies the internal name and public DNS afterwards and
+rolls back if either breaks. The appliance now uses `172.21.60.1` alone.
 
-Naming the zone after the full host shadows *only* that one name internally; a zone called `echofusion.com`
-would shadow the entire public domain for every internal client, including mail and anything else under it.
-
-### 2. The appliance does not use 150.0.0.11 as a resolver
-
-```
-resolvectl status  ->  DNS Servers: 172.21.60.1 8.8.8.8     (Current: 8.8.8.8)
-```
-
-Publishing the record on 150.0.0.11 alone will therefore not help this appliance: it asks 172.21.60.1
-(currently timing out) and 8.8.8.8 (public, no such name). Either point the appliance at a resolver that
-serves the zone, or have 172.21.60.1 forward it. That is a topology decision, not a product one — but the
-cutover gate will not pass until whichever resolver the appliance actually uses returns the record.
-
-Until both parts are done the appliance stays on `https://150.0.0.252`. Everything else — Central
-configuration, both certificates, all three trust roots, the firewall, the schema — is already on the FQDN
-and needs no further change.
-
-### Fixed while attempting the cutover
+### Also fixed to make the cutover possible
 
 **Central's mTLS port was firewalled.** ufw allowed 22 and 443 only, so ctrlapi's appliance mutual-TLS
 listener on 9443 was bound and unreachable — `ss` showed it, loopback tests passed, and every appliance got
@@ -138,17 +130,19 @@ a connection timeout. Nothing on Central logs a connection that never arrives. N
 `DNS:sc-central.echofusion.com` and matches the hostname. (It chains to the *appliance* PKI, not the Caddy
 Internal CA — separate chains by design.)
 
-**The cutover gate's own DNS check was reading `/etc/hosts`.** See the commit; it now queries the upstream
-nameservers directly and reports which one answered.
+**Three checks that reported success while being wrong**, each fixed in source:
 
-**The cutover itself is now tooling, not a manual edit**:
-`deploy/scripts/appliance-central-cutover.sh --check` verifies real DNS (bypassing `/etc/hosts`), HTTPS with
-certificate verification on, and that the mTLS listener presents a certificate valid for the name; `--apply`
-then switches `SCD_CTRLAPI_BASE`/`SCD_MTLS_BASE`, removes the `/etc/hosts` stopgap, restarts scd, and rolls
-everything back if the appliance does not reach Central afterwards. It refuses today, with the reason.
+- The gate's DNS check queried the local stub, and on systemd-resolved the stub answers from `/etc/hosts` —
+  so it certified "resolves in DNS" for a name every real nameserver denied. It now queries the upstream
+  servers and names which one answered.
+- `sc_dns_lookup` returned its results by printing into a command substitution, which runs in a subshell, so
+  the caller read nothing. It sets globals now.
+- `dig | grep -q` under `set -o pipefail`: grep exits at the first match, dig gets SIGPIPE, and the pipeline
+  reports failure — so a resolver answering 8/8 was rejected. Every such pipeline now captures first. The
+  worst instance was the post-cutover verification, which would have rolled back a cutover that worked.
 
-### The `/etc/hosts` stopgap is still in place, deliberately
-
-`150.0.0.252 sc-central.echofusion.com` on the appliance. It was not removed: with DNS still NXDOMAIN,
-removing it and switching to the name would cut the appliance off from Central silently — registration and
-heartbeat stop, guests are unaffected, and nobody notices until a site goes dark in the fleet view.
+**The cutover is tooling, not a manual edit**: `appliance-central-cutover.sh --check` verifies real DNS
+(never the stub), that *every* configured resolver agrees, HTTPS with certificate verification on, and that
+the mTLS listener presents a certificate valid for the name. `--apply` switches both bases from the
+versioned config, removes the `/etc/hosts` stopgap only after DNS is proven to agree with it, restarts scd,
+and rolls everything back unless the appliance both reaches Central and reports `identity loaded`.
