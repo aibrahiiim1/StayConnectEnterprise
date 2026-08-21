@@ -46,8 +46,14 @@
 | Port | Exposure |
 |---|---|
 | 443 (Caddy) | public — cloud-admin + `/cloud/v1` + appliance license fetch |
+| **9443 (ctrlapi mTLS)** | **public but client-certificate-gated** — the appliance mutual-TLS surface (`CTRLAPI_MTLS_ADDR`). `RequireAndVerifyClientCert` against the appliance CA rejects anything without a certificate the CA signed, during the handshake. It must be reachable from wherever hotels are: the design is appliance-initiated outbound, so restricting it to a management subnet breaks the first appliance installed elsewhere. |
 | 4222 (NATS TLS) | public but credentialed — appliance outbound connections terminate here |
 | 5432 / 6379 / 8080 / 3000 / 9090 / 3001 / 9093 | **never public** — loopback or private VPC only |
+
+Apply with **`deploy/scripts/central-firewall.sh`**, which derives the mTLS port from
+`deploy/config/central-endpoint.env` so it cannot drift from what appliances are told to dial. 9443 was
+listening but firewalled on the live host: `ss` showed it, loopback tests passed, and every appliance got a
+connection timeout — a port nothing on Central logs, because the connections never arrived.
 
 The cloud initiates **no** connections toward hotels. Anything that looks like
 "cloud dials appliance" is a design violation.

@@ -94,6 +94,55 @@ sc_validate_central_base() {
   esac
 }
 
+# sc_dns_lookup prints the A record for a host, asking a REAL nameserver, and sets SC_DNS_ANSWERED_BY to
+# whichever one answered. Empty output (and non-zero) means DNS genuinely does not have the name.
+#
+# THE TRAP THIS EXISTS TO AVOID, WHICH CAUGHT THIS SCRIPT ITSELF:
+#
+# "Use dig instead of getent, because dig bypasses /etc/hosts" is only true when dig talks to a real DNS
+# server. On a systemd-resolved host /etc/resolv.conf points at the stub 127.0.0.53, and the stub answers
+# from /etc/hosts -- so `dig sc-central.example` cheerfully returned the hosts entry and the check reported
+# "resolves in DNS" for a name every actual nameserver called NXDOMAIN. The hosts file was being laundered
+# through a DNS-shaped interface.
+#
+# So: enumerate the real upstream servers and query those. Never the stub, never the hosts file. If no
+# non-loopback server can be identified, say so rather than guessing -- an unverifiable answer is not an
+# answer.
+sc_dns_lookup() {
+  local host="$1" servers="" s ip
+  SC_DNS_ANSWERED_BY=""
+
+  if [ -n "${CENTRAL_DNS_SERVER:-}" ]; then
+    servers="$CENTRAL_DNS_SERVER"
+  else
+    if command -v resolvectl >/dev/null 2>&1; then
+      servers="$(resolvectl status 2>/dev/null | sed -n 's/.*DNS Servers: //p; s/.*Current DNS Server: //p' | tr ' ' '\n')"
+    fi
+    if [ -z "$servers" ] && [ -f /etc/resolv.conf ]; then
+      servers="$(awk '/^nameserver/ {print $2}' /etc/resolv.conf)"
+    fi
+  fi
+
+  # Drop loopback: that is the stub, and the stub reads /etc/hosts.
+  servers="$(printf '%s\n' $servers | grep -vE '^(127\.|::1$)' | grep -E '^[0-9a-fA-F:.]+$' | sort -u)"
+  if [ -z "$servers" ]; then
+    SC_DNS_ANSWERED_BY="none-identifiable"
+    return 1
+  fi
+
+  command -v dig >/dev/null 2>&1 || { SC_DNS_ANSWERED_BY="dig-missing"; return 1; }
+  for s in $servers; do
+    ip="$(dig "@$s" +short +time=3 +tries=1 "$host" A 2>/dev/null | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1 || true)"
+    if [ -n "$ip" ]; then
+      SC_DNS_ANSWERED_BY="$s"
+      printf '%s' "$ip"
+      return 0
+    fi
+  done
+  SC_DNS_ANSWERED_BY="$(printf '%s' "$servers" | tr '\n' ' ')"
+  return 1
+}
+
 # sc_report_central_dns is INFORMATIONAL and never fatal. An appliance is legitimately provisioned before
 # DNS exists, and an offline-first-activation appliance may have no route to Central at all. What it must
 # not do is let an /etc/hosts entry pass unremarked as if the name were really resolvable.
@@ -107,26 +156,21 @@ sc_report_central_dns() {
     in_hosts=1
   fi
 
-  # ASK DNS DIRECTLY, NOT THE RESOLVER STACK.
-  #
-  # getent consults /etc/hosts first, so a hosts entry makes it report success and the two cases become
-  # indistinguishable -- which is how a stopgap on one machine gets mistaken for a published record, and
-  # then the next appliance cannot reach Central at all. dig/host bypass the hosts file entirely.
-  local dns_ip=""
-  if command -v dig >/dev/null 2>&1; then
-    dns_ip="$(dig +short +time=3 +tries=1 "$host" A 2>/dev/null | grep -E '^[0-9]+\.' | head -1 || true)"
-  elif command -v host >/dev/null 2>&1; then
-    dns_ip="$(host -t A "$host" 2>/dev/null | awk '/has address/ {print $NF; exit}' || true)"
-  fi
+  local dns_ip dns_server
+  dns_ip="$(sc_dns_lookup "$host")" || true
+  dns_server="${SC_DNS_ANSWERED_BY:-}"
 
   if [ -n "$dns_ip" ]; then
-    say "$host resolves in DNS -> $dns_ip"
+    say "$host resolves in DNS -> $dns_ip (answered by ${dns_server:-a real nameserver})"
     if [ "$in_hosts" = 1 ]; then
       say "NOTE: /etc/hosts also pins $host. DNS answers now, so the local line is redundant and will"
       say "      shadow DNS if the address ever changes. Remove it: appliance-central-cutover.sh"
     fi
+  elif [ "$SC_DNS_ANSWERED_BY" = "none-identifiable" ] || [ "$SC_DNS_ANSWERED_BY" = "dig-missing" ]; then
+    say "NOTE: cannot check DNS for $host (${SC_DNS_ANSWERED_BY/-/ }). Install dnsutils, or set"
+    say "      CENTRAL_DNS_SERVER, so a hosts-file entry cannot be mistaken for a published record."
   elif [ "$in_hosts" = 1 ]; then
-    say "NOTE: $host resolves via /etc/hosts on THIS machine only — DNS does NOT answer for it."
+    say "NOTE: $host resolves via /etc/hosts on THIS machine only — DNS (${SC_DNS_ANSWERED_BY}) does NOT answer for it."
     say "      That is a local stopgap, not the product's dependency. The next appliance will not have it."
     say "      Publish $host in DNS before this fleet grows."
   else

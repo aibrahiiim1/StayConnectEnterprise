@@ -69,16 +69,18 @@ say "target: $CENTRAL_BASE   (mTLS $MTLS)"
 echo
 echo "Resolution"
 
-# 1. REAL DNS, deliberately bypassing /etc/hosts.
-dns_ip=""
-if command -v dig >/dev/null 2>&1; then
-  dns_ip="$(dig +short +time=3 +tries=1 "$FQDN" A 2>/dev/null | grep -E '^[0-9]+\.' | head -1 || true)"
-elif command -v host >/dev/null 2>&1; then
-  dns_ip="$(host -t A "$FQDN" 2>/dev/null | awk '/has address/ {print $NF; exit}' || true)"
-else
-  bad "no dig or host installed — cannot distinguish DNS from an /etc/hosts entry. Install dnsutils."
-  fail=1
-fi
+# 1. REAL DNS. sc_dns_lookup queries the upstream nameservers, never the local stub -- on a
+#    systemd-resolved host the stub answers from /etc/hosts, so "dig" alone proves nothing.
+dns_ip="$(sc_dns_lookup "$FQDN")" || true
+case "${SC_DNS_ANSWERED_BY:-}" in
+  none-identifiable)
+    bad "cannot identify a real nameserver to query (only a loopback stub, which reads /etc/hosts).
+        Set CENTRAL_DNS_SERVER=<ip> so a hosts entry cannot be mistaken for a published record."
+    fail=1 ;;
+  dig-missing)
+    bad "dig is not installed — cannot distinguish DNS from an /etc/hosts entry. Install dnsutils."
+    fail=1 ;;
+esac
 
 hosts_line=""
 if [ -f "$HOSTS" ]; then
