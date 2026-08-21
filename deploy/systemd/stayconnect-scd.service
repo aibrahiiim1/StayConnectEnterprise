@@ -45,6 +45,19 @@ User=root
 Group=root
 RuntimeDirectory=stayconnect
 RuntimeDirectoryMode=0755
+# /run/stayconnect IS SHARED, SO STOPPING scd MUST NOT DELETE IT.
+#
+# netd declares the same RuntimeDirectory and puts its control socket there. With the default
+# (RuntimeDirectoryPreserve=no) systemd removed the whole directory whenever scd stopped, taking
+# netd.sock with it -- while netd itself kept running. netd then reported "active" forever and was
+# unreachable forever: DHCP management, WAN/LAN settings and guest networking all dead behind a green
+# unit, until somebody happened to restart netd.
+#
+# Every scd restart did this. It was found during deployment, when restarting scd made Kea health flip
+# from "waiting" to "cannot assess (netd unreachable)".
+#
+# netd already sets preserve=yes; scd is the one that was tearing the shared directory down.
+RuntimeDirectoryPreserve=yes
 ProtectSystem=full
 # ProtectSystem=full makes /etc read-only, but three stores must persist there:
 #   identity/   — the appliance's enrollment identity + signing key
