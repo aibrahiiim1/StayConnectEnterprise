@@ -100,6 +100,10 @@ func (a *applier) applyBundle(ctx context.Context, revID string, intent []netcfg
 		if err := a.kea.ConfigSet(dhcp4); err != nil {
 			return err
 		}
+		// AND CHECK IT IS ACTUALLY SERVING. Accepting a config is not the same as listening.
+		if err := a.ensureKeaServing(ctx, intent); err != nil {
+			return err
+		}
 	}
 	a.st.Event(ctx, revID, "kea", true, nil)
 
@@ -337,6 +341,99 @@ func (a *applier) rollback(ctx context.Context, failedID, reason string) {
 		_ = os.WriteFile(a.netplanFile, raw, 0o600)
 	}
 	_ = a.markRolledBack(ctx, failedID, reason)
+}
+
+// keaListeningOn reports whether a UDP socket is bound to ip:67 (or to 0.0.0.0:67).
+//
+// It reads /proc/net/udp rather than shelling out to `ss`, so it adds no binary dependency and cannot be
+// defeated by output formatting. Addresses there are little-endian hex.
+func keaListeningOn(ip string) bool {
+	raw, err := os.ReadFile("/proc/net/udp")
+	if err != nil {
+		return false
+	}
+	want := hexLE(ip)
+	anyAddr := "00000000"
+	for _, line := range strings.Split(string(raw), "\n")[1:] {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		parts := strings.Split(f[1], ":") // local_address is HEXIP:HEXPORT
+		if len(parts) != 2 || !strings.EqualFold(parts[1], "0043") {
+			continue // 0x43 == 67
+		}
+		if strings.EqualFold(parts[0], want) || strings.EqualFold(parts[0], anyAddr) {
+			return true
+		}
+	}
+	return false
+}
+
+// hexLE renders a dotted-quad as the little-endian hex /proc/net/udp uses.
+func hexLE(ip string) string {
+	var b [4]int
+	if _, err := fmt.Sscanf(ip, "%d.%d.%d.%d", &b[0], &b[1], &b[2], &b[3]); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%02X%02X%02X%02X", b[3], b[2], b[1], b[0])
+}
+
+// ensureKeaServing verifies Kea is LISTENING for each guest gateway, and restarts it if it is not.
+//
+// THE FAILURE THIS CATCHES. config-set does not reliably rebind Kea's DHCP sockets when the interface set
+// changes underneath it. Roll a guest network back and re-apply it: the bridge is destroyed and recreated
+// with a new ifindex, Kea accepts the new configuration, reports status-get healthy — and never opens a
+// socket. DHCP is dead while every indicator says it is fine. A client sends DHCPDISCOVER and hears
+// nothing, which looks like a cabling fault, not a control-plane one.
+//
+// status-get proves the control channel works, not that guests can get an address. This asserts the thing
+// that actually matters, and repairs it the one way that reliably works — a restart, which rebinds from a
+// config already written to disk.
+func (a *applier) ensureKeaServing(ctx context.Context, intent []netcfg.GuestNetwork) error {
+	missing := a.keaGatewaysNotServed(intent)
+	if len(missing) == 0 {
+		return nil
+	}
+	slog.Warn("kea: accepted the configuration but is not listening; restarting to rebind",
+		"gateways", missing, "unit", a.keaUnit)
+	if err := a.run(ctx, "systemctl", "restart", a.keaUnit); err != nil {
+		return fmt.Errorf("restart %s to bind DHCP: %w", a.keaUnit, err)
+	}
+	wait := a.keaStartTimeout
+	if wait <= 0 {
+		wait = 20 * time.Second
+	}
+	deadline := time.Now().Add(wait)
+	for {
+		if still := a.keaGatewaysNotServed(intent); len(still) == 0 {
+			slog.Info("kea: DHCP listening on every guest gateway")
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("kea is not listening on %v after a restart — guests would get no address "+
+				"(check: journalctl -u %s)", a.keaGatewaysNotServed(intent), a.keaUnit)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+}
+
+// keaGatewaysNotServed lists the enabled guest gateways Kea has no socket for.
+func (a *applier) keaGatewaysNotServed(intent []netcfg.GuestNetwork) []string {
+	var missing []string
+	for _, n := range a.netdManaged(intent) {
+		if !n.Enabled || n.DHCPMode != netcfg.DHCPLocal || n.GatewayIP == "" {
+			continue // only networks this appliance serves DHCP for
+		}
+		if !keaListeningOn(n.GatewayIP) {
+			missing = append(missing, n.GatewayIP)
+		}
+	}
+	return missing
 }
 
 // writeFileAtomic writes via a temp file in the same directory and renames, so a reader (or a Kea that is
@@ -579,9 +676,25 @@ func (a *applier) healthChecks(ctx context.Context, revID string, intent []netcf
 		add("gateway_up", true, "")
 	}
 
-	// kea_running.
-	keaOK := a.dryRun || a.kea.Healthy()
-	add("kea_running", keaOK, "")
+	// kea_running — LISTENING, not merely answering its control socket.
+	//
+	// This used to be a.kea.Healthy(), which is status-get over the control channel. That passed while Kea
+	// held no DHCP socket at all, so an apply reported every health check green on a network where no guest
+	// could ever get an address. A health check that cannot fail when the service is not doing its job is
+	// not a health check.
+	keaOK := a.dryRun
+	keaDetail := ""
+	if !a.dryRun {
+		if missing := a.keaGatewaysNotServed(intent); len(missing) == 0 {
+			keaOK = a.kea.Healthy()
+			if !keaOK {
+				keaDetail = "control socket not answering"
+			}
+		} else {
+			keaDetail = "not listening on " + strings.Join(missing, ", ")
+		}
+	}
+	add("kea_running", keaOK, keaDetail)
 
 	// portal_listen: portald must still be listening on the HTTP portal port.
 	portalOK := a.dryRun || tcpListening(a.topo.PortalHTTPPort)
