@@ -191,6 +191,40 @@ if [ -n "${CENTRAL_MTLS_BASE:-}" ]; then
 fi
 sc_report_central_dns "$CENTRAL_BASE"
 
+# RESOLVERS THAT DISAGREE ABOUT CENTRAL ARE A HARD STOP.
+#
+# Three cases, and only one of them is a fault:
+#
+#   every resolver answers   fine.
+#   no resolver answers      fine. That is an offline installation, or DNS published later; the appliance
+#                            simply waits, and provisioning has already said so.
+#   SOME answer, some say    NOT fine. systemd-resolved falls back on a timeout or SERVFAIL -- "no answer"
+#   NXDOMAIN                 -- but NXDOMAIN is a real answer, so it is accepted and returned. The appliance
+#                            then reaches Central or does not depending on which resolver resolved happens
+#                            to be using, and it switches by itself. Registration and heartbeat stop and
+#                            start for no visible reason, guests are unaffected, and nobody can reproduce it.
+#
+# Nothing here rewrites the hotel's WAN or DNS configuration: which resolvers a site uses is the site's
+# decision. Provisioning only refuses to hand over an appliance whose Central endpoint resolves by luck.
+if [ -n "${SC_DNS_IP:-}" ] && [ -n "${SC_DNS_DENIERS:-}" ]; then
+  say ""
+  say "STOP: this appliance's resolvers DISAGREE about $CENTRAL_BASE."
+  say "  answers:      ${SC_DNS_ANSWERED_BY} -> ${SC_DNS_IP}"
+  say "  say NXDOMAIN: ${SC_DNS_DENIERS}"
+  say ""
+  say "Resolution would be intermittent, and the failure it produces looks like a network fault rather"
+  say "than a configuration one. Fix it at the site before this appliance goes into service: either remove"
+  say "the resolvers that deny the name, or make them resolve it."
+  say ""
+  say "  deploy/scripts/appliance-dns-align.sh          shows exactly which resolvers disagree"
+  say "  deploy/scripts/appliance-dns-align.sh --apply  removes the deniers (checks public DNS first)"
+  say ""
+  say "Deliberately continuing anyway (a staging box, or a resolver about to be fixed):"
+  say "  ALLOW_SPLIT_DNS=1 bash provision-fresh-appliance.sh"
+  [ "${ALLOW_SPLIT_DNS:-0}" = "1" ] || die "refusing to provision an appliance whose Central endpoint resolves by luck"
+  say "ALLOW_SPLIT_DNS=1 set — continuing with intermittent resolution, on purpose."
+fi
+
 # CENTRAL'S CA MUST BE TRUSTED BEFORE THE APPLIANCE EVER DIALS IT.
 #
 # Central presents a certificate from a private CA. Without it in the system trust store every outbound

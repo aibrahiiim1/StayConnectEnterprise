@@ -93,13 +93,37 @@ appliance reported `kea = failed` with `converged=false, alert_open=true, pendin
 The Kea unit remains `inactive` and `disabled`; nothing is started to make health green. Once a guest
 network is applied and confirmed, Kea is checked normally and a real failure is reported as a failure.
 
-## Next step
+## Activation — complete
 
-Manual Product-Owner **Online Activation**: Pending appliance → Customer / Site / licence → Activate. The
-appliance is registered by name, its assignment agent is running against
-`https://sc-central.echofusion.com`, and it is waiting for exactly that.
+Activated by the Product Owner 2026-08-21T15:21:45Z. Full chain verified on the appliance:
 
-No blocker remains. Both parts of the DNS problem are closed.
+| | |
+|---|---|
+| identity | `c6faf4eb-33e4-41b3-9fcb-d902568cc1c9`, serial `SC-7A8M-WM9R-KMAZ` |
+| client certificate | `O=<site>, OU=<tenant>, CN=<appliance>`, issued by *StayConnect Appliance Intermediate CA v1*, expires 2026-11-19 |
+| mTLS | ready, via `sc-central.echofusion.com:9443` |
+| signed assignment | **v1 `assigned`** — CSR SHARM / Coral Sea Holiday |
+| licence | **Active**, v1, **2000** concurrent guests, valid to 2026-12-01, grace to 2026-12-31 |
+| convergence | `activation_status: activated`, `converged=true`, no alert |
+
+Exactly one of each on Central: one appliance, one signed assignment, one active certificate, one licence.
+
+### It did not complete on the first attempt
+
+The certificate bootstrap was a fixed ten-minute window starting at boot. CSR submitted 15:10:46, window
+closed 15:20:46, operator issued at 15:21:45 — **fifty-nine seconds too late**. On expiry the caller logged
+a warning and returned, ending the certificate lifecycle for the life of the process.
+
+Everything downstream sat behind it: the assignment channel is mTLS-only, so the signed assignment, the
+licence and convergence were all blocked on a certificate that was on Central ready to collect. And
+`fetchAssignment` returned silently when mTLS was not ready, so twenty-five minutes of polling wrote nothing
+at all — the activation appeared to hang with no error anywhere.
+
+Fixed in `62b412b`: the bootstrap retries with backoff until installed, shutdown, or a terminal error, and
+**collects before it submits** so retries never pile up duplicate CSRs. Activation is a human action with no
+deadline; an appliance installed on Monday and activated on Friday now converges. The corrected binary
+collected the waiting certificate and produced a `delivered` event with **no new `csr_submitted`** — the
+idempotence proof.
 
 ## DNS — resolved
 
