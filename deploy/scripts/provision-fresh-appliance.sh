@@ -145,6 +145,24 @@ else
   say "      refuse every package until one is pinned. Put the vendor's PUBLIC key at"
   say "      $VENDOR_PUB_SLOT and re-run, or run deploy/scripts/install-vendor-trust-key.sh directly."
 fi
+# ASSIGNMENT REGISTRY ROOT ANCHOR — required by BOTH activation paths.
+#
+# Without it the appliance logs "no trusted registry and no root anchor — assignment agent disabled" and
+# then never adopts an assignment. Activation in the control panel appears to succeed and the appliance
+# simply never converges: nothing errors, it stays awaiting-assignment forever. That is the worst shape a
+# missing prerequisite can take, so it is installed here rather than discovered at a site.
+ASSIGN_ROOT_SLOT="$DEPLOY/pki/assignment-registry-root.pub"
+if [ -n "${ASSIGN_ROOT_PUB:-}" ]; then
+  bash "$DEPLOY/scripts/install-assignment-root-anchor.sh" "$ASSIGN_ROOT_PUB"
+elif [ -s "$ASSIGN_ROOT_SLOT" ]; then
+  bash "$DEPLOY/scripts/install-assignment-root-anchor.sh" "$ASSIGN_ROOT_SLOT"
+elif [ -s "$ETC/assignment-registry-root.pub" ]; then
+  say "assignment root anchor already installed ($(bash "$DEPLOY/scripts/install-assignment-root-anchor.sh" --show | tail -1))"
+else
+  say "NOTE: no assignment registry root anchor. This appliance can register and be activated in the"
+  say "      control panel, but will NEVER adopt the assignment — it stays awaiting-assignment silently."
+  say "      Copy /etc/stayconnect/assignment-registry-root.pub from Central to $ASSIGN_ROOT_SLOT."
+fi
 say "credentials ok"
 
 # ---------------------------------------------------------------- 6. service environment (NO IDENTITY)
