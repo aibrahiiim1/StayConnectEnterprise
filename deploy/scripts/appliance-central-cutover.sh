@@ -138,14 +138,26 @@ if [ "$fail" = 0 ] || [ -n "$dns_ip" ]; then
     fail=1
   fi
   # The mTLS surface is a different port and a different certificate; an appliance needs both.
-  if echo | openssl s_client -connect "$MTLS_HOST:$MTLS_PORT" -servername "$FQDN" 2>/dev/null \
-       | openssl x509 -noout -checkhost "$FQDN" 2>/dev/null | grep -q "does match"; then
+  #
+  # `</dev/null` and `timeout` are not tidiness. `echo | openssl s_client` leaves the connection open
+  # waiting for input, so the probe hangs until something kills it and then reports "no certificate" --
+  # indistinguishable from a listener that really is misconfigured. This check claimed a correct
+  # certificate was invalid for exactly that reason.
+  mtls_pem="$(mktemp)"
+  timeout 15 openssl s_client -connect "$MTLS_HOST:$MTLS_PORT" -servername "$FQDN" </dev/null 2>/dev/null \
+    | sed -n '/BEGIN CERT/,/END CERT/p' > "$mtls_pem" || true
+  if [ ! -s "$mtls_pem" ]; then
+    bad "no certificate retrieved from $MTLS_HOST:$MTLS_PORT — is the port reachable?
+        Central opens it with deploy/scripts/central-firewall.sh; a filtered port times out silently."
+    fail=1
+  elif openssl x509 -in "$mtls_pem" -noout -checkhost "$FQDN" 2>/dev/null | grep -q "does match"; then
     ok "mTLS listener on $MTLS_HOST:$MTLS_PORT presents a certificate valid for $FQDN"
   else
     bad "mTLS listener on $MTLS_HOST:$MTLS_PORT does not present a certificate valid for $FQDN.
         Re-issue it on Central: deploy/scripts/central-mint-tls.sh, and check CTRLAPI_APPLIANCE_BASE."
     fail=1
   fi
+  rm -f "$mtls_pem"
 else
   say "  (skipped — the name does not resolve)"
 fi
