@@ -40,6 +40,9 @@ type RecoveryEvent = { id: number; service: string; event: string; cause: string
 function stateTone(s: string): "ok" | "warn" | "err" | "default" | "info" {
   switch (s) {
     case "healthy": return "ok";
+    // "waiting" is a correct state, not a fault: the service is intentionally idle because its
+    // configuration prerequisite does not exist yet (Kea before guest networking is configured).
+    case "waiting": return "default";
     case "recovering": case "starting": return "info";
     case "degraded": return "warn";
     case "crash_loop": case "failed": return "err";
@@ -131,9 +134,10 @@ export default function HealthPage() {
       )}
 
       {/* Summary tiles */}
-      <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
-        {[["healthy", "Healthy", "text-ok"], ["degraded", "Degraded", "text-warn"], ["recovering", "Recovering", "text-info"],
-          ["crash_loop", "Crash-loop", "text-err"], ["failed", "Failed", "text-err"], ["starting", "Starting", "text-muted"]].map(([k, label, tone]) => (
+      <div className="grid grid-cols-3 gap-3 sm:grid-cols-7">
+        {[["healthy", "Healthy", "text-ok"], ["waiting", "Waiting", "text-muted"], ["degraded", "Degraded", "text-warn"],
+          ["recovering", "Recovering", "text-info"], ["crash_loop", "Crash-loop", "text-err"], ["failed", "Failed", "text-err"],
+          ["starting", "Starting", "text-muted"]].map(([k, label, tone]) => (
           <div key={k} className="rounded-md border border-border bg-panel2/40 p-3">
             <div className={`text-2xl font-semibold ${tone}`}>{c[k] ?? 0}</div>
             <div className="mt-1 text-[10px] uppercase tracking-wider text-muted">{label}</div>

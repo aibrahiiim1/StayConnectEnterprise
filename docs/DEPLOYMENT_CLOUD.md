@@ -46,31 +46,66 @@
 | Port | Exposure |
 |---|---|
 | 443 (Caddy) | public — cloud-admin + `/cloud/v1` + appliance license fetch |
+| **9443 (ctrlapi mTLS)** | **public but client-certificate-gated** — the appliance mutual-TLS surface (`CTRLAPI_MTLS_ADDR`). `RequireAndVerifyClientCert` against the appliance CA rejects anything without a certificate the CA signed, during the handshake. It must be reachable from wherever hotels are: the design is appliance-initiated outbound, so restricting it to a management subnet breaks the first appliance installed elsewhere. |
 | 4222 (NATS TLS) | public but credentialed — appliance outbound connections terminate here |
 | 5432 / 6379 / 8080 / 3000 / 9090 / 3001 / 9093 | **never public** — loopback or private VPC only |
+
+Apply with **`deploy/scripts/central-firewall.sh`**, which derives the mTLS port from
+`deploy/config/central-endpoint.env` so it cannot drift from what appliances are told to dial. 9443 was
+listening but firewalled on the live host: `ss` showed it, loopback tests passed, and every appliance got a
+connection timeout — a port nothing on Central logs, because the connections never arrived.
 
 The cloud initiates **no** connections toward hotels. Anything that looks like
 "cloud dials appliance" is a design violation.
 
 ## 3. DNS / TLS
 
-- `api.<domain>` → ctrlapi vhost (appliances need this reachable: license
-  fetch is HTTPS with a real certificate — no `local_certs` in production).
-- `admin.<domain>` → cloud-admin vhost.
+- **`sc-central.echofusion.com` → ctrlapi** — the appliance-facing endpoint, and the *only* Central address
+  an appliance ever learns. It is defined once in
+  [`deploy/config/central-endpoint.env`](../deploy/config/central-endpoint.env); appliance provisioning and
+  Central both read that file, so the two cannot drift. Moving Central is a DNS change and nothing else —
+  no appliance is edited, because none of them knows an IP. Real certificate, never `local_certs`.
+- `admin.<domain>` → cloud-admin vhost. Deliberately a **different** name from the appliance endpoint, so
+  the admin UI can later sit behind MFA / VPN / Zero-Trust without that becoming a runtime dependency of a
+  hotel's connectivity.
 - NATS endpoint (`nats.<domain>:4222`) with TLS; appliance config pins it.
+
+An `/etc/hosts` entry on an appliance is a stopgap for the hours before DNS propagates. It is never the
+product's dependency: it exists on one machine and the next deployment will not have it. Provisioning says
+so out loud when it finds one.
 
 ## 4. Bring-up order
 
-1. Postgres (+ timescaledb extension) → apply `control-plane/migrations/0001..0019`.
+1. Postgres (+ timescaledb extension).
+   **Schema: `deploy/scripts/central-migrate.sh up`** — never a hand-typed range of files. It keeps a
+   `schema_migrations` ledger, so a fresh install and an upgrade reach the same schema and neither one can
+   skip a migration a feature depends on. On a Central that predates the ledger, adopt its history once
+   (`central-migrate.sh adopt --through <last-applied> --yes`) and then run `up`.
 2. Redis, NATS cluster.
-3. Generate the vendor key once: store per `CTRLAPI_VENDOR_KEY`, escrow the
-   encrypted copy, distribute the **public** key into the appliance image.
-4. ctrlapi (`ctrlapi serve`), then `ctrlapi seed-admin` for the first
-   platform_admin.
-5. Caddy vhosts; cloud-admin.
-6. Observability stack; backup cron; alert-delivery test.
-7. Smoke: `readyz`, `GET /cloud/v1/version`, issue a test license against a
-   staging tenant, verify an appliance can fetch it.
+3. **The vendor signing identity — created once, ever**:
+   `deploy/scripts/vendor-signing-key.sh init`, then immediately `… backup <encrypted-file>` and publish the
+   fingerprint. A *replacement* Central host runs `… restore <encrypted-file>` instead; running `init` there
+   would mint a new identity and every appliance in the field is pinned to the old one's public half. The
+   **public** key goes to appliances via `deploy/pki/vendor-license.pub` or
+   `install-vendor-trust-key.sh`; the private half never leaves this host.
+4. `/etc/stayconnect/ctrlapi.env` from
+   [`deploy/env/ctrlapi.env.example`](../deploy/env/ctrlapi.env.example), then
+   **`deploy/scripts/install-central-endpoint.sh`** — it installs the versioned endpoint to
+   `/etc/stayconnect/central-endpoint.env`, which the unit reads last so the fleet-wide value wins over any
+   hand-edit on this host. Without an appliance base in either place, offline first activation is silently
+   disabled.
+5. ctrlapi (`ctrlapi serve`), then `ctrlapi seed-admin` for the first platform_admin.
+6. Caddy vhosts; cloud-admin.
+7. Observability stack; backup cron; alert-delivery test.
+8. **`deploy/scripts/central-mint-tls.sh`** — issues Central's public certificate covering the
+   appliance-facing FQDN. The certificate an appliance validates must carry the name it was told to dial;
+   if it does not, the appliance's registration fails verification and reports only "awaiting enrollment".
+   Pass `CENTRAL_TLS_SANS` for any address still in use during a transition. Then restart Caddy.
+9. **`deploy/scripts/central-preflight.sh`** — checks the four things that otherwise fail silently at a
+   hotel: endpoint set and matching the versioned config, vendor key present with the right permissions,
+   assignment key present and distinct, schema fully migrated.
+10. Smoke: `readyz`, `GET /cloud/v1/version`, issue a test license against a staging tenant, verify an
+   appliance can fetch it.
 
 ## 5. Operational duties
 

@@ -7,12 +7,33 @@ Requires=docker.service
 [Service]
 Type=simple
 EnvironmentFile=/etc/stayconnect/ctrlapi.env
+# THE FLEET-WIDE APPLIANCE ENDPOINT, LAST SO IT WINS.
+#
+# Installed from the versioned deploy/config/central-endpoint.env by install-central-endpoint.sh. It is
+# read after ctrlapi.env deliberately: the endpoint appliances dial is a property of the fleet, not of this
+# host, and a stale hand-edited value in ctrlapi.env must not be able to override it. Optional (`-`) so a
+# host that has not installed it yet still starts, with offline activation disabled and saying so.
+EnvironmentFile=-/etc/stayconnect/central-endpoint.env
 ExecStart=/opt/stayconnect/bin/ctrlapi serve
 Restart=on-failure
 RestartSec=2
 User=root
 Group=root
 ProtectSystem=full
+# ProtectSystem=full MAKES /etc READ-ONLY, AND CENTRAL KEEPS ITS KEY MATERIAL THERE.
+#
+# ctrlapi does not only read /etc/stayconnect, it writes to it: the mTLS server certificate is rotated
+# before expiry (verify-before-switch, previous kept as .prev), and the per-purpose command/update signing
+# keys are created on first start if absent. Without this, every one of those writes fails with
+# "read-only file system".
+#
+# That failure was invisible. Certificate rotation happens once every couple of years, logs a warning, and
+# keeps serving the old certificate -- so the first symptom would have been an expired certificate and a
+# fleet unable to complete mTLS, years after the cause was introduced. It only surfaced now because adding
+# a name to the certificate made ctrlapi try to re-issue one on startup.
+#
+# Narrow on purpose: the rest of /etc stays read-only.
+ReadWritePaths=/etc/stayconnect
 NoNewPrivileges=yes
 
 [Install]

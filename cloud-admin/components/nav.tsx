@@ -23,8 +23,8 @@ const SECTIONS: Section[] = [
     title: "Infrastructure",
     items: [
       { href: "/sites",      label: "Sites",      icon: MapPin },
-      { href: "/appliances", label: "Appliances", icon: Server },
       { href: "/onboarding", label: "Onboarding", icon: PlugZap },
+      { href: "/appliances", label: "Appliances", icon: Server },
       { href: "/fleet",      label: "Fleet",      icon: Radar },
     ],
   },

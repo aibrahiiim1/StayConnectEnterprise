@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -59,8 +60,23 @@ func (s *Store) keyPath() string { return filepath.Join(s.Dir, "ed25519.key") }
 // Returns (nil, nil) if no identity is present AND no bootstrapToken was
 // given — scd can choose whether that's a soft or hard failure.
 func (s *Store) LoadOrEnroll(ctx context.Context, ctrlBase, bootstrapToken, serial string, autoRegister bool) (*Identity, error) {
+	// AN UNBOUND KEYPAIR IS NOT AN ENROLLED IDENTITY.
+	//
+	// EnsureLocalKeypair (offline first activation) writes an identity.json holding a keypair and no
+	// appliance id -- deliberately, because a factory-clean appliance has no id to claim yet. But `load`
+	// succeeds on that file, so returning it here meant: download one offline activation request, and this
+	// appliance can never self-register online again. It would sit at "awaiting enrollment" forever, having
+	// silently lost the path it was actually going to be activated by, and the only visible symptom is an
+	// appliance that never appears in the control panel.
+	//
+	// An identity counts only once it carries the appliance id Central minted for it.
 	if id, err := s.load(); err == nil {
-		return id, nil
+		if id.ApplianceID != "" {
+			return id, nil
+		}
+		// Keypair present but unbound: fall through and let self-registration bind it. register() reuses
+		// this exact key rather than minting a second one, so an offline activation request an operator is
+		// already carrying stays valid.
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("identity load: %w", err)
 	}
@@ -173,9 +189,21 @@ func (s *Store) register(ctx context.Context, ctrlBase string) (*Identity, error
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", s.Dir, err)
 	}
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("generate key: %w", err)
+	// REUSE AN EXISTING UNBOUND KEYPAIR. An appliance has ONE identity key. If an operator has already
+	// downloaded an offline activation request, that request names this key and is signed by it; minting a
+	// second key here would invalidate the file they are carrying, with no explanation beyond a refusal at
+	// the end of the round trip. Only generate when there is genuinely nothing to reuse.
+	var pub ed25519.PublicKey
+	var priv ed25519.PrivateKey
+	if existing, err := s.load(); err == nil && existing.ApplianceID == "" && existing.privKey != nil {
+		priv = existing.privKey
+		pub = priv.Public().(ed25519.PublicKey)
+	} else {
+		var genErr error
+		pub, priv, genErr = ed25519.GenerateKey(rand.Reader)
+		if genErr != nil {
+			return nil, fmt.Errorf("generate key: %w", genErr)
+		}
 	}
 	pubB64 := base64.RawStdEncoding.EncodeToString(pub)
 	hw := hwid.Detect()
@@ -203,7 +231,18 @@ func (s *Store) register(ctx context.Context, ctrlBase string) (*Identity, error
 	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		// Central unreachable — not fatal; retry on a later boot/loop.
+		// Central unreachable — NOT FATAL, and retried on a later boot/loop. A hotel's uplink being down
+		// is not a reason for the appliance to refuse to start.
+		//
+		// BUT IT MUST NOT BE SILENT. This returned nil,nil with nothing written anywhere, so the only trace
+		// left was the caller's "awaiting enrollment: no appliance identity; run the local setup wizard" --
+		// which points the operator at a wizard when the actual cause is that the appliance cannot verify
+		// Central's certificate, or cannot reach it at all. On a live Production appliance that read as a
+		// setup problem for a full day while the appliance had simply never trusted Central's CA.
+		slog.Warn("appliance self-registration could not reach Central; will retry",
+			"endpoint", ctrlBase+"/v1/appliances/register", "err", err,
+			"hint", "TLS verification failure? the appliance must trust Central's CA — "+
+				"deploy/scripts/install-central-trust.sh")
 		return nil, nil
 	}
 	defer resp.Body.Close()
@@ -286,4 +325,61 @@ func (s *Store) load() (*Identity, error) {
 	}
 	id.privKey = ed25519.PrivateKey(priv)
 	return &id, nil
+}
+
+// EnsureLocalKeypair creates and persists an identity keypair WITHOUT contacting Central, and returns the
+// identity. If one already exists it is returned unchanged.
+//
+// This exists for OFFLINE FIRST ACTIVATION: a factory-clean appliance with no route to Central still has to
+// prove possession of a key before Central will bind an activation package to it. The key is generated here,
+// on the appliance, and the private half never leaves — the activation request carries only the public half
+// and a signature made with the private one.
+//
+// ApplianceID is deliberately left EMPTY. Only Central mints appliance ids, and only the signed assignment
+// carries tenant and site; generating a keypair locally does not make an appliance identity, it makes the
+// evidence that one can be issued.
+func (s *Store) EnsureLocalKeypair() (*Identity, error) {
+	if id, err := s.load(); err == nil {
+		return id, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("identity load: %w", err)
+	}
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return nil, fmt.Errorf("mkdir %s: %w", s.Dir, err)
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generate key: %w", err)
+	}
+	hw := hwid.Detect()
+	id := &Identity{Serial: hw.Serial, PublicKeyB64: base64.RawStdEncoding.EncodeToString(pub), privKey: priv}
+	// Key first (0600), then identity.json, so a crash between the two leaves a key with no claim rather
+	// than a claim with no key.
+	if err := writeFileAtomic(s.keyPath(), priv, 0o600); err != nil {
+		return nil, fmt.Errorf("write key: %w", err)
+	}
+	b, _ := json.Marshal(id)
+	if err := writeFileAtomic(s.idPath(), b, 0o644); err != nil {
+		return nil, fmt.Errorf("write identity.json: %w", err)
+	}
+	return id, nil
+}
+
+// AdoptApplianceID records the appliance id Central minted for an offline first activation. It refuses to
+// overwrite an existing, different id: an appliance has one identity, and silently repointing it is exactly
+// the confusion this whole subsystem exists to prevent.
+func (s *Store) AdoptApplianceID(applianceID string) error {
+	id, err := s.load()
+	if err != nil {
+		return err
+	}
+	if id.ApplianceID != "" && id.ApplianceID != applianceID {
+		return fmt.Errorf("identity already bound to appliance %s", id.ApplianceID)
+	}
+	if id.ApplianceID == applianceID {
+		return nil
+	}
+	id.ApplianceID = applianceID
+	b, _ := json.Marshal(id)
+	return writeFileAtomic(s.idPath(), b, 0o644)
 }

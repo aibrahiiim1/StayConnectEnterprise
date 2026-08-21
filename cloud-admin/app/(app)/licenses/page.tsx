@@ -119,6 +119,37 @@ export default function LicensesPage() {
     try { await withStepUp(() => api.post(`/cloud/v1/licenses/${id}/resume`)); load(); }
     catch (e) { setErr(errMsg(e)); }
   }
+  // DOWNLOAD FOR OFFLINE INSTALL.
+  //
+  // The signed, appliance-bound package already existed as an API and had no UI, so an offline site had no
+  // way to get its licence without someone calling the endpoint by hand. This is the Central half of the
+  // two-step renewal: generate + download here, upload in Hotel Admin.
+  //
+  // The file is bound to ONE appliance (id, serial, key fingerprints, tenant, site), single-use and
+  // expiring. It carries no private key: the appliance proves it is the intended recipient with a key that
+  // never leaves it.
+  async function onDownloadOffline(l: License) {
+    const applianceID = l.appliance_ids?.[0];
+    if (!applianceID) { setMsg("This licence is not bound to an appliance yet — bind it first."); return; }
+    setMsg(null);
+    try {
+      const res = await withStepUp(() =>
+        api.post<{ package_id: string; package: unknown }>(
+          `/cloud/v1/offline-packages/${applianceID}/generate`, { valid_hours: 168 }));
+      const ap = applianceOf(l);
+      const blob = new Blob([JSON.stringify(res.package, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `activation-${ap?.serial || applianceID.slice(0, 8)}-v${l.license_version ?? 0}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg(`Activation package downloaded. Upload it in Hotel Admin under Setup / Activation. Valid 7 days, single use.`);
+    } catch (e: unknown) {
+      setMsg(e instanceof Error ? e.message : String(e));
+    }
+  }
+
   async function onRenew(l: License) {
     const limit = window.prompt("Max concurrent online guests (0 = unlimited):",
       String(l.max_concurrent_online_guests ?? 0));
@@ -262,6 +293,12 @@ export default function LicensesPage() {
                         <div className="flex gap-1 justify-end">
                           {(l.status === "active" || l.status === "suspended") && (
                             <Button size="sm" variant="ghost" onClick={() => onRenew(l)}>Renew</Button>
+                          )}
+                          {(l.appliance_ids?.length ?? 0) > 0 && (
+                            <Button size="sm" variant="ghost" onClick={() => onDownloadOffline(l)}
+                              title="Signed, appliance-bound, single-use. Upload in Hotel Admin → Setup / Activation.">
+                              Download for offline
+                            </Button>
                           )}
                           {l.status === "active" && (
                             <Button size="sm" variant="ghost" onClick={() => onSuspend(l.id)}>Suspend</Button>

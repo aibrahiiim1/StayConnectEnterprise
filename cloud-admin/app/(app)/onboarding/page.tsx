@@ -43,6 +43,11 @@ function slugify(s: string) {
 export default function OnboardingPage() {
   const router = useRouter();
   const [pending, setPending] = useState<Pending[] | null>(null);
+  // OFFLINE FIRST ACTIVATION. Importing a request only registers the appliance as Pending; it then flows
+  // through the SAME Activate form below, so customer, site and licence terms are chosen exactly once and by
+  // an operator — never taken from the imported file.
+  const [offlineMsg, setOfflineMsg] = useState<string | null>(null);
+  const [offlineBusy, setOfflineBusy] = useState(false);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   // Simple license model — the activation form carries the license terms.
   const [maxGuests, setMaxGuests] = useState("500");
@@ -106,6 +111,46 @@ export default function OnboardingPage() {
     const t = setInterval(() => { loadPending(); loadRegistered(); }, 5000);
     return () => clearInterval(t);
   }, [phase, loadPending, loadRegistered]);
+
+  async function importActivationRequest(f: File | null) {
+    if (!f) return;
+    setOfflineMsg(null); setOfflineBusy(true);
+    try {
+      const req = JSON.parse(await f.text());
+      const r = await api.post<{ appliance_id: string; serial: string }>(
+        "/cloud/v1/offline-activation/requests", req);
+      setOfflineMsg(`Appliance ${r.serial} imported and is now pending. Select it below, choose customer, site and licence terms, then Activate.`);
+      await loadPending();
+    } catch (e: unknown) {
+      setOfflineMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOfflineBusy(false);
+    }
+  }
+
+  // Generates the single file that completes a first activation offline. The appliance must already have a
+  // customer, site and licence — the same things the online Activate button sets — because the package
+  // carries the signed assignment and the signed licence, not a promise of them.
+  async function generateActivationPackage(applianceID: string, serial: string) {
+    setOfflineMsg(null); setOfflineBusy(true);
+    try {
+      const res = await withStepUp(() =>
+        api.post<{ package_id: string; package: unknown }>(
+          `/cloud/v1/offline-activation/${applianceID}/package`, { valid_hours: 168 }));
+      const blob = new Blob([JSON.stringify(res.package, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `activation-package-${serial || applianceID.slice(0, 8)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setOfflineMsg("Activation package downloaded. Upload it in Hotel Admin → Setup / Activation. Valid 7 days, single use.");
+    } catch (e: unknown) {
+      setOfflineMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setOfflineBusy(false);
+    }
+  }
 
   async function onDeactivate(a: ApplianceRow) {
     if (!confirm(`Deactivate ${a.serial}? Its license is revoked; the appliance can be re-activated.`)) return;
@@ -241,6 +286,21 @@ export default function OnboardingPage() {
       {!phase ? (
         <div className="space-y-6">
           <Card>
+            <CardHeader><CardTitle>Offline activation</CardTitle></CardHeader>
+            <CardBody className="space-y-3">
+              <p className="text-sm text-muted">
+                For an appliance with no route here. Import the activation request it produced, activate it
+                below as usual, then generate the package to carry back. The imported file registers the
+                appliance only — customer, site and licence terms are chosen here, by you.
+              </p>
+              <input type="file" accept=".json,application/json" disabled={offlineBusy}
+                onChange={(e) => void importActivationRequest(e.target.files?.[0] ?? null)}
+                className="block text-sm" />
+              {offlineMsg && <div className="text-sm text-muted">{offlineMsg}</div>}
+            </CardBody>
+          </Card>
+
+          <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle>Pending activation</CardTitle>
               <Button variant="ghost" size="sm" onClick={loadPending}><RefreshCw size={14} /> Refresh</Button>
@@ -341,6 +401,7 @@ export default function OnboardingPage() {
                         <TD className="text-right">
                           <div className="flex justify-end gap-2">
                             <Button size="sm" variant="secondary" disabled={rowBusy === a.id} onClick={() => onDeactivate(a)}>Deactivate</Button>
+                            <Button size="sm" variant="ghost" disabled={offlineBusy} title="Offline first activation: one signed file carrying the assignment, trust material and licence." onClick={() => void generateActivationPackage(a.id, a.serial)}>Activation package</Button>
                             {showAdvanced && <Button size="sm" variant="ghost" disabled={rowBusy === a.id} onClick={() => advancedAction(a, "reissue certificate", `/cloud/v1/certificates/${a.id}/issue`)}>Reissue cert</Button>}
                             {showAdvanced && <Button size="sm" variant="ghost" disabled={rowBusy === a.id} onClick={() => advancedAction(a, "force reconcile", `/cloud/v1/appliances-admin/${a.id}/force-reconcile`)}>Reconcile</Button>}
                             {showAdvanced && <Button size="sm" variant="ghost" disabled={rowBusy === a.id} onClick={() => advancedAction(a, "decommission", `/cloud/v1/appliances-admin/${a.id}/decommission`)}>Decommission</Button>}

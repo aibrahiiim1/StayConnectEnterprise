@@ -28,7 +28,11 @@
 	admin off
 	auto_https disable_redirects
 }
-150.0.0.252, admin.stayconnect.local {
+# THE APPLIANCE-FACING NAME COMES FIRST and is the one that matters: it must match
+# CTRLAPI_APPLIANCE_BASE in deploy/config/central-endpoint.env, or appliances reach a vhost that does not
+# answer for the name they dialled. The IP is kept only so appliances provisioned before the name existed
+# keep working until they are moved; remove it once none are left.
+sc-central.echofusion.com, 150.0.0.252, admin.stayconnect.local {
 	tls /etc/caddy/tls/server.crt /etc/caddy/tls/server.key
 	encode zstd gzip
 	header {

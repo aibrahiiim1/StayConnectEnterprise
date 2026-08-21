@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -20,9 +21,9 @@ import (
 	"github.com/stayconnect/enterprise/control-plane/internal/auth"
 	"github.com/stayconnect/enterprise/control-plane/internal/configpush"
 	"github.com/stayconnect/enterprise/control-plane/internal/licensing"
-	"github.com/stayconnect/enterprise/control-plane/internal/pki"
 	"github.com/stayconnect/enterprise/control-plane/internal/metrics"
 	"github.com/stayconnect/enterprise/control-plane/internal/oidc"
+	"github.com/stayconnect/enterprise/control-plane/internal/pki"
 	"github.com/stayconnect/enterprise/control-plane/internal/transport"
 )
 
@@ -35,21 +36,21 @@ type Deps struct {
 	// compatibility adapters must read/write THERE, not the cloud schema.
 	// nil = single-DB mode (pre-cutover): falls back to DB.
 	// See docs/API_DEPRECATIONS.md; these mounts disappear after the pilot.
-	GuestDB      *pgxpool.Pool
-	Transport    transport.ApplianceTransport
-	ConfigPush   *configpush.Pusher
-	Metrics      *metrics.Registry
-	OIDC         *oidc.Registry
-	Licensing    *licensing.Service // nil when no vendor key is configured
-	CA           *pki.CA            // appliance certificate authority; nil disables PKI routes
-	ReplayCache  *applianceauth.ReplayCache // shared jti replay cache (both transports)
-	NATSConn     *nats.Conn         // live NATS (mTLS) for command publish; nil disables commands
-	CommandKey   string             // path to command-signing key
-	AssignKey    ed25519.PrivateKey // dedicated key for signing appliance assignments; nil disables signed assignments
-	AssignRegistryRoot ed25519.PrivateKey // registry root key (re-signs the trust registry on key-state change)
-	Version      string
-	AllowOrigins []string // CORS allowlist for dev UI on :3000
-	CookieSecure bool     // set true behind HTTPS
+	GuestDB            *pgxpool.Pool
+	Transport          transport.ApplianceTransport
+	ConfigPush         *configpush.Pusher
+	Metrics            *metrics.Registry
+	OIDC               *oidc.Registry
+	Licensing          *licensing.Service         // nil when no vendor key is configured
+	CA                 *pki.CA                    // appliance certificate authority; nil disables PKI routes
+	ReplayCache        *applianceauth.ReplayCache // shared jti replay cache (both transports)
+	NATSConn           *nats.Conn                 // live NATS (mTLS) for command publish; nil disables commands
+	CommandKey         string                     // path to command-signing key
+	AssignKey          ed25519.PrivateKey         // dedicated key for signing appliance assignments; nil disables signed assignments
+	AssignRegistryRoot ed25519.PrivateKey         // registry root key (re-signs the trust registry on key-state change)
+	Version            string
+	AllowOrigins       []string // CORS allowlist for dev UI on :3000
+	CookieSecure       bool     // set true behind HTTPS
 }
 
 func NewRouter(d Deps) http.Handler {
@@ -253,6 +254,27 @@ func NewRouter(d Deps) http.Handler {
 			}
 			if ob := api.NewOfflineBase(base, vendorKey, "/etc/stayconnect/pki/nats-ca-bundle.crt"); ob != nil {
 				r.Mount("/offline-packages", ob.Routes())
+			}
+			// OFFLINE FIRST ACTIVATION (separate envelope; see api/offline_activation_api.go).
+			//
+			// CTRLAPI_APPLIANCE_BASE is the APPLIANCE-FACING endpoint written into every activation package.
+			// It is a stable HTTPS FQDN on purpose: appliances that learn an IP cannot be moved to cloud
+			// hosting later without touching every hotel, and the appliance API is deliberately a different
+			// surface from the human admin UI so the UI can gain MFA/VPN/Zero-Trust without becoming a
+			// runtime dependency of a hotel's connectivity.
+			// NO DEFAULT, ON PURPOSE. This value is written into every activation package and becomes the
+			// address a hotel's appliance will dial for the rest of its life. Defaulting it to a plausible
+			// name would mean shipping packages pointing at DNS that may not exist, and the failure would
+			// surface months later at a site nobody is standing in. Unset disables offline activation and
+			// says why; it does not guess.
+			applianceBase := os.Getenv("CTRLAPI_APPLIANCE_BASE")
+			if applianceBase == "" {
+				slog.Warn("offline first activation is DISABLED: CTRLAPI_APPLIANCE_BASE is not set. " +
+					"Set it to the appliance-facing HTTPS endpoint (a stable FQDN, not an IP) that " +
+					"appliances should dial, then restart.")
+			} else if oab := api.NewOfflineActivationBase(base, api.AssignmentBaseFrom(base), vendorKey,
+				"/etc/stayconnect/pki/nats-ca-bundle.crt", applianceBase); oab != nil {
+				r.Mount("/offline-activation", oab.Routes())
 			}
 			// Signed software update lifecycle (platform.updates.manage + reauth).
 			updateKey := os.Getenv("CTRLAPI_UPDATE_KEY")

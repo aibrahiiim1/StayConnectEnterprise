@@ -241,6 +241,10 @@ type server struct {
 
 	// certMgr owns the mTLS client-certificate lifecycle (nil if disabled).
 	certMgr *appliancecert.Manager
+	// noMTLSLogged counts consecutive assignment polls skipped because the mTLS certificate is not ready.
+	// Only the assignment agent touches it, and only from its own goroutine, so it needs no lock. It
+	// exists to make "waiting for the certificate" visible without writing a line every 30 seconds.
+	noMTLSLogged int
 	// natsConn is the live NATS connection (nil if not connected).
 	natsConn *nats.Conn
 	// identityKeyFpr is the fingerprint of the identity-signing public key
@@ -693,6 +697,10 @@ func main() {
 		WANMAC:                 s.hw.WANMAC,
 	})
 	s.lic.Load(rootCtx)
+	// CRASH RECOVERY FOR OFFLINE FIRST ACTIVATION. Runs after the licence state is loaded, because deciding
+	// whether an interrupted activation completed means asking whether the licence actually landed. Either
+	// finishes the activation or rolls it back to unassigned; never leaves it half-applied.
+	s.recoverInterruptedActivation()
 	// The concurrent-online-guest cap still comes DIRECTLY from the local signed licence and is still
 	// enforced atomically inside session creation -- it now lives in the IAM-v2 activation transaction
 	// (iamv2_session_activate.go), which reads s.lic itself. Central availability plays no part in guest
@@ -771,6 +779,10 @@ func main() {
 	r.Get("/v1/setup/status", s.setupStatus)
 	r.Post("/v1/setup/enroll", s.setupEnroll)
 	r.Post("/v1/setup/offline-import", s.setupOfflineImport)
+	// OFFLINE FIRST ACTIVATION. Separate from offline-import above, which carries a licence to an appliance
+	// that is already assigned; these two carry a factory-clean appliance all the way to assigned+licensed.
+	r.Get("/v1/setup/activation-request", s.setupActivationRequest)
+	r.Post("/v1/setup/activation-package", s.setupActivationPackage)
 
 	// Phase 2 (DARK): guest-portal commerce routes are mounted ONLY when the portal surface is ON. While
 	// dark they are ABSENT (404) and the commerce engine holds a nil repository, so zero Phase-2 SQL runs.
@@ -1071,8 +1083,12 @@ func main() {
 			s.certMgr = certMgr
 		}
 		go func() {
-			if err := certMgr.Ensure(rootCtx); err != nil {
-				slog.Warn("appliancecert: ensure failed", "err", err)
+			// KEEP TRYING. This used to be a single Ensure() whose ten-minute window started at boot; on
+			// expiry it logged a warning and returned, ending the certificate lifecycle for the life of the
+			// process and taking the assignment channel (mTLS-only), the licence and convergence with it.
+			// First issuance waits on a human pressing Activate, which is not an event with a deadline.
+			if err := certMgr.EnsureUntilInstalled(rootCtx); err != nil {
+				slog.Warn("appliancecert: certificate bootstrap stopped", "err", err)
 				return
 			}
 			if out, err := certMgr.MTLSHello(rootCtx); err != nil {

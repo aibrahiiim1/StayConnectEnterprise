@@ -133,20 +133,68 @@ func checkCaddy(ctx context.Context, s *server) (bool, string, string) {
 	return false, fmt.Sprintf("caddy admin http %d", code), ""
 }
 
+// keaView is netd's answer to both Kea questions: is it configured to run here yet, and is it healthy.
+type keaView struct {
+	KeaConfigured bool   `json:"kea_configured"`
+	KeaHealthy    bool   `json:"kea_healthy"`
+	KeaDetail     string `json:"kea_detail"`
+}
+
+func keaFromNetd(ctx context.Context, s *server) (keaView, bool) {
+	code, body, err := unixGet(ctx, "/run/stayconnect/netd.sock", "/v1/health")
+	if err != nil || code != 200 {
+		return keaView{}, false
+	}
+	var v keaView
+	if json.Unmarshal(body, &v) != nil {
+		return keaView{}, false
+	}
+	return v, true
+}
+
+// keaApplicable reports whether Kea is supposed to be running on this appliance yet.
+//
+// It is not, until a guest network has been applied and confirmed: Kea binds the LAN bridge, which does not
+// exist before that. netd owns that fact, so it is asked rather than guessed.
+//
+// When netd cannot be reached the answer is APPLICABLE. We do not know the prerequisite is absent, and
+// assuming it is would let an unreachable netd silently suppress a genuinely broken Kea. The check below
+// then reports the netd dependency, which is the honest description of that situation.
+func keaApplicable(ctx context.Context, s *server) (bool, string) {
+	v, reachable := keaFromNetd(ctx, s)
+	return keaApplicableFrom(v, reachable)
+}
+
+// keaApplicableFrom is the decision alone, separated from the transport so the fail-open rule can be
+// tested: an unreachable netd must never be able to turn a broken Kea into a quiet "waiting".
+func keaApplicableFrom(v keaView, reachable bool) (bool, string) {
+	if !reachable || v.KeaConfigured {
+		return true, ""
+	}
+	detail := v.KeaDetail
+	if detail == "" {
+		detail = "waiting for guest networking: Kea serves the LAN bridge, which does not exist yet"
+	}
+	return false, detail
+}
+
+// checkKea runs only once Kea IS expected to be running (see keaApplicable), so a failure here is a real
+// failure and is reported as one.
 func checkKea(ctx context.Context, s *server) (bool, string, string) {
-	// netd owns Kea and reports kea_healthy from its own control-channel probe.
+	// netd owns Kea and reports its health from its own control-channel probe.
 	code, body, err := unixGet(ctx, "/run/stayconnect/netd.sock", "/v1/health")
 	if err != nil {
 		return false, "cannot assess Kea (netd unreachable): " + errShort(err), "netd"
 	}
-	var v struct {
-		KeaHealthy bool `json:"kea_healthy"`
-	}
+	var v keaView
 	_ = json.Unmarshal(body, &v)
 	if code == 200 && v.KeaHealthy {
 		return true, "Kea DHCP healthy (via netd control channel)", ""
 	}
-	return false, "Kea DHCP not healthy (netd reports kea_healthy=false)", ""
+	if v.KeaDetail != "" {
+		return false, v.KeaDetail, ""
+	}
+	return false, "Kea DHCP not healthy (netd reports it is not answering)", ""
 }
 
 func checkUnbound(ctx context.Context, s *server) (bool, string, string) {

@@ -48,9 +48,9 @@ func (s *server) setupOfflineImport(w http.ResponseWriter, r *http.Request) {
 	}
 	// Single-use: reboot-persistent ledger in the site DB.
 	if s.db != nil {
-		_, _ = s.db.Exec(r.Context(), `CREATE TABLE IF NOT EXISTS edge_offline_packages (
-            package_id UUID PRIMARY KEY, nonce TEXT UNIQUE, consumed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            reconciled_at TIMESTAMPTZ)`)
+		// edge_offline_packages is declared by migration 0048. It used to be created here on every import,
+		// which hid the schema from anyone reading the migrations and would silently produce a different
+		// shape than the declared one on a database restored from an older dump.
 		tag, err := s.db.Exec(r.Context(),
 			`INSERT INTO edge_offline_packages (package_id, nonce) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
 			pkg.PackageID, pkg.Nonce)
