@@ -59,8 +59,23 @@ func (s *Store) keyPath() string { return filepath.Join(s.Dir, "ed25519.key") }
 // Returns (nil, nil) if no identity is present AND no bootstrapToken was
 // given — scd can choose whether that's a soft or hard failure.
 func (s *Store) LoadOrEnroll(ctx context.Context, ctrlBase, bootstrapToken, serial string, autoRegister bool) (*Identity, error) {
+	// AN UNBOUND KEYPAIR IS NOT AN ENROLLED IDENTITY.
+	//
+	// EnsureLocalKeypair (offline first activation) writes an identity.json holding a keypair and no
+	// appliance id -- deliberately, because a factory-clean appliance has no id to claim yet. But `load`
+	// succeeds on that file, so returning it here meant: download one offline activation request, and this
+	// appliance can never self-register online again. It would sit at "awaiting enrollment" forever, having
+	// silently lost the path it was actually going to be activated by, and the only visible symptom is an
+	// appliance that never appears in the control panel.
+	//
+	// An identity counts only once it carries the appliance id Central minted for it.
 	if id, err := s.load(); err == nil {
-		return id, nil
+		if id.ApplianceID != "" {
+			return id, nil
+		}
+		// Keypair present but unbound: fall through and let self-registration bind it. register() reuses
+		// this exact key rather than minting a second one, so an offline activation request an operator is
+		// already carrying stays valid.
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("identity load: %w", err)
 	}
@@ -173,9 +188,21 @@ func (s *Store) register(ctx context.Context, ctrlBase string) (*Identity, error
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", s.Dir, err)
 	}
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, fmt.Errorf("generate key: %w", err)
+	// REUSE AN EXISTING UNBOUND KEYPAIR. An appliance has ONE identity key. If an operator has already
+	// downloaded an offline activation request, that request names this key and is signed by it; minting a
+	// second key here would invalidate the file they are carrying, with no explanation beyond a refusal at
+	// the end of the round trip. Only generate when there is genuinely nothing to reuse.
+	var pub ed25519.PublicKey
+	var priv ed25519.PrivateKey
+	if existing, err := s.load(); err == nil && existing.ApplianceID == "" && existing.privKey != nil {
+		priv = existing.privKey
+		pub = priv.Public().(ed25519.PublicKey)
+	} else {
+		var genErr error
+		pub, priv, genErr = ed25519.GenerateKey(rand.Reader)
+		if genErr != nil {
+			return nil, fmt.Errorf("generate key: %w", genErr)
+		}
 	}
 	pubB64 := base64.RawStdEncoding.EncodeToString(pub)
 	hw := hwid.Detect()
