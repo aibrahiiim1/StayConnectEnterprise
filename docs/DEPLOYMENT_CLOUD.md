@@ -91,10 +91,14 @@ so out loud when it finds one.
 5. ctrlapi (`ctrlapi serve`), then `ctrlapi seed-admin` for the first platform_admin.
 6. Caddy vhosts; cloud-admin.
 7. Observability stack; backup cron; alert-delivery test.
-8. **`deploy/scripts/central-preflight.sh`** — checks the four things that otherwise fail silently at a
+8. **`deploy/scripts/central-mint-tls.sh`** — issues Central's public certificate covering the
+   appliance-facing FQDN. The certificate an appliance validates must carry the name it was told to dial;
+   if it does not, the appliance's registration fails verification and reports only "awaiting enrollment".
+   Pass `CENTRAL_TLS_SANS` for any address still in use during a transition. Then restart Caddy.
+9. **`deploy/scripts/central-preflight.sh`** — checks the four things that otherwise fail silently at a
    hotel: endpoint set and matching the versioned config, vendor key present with the right permissions,
    assignment key present and distinct, schema fully migrated.
-9. Smoke: `readyz`, `GET /cloud/v1/version`, issue a test license against a staging tenant, verify an
+10. Smoke: `readyz`, `GET /cloud/v1/version`, issue a test license against a staging tenant, verify an
    appliance can fetch it.
 
 ## 5. Operational duties
