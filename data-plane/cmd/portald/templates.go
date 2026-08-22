@@ -187,7 +187,6 @@ const landingHTML = `<!doctype html>
       if (cfg.email   && cfg.email.enabled)   enabled.push('email');
       if (cfg.sms     && cfg.sms.enabled)     enabled.push('sms');
       PHASE3_PMS = !!cfg.phase3_pms;
-      SITE_HAS_NO_PACKAGES = cfg.internet_packages_available === false;
       if (cfg.pms     && cfg.pms.enabled) {
         enabled.push('pms');
         document.getElementById('pms-prompt').textContent = PMSPrompts[cfg.pms.mode] || PMSPrompts.either;
@@ -217,16 +216,18 @@ const landingHTML = `<!doctype html>
           });
         }
       }
-      // NO INTERNET PACKAGE EXISTS AT THIS SITE.
+      // NO INTERNET PACKAGE EXISTS AT THIS SITE — a site availability notice, not an authentication result.
       //
-      // Identity and internet are separate things, and this is the case where the first works and the second
-      // cannot. Saying so up front — before the guest types a room number and is refused — is the whole point:
-      // the previous behaviour verified them successfully and then answered "we could not verify your stay,
-      // check your details or contact reception", which is wrong twice over. Their details were right, and
-      // reception cannot publish a package.
+      // Every property that makes this safe is structural rather than a matter of care:
       //
-      // It is a site-wide fact that is identical for every guest, so stating it reveals nothing about anyone
-      // and cannot be used to probe whether a room or a name is real.
+      //   * it is read from /api/auth-methods on page render, BEFORE any identity is submitted;
+      //   * the value is site-wide configuration — the same answer for every guest on this network;
+      //   * it is rendered above the sign-in tabs, as general availability, never in an error slot;
+      //   * nothing after submission reads it, so it cannot vary with what a guest typed.
+      //
+      // That is what keeps it outside the uniform-envelope contract. The contract governs what an
+      // AUTHENTICATION ATTEMPT may reveal; this is a statement about the site made before anyone attempts
+      // anything, and it carries no information about any room, name or stay.
       if (cfg.internet_packages_available === false) {
         const n = document.getElementById('site-notice');
         n.textContent = 'Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let reception know.';
@@ -303,17 +304,26 @@ const landingHTML = `<!doctype html>
     // deliberately no branch here that renders a server reason — a page that could say "that room exists but
     // the name is wrong" is an occupancy oracle for anyone sitting in the lobby.
     let PHASE3_PMS = false;
-    // Site-level, set once from /api/auth-methods. Never derived from a resolution answer.
-    let SITE_HAS_NO_PACKAGES = false;
     let PMS_REQUEST_ID = '';
     // PMS_ATTEMPT_KEY is the details the current request id belongs to. The id must survive a retry of the
     // SAME attempt and must not survive a different one — see phase3RequestID below.
     let PMS_ATTEMPT_KEY = '';
     let PMS_AUTH_CONTEXT = '';
-    const PHASE3_FAIL = 'We could not match those details to a current stay. Please check the room number and name, or contact reception.';
-    // Used only when the site has no package to give. Kept distinct because telling a guest whose details
-    // were correct to go and re-check them sends them to the one place that cannot help.
-    const PHASE3_NO_PACKAGE = 'You are checked in, but there is no internet package available to give you right now. Please let reception know.';
+    // THE ONE MESSAGE EVERY AUTHENTICATION NON-SUCCESS RENDERS.
+    //
+    // Wrong room, wrong name, no such stay, checked out, stale occupancy, PMS unreachable, network not
+    // mapped, verified with nothing to grant, the server's response-time budget expiring, a dropped
+    // connection: all of them produce exactly this text. That uniformity is the Phase-0 FINAL contract and a
+    // security property, not a UX shortcut — any answer that varies with the outcome lets someone submit
+    // room/surname pairs and learn which ones are real.
+    //
+    // An earlier revision added a second message for the verified-but-no-package case, on the reasoning that
+    // a correct guest should not be told to re-check correct details. The reasoning was right about the
+    // guest and wrong about the contract: differentiating AFTER submission is exactly the oracle the uniform
+    // envelope exists to close. The site-level notice above the sign-in tabs carries that information
+    // instead — it is read from configuration before any identity is submitted, is identical for every guest
+    // on the site, and never varies with what was typed.
+    const PHASE3_FAIL = 'We could not verify your stay. Please check your details or contact reception.';
 
     function newRequestID() {
       if (window.crypto && window.crypto.randomUUID) { return window.crypto.randomUUID(); }
@@ -407,19 +417,15 @@ const landingHTML = `<!doctype html>
         renderPhase3Choices(j.choices || [], errEl);
         return;
       }
-      // EVERY other answer — including a transport failure — is the same message, with ONE exception.
-      //
-      // If this site has no internet package at all, the outcome cannot have been an identity failure for
-      // anyone, so the honest message is the site-level one. That is decided from configuration the portal
-      // already holds, not from anything the server said about this guest, so the uniform envelope is intact
-      // and no identity oracle is created.
+      // EVERY other answer — including a transport failure — is the same message. No branch here reads the
+      // server's outcome, the site configuration, or anything else: one assignment, one string.
       //
       // The request id is deliberately KEPT. A non-success can mean the guest's details were wrong, but it can
       // equally mean the attempt was abandoned at the server's response-time budget or lost in transit with
       // the resolution already recorded. Discarding the id would turn the second of those into a duplicate
       // resolution; keeping it lets the retry return the same Auth Context. A guest who corrects their details
       // gets a new id automatically, because the details are what the id is keyed to.
-      errEl.textContent = SITE_HAS_NO_PACKAGES ? PHASE3_NO_PACKAGE : PHASE3_FAIL;
+      errEl.textContent = PHASE3_FAIL;
     }
 
     function renderPhase3Choices(choices, errEl) {

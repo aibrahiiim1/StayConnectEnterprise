@@ -130,10 +130,11 @@ test("the interface page shows what is running, how it is doing, and how far beh
   await expect(page.getByText("Main PMS")).toBeVisible();
   await page.getByRole("button", { name: "Open" }).click();
 
-  // three dimensions, stated separately because they fail separately
-  await expect(page.getByText("connected")).toBeVisible();
-  await expect(page.getByText("continuous")).toBeVisible();
-  await expect(page.getByText("in sync")).toBeVisible();
+  // three dimensions, stated separately because they fail separately — and in the words an operator reads,
+  // not the internal axis names. The raw codes remain available as tooltips for support.
+  await expect(page.getByText("Connected")).toBeVisible();
+  await expect(page.getByText("Receiving updates")).toBeVisible();
+  await expect(page.getByText("Up to date")).toBeVisible();
   await expect(page.getByText(/12 stays in house/)).toBeVisible();
   // the backlog's AGE, which is what distinguishes a busy morning from a stuck processor
   await expect(page.getByText(/oldest waiting since/)).toBeVisible();
@@ -188,7 +189,18 @@ test("a concurrent publication is shown as a refusal, not as success", async ({ 
   await expect(page.getByRole("button", { name: "Publish revision" })).toBeVisible();
 });
 
-test("the credential is write-only: nothing on the page displays one, and nothing fetches one", async ({ page }) => {
+// THE SUPPORTED CONNECTOR HAS NO CREDENTIAL, so no credential surface may be presented.
+//
+// This replaces two tests that asserted the Credential card behaved SECURELY — masked field, value never
+// echoed, never fetched, refusal surfaced without a false success. Those were the right assertions while a
+// credential could exist. The Protel FIAS link carries no transport authentication (credential_mode=NONE),
+// so the card's "never set" badge described a missing secret that is not supposed to exist and read as a
+// fault on a correctly configured interface.
+//
+// The security property is NOT weakened — it is strengthened to "nothing is rendered and nothing is
+// requested". The card and its endpoint remain in the tree for a connector that genuinely authenticates,
+// and this test would fail the moment either reappeared on the Protel surface.
+test("no credential surface is presented, and no credential is ever fetched", async ({ page }) => {
   const mutations: Mutations = [];
   const gets: string[] = [];
   await installBackend(page, { mutations });
@@ -198,38 +210,16 @@ test("the credential is write-only: nothing on the page displays one, and nothin
 
   await page.goto("/pms-interfaces");
   await page.getByRole("button", { name: "Open" }).click();
-  await expect(page.getByRole("heading", { name: "Credential" })).toBeVisible();
-  await expect(page.getByText(/Currently using generation 3/)).toBeVisible();
 
-  await page.getByRole("button", { name: "Replace credential" }).click();
-  const field = page.getByLabel("New credential");
-  await expect(field).toHaveAttribute("type", "password");
-  await field.fill("s3cr3t-value");
-  await page.getByLabel("Reason").fill("ROTATION");
-  await page.getByLabel("Confirm your password").fill("operator-pw");
-  await page.getByRole("button", { name: "Replace credential" }).click();
-
-  // the confirmation names the generation, never the value
-  await expect(page.getByRole("status")).toContainText("generation 4");
-  expect(await page.content()).not.toContain("s3cr3t-value");
+  await expect(page.getByRole("heading", { name: "Credential" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /replace credential/i })).toHaveCount(0);
+  await expect(page.getByLabel("New credential")).toHaveCount(0);
+  // the misleading warning specifically: an interface needing no secret is not "never set"
+  expect((await page.content()).toLowerCase()).not.toContain("never set");
   // and no request anywhere on this page asks the server for a credential
   for (const g of gets) expect(g).not.toMatch(/secret/);
-});
-
-test("a refused rotation says so and stores nothing", async ({ page }) => {
-  const mutations: Mutations = [];
-  await installBackend(page, { mutations, secretStatus: 503 });
-  await page.goto("/pms-interfaces");
-  await page.getByRole("button", { name: "Open" }).click();
-  await page.getByRole("button", { name: "Replace credential" }).click();
-  await page.getByLabel("New credential").fill("anything");
-  await page.getByLabel("Reason").fill("ROTATION");
-  await page.getByLabel("Confirm your password").fill("operator-pw");
-  await page.getByRole("button", { name: "Replace credential" }).click();
-
-  await expect(page.getByRole("alert").filter({ hasText: /encryption is not configured/ })).toBeVisible();
-  // and no success confirmation is shown alongside the refusal
-  await expect(page.getByRole("status")).toHaveCount(0);
+  // no mutation was issued either — the page cannot rotate what it does not offer
+  expect(mutations.filter((m) => m.path.includes("/secret"))).toHaveLength(0);
 });
 
 test("routing names the guest networks that are mapped to nothing", async ({ page }) => {
