@@ -74,7 +74,117 @@ func (s *server) pmsInterfacesRoutes() http.Handler {
 	r.Post("/{id}/revisions", s.authorPMSInterfaceRevision)
 	r.Post("/{id}/publish", s.publishPMSInterfaceRevision)
 	r.Post("/{id}/secret", s.rotatePMSInterfaceSecret)
+	// THE LIFECYCLE TRANSITION. An interface is created AUTH_DISABLED and publishing a revision does not
+	// change that — deliberately, because publishing decides WHAT the connector would dial and activating
+	// decides WHETHER it dials at all, and collapsing the two means the moment an operator finishes typing
+	// a configuration is the moment a socket opens to the property's PMS.
+	//
+	// What was missing is the second act. pmsd selects `WHERE lifecycle_state='ACTIVE'`, and nothing in the
+	// product could produce that state, so a fully created and published interface was never picked up by
+	// the connector and never would be. The symptom is the worst kind: every screen reports success and
+	// nothing connects.
+	r.Post("/{id}/lifecycle", s.setPMSInterfaceLifecycle)
 	return r
+}
+
+type setLifecycleReq struct {
+	State      string `json:"state"`
+	ReasonCode string `json:"reason_code"`
+	Password   string `json:"password"`
+}
+
+// pmsLifecycleTransitions is the allowed transition map. The schema's CHECK constraint lists the four legal
+// values; it cannot say which moves between them make sense, and that is what this encodes.
+//
+// DECOMMISSIONED is terminal and is NOT reachable here. Retiring an interface has consequences this route
+// does not handle — Stays and events keep referencing it, and the authoring path already refuses to
+// configure one — so it needs its own deliberate operation rather than an option in a dropdown.
+var pmsLifecycleTransitions = map[string]map[string]bool{
+	"ACTIVE":        {"AUTH_DISABLED": true, "DRAINING": true},
+	"AUTH_DISABLED": {"ACTIVE": true},
+	"DRAINING":      {"AUTH_DISABLED": true, "ACTIVE": true},
+}
+
+// setPMSInterfaceLifecycle activates, disables or drains a PMS Interface.
+//
+// Step-up and a reason code are required in both directions. Activating opens a live connection to the
+// property's PMS; disabling stops resolving every guest on every network mapped to it. Neither is a change
+// anybody should be able to make by mis-clicking, and Phase-3 §25 asks for step-up on exactly this surface.
+func (s *server) setPMSInterfaceLifecycle(w http.ResponseWriter, r *http.Request) {
+	var in setLifecycleReq
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "malformed request body")
+		return
+	}
+	want := strings.TrimSpace(in.State)
+	if want != "ACTIVE" && want != "AUTH_DISABLED" && want != "DRAINING" {
+		jsonErr(w, http.StatusBadRequest, "validation",
+			"state must be ACTIVE, AUTH_DISABLED or DRAINING (DECOMMISSIONED is terminal and is not set here)")
+		return
+	}
+	if strings.TrimSpace(in.ReasonCode) == "" {
+		jsonErr(w, http.StatusBadRequest, "reason_required",
+			"a bounded reason code is required: this decides whether a live PMS connection exists")
+		return
+	}
+	if !s.reauth(r, in.Password) {
+		jsonErr(w, http.StatusUnauthorized, "reauth_required", "password confirmation required")
+		return
+	}
+
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	id := chi.URLParam(r, "id")
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "query failed")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var cur, label, currentRev string
+	if err := tx.QueryRow(ctx, `SELECT lifecycle_state, COALESCE(display_label,''),
+	        COALESCE(current_revision_id::text,'')
+	      FROM iam_v2.pms_interfaces WHERE id=$1 AND tenant_id=$2 AND site_id=$3 FOR UPDATE`,
+		id, s.tenantID, s.siteID).Scan(&cur, &label, &currentRev); err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "interface not found")
+		return
+	}
+	if cur == want {
+		// Idempotent, and reported as such rather than as a change that did not happen.
+		writeJSON(w, http.StatusOK, map[string]any{"id": id, "lifecycle_state": cur, "changed": false})
+		return
+	}
+	if cur == "DECOMMISSIONED" {
+		jsonErr(w, http.StatusConflict, "conflict", "this interface is decommissioned; that state is terminal")
+		return
+	}
+	if !pmsLifecycleTransitions[cur][want] {
+		jsonErr(w, http.StatusConflict, "conflict", "cannot move a PMS interface from "+cur+" to "+want)
+		return
+	}
+	// ACTIVATION REQUIRES A PUBLISHED REVISION. Without one there is no endpoint, no timeout and no
+	// timezone, so pmsd would select the interface, find nothing to dial, and report an error the operator
+	// has no way to connect back to a missing step.
+	if want == "ACTIVE" && currentRev == "" {
+		jsonErr(w, http.StatusConflict, "validation",
+			"publish a revision before activating: an interface with no published revision has no endpoint to dial")
+		return
+	}
+	if _, err := tx.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET lifecycle_state=$4
+	      WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, id, s.tenantID, s.siteID, want); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "lifecycle update failed")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "commit failed")
+		return
+	}
+	s.audit(r, "pms_interface.lifecycle", "pms_interface", id,
+		map[string]any{"from": cur, "to": want, "reason_code": in.ReasonCode, "display_label": label})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": id, "lifecycle_state": want, "previous_lifecycle_state": cur, "changed": true,
+	})
 }
 
 const pmsInterfaceCols = `i.id::text, i.connector_kind, i.display_label, i.lifecycle_state,
@@ -591,7 +701,148 @@ type guestNetworkRoute struct {
 func (s *server) pmsRoutingRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", s.listPMSRouting)
+	// THE WRITE PATH. This surface used to be read-only, on the reasoning that which PMS a VLAN resolves
+	// against is a network-topology decision and therefore belongs where the networks are configured. The
+	// reasoning is sound; the problem was that the guest-network API has no PMS field, so the conclusion in
+	// practice was that the mapping could not be set ANYWHERE. It existed only as a row inserted by
+	// integration-test fixtures, which meant a real deployment reached "PMS connected, Stays ingested,
+	// nothing authenticates" with no product action available to fix it.
+	//
+	// So the write lives here, next to the read that already explains the mapping, and it is deliberately
+	// explicit rather than casual: one guest network at a time, named in the path, with the interface
+	// validated against this site and required to be publishable. Wiring it into the guest-network revision
+	// pipeline instead would couple a network apply/confirm/rollback cycle to PMS configuration — a much
+	// larger change that makes a routing typo a network outage.
+	r.Put("/{guest_network_id}", s.setPMSRoute)
+	r.Delete("/{guest_network_id}", s.clearPMSRoute)
 	return r
+}
+
+type setPMSRouteReq struct {
+	InterfaceID string `json:"pms_interface_id"`
+	// RoutingMode is MAPPED (this network resolves against exactly this interface) or
+	// ALL_ACTIVE_INTERFACES (it fans out across every active interface at the site). Defaults to MAPPED:
+	// a single named interface is the answer that cannot surprise anyone.
+	RoutingMode string `json:"routing_mode"`
+}
+
+// setPMSRoute maps one guest network to one PMS Interface.
+//
+// It is an upsert on (guest_network_id, pms_interface_id) and it also REPLACES any other interface mapped to
+// the same guest network. Accumulating mappings would be the more literal reading of an upsert, but a guest
+// network resolving against two properties' PMS at once is not a configuration anyone wants and not one the
+// resolver can make sense of — so setting a route means setting it, not adding to it.
+func (s *server) setPMSRoute(w http.ResponseWriter, r *http.Request) {
+	gnID := strings.TrimSpace(chi.URLParam(r, "guest_network_id"))
+	var in setPMSRouteReq
+	if err := decodeJSON(r, &in); err != nil {
+		jsonErr(w, http.StatusBadRequest, "bad_request", "bad body")
+		return
+	}
+	ifaceID := strings.TrimSpace(in.InterfaceID)
+	if ifaceID == "" {
+		jsonErr(w, http.StatusBadRequest, "validation", "pms_interface_id is required")
+		return
+	}
+	mode := strings.TrimSpace(in.RoutingMode)
+	if mode == "" {
+		mode = "MAPPED"
+	}
+	if mode != "MAPPED" && mode != "ALL_ACTIVE_INTERFACES" {
+		jsonErr(w, http.StatusBadRequest, "validation", "routing_mode must be MAPPED or ALL_ACTIVE_INTERFACES")
+		return
+	}
+
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "begin failed")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Both sides are checked against THIS site rather than trusted from the path/body. The foreign keys would
+	// catch a cross-site id too, but as a 23503 that reaches the operator as "internal" — and "which property
+	// does this VLAN belong to" deserves an answer, not a 500.
+	var gnName string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(name,'') FROM public.guest_networks
+	     WHERE id=$1 AND tenant_id=$2 AND site_id=$3`, gnID, s.tenantID, s.siteID).Scan(&gnName); err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "guest network not found at this site")
+		return
+	}
+	var ifaceLabel, lifecycle string
+	var published bool
+	// PUBLICATION IS `current_revision_id`, not a per-revision timestamp. An earlier draft of this query
+	// tested `pms_interface_revisions.published_at`, a column that does not exist — so the query errored,
+	// the error was indistinguishable from "no such row", and a correctly published interface was rejected
+	// as "not found at this site". A missing column reported as a missing interface sends the operator to
+	// look at the wrong thing entirely.
+	if err := tx.QueryRow(ctx, `
+	    SELECT COALESCE(i.display_label,''), COALESCE(i.lifecycle_state,''),
+	           i.current_revision_id IS NOT NULL
+	      FROM iam_v2.pms_interfaces i
+	     WHERE i.id=$1 AND i.tenant_id=$2 AND i.site_id=$3`,
+		ifaceID, s.tenantID, s.siteID).Scan(&ifaceLabel, &lifecycle, &published); err != nil {
+		jsonErr(w, http.StatusNotFound, "not_found", "PMS interface not found at this site")
+		return
+	}
+	// An interface with no published revision has no endpoint, so a network mapped to it resolves against
+	// nothing. Refusing here turns a silent dead end into a message naming the missing step.
+	if !published {
+		jsonErr(w, http.StatusConflict, "validation",
+			"PMS interface has no published revision — publish one before routing a guest network to it")
+		return
+	}
+
+	// Replace, don't accumulate: drop any other interface currently mapped to this network.
+	if _, err := tx.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_map
+	     WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3 AND pms_interface_id <> $4`,
+		s.tenantID, s.siteID, gnID, ifaceID); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "route replace failed")
+		return
+	}
+	// is_default=true: with exactly one mapping per network it IS the default, and the partial unique index
+	// gnpm_one_default permits one per network. The DELETE above runs first in the same transaction, so the
+	// index cannot see two.
+	if _, err := tx.Exec(ctx, `
+	    INSERT INTO iam_v2.guest_network_pms_map
+	      (tenant_id, site_id, guest_network_id, pms_interface_id, is_default, routing_mode)
+	    VALUES ($1,$2,$3,$4,true,$5)
+	    ON CONFLICT (guest_network_id, pms_interface_id)
+	    DO UPDATE SET is_default=true, routing_mode=EXCLUDED.routing_mode`,
+		s.tenantID, s.siteID, gnID, ifaceID, mode); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "route write failed")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "commit failed")
+		return
+	}
+	s.audit(r, "pms_routing.set", "guest_network", gnID,
+		map[string]any{"pms_interface_id": ifaceID, "routing_mode": mode, "guest_network_name": gnName})
+	writeJSON(w, http.StatusOK, guestNetworkRoute{
+		GuestNetworkID: gnID, GuestNetworkName: gnName,
+		InterfaceID: ifaceID, InterfaceLabel: ifaceLabel, IsDefault: true, RoutingMode: mode,
+	})
+}
+
+// clearPMSRoute unmaps a guest network. The network then resolves against nothing, which is a legitimate
+// state (a staff VLAN has no business consulting the PMS) and is reported as such by listPMSRouting's
+// unmapped_guest_networks — so removal is not a hole, it is an answer.
+func (s *server) clearPMSRoute(w http.ResponseWriter, r *http.Request) {
+	gnID := strings.TrimSpace(chi.URLParam(r, "guest_network_id"))
+	ctx, cancel := dbCtx(r)
+	defer cancel()
+	tag, err := s.db.Exec(ctx, `DELETE FROM iam_v2.guest_network_pms_map
+	     WHERE tenant_id=$1 AND site_id=$2 AND guest_network_id=$3`, s.tenantID, s.siteID, gnID)
+	if err != nil {
+		jsonErr(w, http.StatusInternalServerError, "internal", "route delete failed")
+		return
+	}
+	s.audit(r, "pms_routing.cleared", "guest_network", gnID,
+		map[string]any{"removed": tag.RowsAffected()})
+	writeJSON(w, http.StatusOK, map[string]any{"guest_network_id": gnID, "removed": tag.RowsAffected()})
 }
 
 // listPMSRouting answers "which guest networks resolve against which PMS interface?".

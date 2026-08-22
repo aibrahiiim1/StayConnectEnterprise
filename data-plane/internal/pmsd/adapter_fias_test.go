@@ -98,7 +98,7 @@ func newAdapterOverPipe(t *testing.T) (*fiasAdapter, net.Conn) {
 	t.Helper()
 	client, server := net.Pipe()
 	dialer := func(ctx context.Context, network, address string) (net.Conn, error) { return client, nil }
-	dial := NewFIASDial(dialer, testKeys(), time.Now)
+	dial := NewFIASDial(dialer, testKeys(), time.Now, nil)
 	conn, err := dial(context.Background(), DialParams{Iface: iface("i1"), Rev: testRev()})
 	if err != nil {
 		t.Fatalf("dial: %v", err)

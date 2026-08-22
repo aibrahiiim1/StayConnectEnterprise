@@ -111,17 +111,35 @@ func main() {
 		// The Stay-Event application owner: the real Stay Engine with the real Checkout Converter wired in, so
 		// a typed GO event's application and its whole conversion are ONE transaction. Constructed only when
 		// the ingest flag is on (Run gates the call), and never while dark.
+		//
+		// THE CHECKOUT CONVERTER IS GATED BY ITS OWN FLAG.
+		//
+		// It used to be wired unconditionally, so a GO event ran the whole checkout conversion — creating
+		// grace entitlements, purchases and session updates — while STAYCONNECT_PHASE3_CHECKOUT_GRACE
+		// reported OFF. An operator reading the flags would have concluded that surface was inert while it
+		// was in fact executing on every checkout, and the privilege grant needed to support it would have
+		// looked unexplainable next to a flag that said the feature was disabled.
+		//
+		// With the flag OFF the converter is absent, and stayengine refuses a GO with
+		// ErrCheckoutConverterRequired rather than inventing a Stay-only checkout. That refusal is the
+		// honest outcome: the event stays in the inbox, visible and replayable, instead of being applied
+		// under semantics nobody enabled.
 		NewStayApplier: func(ctx context.Context, _ pmsd.Assignment) (pmsd.StayApplier, error) {
 			p, err := getPool(ctx)
 			if err != nil {
 				return nil, err
+			}
+			if !cfg.CheckoutGraceOn() {
+				log.Warn("pmsd: checkout grace is OFF — GO events will be refused, not converted",
+					"flag", iamv2.EnvPhase3CheckoutGrace)
+				return stayengine.NewProcessor(p), nil
 			}
 			return stayengine.NewProcessorWithCheckout(p, checkout.NewConverter(p)), nil
 		},
 		Dial: pmsd.NewFIASDial(netDialer, pmsd.AdapterKeys{
 			IdentityKey: identKey, IdentityKeyVersion: identKeyVer,
 			EvidenceKey: evKey, EvidenceKeyVersion: evKeyVer,
-		}, time.Now),
+		}, time.Now, log),
 		Log: log,
 	}
 

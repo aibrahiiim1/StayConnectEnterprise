@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"time"
 
@@ -45,6 +46,9 @@ type fiasAdapter struct {
 	identKeyN int
 	profile   string
 	now       func() time.Time
+	// log carries the connector's redacted diagnostics. A nil logger is inert, so tests that construct an
+	// adapter directly need not supply one.
+	log *slog.Logger
 }
 
 // AdapterKeys carries the two DISTINCT keyed-HMAC keys the adapter needs, each with its own purpose and
@@ -59,7 +63,12 @@ type AdapterKeys struct {
 
 // NewFIASDial builds a Deps.Dial using an injected Dialer. It fails closed if the dedicated identity key is
 // absent (an empty/invalid identity key must never silently produce un-fingerprinted events).
-func NewFIASDial(dialer Dialer, keys AdapterKeys, now func() time.Time) func(context.Context, DialParams) (Conn, error) {
+//
+// log may be nil, and is threaded in rather than taken from a package global because the connector's
+// diagnostics are the only window onto why a feed is being rejected. Without it, a record the connector
+// refuses is visible solely as a bounded code in pms_interface_runtime — which is how a live appliance came
+// to sit CONNECTED, resyncing every few seconds, admitting nothing, and saying nothing about why.
+func NewFIASDial(dialer Dialer, keys AdapterKeys, now func() time.Time, log *slog.Logger) func(context.Context, DialParams) (Conn, error) {
 	if now == nil {
 		now = time.Now
 	}
@@ -80,7 +89,7 @@ func NewFIASDial(dialer Dialer, keys AdapterKeys, now func() time.Time) func(con
 			iface: p.Iface, rev: p.Rev,
 			evKey: keys.EvidenceKey, evKeyNo: keys.EvidenceKeyVersion,
 			identKey: keys.IdentityKey, identKeyN: keys.IdentityKeyVersion,
-			profile: "protel-fias/v1", now: now,
+			profile: "protel-fias/v1", now: now, log: log,
 		}, nil
 	}
 }
@@ -126,6 +135,10 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	}
 
 	resyncing := true // a DR is outstanding; we are awaiting DS…DE (gates duplicate DR requests only)
+	// skippedNoIdentity counts well-formed records this ownership cycle carried that describe no keyable Stay.
+	// It is a running total rather than a per-resync one on purpose: the number an operator wants is "how much
+	// of this roster is unusable", and a counter that reset on every DS would only ever show the tail.
+	skippedNoIdentity := 0
 	readDeadline := a.rev.HeartbeatTimeout
 	for {
 		if ctx.Err() != nil {
@@ -154,6 +167,10 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			if intendedDomain(body) {
 				// malformed DOMAIN record: recoverable feed fault → atomic gap/resync, zero admission, DR while
 				// owned, barrier stays active. No idle reset, no heartbeat, no ack for an invalid record.
+				if a.log != nil {
+					a.log.Error("pmsd: unparseable domain record — continuity fault",
+						"interface", a.iface.ID, "reason", "strict_parse")
+				}
 				if ferr := sink.OnContinuityFault(ctx, CodeEventInvalid); ferr != nil {
 					return ferr
 				}
@@ -199,7 +216,31 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			if perr == nil {
 				perr = ev.Validate()
 			}
+			// A well-formed record with no Stay identity is SKIPPED, not faulted. It cannot be admitted — there
+			// is nothing to key a Stay on — but it is normal content of a real in-house roster (house-use and
+			// out-of-order rooms), and treating it as evidence of a broken feed makes every resync request the
+			// resync that will contain it again. See ErrIdentityAbsent.
+			//
+			// Logged at WARN, with the record type and nothing else: the count of skipped records over a resync
+			// is the operational signal, and no guest value, room or reservation belongs in a log line.
+			if errors.Is(perr, ErrIdentityAbsent) {
+				skippedNoIdentity++
+				if a.log != nil {
+					a.log.Warn("pmsd: skipping record with no Stay identity",
+						"record_type", string(pr.RecordType), "interface", a.iface.ID,
+						"missing", missingIdentityField(perr), "skipped_this_cycle", skippedNoIdentity)
+				}
+				continue
+			}
 			if perr != nil {
+				if a.log != nil {
+					// The reason is a bounded classification, never the payload: enough to tell a duplicate
+					// identity field apart from a failed fingerprint or an overlong value, which is the
+					// difference between a PMS-side problem and a key/configuration problem on our side.
+					a.log.Error("pmsd: domain record rejected — continuity fault",
+						"record_type", string(pr.RecordType), "interface", a.iface.ID,
+						"reason", classifyDomainReject(perr))
+				}
 				// A malformed domain record (ambiguous duplicate field, overlong or identity-truncating value)
 				// is a feed-continuity fault, NOT a silently-droppable event. Drive continuity→GAP_DETECTED +
 				// sync→RESYNC_REQUIRED durably (a persist/generation failure closes the transport), then request
@@ -283,4 +324,32 @@ func (a *fiasAdapter) toEvent(body string) (Event, error) {
 		SourceEvidenceHash:   evHash, EvidenceKeyVersion: evVer,
 		ReceivedAt: now,
 	}, nil
+}
+
+// classifyDomainReject maps a domain-record rejection to a bounded reason token for logs. It exists so a
+// continuity fault can be diagnosed at all: before this, the only trace a rejected record left was the string
+// "EVENT_INVALID" in last_sync_failure_code, which is the same value for a duplicate room field, an overlong
+// guest name and a mis-derived fingerprint — three problems with three different owners and three different
+// fixes. The tokens are fixed strings; no payload, value or guest field ever appears in one.
+func classifyDomainReject(err error) string {
+	switch {
+	case errors.Is(err, ErrIdentityAbsent):
+		return "identity_absent"
+	case errors.Is(err, ErrRecordMalformed):
+		return "identity_ambiguous_or_malformed"
+	case errors.Is(err, ErrEventInvalid):
+		return "event_validation_failed"
+	default:
+		return "unclassified"
+	}
+}
+
+// missingIdentityField reports which mandatory identity code an ErrIdentityAbsent rejection was missing, or
+// "unknown" if the error carries no detail. Protocol field codes only — never a value.
+func missingIdentityField(err error) string {
+	var ia identityAbsentError
+	if errors.As(err, &ia) {
+		return ia.Missing
+	}
+	return "unknown"
 }

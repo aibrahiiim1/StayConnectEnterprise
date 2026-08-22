@@ -10,6 +10,36 @@ import (
 // zero event admission. It never carries the raw record bytes.
 var ErrRecordMalformed = errors.New("pmsd: malformed FIAS record")
 
+// ErrIdentityAbsent means the record is WELL-FORMED but carries no mandatory Stay identity (no RN, or no G#).
+//
+// THIS IS NOT THE SAME FAULT AS A MALFORMED RECORD, and conflating the two livelocked the connector against a
+// real Protel roster. A DR resync of this property returns in-house rooms of which a minority carry no
+// reservation number at all — house-use rooms, out-of-order rooms, occupancy the PMS tracks without a booking.
+// The Phase-0 spike measured it directly: 365 in-house records, 355 of them carrying a G#.
+//
+// Treated as malformed, each of those ten drove a continuity fault and a fresh DR — whose response contained
+// the same ten records, which drove another. The observed result on the live appliance was transport CONNECTED
+// and healthy, a heartbeat, a complete DS…DE resync, and PERMANENTLY zero admitted events, cycling
+// GAP_DETECTED → RESYNC_REQUIRED → IN_SYNC → GAP_DETECTED every few seconds. Nothing was corrupt; the feed was
+// exactly what the property's PMS legitimately holds.
+//
+// So the two are separated. A DUPLICATE identity field is still malformed — it means the frame cannot be
+// interpreted, and the safe response is to distrust the feed. An ABSENT one means this record cannot key a
+// Stay and therefore is not admissible, but says nothing about the health of the feed carrying it. The
+// caller skips it and continues; it never reaches the queue or the inbox either way.
+var ErrIdentityAbsent = errors.New("pmsd: record carries no mandatory Stay identity")
+
+// identityAbsentError names WHICH mandatory field was absent. The field CODE ("RN", "G#") is protocol
+// vocabulary, not guest data, so it is safe to log — and it is the difference between "this PMS sends
+// checkouts without a reservation number" and "this PMS sends records without a room", which are different
+// problems with different answers. The value is never carried.
+type identityAbsentError struct{ Missing string }
+
+func (e identityAbsentError) Error() string {
+	return "pmsd: missing mandatory identity field " + e.Missing
+}
+func (e identityAbsentError) Unwrap() error { return ErrIdentityAbsent }
+
 // ParsedRecord is the ONE strict parsed representation of a FIAS record body used for pmsd ingestion. The
 // Record ID is bound ONCE through RecordType (never re-emitted as a fake FieldPair). Fields preserves every
 // valid field code/value in SOURCE ORDER, including DUPLICATE occurrences, present-but-empty values, and
@@ -163,9 +193,28 @@ func extractTypedDomainFields(pr ParsedRecord) (typedDomainFields, error) {
 		}
 		counts[p.Code]++
 	}
-	// RN and G# are mandatory identity → exactly once
-	if counts[fcRoom] != 1 || counts[fcReservation] != 1 {
+	// RN and G# are mandatory identity → exactly once. More than once is ambiguity and the record cannot be
+	// interpreted at all; zero times is a record that simply does not describe a keyable Stay. The first is a
+	// reason to distrust the feed, the second is not — see ErrIdentityAbsent.
+	if counts[fcRoom] > 1 || counts[fcReservation] > 1 {
 		return typedDomainFields{}, ErrRecordMalformed
+	}
+	// ROOM IS ALWAYS MANDATORY. RESERVATION IS MANDATORY EXCEPT ON A CHECKOUT.
+	//
+	// This property's Protel sends every GO carrying RN only — 45 of 45 observed on the live link, with no G#
+	// on any of them — which is a coherent thing for a PMS to say: "the guest in room N has left" identifies
+	// the departure completely, because a room has at most one current occupancy. Requiring G# on a GO meant
+	// every real checkout was discarded before it reached the engine, so a Stay that had genuinely departed
+	// stayed IN_HOUSE forever and kept authenticating.
+	//
+	// The reservation is still required on GI and GC, where it is the key the Stay is created and updated
+	// under, and where its absence really would mean an unusable record. Resolving a room-only GO to a Stay is
+	// the engine's job and it refuses to guess between sharers; see resolveCheckoutByRoom.
+	if counts[fcRoom] == 0 {
+		return typedDomainFields{}, identityAbsentError{Missing: fcRoom}
+	}
+	if counts[fcReservation] == 0 && pr.RecordType != RecGO {
+		return typedDomainFields{}, identityAbsentError{Missing: fcReservation}
 	}
 	// the remaining typed evidence fields are at-most-once
 	for _, code := range []string{fcLastName, fcFirstName, fcFolio, fcArrival, fcDeparture} {

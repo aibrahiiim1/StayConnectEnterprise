@@ -29,6 +29,9 @@ package main
 // changes "what every guest is resolved against from this moment on", and that boundary was accepted as-is.
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,6 +43,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -230,6 +234,21 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	// the only sensible thing to do before Phase 4 exists -- works on both schemas, and asking for a currency
 	// where the schema cannot store it is refused with the reason rather than an internal error.
 	cur := strings.TrimSpace(in.FinancialBaseCurrency)
+
+	// SOURCE FINGERPRINT — implementation-controlled, never an operator field.
+	//
+	// Phase-0 §7 detects duplicate sources by source_fingerprint equality: two Interfaces that turn out to be
+	// the same physical PMS must be flagged, because PMS-settled purchases across such a pair are the case
+	// where one property's charge lands on another's folio. The column existed and the detector read it, but
+	// nothing ever wrote it, so every revision carried NULL — and NULL never equals NULL. The check was
+	// running and structurally incapable of matching.
+	//
+	// It is derived, not asked for. An operator cannot be expected to know whether two host:port pairs are the
+	// same PMS, and a fingerprint they could type is one they could mistype into a collision or out of a real
+	// one. Connector kind is part of the input because the same endpoint reached by two different protocols is
+	// not the same source, and the endpoint is lowercased so that Host:5003 and host:5003 fingerprint alike.
+	fingerprint := pmsSourceFingerprint(kindOf(ctx, tx, id), in.Endpoint)
+
 	var revID string
 	var revNo int
 	const revNoExpr = `(SELECT COALESCE(MAX(revision_no),0)+1 FROM iam_v2.pms_interface_revisions
@@ -238,20 +257,21 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 		err = tx.QueryRow(ctx, `
 		    INSERT INTO iam_v2.pms_interface_revisions
 		      (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, folio_identity_strategy,
-		       config, normalization_version)
-		    VALUES ($1,$2,$3,`+revNoExpr+`,$4,$5,$6::jsonb,$7)
+		       config, normalization_version, source_fingerprint)
+		    VALUES ($1,$2,$3,`+revNoExpr+`,$4,$5,$6::jsonb,$7,$8)
 		    RETURNING id::text, revision_no`,
 			s.tenantID, s.siteID, id, in.SourceTimezone, in.FolioIdentityStrategy, string(raw),
-			in.NormalizationVersion).Scan(&revID, &revNo)
+			in.NormalizationVersion, fingerprint).Scan(&revID, &revNo)
 	} else {
 		err = tx.QueryRow(ctx, `
 		    INSERT INTO iam_v2.pms_interface_revisions
 		      (tenant_id, site_id, pms_interface_id, revision_no, source_timezone, folio_identity_strategy,
-		       config, normalization_version, financial_base_currency, financial_base_currency_exponent)
-		    VALUES ($1,$2,$3,`+revNoExpr+`,$4,$5,$6::jsonb,$7,$8,$9)
+		       config, normalization_version, financial_base_currency, financial_base_currency_exponent,
+		       source_fingerprint)
+		    VALUES ($1,$2,$3,`+revNoExpr+`,$4,$5,$6::jsonb,$7,$8,$9,$10)
 		    RETURNING id::text, revision_no`,
 			s.tenantID, s.siteID, id, in.SourceTimezone, in.FolioIdentityStrategy, string(raw),
-			in.NormalizationVersion, cur, in.FinancialCurrencyExp).Scan(&revID, &revNo)
+			in.NormalizationVersion, cur, in.FinancialCurrencyExp, fingerprint).Scan(&revID, &revNo)
 		if isUndefinedColumn(err) {
 			jsonErr(w, http.StatusBadRequest, "validation",
 				"this deployment cannot store a financial base currency for a PMS interface: leave the "+
@@ -394,4 +414,30 @@ func isLockNotAvailable(err error) bool {
 func isUndefinedColumn(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "42703"
+}
+
+// pmsSourceFingerprint is the stable identity of the PHYSICAL source a revision points at: connector kind
+// plus normalised endpoint, hashed. Two revisions — on the same appliance or on two Interfaces authored years
+// apart — fingerprint identically exactly when they dial the same PMS the same way.
+//
+// SHA-256 rather than the endpoint verbatim: the fingerprint is compared, listed and reported, and a hash
+// keeps a property's internal host and port out of screens and conflict records that only ever need to answer
+// "same source or not". Truncated to 32 hex characters, which is far beyond collision risk for the handful of
+// interfaces one appliance hosts and short enough to read in a comparison.
+func pmsSourceFingerprint(connectorKind, endpoint string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(connectorKind)) + "|" +
+		strings.ToLower(strings.TrimSpace(endpoint))))
+	return hex.EncodeToString(sum[:])[:32]
+}
+
+// kindOf reads the interface's connector kind inside the authoring transaction. It returns "" on failure
+// rather than an error: the caller has already proven the interface exists in this tenant and site, and a
+// fingerprint computed without the kind is still a correct fingerprint for comparison purposes as long as it
+// is computed the same way every time — which it is, because this path is the only writer.
+func kindOf(ctx context.Context, tx pgx.Tx, id string) string {
+	var kind string
+	if err := tx.QueryRow(ctx, `SELECT connector_kind FROM iam_v2.pms_interfaces WHERE id=$1`, id).Scan(&kind); err != nil {
+		return ""
+	}
+	return kind
 }

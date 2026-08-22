@@ -6,6 +6,18 @@
 > `PHASE_3_PMS_FINANCIAL_POSTING: NONE`
 > `PHASE_3_PMS_LIVE: READ_ONLY`
 
+> **SUPERSEDED FOR THE CORAL SEA HOLIDAY APPLIANCE (2026-08-22).** This document records the privilege
+> posture that was ACCEPTED while Phase 3 was dark, and it is left intact as that record. It is no longer a
+> description of the Coral Sea Holiday production appliance, where the Protel Interface has been commissioned:
+> `STAYCONNECT_PHASE3_MASTER`, `_PMS_CONNECTOR`, `_PMS_INGEST` and `_CHECKOUT_GRACE` are ON for pmsd,
+> `_MASTER`+`_ADMIN` for edged and `_MASTER`+`_PMS_AUTH` for scd, and `svc_pmsd`, `svc_scd` and `svc_edged`
+> hold real `iam_v2` grants. The rows below reading "NONE" are therefore historical for that appliance.
+>
+> The live posture, the exact grants and how they were derived are in
+> `docs/runbooks/PMS-Interface-Commissioning.md` and in the per-service grant files under `deploy/gatep/`.
+> What has NOT changed: no financial posting, no `PS`, no payment/settlement privilege, and
+> `folio_identity_strategy=UNSET` on the published revision.
+
 **Authorization:** D14 / T0015. Base master HEAD `ffb68e1`. This matrix specifies the runtime DB-privilege posture for Phase 3 and is derived from the accepted Phase-1B Gate-P least-privilege baseline (`docs/architecture/Phase1B-Privilege-Matrix.md`), which it preserves unchanged. Phase 3 adds **zero** new production runtime privileges while dark.
 
 ## 1. Production runtime service roles vs iam_v2 (dark)
