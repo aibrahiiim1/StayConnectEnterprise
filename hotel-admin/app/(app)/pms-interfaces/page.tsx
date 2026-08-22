@@ -1,6 +1,6 @@
 "use client";
 
-// Phase 3 (DARK) — PMS INTERFACES.
+// PMS CONNECTION — the property management system this appliance talks to.
 //
 // This is the page an operator opens when guests cannot get online and nobody knows why. It has to answer
 // four questions without them having to know which one to ask:
@@ -29,6 +29,7 @@ import { Card, CardBody } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input, Label } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatRelative } from "@/lib/utils";
 
@@ -41,6 +42,44 @@ const toneFor = (s: string) =>
 
 const pretty = (s: string) => s.replace(/_/g, " ").toLowerCase();
 
+// OPERATOR WORDING for the four freshness axes and the lifecycle.
+//
+// `pretty()` turned RESYNC_REQUIRED into "resync required" and GAP_DETECTED into "gap detected", which is
+// the internal vocabulary with the underscores taken out. The axes answer four different questions and the
+// words below say which: is the link up, is the feed continuous, is our copy complete, and is the interface
+// switched on at all. Unknown values fall through to pretty() rather than being hidden.
+const TRANSPORT_WORDS: Record<string, string> = {
+  CONNECTED: "Connected",
+  DISCONNECTED: "Not connected",
+  UNKNOWN: "Never connected",
+};
+const CONTINUITY_WORDS: Record<string, string> = {
+  CONTINUOUS: "Receiving updates",
+  GAP_DETECTED: "Updates were missed",
+  UNKNOWN: "No updates yet",
+};
+const SYNC_WORDS: Record<string, string> = {
+  IN_SYNC: "Up to date",
+  RESYNC_REQUIRED: "Needs a full refresh",
+  RESYNC_IN_PROGRESS: "Refreshing now",
+  RESYNCING: "Refreshing now",
+  OUT_OF_SYNC: "Out of date",
+  UNKNOWN: "Not yet loaded",
+};
+const LIFECYCLE_WORDS: Record<string, string> = {
+  ACTIVE: "In use",
+  AUTH_DISABLED: "Not in use",
+  DRAINING: "Winding down",
+  DECOMMISSIONED: "Retired",
+};
+const words = (map: Record<string, string>, v?: string) => (v ? map[v] ?? pretty(v) : "—");
+
+// Connector kinds in the words a hotel uses. Unknown kinds fall through to the raw value rather than being
+// hidden: an Interface created before the canonical set was narrowed still has to be identifiable.
+const CONNECTOR_LABELS: Record<string, string> = {
+  "protel-fias": "Protel (FIAS)",
+};
+
 export default function PMSInterfacesPage() {
   const [rows, setRows] = useState<PmsInterface[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -48,6 +87,10 @@ export default function PMSInterfacesPage() {
   const [creating, setCreating] = useState(false);
   const [authoring, setAuthoring] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // The pending lifecycle change, held while the operator confirms. Both directions are consequential —
+  // one opens a live connection to the property's PMS, the other stops every guest on every mapped network
+  // being resolved — so neither happens on a single click.
+  const [lifecycle, setLifecycle] = useState<{ id: string; to: string } | null>(null);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -74,6 +117,15 @@ export default function PMSInterfacesPage() {
       </div>
 
       {note && <p className="text-sm text-emerald-700">{note}</p>}
+
+      {lifecycle && (
+        <LifecycleConfirm
+          target={lifecycle}
+          onCancel={() => setLifecycle(null)}
+          onDone={async (msg) => { setLifecycle(null); setNote(msg); await load(); }}
+          onError={(m) => setErr(m)}
+        />
+      )}
 
       {creating && (
         <Card>
@@ -121,7 +173,6 @@ export default function PMSInterfacesPage() {
                   <TH>Connector</TH>
                   <TH>State</TH>
                   <TH>Published revision</TH>
-                  <TH>Credential</TH>
                   <TH>&nbsp;</TH>
                 </TR>
               </THead>
@@ -129,9 +180,9 @@ export default function PMSInterfacesPage() {
                 {rows.map((i) => (
                   <TR key={i.id}>
                     <TD>{i.display_label || "(unlabelled)"}</TD>
-                    <TD>{i.connector_kind}</TD>
+                    <TD>{CONNECTOR_LABELS[i.connector_kind] ?? i.connector_kind}</TD>
                     <TD>
-                      <Badge tone={toneFor(i.lifecycle_state) as any}>{pretty(i.lifecycle_state)}</Badge>
+                      <Badge tone={toneFor(i.lifecycle_state) as any}>{words(LIFECYCLE_WORDS, i.lifecycle_state)}</Badge>
                     </TD>
                     <TD>
                       {i.published ? (
@@ -143,13 +194,6 @@ export default function PMSInterfacesPage() {
                         // An interface with nothing published resolves nothing at all. Saying so plainly
                         // beats an empty cell that reads as "not loaded yet".
                         <Badge tone="warn">nothing published</Badge>
-                      )}
-                    </TD>
-                    <TD>
-                      {i.secret_generation ? (
-                        <>generation {i.secret_generation}</>
-                      ) : (
-                        <Badge tone="warn">never set</Badge>
                       )}
                     </TD>
                     <TD className="whitespace-nowrap">
@@ -167,6 +211,25 @@ export default function PMSInterfacesPage() {
                       {i.lifecycle_state !== "DECOMMISSIONED" && (
                         <Button variant="secondary" onClick={() => { setAuthoring(i.id); setNote(null); }}>
                           Configure
+                        </Button>
+                      )}{" "}
+                      {/*
+                        PUTTING THE INTERFACE INTO USE. Creating and publishing were both reachable from this
+                        screen and activation was not, so an operator could complete every visible step and
+                        still have a connection that never dialled: the connector only picks up interfaces in
+                        the ACTIVE state, and nothing in the product could produce it.
+
+                        Activation is refused without a published revision — there would be no endpoint to
+                        dial — so the button is offered only once one exists.
+                      */}
+                      {i.lifecycle_state === "AUTH_DISABLED" && i.published && (
+                        <Button variant="secondary" onClick={() => setLifecycle({ id: i.id, to: "ACTIVE" })}>
+                          Put into use
+                        </Button>
+                      )}
+                      {i.lifecycle_state === "ACTIVE" && (
+                        <Button variant="ghost" onClick={() => setLifecycle({ id: i.id, to: "AUTH_DISABLED" })}>
+                          Take out of use
                         </Button>
                       )}
                     </TD>
@@ -238,7 +301,11 @@ function InterfaceDetail({
 
       <HealthCard health={health} />
       <RevisionsCard id={id} iface={iface} revisions={revisions} onPublished={reload} />
-      <CredentialCard id={id} iface={iface} onRotated={reload} />
+      {/* The Credential card is not rendered. The supported connector's link carries no transport
+          authentication (credential_mode=NONE), so there is no credential to set or rotate — and the card's
+          "never set" warning described a missing secret that is not supposed to exist, which read as a
+          misconfiguration on a correctly configured interface. The component and its endpoint are left in
+          place for a future connector that genuinely authenticates. */}
       <RoutingCard routes={routes} />
     </div>
   );
@@ -248,22 +315,27 @@ function HealthCard({ health }: { health: PmsInterfaceHealth | null }) {
   if (!health) return null;
   // The four dimensions are shown side by side rather than collapsed into one word. "Degraded" tells an
   // operator nothing about what to do; "connected but out of sync" tells them to look at the resync.
-  const dims: [string, string, string | null | undefined][] = [
-    ["Transport", health.transport_status, health.transport_error_code || null],
-    ["Continuity", health.continuity_status, null],
-    ["Synchronization", health.sync_status, health.last_sync_failure_code || null],
+  // Each label is the QUESTION the axis answers, and each value is in operator words. "Transport /
+  // continuity / synchronization" named the internal axes; an operator wants to know whether the PMS is
+  // reachable, whether updates are still arriving, and whether the appliance's copy is complete.
+  const dims: [string, string, string, string | null | undefined][] = [
+    ["Connection", words(TRANSPORT_WORDS, health.transport_status), health.transport_status, health.transport_error_code || null],
+    ["Live updates", words(CONTINUITY_WORDS, health.continuity_status), health.continuity_status, null],
+    ["Guest list", words(SYNC_WORDS, health.sync_status), health.sync_status, health.last_sync_failure_code || null],
   ];
   return (
     <Card>
       <CardBody>
-        <h2 className="text-lg font-medium">Health</h2>
+        <h2 className="text-lg font-medium">Connection status</h2>
         <dl className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {dims.map(([label, value, detail]) => (
+          {dims.map(([label, text, raw, detail]) => (
             <div key={label}>
               <dt className="text-xs uppercase text-gray-500">{label}</dt>
               <dd>
-                <Badge tone={toneFor(value) as any}>{pretty(value)}</Badge>
-                {detail && <span className="ml-2 text-xs text-gray-600">{detail}</span>}
+                <Badge tone={toneFor(raw) as any}>{text}</Badge>
+                {/* The raw code stays available as a tooltip: it is what appears in the daemon log, so an
+                    operator reading it to support can still quote the exact value. */}
+                {detail && <span className="ml-2 text-xs text-gray-600" title={raw}>{detail}</span>}
               </dd>
             </div>
           ))}
@@ -364,8 +436,11 @@ function RevisionsCard({
                   <TD>{r.source_timezone}</TD>
                   <TD>{pretty(r.folio_identity_strategy)}</TD>
                   <TD>
-                    {/* Already redacted server-side; rendered as-is so nothing here can un-redact it. */}
-                    <pre className="max-w-md overflow-x-auto text-xs">{JSON.stringify(r.config, null, 1)}</pre>
+                    {/* The raw config object used to be dumped here as JSON. It is redacted server-side, so
+                        nothing secret was exposed — but "readable" is not the same as "already safe", and a
+                        wall of snake_case keys and millisecond integers is not how an operator checks that a
+                        PMS is configured correctly. The same values, in words. */}
+                    <RevisionSummary config={r.config} />
                   </TD>
                   <TD>
                     {!r.published && (
@@ -396,7 +471,7 @@ function RevisionsCard({
               <input
                 className="mt-1 block w-full rounded border px-2 py-1"
                 value={reason}
-                onChange={(e) => setReason(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)}
                 placeholder="CONFIG_UPDATE"
                 required
               />
@@ -440,6 +515,10 @@ function CredentialCard({
   const [password, setPassword] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // The pending lifecycle change, held while the operator confirms. Both directions are consequential —
+  // one opens a live connection to the property's PMS, the other stops every guest on every mapped network
+  // being resolved — so neither happens on a single click.
+  const [lifecycle, setLifecycle] = useState<{ id: string; to: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function rotate(e: React.FormEvent) {
@@ -515,7 +594,7 @@ function CredentialCard({
               <input
                 className="mt-1 block w-full rounded border px-2 py-1"
                 value={reason}
-                onChange={(e) => setReason(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)}
                 placeholder="ROTATION"
                 required
               />
@@ -590,7 +669,14 @@ function RoutingCard({ routes }: { routes: PmsGuestNetworkRoute[] }) {
 function CreateInterfaceForm({ onDone, onError }: {
   onDone: (msg: string) => void; onError: (e: string | null) => void;
 }) {
-  const [kind, setKind] = useState("protel-fias");
+  // ONE SUPPORTED CONNECTOR, AND THE SCREEN SAYS SO.
+  //
+  // The dropdown offered six kinds, carried over from the legacy scd provider list. pmsd supports one and
+  // refuses the rest, so choosing "mews" produced an Interface that could be created, configured and
+  // published — and then rejected by the connector, surfacing at the last step as a connection failure
+  // rather than as a connector this build does not implement. edged now refuses the other kinds outright;
+  // this is the screen matching that, not the only line of defence.
+  const kind = "protel-fias";
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
   return (
@@ -607,15 +693,13 @@ function CreateInterfaceForm({ onDone, onError }: {
     >
       <h2 className="font-medium">New PMS interface</h2>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-sm">
+        <div className="block text-sm">
           Connector
-          <select className="mt-1 block w-full rounded border px-2 py-1" value={kind}
-                  onChange={(e) => setKind(e.target.value)}>
-            {["protel-fias", "opera-fias", "fidelio-fias", "mews", "apaleo", "stub"].map((k) => (
-              <option key={k} value={k}>{k}</option>
-            ))}
-          </select>
-        </label>
+          <div className="mt-1 rounded border border-border bg-panel2 px-2 py-1.5">Protel (FIAS)</div>
+          <span className="block text-xs text-gray-500">
+            The only property management system this appliance can connect to today.
+          </span>
+        </div>
         <label className="block text-sm">
           Name
           <input className="mt-1 block w-full rounded border px-2 py-1" value={label} required maxLength={120}
@@ -630,9 +714,23 @@ function CreateInterfaceForm({ onDone, onError }: {
 function AuthorRevisionForm({ interfaceID, onDone, onError }: {
   interfaceID: string; onDone: (msg: string) => void; onError: (e: string | null) => void;
 }) {
+  // WHAT THIS FORM NO LONGER ASKS, and why each one was a way to be wrong rather than a setting:
+  //
+  //   folio identity   — a FINANCIAL determination about how the property's PMS reuses folio numbers. It
+  //                      defaulted to GLOBALLY_UNIQUE here, so saving the form asserted something nobody had
+  //                      verified. New revisions are authored UNSET, which is what keeps posting impossible
+  //                      until the determination is genuinely made.
+  //   credential mode  — defaulted to AUTH_KEY while the supported connector's link is unauthenticated, so
+  //                      the default produced an interface waiting forever for a secret that cannot exist.
+  //   normalization    — identifies how THIS BUILD parses the feed. Typing a different number does not
+  //                      change any parsing; it mislabels the events recorded under it.
+  //   resync supported — a property of the protocol adapter, not of the hotel.
+  //   read-only        — fixed true; pmsd refuses anything else, so asking was a formality.
+  //
+  // The server stamps all five and ignores anything sent for them, so removing the inputs closes the gap
+  // rather than merely hiding it.
   const [f, setF] = useState({
-    endpoint: "", source_timezone: "Africa/Cairo", folio_identity_strategy: "GLOBALLY_UNIQUE",
-    normalization_version: 1, credential_mode: "AUTH_KEY", resync_supported: true,
+    endpoint: "", source_timezone: "Africa/Cairo",
     dial_timeout_ms: 5000, read_timeout_ms: 15000, write_timeout_ms: 15000,
     heartbeat_interval_ms: 30000, heartbeat_timeout_ms: 90000,
     feed_freshness_ms: 120000, complete_sync_ms: 600000,
@@ -686,32 +784,15 @@ function AuthorRevisionForm({ interfaceID, onDone, onError }: {
                  value={f.source_timezone} onChange={(e) => setF({ ...f, source_timezone: e.target.value })} />
           <span className="block text-xs text-gray-500">IANA name; arrivals and departures are read in it</span>
         </label>
-        <label className="block text-sm">
-          Folio identity
-          <select className="mt-1 block w-full rounded border px-2 py-1" value={f.folio_identity_strategy}
-                  onChange={(e) => setF({ ...f, folio_identity_strategy: e.target.value })}>
-            {["UNSET", "GLOBALLY_UNIQUE", "UNIQUE_PER_STAY", "REUSED_SEQUENTIAL"].map((v) => (
-              <option key={v} value={v}>{v}</option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          Credential mode
-          <select className="mt-1 block w-full rounded border px-2 py-1" value={f.credential_mode}
-                  onChange={(e) => setF({ ...f, credential_mode: e.target.value })}>
-            <option value="AUTH_KEY">AUTH_KEY — a credential is required</option>
-            <option value="NONE">NONE — the PMS link is unauthenticated</option>
-          </select>
-        </label>
-        {numField("normalization_version", "Normalization version")}
-        <label className="block text-sm">
-          Resync supported
-          <select className="mt-1 block w-full rounded border px-2 py-1" value={String(f.resync_supported)}
-                  onChange={(e) => setF({ ...f, resync_supported: e.target.value === "true" })}>
-            <option value="true">yes</option>
-            <option value="false">no</option>
-          </select>
-        </label>
+        {/* Fixed facts of the supported connector, shown so the operator can SEE them rather than set
+            them. An operator still needs to know the link is read-only and unauthenticated; what they do not
+            need is a control that can only be set one way. */}
+        <div className="rounded border border-border bg-panel2 px-3 py-2 text-xs text-gray-500 sm:col-span-2">
+          <div className="font-medium text-text mb-1">Fixed for this connector</div>
+          Read-only — StayConnect never writes to the PMS · No credential required — the link is
+          unauthenticated · Full guest-list refresh supported · Folio identity not set, so charging a room
+          through the PMS stays disabled until it is determined from the property&rsquo;s own folio behaviour.
+        </div>
         {numField("dial_timeout_ms", "Dial timeout (ms)")}
         {numField("read_timeout_ms", "Read timeout (ms)")}
         {numField("write_timeout_ms", "Write timeout (ms)")}
@@ -735,5 +816,131 @@ function AuthorRevisionForm({ interfaceID, onDone, onError }: {
       </div>
       <Button type="submit" disabled={busy}>{busy ? "Saving…" : "Save draft revision"}</Button>
     </form>
+  );
+}
+
+
+// LifecycleConfirm asks for a reason and a password before an interface is put into or taken out of use.
+//
+// Both directions change what happens to real guests — one opens a live connection to the property's PMS,
+// the other stops every guest on every mapped network from being resolved — so edged requires a bounded
+// reason code and a password step-up on this route. Collecting them here means the refusal an operator sees
+// is "you did not confirm", not an unexplained 401 after the click appeared to work.
+function LifecycleConfirm({
+  target, onCancel, onDone, onError,
+}: {
+  target: { id: string; to: string };
+  onCancel: () => void;
+  onDone: (msg: string) => void | Promise<void>;
+  onError: (m: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const activating = target.to === "ACTIVE";
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await api.post(`/pms-interfaces/${target.id}/lifecycle`, {
+        state: target.to, reason_code: reason.trim(), password,
+      });
+      await onDone(activating
+        ? "This PMS connection is now in use. It may take a moment to connect and load the guest list."
+        : "This PMS connection is no longer in use. Guests on networks routed to it can no longer sign in with their room details.");
+    } catch (e: any) {
+      onError(e?.message ?? "Could not change the connection state");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardBody>
+        <h2 className="text-base font-semibold">
+          {activating ? "Put this PMS connection into use?" : "Take this PMS connection out of use?"}
+        </h2>
+        <p className="text-sm text-gray-600 mt-1">
+          {activating
+            ? "The appliance will connect to the property management system and load the current guest list."
+            : "Guests on networks routed to this connection will no longer be able to sign in with their room number and name. Stays already recorded are kept."}
+        </p>
+        <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2 mt-3">
+          <div>
+            <Label>Reason</Label>
+            <Input value={reason} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setReason(e.target.value)} required
+              placeholder={activating ? "Commissioning" : "Maintenance"} />
+          </div>
+          <div>
+            <Label>Confirm your password</Label>
+            <Input type="password" value={password} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPassword(e.target.value)} required />
+          </div>
+          <div className="sm:col-span-2 flex gap-2">
+            <Button type="submit" disabled={busy || !reason.trim() || !password}>
+              {busy ? "Working…" : activating ? "Put into use" : "Take out of use"}
+            </Button>
+            <Button type="button" variant="ghost" onClick={onCancel}>Cancel</Button>
+          </div>
+        </form>
+      </CardBody>
+    </Card>
+  );
+}
+
+// RevisionSummary renders a revision's configuration in words instead of dumping the config object.
+//
+// The table cell used to hold `JSON.stringify(r.config)`. It was safe — edged redacts before it leaves the
+// server — but safe is not the same as usable: an operator checking "is this PMS configured correctly?" was
+// reading snake_case keys and millisecond integers, and the two facts they most need (where it dials, how
+// stale is too stale) were buried among five timeouts.
+//
+// Anything unrecognised is still shown, as key/value pairs. Dropping unknown keys would make this view lie
+// by omission the first time a revision carries a field this component has not been taught.
+function RevisionSummary({ config }: { config: Record<string, unknown> }) {
+  const ms = (v: unknown): string | null => {
+    const n = typeof v === "number" ? v : Number(v);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    if (n % 1000 !== 0) return `${n} ms`;
+    const secs = n / 1000;
+    if (secs % 3600 === 0) return `${secs / 3600} h`;
+    if (secs % 60 === 0) return `${secs / 60} min`;
+    return `${secs} s`;
+  };
+  const auth = (config.auth ?? {}) as Record<string, unknown>;
+  const known = new Set([
+    "endpoint", "auth", "dial_timeout_ms", "read_timeout_ms", "write_timeout_ms",
+    "heartbeat_interval_ms", "heartbeat_timeout_ms", "feed_freshness_ms", "complete_sync_ms",
+    "resync_supported",
+  ]);
+  const rows: [string, string][] = [];
+  if (config.endpoint) rows.push(["Connects to", String(config.endpoint)]);
+  const hb = ms(config.heartbeat_interval_ms);
+  const hbTo = ms(config.heartbeat_timeout_ms);
+  if (hb || hbTo) rows.push(["Keep-alive", [hb && `every ${hb}`, hbTo && `give up after ${hbTo}`].filter(Boolean).join(", ")]);
+  const fresh = ms(config.feed_freshness_ms);
+  if (fresh) rows.push(["Guest data treated as stale after", fresh]);
+  const sync = ms(config.complete_sync_ms);
+  if (sync) rows.push(["Full guest-list refresh at least every", sync]);
+  const dial = ms(config.dial_timeout_ms);
+  const read = ms(config.read_timeout_ms);
+  if (dial || read) rows.push(["Timeouts", [dial && `connect ${dial}`, read && `read ${read}`].filter(Boolean).join(", ")]);
+  rows.push(["Authentication", auth.credential_mode === "NONE" ? "None — the link is unauthenticated" : String(auth.credential_mode ?? "—")]);
+  rows.push(["Direction", auth.read_only === false ? "Read and write" : "Read-only"]);
+  if (config.resync_supported != null) {
+    rows.push(["Full refresh", config.resync_supported ? "Supported" : "Not supported"]);
+  }
+  const extra = Object.keys(config).filter((k) => !known.has(k));
+
+  return (
+    <div className="text-xs space-y-0.5 max-w-md">
+      {rows.map(([k, v]) => (
+        <div key={k}><span className="text-gray-500">{k}:</span> {v}</div>
+      ))}
+      {extra.map((k) => (
+        <div key={k}><span className="text-gray-500">{k}:</span> {String(config[k])}</div>
+      ))}
+    </div>
   );
 }

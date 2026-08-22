@@ -86,8 +86,13 @@ func (r *PgCommerceAdminRepository) ListPackageRevisions(ctx context.Context, te
 func (r *PgCommerceAdminRepository) ListPlans(ctx context.Context, tenantID, siteID string) ([]PlanSummary, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT p.id::text, p.code, p.enabled, COALESCE(p.current_revision_id::text,''),
-		        (SELECT count(*) FROM iam_v2.service_plan_revisions r WHERE r.service_plan_id = p.id)
+		        (SELECT count(*) FROM iam_v2.service_plan_revisions r WHERE r.service_plan_id = p.id),
+		        cur.name, cur.down_kbps, cur.up_kbps, cur.max_concurrent_devices, cur.device_limit_policy,
+		        cur.idle_timeout_seconds, cur.max_continuous_session_seconds,
+		        cur.time_quota_seconds, cur.data_quota_bytes, cur.time_accounting_mode
 		   FROM iam_v2.service_plans p
+		   -- LEFT JOIN: a plan with no published revision yet is a real state, and it must still list.
+		   LEFT JOIN iam_v2.service_plan_revisions cur ON cur.id = p.current_revision_id
 		  WHERE p.tenant_id=$1 AND p.site_id=$2
 		    -- Hide the reserved system grace plan, for the same reason ListPackages hides the system package:
 		    -- it is not an operator-editable object. Showing it in the catalogue invites an operator to publish
@@ -104,7 +109,10 @@ func (r *PgCommerceAdminRepository) ListPlans(ctx context.Context, tenantID, sit
 	var out []PlanSummary
 	for rows.Next() {
 		var s PlanSummary
-		if err := rows.Scan(&s.PlanID, &s.Code, &s.Enabled, &s.CurrentRevisionID, &s.RevisionCount); err != nil {
+		if err := rows.Scan(&s.PlanID, &s.Code, &s.Enabled, &s.CurrentRevisionID, &s.RevisionCount,
+			&s.Name, &s.DownKbps, &s.UpKbps, &s.MaxConcurrentDevices, &s.DeviceLimitPolicy,
+			&s.IdleTimeoutSeconds, &s.MaxSessionSeconds, &s.TimeQuotaSeconds, &s.DataQuotaBytes,
+			&s.TimeAccountingMode); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

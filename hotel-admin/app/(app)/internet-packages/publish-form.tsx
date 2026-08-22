@@ -1,17 +1,23 @@
 "use client";
 
-// Typed publish form for a free, non-PMS commercial-package revision. All serialization/validation lives
-// in lib/commerce-form (unit-tested); this file is the React editor. The eligibility rule-type dropdown
-// offers ONLY supported Phase-2 types (no PMS), the grant-tier editor is ordered, the duration editor
-// offers only capability-enabled end-modes, and there is NO price/settlement field (free-only).
+// Typed publish form for a free, non-PMS Internet-package revision. All serialization/validation lives in
+// lib/commerce-form (unit-tested); this file is the React editor. The eligibility rule-type dropdown offers
+// ONLY implemented types (no PMS), the grant-tier editor is ordered, the duration editor offers only
+// capability-enabled end-modes, and there is NO price/settlement field (free-only).
+//
+// Every enum the operator picks from is rendered through a label map rather than as its wire constant, and
+// every rate/duration field collects the unit an operator thinks in. The wire payload is unchanged.
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Trash2, Plus } from "lucide-react";
+import { durationToSeconds, formatSpeed, formatDevices } from "@/lib/units";
 import {
   SUPPORTED_RULE_TYPES,
   SUPPORTED_END_MODES,
+  END_MODE_LABELS,
+  RULE_TYPE_LABELS,
   buildPublishPayload,
   type EligibilityRuleForm,
   type GrantTierForm,
@@ -20,7 +26,12 @@ import {
   type RuleType,
 } from "@/lib/commerce-form";
 
-type PlanOption = { plan_id: string; code: string; current_revision_id: string };
+type PlanOption = {
+  plan_id: string; code: string; current_revision_id: string;
+  // Carried so the selector can say what each plan GRANTS. Choosing the service plan is the single most
+  // consequential field on this form, and a list of bare codes gave the operator nothing to choose on.
+  name?: string | null; down_kbps?: number | null; max_concurrent_devices?: number | null;
+};
 
 function emptyRule(type: RuleType): EligibilityRuleForm {
   switch (type) {
@@ -47,6 +58,9 @@ export function PublishPackageForm({
   const [duration, setDuration] = useState<DurationForm>({ end_mode: "MANUAL_END" });
   const [visFrom, setVisFrom] = useState("");
   const [visUntil, setVisUntil] = useState("");
+  // The operator types hours; the payload carries seconds. Kept as its own state so the field does not
+  // reformat itself while being typed.
+  const [durationHours, setDurationHours] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function submit(e: React.FormEvent) {
@@ -76,7 +90,9 @@ export function PublishPackageForm({
           <select aria-label="service-plan" className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm" value={planRev} onChange={(e) => setPlanRev(e.target.value)}>
             <option value="">Select a plan…</option>
             {plans.filter((p) => p.current_revision_id).map((p) => (
-              <option key={p.plan_id} value={p.current_revision_id}>{p.code} (current revision)</option>
+              <option key={p.plan_id} value={p.current_revision_id}>
+                {planOptionLabel(p)}
+              </option>
             ))}
           </select>
         </div>
@@ -85,14 +101,23 @@ export function PublishPackageForm({
       {/* Duration policy — only capability-enabled end modes */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <Label>End mode</Label>
+          <Label>How long access lasts</Label>
           <select aria-label="end-mode" className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm"
             value={duration.end_mode} onChange={(e) => setDuration({ end_mode: e.target.value as DurationForm["end_mode"] })}>
-            {SUPPORTED_END_MODES.map((m) => <option key={m} value={m}>{m}</option>)}
+            {SUPPORTED_END_MODES.map((m) => <option key={m} value={m}>{END_MODE_LABELS[m]}</option>)}
           </select>
         </div>
         {duration.end_mode === "VALIDITY_WINDOW" && (
-          <div><Label>Duration seconds</Label><Input aria-label="duration-seconds" type="number" min={1} value={String(duration.duration_seconds ?? "")} onChange={(e) => setDuration((d) => ({ ...d, duration_seconds: e.target.value }))} /></div>
+          <div>
+            <Label>Length of access (hours)</Label>
+            <Input aria-label="duration-hours" type="number" min={0} step="0.5"
+              value={durationHours}
+              onChange={(e) => {
+                setDurationHours(e.target.value);
+                const secs = durationToSeconds(e.target.value, "hours");
+                setDuration((d) => ({ ...d, duration_seconds: secs ?? "" }));
+              }} />
+          </div>
         )}
         {duration.end_mode === "FIXED_AT" && (
           <div><Label>Ends at</Label><Input aria-label="ends-at" type="datetime-local" value={duration.ends_at ?? ""} onChange={(e) => setDuration((d) => ({ ...d, ends_at: e.target.value }))} /></div>
@@ -101,21 +126,21 @@ export function PublishPackageForm({
 
       {/* Sale window */}
       <div className="grid grid-cols-2 gap-3">
-        <div><Label>Visible from</Label><Input aria-label="visible-from" type="datetime-local" value={visFrom} onChange={(e) => setVisFrom(e.target.value)} /></div>
-        <div><Label>Visible until</Label><Input aria-label="visible-until" type="datetime-local" value={visUntil} onChange={(e) => setVisUntil(e.target.value)} /></div>
+        <div><Label>Offer from</Label><Input aria-label="visible-from" type="datetime-local" value={visFrom} onChange={(e) => setVisFrom(e.target.value)} /></div>
+        <div><Label>Offer until</Label><Input aria-label="visible-until" type="datetime-local" value={visUntil} onChange={(e) => setVisUntil(e.target.value)} /></div>
       </div>
 
       {/* Eligibility rules — typed, supported types only */}
       <div>
         <div className="flex items-center justify-between mb-1">
-          <Label>Eligibility rules</Label>
-          <Button type="button" variant="ghost" onClick={() => setRules((rs) => [...rs, emptyRule("AUTH_METHOD")])}><Plus size={14} /> Add rule</Button>
+          <Label>Who this package is offered to</Label>
+          <Button type="button" variant="ghost" onClick={() => setRules((rs) => [...rs, emptyRule("AUTH_METHOD")])}><Plus size={14} /> Add condition</Button>
         </div>
         {rules.map((r, i) => (
           <div key={i} className="flex gap-2 items-center mb-2" data-testid={`rule-${i}`}>
             <select aria-label={`rule-type-${i}`} className="bg-panel2 border border-border rounded-md px-2 py-1.5 text-sm"
               value={r.type} onChange={(e) => setRules((rs) => rs.map((x, j) => (j === i ? emptyRule(e.target.value as RuleType) : x)))}>
-              {SUPPORTED_RULE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              {SUPPORTED_RULE_TYPES.map((t) => <option key={t} value={t}>{RULE_TYPE_LABELS[t]}</option>)}
             </select>
             {r.type === "AUTH_METHOD" && <Input aria-label={`rule-methods-${i}`} placeholder="account, voucher" value={r.methods} onChange={(e) => setRule(i, { methods: e.target.value })} />}
             {r.type === "SUBJECT_KIND" && <Input aria-label={`rule-kinds-${i}`} placeholder="ACCOUNT, VOUCHER" value={r.kinds} onChange={(e) => setRule(i, { kinds: e.target.value })} />}
@@ -138,9 +163,13 @@ export function PublishPackageForm({
       {/* Ordered grant tiers */}
       <div>
         <div className="flex items-center justify-between mb-1">
-          <Label>Grant tiers (ordered)</Label>
+          <Label>Speed steps (applied in order, kbps)</Label>
           <Button type="button" variant="ghost" onClick={() => setTiers((ts) => [...ts, { order: (ts.length + 1) * 10, down_kbps: "" }])}><Plus size={14} /> Add tier</Button>
         </div>
+        {/* These carry kbps straight to the payload. They are labelled kbps rather than converted because a
+            grant tier is a step in an ordered ladder the enforcement layer reads literally, and a silent
+            unit conversion in the middle of an ordered list is a worse trap than an explicit raw unit. The
+            plan-level speeds above, which an operator sets far more often, do convert. */}
         {tiers.map((t, i) => (
           <div key={i} className="flex gap-2 items-center mb-2" data-testid={`tier-${i}`}>
             <Input aria-label={`tier-order-${i}`} type="number" className="w-24" value={String(t.order)} onChange={(e) => setTier(i, { order: e.target.value })} />
@@ -151,8 +180,25 @@ export function PublishPackageForm({
         ))}
       </div>
 
-      <div className="text-xs text-muted">This publishes a <strong>free</strong> package revision (price 0, settlement NOT_REQUIRED); paid/PMS settlement is not configurable in Phase 2.</div>
+      <div className="text-xs text-muted">
+        {/* Precise about WHICH thing is unavailable. The financial foundation — charges, settlements,
+            recovery — exists in the product and is gated off on this appliance; what is not currently
+            available is SELLING a package to a guest through the portal. Saying "StayConnect cannot take
+            payment" would be wrong, and would invite removing the integration hooks that are already
+            there. */}
+        This package is <strong>free to the guest</strong>. Selling packages to guests is not enabled on this
+        appliance, so there is no price to set here; the package is granted rather than sold.
+      </div>
       <Button type="submit" disabled={busy}>{busy ? "Publishing…" : "Publish"}</Button>
     </form>
   );
+}
+
+// planOptionLabel describes a service plan in the words the operator chose it with: its name, its speed and
+// how many devices. A dropdown of bare codes made the most important field on this form a memory test.
+function planOptionLabel(p: PlanOption): string {
+  const bits = [p.name || p.code];
+  if (p.down_kbps) bits.push(formatSpeed(p.down_kbps));
+  if (p.max_concurrent_devices) bits.push(formatDevices(p.max_concurrent_devices));
+  return bits.join(" · ");
 }

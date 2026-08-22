@@ -9,13 +9,21 @@ import userEvent from "@testing-library/user-event";
 const get = vi.fn();
 const post = vi.fn();
 const put = vi.fn();
-vi.mock("@/lib/api", () => ({
-  api: {
-    get: (...a: any[]) => get(...a),
-    post: (...a: any[]) => post(...a),
-    put: (...a: any[]) => put(...a),
-  },
-}));
+// ApiError is part of the module's RUNTIME surface, not just its types: ErrorBanner does
+// `err instanceof ApiError` to decide whether to show a trace id. A mock that omits it makes that check
+// throw, React unmounts the tree, and the page renders as an empty div — which is what happened here, and
+// it looked like the error state was missing rather than the mock being incomplete.
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return {
+    ...actual,
+    api: {
+      get: (...a: any[]) => get(...a),
+      post: (...a: any[]) => post(...a),
+      put: (...a: any[]) => put(...a),
+    },
+  };
+});
 
 beforeEach(() => {
   get.mockReset();
@@ -25,7 +33,7 @@ beforeEach(() => {
 afterEach(() => vi.resetModules());
 
 describe("Stays page", () => {
-  it("shows a stay with its occupant count and checkout boundary, and opens details", async () => {
+  it("shows a stay with its guest, dates and sharing count, and opens details", async () => {
     get.mockImplementation((path: string) => {
       if (path.startsWith("/pms-stays/")) {
         return Promise.resolve({
@@ -49,12 +57,12 @@ describe("Stays page", () => {
     render(<StaysPage />);
     expect(await screen.findByText("R900")).toBeTruthy();
     // sharing a stay is ordinary: the occupant count is shown plainly
-    expect(screen.getByText("2")).toBeTruthy();
-    expect(screen.getByText("closed")).toBeTruthy();
+    expect(screen.getByText(/1 sharing/)).toBeTruthy();
+    expect(screen.getByText(/Closed/)).toBeTruthy();
 
-    await userEvent.click(screen.getByRole("button", { name: "Details" }));
+    await userEvent.click(screen.getByRole("button", { name: "View" }));
     expect(await screen.findByText("Byron, Ada")).toBeTruthy();
-    expect(screen.getByText("primary")).toBeTruthy();
+    expect(screen.getByText("main guest")).toBeTruthy();
     expect(screen.getByText(/F900/)).toBeTruthy();
   });
 

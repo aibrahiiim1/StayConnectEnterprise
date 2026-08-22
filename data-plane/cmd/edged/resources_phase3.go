@@ -26,6 +26,7 @@ import (
 type stayRow struct {
 	ID                  string     `json:"id"`
 	Interface           string     `json:"pms_interface_id"`
+	InterfaceLabel      string     `json:"pms_interface_label,omitempty"`
 	Reservation         string     `json:"external_reservation_id"`
 	Room                *string    `json:"room,omitempty"`
 	Status              string     `json:"status"`
@@ -35,16 +36,56 @@ type stayRow struct {
 	EffectiveCheckoutAt *time.Time `json:"effective_checkout_at,omitempty"`
 	PostingAllowed      bool       `json:"posting_allowed"`
 	Occupants           int        `json:"occupants"`
+
+	// THE PRIMARY GUEST'S NAME, and the operational fields the domain already stores.
+	//
+	// The list previously identified a stay by its reservation string and room only, so an operator looking
+	// for "the Andersons in 412" had to open rows until they found it. The name is already persisted on
+	// stay_guests and already shown on the detail view, so surfacing the primary occupant here exposes
+	// nothing new — it just stops the list being unusable for the lookup operators actually perform.
+	PrimaryGuest *string `json:"primary_guest,omitempty"`
+
+	// Why posting is blocked, and where that decision came from. Persisted since the Stay domain shipped and
+	// never exposed: an operator could see posting_allowed = false and had no way to learn why.
+	PostingBlockReason *string `json:"posting_block_reason,omitempty"`
+	PostingSource      *string `json:"posting_permission_source,omitempty"`
+
+	// OCCUPANCY FRESHNESS — how recently the PMS confirmed this stay. This is the evidence guest
+	// authentication is judged against, so when a guest cannot sign in it is the first thing worth seeing.
+	OccupancyEvidenceAt *time.Time `json:"occupancy_evidence_at,omitempty"`
+
+	// Hotel attributes the SCHEMA carries. Whether they are populated depends entirely on the connector: the
+	// Protel FIAS feed commissioned here sends room, reservation, names, arrival and departure and nothing
+	// else, so on that interface these stay null. They are emitted omitempty rather than as blanks, and the
+	// UI renders them only when present — a column of permanent dashes would imply the PMS is failing to
+	// send something it was never asked for.
+	VIP         *bool   `json:"vip,omitempty"`
+	RoomType    *string `json:"room_type,omitempty"`
+	RatePlan    *string `json:"rate_plan,omitempty"`
+	TravelAgent *string `json:"travel_agent,omitempty"`
 }
 
-const stayCols = `s.id::text, s.pms_interface_id::text, s.external_reservation_id,
+const stayCols = `s.id::text, s.pms_interface_id::text, COALESCE(i.display_label,''),
+       s.external_reservation_id,
        s.normalized_room_number, s.status, s.lifecycle_version, s.arrival, s.departure,
        s.effective_checkout_at, s.posting_allowed,
-       (SELECT count(*) FROM iam_v2.stay_guests g WHERE g.stay_id = s.id)::int`
+       (SELECT count(*) FROM iam_v2.stay_guests g WHERE g.stay_id = s.id)::int,
+       (SELECT COALESCE(NULLIF(g.display_name,''), NULLIF(g.last_name_norm,''))
+          FROM iam_v2.stay_guests g WHERE g.stay_id = s.id
+         ORDER BY g.is_primary DESC LIMIT 1),
+       s.posting_block_reason, s.posting_permission_source, s.occupancy_evidence_at,
+       s.vip, s.room_type, s.rate_plan, s.travel_agent`
+
+// stayFrom is the FROM clause every stay query shares. The interface join is LEFT so a Stay whose interface
+// row is somehow missing still lists rather than vanishing from the operator's view.
+const stayFrom = `FROM iam_v2.stays s
+       LEFT JOIN iam_v2.pms_interfaces i ON i.id = s.pms_interface_id`
 
 func scanStay(row interface{ Scan(...any) error }, e *stayRow) error {
-	return row.Scan(&e.ID, &e.Interface, &e.Reservation, &e.Room, &e.Status, &e.LifecycleVersion,
-		&e.Arrival, &e.Departure, &e.EffectiveCheckoutAt, &e.PostingAllowed, &e.Occupants)
+	return row.Scan(&e.ID, &e.Interface, &e.InterfaceLabel, &e.Reservation, &e.Room, &e.Status,
+		&e.LifecycleVersion, &e.Arrival, &e.Departure, &e.EffectiveCheckoutAt, &e.PostingAllowed,
+		&e.Occupants, &e.PrimaryGuest, &e.PostingBlockReason, &e.PostingSource, &e.OccupancyEvidenceAt,
+		&e.VIP, &e.RoomType, &e.RatePlan, &e.TravelAgent)
 }
 
 func (s *server) pmsStaysRoutes() http.Handler {
@@ -77,7 +118,7 @@ func (s *server) listStays(w http.ResponseWriter, r *http.Request) {
 	// Arrival is the ordering an operator actually wants (most recent stays first) and it is a column the
 	// schema really keeps. Inventing an updated_at to satisfy the old query would have been the other way to
 	// make this compile, and it would have added a timestamp nothing maintains.
-	rows, err := s.db.Query(ctx, `SELECT `+stayCols+` FROM iam_v2.stays s
+	rows, err := s.db.Query(ctx, `SELECT `+stayCols+` `+stayFrom+`
 		WHERE s.tenant_id=$1 AND ($2::text IS NULL OR s.status=$2)
 		ORDER BY s.arrival DESC NULLS LAST, s.id LIMIT 200`, s.tenantID, statusArg)
 	if err != nil {
@@ -120,7 +161,7 @@ func (s *server) getStay(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 	var d stayDetail
-	err := scanStay(s.db.QueryRow(ctx, `SELECT `+stayCols+` FROM iam_v2.stays s
+	err := scanStay(s.db.QueryRow(ctx, `SELECT `+stayCols+` `+stayFrom+`
 		WHERE s.id=$1 AND s.tenant_id=$2`, id, s.tenantID), &d.stayRow)
 	if isNoRows(err) {
 		jsonErr(w, http.StatusNotFound, "not_found", "stay not found")
