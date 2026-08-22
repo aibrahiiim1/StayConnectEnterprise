@@ -43,11 +43,12 @@ import (
 // point them elsewhere without this package knowing any absolute path.
 func CentralAssignmentLoader(paths assignment.Paths, identityDir string, log *slog.Logger) func(context.Context) (Assignment, bool, error) {
 	return func(context.Context) (Assignment, bool, error) {
-		idStore := &identity.Store{Dir: identityDir}
-		// EnsureLocalKeypair loads the existing identity and does NOT enrol or contact anything; on a
-		// factory-clean appliance it yields a keypair with no ApplianceID, which cannot be bound to any
-		// assignment and therefore resolves to no scope.
-		ident, err := idStore.EnsureLocalKeypair()
+		// PUBLIC identity only. pmsd needs to know WHICH appliance this is so the assignment can be checked
+		// against it; it signs nothing, so it has no business reading the appliance private key — and could
+		// not anyway, since ed25519.key is 0600 root-only while pmsd runs under its own service account.
+		//
+		// No ApplianceID means enrolment has not completed. That is factory-clean, not a fault.
+		ident, err := (&identity.Store{Dir: identityDir}).LoadPublic()
 		if err != nil || ident == nil || ident.ApplianceID == "" {
 			return Assignment{}, false, nil // awaiting enrolment → no PMS work
 		}

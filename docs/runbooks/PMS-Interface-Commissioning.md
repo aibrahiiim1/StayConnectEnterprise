@@ -285,25 +285,47 @@ decision is made.
 The emergency-grace catalog created in step 6 is a **system** package (`is_system=t`) and is deliberately not
 offered to guests, so it does not and must not satisfy this.
 
-### Real GO on a known Stay — IMPLEMENTED, NOT YET LIVE-PROVEN
+### Real GO on a known Stay — LIVE-PROVEN
 
-Room-only checkout resolution is implemented and deployed. It has **not** been observed applying to a Stay
-that was IN_HOUSE at the time: every GO this Protel sent during commissioning was a `RESYNC` replay for a room
-the roster did not list as in-house, which correctly resolved to `GO_UNKNOWN_STAY`. Real checkouts occur
-during the property's morning departure window.
+Proven at 01:52 UTC on 2026-08-22 by **natural checkouts during the property's departure window**. No checkout
+event was fabricated, and none should ever be.
 
-What *was* proven is the privilege and trigger surface the conversion needs, by running the Checkout
-Converter's exact statement sequence as `svc_pmsd` inside a rolled-back transaction. That rehearsal is what
-found the missing `service_plans` SELECT.
+| Evidence | Result |
+|---|---|
+| `stay_events` GO | 3 `APPLIED`, all resolved to a Stay; **0 PENDING** |
+| `stays` | 1 `CHECKED_OUT` with `effective_checkout_at` set and `last_applied_event_id` linked; 501 `IN_HOUSE` |
+| `checkout_grace_audit` | `NO_GRACE` / `NO_ACTIVE_ENTITLEMENT_AT_CHECKOUT` — correct, the Stay had bought nothing |
+| Financial boundary | `purchases=0`, `entitlements=0`, `pms_postings=0`, `accounting_records=0` |
+| Runtime | `CONNECTED / CONTINUOUS / IN_SYNC` |
 
-**No checkout event was fabricated to close this item, and none should be.** It closes when a natural checkout
-is observed applying to a known Stay:
+Getting there required two privileges the pre-flight rehearsal had missed, each of which failed
+**mid-transaction on a real checkout** and left the GO `PENDING` with the ordered per-interface stream stalled
+behind it:
+
+- `UPDATE` on `site_checkout_grace_config`
+- `UPDATE` on `entitlements`
+
+Both are `SELECT ... FOR UPDATE` **row locks**, not writes. PostgreSQL requires UPDATE privilege to take a
+lock even when the statement modifies nothing, and the controlled-writer triggers still refuse any actual
+column change from a non-owner.
+
+**The lesson, which is the reusable part:** a privilege rehearsal must issue the statement the code issues,
+**lock clauses included**. The original rehearsal ran plain `SELECT`s against both tables and passed, proving
+something adjacent to what was needed. It caught the `service_plans` gap and missed these two.
+
+The applier also logged nothing but `UNCLASSIFIED` for every failure — a missing grant, a violated domain
+guard and a dropped connection were one indistinguishable line while the stream silently backed up. It now
+logs the cause (database and engine text only; no PMS payload passes through it), which is what turned a
+stalled queue into a two-minute diagnosis.
+
+### How to re-check any of this
 
 ```sh
-psql -c "SELECT event_type, processing_status, review_code, count(*)
-           FROM iam_v2.stay_events WHERE event_type='GO' GROUP BY 1,2,3;"
-psql -c "SELECT count(*) FROM iam_v2.stays WHERE status='CHECKED_OUT';"
+psql -c "SELECT event_type, processing_status, count(*) FROM iam_v2.stay_events GROUP BY 1,2 ORDER BY 1,2;"
+psql -c "SELECT status, count(*) FROM iam_v2.stays GROUP BY 1;"
+psql -c "SELECT outcome_code, count(*) FROM iam_v2.auth_resolutions GROUP BY 1;"
+journalctl -u stayconnect-pmsd | grep 'application failed'
 ```
 
-A `GO` at `APPLIED` with a corresponding `CHECKED_OUT` Stay closes it. A `GO` left `PENDING` does not — that
-would mean the conversion is failing and the inbox is stalling.
+A `GO` at `APPLIED` with a `CHECKED_OUT` Stay is healthy. A `GO` left `PENDING` is not — it means the
+conversion is failing and the inbox is stalling; read the `cause` field, do not restart and hope.

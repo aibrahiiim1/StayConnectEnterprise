@@ -75,7 +75,18 @@ GRANT SELECT,INSERT        ON iam_v2.folios                            TO svc_pm
 --
 -- None of it is financial execution. The conversion ENDS a paid entitlement at the checkout boundary and may
 -- create a free grace entitlement in its place; it takes no payment, posts no charge and writes no usage.
-GRANT SELECT,INSERT        ON iam_v2.entitlements                      TO svc_pmsd; -- INSERT the grace entitlement
+-- entitlements: SELECT + INSERT the grace entitlement, and UPDATE for a row LOCK.
+--
+-- The eligibility scan locks the Stay's pre-checkout entitlements with `SELECT ... FOR UPDATE` so a
+-- conversion cannot race another writer, and PostgreSQL requires UPDATE privilege to take that lock. The
+-- converter issues no UPDATE against this table — the boundary is moved by
+-- iam_v2.terminate_entitlement_at_boundary and the status by apply_entitlement_transition, both granted
+-- below — and p3_entitlement_controlled_writer refuses any status change from a non-owner regardless.
+--
+-- This and site_checkout_grace_config are the two places where UPDATE means "may lock", not "may write".
+-- Both were missed by the pre-flight rehearsal because it issued plain SELECTs; both then failed on real
+-- checkouts, mid-transaction, leaving the GO PENDING and the ordered stream stalled behind it.
+GRANT SELECT,INSERT,UPDATE ON iam_v2.entitlements                      TO svc_pmsd;
 GRANT SELECT,INSERT,UPDATE ON iam_v2.entitlement_devices               TO svc_pmsd;
 GRANT SELECT,INSERT,UPDATE ON iam_v2.entitlement_device_authorizations TO svc_pmsd; -- capability-scoped: device_auth
 GRANT SELECT,INSERT        ON iam_v2.entitlement_boundary_watermarks   TO svc_pmsd; -- capability-scoped: checkout_conversion
@@ -92,7 +103,22 @@ GRANT SELECT,INSERT        ON iam_v2.purchases                         TO svc_pm
 GRANT SELECT,UPDATE        ON iam_v2.sessions                          TO svc_pmsd;
 
 -- Read-only inputs the conversion consults to decide the boundary and what grace, if any, it may grant.
-GRANT SELECT ON iam_v2.site_checkout_grace_config     TO svc_pmsd;
+-- site_checkout_grace_config: SELECT **and UPDATE**, and the UPDATE is a row LOCK, not a licence to write.
+--
+-- The conversion reads this row with `SELECT ... FOR UPDATE`, to serialise a checkout against a concurrent
+-- grace-policy publication. PostgreSQL requires UPDATE privilege to take that lock even though the statement
+-- modifies nothing, so SELECT alone fails with "permission denied for table site_checkout_grace_config" —
+-- mid-transaction, which aborts the conversion and leaves the GO PENDING while the ordered per-interface
+-- stream backs up behind it. That is what happened on the live appliance to five real checkouts.
+--
+-- Granting UPDATE does NOT make svc_pmsd a writer of grace policy. p3_grace_config_controlled_writer refuses
+-- any actual column change from a caller that is not the owner of publish_checkout_grace_config, and taking a
+-- row lock does not fire it. The privilege buys the lock; the trigger keeps the boundary.
+--
+-- Worth recording how it was missed: the pre-flight rehearsal ran `SELECT ... FROM site_checkout_grace_config`
+-- without `FOR UPDATE`, so it passed. A rehearsal has to issue the statement the code issues, lock clauses
+-- included, or it proves something adjacent to the thing you need.
+GRANT SELECT,UPDATE ON iam_v2.site_checkout_grace_config TO svc_pmsd;
 GRANT SELECT ON iam_v2.entitlement_state_transitions  TO svc_pmsd;
 GRANT SELECT ON iam_v2.internet_packages              TO svc_pmsd;
 GRANT SELECT ON iam_v2.internet_package_revisions     TO svc_pmsd;
