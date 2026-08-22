@@ -99,6 +99,24 @@ type PlanSummary struct {
 	Enabled           bool   `json:"enabled"`
 	CurrentRevisionID string `json:"current_revision_id"`
 	RevisionCount     int    `json:"revision_count"`
+
+	// WHAT THE PLAN ACTUALLY IS, from its current revision.
+	//
+	// The summary used to carry a code, a revision count and a revision UUID and nothing else, so the operator
+	// screen listing service plans could not say what any of them DID. Choosing which plan to attach to a
+	// guest-facing package meant opening each one's revision history in turn and reading it — for the single
+	// most consequential field on the package form. These come from the current revision, so they are the
+	// values in force right now rather than the newest ones drafted.
+	Name                 *string `json:"name,omitempty"`
+	DownKbps             *int    `json:"down_kbps,omitempty"`
+	UpKbps               *int    `json:"up_kbps,omitempty"`
+	MaxConcurrentDevices *int    `json:"max_concurrent_devices,omitempty"`
+	DeviceLimitPolicy    *string `json:"device_limit_policy,omitempty"`
+	IdleTimeoutSeconds   *int    `json:"idle_timeout_seconds,omitempty"`
+	MaxSessionSeconds    *int    `json:"max_continuous_session_seconds,omitempty"`
+	TimeQuotaSeconds     *int64  `json:"time_quota_seconds,omitempty"`
+	DataQuotaBytes       *int64  `json:"data_quota_bytes,omitempty"`
+	TimeAccountingMode   *string `json:"time_accounting_mode,omitempty"`
 }
 
 // GraceConfig is the read/write shape for site_checkout_grace_config.

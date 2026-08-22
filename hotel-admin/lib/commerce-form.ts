@@ -1,10 +1,11 @@
-// Pure, deterministic form logic for the Phase-2 commercial-packages publish form. Kept separate from
-// the React components so it is unit-testable in isolation and shared by the editors. Everything here
-// enforces the Phase-2 DARK constraints on the client (the edged API re-validates authoritatively):
-// free-only, non-PMS, capability-disabled duration modes.
+// Pure, deterministic form logic for the Internet-package publish form. Kept separate from the React
+// components so it is unit-testable in isolation and shared by the editors. Everything here enforces the
+// currently-supported contract on the client (the edged API re-validates authoritatively): free-only,
+// non-PMS eligibility, and only the duration modes this build actually implements.
 
-// The ONLY eligibility rule types an operator may select in Phase 2. PMS/Stay-dependent rule types
-// (ROOM_TYPE, RATE_PLAN, STAY_*, etc.) are deliberately absent — they cannot be selected in the UI.
+// The ONLY eligibility rule types an operator may select. PMS/Stay-dependent rule types (ROOM_TYPE,
+// RATE_PLAN, STAY_*, etc.) are deliberately absent — they are not implemented end to end, and a control that
+// silently does nothing is worse than an absent one.
 export const SUPPORTED_RULE_TYPES = [
   "AUTH_METHOD",
   "SUBJECT_KIND",
@@ -14,7 +15,7 @@ export const SUPPORTED_RULE_TYPES = [
 ] as const;
 export type RuleType = (typeof SUPPORTED_RULE_TYPES)[number];
 
-// Rule types that must never be selectable in Phase 2 (PMS/Stay dependent). Exported for tests.
+// Rule types that must never be selectable (PMS/Stay dependent, not implemented). Exported for tests.
 export const FORBIDDEN_RULE_TYPES = [
   "ROOM_TYPE",
   "RATE_PLAN",
@@ -27,8 +28,8 @@ export function isSupportedRuleType(t: string): t is RuleType {
   return (SUPPORTED_RULE_TYPES as readonly string[]).includes(t);
 }
 
-// The ONLY duration end-modes selectable in Phase 2. AT_CHECKOUT / GRACE_AFTER_CHECKOUT /
-// REST_OF_STAY / EARLIEST_OF_FIXED_AND_CHECKOUT (PMS/checkout) are capability-disabled and absent.
+// The ONLY duration end-modes selectable here. AT_CHECKOUT / GRACE_AFTER_CHECKOUT / REST_OF_STAY /
+// EARLIEST_OF_FIXED_AND_CHECKOUT (PMS/checkout-driven) are capability-disabled and absent.
 export const SUPPORTED_END_MODES = ["MANUAL_END", "VALIDITY_WINDOW", "FIXED_AT"] as const;
 export type EndMode = (typeof SUPPORTED_END_MODES)[number];
 
@@ -160,3 +161,25 @@ export function buildPublishPayload(s: PublishFormState): { payload?: PublishPay
   if (s.visible_until) payload.visible_until = new Date(s.visible_until).toISOString();
   return { payload };
 }
+
+
+// OPERATOR WORDING for the enum values above.
+//
+// The form used to render the raw constants — an operator picking a duration policy chose between
+// "MANUAL_END", "VALIDITY_WINDOW" and "FIXED_AT", and picking an eligibility rule chose between
+// "AUTH_METHOD" and "SUBJECT_KIND". Those are the wire values and they stay the wire values; these are what
+// the person reading the screen sees. Kept beside the enums so a new value cannot be added without the
+// label question being asked.
+export const END_MODE_LABELS: Record<EndMode, string> = {
+  MANUAL_END: "Until the guest disconnects or an operator ends it",
+  VALIDITY_WINDOW: "For a fixed length of time after the guest connects",
+  FIXED_AT: "Until a specific date and time",
+};
+
+export const RULE_TYPE_LABELS: Record<RuleType, string> = {
+  AUTH_METHOD: "How the guest signed in",
+  SUBJECT_KIND: "Type of guest credential",
+  DATE_WINDOW: "Only between two dates",
+  PRIOR_PURCHASE: "Whether they already had a package",
+  SITE_NETWORK: "Only on certain guest networks",
+};

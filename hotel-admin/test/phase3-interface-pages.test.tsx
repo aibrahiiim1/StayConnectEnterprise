@@ -102,11 +102,11 @@ describe("PMS interfaces page", () => {
     await screen.findByText("Main PMS");
     await userEvent.click(screen.getByRole("button", { name: "Open" }));
 
-    await screen.findByText("Health");
+    await screen.findByText("Connection status");
     // separate, because they fail separately and each has a different response
-    expect(screen.getByText("Transport")).toBeTruthy();
-    expect(screen.getByText("Continuity")).toBeTruthy();
-    expect(screen.getByText("Synchronization")).toBeTruthy();
+    expect(screen.getByText("Connection")).toBeTruthy();
+    expect(screen.getByText("Live updates")).toBeTruthy();
+    expect(screen.getByText("Guest list")).toBeTruthy();
     expect(screen.getByText(/12 stays in house/)).toBeTruthy();
     // the age of the oldest waiting event is what separates a busy morning from a stuck processor
     expect(screen.getByText(/oldest waiting since/)).toBeTruthy();
@@ -154,37 +154,60 @@ describe("PMS interfaces page", () => {
     expect(alert.textContent).toMatch(/another operator published/);
   });
 
-  it("never renders a credential and never asks the server for one", async () => {
+  // THE SUPPORTED CONNECTOR HAS NO CREDENTIAL, so the page must not present one.
+  //
+  // This replaces a test that asserted the Credential card behaved SECURELY — masked input, never echoed,
+  // never fetched. That was the right test while a credential could exist. The Protel FIAS link carries no
+  // transport authentication (credential_mode=NONE), so the card's "never set" badge described a missing
+  // secret that is not supposed to exist, and read as a fault on a correctly configured interface.
+  //
+  // The component and its endpoint are deliberately still in the tree for a connector that authenticates;
+  // what is asserted here is that nothing REACHES the operator and nothing is requested.
+  it("presents no credential surface for a connector that needs none", async () => {
     mockInterfacePage();
-    post.mockResolvedValue({ generation_no: 4 });
     const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
     const { container } = render(<Page />);
     await screen.findByText("Main PMS");
     await userEvent.click(screen.getByRole("button", { name: "Open" }));
 
-    await screen.findByRole("heading", { name: "Credential" });
-    // it names the generation, which is what "did my rotation take effect?" needs — and nothing else
-    expect(screen.getByText(/Currently using generation 3/)).toBeTruthy();
-
-    await userEvent.click(screen.getByRole("button", { name: "Replace credential" }));
-    const field = screen.getByLabelText(/New credential/) as HTMLInputElement;
-    // a masked TEXT field would still put the value in the DOM; this must be a password input
-    expect(field.type).toBe("password");
-    await userEvent.type(field, "s3cr3t-value");
-    await userEvent.type(screen.getByLabelText(/Reason/), "ROTATION");
-    await userEvent.type(screen.getByLabelText(/Confirm your password/), "pw");
-    await userEvent.click(screen.getByRole("button", { name: "Replace credential" }));
-
-    await waitFor(() => expect(post).toHaveBeenCalled());
-    const [path, body] = post.mock.calls[0];
-    expect(path).toBe("/pms-interfaces/i1/secret");
-    expect(body.reason_code).toBe("ROTATION");
-    // the confirmation names the generation, never the value
-    expect(await screen.findByRole("status")).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toMatch(/generation 4/);
-    expect(container.innerHTML).not.toContain("s3cr3t-value");
-    // and nothing on the page ever GETs a credential
+    expect(screen.queryByRole("heading", { name: "Credential" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /replace credential/i })).toBeNull();
+    // the misleading warning specifically: an interface that needs no secret is not "never set"
+    expect(container.textContent).not.toMatch(/never set/i);
+    // and nothing on the page ever asks the server for one
     for (const [p] of get.mock.calls) expect(String(p)).not.toMatch(/secret/);
+  });
+
+  // Only the connector the canonical runtime supports is offered. pmsd refuses any other kind at validation,
+  // so offering one here would let an operator author and publish configuration that can never connect.
+  it("offers only the supported connector when creating an interface", async () => {
+    mockInterfacePage();
+    const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
+    const { container } = render(<Page />);
+    await screen.findByText("Main PMS");
+    await userEvent.click(screen.getByRole("button", { name: /add interface/i }));
+
+    for (const unsupported of ["opera-fias", "fidelio-fias", "mews", "apaleo", "stub"]) {
+      expect(container.textContent).not.toContain(unsupported);
+    }
+    // Two matches is correct: the existing interface's row and the create form's fixed connector. Asserting
+    // "at least one" keeps the test about WHICH connectors are offered rather than about page layout.
+    expect((await screen.findAllByText("Protel (FIAS)")).length).toBeGreaterThan(0);
+  });
+
+  // A Protel revision form must not ask for values the implementation controls. Each of these was a way to
+  // save a revision that could never work, and folio identity was a financial assertion on a dropdown.
+  it("does not ask the operator for implementation-controlled revision settings", async () => {
+    mockInterfacePage();
+    const Page = (await import("@/app/(app)/pms-interfaces/page")).default;
+    render(<Page />);
+    await screen.findByText("Main PMS");
+    await userEvent.click(screen.getByRole("button", { name: "Configure" }));
+
+    expect(await screen.findByLabelText(/PMS time zone/)).toBeTruthy(); // still the operator's to set
+    for (const gone of [/folio identity/i, /credential mode/i, /normalization version/i, /resync supported/i]) {
+      expect(screen.queryByLabelText(gone)).toBeNull();
+    }
   });
 
   it("says when no guest network routes to the interface", async () => {

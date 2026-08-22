@@ -45,7 +45,7 @@ const MATRIX: Matrix = {
     // capabilities the property offers its guests is a configuration decision, not a desk action.
     "guest-device-self-service": "write",
     "guest-accounts": "write",
-    sessions: "write", "pms-providers": "write",
+    sessions: "write",
     "auth-methods": "write", "walled-garden": "write",
     "portal-branding": "write", "notification-providers": "write",
     "social-providers": "write", "stripe-accounts": "write",
@@ -59,7 +59,6 @@ const MATRIX: Matrix = {
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
     "guest-accounts": "write", sessions: "write",
-    "pms-providers": "read",
     "auth-methods": "read", "walled-garden": "read", reports: "read", audit: "read", license: "read", backups: "read", diagnostics: "read",
   },
   guest_relations_operator: {
@@ -67,7 +66,6 @@ const MATRIX: Matrix = {
     "pms-stays": "read", "pms-events": "read", "operational-alerts": "write", "checkout-grace": "read",
     "post-stay-profiles": "write", "stay-transfers": "write",
     "guest-accounts": "write", sessions: "write",
-    "pms-providers": "read",
     "auth-methods": "read", reports: "read",
     audit: "read", license: "read", backups: "read", "walled-garden": "read", diagnostics: "read",
   },
@@ -84,7 +82,7 @@ const MATRIX: Matrix = {
     "guest-device-self-service": "read",
     "pms-stays": "read", "pms-events": "read", "pms-resolutions": "read", "checkout-grace": "read", "operational-alerts": "read",
     "post-stay-profiles": "read", "stay-transfers": "read",
-    "guest-accounts": "read", sessions: "read", "pms-providers": "read", "auth-methods": "read",
+    "guest-accounts": "read", sessions: "read", "auth-methods": "read",
     "walled-garden": "read", "portal-branding": "read", "notification-providers": "read", "social-providers": "read",
     "stripe-accounts": "read", audit: "read", reports: "read",
     backups: "read", license: "read", network: "read", diagnostics: "read",

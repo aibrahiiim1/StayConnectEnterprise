@@ -171,11 +171,13 @@ test.describe("Phase 4 financial operator surface", () => {
     // is outside it. Nothing in the product changed to accommodate the test.
     await expect(page.getByRole("main").getByText("FINANCIAL RECOVERY")).toBeVisible();
     // The ambiguity itself, asserted so it cannot come back silently: exactly ONE banner inside the content
-    // region, and exactly one navigation LINK that happens to share the words. Measured: page-wide 2, in-main 1,
-    // in-nav 1 with nav text "Financial recovery". If the banner is ever rendered twice, or the nav moves inside
-    // <main>, this fails here with a clear reason instead of surfacing as an intermittent strict-mode violation.
+    // region, and exactly one navigation LINK for the same destination. The sidebar item is now "Recovery"
+    // under a "Charges" group — the group supplies the word the label used to carry — so the nav matcher is
+    // anchored to that label rather than to /financial recovery/. The property under test is unchanged: if
+    // the banner is ever rendered twice, or the nav moves inside <main>, this fails here with a clear reason
+    // instead of surfacing as an intermittent strict-mode violation.
     await expect(page.getByRole("main").getByText("FINANCIAL RECOVERY")).toHaveCount(1);
-    await expect(page.getByRole("navigation").getByRole("link", { name: /financial recovery/i })).toHaveCount(1);
+    await expect(page.getByRole("navigation").getByRole("link", { name: /^recovery$/i })).toHaveCount(1);
     await expect(page.getByText(/2 items still to reconcile/i)).toBeVisible();
     await expect(page.getByText(/guest internet access is unaffected/i)).toBeVisible();
 

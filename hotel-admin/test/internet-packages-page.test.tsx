@@ -17,7 +17,7 @@ vi.mock("@/lib/api", () => {
 });
 
 import { api, ApiError } from "@/lib/api";
-import CommercialPackagesPage from "@/app/(app)/commercial-packages/page";
+import InternetPackagesPage from "@/app/(app)/internet-packages/page";
 
 const g = api.get as unknown as ReturnType<typeof vi.fn>;
 const p = api.post as unknown as ReturnType<typeof vi.fn>;
@@ -26,11 +26,11 @@ function list<T>(data: T[]) { return { data, meta: { has_more: false } }; }
 
 beforeEach(() => { vi.clearAllMocks(); });
 
-describe("CommercialPackagesPage", () => {
+describe("InternetPackagesPage", () => {
   it("renders the approved disabled state when the backend returns 503", async () => {
     g.mockRejectedValue(new ApiError(503, { error: "phase2_disabled" }));
-    render(<CommercialPackagesPage />);
-    expect(await screen.findByText(/not enabled/i)).toBeInTheDocument();
+    render(<InternetPackagesPage />);
+    expect(await screen.findByText(/not switched on/i)).toBeInTheDocument();
     // tabs are not shown in the disabled state
     expect(screen.queryByText("Service plans")).toBeNull();
   });
@@ -41,7 +41,7 @@ describe("CommercialPackagesPage", () => {
       if (path === "/commercial-packages/plans") return Promise.resolve(list([{ plan_id: "p1", code: "GOLD", enabled: true, current_revision_id: "rev-gold", revision_count: 1 }]));
       return Promise.resolve(list([]));
     });
-    render(<CommercialPackagesPage />);
+    render(<InternetPackagesPage />);
     expect(await screen.findByText("FREEWIFI")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /publish package/i }));
     const select = (await screen.findByLabelText("service-plan")) as HTMLSelectElement;
@@ -58,9 +58,9 @@ describe("CommercialPackagesPage", () => {
       ]));
       return Promise.resolve(list([]));
     });
-    render(<CommercialPackagesPage />);
+    render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByText(/2 ▾/));
+    fireEvent.click(screen.getByText(/2 revisions/));
     expect(await screen.findByText(/current · immutable/i)).toBeInTheDocument();
     expect(screen.getByText(/#1/)).toBeInTheDocument();
   });
@@ -72,9 +72,9 @@ describe("CommercialPackagesPage", () => {
     });
     p.mockResolvedValue({});
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValueOnce("bad package").mockReturnValueOnce("secretpw");
-    render(<CommercialPackagesPage />);
+    render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByRole("button", { name: /deactivate/i }));
+    fireEvent.click(screen.getByRole("button", { name: /stop offering/i }));
     await waitFor(() => expect(p).toHaveBeenCalled());
     expect(promptSpy).toHaveBeenCalledTimes(2); // reason then password
     expect(p).toHaveBeenCalledWith("/commercial-packages/pk1/active", { active: false, reason: "bad package", password: "secretpw" });
@@ -86,9 +86,9 @@ describe("CommercialPackagesPage", () => {
       : Promise.resolve(list([])));
     p.mockResolvedValue({});
     vi.spyOn(window, "prompt").mockReturnValue(null); // cancel
-    render(<CommercialPackagesPage />);
+    render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByRole("button", { name: /deactivate/i }));
+    fireEvent.click(screen.getByRole("button", { name: /stop offering/i }));
     await new Promise((r) => setTimeout(r, 10));
     expect(p).not.toHaveBeenCalled();
   });
@@ -99,8 +99,8 @@ describe("CommercialPackagesPage", () => {
       if (path === "/commercial-packages/purchases") return Promise.resolve(list([{ id: "pu1", package_revision_id: "r1", state: "GRANTED", amount_minor: 0, currency: "USD" }]));
       return Promise.resolve(list([]));
     });
-    render(<CommercialPackagesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /inspection/i }));
+    render(<InternetPackagesPage />);
+    fireEvent.click(await screen.findByRole("button", { name: /guest activity/i }));
     expect(await screen.findByText("q1")).toBeInTheDocument();
     expect(screen.getByText("GRANTED")).toBeInTheDocument();
     const html = document.body.innerHTML.toLowerCase();
@@ -109,19 +109,8 @@ describe("CommercialPackagesPage", () => {
     }
   });
 
-  it("grace tab: a rejected grace config surfaces the validation error", async () => {
-    g.mockImplementation((path: string) =>
-      path === "/commercial-packages/grace"
-        ? Promise.resolve({ grace_package_revision_id: "", config: {} })
-        : Promise.resolve(list([])));
-    (api.put as unknown as ReturnType<typeof vi.fn>).mockRejectedValue(new ApiError(400, { error: "grace_package_wrong_type" }));
-    render(<CommercialPackagesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /checkout grace/i }));
-    fireEvent.change(await screen.findByPlaceholderText(/uuid of a CHECKOUT_GRACE/i), { target: { value: "some-rev" } });
-    fireEvent.click(screen.getByRole("button", { name: /save grace config/i }));
-    // the specific backend validation reason is surfaced (exact match avoids the descriptive helper text)
-    expect(await screen.findByText("grace_package_wrong_type")).toBeInTheDocument();
-  });
+  // The grace tab was removed from this page: checkout grace is its own screen (/checkout-grace),
+  // covered by the checkout-grace component tests. Asserting it here would pin a duplicate surface.
 
   it("a failed publish shows an error and does not falsely report success", async () => {
     g.mockImplementation((path: string) => {
@@ -130,7 +119,7 @@ describe("CommercialPackagesPage", () => {
       return Promise.resolve(list([]));
     });
     p.mockRejectedValue(new ApiError(400, { error: "invalid_grant_tier" }));
-    render(<CommercialPackagesPage />);
+    render(<InternetPackagesPage />);
     fireEvent.click(await screen.findByRole("button", { name: /publish package/i }));
     fireEvent.change(await screen.findByLabelText("code"), { target: { value: "X" } });
     fireEvent.change(screen.getByLabelText("service-plan"), { target: { value: "rev-gold" } });

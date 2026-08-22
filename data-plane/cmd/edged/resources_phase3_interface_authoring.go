@@ -47,16 +47,47 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// folioIdentityStrategies mirrors the schema CHECK constraint exactly. Listing them here rather than
-// accepting free text means an operator gets a named refusal instead of a constraint violation from three
-// layers down.
-var folioIdentityStrategies = map[string]bool{
-	"UNSET": true, "GLOBALLY_UNIQUE": true, "UNIQUE_PER_STAY": true, "REUSED_SEQUENTIAL": true,
+// pmsAllowedKinds is the set of connector kinds the CANONICAL PMS runtime supports.
+//
+// It holds exactly one entry, and that is the honest number: pmsd declares the same single supported kind
+// (internal/pmsd.supportedConnectorKinds) and Revision.Validate refuses any other with REVISION_INVALID.
+//
+// So this is NOT the only thing standing between an unsupported kind and a bad connection — the runtime
+// already refuses one. What it prevents is the unsupported configuration being AUTHORED at all. Without it
+// an operator could create an Interface, configure a revision, publish it, and only then discover that the
+// connector rejects the whole thing: work that could never succeed, failing at the last step, reported as a
+// connection problem rather than as a connector this build does not implement.
+//
+// The legacy scd loader recognised six kinds (stub, protel-fias, opera-fias, fidelio-fias, mews, apaleo)
+// and this path reused that list, which is how five options pmsd would refuse came to be offered on the
+// canonical screen. Those implementations still exist and are not deleted here; they are simply not
+// presented as PMS Interface capability, so the product surface matches what the runtime can run.
+//
+// REJECTION IS HERE, NOT ONLY IN THE DROPDOWN. Hiding an option in the UI leaves the API accepting it, and
+// the API is what a script, a restored fixture or a future screen will use.
+//
+// A kind belongs in this map when pmsd declares support for it — the two lists are meant to agree.
+var pmsAllowedKinds = map[string]bool{
+	"protel-fias": true,
 }
 
-// credentialModes is pmsd's supportedCredentialModes. A revision must state one explicitly: pmsd fails
-// closed to AUTH_KEY when the value is empty, so an unstated mode silently becomes "a secret is required".
-var credentialModes = map[string]bool{"NONE": true, "AUTH_KEY": true}
+const (
+	// folioStrategyUnset is the fail-closed default: while a revision carries it, PMS financial posting is
+	// impossible by construction.
+	folioStrategyUnset = "UNSET"
+	// credentialModeNone matches the supported connector: the FIAS link carries no transport authentication.
+	credentialModeNone = "NONE"
+	// canonicalNormalizationVersion is the normalisation contract THIS BUILD implements. It changes when the
+	// parsing/normalisation of the feed changes, which is a code change, never a configuration one.
+	canonicalNormalizationVersion = 1
+)
+
+// folioIdentityStrategies and credentialModes were the validation allowlists for two fields this path no
+// longer accepts from the caller. The schema still permits all four folio strategies and both credential
+// modes — a future revision authored by a different, deliberate path may use them — but neither is a choice
+// an operator makes on this form, so the allowlists here would only describe options nothing can select.
+// The constants above carry the single value each field is now written with, and the reasons are recorded
+// at the point of enforcement in validateRevisionConfig.
 
 type createPMSInterfaceReq struct {
 	ConnectorKind string `json:"connector_kind"`
@@ -352,19 +383,58 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 	if _, lerr := time.LoadLocation(in.SourceTimezone); lerr != nil {
 		return nil, fmt.Errorf("source_timezone %q is not a known IANA time zone", in.SourceTimezone)
 	}
-	if !folioIdentityStrategies[in.FolioIdentityStrategy] {
-		return nil, fmt.Errorf("folio_identity_strategy must be UNSET, GLOBALLY_UNIQUE, UNIQUE_PER_STAY or REUSED_SEQUENTIAL")
+	// A NEW REVISION STARTS AT UNSET, AND THE OPERATOR DOES NOT CHOOSE OTHERWISE HERE.
+	//
+	// folio_identity_strategy decides how a folio number is interpreted across a stay, and getting it wrong
+	// is how one guest's charges reach another guest's folio. It is a FINANCIAL determination that has to be
+	// established by observing how the property's PMS actually reuses folio numbers — the Phase-0 contract
+	// makes UNSET the fail-closed default precisely so that posting is impossible until somebody has done
+	// that work and recorded a concrete strategy deliberately.
+	//
+	// The form used to offer all four values in a dropdown, which invited picking one that looked plausible.
+	// Silently accepting GLOBALLY_UNIQUE from a form is not a configuration choice, it is a financial
+	// assertion nobody verified, so this path now accepts only UNSET and says why.
+	if strings.TrimSpace(in.FolioIdentityStrategy) == "" {
+		in.FolioIdentityStrategy = folioStrategyUnset
 	}
-	if in.NormalizationVersion <= 0 {
-		return nil, fmt.Errorf("normalization_version must be greater than 0")
+	if in.FolioIdentityStrategy != folioStrategyUnset {
+		return nil, fmt.Errorf(
+			"folio_identity_strategy must be %s for a revision authored here: a concrete strategy is a "+
+				"financial determination made from observed PMS behaviour, not a form choice", folioStrategyUnset)
 	}
-	if !credentialModes[in.CredentialMode] {
-		return nil, fmt.Errorf("credential_mode must be stated explicitly as AUTH_KEY or NONE")
+
+	// IMPLEMENTATION-CONTROLLED, NOT OPERATOR-CONTROLLED.
+	//
+	// normalization_version identifies how THIS BUILD parses and normalises the feed, and resync support is
+	// a property of the protocol adapter. Neither is a fact about the hotel, and neither is knowable from an
+	// admin screen — an operator typing 2 into a normalization field does not change how the connector
+	// parses anything; it just mislabels every event recorded under it. They are stamped from the
+	// implementation and any submitted value is ignored rather than honoured.
+	in.NormalizationVersion = canonicalNormalizationVersion
+	resyncTrue := true
+	in.ResyncSupported = &resyncTrue
+
+	// CREDENTIAL MODE FOLLOWS THE CONNECTOR. The Protel FIAS link carries no transport authentication, so
+	// NONE is the only truthful value and requiring the operator to state it added a way to be wrong: an
+	// interface saved as AUTH_KEY waits for a secret that will never exist and never connects.
+	if strings.TrimSpace(in.CredentialMode) == "" {
+		in.CredentialMode = credentialModeNone
 	}
+	if in.CredentialMode != credentialModeNone {
+		return nil, fmt.Errorf(
+			"credential_mode must be %s: the supported PMS connector uses a link with no transport "+
+				"authentication, so there is no credential to configure", credentialModeNone)
+	}
+
 	// READ-ONLY IS NOT OPTIONAL. pmsd refuses any revision whose read-only capability is absent or false, so
 	// a write-capable PMS connection cannot be configured here at all -- and that refusal is the product
-	// decision, not an oversight to work around.
-	if in.ReadOnly == nil || !*in.ReadOnly {
+	// decision, not an oversight to work around. Defaulted rather than demanded: it is fixed, so making the
+	// caller assert it was a formality that could only ever be got wrong.
+	if in.ReadOnly == nil {
+		readOnlyTrue := true
+		in.ReadOnly = &readOnlyTrue
+	}
+	if !*in.ReadOnly {
 		return nil, fmt.Errorf("read_only must be true: this connector is read-only and pmsd refuses any other revision")
 	}
 	type d struct {

@@ -17,7 +17,12 @@ export function ErrorBanner({ err }: { err: unknown }) {
     message = String(err);
   }
   return (
-    <div className="mb-4 rounded-md border border-[#6b2128] bg-[#3a1418] text-err px-3 py-2 text-sm flex items-start justify-between gap-4">
+    // role="alert" + aria-live: an error that only appears visually is an error a screen-reader user is
+    // never told about, and this component is how most of the admin reports failures. Pages that hand-rolled
+    // a <p role="alert"> already announced; those switching to this shared banner silently stopped, which is
+    // how the gap surfaced.
+    <div role="alert" aria-live="assertive"
+      className="mb-4 rounded-md border border-[#6b2128] bg-[#3a1418] text-err px-3 py-2 text-sm flex items-start justify-between gap-4">
       <span>{message}</span>
       {traceId && (
         <span className="text-xs text-muted font-mono shrink-0" title="Server trace id — include when reporting issues">

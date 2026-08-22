@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import { PublishPackageForm } from "@/app/(app)/commercial-packages/publish-form";
+import { PublishPackageForm } from "@/app/(app)/internet-packages/publish-form";
 import { FORBIDDEN_RULE_TYPES, SUPPORTED_RULE_TYPES } from "@/lib/commerce-form";
 
 const plans = [
@@ -25,9 +25,9 @@ describe("PublishPackageForm", () => {
     expect(screen.queryByLabelText(/plan.revision.*id/i)).toBeNull();
   });
 
-  it("the eligibility rule-type dropdown offers ONLY supported Phase-2 types and NO PMS types", () => {
+  it("the eligibility rule-type dropdown offers ONLY implemented types and NO PMS types", () => {
     render(<PublishPackageForm plans={plans} onPublish={() => {}} />);
-    fireEvent.click(screen.getByText("Add rule"));
+    fireEvent.click(screen.getByText("Add condition"));
     const typeSelect = screen.getByLabelText("rule-type-0") as HTMLSelectElement;
     const offered = Array.from(typeSelect.options).map((o) => o.value);
     expect(offered.sort()).toEqual([...SUPPORTED_RULE_TYPES].sort());
@@ -97,7 +97,7 @@ describe("PublishPackageForm", () => {
     render(<PublishPackageForm plans={plans} onPublish={onPublish} />);
     fireEvent.change(screen.getByLabelText("code"), { target: { value: "X" } });
     fireEvent.change(screen.getByLabelText("service-plan"), { target: { value: "rev-gold" } });
-    fireEvent.click(screen.getByText("Add rule"));
+    fireEvent.click(screen.getByText("Add condition"));
     fireEvent.change(screen.getByLabelText("rule-type-0"), { target: { value: "DATE_WINDOW" } });
     const row = screen.getByTestId("rule-0");
     fireEvent.change(within(row).getByLabelText("rule-from-0"), { target: { value: "2026-08-01T00:00" } });

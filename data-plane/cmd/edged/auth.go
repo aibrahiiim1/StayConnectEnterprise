@@ -154,8 +154,8 @@ const (
 var rolePerms = map[string]map[string]perm{
 	"hotel_it_manager": {
 		"guest-accounts": permWrite,
-		"sessions":       permWrite, "pms-providers": permWrite,
-		"auth-methods": permWrite, "walled-garden": permWrite,
+		"sessions":       permWrite,
+		"auth-methods":   permWrite, "walled-garden": permWrite,
 		"portal-branding": permWrite, "notification-providers": permWrite,
 		"social-providers": permWrite, "stripe-accounts": permWrite,
 		"network": permWrite,
@@ -207,7 +207,6 @@ var rolePerms = map[string]map[string]perm{
 		"stay-transfers":   permWrite,
 		"financial-review": permRead,
 		"financial-ops":    permRead,
-		"pms-providers":    permRead,
 		"auth-methods":     permRead, "walled-garden": permRead, "reports": permRead, "audit": permRead, "license": permRead, "backups": permRead,
 		// Phase 6 (DARK): the desk may SEE whether the property offers guest device self-service -- it is
 		// the answer to "why can't I remove my old phone" -- but changing a property capability is not a
@@ -223,7 +222,6 @@ var rolePerms = map[string]map[string]perm{
 		"pms-interfaces": permRead, "pms-routing": permRead, "pms-source-conflicts": permRead,
 		"post-stay-profiles": permWrite,
 		"stay-transfers":     permWrite,
-		"pms-providers":      permRead,
 		"auth-methods":       permRead, "reports": permRead,
 		"audit": permRead, "license": permRead, "backups": permRead, "walled-garden": permRead,
 		// Phase 6 (DARK): same readership as the front desk, for the same reason -- guest relations answers
@@ -249,7 +247,7 @@ var rolePerms = map[string]map[string]perm{
 		"diagnostics": permRead,
 	},
 	"site_viewer": {
-		"guest-accounts": permRead, "sessions": permRead, "pms-providers": permRead, "auth-methods": permRead,
+		"guest-accounts": permRead, "sessions": permRead, "auth-methods": permRead,
 		"walled-garden": permRead, "portal-branding": permRead, "notification-providers": permRead, "social-providers": permRead,
 		"stripe-accounts": permRead, "audit": permRead, "reports": permRead,
 		"backups": permRead, "license": permRead, "network": permRead, "diagnostics": permRead,

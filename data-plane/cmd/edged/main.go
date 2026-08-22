@@ -370,7 +370,9 @@ func main() {
 			// up editing the plan that nothing reads.
 			mountResource(r, s, "guest-accounts", s.guestAccountsRoutes)
 			mountResource(r, s, "sessions", s.sessionsRoutes)
-			mountResource(r, s, "pms-providers", s.pmsProvidersRoutes)
+			// "pms-providers" is NOT mounted. It was the superseded PMS configuration model, replaced by the
+			// PMS Interface surface below; keeping both meant two operator screens configuring one property
+			// management system, and the older one could start a competing connector. See resources_providers.go.
 			mountResource(r, s, "auth-methods", s.authMethodsRoutes)
 			mountResource(r, s, "walled-garden", s.walledGardenRoutes)
 			mountResource(r, s, "portal-branding", s.brandingRoutes)

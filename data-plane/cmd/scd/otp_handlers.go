@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,17 +34,60 @@ func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 	}
 	// License gating: unlicensed methods never reach the portal.
 	s.applyLicenseToMethods(cfg)
+
+	// CAN THIS SITE GIVE A GUEST ANYTHING AT ALL?
+	//
+	// Proving who a guest is and giving them internet are two different things, and a site can be perfectly
+	// configured for the first while having nothing to offer for the second. When that happens the guest
+	// signs in successfully and is then refused, and the portal — which had no way to tell that apart from a
+	// wrong room number — told them to check their details and see reception. Reception cannot fix it; only
+	// an operator publishing a package can.
+	//
+	// This is a SITE-LEVEL fact, computed before and independently of any identity, which is precisely what
+	// makes it safe to publish to an unauthenticated portal. It reveals nothing about any guest, and it is
+	// equally true for everyone on the network, so it creates no oracle for probing room numbers or names.
+	// Per-guest ELIGIBILITY still decides the actual offer set, and that answer stays uniform.
+	packagesAvailable := s.sitePackagesAvailable(r.Context())
+
 	if s.p3auth != nil {
-		// Phase 3 (DARK): the portal needs exactly ONE extra fact — whether to submit the room form to the
+		// The portal needs exactly one extra fact about PMS: whether to submit the room form to the
 		// Stay-resolution flow or the legacy one. It is derived from the flags this daemon started with, so a
 		// dark appliance advertises nothing and the portal keeps using the path it always used.
 		writeJSON(w, http.StatusOK, struct {
 			*tenantcfg.AuthMethods
-			Phase3PMS bool `json:"phase3_pms"`
-		}{cfg, true})
+			Phase3PMS         bool `json:"phase3_pms"`
+			PackagesAvailable bool `json:"internet_packages_available"`
+		}{cfg, true, packagesAvailable})
 		return
 	}
-	writeJSON(w, http.StatusOK, cfg)
+	writeJSON(w, http.StatusOK, struct {
+		*tenantcfg.AuthMethods
+		PackagesAvailable bool `json:"internet_packages_available"`
+	}{cfg, packagesAvailable})
+}
+
+// sitePackagesAvailable reports whether this site has at least one internet package a guest could be given.
+//
+// SYSTEM PACKAGES DO NOT COUNT. The emergency checkout-grace catalogue is a package row (is_system = true)
+// that exists so a departing guest's conversion has something to reference; it is never offered on the
+// portal. Counting it would report a site as ready to serve guests when the only thing it can serve is a
+// grace window nobody can ask for.
+//
+// Fails OPEN on error, and deliberately so: this drives an advisory notice, not an authorisation decision.
+// A database hiccup must not make a working portal announce that the hotel has no internet.
+func (s *server) sitePackagesAvailable(ctx context.Context) bool {
+	var n int
+	err := s.db.QueryRow(ctx, `
+		SELECT count(*) FROM iam_v2.internet_packages p
+		 WHERE p.tenant_id = $1 AND p.site_id = $2
+		   AND p.active
+		   AND COALESCE(p.is_system, false) = false
+		   AND p.current_revision_id IS NOT NULL`, s.tenID, s.siteID).Scan(&n)
+	if err != nil {
+		slog.Warn("auth-methods: could not count internet packages; assuming some exist", "err", err)
+		return true
+	}
+	return n > 0
 }
 
 // ---- /v1/auth/otp/issue ----------------------------------------------------

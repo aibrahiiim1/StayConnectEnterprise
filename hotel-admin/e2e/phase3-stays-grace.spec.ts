@@ -128,8 +128,11 @@ test("stays list shows the stay and its occupants/folios on demand", async ({ pa
     mutations,
   });
   await page.goto("/stays");
+  // The list opens on in-house stays, which is the question an operator asks by default; this fixture is a
+  // departed stay, so the filter is set explicitly rather than the fixture being changed to fit the default.
+  await page.getByLabel("Filter by status").selectOption("");
   await expect(page.getByText("R900")).toBeVisible();
-  await page.getByRole("button", { name: "Details" }).click();
+  await page.getByRole("button", { name: "View" }).click();
   await expect(page.getByText("Byron, Ada")).toBeVisible();
   await expect(page.getByText("F900", { exact: false })).toBeVisible();
   // a read-only page issues no mutations at all

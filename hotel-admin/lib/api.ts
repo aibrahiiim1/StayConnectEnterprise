@@ -172,10 +172,19 @@ export type Session = {
 // identity: an operator learns that a resolution succeeded, never who it was.
 
 export type Stay = {
-  id: string; pms_interface_id: string; external_reservation_id: string;
+  id: string; pms_interface_id: string; pms_interface_label?: string; external_reservation_id: string;
   room?: string | null; status: string; lifecycle_version: number;
   arrival?: string | null; departure?: string | null;
   effective_checkout_at?: string | null; posting_allowed: boolean; occupants: number;
+  // The primary occupant, so the list can be searched the way an operator actually thinks about a stay.
+  primary_guest?: string | null;
+  // Why posting is closed, and which side decided it.
+  posting_block_reason?: string | null; posting_permission_source?: string | null;
+  // When the PMS last confirmed this occupancy — the evidence guest sign-in is judged against.
+  occupancy_evidence_at?: string | null;
+  // Hotel attributes the schema carries. Present only when the connector sends them; the Protel FIAS feed
+  // does not, so these are absent on that interface rather than blank.
+  vip?: boolean | null; room_type?: string | null; rate_plan?: string | null; travel_agent?: string | null;
 };
 
 export type StayDetail = Stay & {

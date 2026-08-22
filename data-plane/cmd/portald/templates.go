@@ -7,11 +7,19 @@ const landingHTML = `<!doctype html>
 <title>Wi-Fi Access</title>
 <style>
   :root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; }
-  body { max-width: 440px; margin: 8vh auto; padding: 24px; }
+  /* 8vh top margin is pleasant on a laptop and wasteful on a phone in landscape, where it pushed the first
+     field below the fold. Clamped so it stays generous on a large screen and modest on a short one. */
+  body { max-width: 440px; margin: clamp(16px, 8vh, 96px) auto; padding: 24px; }
   h1 { font-size: 1.4rem; margin: 0 0 8px; }
   p  { color: #666; margin: 0 0 20px; }
-  .tabs { display:flex; gap:0; border-bottom:1px solid #ddd; margin-bottom:18px; }
-  .tab { flex:1; padding:10px 12px; text-align:center; cursor:pointer;
+  /* WITH PMS ENABLED THERE CAN BE SIX TABS on a 360px phone. flex:1 divided the row evenly and the labels
+     ran into each other; the sign-in method a guest needs was unreadable on the device almost every guest
+     uses. They now size to their content and scroll horizontally when they do not fit, which keeps every
+     label legible instead of shrinking all of them until none are. */
+  .tabs { display:flex; gap:0; border-bottom:1px solid #ddd; margin-bottom:18px;
+          overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+  .tabs::-webkit-scrollbar { display:none; }
+  .tab { flex:0 0 auto; padding:10px 14px; text-align:center; cursor:pointer; white-space:nowrap;
          color:#666; font-size:.92rem; border-bottom:2px solid transparent; user-select:none; }
   .tab.active { color:inherit; border-bottom-color:#0a6cff; font-weight:600; }
   .panel { display:none; }
@@ -29,14 +37,25 @@ const landingHTML = `<!doctype html>
   button:disabled { opacity:.5; cursor:wait; }
   button.link { background:none; color:#0a6cff; font-weight:400; padding:6px; margin-top:8px; }
   .err { color:#b00020; margin-top:12px; min-height:1.2em; font-size:.9rem; }
+  /* These hardcoded background:#fff while the page declares color-scheme: light dark, so on a phone in
+     dark mode the label inherited light text onto a white button and the guest's package choices were
+     invisible. Canvas/CanvasText follow the active scheme, so the choice is readable either way. */
   #pms-choices button.choice { display:block; width:100%; text-align:left; margin:8px 0; padding:12px 14px;
-    border:1px solid #ccc; border-radius:10px; background:#fff; cursor:pointer; font-size:1rem; }
+    border:1px solid #ccc; border-radius:10px; background:Canvas; color:CanvasText; cursor:pointer;
+    font-size:1rem; }
   #pms-choices button.choice[disabled] { opacity:.5; cursor:default; }
   .small { font-size:.8rem; color:#777; }
+  /* A site-level advisory, not an error the guest caused. Amber rather than red, and it sits above the
+     sign-in choices because it changes what the guest should expect from all of them. */
+  .notice { display:none; margin:0 0 14px; padding:12px 14px; border-radius:8px; font-size:.9rem;
+            background:#fff8e1; border:1px solid #f0d38a; color:#6b4e00; }
+  .notice.show { display:block; }
 </style>
 </head><body>
   <h1>Welcome</h1>
   <p>Choose how you'd like to connect.</p>
+
+  <div class="notice" id="site-notice" role="status" aria-live="polite"></div>
 
   <div class="tabs" id="tabs"></div>
 
@@ -197,7 +216,27 @@ const landingHTML = `<!doctype html>
           });
         }
       }
-      if (enabled.length === 0) { tabsEl.innerHTML = '<div class="small">No auth methods configured.</div>'; return; }
+      // NO INTERNET PACKAGE EXISTS AT THIS SITE — a site availability notice, not an authentication result.
+      //
+      // Every property that makes this safe is structural rather than a matter of care:
+      //
+      //   * it is read from /api/auth-methods on page render, BEFORE any identity is submitted;
+      //   * the value is site-wide configuration — the same answer for every guest on this network;
+      //   * it is rendered above the sign-in tabs, as general availability, never in an error slot;
+      //   * nothing after submission reads it, so it cannot vary with what a guest typed.
+      //
+      // That is what keeps it outside the uniform-envelope contract. The contract governs what an
+      // AUTHENTICATION ATTEMPT may reveal; this is a statement about the site made before anyone attempts
+      // anything, and it carries no information about any room, name or stay.
+      if (cfg.internet_packages_available === false) {
+        const n = document.getElementById('site-notice');
+        n.textContent = 'Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let reception know.';
+        n.classList.add('show');
+      }
+      if (enabled.length === 0) {
+        tabsEl.innerHTML = '<div class="small">There is no way to sign in on this network yet. Please contact reception.</div>';
+        return;
+      }
       enabled.forEach(id => {
         const el = document.createElement('div');
         el.className = 'tab'; el.dataset.tab = id; el.textContent = Tabs[id].label;
@@ -270,6 +309,20 @@ const landingHTML = `<!doctype html>
     // SAME attempt and must not survive a different one — see phase3RequestID below.
     let PMS_ATTEMPT_KEY = '';
     let PMS_AUTH_CONTEXT = '';
+    // THE ONE MESSAGE EVERY AUTHENTICATION NON-SUCCESS RENDERS.
+    //
+    // Wrong room, wrong name, no such stay, checked out, stale occupancy, PMS unreachable, network not
+    // mapped, verified with nothing to grant, the server's response-time budget expiring, a dropped
+    // connection: all of them produce exactly this text. That uniformity is the Phase-0 FINAL contract and a
+    // security property, not a UX shortcut — any answer that varies with the outcome lets someone submit
+    // room/surname pairs and learn which ones are real.
+    //
+    // An earlier revision added a second message for the verified-but-no-package case, on the reasoning that
+    // a correct guest should not be told to re-check correct details. The reasoning was right about the
+    // guest and wrong about the contract: differentiating AFTER submission is exactly the oracle the uniform
+    // envelope exists to close. The site-level notice above the sign-in tabs carries that information
+    // instead — it is read from configuration before any identity is submitted, is identical for every guest
+    // on the site, and never varies with what was typed.
     const PHASE3_FAIL = 'We could not verify your stay. Please check your details or contact reception.';
 
     function newRequestID() {
@@ -364,7 +417,8 @@ const landingHTML = `<!doctype html>
         renderPhase3Choices(j.choices || [], errEl);
         return;
       }
-      // EVERY other answer — including a transport failure — is the same message.
+      // EVERY other answer — including a transport failure — is the same message. No branch here reads the
+      // server's outcome, the site configuration, or anything else: one assignment, one string.
       //
       // The request id is deliberately KEPT. A non-success can mean the guest's details were wrong, but it can
       // equally mean the attempt was abandoned at the server's response-time budget or lost in transit with

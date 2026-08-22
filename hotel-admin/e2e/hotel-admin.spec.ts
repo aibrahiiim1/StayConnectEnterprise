@@ -61,46 +61,56 @@ async function installBackend(page: Page, opts: {
   });
 }
 
-test("nav shows Commercial Packages (flag-ON build) and lists packages", async ({ page }) => {
+test("nav shows Internet packages (flag-ON build) and lists packages", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { packages: [{ package_id: "pk1", code: "FREEWIFI", active: true, current_revision_id: "r1", revision_count: 2 }], plans: [], mutations });
-  await page.goto("/commercial-packages");
-  await expect(page.getByRole("link", { name: "Commercial packages" })).toBeVisible();
+  await page.goto("/internet-packages");
+  await expect(page.getByRole("link", { name: "Internet packages" })).toBeVisible();
   await expect(page.getByText("FREEWIFI")).toBeVisible();
 });
 
 test("approved disabled behavior on 503 makes no commerce mutation requests", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, { packagesStatus: 503, mutations });
-  await page.goto("/commercial-packages");
-  await expect(page.getByText(/not enabled/i)).toBeVisible();
+  await page.goto("/internet-packages");
+  await expect(page.getByText(/not switched on/i)).toBeVisible();
   // no publish/activate/plan-create/grace mutation was issued
   expect(mutations.filter((m) => m.method !== "GET")).toHaveLength(0);
 });
 
-test("full admin flow: create plan, publish free package via selector, step-up deactivate, grace, inspection", async ({ page }) => {
+// The single "full admin flow" test covered four screens that were four tabs. Service plans and checkout
+// grace are now their own pages, so the walk is split — deliberately keeping every CONTRACT the original
+// asserted (VALIDITY_WINDOW on plan publish, plan chosen by selector rather than raw UUID, no price/PMS
+// field in the package payload, two-prompt step-up on deactivate, sanitized inspection rows) rather than
+// dropping the ones that became inconvenient to reach.
+
+test("service plans: a new plan publishes with the supported time-accounting mode", async ({ page }) => {
+  const mutations: Mutations = [];
+  await installBackend(page, {
+    plans: [{ plan_id: "p1", code: "GOLD", enabled: true, current_revision_id: "rev-gold", revision_count: 1 }],
+    mutations,
+  });
+  await page.goto("/service-plans");
+  await page.getByRole("button", { name: /new plan/i }).click();
+  await page.locator('input[name="code"]').fill("PLATINUM");
+  await page.getByRole("button", { name: /publish plan/i }).click();
+  await expect.poll(() => mutations.find((m) => m.path.endsWith("/plans") && m.method === "POST")).toBeTruthy();
+  const planReq = mutations.find((m) => m.path.endsWith("/plans") && m.method === "POST")!;
+  expect((planReq.body as { time_accounting_mode: string }).time_accounting_mode).toBe("VALIDITY_WINDOW");
+});
+
+test("internet packages: publish via the plan selector, then step-up deactivate", async ({ page }) => {
   const mutations: Mutations = [];
   await installBackend(page, {
     packages: [{ package_id: "pk1", code: "FREEWIFI", active: true, current_revision_id: "r2", revision_count: 2 }],
     plans: [{ plan_id: "p1", code: "GOLD", enabled: true, current_revision_id: "rev-gold", revision_count: 1 }],
     revisions: { pk1: [{ revision_id: "r2", revision_no: 2, is_current: true, package_type: "GENERAL", price_minor: 0, currency: "USD" }] },
-    gracePut: { status: 400, body: { error: "grace_package_wrong_type" } },
     mutations,
   });
-  await page.goto("/commercial-packages");
+  await page.goto("/internet-packages");
   await expect(page.getByText("FREEWIFI")).toBeVisible();
 
-  // 1. Create a Service Plan revision (Plans tab)
-  await page.getByRole("button", { name: "Service plans" }).click();
-  await page.getByRole("button", { name: /new plan revision/i }).click();
-  await page.locator('input[name="code"]').fill("PLATINUM");
-  await page.getByRole("button", { name: /publish revision/i }).click();
-  await expect.poll(() => mutations.find((m) => m.path.endsWith("/plans") && m.method === "POST")).toBeTruthy();
-  const planReq = mutations.find((m) => m.path.endsWith("/plans") && m.method === "POST")!;
-  expect((planReq.body as { time_accounting_mode: string }).time_accounting_mode).toBe("VALIDITY_WINDOW");
-
-  // 2. Publish a free package via the plan SELECTOR (no raw UUID)
-  await page.getByRole("button", { name: "Packages" }).click();
+  // Published through the plan SELECTOR — the operator never types a revision UUID.
   await page.getByRole("button", { name: /publish package/i }).click();
   await page.getByLabel("code").fill("FREEWIFI2");
   await page.getByLabel("service-plan").selectOption("rev-gold");
@@ -112,22 +122,23 @@ test("full admin flow: create plan, publish free package via selector, step-up d
   expect(pkgJson).not.toMatch(/price|settlement|pms|tax|currency/); // free-only, no PMS
   expect((pkgReq.body as { service_plan_revision_id: string }).service_plan_revision_id).toBe("rev-gold");
 
-  // 3. Step-up deactivate (two window.prompt dialogs: reason then password)
+  // Withdrawing a package still takes two prompts: a reason, then the operator's password.
   let dialogs = 0;
   page.on("dialog", (d) => { dialogs += 1; d.accept(dialogs === 1 ? "retire it" : "operatorpw"); });
-  await page.getByRole("button", { name: /deactivate/i }).click();
+  await page.getByRole("button", { name: /stop offering/i }).click();
   await expect.poll(() => mutations.find((m) => m.path.includes("/active"))).toBeTruthy();
   const actReq = mutations.find((m) => m.path.includes("/active"))!;
   expect(actReq.body).toMatchObject({ active: false, reason: "retire it", password: "operatorpw" });
+});
 
-  // 4. Grace: an invalid grace config surfaces the validation error
-  await page.getByRole("button", { name: /checkout grace/i }).click();
-  await page.getByPlaceholder(/uuid of a CHECKOUT_GRACE/i).fill("bad-rev");
-  await page.getByRole("button", { name: /save grace config/i }).click();
-  await expect(page.getByText("grace_package_wrong_type")).toBeVisible();
-
-  // 5. Inspection: sanitized rows, no guest PII in the DOM
-  await page.getByRole("button", { name: /inspection/i }).click();
+test("internet packages: guest activity rows are sanitized and carry no guest PII", async ({ page }) => {
+  const mutations: Mutations = [];
+  await installBackend(page, {
+    packages: [{ package_id: "pk1", code: "FREEWIFI", active: true, current_revision_id: "r2", revision_count: 2 }],
+    mutations,
+  });
+  await page.goto("/internet-packages");
+  await page.getByRole("button", { name: /guest activity/i }).click();
   await expect(page.getByText("q1")).toBeVisible();
   await expect(page.getByText("GRANTED")).toBeVisible();
   const html = (await page.content()).toLowerCase();
