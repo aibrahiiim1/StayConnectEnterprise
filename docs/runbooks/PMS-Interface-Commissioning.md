@@ -57,24 +57,33 @@ psql -f deploy/gatep/svc-edged-phase345-admin-grants.sql      # incl. the routin
 
 ---
 
-## 2. Service account, binaries, assignment
+## 2. Service account and binaries
 
 ```sh
 useradd --system --no-create-home --shell /usr/sbin/nologin stayconnect-pmsd
-install -m 0755 pmsd pmsd-assignment /opt/stayconnect/bin/
-/opt/stayconnect/bin/pmsd-assignment          # generates the keypair, derives the signed scope
+install -m 0755 pmsd /opt/stayconnect/bin/
 ```
 
-`pmsd-assignment` reads the Central assignment at `/etc/stayconnect/assignment/assignment.json`, copies
-appliance/tenant/site verbatim, binds the result to a SHA-256 digest of Central's document, and signs it with
-an Ed25519 key generated **on the appliance**. It refuses if the Central assignment is not in the `assigned`
-state. It prints `PMSD_ASSIGNMENT_PUBKEY_HEX` for the env file; the private half never leaves the box and is
-needed only to re-sign after a Central reassignment.
+**There is nothing to provision for scope.** pmsd resolves tenant/site from the canonical Central-signed
+assignment that the appliance already holds — the same chain scd uses, re-verified on every scope load against
+the trust registry anchored by the manufacture-time registry root, and bound to this appliance's identity.
 
-`pmsd-assignment -verify` answers two separate questions later: is the signature still valid (was the file
-edited), and is the scope still current (did Central reassign this appliance).
+pmsd has no assignment key of its own and cannot issue a scope, only verify one. An earlier revision of this
+procedure generated an appliance-local Ed25519 keypair and a pmsd-specific signed document; that was a second
+assignment authority — anyone able to write that key and file could have scoped the PMS connector to any
+tenant, without the canonical assignment ever being consulted. It has been removed, and
+`internal/assignment.Resolve` is now the single implementation for every daemon.
 
----
+Behaviour when the assignment is not usable:
+
+| State | pmsd |
+|---|---|
+| no identity, or no assignment adopted | `assigned=false` — factory-clean, does no PMS work, exits cleanly |
+| assignment present but unverifiable, bound elsewhere, or revoked | `ErrAssignmentNotGranting` — refuses to start |
+| verified and granting | resolves tenant/site and proceeds |
+
+The two failure modes are deliberately distinct: "this appliance was rejected" must never read as "this
+appliance is new".
 
 ## 3. Environment
 
@@ -87,8 +96,6 @@ STAYCONNECT_PHASE3_PMS_INGEST=1
 STAYCONNECT_PHASE3_CHECKOUT_GRACE=1
 
 PMSD_DB_URL=postgres://svc_pmsd:…@127.0.0.1:5432/stayconnect_site?sslmode=disable
-PMSD_ASSIGNMENT_FILE=/etc/stayconnect/assignment/pmsd-assignment.json
-PMSD_ASSIGNMENT_PUBKEY_HEX=…
 PMSD_EVIDENCE_KEY_HEX=…            PMSD_EVIDENCE_KEY_VERSION=1
 PMSD_EVENT_IDENTITY_KEY_HEX=…      PMSD_EVENT_IDENTITY_KEY_VERSION=1
 ```
@@ -101,6 +108,10 @@ refusing departures, which looks like everything working.
 
 `PMSD_SECRET_KEY_ID` / `PMSD_SECRET_KEY_HEX` are needed only for `credential_mode=AUTH_KEY`. Do not set them
 for a `NONE` interface; an unused keyring is a key held for no reason.
+
+No assignment key appears here. The chain's paths (`PMSD_ASSIGNMENT_DIR`, `PMSD_ASSIGNMENT_REGISTRY`,
+`PMSD_ASSIGNMENT_REGISTRY_ROOT`, `PMSD_ASSIGNMENT_TRUST`) default to the appliance's canonical locations and
+are overridable only for tests and offline tooling.
 
 Then the other two daemons:
 
@@ -230,7 +241,7 @@ Every one of these was found on a live link, and each presented as something wor
 |---|---|---|
 | Every screen succeeds, nothing connects | no product path could set `lifecycle_state='ACTIVE'` | `POST /{id}/lifecycle` |
 | PMS connected, Stays ingested, nobody authenticates | `guest_network_pms_map` had a read path and test fixtures but no writer | `PUT /pms-routing/{id}` |
-| Duplicate-source detection can never fire | `source_fingerprint` was read but never written, so every revision was NULL and NULL never equals NULL | derived at authoring from connector kind + endpoint |
+| Duplicate-source detection can never fire | `source_fingerprint` was read but never written, so every revision was NULL and NULL never equals NULL | derived at authoring from connector kind + endpoint; **fails closed** if the connector kind cannot be read, rather than fingerprinting a partial identity |
 | Healthy link, full DS…DE resync, **zero** events admitted, resyncing forever | `Event.Validate` demanded a canonical-UUID secret generation, which a `credential_mode=NONE` interface legitimately does not have | secret generation is optional; still validated when present |
 | ~10 of 365 roster records wedge the pipeline permanently | a record with no `G#` was classed MALFORMED → continuity fault → resync → same records again | absent identity distinguished from ambiguous identity; skipped and counted, not faulted |
 | Arrivals ingest, departures never apply | this Protel sends every GO with `RN` and no `G#` | reservation required on GI/GC, room-only permitted on GO; the engine resolves by room and refuses when sharers make it ambiguous |
@@ -241,3 +252,58 @@ Every one of these was found on a live link, and each presented as something wor
 The last row is the technique worth keeping: **rehearse the converter's exact statement sequence as the
 service role inside a transaction you roll back.** It exercises the grants and the controlled-writer triggers
 for real, commits nothing, and finds the privilege gap before a departing guest does.
+
+---
+
+## Verification status — Coral Sea Holiday, 2026-08-22
+
+Recorded separately from the procedure because two items are implemented and **not** yet proven live, and
+conflating them with the verified ones would misrepresent the delivery.
+
+### Verified live
+
+Single pmsd ownership of the socket · read-only FIAS handshake · `DR` → `DS…DE` resync · durable
+`stay_events` → `stays` (502 IN_HOUSE, 502 guests, 0 pending) · runtime axes `CONNECTED / CONTINUOUS /
+IN_SYNC` · guest-network → interface routing · Hotel Admin Stays and Events showing real room and date data ·
+restart and full-reboot persistence.
+
+### PMS resolver verification — VERIFIED
+
+The STRICT resolver returns `VERIFIED` with a `resolved_stay_id` for a real in-house Stay on the PRE-LIVE
+guest network, and determinate `NO_MATCH` for a non-resident pair. Recorded in `iam_v2.auth_resolutions`.
+
+**This is the identity decision only.** It says the guest is who they claim to be and is currently resident.
+
+### Guest Internet authorization — BLOCKED, separately
+
+The guest-visible flow still returns `NOT_VERIFIED` with reason `verified_but_no_eligible_package`: identity
+is proven, but the site has no sellable Internet Package, so no offer can be made and no Auth Context is
+consumed. This is a **package / commercial configuration decision**, not a PMS or authentication fault, and
+it is outside the commissioning scope. PMS resolution will keep returning `VERIFIED` regardless of when that
+decision is made.
+
+The emergency-grace catalog created in step 6 is a **system** package (`is_system=t`) and is deliberately not
+offered to guests, so it does not and must not satisfy this.
+
+### Real GO on a known Stay — IMPLEMENTED, NOT YET LIVE-PROVEN
+
+Room-only checkout resolution is implemented and deployed. It has **not** been observed applying to a Stay
+that was IN_HOUSE at the time: every GO this Protel sent during commissioning was a `RESYNC` replay for a room
+the roster did not list as in-house, which correctly resolved to `GO_UNKNOWN_STAY`. Real checkouts occur
+during the property's morning departure window.
+
+What *was* proven is the privilege and trigger surface the conversion needs, by running the Checkout
+Converter's exact statement sequence as `svc_pmsd` inside a rolled-back transaction. That rehearsal is what
+found the missing `service_plans` SELECT.
+
+**No checkout event was fabricated to close this item, and none should be.** It closes when a natural checkout
+is observed applying to a known Stay:
+
+```sh
+psql -c "SELECT event_type, processing_status, review_code, count(*)
+           FROM iam_v2.stay_events WHERE event_type='GO' GROUP BY 1,2,3;"
+psql -c "SELECT count(*) FROM iam_v2.stays WHERE status='CHECKED_OUT';"
+```
+
+A `GO` at `APPLIED` with a corresponding `CHECKED_OUT` Stay closes it. A `GO` left `PENDING` does not — that
+would mean the conversion is failing and the inbox is stalling.

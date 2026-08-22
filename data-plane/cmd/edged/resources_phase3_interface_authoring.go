@@ -247,7 +247,23 @@ func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Reque
 	// same PMS, and a fingerprint they could type is one they could mistype into a collision or out of a real
 	// one. Connector kind is part of the input because the same endpoint reached by two different protocols is
 	// not the same source, and the endpoint is lowercased so that Host:5003 and host:5003 fingerprint alike.
-	fingerprint := pmsSourceFingerprint(kindOf(ctx, tx, id), in.Endpoint)
+	// FAIL CLOSED IF THE SOURCE IDENTITY CANNOT BE FULLY RESOLVED. An earlier version swallowed the read
+	// error and fingerprinted the endpoint alone, which is worse than not fingerprinting at all: two
+	// interfaces that ARE the same physical PMS would still collide correctly, but an interface whose kind
+	// failed to read would get a fingerprint no other revision of that same interface can ever reproduce —
+	// so duplicate-source detection would quietly compare identities that were computed under different
+	// rules and conclude, wrongly, that two sources differ.
+	//
+	// A fingerprint is a claim about identity. Refusing to make one from a partially-resolved identity is
+	// the only safe answer; the operator retries and nothing has been written.
+	connectorKind, kerr := interfaceConnectorKind(ctx, tx, id)
+	if kerr != nil || strings.TrimSpace(connectorKind) == "" {
+		jsonErr(w, http.StatusInternalServerError, "internal",
+			"cannot resolve this interface's connector kind, so its source fingerprint cannot be derived; "+
+				"no revision was written")
+		return
+	}
+	fingerprint := pmsSourceFingerprint(connectorKind, in.Endpoint)
 
 	var revID string
 	var revNo int
@@ -430,14 +446,15 @@ func pmsSourceFingerprint(connectorKind, endpoint string) string {
 	return hex.EncodeToString(sum[:])[:32]
 }
 
-// kindOf reads the interface's connector kind inside the authoring transaction. It returns "" on failure
-// rather than an error: the caller has already proven the interface exists in this tenant and site, and a
-// fingerprint computed without the kind is still a correct fingerprint for comparison purposes as long as it
-// is computed the same way every time — which it is, because this path is the only writer.
-func kindOf(ctx context.Context, tx pgx.Tx, id string) string {
+// interfaceConnectorKind reads the interface's connector kind inside the authoring transaction.
+//
+// It returns the error rather than absorbing it. The kind is half of the source fingerprint's input, and a
+// fingerprint derived from half an identity is not a weaker fingerprint — it is a different one, which is
+// how a duplicate-source check ends up comparing values that were never comparable.
+func interfaceConnectorKind(ctx context.Context, tx pgx.Tx, id string) (string, error) {
 	var kind string
 	if err := tx.QueryRow(ctx, `SELECT connector_kind FROM iam_v2.pms_interfaces WHERE id=$1`, id).Scan(&kind); err != nil {
-		return ""
+		return "", err
 	}
-	return kind
+	return kind, nil
 }

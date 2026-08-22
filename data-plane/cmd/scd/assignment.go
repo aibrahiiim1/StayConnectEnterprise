@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/ed25519"
-	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -50,27 +48,19 @@ func registryStoreOnDisk() *assignment.RegistryStore {
 // falling back to the legacy plain trust file only where no signed registry
 // exists yet.
 func currentRegistryOnDisk() (*assignment.Registry, string) {
-	if rs := registryStoreOnDisk(); rs != nil {
-		// Best last-known-good: current if it verifies, else the previous verified
-		// registry — this is what keeps a hotel running through a Central outage.
-		if reg := rs.Trusted(); reg != nil {
-			return reg, "signed"
-		}
-		// Root anchor present AND a signed-registry file already exists on disk = the
-		// signed regime is in force. A file that no longer verifies is tampering or
-		// corruption; REFUSE to downgrade to the unauthenticated legacy plain trust
-		// file (that would let anyone who can write the file authorise a rogue key).
-		if rs.FileExists() {
-			slog.Error("assignment: on-disk signed registry failed verification — refusing to downgrade to the unsigned trust file")
-			return nil, "none"
-		}
+	return assignment.TrustedRegistry(assignmentPaths(), slog.Default())
+}
+
+// assignmentPaths gathers the on-disk assignment chain from scd's environment. The same four paths are what
+// every other daemon resolves its scope from; the resolver that consumes them lives in internal/assignment so
+// there is exactly one implementation of "which tenant and site is this appliance".
+func assignmentPaths() assignment.Paths {
+	return assignment.Paths{
+		Dir:              envOr("SCD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"),
+		RegistryPath:     assignmentRegistryPath(),
+		RegistryRootPath: assignmentRegistryRootPath(),
+		TrustPath:        assignmentTrustPath(),
 	}
-	// Pre-rollout only: no signed registry has ever been persisted yet.
-	reg, err := assignment.LoadRegistry(assignmentTrustPath())
-	if err != nil {
-		return nil, "none"
-	}
-	return reg, "legacy-plain"
 }
 
 // verifiedAssignment loads the persisted assignment and RE-VERIFIES it on boot
@@ -83,45 +73,11 @@ func currentRegistryOnDisk() (*assignment.Registry, string) {
 //
 // Returns (tenantID, siteID, state, version); tenant/site are non-empty only for a
 // verified 'assigned' document.
-func verifiedAssignment(store *assignment.Store, ident *identity.Identity) (string, string, string, int64) {
-	rec, err := store.Load()
-	if err != nil || rec == nil || rec.Current == nil {
-		return "", "", "", 0
-	}
-	d := rec.Current
-	// Prefer the verified SIGNED registry (last-known-good survives outages);
-	// fall back to the legacy plain trust file only where none exists yet.
-	reg, src := currentRegistryOnDisk()
-	if reg == nil {
-		slog.Error("assignment: no trusted registry — refusing to trust the persisted assignment")
-		return "", "", "", 0
-	}
-	if src != "signed" {
-		slog.Warn("assignment: verifying against legacy plain trust file (no signed registry yet)")
-	}
-	fpr := ""
-	if raw, e := base64.RawStdEncoding.DecodeString(ident.PublicKeyB64); e == nil && len(raw) == ed25519.PublicKeySize {
-		fpr = applianceauth.KeyID(ed25519.PublicKey(raw))
-	}
-	// haveVersion = d.Version-1 so the persisted document itself is admissible.
-	// A verify_only signer still verifies here — that is what lets an appliance
-	// holding an older-key assignment reboot cleanly mid-rotation.
-	if reason := assignment.AcceptForRegistry(reg, d, ident.ApplianceID, ident.Serial, fpr, d.Version-1, time.Now()); reason != "" {
-		slog.Error("assignment: persisted assignment FAILED verification — ignoring it",
-			"reason", reason, "signer_key_id", d.SignerKeyID, "version", d.Version)
-		return "", "", "", 0
-	}
-	// Expiry is NOT a de-authorisation: a stale assignment keeps the hotel running
-	// through a Central outage. Warn, but keep operating on the last known good.
-	if assignment.IsExpired(d, time.Now()) {
-		slog.Warn("assignment: STALE (past expires_at, not refreshed) — retaining last-known-good tenant/site; guest operation continues",
-			"version", d.Version, "expired_at", d.ExpiresAt, "stale_since", rec.StaleSince,
-			"last_refresh_success", rec.LastRefreshSuccess)
-	}
-	if assignment.Grants(d.State) {
-		return d.TenantID, d.SiteID, d.State, d.Version
-	}
-	return "", "", d.State, d.Version
+func verifiedAssignment(_ *assignment.Store, ident *identity.Identity) (string, string, string, int64) {
+	r := assignment.Resolve(assignmentPaths(), assignment.ApplianceBinding{
+		ApplianceID: ident.ApplianceID, Serial: ident.Serial, PublicKeyB64: ident.PublicKeyB64,
+	}, time.Now(), slog.Default())
+	return r.TenantID, r.SiteID, r.State, r.Version
 }
 
 // cloudHTTPClient is the plain-HTTPS client used before an mTLS client cert

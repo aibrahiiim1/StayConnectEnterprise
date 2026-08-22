@@ -13,19 +13,20 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/hex"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/stayconnect/enterprise/data-plane/internal/assignment"
 	"github.com/stayconnect/enterprise/data-plane/internal/checkout"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/pmsd"
@@ -63,8 +64,10 @@ func main() {
 		}
 	}()
 
-	// control-plane assignment-verification public key (hex ed25519) + secret keyring + evidence key.
-	pub, _ := hex.DecodeString(os.Getenv("PMSD_ASSIGNMENT_PUBKEY_HEX"))
+	// The interface-secret keyring + evidence/identity keys. There is deliberately NO assignment-verification
+	// key here: pmsd does not carry its own trust root for scope. Tenant/site come from the canonical
+	// Central-signed assignment, verified against the registry anchored by the manufacture-time root — see
+	// pmsd.CentralAssignmentLoader.
 	keyring := pmsd.MapKeyring{}
 	if kid := os.Getenv("PMSD_SECRET_KEY_ID"); kid != "" {
 		if kb, err := hex.DecodeString(os.Getenv("PMSD_SECRET_KEY_HEX")); err == nil {
@@ -80,7 +83,12 @@ func main() {
 	}
 
 	deps := pmsd.Deps{
-		LoadAssignment: pmsd.FileAssignmentLoader(os.Getenv("PMSD_ASSIGNMENT_FILE"), ed25519.PublicKey(pub)),
+		LoadAssignment: pmsd.CentralAssignmentLoader(assignment.Paths{
+			Dir:              envOr("PMSD_ASSIGNMENT_DIR", "/etc/stayconnect/assignment"),
+			RegistryPath:     envOr("PMSD_ASSIGNMENT_REGISTRY", "/etc/stayconnect/assignment/registry.json"),
+			RegistryRootPath: envOr("PMSD_ASSIGNMENT_REGISTRY_ROOT", "/etc/stayconnect/assignment-registry-root.pub"),
+			TrustPath:        envOr("PMSD_ASSIGNMENT_TRUST", "/etc/stayconnect/assignment-trust.json"),
+		}, envOr("PMSD_IDENTITY_DIR", "/etc/stayconnect/identity"), log),
 		OpenRepo: func(ctx context.Context, _ pmsd.Assignment) (pmsd.Repo, error) {
 			p, err := getPool(ctx)
 			if err != nil {
@@ -154,4 +162,14 @@ func main() {
 func envInt(name string) int {
 	n, _ := strconv.Atoi(os.Getenv(name))
 	return n
+}
+
+// envOr reads an environment override, falling back to the packaged default. The assignment chain's paths are
+// deployment facts rather than policy, so they are overridable for tests and offline tooling — but never
+// absent, because a daemon that cannot find the canonical assignment must fail closed rather than invent one.
+func envOr(name, def string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	return def
 }
