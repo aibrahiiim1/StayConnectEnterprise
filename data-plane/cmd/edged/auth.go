@@ -155,7 +155,7 @@ var rolePerms = map[string]map[string]perm{
 	"hotel_it_manager": {
 		"guest-accounts": permWrite,
 		"sessions":       permWrite,
-		"auth-methods": permWrite, "walled-garden": permWrite,
+		"auth-methods":   permWrite, "walled-garden": permWrite,
 		"portal-branding": permWrite, "notification-providers": permWrite,
 		"social-providers": permWrite, "stripe-accounts": permWrite,
 		"network": permWrite,
