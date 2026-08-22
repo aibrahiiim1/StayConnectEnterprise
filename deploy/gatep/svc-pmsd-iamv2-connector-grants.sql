@@ -92,8 +92,10 @@ GRANT SELECT,INSERT,UPDATE ON iam_v2.entitlement_device_authorizations TO svc_pm
 GRANT SELECT,INSERT        ON iam_v2.entitlement_boundary_watermarks   TO svc_pmsd; -- capability-scoped: checkout_conversion
 GRANT SELECT,INSERT        ON iam_v2.checkout_grace_audit              TO svc_pmsd; -- capability-scoped: checkout_conversion
 GRANT SELECT,INSERT        ON iam_v2.purchases                         TO svc_pmsd; -- capability-scoped: commerce_intent
--- NO INSERT on entitlements' status path and no UPDATE on entitlements at all: status is operation-owned and
--- moves only through apply_entitlement_transition, granted below.
+-- On the UPDATE that IS present above: it exists solely so `SELECT ... FOR UPDATE` can take a row lock, and
+-- it is not a licence to mutate. The converter issues no UPDATE statement against iam_v2.entitlements; status
+-- is operation-owned and moves only through apply_entitlement_transition, and p3_entitlement_controlled_writer
+-- refuses a status change from any caller that is not the approved writer's owner — grant or no grant.
 
 -- sessions: SELECT and UPDATE, and the UPDATE is narrower than it looks. p3_session_usage_controlled_writer
 -- guards the accounting columns (bytes_up/bytes_down/ip/ingress_interface) and the PENDING_ENFORCEMENT
@@ -157,7 +159,8 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_pmsd;
 GRANT EXECUTE ON FUNCTION iam_v2.p3_controlled_operation_open(text) TO svc_pmsd;
 
 -- Entitlement status is operation-owned: the conversion activates the grace entitlement through the approved
--- transition rather than by UPDATE, which is why no UPDATE on iam_v2.entitlements appears above.
+-- transition rather than by a raw UPDATE. The UPDATE privilege granted above is for the eligibility scan's
+-- row lock only, so this function — not that grant — remains the sole way the status moves.
 GRANT EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid, text, timestamptz, text) TO svc_pmsd;
 
 -- Ending the pre-checkout entitlement at the boundary, and moving any live session onto the grace

@@ -76,14 +76,21 @@ tenant, without the canonical assignment ever being consulted. It has been remov
 
 Behaviour when the assignment is not usable:
 
-| State | pmsd |
-|---|---|
-| no identity, or no assignment adopted | `assigned=false` — factory-clean, does no PMS work, exits cleanly |
-| assignment present but unverifiable, bound elsewhere, or revoked | `ErrAssignmentNotGranting` — refuses to start |
-| verified and granting | resolves tenant/site and proceeds |
+| `assignment.Outcome` | Cause | pmsd |
+|---|---|---|
+| `absent` | no identity, or no assignment adopted | `assigned=false` — factory-clean, does no PMS work, exits cleanly |
+| `unverifiable` | present but unreadable, no trust anchor, signed by a key outside the registry, or bound to another appliance | `ErrAssignmentNotGranting` — refuses to start |
+| `not_granting` | verified, and its state is unassigned / revoked / decommissioned | `ErrAssignmentNotGranting` — refuses to start |
+| `granted` | verified, bound to this appliance, granting | resolves tenant/site and proceeds |
 
-The two failure modes are deliberately distinct: "this appliance was rejected" must never read as "this
-appliance is new".
+**Read the outcome, not the emptiness of tenant/site.** All three non-granting cases produce an empty scope,
+so a caller that infers "not enrolled yet" from empty fields reports a rejected appliance as a new one — which
+is exactly what happened before `Outcome` existed: pmsd switched on an empty `State`, and a bad signature took
+the factory-clean branch and exited 0.
+
+`State` and `Version` stay empty for anything that did not verify. That is the long-standing scd contract and
+it is unchanged, including scd's local-first behaviour of continuing to operate on a valid but stale
+last-known-good assignment through a Central outage — expiry is not a de-authorisation.
 
 ## 3. Environment
 

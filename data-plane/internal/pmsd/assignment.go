@@ -32,12 +32,14 @@ import (
 // FAIL CLOSED, AND FACTORY-CLEAN IS NOT A FAILURE. The two are different answers and the caller treats them
 // differently:
 //
-//   - assigned=false, err=nil — no assignment has been adopted, or the appliance has no identity yet. This
-//     is a factory-clean box, and the correct behaviour is to do no PMS work at all. Run() logs it and stops.
-//   - err != nil — an assignment IS present but the appliance cannot stand behind it: unverifiable signature,
-//     a signer outside the registry, a document bound to a different appliance, or a state that grants
-//     nothing. Refusing loudly is the point; silently degrading to "unassigned" would make a rejected
-//     assignment indistinguishable from never having had one.
+//   - assigned=false, err=nil — OutcomeAbsent: no assignment has been adopted, or the appliance has no
+//     identity yet. This is a factory-clean box, and the correct behaviour is to do no PMS work at all.
+//     Run() logs it and stops.
+//   - err != nil — OutcomeUnverifiable or OutcomeNotGranting: an assignment IS present and the appliance
+//     cannot stand behind it (bad signature, signer outside the registry, bound to a different appliance,
+//     unreadable file) or it verified and grants nothing (unassigned, revoked, decommissioned). Refusing
+//     loudly is the point; silently degrading to "unassigned" would make a rejected assignment
+//     indistinguishable from never having had one.
 //
 // identityDir and the assignment paths come from the daemon's environment, so a test or an offline tool can
 // point them elsewhere without this package knowing any absolute path.
@@ -59,13 +61,22 @@ func CentralAssignmentLoader(paths assignment.Paths, identityDir string, log *sl
 			PublicKeyB64: ident.PublicKeyB64,
 		}, time.Now(), log)
 
-		switch {
-		case r.State == "":
-			// Nothing adopted, or nothing readable. Factory-clean.
-			return Assignment{}, false, nil
-		case !r.Assigned():
-			// A document exists but grants no scope — revoked, unassigned, decommissioned, or it failed
-			// verification. Either way pmsd must not run, and must not pretend the appliance is merely new.
+		// The DECISION IS THE OUTCOME, not the emptiness of the fields.
+		//
+		// This used to switch on `r.State == ""`, and State is empty for BOTH a factory-clean appliance and a
+		// document that failed verification — so a bad signature, a signer outside the registry, a binding to
+		// another appliance or an unreadable file all took the factory-clean branch and returned
+		// assigned=false with no error. pmsd then logged "no assignment" and exited 0, which is the report an
+		// unassigned box gives. A REJECTED appliance looked like a NEW one, and the loudest possible failure
+		// became the quietest.
+		switch r.Outcome {
+		case assignment.OutcomeAbsent:
+			return Assignment{}, false, nil // genuinely not assigned → do no PMS work, cleanly
+		case assignment.OutcomeUnverifiable, assignment.OutcomeNotGranting:
+			if log != nil {
+				log.Error("pmsd: refusing to start — an appliance assignment is present but confers no scope",
+					"outcome", r.Outcome.String(), "state", r.State, "version", r.Version)
+			}
 			return Assignment{}, false, ErrAssignmentNotGranting
 		}
 		return Assignment{
