@@ -503,11 +503,14 @@ func TestIntegration_API_EveryReadOnlyCollectionAnswers(t *testing.T) {
 
 // validRevisionBody is the smallest configuration the authoring endpoint accepts. Every field is one the
 // running connector reads, so a test that drifts from reality fails here rather than in front of an operator.
+//
+// It no longer sends folio_identity_strategy, normalization_version, credential_mode, read_only or
+// resync_supported. Those are stamped by the server now — a folio strategy is a financial determination
+// rather than a form value, and the rest describe the implementation rather than the hotel — so a body that
+// still carried GLOBALLY_UNIQUE was asserting the OLD contract and was refused, correctly.
 func validRevisionBody(endpoint string) map[string]any {
 	return map[string]any{
 		"endpoint": endpoint, "source_timezone": "Africa/Cairo",
-		"folio_identity_strategy": "GLOBALLY_UNIQUE", "normalization_version": 1,
-		"credential_mode": "NONE", "read_only": true, "resync_supported": true,
 		"dial_timeout_ms": 5000, "read_timeout_ms": 15000, "write_timeout_ms": 15000,
 		"heartbeat_interval_ms": 30000, "heartbeat_timeout_ms": 90000,
 		"feed_freshness_ms": 120000, "complete_sync_ms": 600000,
@@ -526,7 +529,7 @@ func TestIntegration_API_ViewerCannotCreateOrConfigurePMSInterfaces(t *testing.T
 		t.Fatal("a viewer must still be able to read the interface list")
 	}
 	if status, body := f.do(t, "POST", "/pms-interfaces",
-		map[string]any{"connector_kind": "stub", "display_label": "viewer attempt"}); status != 403 {
+		map[string]any{"connector_kind": "protel-fias", "display_label": "viewer attempt"}); status != 403 {
 		t.Fatalf("a viewer created a PMS interface: %d %v", status, body)
 	}
 	if status, body := f.do(t, "POST", "/pms-interfaces/00000000-0000-4000-8000-000000000000/revisions",
@@ -549,7 +552,7 @@ func TestIntegration_API_ViewerCannotCreateOrConfigurePMSInterfaces(t *testing.T
 func TestIntegration_API_ConcurrentRevisionAuthoringIsDeterministic(t *testing.T) {
 	f := newAPI(t)
 	status, body := f.do(t, "POST", "/pms-interfaces",
-		map[string]any{"connector_kind": "stub", "display_label": "concurrency"})
+		map[string]any{"connector_kind": "protel-fias", "display_label": "concurrency"})
 	if status != 201 {
 		t.Fatalf("create interface: %d %v", status, body)
 	}
@@ -607,7 +610,7 @@ func TestIntegration_API_ConcurrentRevisionAuthoringIsDeterministic(t *testing.T
 func TestIntegration_API_DecommissionedInterfaceRefusesConfiguration(t *testing.T) {
 	f := newAPI(t)
 	status, body := f.do(t, "POST", "/pms-interfaces",
-		map[string]any{"connector_kind": "stub", "display_label": "lifecycle"})
+		map[string]any{"connector_kind": "protel-fias", "display_label": "lifecycle"})
 	if status != 201 {
 		t.Fatalf("create interface: %d %v", status, body)
 	}
