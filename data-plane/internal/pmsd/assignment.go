@@ -32,9 +32,11 @@ import (
 // FAIL CLOSED, AND FACTORY-CLEAN IS NOT A FAILURE. The two are different answers and the caller treats them
 // differently:
 //
-//   - assigned=false, err=nil — OutcomeAbsent: no assignment has been adopted, or the appliance has no
-//     identity yet. This is a factory-clean box, and the correct behaviour is to do no PMS work at all.
-//     Run() logs it and stops.
+//   - assigned=false, err=nil — OutcomeAbsent, or no identity.json, or an identity awaiting enrolment. This
+//     is a factory-clean box, and the correct behaviour is to do no PMS work at all. Run() logs it and stops.
+//   - ErrIdentityUnreadable — identity.json EXISTS and cannot be trusted: unreadable, corrupt, or carrying
+//     neither an appliance id nor a public key. Distinct from having no identity at all, for the same reason
+//     OutcomeUnverifiable is distinct from OutcomeAbsent.
 //   - err != nil — OutcomeUnverifiable or OutcomeNotGranting: an assignment IS present and the appliance
 //     cannot stand behind it (bad signature, signer outside the registry, bound to a different appliance,
 //     unreadable file) or it verified and grants nothing (unassigned, revoked, decommissioned). Refusing
@@ -49,10 +51,38 @@ func CentralAssignmentLoader(paths assignment.Paths, identityDir string, log *sl
 		// against it; it signs nothing, so it has no business reading the appliance private key — and could
 		// not anyway, since ed25519.key is 0600 root-only while pmsd runs under its own service account.
 		//
-		// No ApplianceID means enrolment has not completed. That is factory-clean, not a fault.
+		// THE THREE IDENTITY STATES ARE NOT ONE STATE. This branch used to read
+		//
+		//	if err != nil || ident == nil || ident.ApplianceID == "" { return ..., false, nil }
+		//
+		// which folded a CORRUPT identity.json into the factory-clean case — the same collapse the assignment
+		// Outcome was introduced to fix, one layer down. LoadPublic already reports them apart: (nil, nil) for
+		// a file that does not exist, (nil, err) for one that does and cannot be read or parsed. Discarding
+		// that distinction here meant an unreadable or tampered identity produced "no assignment", exit 0, and
+		// a log line indistinguishable from a box that had simply never been enrolled.
 		ident, err := (&identity.Store{Dir: identityDir}).LoadPublic()
-		if err != nil || ident == nil || ident.ApplianceID == "" {
-			return Assignment{}, false, nil // awaiting enrolment → no PMS work
+		switch {
+		case err != nil:
+			// The file EXISTS and cannot be trusted. Fail loudly; never describe it as factory-clean.
+			if log != nil {
+				log.Error("pmsd: refusing to start — the appliance identity is present but unreadable",
+					"err", err.Error())
+			}
+			return Assignment{}, false, ErrIdentityUnreadable
+		case ident == nil:
+			return Assignment{}, false, nil // no identity.json at all → factory-clean
+		case ident.ApplianceID == "" && ident.PublicKeyB64 == "":
+			// Parsed, but carries neither an appliance id nor a key. A pre-enrolment identity always has the
+			// public half (EnsureLocalKeypair writes it); one with nothing in it is a damaged file wearing
+			// valid JSON, and treating it as "not enrolled yet" would hide that.
+			if log != nil {
+				log.Error("pmsd: refusing to start — the appliance identity carries no appliance id and no public key")
+			}
+			return Assignment{}, false, ErrIdentityUnreadable
+		case ident.ApplianceID == "":
+			// Valid identity, enrolment not completed: a keypair exists, Central has not minted an appliance
+			// id. Genuinely nothing to do, and genuinely not a fault.
+			return Assignment{}, false, nil
 		}
 
 		r := assignment.Resolve(paths, assignment.ApplianceBinding{

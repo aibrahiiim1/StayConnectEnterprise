@@ -78,10 +78,19 @@ Behaviour when the assignment is not usable:
 
 | `assignment.Outcome` | Cause | pmsd |
 |---|---|---|
-| `absent` | no identity, or no assignment adopted | `assigned=false` — factory-clean, does no PMS work, exits cleanly |
+| `absent` | no `identity.json`, an identity still awaiting enrolment, or no assignment adopted | `assigned=false` — factory-clean, does no PMS work, exits cleanly |
 | `unverifiable` | present but unreadable, no trust anchor, signed by a key outside the registry, or bound to another appliance | `ErrAssignmentNotGranting` — refuses to start |
 | `not_granting` | verified, and its state is unassigned / revoked / decommissioned | `ErrAssignmentNotGranting` — refuses to start |
 | `granted` | verified, bound to this appliance, granting | resolves tenant/site and proceeds |
+
+The identity gate in front of it makes the same distinction, for the same reason:
+
+| `identity.json` | pmsd |
+|---|---|
+| absent | `assigned=false`, no error — factory-clean |
+| present and valid, no appliance id yet | `assigned=false`, no error — awaiting enrolment |
+| present but unreadable, corrupt, or carrying neither an appliance id nor a public key | `ErrIdentityUnreadable` — refuses to start |
+| present and valid, with an appliance id | proceeds to the assignment check above |
 
 **Read the outcome, not the emptiness of tenant/site.** All three non-granting cases produce an empty scope,
 so a caller that infers "not enrolled yet" from empty fields reports a rejected appliance as a new one — which
