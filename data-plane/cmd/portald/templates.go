@@ -170,6 +170,7 @@ const landingHTML = `<!doctype html>
       room_firstname:   "First name on the reservation",
       room_reservation: "Reservation / confirmation number",
       either:           "Last name OR reservation number",
+      room_any:         "Last name, first name or reservation number",
     };
     const challenges = {}; // channel -> challenge_id
 
@@ -467,10 +468,16 @@ const landingHTML = `<!doctype html>
       const val  = sec.value.trim();
       const mode = sec.dataset.mode || 'either';
       const body = { room };
-      if (mode === 'room_firstname')      body.first_name = val;
+      if (mode === 'room_firstname')        body.first_name = val;
       else if (mode === 'room_reservation') body.reservation_number = val;
       else if (mode === 'room_lastname')    body.last_name = val;
-      else { // either — guess: if all-digits-or-hyphens and starts with letters, treat as reservation
+      else if (mode === 'room_any')         body.guest_identifier = val;
+      else { // legacy "either" — kept exactly as it was for sites still configured with it.
+        //
+        // It GUESSES which field the guest typed, so a surname containing a digit is submitted as a
+        // reservation number and fails. room_any is the replacement: one value, matched server-side against
+        // every supported identifier, no guessing. This branch is not removed because changing what a
+        // stored configuration does is not this screen's decision to make.
         if (/^[A-Z0-9\-]+$/i.test(val) && /\d/.test(val)) body.reservation_number = val;
         else body.last_name = val;
       }
