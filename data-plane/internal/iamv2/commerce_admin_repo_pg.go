@@ -98,10 +98,11 @@ func (r *PgCommerceAdminRepository) ListPlans(ctx context.Context, tenantID, sit
 		    -- it is not an operator-editable object. Showing it in the catalogue invites an operator to publish
 		    -- a revision onto it (which the reserved-code guard then refuses) or to attach it to a package of
 		    -- their own, and it presents system-derived internals as if they were part of the product's offer.
-		    -- service_plans carries no is_system column, so the reserved codes are named directly -- the same
-		    -- pair the publish guards refuse.
-		    AND p.code <> $3 AND p.code <> $4
-		  ORDER BY p.code`, tenantID, siteID, systemGracePlanCode, systemGraceCode)
+		    -- service_plans carries no is_system column (internet_packages does, which is why ListPackages
+		    -- can filter on it), so the reserved codes are named directly -- and they come from the SAME
+		    -- list the publish guard refuses, passed as an array so the two cannot disagree again.
+		    AND p.code <> ALL($3::text[])
+		  ORDER BY p.code`, tenantID, siteID, reservedCommerceCodes)
 	if err != nil {
 		return nil, err
 	}
@@ -271,11 +272,27 @@ func (r *PgCommerceAdminRepository) ListPurchases(ctx context.Context, tenantID,
 // internal error tells the operator the system is broken when in fact it is working, and it is the shape that
 // gets escalated as an outage. Refusing all four here makes the answer uniform and truthful, and it does so
 // before any row is touched.
+// reservedCommerceCodes is the ONE list of codes that belong to the system rather than to an operator.
+//
+// There are two naming schemes because two provisioning paths created system rows at different times: the Go
+// constants (__system_checkout_grace*) and the SQL bootstrap in migration 0010
+// (__sys_emergency_grace_*__). Both are live, so both are reserved.
+//
+// It is a slice, and every consumer reads it, because the previous arrangement had the publish GUARD
+// checking all four while the plans LISTING hardcoded only two of them in its SQL. The two disagreed, and
+// the half that was wrong was the one an operator actually sees: the Service Plans screen listed
+// __sys_emergency_grace_plan__ as though it were theirs to edit, while publishing onto it was refused.
+// A list that is read in one place cannot drift from itself.
+var reservedCommerceCodes = []string{
+	systemGraceCode, systemGracePlanCode,
+	"__sys_emergency_grace_pkg__", "__sys_emergency_grace_plan__",
+}
+
 func reservedCommerceCode(code string) bool {
-	switch code {
-	case systemGraceCode, systemGracePlanCode,
-		"__sys_emergency_grace_pkg__", "__sys_emergency_grace_plan__":
-		return true
+	for _, c := range reservedCommerceCodes {
+		if code == c {
+			return true
+		}
 	}
 	return false
 }
