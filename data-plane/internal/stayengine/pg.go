@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -145,10 +146,54 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 	// lifecycle_version is the episode counter). Locked so a concurrent processor cannot race it.
 	var cur *StayView
 	var sv StayView
-	lerr := tx.QueryRow(ctx, `SELECT id::text, status, lifecycle_version, COALESCE(normalized_room_number,'')
-		FROM iam_v2.stays
-		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND external_reservation_id=$4
-		FOR UPDATE`, tenant, site, iface, ev.Reservation).Scan(&sv.ID, &sv.Status, &sv.LifecycleVersion, &sv.Room)
+	var lerr error
+	if strings.TrimSpace(ev.Reservation) == "" {
+		// A CHECKOUT IDENTIFIED BY ROOM ALONE. This PMS reports every departure as a GO carrying RN and no G#,
+		// so there is no reservation to look the Stay up by and the room is the only thing the event says.
+		//
+		// Resolution is by room among IN_HOUSE Stays, and it is deliberately all-or-nothing: exactly one match
+		// is the answer, and anything else is not. Two IN_HOUSE Stays in one room are sharers, and choosing
+		// between them would check out a guest who is still resident — so that case goes to MANUAL_REVIEW with
+		// both Stays untouched rather than to a coin flip. Zero matches falls through to cur == nil, which the
+		// resolver already treats as GO_UNKNOWN_STAY.
+		//
+		// This is NOT a second checkout path: whatever it resolves goes through the same Decision, the same
+		// applyDecision and the same Checkout Converter as a reservation-keyed GO. All that differs is how the
+		// Stay is identified.
+		if ev.EventType != EvGuestOut {
+			// Only a checkout may be room-keyed. Anything else without a reservation is unusable, and the
+			// connector should not have admitted it; refuse rather than guess.
+			if ferr := failEvent(ctx, tx, eventID, "MANUAL_REVIEW", "EVENT_WITHOUT_RESERVATION"); ferr != nil {
+				return false, ferr
+			}
+			return true, tx.Commit(ctx)
+		}
+		var n int
+		if cerr := tx.QueryRow(ctx, `SELECT count(*) FROM iam_v2.stays
+			WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3
+			  AND status='IN_HOUSE' AND normalized_room_number=$4`,
+			tenant, site, iface, normRoom(ev.Room)).Scan(&n); cerr != nil {
+			return false, cerr
+		}
+		if n > 1 {
+			if ferr := failEvent(ctx, tx, eventID, "MANUAL_REVIEW", "GO_AMBIGUOUS_ROOM"); ferr != nil {
+				return false, ferr
+			}
+			return true, tx.Commit(ctx)
+		}
+		lerr = tx.QueryRow(ctx, `SELECT id::text, status, lifecycle_version, COALESCE(normalized_room_number,'')
+			FROM iam_v2.stays
+			WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3
+			  AND status='IN_HOUSE' AND normalized_room_number=$4
+			FOR UPDATE`, tenant, site, iface, normRoom(ev.Room)).
+			Scan(&sv.ID, &sv.Status, &sv.LifecycleVersion, &sv.Room)
+	} else {
+		lerr = tx.QueryRow(ctx, `SELECT id::text, status, lifecycle_version, COALESCE(normalized_room_number,'')
+			FROM iam_v2.stays
+			WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND external_reservation_id=$4
+			FOR UPDATE`, tenant, site, iface, ev.Reservation).
+			Scan(&sv.ID, &sv.Status, &sv.LifecycleVersion, &sv.Room)
+	}
 	if lerr == nil {
 		cur = &sv
 	} else if !errors.Is(lerr, pgx.ErrNoRows) {

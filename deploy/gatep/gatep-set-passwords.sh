@@ -28,8 +28,8 @@ echo "log-safety: log_statement=$ls log_min_duration_statement=$lmd (no capture)
 
 umask 077
 : > "$DSN_OUT"; chmod 600 "$DSN_OUT"
-declare -A PORTMAP=( [svc_scd]=SCD [svc_edged]=EDGED [svc_acctd]=ACCTD [svc_netd]=NETD )
-for role in svc_scd svc_edged svc_acctd svc_netd; do
+declare -A PORTMAP=( [svc_scd]=SCD [svc_edged]=EDGED [svc_acctd]=ACCTD [svc_netd]=NETD [svc_pmsd]=PMSD )
+for role in svc_scd svc_edged svc_acctd svc_netd svc_pmsd; do
   pw="$(python3 -c 'import secrets;print(secrets.token_urlsafe(24))')"
   verifier="$(printf '%s' "$pw" | python3 "$HERE/scram_verifier.py")"
   # verifier (a hash) only — cleartext never enters SQL/argv; statement piped via STDIN.

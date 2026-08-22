@@ -376,6 +376,15 @@ var (
 	ErrStaleGeneration = errors.New("pmsd: stale runtime generation (a newer owner exists)")
 	ErrConnectorDark   = errors.New("pmsd: connector flag OFF")
 	ErrNoAssignment    = errors.New("pmsd: no verified signed appliance assignment (factory-clean)")
+	// ErrAssignmentNotGranting is the OTHER failure: an assignment document exists but confers no scope —
+	// it failed verification against the trust registry, is bound to a different appliance, or its state is
+	// revoked/unassigned/decommissioned. It is deliberately distinct from ErrNoAssignment so that "this
+	// appliance was rejected" can never be read as "this appliance is new".
+	ErrAssignmentNotGranting = errors.New("pmsd: appliance assignment present but grants no tenant/site scope")
+	// ErrIdentityUnreadable is the identity-layer counterpart: identity.json exists and cannot be trusted.
+	// Kept separate from "no identity" so a corrupt or tampered identity can never be reported as a
+	// never-enrolled appliance.
+	ErrIdentityUnreadable = errors.New("pmsd: appliance identity present but unreadable or invalid")
 )
 
 func (d *Deps) now() time.Time {

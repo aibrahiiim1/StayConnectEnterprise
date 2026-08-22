@@ -94,6 +94,10 @@ func Classify(err error) Code {
 		return CodeRuntimeGenStale
 	case errors.Is(err, ErrMalformedUUID):
 		return CodeConfigInvalid
+	case errors.Is(err, ErrNoAssignment), errors.Is(err, ErrAssignmentNotGranting):
+		return CodeAssignmentMissing
+	case errors.Is(err, ErrIdentityUnreadable):
+		return CodeConfigInvalid
 	default:
 		return CodeUnclassified
 	}

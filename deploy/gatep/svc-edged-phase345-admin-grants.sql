@@ -41,7 +41,19 @@ GRANT SELECT ON iam_v2.pms_interfaces                  TO svc_edged;
 GRANT SELECT ON iam_v2.pms_interface_revisions         TO svc_edged;
 GRANT SELECT ON iam_v2.pms_interface_runtime           TO svc_edged;
 GRANT SELECT ON iam_v2.pms_interface_secret_generations TO svc_edged;
-GRANT SELECT ON iam_v2.guest_network_pms_map           TO svc_edged;
+-- guest_network_pms_map: SELECT for the routing read surface, and INSERT/UPDATE/DELETE for the write one.
+--
+-- The write path was added when commissioning a real PMS Interface revealed that this mapping — which decides
+-- which property's PMS a device on a given VLAN is checked against — could not be set by any product action.
+-- It existed only in integration-test fixtures, so a correctly connected and ingesting appliance still
+-- authenticated nobody, with nothing in the UI able to fix it.
+--
+-- DELETE is included and is not an oversight against the "no admin read surface deletes" rule at the foot of
+-- this file: setting a route REPLACES the previous one, and unmapping a network (a staff VLAN has no business
+-- consulting the PMS) is a legitimate configuration rather than a removal of history. The row carries no
+-- record of anything that happened; it is current configuration, and configuration that can only be added to
+-- is configuration that cannot be corrected.
+GRANT SELECT,INSERT,UPDATE,DELETE ON iam_v2.guest_network_pms_map TO svc_edged;
 GRANT SELECT ON iam_v2.pms_source_conflicts            TO svc_edged;
 GRANT SELECT ON iam_v2.auth_resolutions                TO svc_edged;
 GRANT SELECT ON iam_v2.stays                           TO svc_edged;

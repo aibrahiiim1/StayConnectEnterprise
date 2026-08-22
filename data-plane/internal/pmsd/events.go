@@ -80,8 +80,23 @@ func (e Event) Validate() error {
 	if _, err := parseUUID16(e.RevisionID); err != nil {
 		return ErrEventInvalid
 	}
-	if _, err := parseUUID16(e.SecretGenerationID); err != nil {
-		return ErrEventInvalid
+	// SecretGenerationID is OPTIONAL, and pinning it is conditional on there being a secret to pin.
+	//
+	// This used to be an unconditional canonical-UUID check, which made the whole connector unusable against
+	// any interface whose revision declares credential_mode=NONE — the FIAS link to this property carries no
+	// transport authentication, so no secret generation exists, so the field is legitimately empty, so EVERY
+	// domain record failed validation. On the live appliance that presented as a healthy CONNECTED link
+	// completing a full DS…DE resync and admitting exactly zero of its 365 records, cycling
+	// GAP_DETECTED → RESYNC_REQUIRED forever. The column in iam_v2.stay_events is nullable precisely because
+	// this case is expected; only this check disagreed.
+	//
+	// It stays strict about the thing that matters: when a secret generation IS pinned, it must be a canonical
+	// UUID, so a malformed or partially-written provenance reference is still refused. What is no longer
+	// refused is the honest absence of one.
+	if e.SecretGenerationID != "" {
+		if _, err := parseUUID16(e.SecretGenerationID); err != nil {
+			return ErrEventInvalid
+		}
 	}
 	if e.NormalizationVer <= 0 {
 		return ErrEventInvalid
@@ -119,7 +134,13 @@ func (e Event) Validate() error {
 		if !isHex64(e.SourceEvidenceHash) || e.EvidenceKeyVersion <= 0 {
 			return ErrEventInvalid
 		}
-		if strings.TrimSpace(e.RoomNumber) == "" || strings.TrimSpace(e.ReservationRef) == "" {
+		// Room is always required. Reservation is required except on a checkout, which this PMS reports by
+		// room alone (see extractTypedDomainFields): a GO names the room the guest left, and the engine
+		// resolves which Stay that was — refusing to act when the answer is not unique.
+		if strings.TrimSpace(e.RoomNumber) == "" {
+			return ErrEventInvalid
+		}
+		if e.RecordType != RecGO && strings.TrimSpace(e.ReservationRef) == "" {
 			return ErrEventInvalid
 		}
 	} else {

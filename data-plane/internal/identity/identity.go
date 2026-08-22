@@ -327,6 +327,32 @@ func (s *Store) load() (*Identity, error) {
 	return &id, nil
 }
 
+// LoadPublic returns the appliance's PUBLIC identity — appliance id, serial and public key — without reading
+// the private key file at all.
+//
+// It exists for readers that need to know WHICH appliance this is but have no business holding its signing
+// key. pmsd is the case in point: it verifies a Central-signed assignment against this appliance's identity
+// and never signs anything, so requiring the private key would give a PMS connector the appliance's key for
+// no reason — and, because ed25519.key is 0600 root-only while identity.json is world-readable, it also
+// simply fails for any daemon running under its own service account.
+//
+// Returns (nil, nil) when no identity.json exists: a factory-clean appliance has no identity, which is an
+// answer rather than an error.
+func (s *Store) LoadPublic() (*Identity, error) {
+	ij, err := os.ReadFile(s.idPath())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var id Identity
+	if err := json.Unmarshal(ij, &id); err != nil {
+		return nil, fmt.Errorf("parse identity.json: %w", err)
+	}
+	return &id, nil
+}
+
 // EnsureLocalKeypair creates and persists an identity keypair WITHOUT contacting Central, and returns the
 // identity. If one already exists it is returned unchanged.
 //

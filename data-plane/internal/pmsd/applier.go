@@ -83,8 +83,13 @@ func runApplierScope(ctx context.Context, ap StayApplier, sc applierScope, cfg a
 				if ctx.Err() != nil {
 					return // shutting down: not an error worth reporting
 				}
+				// The CAUSE is logged, not just the classification. A bounded code alone said
+				// "UNCLASSIFIED" for every failure — a missing grant, a violated domain guard and a dropped
+				// connection were one indistinguishable line, while the ordered per-interface stream sat
+				// blocked behind the event that could not be applied. The error text here comes from the
+				// database and the engine, never from PMS payload: no guest value passes through it.
 				log.Warn("pmsd: stay-event application failed; event stays PENDING for retry",
-					"code", Classify(err).String(), "interface", sc.Interface)
+					"code", Classify(err).String(), "interface", sc.Interface, "cause", err.Error())
 				sleepCtx(ctx, cfg.ErrorPause)
 				break
 			}
