@@ -96,6 +96,19 @@ GRANT SELECT ON iam_v2.auth_context_offers        TO svc_scd; -- offers already 
 GRANT EXECUTE ON FUNCTION iam_v2.issue_or_return_pms_context(
   uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid, integer) TO svc_scd;
 
+-- Recording WHAT the verified guest was offered is part of the same resolution, not a later step: the
+-- response scd returns names those offers, and the record is the audit trail of what was on the screen.
+--
+-- This grant was missing, and only svc_netd had it. Nothing noticed for as long as it was unreachable —
+-- every resolution failed earlier, at CONTEXT_INVALID, so the offer stage was never entered. The first
+-- resolution that ever got this far died on "permission denied for function record_auth_context_offer",
+-- which the guest saw as the same uniform failure as a wrong surname.
+--
+-- The feed-health and evidence rules that let a guest reach this point are eligibility. This is not: it is
+-- scd writing down its own answer, and refusing it turns a successful authentication into a failed one.
+GRANT EXECUTE ON FUNCTION iam_v2.record_auth_context_offer(
+  uuid, uuid, uuid, uuid, integer, bigint, timestamptz) TO svc_scd;
+
 -- The auth_context family is guarded in the DATABASE: a trigger refuses any
 -- write not inside a transaction that has opened a controlled operation. This
 -- is the same minimum already granted to svc_edged and svc_acctd -- it lets scd
