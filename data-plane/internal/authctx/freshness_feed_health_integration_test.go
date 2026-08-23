@@ -94,6 +94,9 @@ func TestIntegration_DeadFeedAuthorisesNobody(t *testing.T) {
 		{"resync in progress", "CONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now},
 		{"sync failed", "CONNECTED", "SYNC_FAILED", "CONTINUOUS", now},
 		{"gap detected", "CONNECTED", "IN_SYNC", "GAP_DETECTED", now},
+		// UNKNOWN is the value a runtime row is BORN with — continuity never established. It was briefly
+		// accepted alongside CONTINUOUS, which read a missing positive signal as an absent negative one.
+		{"continuity never established", "CONNECTED", "IN_SYNC", "UNKNOWN", now},
 		// Connected and in sync on paper, but nothing has been heard for far longer than the heartbeat
 		// timeout: a hung socket that never reported an error must not pass as a healthy feed.
 		{"silent beyond heartbeat timeout", "CONNECTED", "IN_SYNC", "CONTINUOUS", now.Add(-2 * time.Hour)},
@@ -106,6 +109,38 @@ func TestIntegration_DeadFeedAuthorisesNobody(t *testing.T) {
 				t.Fatalf("a guest was authorised on a %s feed, with no live PMS behind the answer", tc.name)
 			}
 		})
+	}
+}
+
+// UNKNOWN CONTINUITY IS NOT A HEALTHY STATE, and this asserts it against the state machine's own claim rather
+// than against the word.
+//
+// continuity_status is NOT NULL DEFAULT 'UNKNOWN', so it is what a runtime row carries before the interface
+// has done anything. The only transitions to CONTINUOUS are PublishResyncGeneration — which sets it in the
+// same UPDATE as IN_SYNC — and the admission of a LIVE event. Nothing returns to UNKNOWN.
+//
+// Two consequences are pinned here. An interface that never established continuity authorises nobody even
+// with perfect evidence and a live socket; and, because publishing a resync sets both columns at once,
+// requiring CONTINUOUS costs a healthy interface nothing — IN_SYNC already implies it.
+func TestIntegration_UnknownContinuityNeverAuthorises(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := seedCacheAge(t, p, "null")
+	now := time.Now().UTC()
+
+	setFeed(t, p, s, "CONNECTED", "IN_SYNC", "UNKNOWN", now)
+	if authorizable(t, p, s) {
+		t.Fatal("an interface whose continuity was NEVER established authorised a guest. UNKNOWN is the " +
+			"column default, not a clean bill of health: reading it as one authorises on the strength of a " +
+			"signal that has never arrived")
+	}
+
+	// The same interface, once continuity is genuinely established, does authorise — so the refusal above is
+	// the continuity term and not some unrelated part of the fixture being wrong.
+	setFeed(t, p, s, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
+	if !authorizable(t, p, s) {
+		t.Fatal("established continuity must authorise; the UNKNOWN refusal above proves nothing if the " +
+			"CONTINUOUS case cannot pass either")
 	}
 }
 

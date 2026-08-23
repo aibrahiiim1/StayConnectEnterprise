@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0050, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0051, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -1603,11 +1603,11 @@ CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interfac
      WHERE pi.tenant_id=p_tenant AND pi.site_id=p_site AND pi.id=p_interface
        AND pi.lifecycle_state='ACTIVE'
        AND p_evidence_at IS NOT NULL
-       -- (1) the feed is maintaining the mirror RIGHT NOW. A disconnected, out-of-sync or gapped interface
-       --     authorises nobody, however recent its stored evidence happens to look.
-       AND rt.transport_status = 'CONNECTED'
-       AND rt.sync_status      = 'IN_SYNC'
-       AND rt.continuity_status IN ('CONTINUOUS','UNKNOWN')
+       -- (1) the feed is maintaining the mirror RIGHT NOW. A disconnected, out-of-sync, gapped or
+       --     never-established interface authorises nobody, however recent its stored evidence looks.
+       AND rt.transport_status  = 'CONNECTED'
+       AND rt.sync_status       = 'IN_SYNC'
+       AND rt.continuity_status = 'CONTINUOUS'
        AND rt.pinned_revision_id = p_revision
        -- (2) proven liveness, so a silently hung socket cannot masquerade as a healthy one.
        AND COALESCE(rt.last_heartbeat_at, rt.last_connected_at) IS NOT NULL
@@ -1632,7 +1632,7 @@ $_$;
 -- Name: FUNCTION p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the FEED-health half of PMS Room sign-in eligibility: interface ACTIVE, transport connected, in sync, continuous, pinned to the presented Revision, live within heartbeat_timeout_ms, and the supplied evidence timestamp within one complete-sync cadence. Silence from a healthy feed confirms an unchanged Stay; a disconnected feed authorises nobody. Deliberately does NOT read iam_v2.stays: callers hold FOR UPDATE OF st and need those conditions inline so EvalPlanQual rechecks them against the locked tuple.';
+COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the FEED-health half of PMS Room sign-in eligibility: interface ACTIVE, transport CONNECTED, sync IN_SYNC, continuity CONTINUOUS, pinned to the presented Revision, live within heartbeat_timeout_ms, and the supplied evidence timestamp within one complete-sync cadence. UNKNOWN continuity means never established and authorises nobody. Silence from a healthy feed confirms an unchanged Stay; a disconnected feed authorises nobody. Deliberately does NOT read iam_v2.stays: callers hold FOR UPDATE OF st and need those conditions inline so EvalPlanQual rechecks them against the locked tuple.';
 
 
 --
@@ -13288,6 +13288,7 @@ REVOKE ALL ON FUNCTION iam_v2.p5_stay_link_guard() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) TO svc_acctd;
 
 
 --
@@ -13444,6 +13445,7 @@ REVOKE ALL ON FUNCTION iam_v2.record_alert_action(p_tenant uuid, p_site uuid, p_
 --
 
 REVOKE ALL ON FUNCTION iam_v2.record_auth_context_offer(p_tenant uuid, p_site uuid, p_auth_context uuid, p_package_revision uuid, p_tier integer, p_evidence_version bigint, p_expires_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.record_auth_context_offer(p_tenant uuid, p_site uuid, p_auth_context uuid, p_package_revision uuid, p_tier integer, p_evidence_version bigint, p_expires_at timestamp with time zone) TO svc_scd;
 GRANT ALL ON FUNCTION iam_v2.record_auth_context_offer(p_tenant uuid, p_site uuid, p_auth_context uuid, p_package_revision uuid, p_tier integer, p_evidence_version bigint, p_expires_at timestamp with time zone) TO svc_netd;
 
 

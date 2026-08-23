@@ -155,6 +155,15 @@ jobs:
           bash -c "bash $GITHUB_WORKSPACE/scripts/clean-install-reconstruction.sh &&
                    bash $GITHUB_WORKSPACE/scripts/factory-clean-baseline-verify.sh"
 
+      # A grant written only in a migration is removed by the first Gate-P reconcile and never comes back,
+      # because gatep-grants.sql revokes all iam_v2 privilege before re-granting exactly what its per-service
+      # files name. That silently disabled the expiry sweep on a live appliance. This proves the privileges
+      # the services need are named where the reconcile will keep them.
+      - name: Gate-P grants survive a reconcile (disposable PG)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh gatep-grant-survives-reconcile --
+          bash $GITHUB_WORKSPACE/scripts/gatep-grant-survives-reconcile.sh
+
       - name: go test -race (all Phase-3 concurrency-sensitive paths)
         working-directory: data-plane
         # pmsd, resolver, auth context, stay grant, checkout, scd, acctd, netd, and the controlled-writer guard.
