@@ -170,7 +170,6 @@ const landingHTML = `<!doctype html>
       room_firstname:   "First name on the reservation",
       room_reservation: "Reservation / confirmation number",
       either:           "Last name OR reservation number",
-      room_any:         "Last name, first name or reservation number",
     };
     const challenges = {}; // channel -> challenge_id
 
@@ -195,11 +194,18 @@ const landingHTML = `<!doctype html>
         const sec = document.getElementById('pms-secondary');
         sec.placeholder = PMSPrompts[cfg.pms.mode] || sec.placeholder;
         sec.dataset.mode = cfg.pms.mode || 'either';
-        // Post-stay is offered wherever PMS stay auth is, and is pushed AFTER it so the ORDER is unchanged:
-        // setTab(enabled[0]) opens the first tab, and a guest arriving to authenticate for the first time
-        // must land on Room, not on a PIN they do not have yet. Adding it before pms silently made post-stay
-        // the default panel and hid the room form -- which the Phase-3 portal suite caught as every one of
-        // its tests timing out on a field that was no longer visible.
+      }
+      // POST-STAY HAS ITS OWN GATE, and it is not the PMS one.
+      //
+      // This used to be pushed inside the PMS branch, so turning on room sign-in also put a Post-Stay tab in
+      // front of every guest. They are different capabilities — PMS proves an in-house guest by room and
+      // name, post-stay lets a DEPARTED guest back in with a PIN — and on an appliance with Phase 5 off the
+      // routes behind that tab are not mounted at all, so every PIN typed into it reached nothing.
+      //
+      // It is still pushed AFTER pms so the tab ORDER is unchanged: setTab(enabled[0]) opens the first tab,
+      // and a guest arriving to authenticate for the first time must land on Room, not on a PIN they do not
+      // have yet.
+      if (cfg.phase5_poststay) {
         enabled.push('poststay');
       }
       // Render social provider buttons.
@@ -471,13 +477,7 @@ const landingHTML = `<!doctype html>
       if (mode === 'room_firstname')        body.first_name = val;
       else if (mode === 'room_reservation') body.reservation_number = val;
       else if (mode === 'room_lastname')    body.last_name = val;
-      else if (mode === 'room_any')         body.guest_identifier = val;
       else { // legacy "either" — kept exactly as it was for sites still configured with it.
-        //
-        // It GUESSES which field the guest typed, so a surname containing a digit is submitted as a
-        // reservation number and fails. room_any is the replacement: one value, matched server-side against
-        // every supported identifier, no guessing. This branch is not removed because changing what a
-        // stored configuration does is not this screen's decision to make.
         if (/^[A-Z0-9\-]+$/i.test(val) && /\d/.test(val)) body.reservation_number = val;
         else body.last_name = val;
       }

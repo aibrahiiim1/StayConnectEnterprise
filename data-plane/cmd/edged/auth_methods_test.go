@@ -24,7 +24,7 @@ func patch(t *testing.T, body string) map[string]json.RawMessage {
 // Every mode offered on the screen must be accepted, and each corresponds to a field the resolver actually
 // matches against. A mode that validated but never resolved would be a switch that silently does nothing.
 func TestValidateAuthMethodsPatch_AcceptsEveryOfferedMode(t *testing.T) {
-	for _, mode := range []string{"room_lastname", "room_firstname", "room_reservation", "room_any"} {
+	for _, mode := range []string{"room_lastname", "room_firstname", "room_reservation"} {
 		if err := validateAuthMethodsPatch(patch(t, `{"pms":{"enabled":true,"mode":"`+mode+`"}}`)); err != nil {
 			t.Fatalf("mode %q is offered by the UI but rejected by validation: %v", mode, err)
 		}
@@ -41,7 +41,11 @@ func TestValidateAuthMethodsPatch_LegacyEitherAcceptedButNotOffered(t *testing.T
 		t.Fatalf("a site already storing \"either\" must still be able to save: %v", err)
 	}
 	if pmsSignInModes["either"] {
-		t.Fatal("\"either\" must not be offered as a new choice; room_any supersedes it")
+		t.Fatal("\"either\" must not be offered as a new choice")
+	}
+	// room_any was proposed and withdrawn: it is not an authorised mode and must not be selectable.
+	if pmsSignInModes["room_any"] {
+		t.Fatal("room_any is not an approved sign-in mode")
 	}
 }
 
@@ -52,7 +56,7 @@ func TestValidateAuthMethodsPatch_RejectsUnknownMode(t *testing.T) {
 		t.Fatal("an unsupported verification value was accepted")
 	}
 	// The refusal names the alternatives; an operator cannot act on "invalid mode".
-	for _, want := range []string{"room_lastname", "room_any"} {
+	for _, want := range []string{"room_lastname", "room_reservation"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("the refusal should name the supported modes, got %q", err.Error())
 		}

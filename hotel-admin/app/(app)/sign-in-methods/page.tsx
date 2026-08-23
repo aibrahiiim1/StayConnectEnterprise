@@ -46,13 +46,12 @@ type SocialProvider = { provider: string; enabled: boolean };
 //
 // "either" is absent on purpose. It is still honoured if already stored, but it means
 // last-name-or-reservation decided by a guess at the shape of what the guest typed, so a surname containing
-// a digit is submitted as a reservation number and fails. `room_any` replaces it by matching one value
-// against every supported field on the server.
+// a digit is submitted as a reservation number and fails. An operator picking a mode here chooses one
+// explicit identifier instead.
 const PMS_MODES: { value: string; label: string; hint: string }[] = [
   { value: "room_lastname", label: "Last name (surname)", hint: "Room number plus the surname on the reservation." },
   { value: "room_firstname", label: "First name", hint: "Room number plus the first name on the reservation." },
   { value: "room_reservation", label: "Reservation number", hint: "Room number plus the reservation / confirmation number." },
-  { value: "room_any", label: "Any of the above", hint: "One field; the guest may type their surname, first name or reservation number." },
 ];
 const LEGACY_EITHER = "either";
 
@@ -160,8 +159,8 @@ export default function SignInMethodsPage() {
                 // operator's decision, not this screen's.
                 <p className="text-xs text-amber-600 mb-2">
                   This site currently uses an older setting that accepts a last name or a reservation number
-                  and guesses which one was typed, so some surnames are rejected. Choosing an option below
-                  replaces it.
+                  and guesses which one was typed, so some surnames are rejected. Choosing one of the
+                  options below replaces it.
                 </p>
               )}
               <div className="space-y-1.5">

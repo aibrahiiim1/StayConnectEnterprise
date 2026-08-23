@@ -24,13 +24,11 @@ import (
 // "either" is ABSENT deliberately. It is still accepted from an existing stored configuration and still
 // behaves exactly as it did, but it is not offered as a new choice: it means last-name-or-reservation and
 // the portal decides which by guessing at the shape of what was typed, so a surname containing a digit is
-// submitted as a reservation number and fails. room_any supersedes it by matching one value against every
-// supported field server-side.
+// submitted as a reservation number and fails.
 var pmsSignInModes = map[string]bool{
 	"room_lastname":    true,
 	"room_firstname":   true,
 	"room_reservation": true,
-	"room_any":         true,
 }
 
 // authMethodsRoutes reads and writes the site's guest sign-in configuration.
@@ -142,7 +140,7 @@ func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
 		return nil
 	}
 	if !pmsSignInModes[cfg.Mode] {
-		return errors.New("pms.mode must be room_lastname, room_firstname, room_reservation or room_any")
+		return errors.New("pms.mode must be room_lastname, room_firstname or room_reservation")
 	}
 	return nil
 }

@@ -193,6 +193,28 @@ test("a server that answers with nothing at all is still the same message", asyn
   expect(calls).toHaveLength(0);
 });
 
+// PMS ROOM SIGN-IN MUST NOT DRAG POST-STAY IN WITH IT.
+//
+// The Post-Stay tab used to be pushed inside the PMS branch, so enabling room sign-in put a PIN form in
+// front of every guest — on an appliance with Phase 5 off, backed by routes that are not mounted. They are
+// separate capabilities and now have separate gates.
+test("enabling PMS does not expose the Post-Stay tab", async ({ page }) => {
+  const html = renderLanding();
+  await page.route("**/portal", (r: Route) =>
+    r.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: html }));
+  await page.route("**/api/auth-methods", (r: Route) =>
+    r.fulfill({
+      status: 200, contentType: "application/json",
+      // PMS on, post-stay absent — the current PRE-LIVE shape.
+      body: JSON.stringify({ voucher: { enabled: true }, pms: { enabled: true, mode: "room_lastname" }, phase3_pms: true }),
+    }));
+  await page.goto("/portal");
+  await expect(page.locator("#panel-pms")).toBeAttached();
+  await expect(page.locator('.tab[data-tab="pms"]')).toHaveCount(1);
+  await expect(page.locator('.tab[data-tab="poststay"]')).toHaveCount(0);
+  await expect(page.locator('.tab[data-tab="voucher"]')).toHaveCount(1);
+});
+
 test("with Phase 3 off the page keeps using the legacy endpoint", async ({ page }) => {
   // A dark site must behave exactly as it does today. If the page could be talked into the Phase-3 endpoint
   // by anything other than the server's own flag, "dark" would depend on the client.
