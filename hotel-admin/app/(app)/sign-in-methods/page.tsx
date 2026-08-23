@@ -18,7 +18,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ApiError, ListResp } from "@/lib/api";
+import { api, ApiError, ListResp, PmsInterface, PmsInterfaceHealth } from "@/lib/api";
+import { roomSignInUnavailableReason } from "@/lib/pms-availability";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -72,6 +73,7 @@ export default function SignInMethodsPage() {
   const [err, setErr] = useState<unknown>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [pmsHealth, setPmsHealth] = useState<PmsInterfaceHealth[] | null>(null);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -91,6 +93,22 @@ export default function SignInMethodsPage() {
       const s = await api.get<ListResp<SocialProvider>>("/social-providers");
       setSocial(s.data ?? []);
     } catch { /* readiness unknown; rendered as such */ }
+    // Whether Room sign-in can actually serve a guest right now, which is not the same question as whether it
+    // is switched on. Guest authentication requires a live PMS feed, so an interface that is disconnected or
+    // still loading its guest list refuses every guest — with the uniform message, which looks exactly like a
+    // wrong surname. Without this the screen would show a correctly configured, enabled method while the front
+    // desk fields complaints.
+    try {
+      const list = await api.get<ListResp<PmsInterface>>("/pms-interfaces");
+      const active = (list.data ?? []).filter((i) => i.lifecycle_state === "ACTIVE");
+      const healths = await Promise.all(
+        active.map((i) =>
+          api.get<{ health: PmsInterfaceHealth }>(`/pms-interfaces/${i.id}/health`)
+            .then((h) => h.health)
+            .catch(() => null)),
+      );
+      setPmsHealth(healths.filter(Boolean) as PmsInterfaceHealth[]);
+    } catch { /* readiness unknown; the notice is simply not shown */ }
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -111,6 +129,9 @@ export default function SignInMethodsPage() {
   const emailReady = useMemo(() => notify.some((p) => p.channel === "email" && p.enabled), [notify]);
   const smsReady = useMemo(() => notify.some((p) => p.channel === "sms" && p.enabled), [notify]);
   const socialReady = useMemo(() => social.filter((p) => p.enabled).map((p) => p.provider), [social]);
+  // Declared with the other readiness values and ABOVE the loading early-return: a hook after a conditional
+  // return is called on some renders and not others, which React rejects outright.
+  const pmsUnavailable = useMemo(() => roomSignInUnavailableReason(pmsHealth), [pmsHealth]);
 
   if (cfg === null) {
     return <div className="space-y-4"><h1 className="text-lg font-semibold">Sign-in methods</h1>
@@ -148,6 +169,30 @@ export default function SignInMethodsPage() {
           <CardTitle className="flex items-center gap-2"><Hotel size={16} /> Room sign-in (from the PMS)</CardTitle>
         </CardHeader>
         <CardBody className="space-y-3">
+          {pms.enabled && pmsUnavailable && (
+            // WHY THIS IS SEPARATE FROM THE TOGGLE. The method is switched on and correctly configured; what
+            // is missing is the live PMS feed it depends on, and there is nothing on this screen to fix. An
+            // operator otherwise sees a healthy-looking feature while every guest is refused with the uniform
+            // failure message — which reads as a wrong surname, so the front desk starts re-checking spellings
+            // instead of the interface.
+            <div role="status" className="rounded-md border border-amber-300 bg-amber-50 p-3">
+              <div className="text-sm font-medium text-amber-900">
+                Room sign-in is not working at the moment
+              </div>
+              <p className="text-xs text-amber-800 mt-1">
+                {pmsUnavailable}. Guests cannot sign in with their room number until the property management
+                system is connected to StayConnect again; they can still use any other method switched on
+                below. Nothing here needs changing — this setting is kept as it is and starts working again on
+                its own once the connection returns.
+              </p>
+              <p className="text-xs mt-1">
+                <Link href="/pms-interfaces" className="underline text-amber-900">
+                  Check the PMS interface <ExternalLink size={11} className="inline" />
+                </Link>
+              </p>
+            </div>
+          )}
+
           <div className="flex items-start justify-between gap-4">
             <p className="text-sm text-muted max-w-xl">
               The guest enters their room number and one detail from their booking. StayConnect checks it
