@@ -18,8 +18,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { api, ApiError, ListResp, PmsInterface, PmsInterfaceHealth } from "@/lib/api";
-import { roomSignInUnavailableReason } from "@/lib/pms-availability";
+import { api, ApiError, ListResp, PmsInterface, PmsInterfaceHealth, PmsGuestNetworkRoute } from "@/lib/api";
+import { roomSignInReadiness } from "@/lib/pms-availability";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +66,10 @@ const PMS_MODES: { value: string; label: string; hint: string }[] = [
 ];
 const LEGACY_EITHER = "either";
 
+// The reasons read as sentence fragments so they can be listed after a network name; the single-outage copy
+// puts one at the start of a sentence instead.
+const capitalise = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+
 export default function SignInMethodsPage() {
   const [cfg, setCfg] = useState<AuthMethods | null>(null);
   const [notify, setNotify] = useState<NotifyProvider[]>([]);
@@ -73,7 +77,9 @@ export default function SignInMethodsPage() {
   const [err, setErr] = useState<unknown>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [pmsIfaces, setPmsIfaces] = useState<PmsInterface[] | null>(null);
   const [pmsHealth, setPmsHealth] = useState<PmsInterfaceHealth[] | null>(null);
+  const [pmsRoutes, setPmsRoutes] = useState<PmsGuestNetworkRoute[] | null>(null);
 
   const load = useCallback(async () => {
     setErr(null);
@@ -99,15 +105,22 @@ export default function SignInMethodsPage() {
     // wrong surname. Without this the screen would show a correctly configured, enabled method while the front
     // desk fields complaints.
     try {
-      const list = await api.get<ListResp<PmsInterface>>("/pms-interfaces");
-      const active = (list.data ?? []).filter((i) => i.lifecycle_state === "ACTIVE");
+      const [list, routing] = await Promise.all([
+        api.get<ListResp<PmsInterface>>("/pms-interfaces"),
+        api.get<{ routes: PmsGuestNetworkRoute[] }>("/pms-routing"),
+      ]);
+      const ifaces = list.data ?? [];
+      // Health is read for ACTIVE interfaces only: the others cannot serve a guest whatever their axes say,
+      // and asking is a request per interface.
       const healths = await Promise.all(
-        active.map((i) =>
+        ifaces.filter((i) => i.lifecycle_state === "ACTIVE").map((i) =>
           api.get<{ health: PmsInterfaceHealth }>(`/pms-interfaces/${i.id}/health`)
             .then((h) => h.health)
             .catch(() => null)),
       );
+      setPmsIfaces(ifaces);
       setPmsHealth(healths.filter(Boolean) as PmsInterfaceHealth[]);
+      setPmsRoutes(routing.routes ?? []);
     } catch { /* readiness unknown; the notice is simply not shown */ }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -131,7 +144,9 @@ export default function SignInMethodsPage() {
   const socialReady = useMemo(() => social.filter((p) => p.enabled).map((p) => p.provider), [social]);
   // Declared with the other readiness values and ABOVE the loading early-return: a hook after a conditional
   // return is called on some renders and not others, which React rejects outright.
-  const pmsUnavailable = useMemo(() => roomSignInUnavailableReason(pmsHealth), [pmsHealth]);
+  const pmsReadiness = useMemo(
+    () => roomSignInReadiness(pmsIfaces, pmsHealth, pmsRoutes),
+    [pmsIfaces, pmsHealth, pmsRoutes]);
 
   if (cfg === null) {
     return <div className="space-y-4"><h1 className="text-lg font-semibold">Sign-in methods</h1>
@@ -169,22 +184,46 @@ export default function SignInMethodsPage() {
           <CardTitle className="flex items-center gap-2"><Hotel size={16} /> Room sign-in (from the PMS)</CardTitle>
         </CardHeader>
         <CardBody className="space-y-3">
-          {pms.enabled && pmsUnavailable && (
+          {pms.enabled && (pmsReadiness.state === "down" || pmsReadiness.state === "partial") && (
             // WHY THIS IS SEPARATE FROM THE TOGGLE. The method is switched on and correctly configured; what
             // is missing is the live PMS feed it depends on, and there is nothing on this screen to fix. An
-            // operator otherwise sees a healthy-looking feature while every guest is refused with the uniform
+            // operator otherwise sees a healthy-looking feature while guests are refused with the uniform
             // failure message — which reads as a wrong surname, so the front desk starts re-checking spellings
             // instead of the interface.
+            //
+            // PARTIAL IS ITS OWN CASE. When one guest network is affected and another is fine, "Room sign-in
+            // is not working" would be false for half the property, and staying silent would be false for the
+            // other half. The networks are named so the operator knows which guests are affected.
             <div role="status" className="rounded-md border border-amber-300 bg-amber-50 p-3">
               <div className="text-sm font-medium text-amber-900">
-                Room sign-in is not working at the moment
+                {pmsReadiness.state === "down"
+                  ? "Room sign-in is not working at the moment"
+                  : "Room sign-in is not working on some guest networks"}
               </div>
-              <p className="text-xs text-amber-800 mt-1">
-                {pmsUnavailable}. Guests cannot sign in with their room number until the property management
-                system is connected to StayConnect again; they can still use any other method switched on
-                below. Nothing here needs changing — this setting is kept as it is and starts working again on
-                its own once the connection returns.
-              </p>
+              {pmsReadiness.state === "down" ? (
+                <p className="text-xs text-amber-800 mt-1">
+                  {capitalise(pmsReadiness.reason)}. Guests cannot sign in with their room number until the
+                  property management system is connected to StayConnect again; they can still use any other
+                  method switched on below. Nothing here needs changing — this setting is kept as it is and
+                  starts working again on its own once the connection returns.
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-amber-800 mt-1">
+                    Guests on the networks below cannot sign in with their room number. Everywhere else is
+                    working normally. Nothing here needs changing — each one starts working again on its own
+                    once its property management system is connected.
+                  </p>
+                  <ul className="text-xs text-amber-800 mt-1 list-disc pl-4 space-y-0.5">
+                    {pmsReadiness.affected.map((a) => (
+                      <li key={`${a.guestNetwork}-${a.pmsInterface}`}>
+                        <span className="font-medium">{a.guestNetwork}</span> (via {a.pmsInterface}) —{" "}
+                        {a.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
               <p className="text-xs mt-1">
                 <Link href="/pms-interfaces" className="underline text-amber-900">
                   Check the PMS interface <ExternalLink size={11} className="inline" />
