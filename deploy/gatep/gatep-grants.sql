@@ -11,6 +11,28 @@
 \set ON_ERROR_STOP on
 
 -- ===========================================================================
+-- ONE TRANSACTION. The revoke, every per-service re-grant and every assertion
+-- either all take effect or none do.
+--
+-- This file's preamble strips every iam_v2 privilege from the runtime roles
+-- before re-granting the allowlist, so between those two points the services
+-- can do nothing. Run as a sequence of autocommitted statements, any failure
+-- in between -- a missing include, an invalid grant, a failed assertion --
+-- leaves Production in that gap permanently, with the revoke applied and the
+-- re-grant not.
+--
+-- That is not hypothetical. A reconcile aborted on the D32 assertion after the
+-- revoke had already committed, and svc_scd lost EXECUTE on the PMS
+-- authentication path until the per-service files were reapplied by hand.
+--
+-- Inside a transaction the same failure changes nothing at all: ON_ERROR_STOP
+-- aborts, the implicit ROLLBACK discards the revoke along with everything
+-- else, and the effective privilege set is exactly what it was before. A
+-- reconcile that fails must be a non-event.
+-- ===========================================================================
+BEGIN;
+
+-- ===========================================================================
 -- RECONCILER PREAMBLE — converge each svc_* role to EXACTLY the allowlist below.
 -- Fail closed on unexpected ownership or membership; revoke everything first so a
 -- re-run is idempotent and any pre-existing excess privilege is removed.
@@ -18,7 +40,7 @@
 DO $$
 DECLARE r text; n int; who text;
 BEGIN
-  FOREACH r IN ARRAY ARRAY['svc_scd','svc_edged','svc_acctd','svc_netd'] LOOP
+  FOREACH r IN ARRAY ARRAY['svc_scd','svc_edged','svc_acctd','svc_netd','svc_pmsd'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname=r) THEN CONTINUE; END IF;
     -- fail closed: runtime role must own NO object
     SELECT count(*) INTO n FROM pg_class WHERE relowner=(SELECT oid FROM pg_roles WHERE rolname=r);
@@ -248,6 +270,10 @@ GRANT EXECUTE ON FUNCTION iam_v2.begin_controlled_operation(text) TO svc_acctd;
 \ir svc-acctd-iamv2-accounting-grants.sql
 \ir svc-edged-phase2-commerce-grants.sql
 \ir svc-edged-phase345-admin-grants.sql
+-- svc_pmsd is reconciled here like every other runtime role. It used to be converged nowhere: absent from the
+-- revoke loop above and from this list, so its privileges were whatever the last incremental apply happened to
+-- leave, and the reconcile's own D32 assertion then judged a role it had never converged.
+\ir svc-pmsd-iamv2-connector-grants.sql
 
 -- EXECUTE on the CANONICAL audited, versioned publication boundary. This is the only function the product
 -- calls to change checkout grace policy: it requires an active operator as actor, a bounded machine reason
@@ -358,3 +384,5 @@ BEGIN
       'boundary either, so grace policy cannot be published at all';
   END IF;
 END $$;
+
+COMMIT;

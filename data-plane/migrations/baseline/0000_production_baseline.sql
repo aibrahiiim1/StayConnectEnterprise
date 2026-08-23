@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0051, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0052, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -1712,6 +1712,34 @@ BEGIN
   END IF;
   RAISE EXCEPTION '%: append-only history (UPDATE rejected)', TG_TABLE_NAME;
 END $$;
+
+
+--
+-- Name: p3_lock_grace_config(uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p3_lock_grace_config(p_tenant uuid, p_site uuid) RETURNS TABLE(grace_duration_seconds integer, grace_down_kbps integer, grace_up_kbps integer, grace_data_quota_bytes bigint, grace_device_limit integer, grace_device_limit_policy text, grace_package_revision_id uuid, config_version bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+BEGIN
+  RETURN QUERY
+    SELECT g.grace_duration_seconds, g.grace_down_kbps, g.grace_up_kbps, g.grace_data_quota_bytes,
+           g.grace_device_limit, g.grace_device_limit_policy, g.grace_package_revision_id, g.config_version
+      FROM iam_v2.site_checkout_grace_config g
+     WHERE g.tenant_id = p_tenant AND g.site_id = p_site
+     FOR UPDATE;
+  -- No row is not an error: an unconfigured site takes the Emergency Grace path, and the caller distinguishes
+  -- "no row" from "row present but incomplete". Returning zero rows preserves that exactly.
+END
+$$;
+
+
+--
+-- Name: FUNCTION p3_lock_grace_config(p_tenant uuid, p_site uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p3_lock_grace_config(p_tenant uuid, p_site uuid) IS 'Locks one site grace-config row FOR UPDATE inside the caller''s transaction and returns the eight fields the Checkout Converter reads. Exists so a caller needs EXECUTE on a non-mutating function rather than UPDATE on the table: PostgreSQL requires UPDATE privilege to take a row lock, and granting it to a runtime role collided with the D32 no-direct-grace-mutation invariant. Mutates nothing; the audited publication boundary remains the only way grace policy changes.';
 
 
 --
@@ -12715,6 +12743,7 @@ GRANT USAGE ON SCHEMA public TO svc_scd;
 GRANT USAGE ON SCHEMA public TO svc_edged;
 GRANT USAGE ON SCHEMA public TO svc_acctd;
 GRANT USAGE ON SCHEMA public TO svc_netd;
+GRANT USAGE ON SCHEMA public TO svc_pmsd;
 
 
 --
@@ -12730,6 +12759,7 @@ GRANT USAGE ON SCHEMA iam_v2 TO svc_scd;
 GRANT USAGE ON SCHEMA iam_v2 TO svc_netd;
 GRANT USAGE ON SCHEMA iam_v2 TO svc_acctd;
 GRANT USAGE ON SCHEMA iam_v2 TO svc_edged;
+GRANT USAGE ON SCHEMA iam_v2 TO svc_pmsd;
 
 
 --
@@ -12762,6 +12792,7 @@ REVOKE ALL ON FUNCTION iam_v2.allocate_p_number(p_tenant uuid, p_site uuid, p_in
 REVOKE ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
 
 
 --
@@ -12789,6 +12820,7 @@ GRANT ALL ON FUNCTION iam_v2.begin_controlled_operation(p_family text) TO svc_ed
 GRANT ALL ON FUNCTION iam_v2.begin_controlled_operation(p_family text) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.begin_controlled_operation(p_family text) TO svc_scd;
 GRANT ALL ON FUNCTION iam_v2.begin_controlled_operation(p_family text) TO svc_netd;
+GRANT ALL ON FUNCTION iam_v2.begin_controlled_operation(p_family text) TO svc_pmsd;
 
 
 --
@@ -12818,6 +12850,7 @@ REVOKE ALL ON FUNCTION iam_v2.deauthorize_entitlement_device(p_ent uuid, p_devic
 --
 
 REVOKE ALL ON FUNCTION iam_v2.emergency_grace_health(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.emergency_grace_health(p_tenant uuid, p_site uuid) TO svc_pmsd;
 
 
 --
@@ -12834,6 +12867,7 @@ GRANT ALL ON FUNCTION iam_v2.end_session_enforcement(p_tenant uuid, p_site uuid,
 
 REVOKE ALL ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp with time zone) TO svc_pmsd;
 
 
 --
@@ -12841,6 +12875,7 @@ GRANT ALL ON FUNCTION iam_v2.entitlement_usage_bytes(p_ent uuid, p_at timestamp 
 --
 
 REVOKE ALL ON FUNCTION iam_v2.grace_package_matches_policy(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.grace_package_matches_policy(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text) TO svc_pmsd;
 
 
 --
@@ -12848,6 +12883,7 @@ REVOKE ALL ON FUNCTION iam_v2.grace_package_matches_policy(p_tenant uuid, p_site
 --
 
 REVOKE ALL ON FUNCTION iam_v2.grace_package_mismatch_reason(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.grace_package_mismatch_reason(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text) TO svc_pmsd;
 GRANT ALL ON FUNCTION iam_v2.grace_package_mismatch_reason(p_tenant uuid, p_site uuid, p_pkg_rev uuid, p_duration integer, p_down integer, p_up integer, p_quota bigint, p_dev_limit integer, p_dev_policy text) TO svc_edged;
 
 
@@ -12890,6 +12926,14 @@ REVOKE ALL ON FUNCTION iam_v2.p3_alert_open_on_audit() FROM PUBLIC;
 
 
 --
+-- Name: FUNCTION p3_cfg_secs(p_config jsonb, p_key text, p_default integer); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p3_cfg_secs(p_config jsonb, p_key text, p_default integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p3_cfg_secs(p_config jsonb, p_key text, p_default integer) TO svc_scd;
+
+
+--
 -- Name: FUNCTION p3_checkout_audit_provenance(); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -12911,6 +12955,7 @@ REVOKE ALL ON FUNCTION iam_v2.p3_controlled_operation_open(p_family text) FROM P
 GRANT ALL ON FUNCTION iam_v2.p3_controlled_operation_open(p_family text) TO svc_scd;
 GRANT ALL ON FUNCTION iam_v2.p3_controlled_operation_open(p_family text) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.p3_controlled_operation_open(p_family text) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.p3_controlled_operation_open(p_family text) TO svc_pmsd;
 
 
 --
@@ -12970,6 +13015,14 @@ REVOKE ALL ON FUNCTION iam_v2.p3_expected_class_minor(p_ip inet) FROM PUBLIC;
 
 
 --
+-- Name: FUNCTION p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) TO svc_scd;
+
+
+--
 -- Name: FUNCTION p3_grace_config_version_guard(); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -12981,6 +13034,14 @@ REVOKE ALL ON FUNCTION iam_v2.p3_grace_config_version_guard() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p3_history_appendonly() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p3_lock_grace_config(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p3_lock_grace_config(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p3_lock_grace_config(p_tenant uuid, p_site uuid) TO svc_pmsd;
 
 
 --
@@ -13296,6 +13357,7 @@ GRANT ALL ON FUNCTION iam_v2.p6_data_crossing(p_entitlement uuid) TO svc_acctd;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p6_due_terminal(p_entitlement uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p6_due_terminal(p_entitlement uuid) TO svc_acctd;
 
 
 --
@@ -13310,6 +13372,7 @@ REVOKE ALL ON FUNCTION iam_v2.p6_exhaustion_instant(p_entitlement uuid) FROM PUB
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p6_expire_entitlement(p_entitlement uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p6_expire_entitlement(p_entitlement uuid) TO svc_acctd;
 
 
 --
@@ -13387,6 +13450,7 @@ REVOKE ALL ON FUNCTION iam_v2.p6_skipped_intervals_append_only() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p6_suspend_over_budget(p_tenant uuid, p_site uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p6_suspend_over_budget(p_tenant uuid, p_site uuid) TO svc_acctd;
 
 
 --
@@ -13408,6 +13472,7 @@ REVOKE ALL ON FUNCTION iam_v2.p6_termination_evidence_matches_transition() FROM 
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.p6_tick_online_time(p_tenant uuid, p_site uuid, p_now timestamp with time zone, p_max_charge_seconds integer, p_capped_entitlements uuid[], p_caps timestamp with time zone[]) TO svc_acctd;
 
 
 --
@@ -13431,6 +13496,7 @@ GRANT ALL ON FUNCTION iam_v2.publish_checkout_grace_policy(p_tenant uuid, p_site
 
 REVOKE ALL ON FUNCTION iam_v2.rebind_session_entitlement(p_session uuid, p_ent uuid, p_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.rebind_session_entitlement(p_session uuid, p_ent uuid, p_at timestamp with time zone) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.rebind_session_entitlement(p_session uuid, p_ent uuid, p_at timestamp with time zone) TO svc_pmsd;
 
 
 --
@@ -13486,6 +13552,7 @@ REVOKE ALL ON FUNCTION iam_v2.supersede_entitlement_transition(p_target uuid, p_
 
 REVOKE ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.terminate_entitlement_at_boundary(p_ent uuid, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
 
 
 --
@@ -13500,6 +13567,13 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.accounting_checkpoints TO svc_acctd;
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.accounting_records TO svc_acctd;
+
+
+--
+-- Name: TABLE checkout_grace_audit; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE iam_v2.checkout_grace_audit TO svc_pmsd;
 
 
 --
@@ -13567,6 +13641,14 @@ GRANT SELECT ON TABLE iam_v2.devices TO svc_acctd;
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_boundary_watermarks TO svc_acctd;
+GRANT SELECT,INSERT ON TABLE iam_v2.entitlement_boundary_watermarks TO svc_pmsd;
+
+
+--
+-- Name: TABLE entitlement_device_authorizations; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_device_authorizations TO svc_pmsd;
 
 
 --
@@ -13574,6 +13656,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_boundary_watermarks TO sv
 --
 
 GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_edged;
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_devices TO svc_pmsd;
 
 
 --
@@ -13581,6 +13664,7 @@ GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.entitlement_state_transitions TO sc_payment_runtime;
+GRANT SELECT ON TABLE iam_v2.entitlement_state_transitions TO svc_pmsd;
 
 
 --
@@ -13605,6 +13689,7 @@ GRANT SELECT ON TABLE iam_v2.entitlements TO sc_payment_runtime;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlements TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.entitlements TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.entitlements TO svc_edged;
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlements TO svc_pmsd;
 
 
 --
@@ -13633,6 +13718,7 @@ GRANT SELECT ON TABLE iam_v2.financial_restore_events TO sc_financial_operator;
 --
 
 GRANT SELECT ON TABLE iam_v2.folios TO svc_edged;
+GRANT SELECT,INSERT ON TABLE iam_v2.folios TO svc_pmsd;
 
 
 --
@@ -13673,6 +13759,7 @@ GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO sc_payment_runtime;
 GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO svc_acctd;
 GRANT SELECT,INSERT ON TABLE iam_v2.internet_package_revisions TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.internet_package_revisions TO svc_pmsd;
 
 
 --
@@ -13682,6 +13769,7 @@ GRANT SELECT,INSERT ON TABLE iam_v2.internet_package_revisions TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.internet_packages TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.internet_packages TO svc_acctd;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.internet_packages TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.internet_packages TO svc_pmsd;
 
 
 --
@@ -13739,6 +13827,7 @@ GRANT SELECT ON TABLE iam_v2.payment_transactions TO sc_payment_outcome;
 
 GRANT SELECT ON TABLE iam_v2.pms_interface_revisions TO svc_scd;
 GRANT SELECT,INSERT ON TABLE iam_v2.pms_interface_revisions TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.pms_interface_revisions TO svc_pmsd;
 
 
 --
@@ -13746,6 +13835,7 @@ GRANT SELECT,INSERT ON TABLE iam_v2.pms_interface_revisions TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.pms_interface_runtime TO svc_edged;
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.pms_interface_runtime TO svc_pmsd;
 
 
 --
@@ -13753,6 +13843,7 @@ GRANT SELECT ON TABLE iam_v2.pms_interface_runtime TO svc_edged;
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.pms_interface_secret_generations TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.pms_interface_secret_generations TO svc_pmsd;
 
 
 --
@@ -13762,6 +13853,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.pms_interface_secret_generations TO s
 GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_acctd;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.pms_interfaces TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_pmsd;
 
 
 --
@@ -13832,6 +13924,7 @@ GRANT SELECT ON TABLE iam_v2.purchases TO sc_financial_operator;
 GRANT SELECT,INSERT ON TABLE iam_v2.purchases TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.purchases TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.purchases TO svc_edged;
+GRANT SELECT,INSERT ON TABLE iam_v2.purchases TO svc_pmsd;
 
 
 --
@@ -13842,6 +13935,7 @@ GRANT SELECT ON TABLE iam_v2.service_plan_revisions TO sc_payment_runtime;
 GRANT SELECT ON TABLE iam_v2.service_plan_revisions TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.service_plan_revisions TO svc_acctd;
 GRANT SELECT,INSERT ON TABLE iam_v2.service_plan_revisions TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.service_plan_revisions TO svc_pmsd;
 
 
 --
@@ -13850,6 +13944,7 @@ GRANT SELECT,INSERT ON TABLE iam_v2.service_plan_revisions TO svc_edged;
 
 GRANT SELECT ON TABLE iam_v2.service_plans TO svc_acctd;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.service_plans TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.service_plans TO svc_pmsd;
 
 
 --
@@ -13867,6 +13962,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.sessions TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.sessions TO svc_netd;
 GRANT SELECT ON TABLE iam_v2.sessions TO svc_acctd;
 GRANT SELECT,UPDATE ON TABLE iam_v2.sessions TO svc_edged;
+GRANT SELECT,UPDATE ON TABLE iam_v2.sessions TO svc_pmsd;
 
 
 --
@@ -13885,6 +13981,7 @@ GRANT SELECT ON TABLE iam_v2.settlements TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.site_checkout_grace_config TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.site_checkout_grace_config TO svc_pmsd;
 
 
 --
@@ -13892,6 +13989,7 @@ GRANT SELECT ON TABLE iam_v2.site_checkout_grace_config TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.stay_events TO svc_edged;
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_events TO svc_pmsd;
 
 
 --
@@ -13899,6 +13997,7 @@ GRANT SELECT ON TABLE iam_v2.stay_events TO svc_edged;
 --
 
 GRANT SELECT ON TABLE iam_v2.stay_folios TO svc_edged;
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_folios TO svc_pmsd;
 
 
 --
@@ -13907,6 +14006,7 @@ GRANT SELECT ON TABLE iam_v2.stay_folios TO svc_edged;
 
 GRANT SELECT ON TABLE iam_v2.stay_guests TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.stay_guests TO svc_edged;
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stay_guests TO svc_pmsd;
 
 
 --
@@ -13916,6 +14016,7 @@ GRANT SELECT ON TABLE iam_v2.stay_guests TO svc_edged;
 GRANT SELECT ON TABLE iam_v2.stays TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.stays TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.stays TO svc_edged;
+GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.stays TO svc_pmsd;
 
 
 --
