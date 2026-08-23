@@ -609,8 +609,40 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 // time; none of it is stored. The four dimensions are separate because they fail separately and an operator
 // acts differently on each: transport is "is it connected", continuity is "did we miss anything", sync is
 // "are we mid-resync", occupancy is "is what we hold about the property still current".
+// roomAuth* are the CLOSED set of reasons Room authentication cannot currently be served by an interface.
+//
+// Bounded codes rather than sentences: this is a machine field, the wording belongs to whichever surface
+// renders it, and a free-text reason built from runtime state is how PMS detail leaks into places nobody
+// audited. Each maps to one clause of the server's own feed-health rule.
+const (
+	roomAuthNotActive      = "INTERFACE_NOT_ACTIVE"
+	roomAuthNoRevision     = "NO_PUBLISHED_REVISION"
+	roomAuthTransportDown  = "TRANSPORT_DOWN"
+	roomAuthContinuityGap  = "CONTINUITY_GAP"
+	roomAuthContinuityNone = "CONTINUITY_NOT_ESTABLISHED"
+	roomAuthNotInSync      = "NOT_IN_SYNC"
+	roomAuthFeedSilent     = "FEED_SILENT"
+	roomAuthRevisionUnpin  = "REVISION_NOT_PINNED"
+)
+
 type interfaceHealth struct {
 	InterfaceID string `json:"pms_interface_id"`
+
+	// ROOM-AUTH FEED READINESS, decided here rather than by whoever is displaying it.
+	//
+	// Phase 3 refuses to mint a PMS Auth Context unless the interface is ACTIVE, CONNECTED, IN_SYNC,
+	// CONTINUOUS, pinned to the published Revision and heard from within that Revision's own
+	// heartbeat_timeout_ms. A client cannot evaluate the last of those: the bound lives in the Revision's
+	// config, and Hotel Admin was hardcoding the 300-second DEFAULT as though it were the rule. An interface
+	// configured with a different timeout would then be described to an operator using a number that
+	// interface does not use.
+	//
+	// So the same runtime and the same active Revision that Phase 3 reads answer the question here, and the
+	// client renders the answer. What is deliberately EXCLUDED is the Stay-specific half of
+	// iam_v2.p3_feed_authorizes — occupancy evidence, its age and its revision pin — because that is a
+	// property of one guest's Stay, not of the feed, and this endpoint is about the interface.
+	RoomAuthReady  bool   `json:"room_auth_ready"`
+	RoomAuthReason string `json:"room_auth_reason,omitempty"`
 
 	Transport         string     `json:"transport_status"`
 	LastConnectedAt   *time.Time `json:"last_connected_at,omitempty"`
@@ -674,16 +706,44 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		       (SELECT count(*) FROM iam_v2.stay_events ev
 		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='MANUAL_REVIEW')::int,
 		       (SELECT min(ev.received_at) FROM iam_v2.stay_events ev
-		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='PENDING')
+		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='PENDING'),
+		       -- ROOM-AUTH FEED READINESS. The clauses and their order mirror the feed half of
+		       -- iam_v2.p3_feed_authorizes; the Stay-specific half is deliberately absent. The heartbeat bound
+		       -- comes from THIS interface's published Revision via the same iam_v2.p3_cfg_secs the
+		       -- authentication path uses, so a Revision configured with a non-default heartbeat_timeout_ms is
+		       -- judged by its own number instead of by the default.
+		       CASE
+		         WHEN i.lifecycle_state <> 'ACTIVE'            THEN '`+roomAuthNotActive+`'
+		         WHEN pr.id IS NULL                            THEN '`+roomAuthNoRevision+`'
+		         WHEN COALESCE(rt.transport_status,'UNKNOWN') <> 'CONNECTED'
+		                                                       THEN '`+roomAuthTransportDown+`'
+		         WHEN rt.continuity_status = 'GAP_DETECTED'    THEN '`+roomAuthContinuityGap+`'
+		         WHEN COALESCE(rt.sync_status,'UNKNOWN') <> 'IN_SYNC'
+		                                                       THEN '`+roomAuthNotInSync+`'
+		         WHEN COALESCE(rt.continuity_status,'UNKNOWN') <> 'CONTINUOUS'
+		                                                       THEN '`+roomAuthContinuityNone+`'
+		         WHEN rt.pinned_revision_id IS DISTINCT FROM pr.id
+		                                                       THEN '`+roomAuthRevisionUnpin+`'
+		         WHEN COALESCE(rt.last_heartbeat_at, rt.last_connected_at) IS NULL
+		           OR COALESCE(rt.last_heartbeat_at, rt.last_connected_at)
+		              <= now() - make_interval(secs => iam_v2.p3_cfg_secs(pr.config,'heartbeat_timeout_ms',300))
+		                                                       THEN '`+roomAuthFeedSilent+`'
+		         ELSE ''
+		       END
 		  FROM iam_v2.pms_interfaces i
 		  LEFT JOIN iam_v2.pms_interface_runtime rt
 		         ON rt.tenant_id=i.tenant_id AND rt.site_id=i.site_id AND rt.pms_interface_id=i.id
+		  LEFT JOIN iam_v2.pms_interface_revisions pr
+		         ON pr.tenant_id=i.tenant_id AND pr.site_id=i.site_id
+		        AND pr.pms_interface_id=i.id AND pr.id=i.current_revision_id
 		 WHERE i.tenant_id=$1 AND i.site_id=$2 AND i.id=$3::uuid`,
 		s.tenantID, s.siteID, id).Scan(
 		&h.Transport, &h.LastConnectedAt, &h.LastHeartbeatAt, &h.DisconnectedSince, &h.TransportError,
 		&h.Continuity, &h.LastValidEventAt, &h.DiscontinuityDetectedAt,
 		&h.Sync, &h.ResyncRequestedAt, &h.ResyncStartedAt, &h.LastCompleteSyncAt, &h.LastSyncFailureCode,
-		&h.InHouseStays, &h.LastStayEvent, &h.PendingEvents, &h.ReviewEvents, &h.OldestPendingAt)
+		&h.InHouseStays, &h.LastStayEvent, &h.PendingEvents, &h.ReviewEvents, &h.OldestPendingAt,
+		&h.RoomAuthReason)
+	h.RoomAuthReady = err == nil && h.RoomAuthReason == ""
 	return h, err
 }
 

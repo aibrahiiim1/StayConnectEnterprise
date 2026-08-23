@@ -104,6 +104,20 @@ GRANT SELECT ON iam_v2.entitlement_termination_evidence TO svc_edged;
 -- enabling it is a Product-Owner decision that no UI privilege should be able to anticipate.
 GRANT SELECT ON iam_v2.appliance_product_settings TO svc_edged;
 
+-- ---- the fail-closed config reader the interface-health read uses ------------------------------------
+-- /pms-interfaces/{id}/health reports whether an interface can currently serve Room authentication, and one
+-- clause of that is whether the feed has been heard from within its own heartbeat_timeout_ms. That bound
+-- lives in the interface's Revision config, so the health read parses it with the SAME function the
+-- authentication path uses rather than with a copy.
+--
+-- Hotel Admin previously hardcoded the 300-second DEFAULT and presented it as the rule, which described any
+-- interface configured with a different timeout using a number that interface does not use. Answering
+-- server-side is what removes that class of drift, and this grant is what lets the read do it.
+--
+-- EXECUTE only, on a function that reads a jsonb argument and returns an integer. It touches no table and
+-- cannot mutate anything.
+GRANT EXECUTE ON FUNCTION iam_v2.p3_cfg_secs(jsonb, text, int) TO svc_edged;
+
 -- NOT granted, on purpose, and each absence is load-bearing:
 --   * DELETE on anything -- no admin read surface deletes;
 --   * any privilege on iam_v2 vouchers, guest credentials or session secrets;

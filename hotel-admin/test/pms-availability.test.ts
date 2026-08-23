@@ -2,130 +2,187 @@
 // directions.
 //
 // A missing warning means an operator watches a correctly configured, enabled method refuse guests with a
-// message that reads like a wrong surname. A false warning means they hunt a PMS problem that does not exist,
-// or switch a working method off. A warning that is right for the property but wrong for a network is both at
-// once — which is exactly what "is any interface healthy" produces once a site has more than one.
+// message that reads like a wrong surname. A false warning means they hunt a PMS problem that does not exist.
+// A warning that is right for the property but wrong for a network is both at once.
 //
-// The health condition mirrors the server's own (iam_v2.p3_feed_authorizes): CONNECTED, IN_SYNC, CONTINUOUS
-// and recently alive. These tests exist so that if the server rule moves, the screen explaining it to a human
-// cannot quietly keep asserting the old one.
+// TWO THINGS ARE NO LONGER DECIDED HERE, and the tests below pin that. Whether an interface's feed is healthy
+// is the server's answer (`room_auth_ready`), derived from the same runtime and active Revision that Phase 3
+// reads — including that Revision's own heartbeat_timeout_ms, which this client cannot know. And an interface
+// whose health could not be READ is unknown, never an outage.
 
 import { describe, it, expect } from "vitest";
 import { roomSignInReadiness } from "@/lib/pms-availability";
 import type { PmsInterface, PmsInterfaceHealth, PmsGuestNetworkRoute } from "@/lib/api";
-
-const NOW = Date.parse("2026-08-23T18:00:00Z");
-const fresh = new Date(NOW - 30_000).toISOString();
-const stale = new Date(NOW - 20 * 60_000).toISOString();
 
 const iface = (id: string, label: string, state = "ACTIVE"): PmsInterface => ({
   id, display_label: label, connector_kind: "protel-fias", lifecycle_state: state,
   revision_count: 1, published: true,
 });
 
-const health = (
-  id: string, transport: string, sync: string, continuity = "CONTINUOUS", lastSeen: string | null = fresh,
-): PmsInterfaceHealth => ({
+/** A health row carrying the SERVER's verdict. `reason` is a bounded code, as the server sends. */
+const health = (id: string, ready: boolean, reason?: string): PmsInterfaceHealth => ({
   pms_interface_id: id,
-  transport_status: transport, sync_status: sync, continuity_status: continuity,
-  last_heartbeat_at: lastSeen ?? undefined,
+  transport_status: ready ? "CONNECTED" : "DISCONNECTED",
+  sync_status: ready ? "IN_SYNC" : "RESYNC_REQUIRED",
+  continuity_status: "CONTINUOUS",
+  room_auth_ready: ready,
+  room_auth_reason: reason,
   in_house_stays: 0, pending_events: 0, review_events: 0,
 });
 
-const route = (
-  net: string, ifaceId: string, label: string, mode = "MAPPED",
-): PmsGuestNetworkRoute => ({
+/** A health row from a server that does not answer the question — indistinguishable from unknown. */
+const healthWithoutVerdict = (id: string): PmsInterfaceHealth => ({
+  pms_interface_id: id,
+  transport_status: "CONNECTED", sync_status: "IN_SYNC", continuity_status: "CONTINUOUS",
+  in_house_stays: 0, pending_events: 0, review_events: 0,
+});
+
+const route = (net: string, ifaceId: string, label: string, mode = "MAPPED"): PmsGuestNetworkRoute => ({
   guest_network_id: `${net}-id`, guest_network_name: net,
   pms_interface_id: ifaceId, pms_interface_label: label,
   is_default: true, routing_mode: mode,
 });
 
-const HEALTHY = (id: string) => health(id, "CONNECTED", "IN_SYNC");
+const READY = (id: string) => health(id, true);
 
-describe("roomSignInReadiness — the healthy case", () => {
-  it("is ready when the routed interface is connected, in sync, continuous and alive", () => {
-    const r = roomSignInReadiness([iface("a", "Protel")], [HEALTHY("a")], [route("Guest Wi-Fi", "a", "Protel")], NOW);
+describe("the server decides feed health, not this client", () => {
+  it("is ready when the server says the routed interface can serve Room auth", () => {
+    const r = roomSignInReadiness([iface("a", "Protel")], [READY("a")], [route("Guest Wi-Fi", "a", "Protel")]);
     expect(r.state).toBe("ready");
   });
-});
 
-describe("roomSignInReadiness — a single routed interface that cannot authorise", () => {
-  // Each of these is a state the server refuses to mint an Auth Context in. A check that looked only at
-  // transport would call three of them healthy.
-  it.each([
-    ["disconnected", health("a", "DISCONNECTED", "IN_SYNC"), "the connection to the property management system is down"],
-    ["still loading", health("a", "CONNECTED", "RESYNC_IN_PROGRESS"), "the guest list is still loading"],
-    ["needs a refresh", health("a", "CONNECTED", "RESYNC_REQUIRED"), "the guest list is still loading"],
-    ["gapped", health("a", "CONNECTED", "IN_SYNC", "GAP_DETECTED"), "updates from the property management system were missed"],
-    ["continuity never established", health("a", "CONNECTED", "IN_SYNC", "UNKNOWN"), "no updates have arrived from the property management system yet"],
-    ["silent past its timeout", health("a", "CONNECTED", "IN_SYNC", "CONTINUOUS", stale), "the property management system has stopped responding"],
-  ])("reports %s", (_name, h, reason) => {
-    const r = roomSignInReadiness([iface("a", "Protel")], [h], [route("Guest Wi-Fi", "a", "Protel")], NOW);
+  // THE NON-DEFAULT TIMEOUT CASE. An interface whose Revision sets heartbeat_timeout_ms well above the
+  // 300-second default is silent-but-healthy by its own configuration, and the server says so. The client
+  // used to hardcode 300s and would have called this an outage; it must now simply believe the server.
+  it("believes a server that reports ready despite a long silence under a non-default heartbeat timeout", () => {
+    const longTimeout: PmsInterfaceHealth = {
+      pms_interface_id: "a",
+      transport_status: "CONNECTED", sync_status: "IN_SYNC", continuity_status: "CONTINUOUS",
+      // Twenty minutes since anything was heard — past the 300s default, inside this Revision's own bound.
+      last_heartbeat_at: new Date(Date.now() - 20 * 60_000).toISOString(),
+      room_auth_ready: true,
+      in_house_stays: 0, pending_events: 0, review_events: 0,
+    };
+    const r = roomSignInReadiness([iface("a", "Protel")], [longTimeout], [route("Guest Wi-Fi", "a", "Protel")]);
+    expect(r.state).toBe("ready");
+  });
+
+  // And the converse: a Revision with a SHORTER timeout than the default. The server calls it silent while a
+  // 300-second client rule would still have called it healthy.
+  it("believes a server that reports FEED_SILENT under a shorter-than-default heartbeat timeout", () => {
+    const shortTimeout: PmsInterfaceHealth = {
+      pms_interface_id: "a",
+      transport_status: "CONNECTED", sync_status: "IN_SYNC", continuity_status: "CONTINUOUS",
+      last_heartbeat_at: new Date(Date.now() - 60_000).toISOString(), // 1 min: well inside 300s
+      room_auth_ready: false, room_auth_reason: "FEED_SILENT",
+      in_house_stays: 0, pending_events: 0, review_events: 0,
+    };
+    const r = roomSignInReadiness([iface("a", "Protel")], [shortTimeout], [route("Guest Wi-Fi", "a", "Protel")]);
     expect(r.state).toBe("down");
-    if (r.state === "down") expect(r.reason).toBe(reason);
+    if (r.state === "down") expect(r.reason).toBe("the property management system has stopped responding");
+  });
+
+  it.each([
+    ["TRANSPORT_DOWN", "the connection to the property management system is down"],
+    ["NOT_IN_SYNC", "the guest list is still loading"],
+    ["CONTINUITY_GAP", "updates from the property management system were missed"],
+    ["CONTINUITY_NOT_ESTABLISHED", "no updates have arrived from the property management system yet"],
+    ["FEED_SILENT", "the property management system has stopped responding"],
+    ["REVISION_NOT_PINNED", "the property management system interface is being reconfigured"],
+    ["NO_PUBLISHED_REVISION", "the property management system interface has no published configuration"],
+  ])("renders the server's %s code in operator words", (code, wording) => {
+    const r = roomSignInReadiness([iface("a", "Protel")], [health("a", false, code)], [route("W", "a", "Protel")]);
+    expect(r.state).toBe("down");
+    if (r.state === "down") expect(r.reason).toBe(wording);
+  });
+
+  // A code this build does not know must never be printed raw at a hotel.
+  it("falls back to a general phrase for an unrecognised reason code", () => {
+    const r = roomSignInReadiness([iface("a", "Protel")], [health("a", false, "SOME_FUTURE_CODE")], [route("W", "a", "Protel")]);
+    if (r.state !== "down") throw new Error(`expected down, got ${r.state}`);
+    expect(r.reason).toBe("the property management system is unavailable");
+    expect(r.reason).not.toContain("SOME_FUTURE_CODE");
   });
 });
 
-describe("roomSignInReadiness — per network, not per property", () => {
-  // THE CORRECTION THIS FILE EXISTS FOR. Two networks, two interfaces, one broken. Reporting "ready" because
-  // some interface somewhere is healthy is false for every guest on the broken one.
-  it("reports a partial outage and names the affected network and interface", () => {
+describe("an unreadable health result is unknown, never an outage", () => {
+  // THE SECOND CORRECTION. The fetch for this interface failed, so it is absent from the health list. That is
+  // absence of evidence: reporting "guests cannot sign in" would turn an admin-API hiccup into a false outage.
+  it("does not claim an outage when a routed interface's health could not be read", () => {
+    const r = roomSignInReadiness([iface("a", "Protel")], [], [route("Guest Wi-Fi", "a", "Protel")]);
+    expect(r.state).toBe("unknown");
+  });
+
+  it("treats a health row without a server verdict as unknown rather than guessing from the axes", () => {
+    const r = roomSignInReadiness(
+      [iface("a", "Protel")], [healthWithoutVerdict("a")], [route("Guest Wi-Fi", "a", "Protel")]);
+    expect(r.state).toBe("unknown");
+  });
+
+  // Mixed: one network definitely broken, one unreadable. The broken one is reported; the unreadable one is
+  // listed as unchecked and is NOT counted among the affected.
+  it("separates unchecked networks from affected ones", () => {
+    const r = roomSignInReadiness(
+      [iface("a", "Protel Main"), iface("b", "Protel Annexe"), iface("c", "Protel Spa")],
+      [READY("a"), health("b", false, "TRANSPORT_DOWN")], // c's health missing
+      [route("Main", "a", "Protel Main"), route("Annexe", "b", "Protel Annexe"), route("Spa", "c", "Protel Spa")],
+    );
+    expect(r.state).toBe("partial");
+    if (r.state !== "partial") return;
+    expect(r.affected.map((a) => a.guestNetwork)).toEqual(["Annexe"]);
+    expect(r.unchecked).toEqual(["Spa"]);
+  });
+
+  // An ALL_ACTIVE_INTERFACES network where one candidate is broken and another unreadable: the unread one
+  // might have been the healthy one, so this is unknown rather than an outage.
+  it("is unchecked when an unread candidate could have been the healthy one", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [HEALTHY("a"), health("b", "DISCONNECTED", "IN_SYNC")],
+      [health("a", false, "TRANSPORT_DOWN")], // b unread
+      [route("Guest Wi-Fi", "a", "Protel Main", "ALL_ACTIVE_INTERFACES")],
+    );
+    expect(r.state).toBe("unknown");
+  });
+});
+
+describe("routing semantics are unchanged", () => {
+  it("reports a partial outage and names only the affected network and interface", () => {
+    const r = roomSignInReadiness(
+      [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
+      [READY("a"), health("b", false, "TRANSPORT_DOWN")],
       [route("Main Wi-Fi", "a", "Protel Main"), route("Annexe Wi-Fi", "b", "Protel Annexe")],
-      NOW,
     );
     expect(r.state).toBe("partial");
     if (r.state !== "partial") return;
     expect(r.affected).toHaveLength(1);
     expect(r.affected[0].guestNetwork).toBe("Annexe Wi-Fi");
     expect(r.affected[0].pmsInterface).toBe("Protel Annexe");
-    expect(r.affected[0].reason).toContain("connection");
+    expect(r.affected.map((a) => a.guestNetwork)).not.toContain("Main Wi-Fi");
   });
 
-  it("is down, not partial, when every routed network is affected", () => {
+  it("is down when every routed network with a known result is affected", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [health("a", "DISCONNECTED", "IN_SYNC"), health("b", "DISCONNECTED", "IN_SYNC")],
+      [health("a", false, "TRANSPORT_DOWN"), health("b", false, "TRANSPORT_DOWN")],
       [route("Main Wi-Fi", "a", "Protel Main"), route("Annexe Wi-Fi", "b", "Protel Annexe")],
-      NOW,
     );
     expect(r.state).toBe("down");
   });
 
-  // An ACTIVE interface nobody routes to serves no guests, so its state cannot make the screen warn.
   it("ignores an unrouted interface, however broken", () => {
     const r = roomSignInReadiness(
-      [iface("a", "Protel Main"), iface("spare", "Spare interface")],
-      [HEALTHY("a"), health("spare", "DISCONNECTED", "IN_SYNC", "GAP_DETECTED")],
+      [iface("a", "Protel Main"), iface("spare", "Spare")],
+      [READY("a"), health("spare", false, "TRANSPORT_DOWN")],
       [route("Main Wi-Fi", "a", "Protel Main")],
-      NOW,
     );
     expect(r.state).toBe("ready");
   });
 
-  it("keeps healthy networks out of the affected list", () => {
-    const r = roomSignInReadiness(
-      [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [HEALTHY("a"), health("b", "DISCONNECTED", "IN_SYNC")],
-      [route("Main Wi-Fi", "a", "Protel Main"), route("Annexe Wi-Fi", "b", "Protel Annexe")],
-      NOW,
-    );
-    if (r.state !== "partial") throw new Error(`expected partial, got ${r.state}`);
-    expect(r.affected.map((a) => a.guestNetwork)).not.toContain("Main Wi-Fi");
-  });
-});
-
-describe("roomSignInReadiness — routing modes and lifecycle", () => {
-  // ALL_ACTIVE_INTERFACES fans a network out across every ACTIVE interface, exactly as the resolver does, so
-  // one healthy interface is enough for its guests.
   it("treats ALL_ACTIVE_INTERFACES as served while any active interface is healthy", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [health("a", "DISCONNECTED", "IN_SYNC"), HEALTHY("b")],
+      [health("a", false, "TRANSPORT_DOWN"), READY("b")],
       [route("Guest Wi-Fi", "a", "Protel Main", "ALL_ACTIVE_INTERFACES")],
-      NOW,
     );
     expect(r.state).toBe("ready");
   });
@@ -133,46 +190,31 @@ describe("roomSignInReadiness — routing modes and lifecycle", () => {
   it("reports ALL_ACTIVE_INTERFACES as down when no active interface is healthy", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [health("a", "DISCONNECTED", "IN_SYNC"), health("b", "DISCONNECTED", "IN_SYNC")],
+      [health("a", false, "TRANSPORT_DOWN"), health("b", false, "TRANSPORT_DOWN")],
       [route("Guest Wi-Fi", "a", "Protel Main", "ALL_ACTIVE_INTERFACES")],
-      NOW,
     );
     expect(r.state).toBe("down");
   });
 
-  // Routed to an interface that has been switched off: its guests cannot resolve, and the reason is a
-  // lifecycle state rather than a connection fault.
-  it("reports a network routed to a non-ACTIVE interface", () => {
+  it("keeps a network mapped to a non-ACTIVE interface visible as a configuration problem", () => {
     const r = roomSignInReadiness(
-      [iface("a", "Protel Main"), iface("old", "Retired interface", "AUTH_DISABLED")],
-      [HEALTHY("a")],
-      [route("Main Wi-Fi", "a", "Protel Main"), route("Old Wi-Fi", "old", "Retired interface")],
-      NOW,
+      [iface("a", "Protel Main"), iface("old", "Retired", "AUTH_DISABLED")],
+      [READY("a")],
+      [route("Main Wi-Fi", "a", "Protel Main"), route("Old Wi-Fi", "old", "Retired")],
     );
     expect(r.state).toBe("partial");
     if (r.state === "partial") expect(r.affected[0].reason).toContain("not in use");
   });
-});
 
-describe("roomSignInReadiness — unknown readiness never warns", () => {
-  // A failed read is not evidence of an outage, and a false alarm on a working system costs more trust than a
-  // missing one.
   it.each([
-    ["interfaces unread", null, [HEALTHY("a")], [route("Guest Wi-Fi", "a", "Protel")]],
-    ["health unread", [iface("a", "Protel")], null, [route("Guest Wi-Fi", "a", "Protel")]],
-    ["routing unread", [iface("a", "Protel")], [HEALTHY("a")], null],
-    ["nothing routed", [iface("a", "Protel")], [HEALTHY("a")], []],
+    ["interfaces unread", null, [READY("a")], [route("W", "a", "Protel")]],
+    ["health unread", [iface("a", "Protel")], null, [route("W", "a", "Protel")]],
+    ["routing unread", [iface("a", "Protel")], [READY("a")], null],
+    ["nothing routed", [iface("a", "Protel")], [READY("a")], []],
   ])("stays silent when %s", (_n, ifaces, healths, routes) => {
     const r = roomSignInReadiness(
       ifaces as PmsInterface[] | null, healths as PmsInterfaceHealth[] | null,
-      routes as PmsGuestNetworkRoute[] | null, NOW);
+      routes as PmsGuestNetworkRoute[] | null);
     expect(r.state).toBe("unknown");
-  });
-
-  // Health missing for a routed interface is not the same as health saying "bad", but it still cannot be
-  // reported as ready — we do not know that it is.
-  it("does not claim ready when a routed interface has no health at all", () => {
-    const r = roomSignInReadiness([iface("a", "Protel")], [], [route("Guest Wi-Fi", "a", "Protel")], NOW);
-    expect(r.state).toBe("down");
   });
 });
