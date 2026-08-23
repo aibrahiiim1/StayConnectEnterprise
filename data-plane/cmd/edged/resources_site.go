@@ -2,8 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +18,27 @@ import (
 
 // ----- auth-methods (tenants.auth_methods jsonb) -------------------------------
 
+// pmsSignInModes are the verification values a site may accept alongside the room number, mapped to the
+// wire values the portal and resolver already use.
+//
+// "either" is ABSENT deliberately. It is still accepted from an existing stored configuration and still
+// behaves exactly as it did, but it is not offered as a new choice: it means last-name-or-reservation and
+// the portal decides which by guessing at the shape of what was typed, so a surname containing a digit is
+// submitted as a reservation number and fails. room_any supersedes it by matching one value against every
+// supported field server-side.
+var pmsSignInModes = map[string]bool{
+	"room_lastname":    true,
+	"room_firstname":   true,
+	"room_reservation": true,
+	"room_any":         true,
+}
+
+// authMethodsRoutes reads and writes the site's guest sign-in configuration.
+//
+// THE WRITE IS A MERGE, NOT A REPLACEMENT. It used to marshal whatever the caller posted straight over the
+// column, so any client that sent a partial object silently deleted every key it did not know about —
+// including provider blocks and any future method. The screen that drives this only owns the methods it
+// renders, so the server merges per top-level key and leaves everything else exactly as it found it.
 func (s *server) authMethodsRoutes() http.Handler {
 	r := chi.NewRouter()
 	r.Get("/", func(w http.ResponseWriter, req *http.Request) {
@@ -31,25 +54,97 @@ func (s *server) authMethodsRoutes() http.Handler {
 		_, _ = w.Write(raw)
 	})
 	r.Put("/", func(w http.ResponseWriter, req *http.Request) {
-		var body map[string]json.RawMessage
-		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+		var patch map[string]json.RawMessage
+		if err := json.NewDecoder(req.Body).Decode(&patch); err != nil {
 			jsonErr(w, http.StatusBadRequest, "bad_request", "body must be a JSON object")
 			return
 		}
-		raw, _ := json.Marshal(body)
+		if err := validateAuthMethodsPatch(patch); err != nil {
+			jsonErr(w, http.StatusBadRequest, "validation", err.Error())
+			return
+		}
 		ctx, cancel := dbCtx(req)
 		defer cancel()
-		if _, err := s.db.Exec(ctx,
-			`UPDATE tenants SET auth_methods = $1::jsonb, updated_at = now() WHERE id = $2`,
-			string(raw), s.tenantID); err != nil {
+
+		// Read-modify-write inside one transaction: two operators saving different methods at the same
+		// moment must not lose one of the changes.
+		tx, err := s.db.Begin(ctx)
+		if err != nil {
 			jsonErr(w, http.StatusInternalServerError, "internal", "auth_methods update failed")
 			return
 		}
-		s.audit(req, "auth_methods.updated", "tenant", s.tenantID, map[string]any{"methods": body})
+		defer func() { _ = tx.Rollback(ctx) }()
+
+		var currentRaw []byte
+		if err := tx.QueryRow(ctx,
+			`SELECT auth_methods FROM tenants WHERE id = $1 FOR UPDATE`, s.tenantID).Scan(&currentRaw); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "auth_methods load failed")
+			return
+		}
+		merged := map[string]json.RawMessage{}
+		if len(currentRaw) > 0 {
+			if err := json.Unmarshal(currentRaw, &merged); err != nil {
+				// Refuse rather than overwrite: a column that does not parse may hold configuration this
+				// build does not understand, and replacing it would destroy it.
+				jsonErr(w, http.StatusConflict, "conflict",
+					"the stored sign-in configuration could not be read; refusing to overwrite it")
+				return
+			}
+		}
+		for k, v := range patch {
+			merged[k] = v
+		}
+		out, _ := json.Marshal(merged)
+		if _, err := tx.Exec(ctx,
+			`UPDATE tenants SET auth_methods = $1::jsonb, updated_at = now() WHERE id = $2`,
+			string(out), s.tenantID); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "auth_methods update failed")
+			return
+		}
+		if err := tx.Commit(ctx); err != nil {
+			jsonErr(w, http.StatusInternalServerError, "internal", "auth_methods update failed")
+			return
+		}
+		// The audit records WHICH methods were touched, never the whole blob: it may carry provider
+		// identifiers, and an audit row is not the place to copy them.
+		changed := make([]string, 0, len(patch))
+		for k := range patch {
+			changed = append(changed, k)
+		}
+		sort.Strings(changed)
+		s.audit(req, "auth_methods.updated", "tenant", s.tenantID, map[string]any{"methods_changed": changed})
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(raw)
+		_, _ = w.Write(out)
 	})
 	return r
+}
+
+// validateAuthMethodsPatch refuses a patch the portal could not act on, so a bad value is reported here
+// rather than becoming a sign-in method that silently never works.
+func validateAuthMethodsPatch(patch map[string]json.RawMessage) error {
+	rawPMS, ok := patch["pms"]
+	if !ok {
+		return nil
+	}
+	var cfg struct {
+		Enabled bool   `json:"enabled"`
+		Mode    string `json:"mode"`
+	}
+	if err := json.Unmarshal(rawPMS, &cfg); err != nil {
+		return errors.New("pms must be an object")
+	}
+	if !cfg.Enabled {
+		return nil // a disabled method needs no mode
+	}
+	// "either" stays ACCEPTED so an existing stored configuration can be saved back unchanged; it is simply
+	// not offered as a new choice.
+	if cfg.Mode == "either" {
+		return nil
+	}
+	if !pmsSignInModes[cfg.Mode] {
+		return errors.New("pms.mode must be room_lastname, room_firstname, room_reservation or room_any")
+	}
+	return nil
 }
 
 // ----- walled garden ---------------------------------------------------------------

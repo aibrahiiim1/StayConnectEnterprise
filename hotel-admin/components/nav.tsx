@@ -7,7 +7,7 @@ import { canRead } from "@/lib/roles";
 import {
   LayoutDashboard, Users, LogOut, Monitor, Shield, ScrollText, Hotel, Send, KeyRound,
   Wallet, BadgeCheck, Paintbrush, Archive, Network, Wifi, History, Router, Cloud,
-  ServerCog, Lock, Activity, Package, Gauge, Smartphone,
+  ServerCog, Lock, Activity, Package, Gauge, Smartphone, LogIn,
 } from "lucide-react";
 
 // DEPLOYMENT GATES, NOT PRODUCT VOCABULARY.
@@ -99,7 +99,10 @@ const SECTIONS: Section[] = [
   {
     title: "Guest portal",
     items: [
-      { href: "/portal-branding",  label: "Branding",      icon: Paintbrush, resource: "portal-branding" },
+      // Sign-in methods leads the group: which ways a guest may prove who they are is the first thing an
+      // operator sets up on the portal, and it was previously not settable anywhere in the product.
+      { href: "/sign-in-methods",  label: "Sign-in methods", icon: LogIn,    resource: "auth-methods" },
+      { href: "/portal-branding",  label: "Branding",        icon: Paintbrush, resource: "portal-branding" },
       { href: "/walled-garden",    label: "Allowed sites", icon: Shield,     resource: "walled-garden" },
       { href: "/social-providers", label: "Social login",  icon: KeyRound,   resource: "social-providers" },
       { href: "/notifications",    label: "Email & SMS",   icon: Send,       resource: "notification-providers" },
