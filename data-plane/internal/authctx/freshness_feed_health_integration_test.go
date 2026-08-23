@@ -36,9 +36,14 @@ func authorizable(t *testing.T, p *pgxpool.Pool, s fixture) bool {
 // setFeed drives the runtime axes to a named state.
 func setFeed(t *testing.T, p *pgxpool.Pool, s fixture, transport, sync, continuity string, live time.Time) {
 	t.Helper()
+	// updated_at is GREATEST(now(), $5) because pir_heartbeat_not_future requires last_heartbeat_at to be no
+	// later than updated_at, and the heartbeat here comes from the Go clock while now() comes from the
+	// database. Even microseconds of skew between the two violated the CHECK, which made this helper — and so
+	// every test using it — fail intermittently in the gate for a reason that had nothing to do with the
+	// behaviour under test.
 	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
 		SET transport_status=$2, sync_status=$3, continuity_status=$4,
-		    last_connected_at=$5, last_heartbeat_at=$5, updated_at=now()
+		    last_connected_at=$5, last_heartbeat_at=$5, updated_at=GREATEST(now(), $5)
 		WHERE pms_interface_id=$1`, s.iface, transport, sync, continuity, live); err != nil {
 		t.Fatalf("set feed %s/%s: %v", transport, sync, err)
 	}

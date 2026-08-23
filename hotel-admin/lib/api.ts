@@ -855,6 +855,12 @@ export type PmsRevision = {
 
 export type PmsInterfaceHealth = {
   pms_interface_id: string;
+  // Whether this interface can currently serve Room authentication, decided by the server from the same
+  // runtime and active Revision that Phase 3 reads — including the Revision's own heartbeat_timeout_ms,
+  // which a client cannot know. Excludes Stay-specific occupancy evidence: that is per guest, not per feed.
+  // room_auth_reason is a bounded code from a closed set, empty when ready.
+  room_auth_ready?: boolean;
+  room_auth_reason?: string;
   transport_status: string; last_connected_at?: string | null; last_heartbeat_at?: string | null;
   disconnected_since?: string | null; transport_error_code?: string;
   continuity_status: string; last_valid_event_at?: string | null; discontinuity_detected_at?: string | null;

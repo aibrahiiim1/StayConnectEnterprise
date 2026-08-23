@@ -224,6 +224,13 @@ export default function SignInMethodsPage() {
                   </ul>
                 </>
               )}
+              {pmsReadiness.unchecked.length > 0 && (
+                // Neutral, and never counted as an outage. A health read that failed is absence of evidence,
+                // and one of those networks may be perfectly fine.
+                <p className="text-xs text-amber-800 mt-1">
+                  Readiness could not be checked for {pmsReadiness.unchecked.join(", ")}.
+                </p>
+              )}
               <p className="text-xs mt-1">
                 <Link href="/pms-interfaces" className="underline text-amber-900">
                   Check the PMS interface <ExternalLink size={11} className="inline" />
