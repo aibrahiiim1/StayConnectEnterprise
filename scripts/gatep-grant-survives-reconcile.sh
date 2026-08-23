@@ -52,9 +52,25 @@ holds(){ [ "$(q "SELECT has_function_privilege('$1','$2','EXECUTE')")" = "t" ]; 
 # the cleanroom build's own host paths, so the escape stays local to the argument that needs it.
 reconcile(){ docker exec "$C" psql -v ON_ERROR_STOP=1 -U postgres -d "$DB" -q -f "//tmp/gatep/gatep-grants.sql" >/tmp/gr.out 2>&1; }
 
-ROLE=svc_acctd
-KEPT='iam_v2.p6_data_crossing(uuid)'         # named in a per-service file — must survive
-DROPPED='iam_v2.p6_expire_entitlement(uuid)' # granted only by migration 0041 — must not
+# Every privilege that must survive a reconcile, as "role|function". Each was, at some point, granted only by
+# a migration and therefore silently removed by a reconcile; each is now named in a per-service file.
+KEPT_PAIRS=(
+  "svc_acctd|iam_v2.p6_data_crossing(uuid)"
+  "svc_acctd|iam_v2.p6_expire_entitlement(uuid)"
+  "svc_acctd|iam_v2.p6_due_terminal(uuid)"
+  "svc_acctd|iam_v2.p6_suspend_over_budget(uuid, uuid)"
+  "svc_acctd|iam_v2.p6_tick_online_time(uuid, uuid, timestamptz, int, uuid[], timestamptz[])"
+  "svc_scd|iam_v2.p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamptz)"
+  "svc_scd|iam_v2.p3_cfg_secs(jsonb, text, int)"
+  "svc_scd|iam_v2.record_auth_context_offer(uuid, uuid, uuid, uuid, integer, bigint, timestamptz)"
+  "svc_scd|iam_v2.issue_or_return_pms_context(uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid, integer)"
+)
+
+# The control: a function granted by a migration and named in NO per-service file, so it must NOT survive.
+# Without it the positive results below would look identical whether the mechanism works or the reconcile
+# simply never revokes anything.
+CONTROL_ROLE=svc_netd
+CONTROL_FN='iam_v2.p6_data_crossing(uuid)'
 
 echo "== disposable cluster with the real schema and the real Gate-P roles =="
 if ! CLEANROOM_KEEP=1 CLEANROOM_NAME="$C" bash "$ROOT/scripts/clean-install-reconstruction.sh" >/tmp/gr-build.log 2>&1; then
@@ -63,61 +79,68 @@ fi
 docker inspect "$C" >/dev/null 2>&1 || { echo "INFRA: no cleanroom container"; exit 2; }
 docker cp "$GP/." "$C:/tmp/gatep/" >/dev/null 2>&1 || { echo "INFRA: could not stage the Gate-P scripts"; exit 2; }
 
-for fn in "$KEPT" "$DROPPED"; do
+for pair in "${KEPT_PAIRS[@]}"; do
+  fn="${pair#*|}"
   if [ "$(q "SELECT to_regprocedure('$fn') IS NOT NULL")" != "t" ]; then
     echo "  *** FAIL: $fn does not exist in the built schema; this check cannot mean anything"; exit 1
   fi
 done
-if [ "$(q "SELECT count(*) FROM pg_roles WHERE rolname='$ROLE'")" != "1" ]; then
-  echo "INFRA: role $ROLE was not created by the cleanroom build"; exit 2
-fi
-ok "schema and roles present"
+for role in svc_acctd svc_scd svc_netd; do
+  if [ "$(q "SELECT count(*) FROM pg_roles WHERE rolname='$role'")" != "1" ]; then
+    echo "INFRA: role $role was not created by the cleanroom build"; exit 2
+  fi
+done
+ok "schema and roles present (${#KEPT_PAIRS[@]} privileges under test)"
 
-# The control is only a control while nothing re-grants it. If a per-service file ever starts naming it, say so
-# rather than quietly losing the ability to detect the defect.
-if grep -l "p6_expire_entitlement" "$GP"/svc-*.sql >/dev/null 2>&1; then
-  echo "  *** FAIL: $DROPPED is now named in a per-service file, so it can no longer serve as the control."
-  echo "            Choose another iam_v2 function that is granted only by a migration."
+# The control is only a control while no per-service file grants that function to that role.
+if grep -l "p6_data_crossing" "$GP"/svc-netd-*.sql >/dev/null 2>&1; then
+  echo "  *** FAIL: $CONTROL_FN is now named for $CONTROL_ROLE in a per-service file, so it can no longer"
+  echo "            serve as the control. Choose another role/function pair granted only by a migration."
   exit 1
 fi
-ok "control function is granted only by a migration"
+ok "control pair is granted by no per-service file"
 
 echo
 echo "== a full reconcile =="
-# Granted exactly the way migration 0041 grants them, so the two differ only in whether a per-service file
+# Everything is granted the way a migration grants it, so the pairs differ only in whether a per-service file
 # also names them.
-sql "GRANT EXECUTE ON FUNCTION $KEPT TO $ROLE"
-sql "GRANT EXECUTE ON FUNCTION $DROPPED TO $ROLE"
-if ! holds "$ROLE" "$KEPT" || ! holds "$ROLE" "$DROPPED"; then
-  echo "  *** FAIL: the migration-style grants did not take effect; the comparison proves nothing"; exit 1
+for pair in "${KEPT_PAIRS[@]}"; do
+  sql "GRANT EXECUTE ON FUNCTION ${pair#*|} TO ${pair%%|*}"
+done
+sql "GRANT EXECUTE ON FUNCTION $CONTROL_FN TO $CONTROL_ROLE"
+if ! holds "$CONTROL_ROLE" "$CONTROL_FN"; then
+  echo "  *** FAIL: the control grant did not take effect; the comparison proves nothing"; exit 1
 fi
-ok "both privileges granted the way a migration grants them"
+ok "all privileges granted the way a migration grants them"
 
 if ! reconcile; then
   echo "INFRA: gatep-grants.sql failed to apply"; tail -20 /tmp/gr.out; exit 2
 fi
 
-if holds "$ROLE" "$DROPPED"; then
-  bad "the reconcile did NOT remove a migration-only grant — this check can no longer detect the defect it exists for, so the positive result below means nothing"
+if holds "$CONTROL_ROLE" "$CONTROL_FN"; then
+  bad "the reconcile did NOT remove a migration-only grant — this check can no longer detect the defect it exists for, so the positive results below mean nothing"
 else
   ok "CONTROL: a migration-only grant is gone after the reconcile, exactly as the appliance experienced"
 fi
 
-if holds "$ROLE" "$KEPT"; then
-  ok "$ROLE holds EXECUTE on $KEPT after the reconcile"
-else
-  bad "$ROLE LOST EXECUTE on $KEPT — the expiry sweep will fail in its candidate query on every pass"
-fi
+for pair in "${KEPT_PAIRS[@]}"; do
+  role="${pair%%|*}"; fn="${pair#*|}"
+  if holds "$role" "$fn"; then
+    ok "$role holds EXECUTE on $fn"
+  else
+    bad "$role LOST EXECUTE on $fn — name it in a per-service file, not only in a migration"
+  fi
+done
 
 # A privilege that survives the first reconcile and not the second is the same outage with a longer fuse.
 echo
 echo "== and again, because a reconcile is not a one-time event =="
 reconcile || { echo "INFRA: second reconcile failed"; tail -20 /tmp/gr.out; exit 2; }
-if holds "$ROLE" "$KEPT"; then
-  ok "still held after a second reconcile"
-else
-  bad "$ROLE lost EXECUTE on $KEPT on the SECOND reconcile"
-fi
+for pair in "${KEPT_PAIRS[@]}"; do
+  role="${pair%%|*}"; fn="${pair#*|}"
+  holds "$role" "$fn" || bad "$role lost EXECUTE on $fn on the SECOND reconcile"
+done
+[ "$FAIL" -eq 0 ] && ok "all ${#KEPT_PAIRS[@]} privileges still held after a second reconcile"
 
 echo
 if [ "$FAIL" -eq 0 ]; then

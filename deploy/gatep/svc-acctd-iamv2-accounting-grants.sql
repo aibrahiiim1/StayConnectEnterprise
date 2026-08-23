@@ -67,5 +67,24 @@ GRANT EXECUTE ON FUNCTION iam_v2.entitlement_usage_bytes(uuid, timestamptz) TO s
 -- privilege survives a reconcile, and that a migration-only grant does not.
 GRANT EXECUTE ON FUNCTION iam_v2.p6_data_crossing(uuid) TO svc_acctd;
 
+-- The rest of the Phase-6 expiry sweep, here for the same reason and proven the hard way.
+--
+-- Granting only p6_data_crossing fixed the denial the appliance was logging and immediately exposed the next
+-- one: the sweep got past its candidate query and failed on p6_tick_online_time, then on
+-- p6_suspend_over_budget. Every one of these is granted by a migration (0040–0042) and by no per-service
+-- file, so the whole set is removed by the first reconcile and the sweep cannot complete a single pass.
+--
+-- They are listed together because they are one operation. A sweep that can derive a crossing but not act on
+-- it is not partially working; it fails on every pass, quietly, in a background job whose only symptom is a
+-- log line. Enumerated explicitly rather than granted by wildcard so each one remains a decision.
+--
+-- No new capability: this is exactly the set migrations 0040–0042 already grant, written where a reconcile
+-- will keep it.
+GRANT EXECUTE ON FUNCTION iam_v2.p6_expire_entitlement(uuid) TO svc_acctd;
+GRANT EXECUTE ON FUNCTION iam_v2.p6_due_terminal(uuid) TO svc_acctd;
+GRANT EXECUTE ON FUNCTION iam_v2.p6_suspend_over_budget(uuid, uuid) TO svc_acctd;
+GRANT EXECUTE ON FUNCTION iam_v2.p6_tick_online_time(
+  uuid, uuid, timestamptz, int, uuid[], timestamptz[]) TO svc_acctd;
+
 -- NOT granted: DELETE on anything, and no write to packages, plans or their revisions. Metering must never
 -- be able to change what was sold.
