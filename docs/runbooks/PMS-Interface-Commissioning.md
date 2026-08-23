@@ -41,9 +41,19 @@ deploy/gatep/gatep-set-passwords.sh             # generates a SCRAM password on 
 psql -f deploy/gatep/svc-pmsd-iamv2-connector-grants.sql
 ```
 
-The connector's grants live in their own per-service file, **not** in `gatep-grants.sql` — that file's
-reconciler preamble revokes all `iam_v2` privilege from every `svc_*` role as its first act, so an `iam_v2`
-grant written there is revoked by the next Gate-P run.
+The connector's grants live in their own per-service file, **not** written inline in `gatep-grants.sql` — that
+file's reconciler preamble revokes all `iam_v2` privilege from every `svc_*` role as its first act, so an
+`iam_v2` grant written there directly is revoked by the next Gate-P run.
+
+`gatep-grants.sql` does **include** this file (`\ir`), and `svc_pmsd` is in the revoke loop, so the connector
+is converged by a normal reconcile like every other runtime role. Applying the file on its own is still
+supported for incremental commissioning; it is no longer the only thing that maintains these privileges.
+
+Note what the connector does **not** get: `UPDATE` on `iam_v2.site_checkout_grace_config`. It holds `SELECT`
+plus `EXECUTE` on `iam_v2.p3_lock_grace_config`, which takes the checkout-vs-publication row lock as its owner.
+Locking used to require `UPDATE` — PostgreSQL demands it for `SELECT ... FOR UPDATE` even when nothing is
+written — and that collided with the D32 no-direct-grace-mutation assertion badly enough that the full
+reconcile could not complete at all. Do not re-add the table grant.
 
 The grant file ends with an assertion that fails the deployment if `svc_pmsd` ever holds a posting, payment,
 settlement or accounting privilege. Leave it there.

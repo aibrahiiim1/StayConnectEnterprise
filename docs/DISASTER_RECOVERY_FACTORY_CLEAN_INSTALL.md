@@ -387,8 +387,16 @@ production build (`-tags stayconnect_production`); the Hotel-Admin Next build an
 3. **Create the database and roles.** Apply `deploy/gatep/gatep-roles.sql` with passwords generated *on the
    appliance*; never reuse a committed or copied secret.
 4. **Build the schema** in the order of §2. Record every step in `schema_migrations`.
-5. **Apply `deploy/gatep/gatep-grants.sql`.** It re-asserts least privilege and ends in fail-closed
-   assertions; a failure here is a stop, not a warning.
+5. **Reconcile privileges with `scripts/gatep-reconcile.sh`**, which applies `deploy/gatep/gatep-grants.sql`
+   for you. Do not invoke the SQL by hand: the runner is what verifies that the revoke script and every file
+   it `\ir`-includes come from the same committed revision, staging them into a fresh empty directory and
+   hashing each one on both sides of the copy before a transaction is opened. Combining a current revoke with
+   stale re-grant files is a real failure mode — it happened, via a `docker cp` that nested one level deeper
+   than intended, and it cost `svc_scd` the PMS authentication path until the current files were reapplied.
+
+   The reconcile is one transaction. It re-asserts least privilege and ends in fail-closed assertions; a
+   failure rolls back the revoke along with everything else, so the effective privilege set is exactly what it
+   was beforehand. A failure here is still a stop, not a warning — but it is no longer an outage.
 6. **Build the binaries with the production tag** — `go build -tags stayconnect_production ./...` in
    `data-plane/`. This is not optional and it is not cosmetic: without the tag the guest IAM authority stays
    configurable and the superseded path is one environment variable away (§4G). Confirm it after start-up —
