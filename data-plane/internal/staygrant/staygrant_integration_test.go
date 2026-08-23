@@ -80,6 +80,17 @@ func seed(t *testing.T, p *pgxpool.Pool, priceMinor int64, settlement, pkgType s
 		WHERE id=(SELECT package_id FROM iam_v2.internet_package_revisions WHERE id=$1)`, f.pkgRev); err != nil {
 		t.Fatalf("pin revision: %v", err)
 	}
+	// A HEALTHY runtime row. Issuing a PMS Auth Context now depends on the FEED being connected and in sync,
+	// not only on the Stay — a guest cannot be authorised by a PMS that is not currently telling us anything.
+	// These fixtures exist to exercise grant/commerce behaviour, so the feed is put in the state where those
+	// are the only things under test; the feed rule itself is exercised in internal/authctx.
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
+		(tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, published_resync_generation,
+		 pinned_revision_id, transport_status, sync_status, continuity_status, last_connected_at, last_heartbeat_at)
+		VALUES ($1,$2,$3,1,'NONE',0,$4,'CONNECTED','IN_SYNC','CONTINUOUS',now(),now())`,
+		f.tenant, f.site, f.iface, f.rev); err != nil {
+		t.Fatalf("seed runtime: %v", err)
+	}
 	return f
 }
 

@@ -181,12 +181,39 @@ func (p *phase3Auth) device(ctx context.Context, d wireDevice) (deviceIdentity, 
 // ---- resolve ---------------------------------------------------------------
 
 type phase3ResolveReq struct {
-	Room              string     `json:"room"`
+	Room string `json:"room"`
+	// Verification carries the ONE value a guest typed under the combined room_any mode, where the portal does
+	// not know or ask which kind of identifier it is. The server compares it against all three PMS-derived
+	// fields; see the handler.
+	Verification      string     `json:"verification"`
 	LastName          string     `json:"last_name"`
 	FirstName         string     `json:"first_name"`
 	ReservationNumber string     `json:"reservation_number"`
 	RequestID         string     `json:"request_id"`
 	Device            wireDevice `json:"device"`
+}
+
+// combineVerification implements the room_any combined mode: the guest typed ONE value and was never asked
+// what kind of identifier it is, so the server offers it to all three comparisons at once.
+//
+// Each copy is normalised the way its own stored column was — as a name for the name columns, as typed for the
+// reservation id. NOTHING HERE INSPECTS THE VALUE'S SHAPE. Guessing "digits mean a reservation number" is the
+// legacy "either" behaviour this mode exists to replace: it submitted a surname containing a digit as a
+// reservation number and failed for the guest who owned that name, and it is wrong in the other direction for
+// any property whose reservation numbers are alphabetic.
+//
+// Fanning out to three comparisons widens what matches, which is only safe because of what happens next:
+// probeInterface ORs the three and answers AMBIGUOUS_LOCAL whenever more than one Stay matches, so a value
+// that is simultaneously one guest's surname and another guest's reservation number in the same room FAILS
+// CLOSED rather than picking one. Combined mode is therefore a transport change, not a matching change.
+//
+// An explicit single-field submission always wins, so a site on room_lastname keeps comparing exactly one
+// field and nothing about its behaviour moves.
+func combineVerification(verification, last, first, res string) (string, string, string) {
+	if v := strings.TrimSpace(verification); v != "" && last == "" && first == "" && res == "" {
+		return normalizeName(v), normalizeName(v), v
+	}
+	return last, first, res
 }
 
 // resolveHandler proves the guest's identity STRICTLY across every PMS Interface mapped to their network, and
@@ -209,6 +236,9 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	last := normalizeName(req.LastName)
 	first := normalizeName(req.FirstName)
 	res := strings.TrimSpace(req.ReservationNumber)
+
+	last, first, res = combineVerification(req.Verification, last, first, res)
+
 	if room == "" || (last == "" && first == "" && res == "") {
 		// Incomplete evidence is a non-success like any other: telling the guest WHICH field was missing is
 		// a small oracle, and the portal already knows what it asked for.

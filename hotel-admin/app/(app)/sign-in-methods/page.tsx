@@ -47,8 +47,18 @@ type SocialProvider = { provider: string; enabled: boolean };
 // "either" is absent on purpose. It is still honoured if already stored, but it means
 // last-name-or-reservation decided by a guess at the shape of what the guest typed, so a surname containing
 // a digit is submitted as a reservation number and fails. An operator picking a mode here chooses one
-// explicit identifier instead.
+// explicit identifier instead — or "Any of the three", which is not the same thing: the guest still fills in
+// ONE box, and the SERVER compares that value against all three fields rather than the browser guessing which
+// one was meant.
 const PMS_MODES: { value: string; label: string; hint: string }[] = [
+  {
+    value: "room_any",
+    label: "Any of the three (recommended)",
+    hint:
+      "Room number plus one box that accepts the first name, the surname, or the reservation number. " +
+      "The guest is not asked which one they are entering. If the value matches more than one guest in " +
+      "that room, sign-in is refused rather than guessing between them.",
+  },
   { value: "room_lastname", label: "Last name (surname)", hint: "Room number plus the surname on the reservation." },
   { value: "room_firstname", label: "First name", hint: "Room number plus the first name on the reservation." },
   { value: "room_reservation", label: "Reservation number", hint: "Room number plus the reservation / confirmation number." },

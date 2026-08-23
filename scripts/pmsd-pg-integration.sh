@@ -40,6 +40,18 @@ export EDGE_PSQL="docker exec -i $C psql -U postgres -d $DB -v ON_ERROR_STOP=1"
 bash "$ROOT/scripts/edge-migrate.sh" --only 0010_phase3_stay_resolution --expect-db "$DB" \
   --target-kind disposable --ack-target I_UNDERSTAND_DISPOSABLE_DATABASE --expect-sha256 "$UPSHA" >/dev/null 2>&1
 
+# 0050 redefines a Phase-3 object this gate owns: issue_or_return_pms_context, plus the shared
+# iam_v2.p3_stay_authorizable predicate the authctx suite exercises directly. The gate builds the schema Phase 3
+# ships, and that now includes this. Applied with ON_ERROR_STOP so a broken migration fails here, loudly,
+# rather than surfacing later as a missing-function mystery in an unrelated test.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0050_pms_auth_freshness_follows_feed_health.up.sql" >/dev/null 2>&1; then
+  echo "0050 FAILED TO APPLY -- deterministic, not a flake"
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0050_pms_auth_freshness_follows_feed_health') ON CONFLICT DO NOTHING;" >/dev/null
+
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi
 runtime_cols="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_runtime' AND column_name='pinned_secret_generation_id';")"

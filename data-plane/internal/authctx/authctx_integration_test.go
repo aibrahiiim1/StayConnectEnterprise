@@ -84,6 +84,17 @@ func seedAged(t *testing.T, p *pgxpool.Pool, cacheAgeJSON, evidenceAtExpr string
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$1 WHERE id=$2`, f.rev, f.iface); err != nil {
 		t.Fatalf("seed set current revision: %v", err)
 	}
+	// A HEALTHY runtime row, because eligibility now depends on the feed as well as on the Stay. Every fixture
+	// here exists to exercise an evidence/version/revision rule, so the feed is put in the state where those
+	// rules are the only thing left deciding. The feed-health dimension itself is exercised in
+	// freshness_feed_health_integration_test.go, which drives these columns deliberately.
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
+		(tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, published_resync_generation,
+		 pinned_revision_id, transport_status, sync_status, continuity_status, last_connected_at, last_heartbeat_at)
+		VALUES ($1,$2,$3,1,'NONE',0,$4,'CONNECTED','IN_SYNC','CONTINUOUS',now(),now())`,
+		f.tenant, f.site, f.iface, f.rev); err != nil {
+		t.Fatalf("seed runtime: %v", err)
+	}
 	return f
 }
 
@@ -428,18 +439,25 @@ func TestIntegration_IssueRejectsIncomplete(t *testing.T) {
 }
 
 // TestIntegration_FreshnessConfigFailClosed proves a malformed / out-of-range max_auth_cache_age config never
-// causes a cast error or an unbounded window: it falls back to the strict 300s default.
+// causes a cast error and never produces an unbounded window: it falls back to the DERIVED ceiling — one
+// complete-sync cadence plus the heartbeat allowance — and an explicitly valid value is still honoured exactly.
+//
+// The fallback used to be a flat 300 seconds, and this test asserted that. That default is what made Room
+// sign-in unusable: a guest whose Stay the PMS had not mentioned for five minutes was refused even though the
+// feed was healthy and actively confirming nothing had changed. The property worth protecting here was never
+// the number — it is that a value nobody can parse must not WIDEN the window and must not raise. Both are
+// still asserted, against the ceiling that replaced it.
 func TestIntegration_FreshnessConfigFailClosed(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	s := NewStore(p)
 	ctx := context.Background()
 
-	// Freshness is now revalidated at ISSUANCE (an already-stale Stay must never yield a persisted context), so
-	// the fail-closed parse is proven there. INVALID / out-of-range / overflow-sized values → strict 300s
-	// default (never a cast error, never widened to a large window).
+	// Freshness is revalidated at ISSUANCE (an already-ineligible Stay must never yield a persisted context),
+	// so the fail-closed parse is proven there. INVALID / out-of-range / overflow-sized values → the derived
+	// ceiling (never a cast error, never an unbounded window).
 	for _, cfg := range []string{`"abc"`, `"-5"`, `"0"`, `null`, `604801`, `2147483648`, `99999999999999999999`} {
-		// fresh evidence (within the 300s default) → issues AND consumes: proves no SQL cast error, default applied
+		// fresh evidence → issues AND consumes: proves no SQL cast error and that the fallback is not zero.
 		f := seedCacheAge(t, p, cfg)
 		id, err := s.IssuePMS(ctx, grant(f, 600))
 		if err != nil {
@@ -448,14 +466,15 @@ func TestIntegration_FreshnessConfigFailClosed(t *testing.T) {
 		if _, err := s.Consume(ctx, id, pres(f)); err != nil {
 			t.Fatalf("cfg=%s fresh consume: %v", cfg, err)
 		}
-		// evidence 10min old (> 300s default) → issuance fails closed: proves the invalid value was NOT widened
-		f2 := seedAged(t, p, cfg, "now() - interval '10 minutes'", false)
+		// Evidence beyond the derived ceiling (24h complete-sync cadence + heartbeat allowance) → issuance
+		// fails closed. This is the assertion that the unparseable value was NOT widened into an open window.
+		f2 := seedAged(t, p, cfg, "now() - interval '30 hours'", false)
 		before := authCtxCount(t, p, f2)
 		if _, err := s.IssuePMS(ctx, grant(f2, 600)); err != ErrGrantIncomplete {
-			t.Fatalf("cfg=%s stale-beyond-default = %v, want ErrGrantIncomplete (invalid value must not widen)", cfg, err)
+			t.Fatalf("cfg=%s beyond-ceiling = %v, want ErrGrantIncomplete (invalid value must not widen)", cfg, err)
 		}
 		if after := authCtxCount(t, p, f2); after != before {
-			t.Fatalf("cfg=%s stale-at-issue must not persist a context: before=%d after=%d", cfg, before, after)
+			t.Fatalf("cfg=%s ineligible-at-issue must not persist a context: before=%d after=%d", cfg, before, after)
 		}
 	}
 

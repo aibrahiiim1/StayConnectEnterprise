@@ -25,10 +25,17 @@ import (
 // behaves exactly as it did, but it is not offered as a new choice: it means last-name-or-reservation and
 // the portal decides which by guessing at the shape of what was typed, so a surname containing a digit is
 // submitted as a reservation number and fails.
+//
+// "room_any" is the supported way to accept more than one kind of identifier, and it is NOT a revival of
+// "either". The distinction is where the decision happens. "either" made the BROWSER guess which field the
+// guest meant and send one of them; "room_any" sends the value as typed and has the server compare it against
+// all three PMS-derived fields at once, with the existing ambiguity rule failing closed when a value matches
+// more than one Stay. Nothing is inferred from the shape of what was typed.
 var pmsSignInModes = map[string]bool{
 	"room_lastname":    true,
 	"room_firstname":   true,
 	"room_reservation": true,
+	"room_any":         true,
 }
 
 // authMethodsRoutes reads and writes the site's guest sign-in configuration.
