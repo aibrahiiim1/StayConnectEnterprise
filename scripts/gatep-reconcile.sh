@@ -127,26 +127,31 @@ if [ -n "$DSN" ]; then
   psql "$DSN" -v ON_ERROR_STOP=1 -q -f "$STAGE/$ENTRY"; rc=$?
 else
   REMOTE="/tmp/$(basename "$STAGE")"
-  docker exec "$CONTAINER" rm -rf "$REMOTE" >/dev/null 2>&1
+  # Every in-container path is addressed with a doubled leading slash in docker exec arguments. Git Bash
+  # rewrites a lone leading "/" into a Windows path, so the verification below would look somewhere that does
+  # not exist and report the files absent. Linux collapses "//" to "/", so the identical string is correct on
+  # the CI runner. The docker cp destination is not affected: it starts with the container name.
+  REMOTE_X="/$REMOTE"
+  docker exec "$CONTAINER" rm -rf "$REMOTE_X" >/dev/null 2>&1
   docker cp "$STAGE" "$CONTAINER:$REMOTE" >/dev/null 2>&1 || refuse "could not copy the staged set into $CONTAINER"
 
   # Re-verify INSIDE the container. The copy is the step that went wrong before, so it is checked on the far
   # side rather than assumed: same hashes, same count, no nesting.
   for f in "${FILES[@]}"; do
     want="$(sha256sum "$STAGE/$f" | awk '{print $1}')"
-    got="$(docker exec "$CONTAINER" sha256sum "$REMOTE/$f" 2>/dev/null | awk '{print $1}')"
-    [ "$want" = "$got" ] || { docker exec "$CONTAINER" rm -rf "$REMOTE" >/dev/null 2>&1; refuse "$f differs inside the container (expected $want, found ${got:-absent})"; }
+    got="$(docker exec "$CONTAINER" sha256sum "$REMOTE_X/$f" 2>/dev/null | awk '{print $1}')"
+    [ "$want" = "$got" ] || { docker exec "$CONTAINER" rm -rf "$REMOTE_X" >/dev/null 2>&1; refuse "$f differs inside the container (expected $want, found ${got:-absent})"; }
   done
   incount="$(docker exec "$CONTAINER" sh -c "find '$REMOTE' -maxdepth 1 -type f | wc -l" 2>/dev/null | tr -d ' ')"
   indirs="$(docker exec "$CONTAINER" sh -c "find '$REMOTE' -mindepth 1 -type d | wc -l" 2>/dev/null | tr -d ' ')"
   if [ "$incount" != "${#FILES[@]}" ] || [ "$indirs" != "0" ]; then
-    docker exec "$CONTAINER" rm -rf "$REMOTE" >/dev/null 2>&1
+    docker exec "$CONTAINER" rm -rf "$REMOTE_X" >/dev/null 2>&1
     refuse "container staging holds $incount files and $indirs subdirectories, expected ${#FILES[@]} and 0"
   fi
   echo "   container copy hash-verified: ${#FILES[@]}/${#FILES[@]} files, no nesting"
 
-  docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U "$PGUSER_ROLE" -d "$DB" -q -f "$REMOTE/$ENTRY"; rc=$?
-  docker exec "$CONTAINER" rm -rf "$REMOTE" >/dev/null 2>&1
+  docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U "$PGUSER_ROLE" -d "$DB" -q -f "$REMOTE_X/$ENTRY"; rc=$?
+  docker exec "$CONTAINER" rm -rf "$REMOTE_X" >/dev/null 2>&1
 fi
 
 if [ "$rc" -ne 0 ]; then
