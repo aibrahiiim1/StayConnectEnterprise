@@ -766,9 +766,20 @@ func lockGraceConfig(ctx context.Context, tx pgx.Tx, tenant, site string) (grace
 		gpkg                  *string
 		configVersion         int64
 	)
+	// Through iam_v2.p3_lock_grace_config rather than SELECT ... FOR UPDATE on the table.
+	//
+	// The lock is identical — a SECURITY DEFINER function has no transaction of its own, so the row lock is
+	// taken in THIS transaction and held until it ends, serialising against a concurrent policy publication
+	// exactly as the inline statement did. What changes is the privilege this caller needs.
+	//
+	// PostgreSQL requires UPDATE privilege to take a row lock even when nothing is written, so locking the
+	// table directly meant granting svc_pmsd UPDATE on the grace config. Gate-P's D32 assertion refuses to
+	// complete while any runtime role holds INSERT/UPDATE/DELETE there, because policy must only change
+	// through the audited publication boundary — so the two requirements together made the full privilege
+	// reconcile impossible to run. The function needs only EXECUTE and can mutate nothing.
 	err := tx.QueryRow(ctx, `SELECT grace_duration_seconds, grace_down_kbps, grace_up_kbps, grace_data_quota_bytes,
 		grace_device_limit, grace_device_limit_policy, grace_package_revision_id, config_version
-		FROM iam_v2.site_checkout_grace_config WHERE tenant_id=$1 AND site_id=$2 FOR UPDATE`, tenant, site).
+		FROM iam_v2.p3_lock_grace_config($1,$2)`, tenant, site).
 		Scan(&dur, &down, &up, &quota, &devLim, &policyKind, &gpkg, &configVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

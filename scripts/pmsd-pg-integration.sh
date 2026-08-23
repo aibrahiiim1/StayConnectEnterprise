@@ -62,6 +62,16 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0051_continuity_unknown_is_not_a_healthy_feed') ON CONFLICT DO NOTHING;" >/dev/null
 
+# 0052 adds iam_v2.p3_lock_grace_config, which the Checkout Converter now calls instead of locking the grace
+# config table directly. The checkout suite exercises that path, including its concurrency behaviour.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0052_grace_config_lock_without_update_privilege.up.sql" >/dev/null 2>&1; then
+  echo "0052 FAILED TO APPLY -- deterministic, not a flake"
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0052_grace_config_lock_without_update_privilege') ON CONFLICT DO NOTHING;" >/dev/null
+
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi
 runtime_cols="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_runtime' AND column_name='pinned_secret_generation_id';")"

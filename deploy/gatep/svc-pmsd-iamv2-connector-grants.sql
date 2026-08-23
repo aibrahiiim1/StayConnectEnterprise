@@ -28,6 +28,19 @@
 
 GRANT USAGE ON SCHEMA iam_v2 TO svc_pmsd;
 
+-- USAGE on public, which svc_pmsd already held and which nothing re-granted.
+--
+-- It matters now because svc_pmsd is a reconciled role: gatep-grants.sql revokes ALL ON SCHEMA public from
+-- every runtime role before re-granting, so a privilege that exists live and is named in no file is removed by
+-- the first reconcile. The other four roles are re-granted this in gatep-grants.sql itself; pmsd's privileges
+-- live here, so it is stated here.
+--
+-- This adds nothing. It records what the role already has, so that bringing it under reconciliation preserves
+-- its behaviour instead of silently narrowing it. pmsd's own SQL addresses iam_v2 exclusively, but iam_v2
+-- DEFAULT expressions resolve functions through the search path, and losing public would surface as an insert
+-- failing deep inside a transaction rather than as anything that names a privilege.
+GRANT USAGE ON SCHEMA public TO svc_pmsd;
+
 -- ---------------------------------------------------------------------------
 -- CONNECTOR: interface identity, published revision, secret generation, runtime axes.
 -- ---------------------------------------------------------------------------
@@ -105,22 +118,30 @@ GRANT SELECT,INSERT        ON iam_v2.purchases                         TO svc_pm
 GRANT SELECT,UPDATE        ON iam_v2.sessions                          TO svc_pmsd;
 
 -- Read-only inputs the conversion consults to decide the boundary and what grace, if any, it may grant.
--- site_checkout_grace_config: SELECT **and UPDATE**, and the UPDATE is a row LOCK, not a licence to write.
 --
--- The conversion reads this row with `SELECT ... FOR UPDATE`, to serialise a checkout against a concurrent
--- grace-policy publication. PostgreSQL requires UPDATE privilege to take that lock even though the statement
--- modifies nothing, so SELECT alone fails with "permission denied for table site_checkout_grace_config" —
--- mid-transaction, which aborts the conversion and leaves the GO PENDING while the ordered per-interface
--- stream backs up behind it. That is what happened on the live appliance to five real checkouts.
+-- site_checkout_grace_config: SELECT ONLY. NO UPDATE — see below, because the history matters.
 --
--- Granting UPDATE does NOT make svc_pmsd a writer of grace policy. p3_grace_config_controlled_writer refuses
--- any actual column change from a caller that is not the owner of publish_checkout_grace_config, and taking a
--- row lock does not fire it. The privilege buys the lock; the trigger keeps the boundary.
+-- The conversion must lock this row to serialise a checkout against a concurrent grace-policy publication, and
+-- PostgreSQL requires UPDATE privilege to take a row lock even when the statement writes nothing. So this file
+-- used to grant UPDATE, with a long comment explaining that the privilege bought the lock and
+-- p3_grace_config_controlled_writer kept the boundary. Both halves of that were true.
 --
--- Worth recording how it was missed: the pre-flight rehearsal ran `SELECT ... FROM site_checkout_grace_config`
--- without `FOR UPDATE`, so it passed. A rehearsal has to issue the statement the code issues, lock clauses
--- included, or it proves something adjacent to the thing you need.
-GRANT SELECT,UPDATE ON iam_v2.site_checkout_grace_config TO svc_pmsd;
+-- It was still the wrong shape. Gate-P's D32 assertion refuses to complete while ANY non-owner login role
+-- holds INSERT/UPDATE/DELETE on this table, and it reads pg_roles dynamically, so svc_pmsd was covered the day
+-- the role was created. The result was a deadlock between two correct rules: the reconcile that converges
+-- every privilege to its allowlist could not run at all on an appliance where these grants had been applied.
+-- A safety mechanism that cannot be executed is not a safety mechanism.
+--
+-- iam_v2.p3_lock_grace_config (migration 0052) takes the lock as its owner and returns only the eight fields
+-- the converter reads. The lock is identical — a SECURITY DEFINER function has no transaction of its own, so
+-- the row stays locked in the caller's transaction until it ends — but reaching it needs EXECUTE on a function
+-- that cannot mutate anything, rather than UPDATE on the table.
+--
+-- Worth keeping the note on how the original gap was missed: the pre-flight rehearsal ran
+-- `SELECT ... FROM site_checkout_grace_config` without `FOR UPDATE`, so it passed. A rehearsal has to issue
+-- the statement the code issues, lock clauses included, or it proves something adjacent to the thing you need.
+GRANT SELECT ON iam_v2.site_checkout_grace_config TO svc_pmsd;
+GRANT EXECUTE ON FUNCTION iam_v2.p3_lock_grace_config(uuid, uuid) TO svc_pmsd;
 GRANT SELECT ON iam_v2.entitlement_state_transitions  TO svc_pmsd;
 GRANT SELECT ON iam_v2.internet_packages              TO svc_pmsd;
 GRANT SELECT ON iam_v2.internet_package_revisions     TO svc_pmsd;
