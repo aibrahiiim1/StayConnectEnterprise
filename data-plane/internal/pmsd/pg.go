@@ -186,10 +186,27 @@ func (r *pgRepo) UpdateContinuity(ctx context.Context, u ContinuityUpdate) error
 		string(u.Status), u.LastValidEventAt, u.DiscontinuityAt, u.LastResyncMarkerAt, u.LastEventCursor)
 }
 
+// UpdateSync moves the sync axis under the exact runtime-generation CAS.
+//
+// DECLARING RESYNC_REQUIRED CLEARS resync_started_at, and that is not optional. pir_resync_coherent requires
+// resync_started_at >= resync_requested_at, so writing a fresh requested_at while an older started_at from an
+// abandoned DS…DE window is still on the row produces a row the CHECK rejects.
+//
+// This is how a PRE-LIVE interface wedged itself permanently. A resync was interrupted between DS and DE on
+// 22 Aug, leaving resync_started_at set and its generation unpublished. From then on every reconnect called
+// RequireInitialResync, wrote a new requested_at against that stale started_at, and was rejected by the CHECK
+// about four milliseconds after connecting — so the link dropped, retried, and failed again, thousands of
+// times. Nothing downstream could recover: LIVE admission stays barred until a complete generation publishes,
+// so the event backlog simply grew and no Stay could gain occupancy evidence.
+//
+// MarkGapAndRequireResync already reset started_at for exactly this reason and says so in its comment. The
+// invariant was understood on that path and missed on this one. Keying the reset off the STATUS rather than
+// fixing the single caller means any future path that declares RESYNC_REQUIRED is coherent by construction.
 func (r *pgRepo) UpdateSync(ctx context.Context, u SyncUpdate) error {
 	return r.cas(ctx, `UPDATE iam_v2.pms_interface_runtime SET
 		sync_status=$5, resync_requested_at=COALESCE($6,resync_requested_at),
-		resync_started_at=COALESCE($7,resync_started_at), last_complete_sync_at=COALESCE($8,last_complete_sync_at),
+		resync_started_at=CASE WHEN $5='RESYNC_REQUIRED' THEN NULL ELSE COALESCE($7,resync_started_at) END,
+		last_complete_sync_at=COALESCE($8,last_complete_sync_at),
 		sync_cursor=COALESCE(NULLIF($9,''),sync_cursor), last_sync_failure_code=NULLIF($10,''), updated_at=now()
 		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4`,
 		u.TenantID, u.SiteID, u.PMSInterfaceID, u.ExpectedGeneration,

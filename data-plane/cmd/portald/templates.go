@@ -169,6 +169,9 @@ const landingHTML = `<!doctype html>
       room_lastname:    "Last name on the reservation",
       room_firstname:   "First name on the reservation",
       room_reservation: "Reservation / confirmation number",
+      // room_any accepts any of the three. The guest is told what they MAY type and is never asked to
+      // classify it — the server compares one value against all three fields.
+      room_any:         "First name, last name, or reservation number",
       either:           "Last name OR reservation number",
     };
     const challenges = {}; // channel -> challenge_id
@@ -498,6 +501,11 @@ const landingHTML = `<!doctype html>
       if (mode === 'room_firstname')        body.first_name = val;
       else if (mode === 'room_reservation') body.reservation_number = val;
       else if (mode === 'room_lastname')    body.last_name = val;
+      // room_any sends the value AS TYPED in one field and lets the server compare it against first name,
+      // last name and reservation number together. The browser deliberately does not look at the value: the
+      // legacy branch below is what happens when it does, and it is why a surname with a digit in it was
+      // submitted as a reservation number and failed.
+      else if (mode === 'room_any')         body.verification = val;
       else { // legacy "either" — kept exactly as it was for sites still configured with it.
         if (/^[A-Z0-9\-]+$/i.test(val) && /\d/.test(val)) body.reservation_number = val;
         else body.last_name = val;

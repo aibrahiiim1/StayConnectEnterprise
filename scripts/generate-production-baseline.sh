@@ -45,6 +45,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/data-plane/migrations/baseline"
 C="sc-baseline-gen-$$"
+# Derived, not written down: the header names the upgrade range, and a hardcoded number silently becomes a
+# lie the first time someone adds a migration — which is exactly what happened at 0050.
+LAST_MIGRATION="$(ls "$ROOT"/data-plane/migrations/*.up.sql | sed -E 's#.*/([0-9]+)_.*#\1#' | sort -n | tail -1)"
 mkdir -p "$OUT"
 cleanup() { docker rm -f "$C" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
@@ -96,7 +99,7 @@ docker exec "$C" pg_dump -U postgres -d stayconnect_site \
   echo "--"
   echo "-- This is the CURRENT schema and only the current schema. A new Production appliance is built from"
   echo "-- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing"
-  echo "-- installations continue to upgrade through data-plane/migrations/0001..0049, which still create"
+  echo "-- installations continue to upgrade through data-plane/migrations/0001..$LAST_MIGRATION, which still create"
   echo "-- those tables and then remove them, because that is what actually happened to them."
   echo "--"
   echo "-- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and"

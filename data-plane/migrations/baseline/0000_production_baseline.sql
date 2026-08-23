@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0049, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0050, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -23,6 +23,7 @@ DO $do$ BEGIN CREATE ROLE sc_financial_operator NOLOGIN; EXCEPTION WHEN duplicat
 DO $do$ BEGIN CREATE ROLE sc_financial_readonly NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 DO $do$ BEGIN CREATE ROLE sc_payment_outcome NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 DO $do$ BEGIN CREATE ROLE sc_payment_runtime NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
+DO $do$ BEGIN CREATE ROLE svc_pmsd NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 
 --
 -- PostgreSQL database dump
@@ -1001,18 +1002,13 @@ END; $$;
 CREATE FUNCTION iam_v2.issue_or_return_pms_context(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_stay uuid, p_device uuid, p_guest_network uuid, p_request uuid, p_ttl_seconds integer) RETURNS TABLE(context_id uuid, reused boolean)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'iam_v2', 'pg_temp'
-    AS $_$
+    AS $$
 DECLARE v_existing uuid; v_lifecycle int; v_ev bigint;
 BEGIN
-  -- This operation writes a capability-scoped family, so it declares its own scope. Doing it here
-  -- rather than relying on ownership is what lets Gate-P give every function its own owner without
-  -- any of them losing the right to perform its own writes.
   PERFORM iam_v2.begin_controlled_operation('auth_context');
   IF p_request IS NULL THEN
     RAISE EXCEPTION 'CONTEXT_INVALID: a PMS context must name the resolution it came from';
   END IF;
-  -- An existing LIVE context for this resolution is returned as-is. Note what is deliberately not matched:
-  -- a CONSUMED one. Returning that would hand back a credential that has already bought access.
   SELECT id INTO v_existing FROM iam_v2.auth_contexts
     WHERE tenant_id = p_tenant AND site_id = p_site AND resolution_request_id = p_request
       AND consumed_at IS NULL AND expires_at > now()
@@ -1022,24 +1018,20 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Same authoritative Stay snapshot the plain issue path takes: IN_HOUSE, ACTIVE interface, occupancy
-  -- evidence present, versioned, not clock-suspect, produced by the SAME revision, and still fresh.
+  -- The row lock and the version snapshot still come from the Stay itself; whether the Stay may be authorised
+  -- at all is the shared predicate's decision.
   SELECT st.lifecycle_version, st.occupancy_evidence_version INTO v_lifecycle, v_ev
     FROM iam_v2.stays st
-    JOIN iam_v2.pms_interfaces pi
-      ON pi.tenant_id=st.tenant_id AND pi.site_id=st.site_id AND pi.id=st.pms_interface_id
-    JOIN iam_v2.pms_interface_revisions pr
-      ON pr.tenant_id=st.tenant_id AND pr.site_id=st.site_id
-     AND pr.pms_interface_id=st.pms_interface_id AND pr.id=p_revision
-   WHERE st.tenant_id=p_tenant AND st.site_id=p_site AND st.pms_interface_id=p_interface AND st.id=p_stay
-     AND st.status='IN_HOUSE' AND pi.lifecycle_state='ACTIVE'
-     AND st.occupancy_evidence_at IS NOT NULL AND st.occupancy_clock_suspect IS NOT TRUE
-     AND st.occupancy_evidence_version > 0 AND st.occupancy_revision_id = p_revision
-     AND st.occupancy_evidence_at > now() - make_interval(secs =>
-           CASE WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
-                THEN CASE WHEN (pr.config->>'max_auth_cache_age_seconds')::int <= 604800
-                          THEN (pr.config->>'max_auth_cache_age_seconds')::int ELSE 300 END
-                ELSE 300 END)
+   WHERE st.tenant_id=p_tenant AND st.site_id=p_site
+     AND st.pms_interface_id=p_interface AND st.id=p_stay
+     -- Stay-row conditions INLINE, so the FOR UPDATE recheck evaluates them against the locked tuple.
+     AND st.status='IN_HOUSE'
+     AND st.occupancy_evidence_at IS NOT NULL
+     AND st.occupancy_clock_suspect IS NOT TRUE
+     AND st.occupancy_evidence_version > 0
+     AND st.occupancy_revision_id = p_revision
+     -- Feed health + the freshness ceiling, judged against the locked tuple's own evidence timestamp.
+     AND iam_v2.p3_feed_authorizes(p_tenant, p_site, p_interface, p_revision, st.occupancy_evidence_at)
    FOR UPDATE OF st;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
@@ -1053,7 +1045,7 @@ BEGIN
     VALUES (p_tenant, p_site, 'PMS', p_stay, p_interface, p_revision, p_device, p_guest_network,
             v_lifecycle, v_ev, p_request, now() + make_interval(secs => p_ttl_seconds))
     RETURNING id, false;
-END $_$;
+END $$;
 
 
 --
@@ -1158,6 +1150,29 @@ BEGIN
   END IF;
   RETURN NULL;
 END $$;
+
+
+--
+-- Name: p3_cfg_secs(jsonb, text, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p3_cfg_secs(p_config jsonb, p_key text, p_default integer) RETURNS integer
+    LANGUAGE sql IMMUTABLE
+    AS $_$
+  SELECT CASE
+           WHEN (p_config->>p_key) ~ '^[1-9][0-9]{0,10}$'
+            AND (p_config->>p_key)::bigint BETWEEN 1000 AND 604800000
+             THEN ((p_config->>p_key)::bigint / 1000)::int
+           ELSE p_default
+         END;
+$_$;
+
+
+--
+-- Name: FUNCTION p3_cfg_secs(p_config jsonb, p_key text, p_default integer); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p3_cfg_secs(p_config jsonb, p_key text, p_default integer) IS 'Fail-closed millisecond-to-seconds reader for operator-authored Revision config. Any missing, malformed, out-of-range or non-integer value yields the supplied default. Cannot raise: callers are on the authentication path, where an exception would be an outage.';
 
 
 --
@@ -1568,6 +1583,56 @@ CREATE FUNCTION iam_v2.p3_expected_class_minor(p_ip inet) RETURNS integer
     ELSE 4096 + (((split_part(host(p_ip), '.', 3)::int & 15) << 8) | split_part(host(p_ip), '.', 4)::int)
   END;
 $$;
+
+
+--
+-- Name: p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) RETURNS boolean
+    LANGUAGE sql STABLE
+    AS $_$
+  SELECT EXISTS (
+    SELECT 1
+      FROM iam_v2.pms_interfaces pi
+      JOIN iam_v2.pms_interface_revisions pr
+        ON pr.tenant_id=pi.tenant_id AND pr.site_id=pi.site_id
+       AND pr.pms_interface_id=pi.id AND pr.id=p_revision
+      JOIN iam_v2.pms_interface_runtime rt
+        ON rt.tenant_id=pi.tenant_id AND rt.site_id=pi.site_id AND rt.pms_interface_id=pi.id
+     WHERE pi.tenant_id=p_tenant AND pi.site_id=p_site AND pi.id=p_interface
+       AND pi.lifecycle_state='ACTIVE'
+       AND p_evidence_at IS NOT NULL
+       -- (1) the feed is maintaining the mirror RIGHT NOW. A disconnected, out-of-sync or gapped interface
+       --     authorises nobody, however recent its stored evidence happens to look.
+       AND rt.transport_status = 'CONNECTED'
+       AND rt.sync_status      = 'IN_SYNC'
+       AND rt.continuity_status IN ('CONTINUOUS','UNKNOWN')
+       AND rt.pinned_revision_id = p_revision
+       -- (2) proven liveness, so a silently hung socket cannot masquerade as a healthy one.
+       AND COALESCE(rt.last_heartbeat_at, rt.last_connected_at) IS NOT NULL
+       AND COALESCE(rt.last_heartbeat_at, rt.last_connected_at)
+             > now() - make_interval(secs => iam_v2.p3_cfg_secs(pr.config, 'heartbeat_timeout_ms', 300))
+       -- (3) an absolute ceiling: one full resync cadence plus the heartbeat allowance, so a Stay the PMS has
+       --     silently stopped carrying cannot authorise forever on a feed that is healthy for other guests.
+       --     An explicit max_auth_cache_age_seconds overrides it where an operator has chosen one.
+       AND p_evidence_at > now() - make_interval(secs =>
+             CASE
+               WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
+                AND (pr.config->>'max_auth_cache_age_seconds')::int <= 604800
+                 THEN (pr.config->>'max_auth_cache_age_seconds')::int
+               ELSE iam_v2.p3_cfg_secs(pr.config, 'complete_sync_ms', 86400)
+                  + iam_v2.p3_cfg_secs(pr.config, 'heartbeat_timeout_ms', 300)
+             END)
+  );
+$_$;
+
+
+--
+-- Name: FUNCTION p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the FEED-health half of PMS Room sign-in eligibility: interface ACTIVE, transport connected, in sync, continuous, pinned to the presented Revision, live within heartbeat_timeout_ms, and the supplied evidence timestamp within one complete-sync cadence. Silence from a healthy feed confirms an unchanged Stay; a disconnected feed authorises nobody. Deliberately does NOT read iam_v2.stays: callers hold FOR UPDATE OF st and need those conditions inline so EvalPlanQual rechecks them against the locked tuple.';
 
 
 --
@@ -12800,6 +12865,7 @@ GRANT ALL ON FUNCTION iam_v2.ingest_absolute_counters(p_tenant uuid, p_site uuid
 --
 
 REVOKE ALL ON FUNCTION iam_v2.issue_or_return_pms_context(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_stay uuid, p_device uuid, p_guest_network uuid, p_request uuid, p_ttl_seconds integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.issue_or_return_pms_context(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_stay uuid, p_device uuid, p_guest_network uuid, p_request uuid, p_ttl_seconds integer) TO svc_scd;
 
 
 --
@@ -13449,6 +13515,13 @@ GRANT SELECT ON TABLE iam_v2.appliance_product_settings TO svc_edged;
 
 
 --
+-- Name: TABLE auth_context_offers; Type: ACL; Schema: iam_v2; Owner: -
+--
+
+GRANT SELECT ON TABLE iam_v2.auth_context_offers TO svc_scd;
+
+
+--
 -- Name: TABLE auth_contexts; Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -13460,6 +13533,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.auth_contexts TO svc_scd;
 -- Name: TABLE auth_resolutions; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT,INSERT ON TABLE iam_v2.auth_resolutions TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.auth_resolutions TO svc_edged;
 
 
@@ -13571,7 +13645,8 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.guest_access_accounts TO svc_e
 -- Name: TABLE guest_network_pms_map; Type: ACL; Schema: iam_v2; Owner: -
 --
 
-GRANT SELECT ON TABLE iam_v2.guest_network_pms_map TO svc_edged;
+GRANT SELECT ON TABLE iam_v2.guest_network_pms_map TO svc_scd;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE iam_v2.guest_network_pms_map TO svc_edged;
 
 
 --
@@ -13660,6 +13735,7 @@ GRANT SELECT ON TABLE iam_v2.payment_transactions TO sc_payment_outcome;
 -- Name: TABLE pms_interface_revisions; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.pms_interface_revisions TO svc_scd;
 GRANT SELECT,INSERT ON TABLE iam_v2.pms_interface_revisions TO svc_edged;
 
 
@@ -13681,6 +13757,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.pms_interface_secret_generations TO s
 -- Name: TABLE pms_interfaces; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.pms_interfaces TO svc_acctd;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.pms_interfaces TO svc_edged;
 
@@ -13826,6 +13903,7 @@ GRANT SELECT ON TABLE iam_v2.stay_folios TO svc_edged;
 -- Name: TABLE stay_guests; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.stay_guests TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.stay_guests TO svc_edged;
 
 
@@ -13833,6 +13911,7 @@ GRANT SELECT ON TABLE iam_v2.stay_guests TO svc_edged;
 -- Name: TABLE stays; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.stays TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.stays TO svc_acctd;
 GRANT SELECT ON TABLE iam_v2.stays TO svc_edged;
 

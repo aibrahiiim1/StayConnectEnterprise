@@ -196,6 +196,18 @@ func newAuthFixture(t *testing.T) *authFixture {
 		 WHERE tenant_id=$1 AND site_id=$2`, f.tenant, f.site, f.revision); err != nil {
 		t.Fatalf("publish the interface revision: %v", err)
 	}
+	// A HEALTHY runtime row. Authorising a guest now depends on the FEED being connected and in sync as well
+	// as on the Stay: a PMS that is telling us nothing cannot vouch for anybody. These fixtures exercise the
+	// resolve → context → offer path, so the feed is put in the state where that path is the only thing under
+	// test; the feed rule itself is exercised in internal/authctx.
+	if _, err := p.Exec(ctx, `INSERT INTO iam_v2.pms_interface_runtime
+		(tenant_id, site_id, pms_interface_id, runtime_generation, credential_mode, published_resync_generation,
+		 pinned_revision_id, transport_status, sync_status, continuity_status, last_connected_at, last_heartbeat_at)
+		SELECT $1,$2,i.id,1,'NONE',0,$3,'CONNECTED','IN_SYNC','CONTINUOUS',now(),now()
+		  FROM iam_v2.pms_interfaces i WHERE i.tenant_id=$1 AND i.site_id=$2
+		ON CONFLICT DO NOTHING`, f.tenant, f.site, f.revision); err != nil {
+		t.Fatalf("seed pms interface runtime: %v", err)
+	}
 	// The catalog's current-revision pointer is a separate statement: a data-modifying CTE cannot see a
 	// sibling CTE's insert.
 	if _, err := p.Exec(ctx, `

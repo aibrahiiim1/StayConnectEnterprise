@@ -145,29 +145,26 @@ func (s *Store) IssuePMSTx(ctx context.Context, tx pgx.Tx, g PMSGrant) (string, 
 	}
 	var lifecycleVer int
 	var evVer int64
-	// authoritative snapshot from the resolved Stay: locked (L1 Stay-first), IN_HOUSE, occupancy evidence
-	// present with a real MONOTONIC version (> 0), produced by the SAME Revision the resolution authenticated
-	// against, not clock-suspect, AND still FRESH under that Revision's pinned max_auth_cache_age. Freshness is
-	// revalidated HERE so a context that is already stale at the moment of issue is NEVER persisted — the
-	// evidence-version guard alone cannot detect wall-clock staleness of unchanged evidence. Same cast-safe,
-	// fail-closed 300s parse as consume (regex-bounded 1..6 digits, nested CASE, <= 604800).
+	// Authoritative snapshot from the resolved Stay: locked (L1 Stay-first), and eligible according to
+	// iam_v2.p3_feed_authorizes — the SINGLE definition of the feed-health rule, shared with
+	// iam_v2.issue_or_return_pms_context.
+	//
+	// It used to be spelled out here, and in the consume path below, and again inside the SQL function: three
+	// hand-maintained copies of one security rule. They agreed, and all three were wrong the same way, keying
+	// eligibility to the age of the last event about the individual Stay. A healthy PMS says nothing about a
+	// guest who is simply in their room, so evidence "expired" five minutes after check-in while the feed was
+	// perfectly healthy. Eligibility now follows FEED health; see the function's comment for the full rule.
+	//
+	// It is still revalidated HERE as well as in the function, so a context that has become ineligible at the
+	// moment of issue is never persisted.
 	err := tx.QueryRow(ctx, `SELECT st.lifecycle_version, st.occupancy_evidence_version
 		FROM iam_v2.stays st
-		JOIN iam_v2.pms_interfaces pi
-		  ON pi.tenant_id=st.tenant_id AND pi.site_id=st.site_id AND pi.id=st.pms_interface_id
-		JOIN iam_v2.pms_interface_revisions pr
-		  ON pr.tenant_id=st.tenant_id AND pr.site_id=st.site_id AND pr.pms_interface_id=st.pms_interface_id
-		     AND pr.id=$5
 		WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.pms_interface_id=$3 AND st.id=$4
-		  AND st.status='IN_HOUSE' AND pi.lifecycle_state='ACTIVE'
+		  AND st.status='IN_HOUSE'
 		  AND st.occupancy_evidence_at IS NOT NULL AND st.occupancy_clock_suspect IS NOT TRUE
 		  AND st.occupancy_evidence_version > 0
 		  AND st.occupancy_revision_id=$5
-		  AND st.occupancy_evidence_at > now() - make_interval(secs =>
-		        CASE WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
-		             THEN CASE WHEN (pr.config->>'max_auth_cache_age_seconds')::int <= 604800
-		                       THEN (pr.config->>'max_auth_cache_age_seconds')::int ELSE 300 END
-		             ELSE 300 END)
+		  AND iam_v2.p3_feed_authorizes($1,$2,$3,$5, st.occupancy_evidence_at)
 		FOR UPDATE OF st`,
 		g.Tenant, g.Site, g.Interface, g.Stay, g.Revision).Scan(&lifecycleVer, &evVer)
 	if err != nil {
@@ -351,30 +348,28 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 			JOIN iam_v2.auth_contexts ac
 			  ON ac.id=$1 AND ac.stay_id=st.id AND ac.tenant_id=st.tenant_id AND ac.site_id=st.site_id
 			     AND ac.pms_interface_id=st.pms_interface_id
-			JOIN iam_v2.pms_interfaces pi
-			  ON pi.tenant_id=st.tenant_id AND pi.site_id=st.site_id AND pi.id=st.pms_interface_id
-			JOIN iam_v2.pms_interface_revisions pr
-			  ON pr.tenant_id=st.tenant_id AND pr.site_id=st.site_id AND pr.pms_interface_id=st.pms_interface_id
-			     AND pr.id=ac.authentication_interface_revision_id
-			WHERE st.status='IN_HOUSE'
-			  AND pi.lifecycle_state='ACTIVE'
+			WHERE
 			  -- SNAPSHOT: pinned Stay EPISODE + MONOTONIC occupancy-evidence version unchanged — a
 			  -- Checkout→Reinstatement (lifecycle_version bump) or an authoritative evidence replacement
-			  -- (evidence_version bump) invalidates the context even within TTL.
-			  AND st.lifecycle_version IS NOT DISTINCT FROM ac.pinned_lifecycle_version
+			  -- (evidence_version bump) invalidates the context even within TTL. This is the part that is
+			  -- specific to CONSUMING a context, so it stays here.
+			  st.lifecycle_version IS NOT DISTINCT FROM ac.pinned_lifecycle_version
 			  AND st.occupancy_evidence_version IS NOT DISTINCT FROM ac.pinned_occupancy_evidence_version
-			  -- PROVENANCE: evidence produced by the SAME immutable Revision the context authenticated against.
+			  -- Conditions on the Stay row stay INLINE, never inside a function. This query holds
+			  -- FOR UPDATE OF st, and when a concurrent Checkout commits while we wait on that lock,
+			  -- PostgreSQL re-evaluates these against the UPDATED tuple and correctly refuses the consume.
+			  -- A STABLE function reading iam_v2.stays internally would answer from the pre-Checkout
+			  -- statement snapshot and let a departed guest through.
+			  AND st.status='IN_HOUSE'
 			  AND st.occupancy_revision_id = ac.authentication_interface_revision_id
 			  AND st.occupancy_evidence_at IS NOT NULL
 			  AND st.occupancy_evidence_version > 0
 			  AND st.occupancy_clock_suspect IS NOT TRUE
-			  -- freshness: CAST-SAFE, fail-closed (regex-bounded 1..6 digits → nested CASE cast → <= 604800,
-			  -- else strict 300s). An invalid value is NEVER widened to a large window.
-			  AND st.occupancy_evidence_at > now() - make_interval(secs =>
-			        CASE WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
-			             THEN CASE WHEN (pr.config->>'max_auth_cache_age_seconds')::int <= 604800
-			                       THEN (pr.config->>'max_auth_cache_age_seconds')::int ELSE 300 END
-			             ELSE 300 END)
+			  -- Feed health and the freshness ceiling are the shared rule, re-evaluated at consume against the
+			  -- SAME Revision the context authenticated under and the locked tuple's own evidence timestamp.
+			  -- A feed that has gone away between issue and consume stops the consumption here.
+			  AND iam_v2.p3_feed_authorizes(st.tenant_id, st.site_id, st.pms_interface_id,
+			                                ac.authentication_interface_revision_id, st.occupancy_evidence_at)
 			FOR UPDATE OF st`, id).Scan(&one)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
