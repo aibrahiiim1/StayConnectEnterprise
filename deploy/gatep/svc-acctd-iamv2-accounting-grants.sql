@@ -51,5 +51,21 @@ GRANT EXECUTE ON FUNCTION iam_v2.rebind_session_entitlement(uuid, uuid, timestam
 GRANT EXECUTE ON FUNCTION iam_v2.terminate_entitlement_at_boundary(uuid, timestamptz, text) TO svc_acctd;
 GRANT EXECUTE ON FUNCTION iam_v2.entitlement_usage_bytes(uuid, timestamptz) TO svc_acctd;
 
+-- The DATA-quota crossing the expiry sweep derives for every candidate it considers.
+--
+-- THIS GRANT HAS TO LIVE HERE, NOT IN THE MIGRATION THAT CREATED THE FUNCTION. Migration 0041 does grant it,
+-- and that grant is real — until the next Gate-P reconcile, whose preamble REVOKEs ALL PRIVILEGES ON ALL
+-- FUNCTIONS IN SCHEMA iam_v2 from every service role before the per-service files re-grant. A privilege named
+-- only in a migration is therefore removed by the first reconcile after it and never comes back, which is why
+-- the live appliance logged "permission denied for function p6_data_crossing" on every sweep — roughly once a
+-- second, indefinitely, with the expiry sweep failing before it could evaluate a single candidate.
+--
+-- Read-only and derivation-only: it computes when an entitlement's data allowance is crossed and writes
+-- nothing. It enables no Phase-6 capability that migration 0041 did not already intend.
+--
+-- scripts/gatep-grant-survives-reconcile.sh is the regression check, and it asserts both halves: that this
+-- privilege survives a reconcile, and that a migration-only grant does not.
+GRANT EXECUTE ON FUNCTION iam_v2.p6_data_crossing(uuid) TO svc_acctd;
+
 -- NOT granted: DELETE on anything, and no write to packages, plans or their revisions. Metering must never
 -- be able to change what was sold.

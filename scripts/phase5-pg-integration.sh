@@ -45,7 +45,8 @@ for m in 0007_auth_throttle_buckets 0009_phase2_commerce 0010_phase3_stay_resolu
          0026_phase4_c35_failclosed_and_operator_retry \
          0027_phase5_poststay_and_transfer 0028_phase5_poststay_throttle_method \
          0029_phase5_reveal_is_at_mint \
-         0050_pms_auth_freshness_follows_feed_health; do
+         0050_pms_auth_freshness_follows_feed_health \
+         0051_continuity_unknown_is_not_a_healthy_feed; do
   # 0050 is out of numeric sequence with the rest of this list on purpose: this gate runs internal/authctx,
   # whose PMS arm now calls iam_v2.p3_feed_authorizes. Without it those tests fail with "function does not
   # exist" rather than on anything Phase 5 owns. It is applied last, after everything it redefines.
