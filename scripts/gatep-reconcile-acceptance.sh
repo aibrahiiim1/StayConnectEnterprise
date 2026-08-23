@@ -177,6 +177,14 @@ mkdir -p "$FAKE/scripts" "$FAKE/deploy/gatep"
 cp "$ROOT/scripts/gatep-reconcile.sh" "$FAKE/scripts/"
 cp "$GP"/*.sql "$GP"/*.sh "$FAKE/deploy/gatep/" 2>/dev/null
 
+# A real git checkout, because that is what the runner is designed against and half its protection is
+# repository identity. Comparing hashes proves staging copied the source faithfully; it cannot notice that the
+# SOURCE is the wrong revision, which is what the dirty-tree and --expect-commit checks are for.
+( cd "$FAKE" && git init -q . \
+    && git -c user.email=a@b -c user.name=t add -A \
+    && git -c user.email=a@b -c user.name=t commit -qm "acceptance fixture" ) >/dev/null 2>&1 \
+  || { echo "INFRA: could not build the fixture checkout"; exit 2; }
+
 if bash "$FAKE/scripts/gatep-reconcile.sh" --dsn "postgres://unused" --dry-run >/tmp/ga-s1.log 2>&1; then
   ok "an intact source set passes verification"
 else
@@ -202,9 +210,23 @@ printf '\n-- tampered\n' >> "$FAKE/deploy/gatep/$MISSING"
 BEFORE_T="$(acl_snapshot)"
 if bash "$FAKE/scripts/gatep-reconcile.sh" --container "$C" --db "$DB" >/tmp/ga-s3.log 2>&1; then
   bad "a tampered include was accepted"
+elif grep -q "REFUSED (no database change)" /tmp/ga-s3.log; then
+  ok "an include that does not match the committed revision is refused before any database change"
 else
-  ok "a modified include is refused (hash mismatch or dirty tree)"
+  bad "the tampered run failed, but not as a pre-database refusal"; tail -5 /tmp/ga-s3.log
 fi
+( cd "$FAKE" && git checkout -q -- "deploy/gatep/$MISSING" ) 2>/dev/null
+
+# The explicit revision pin: asking for a commit this tree is not at must refuse.
+if bash "$FAKE/scripts/gatep-reconcile.sh" --container "$C" --db "$DB" \
+     --expect-commit 0000000000000000000000000000000000000000 >/tmp/ga-s4.log 2>&1; then
+  bad "a run pinned to the wrong commit was accepted"
+elif grep -q "REFUSED (no database change)" /tmp/ga-s4.log; then
+  ok "a wrong --expect-commit is refused before any database change"
+else
+  bad "the pinned run failed, but not as a pre-database refusal"; tail -5 /tmp/ga-s4.log
+fi
+
 [ "$BEFORE_T" = "$(acl_snapshot)" ] && ok "no ACL changed during the refused runs" || bad "a refused run changed an ACL"
 
 # ---------------------------------------------------------------------------------------------------------

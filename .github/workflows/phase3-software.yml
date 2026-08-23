@@ -164,6 +164,15 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh gatep-grant-survives-reconcile --
           bash $GITHUB_WORKSPACE/scripts/gatep-grant-survives-reconcile.sh
 
+      # The prior question to "do the right grants survive": can running the reconcile hurt anything. Proves
+      # it is atomic under a deliberate mid-run failure, idempotent, that svc_pmsd holds no direct grace
+      # mutation path, that PUBLIC holds no auth predicate, and that a stale or incomplete source set is
+      # refused before a transaction opens.
+      - name: Gate-P reconcile is safe to run (disposable PG)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh gatep-reconcile-acceptance --
+          bash $GITHUB_WORKSPACE/scripts/gatep-reconcile-acceptance.sh
+
       - name: go test -race (all Phase-3 concurrency-sensitive paths)
         working-directory: data-plane
         # pmsd, resolver, auth context, stay grant, checkout, scd, acctd, netd, and the controlled-writer guard.
