@@ -181,20 +181,12 @@ func (p *phase3Auth) device(ctx context.Context, d wireDevice) (deviceIdentity, 
 // ---- resolve ---------------------------------------------------------------
 
 type phase3ResolveReq struct {
-	Room              string `json:"room"`
-	LastName          string `json:"last_name"`
-	FirstName         string `json:"first_name"`
-	ReservationNumber string `json:"reservation_number"`
-	// GuestIdentifier is ONE value the guest typed when the site accepts any supported identifier. The
-	// server matches it against last name, first name and reservation number rather than the portal
-	// guessing which one it is.
-	//
-	// The old "either" mode did that guessing in the browser with a regex, so a surname containing a digit
-	// was submitted as a reservation number and simply failed. Deciding server-side removes the guess and
-	// keeps the decision where the data is.
-	GuestIdentifier string     `json:"guest_identifier"`
-	RequestID       string     `json:"request_id"`
-	Device          wireDevice `json:"device"`
+	Room              string     `json:"room"`
+	LastName          string     `json:"last_name"`
+	FirstName         string     `json:"first_name"`
+	ReservationNumber string     `json:"reservation_number"`
+	RequestID         string     `json:"request_id"`
+	Device            wireDevice `json:"device"`
 }
 
 // resolveHandler proves the guest's identity STRICTLY across every PMS Interface mapped to their network, and
@@ -217,11 +209,7 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	last := normalizeName(req.LastName)
 	first := normalizeName(req.FirstName)
 	res := strings.TrimSpace(req.ReservationNumber)
-	// One value offered against every supported identifier. Normalised the same way each field is, so the
-	// comparison is the one the stored columns were built for.
-	anyID := strings.TrimSpace(req.GuestIdentifier)
-	anyIDName := normalizeName(req.GuestIdentifier)
-	if room == "" || (last == "" && first == "" && res == "" && anyID == "") {
+	if room == "" || (last == "" && first == "" && res == "") {
 		// Incomplete evidence is a non-success like any other: telling the guest WHICH field was missing is
 		// a small oracle, and the portal already knows what it asked for.
 		notVerified(w, "incomplete_evidence")
@@ -238,7 +226,7 @@ func (p *phase3Auth) resolveHandler(w http.ResponseWriter, r *http.Request) {
 	// The probe evaluates ONE interface's mirrored Stay state. It returns a determinate verdict or an
 	// indeterminate one; it never guesses, and the resolver waits for every interface before deciding.
 	probe := pmsresolve.ProbeFunc(func(pctx context.Context, ifaceID string) (pmsresolve.CandidateOutcome, string, error) {
-		return p.probeInterface(pctx, ifaceID, room, last, first, res, anyIDName, anyID)
+		return p.probeInterface(pctx, ifaceID, room, last, first, res)
 	})
 
 	out, err := p.resolver.Resolve(ctx, p.srv.tenID, p.srv.siteID, dev.GuestNetwork, strings.TrimSpace(req.RequestID), probe)
@@ -360,15 +348,13 @@ func validRequestID(s string) bool {
 // exactly the decision this system must never make on its own.
 // probeInterface evaluates ONE interface's mirrored Stay state for the submitted evidence.
 //
-// Every identifier is matched against a field the PMS actually populated on this Stay — last name and first
+// Each identifier is matched against a field the PMS actually populated on this Stay — last name and first
 // name from stay_guests, reservation from the Stay itself. There is no fuzzy matching and nothing is
 // inferred: a value either equals a stored, normalised identity or it does not.
 //
-// anyName/anyRaw carry the single value from the any-supported-identifier mode. It is tried against all
-// three, and because the row cap and the >1 = AMBIGUOUS_LOCAL rule are unchanged, widening the match set can
-// only ever make the resolver MORE cautious — two Stays matching one value is an ambiguity it refuses,
-// exactly as it would for a shared surname.
-func (p *phase3Auth) probeInterface(ctx context.Context, ifaceID, room, last, first, res, anyName, anyRaw string) (pmsresolve.CandidateOutcome, string, error) {
+// first_name is matched because room_firstname has always been a selectable mode and never worked: the
+// portal sent the field, this probe ignored it, and every attempt failed as incomplete evidence.
+func (p *phase3Auth) probeInterface(ctx context.Context, ifaceID, room, last, first, res string) (pmsresolve.CandidateOutcome, string, error) {
 	rows, err := p.srv.db.Query(ctx, `
 		SELECT s.id::text
 		  FROM iam_v2.stays s
@@ -379,12 +365,8 @@ func (p *phase3Auth) probeInterface(ctx context.Context, ifaceID, room, last, fi
 		                                WHERE g.stay_id = s.id AND g.last_name_norm = $5))
 		      OR ($6 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
 		                                WHERE g.stay_id = s.id AND g.first_name_norm = $6))
-		      OR ($7 <> '' AND s.external_reservation_id = $7)
-		      OR ($8 <> '' AND EXISTS (SELECT 1 FROM iam_v2.stay_guests g
-		                                WHERE g.stay_id = s.id
-		                                  AND (g.last_name_norm = $8 OR g.first_name_norm = $8)))
-		      OR ($9 <> '' AND s.external_reservation_id = $9) )
-		 LIMIT 3`, p.srv.tenID, p.srv.siteID, ifaceID, room, last, first, res, anyName, anyRaw)
+		      OR ($7 <> '' AND s.external_reservation_id = $7) )
+		 LIMIT 3`, p.srv.tenID, p.srv.siteID, ifaceID, room, last, first, res)
 	if err != nil {
 		// An interface whose state cannot be read is INDETERMINATE, never a determinate "no such guest".
 		return pmsresolve.Unavailable, "", err

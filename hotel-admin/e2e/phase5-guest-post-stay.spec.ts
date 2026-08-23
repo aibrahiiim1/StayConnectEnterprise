@@ -34,7 +34,13 @@ async function serve(page: Page, answers: unknown[], calls: Call[]) {
     r.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ pms: { enabled: true, mode: "room_lastname" }, phase3_pms: true }),
+      // phase5_poststay is declared EXPLICITLY. The tab used to appear whenever PMS was on, so this mock
+      // did not need to mention post-stay at all — which is precisely the coupling that put a Post-Stay tab
+      // in front of guests on an appliance whose post-stay routes were not mounted. The capability now has
+      // its own gate, and a fixture that wants the panel has to say so.
+      body: JSON.stringify({
+        pms: { enabled: true, mode: "room_lastname" }, phase3_pms: true, phase5_poststay: true,
+      }),
     }));
   let n = 0;
   await page.route("**/auth/post-stay-pin", async (route: Route) => {

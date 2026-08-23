@@ -49,21 +49,32 @@ func (s *server) tenantAuthMethods(w http.ResponseWriter, r *http.Request) {
 	// Per-guest ELIGIBILITY still decides the actual offer set, and that answer stays uniform.
 	packagesAvailable := s.sitePackagesAvailable(r.Context())
 
+	// IS THE POST-STAY SURFACE ACTUALLY SERVED? Reported from the one thing that decides it: whether this
+	// daemon mounted the post-stay routes at startup, which happens only when Phase5Config.GuestOn() is true.
+	//
+	// The portal previously showed the Post-Stay tab whenever PMS room sign-in was on. Those are separate
+	// capabilities — PMS proves an in-house guest by room and name; post-stay lets a DEPARTED guest back in
+	// with a PIN — and tying one to the other put a sign-in method in front of guests that the appliance was
+	// not serving. Every PIN typed into it reached a route that does not exist.
+	postStayAvailable := s.p5poststay != nil
+
 	if s.p3auth != nil {
-		// The portal needs exactly one extra fact about PMS: whether to submit the room form to the
-		// Stay-resolution flow or the legacy one. It is derived from the flags this daemon started with, so a
-		// dark appliance advertises nothing and the portal keeps using the path it always used.
+		// The portal needs one extra fact about PMS: whether to submit the room form to the Stay-resolution
+		// flow or the legacy one. It is derived from the flags this daemon started with, so a dark appliance
+		// advertises nothing and the portal keeps using the path it always used.
 		writeJSON(w, http.StatusOK, struct {
 			*tenantcfg.AuthMethods
 			Phase3PMS         bool `json:"phase3_pms"`
+			PostStay          bool `json:"phase5_poststay"`
 			PackagesAvailable bool `json:"internet_packages_available"`
-		}{cfg, true, packagesAvailable})
+		}{cfg, true, postStayAvailable, packagesAvailable})
 		return
 	}
 	writeJSON(w, http.StatusOK, struct {
 		*tenantcfg.AuthMethods
+		PostStay          bool `json:"phase5_poststay"`
 		PackagesAvailable bool `json:"internet_packages_available"`
-	}{cfg, packagesAvailable})
+	}{cfg, postStayAvailable, packagesAvailable})
 }
 
 // sitePackagesAvailable reports whether this site has at least one internet package a guest could be given.

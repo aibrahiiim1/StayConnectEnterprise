@@ -32,13 +32,6 @@ const (
 	ModeRoomFirstName   Mode = "room_firstname"
 	ModeRoomReservation Mode = "room_reservation"
 	ModeEither          Mode = "either"
-	// ModeRoomAny accepts ONE value and matches it against every supported PMS identity field: last name,
-	// first name, or reservation number.
-	//
-	// Added rather than redefining ModeEither, which historically means last-name-or-reservation and is
-	// decided by a heuristic in the portal. Existing stored configurations keep exactly the behaviour they
-	// were saved with; sites that want all three opt into this one.
-	ModeRoomAny Mode = "room_any"
 )
 
 func ValidMode(m string) bool {
