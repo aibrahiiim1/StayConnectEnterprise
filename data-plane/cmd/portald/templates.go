@@ -332,10 +332,31 @@ const landingHTML = `<!doctype html>
     // on the site, and never varies with what was typed.
     const PHASE3_FAIL = 'We could not verify your stay. Please check your details or contact reception.';
 
+    // newRequestID returns a CANONICAL RFC-4122 UUID — 36 characters, dashed — because that is the only
+    // shape the server accepts.
+    //
+    // THE FALLBACK USED TO RETURN 32 UNDASHED HEX CHARACTERS, and the server rejects anything that is not a
+    // canonical UUID with malformed_request_id. That looks like a corner case and is not: crypto.randomUUID
+    // exists only in a SECURE CONTEXT, and a captive portal is served over plain HTTP by definition, so the
+    // fallback is the path every real guest takes. Room sign-in therefore failed for everyone, on every
+    // browser, before any room number or name was ever looked at — and because the failure is folded into the
+    // uniform message, it was indistinguishable from a wrong surname.
+    //
+    // crypto.getRandomValues IS available in an insecure context, so the bytes were never the problem; only
+    // the formatting was. The version and variant bits are set so the value is a real v4 UUID rather than
+    // dashed random hex, and Math.random is the last resort for a browser offering neither API.
     function newRequestID() {
       if (window.crypto && window.crypto.randomUUID) { return window.crypto.randomUUID(); }
-      const b = new Uint8Array(16); (window.crypto || {}).getRandomValues && window.crypto.getRandomValues(b);
-      return Array.from(b, function(x){ return ('0'+x.toString(16)).slice(-2); }).join('');
+      const b = new Uint8Array(16);
+      if (window.crypto && window.crypto.getRandomValues) {
+        window.crypto.getRandomValues(b);
+      } else {
+        for (let i = 0; i < 16; i++) { b[i] = Math.floor(Math.random() * 256); }
+      }
+      b[6] = (b[6] & 0x0f) | 0x40; // version 4
+      b[8] = (b[8] & 0x3f) | 0x80; // RFC-4122 variant
+      const h = Array.from(b, function(x){ return ('0' + x.toString(16)).slice(-2); }).join('');
+      return h.slice(0,8) + '-' + h.slice(8,12) + '-' + h.slice(12,16) + '-' + h.slice(16,20) + '-' + h.slice(20);
     }
 
     // phase3RequestID decides whether this submission is a RETRY of the attempt already in flight or a NEW
