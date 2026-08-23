@@ -109,6 +109,24 @@ GRANT EXECUTE ON FUNCTION iam_v2.issue_or_return_pms_context(
 GRANT EXECUTE ON FUNCTION iam_v2.record_auth_context_offer(
   uuid, uuid, uuid, uuid, integer, bigint, timestamptz) TO svc_scd;
 
+-- The feed-health predicate the PMS arm evaluates at issue and again at consume, and the fail-closed config
+-- reader it calls.
+--
+-- Migrations 0050 and 0051 grant these to svc_scd, and that is not sufficient — it is the same mistake that
+-- silently disabled the expiry sweep. A reconcile revokes every iam_v2 function privilege and re-grants only
+-- what these per-service files name, so a migration-only grant lasts until the next reconcile and no longer.
+-- Observed directly: after a reconcile on PRE-LIVE these functions were left executable by scd only because
+-- CREATE FUNCTION's default ACL grants EXECUTE to PUBLIC, which is neither least privilege nor something to
+-- depend on.
+--
+-- So PUBLIC is withdrawn and scd is named explicitly. Withdrawing PUBLIC is the point: an authentication
+-- predicate that every role in the database may evaluate is an information disclosure about occupancy, and
+-- it was never intended — it is what a bare CREATE FUNCTION leaves behind when nobody says otherwise.
+REVOKE ALL ON FUNCTION iam_v2.p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION iam_v2.p3_cfg_secs(jsonb, text, int)                            FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION iam_v2.p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamptz) TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.p3_cfg_secs(jsonb, text, int)                           TO svc_scd;
+
 -- The auth_context family is guarded in the DATABASE: a trigger refuses any
 -- write not inside a transaction that has opened a controlled operation. This
 -- is the same minimum already granted to svc_edged and svc_acctd -- it lets scd
