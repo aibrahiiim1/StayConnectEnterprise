@@ -102,7 +102,16 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 
 	var eventID, identity, eventType string
 	var raw []byte
-	err = tx.QueryRow(ctx, `SELECT se.id::text, se.external_event_identity, se.event_type, se.payload
+	// received_at, clock_suspect and the interface's PINNED revision (with its normalization version) come back
+	// with the event because the Stay's occupancy evidence is stamped from them — see stampOccupancyEvidence.
+	var evReceivedAt time.Time
+	var evClockSuspect bool
+	var pinnedRevision string
+	var pinnedNormVersion int
+	err = tx.QueryRow(ctx, `SELECT se.id::text, se.external_event_identity, se.event_type, se.payload,
+		       se.received_at, se.clock_suspect, COALESCE(r.pinned_revision_id::text,''),
+		       COALESCE((SELECT rv.normalization_version FROM iam_v2.pms_interface_revisions rv
+		                  WHERE rv.id = r.pinned_revision_id), 0)
 		FROM iam_v2.stay_events se
 		JOIN iam_v2.pms_interface_runtime r USING (tenant_id, site_id, pms_interface_id)
 		WHERE se.tenant_id=$1 AND se.site_id=$2 AND se.pms_interface_id=$3
@@ -110,7 +119,8 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 		  AND (se.admission_kind='LIVE' OR se.resync_generation <= r.published_resync_generation)
 		ORDER BY se.received_at, se.id
 		FOR UPDATE OF se SKIP LOCKED
-		LIMIT 1`, tenant, site, iface).Scan(&eventID, &identity, &eventType, &raw)
+		LIMIT 1`, tenant, site, iface).Scan(&eventID, &identity, &eventType, &raw,
+		&evReceivedAt, &evClockSuspect, &pinnedRevision, &pinnedNormVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
@@ -217,7 +227,9 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 	}
 
 	d := Resolve(ev, cur)
-	stayID, terminal, reviewCode, aerr := applyDecision(ctx, tx, tenant, site, iface, ev, cur, d, p.conv != nil)
+	occ := occupancyEvidence{At: evReceivedAt, RevisionID: pinnedRevision,
+		NormalizationVersion: pinnedNormVersion, ClockSuspect: evClockSuspect}
+	stayID, terminal, reviewCode, aerr := applyDecision(ctx, tx, tenant, site, iface, ev, cur, d, p.conv != nil, occ)
 	if aerr != nil {
 		return false, aerr
 	}
@@ -240,7 +252,16 @@ func (p *Processor) ProcessNext(ctx context.Context, tenant, site, iface string)
 
 // applyDecision performs the authoritative Stay mutation for the decision and returns the resolved stay id (or
 // ""), the terminal processing_status and the review code. All within the caller's transaction.
-func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev InboxEvent, cur *StayView, d Decision, delegateCheckout bool) (stayID, terminal, reviewCode string, err error) {
+// occupancyEvidence is what the PMS just told us about this Stay being occupied, taken from the event that
+// carried it: when it arrived, which Interface Revision produced it, and whether its clock was suspect.
+type occupancyEvidence struct {
+	At                   time.Time
+	RevisionID           string
+	NormalizationVersion int
+	ClockSuspect         bool
+}
+
+func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, ev InboxEvent, cur *StayView, d Decision, delegateCheckout bool, occ occupancyEvidence) (stayID, terminal, reviewCode string, err error) {
 	switch d.Op {
 	case OpCreateStay:
 		if stayID, err = createStay(ctx, tx, tenant, site, iface, ev); err != nil {
@@ -248,6 +269,9 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		}
 		if _, aerr := applyOccupancyFacts(ctx, tx, tenant, site, iface, stayID, ev); aerr != nil {
 			return "", "", "", aerr
+		}
+		if serr := stampOccupancyEvidence(ctx, tx, stayID, occ); serr != nil {
+			return "", "", "", serr
 		}
 		return stayID, "APPLIED", "", nil
 
@@ -261,11 +285,18 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		if _, aerr := applyOccupancyFacts(ctx, tx, tenant, site, iface, cur.ID, ev); aerr != nil {
 			return "", "", "", aerr
 		}
+		if serr := stampOccupancyEvidence(ctx, tx, cur.ID, occ); serr != nil {
+			return "", "", "", serr
+		}
 		return cur.ID, "APPLIED", "", nil
 
 	case OpRoomMove:
 		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET normalized_room_number=NULLIF($2,'') WHERE id=$1`, cur.ID, ev.Room); err != nil {
 			return "", "", "", err
+		}
+		// A room move is the PMS saying where this guest is NOW, so it refreshes occupancy like an arrival.
+		if serr := stampOccupancyEvidence(ctx, tx, cur.ID, occ); serr != nil {
+			return "", "", "", serr
 		}
 		return cur.ID, "APPLIED", "", nil
 
@@ -284,6 +315,9 @@ func applyDecision(ctx context.Context, tx pgx.Tx, tenant, site, iface string, e
 		if _, err = tx.Exec(ctx, `UPDATE iam_v2.stays SET status='IN_HOUSE', lifecycle_version=lifecycle_version+1,
 			effective_checkout_at=NULL WHERE id=$1`, cur.ID); err != nil {
 			return "", "", "", err
+		}
+		if serr := stampOccupancyEvidence(ctx, tx, cur.ID, occ); serr != nil {
+			return "", "", "", serr
 		}
 		return cur.ID, "APPLIED", "", nil
 
@@ -379,4 +413,59 @@ func finishEvent(ctx context.Context, tx pgx.Tx, eventID, terminal, stayID, revi
 
 func failEvent(ctx context.Context, tx pgx.Tx, eventID, terminal, reviewCode string) error {
 	return finishEvent(ctx, tx, eventID, terminal, "", reviewCode)
+}
+
+// stampOccupancyEvidence records that the PMS has just confirmed this Stay is occupied.
+//
+// WITHOUT THIS, PMS ROOM SIGN-IN CANNOT WORK AT ALL. iam_v2.stays carries occupancy_evidence_at,
+// occupancy_evidence_version, occupancy_revision_id and occupancy_clock_suspect, and authentication requires
+// every one of them: internal/authctx and iam_v2.issue_or_return_pms_context both refuse to mint a PMS Auth
+// Context for a Stay whose evidence is absent, clock-suspect, produced under a different Revision, or stale.
+// Those four columns were read in both places and written NOWHERE -- 503 mirrored Stays, none with evidence
+// -- so every verified guest was refused with CONTEXT_INVALID after their identity had already matched.
+//
+// The values come from the event that carried the confirmation rather than from the server clock: At is when
+// the record actually arrived, and clock_suspect is carried through so a feed with a doubtful timestamp
+// produces evidence authentication will decline rather than evidence that silently looks fine.
+//
+// The Revision is the one the connector was PINNED to when it received the record. Authentication compares it
+// against the interface published Revision, so evidence produced under a superseded configuration stops
+// authorising sign-ins the moment a new Revision is published -- intended behaviour, not an edge case.
+//
+// Stamped for arrivals, updates, room moves and reinstatements — every event saying the guest is in the room
+// now. NOT for a checkout: that Stay is leaving, and refreshing its occupancy is the one thing that must
+// never happen.
+//
+// Three database rules shape the statement below, and all three reject a naive write:
+//
+//   - stays_occupancy_all_or_none: evidence_at, ingested_at, revision_id, normalization_version and
+//     clock_suspect are one tuple. Writing three of the five is a CHECK violation, so a partial stamp would
+//     not degrade — it would abort the event.
+//   - stays_evidence_version_coherent: evidence present <=> version > 0.
+//   - p3_stay_lifecycle_guard: a MATERIAL change (evidence_at, revision_id, normalization_version or
+//     clock_suspect — ingested_at is deliberately excluded) must increment the version by exactly 1, and a
+//     non-material write must NOT touch it at all. Hence the CASE: re-applying an event whose evidence is
+//     identical refreshes ingested_at and leaves the version alone, which the guard requires and which also
+//     keeps Auth Contexts pinned to that version valid.
+func stampOccupancyEvidence(ctx context.Context, tx pgx.Tx, stayID string, occ occupancyEvidence) error {
+	if stayID == "" || occ.At.IsZero() || occ.RevisionID == "" || occ.NormalizationVersion <= 0 {
+		// Fail SAFE rather than closed: an interface with no pinned revision is not a reason to reject an
+		// otherwise good Stay record. Un-stamped evidence simply means authentication keeps declining until
+		// an event arrives with a complete one.
+		return nil
+	}
+	_, err := tx.Exec(ctx, `UPDATE iam_v2.stays
+		   SET occupancy_evidence_at            = $2,
+		       occupancy_ingested_at            = now(),
+		       occupancy_revision_id            = $3::uuid,
+		       occupancy_normalization_version  = $4,
+		       occupancy_clock_suspect          = $5,
+		       occupancy_evidence_version       = occupancy_evidence_version + CASE
+		         WHEN occupancy_evidence_at           IS DISTINCT FROM $2
+		           OR occupancy_revision_id           IS DISTINCT FROM $3::uuid
+		           OR occupancy_normalization_version IS DISTINCT FROM $4
+		           OR occupancy_clock_suspect         IS DISTINCT FROM $5
+		         THEN 1 ELSE 0 END
+		 WHERE id = $1`, stayID, occ.At, occ.RevisionID, occ.NormalizationVersion, occ.ClockSuspect)
+	return err
 }
