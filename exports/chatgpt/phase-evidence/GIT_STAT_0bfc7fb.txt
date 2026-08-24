@@ -1,4 +1,0 @@
-commit 0bfc7fbe21e0037209fcd0aaabd1a0e61cd985e8
-Date:   Mon Aug 24 16:42:24 2026 +0300
-
-    D37: reconcile the onboarding state to verified reality
