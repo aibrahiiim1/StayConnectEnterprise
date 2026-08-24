@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `a421189a30048831e16fc13f16f0a89d8e6bfddd`
-- **Provenance (generation HEAD = inventory_head):** `a421189a30048831e16fc13f16f0a89d8e6bfddd`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `f89ccb784dc68b745b9ac84e3c83e18467dc2f6a`
+- **Provenance (generation HEAD = inventory_head):** `f89ccb784dc68b745b9ac84e3c83e18467dc2f6a`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `records/pr39-post-closure-sync`
 - **Remote branch:** `origin/records/pr39-post-closure-sync`
 - **Changed files:** 196
@@ -138,7 +138,7 @@
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: post-closure manifest at the final tree |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest at the retargeted-mutation tree |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
@@ -163,10 +163,10 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: post-closure manifest at the final tree |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest at the retargeted-mutation tree |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
-| `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Record PR #39 as a post-closure correction, and name the governance gap |
-| `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
+| `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
+| `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `hotel-admin/app/(app)/commercial-packages/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `hotel-admin/app/(app)/commercial-packages/publish-form.tsx -> hotel-admin/app/(app)/internet-packages/publish-form.tsx` | RENAMED | `R065 (hotel-admin/app/(app)/commercial-packages/publish-form.tsx -> hotel-admin/app/(app)/internet-packages/publish-form.tsx)` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `hotel-admin/app/(app)/health/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Activation, licensing, Central FQDN and Kea health: production readiness |
@@ -243,7 +243,7 @@
  .../edged/resources_phase3_interface_authoring.go  | 177 +++++++-
  .../cmd/edged/resources_phase3_interfaces.go       | 315 ++++++++++++-
  data-plane/cmd/edged/resources_providers.go        | 386 +---------------
- data-plane/cmd/edged/resources_site.go             | 124 +++++-
+ data-plane/cmd/edged/resources_site.go             | 124 ++++-
  data-plane/cmd/keybootstrap/main.go                |  16 +-
  data-plane/cmd/netd/kea.go                         |  13 +
  data-plane/cmd/netd/main.go                        |  39 +-
@@ -267,7 +267,7 @@
  .../internal/assignment/resolve_outcome_test.go    |  85 ++++
  data-plane/internal/authctx/authctx.go             |  63 ++-
  .../internal/authctx/authctx_integration_test.go   |  37 +-
- .../freshness_feed_health_integration_test.go      | 199 +++++++++
+ .../freshness_feed_health_integration_test.go      | 199 ++++++++
  data-plane/internal/checkout/checkout.go           |  13 +-
  .../grace_lock_boundary_integration_test.go        | 146 ++++++
  data-plane/internal/iamv2/commerce_admin.go        |  18 +
@@ -306,7 +306,7 @@
  deploy/gatep/gatep-set-passwords.sh                |   4 +-
  deploy/gatep/svc-acctd-iamv2-accounting-grants.sql |  35 ++
  deploy/gatep/svc-edged-phase345-admin-grants.sql   |  28 +-
- deploy/gatep/svc-pmsd-iamv2-connector-grants.sql   | 249 +++++++++++
+ deploy/gatep/svc-pmsd-iamv2-connector-grants.sql   | 249 ++++++++++
  deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql   |  69 +++
  deploy/pki/.gitignore                              |   5 +
  deploy/pki/README.md                               |  26 ++
@@ -315,7 +315,7 @@
  deploy/scripts/central-firewall.sh                 |  61 +++
  deploy/scripts/central-migrate.sh                  | 268 +++++++++++
  deploy/scripts/central-mint-tls.sh                 | 148 ++++++
- deploy/scripts/central-preflight.sh                | 174 ++++++++
+ deploy/scripts/central-preflight.sh                | 174 +++++++
  deploy/scripts/deploy-hotel-admin.sh               |   9 +-
  deploy/scripts/hotel-admin-mint-cert.sh            |  26 +-
  deploy/scripts/install-assignment-root-anchor.sh   |  87 ++++
@@ -323,7 +323,7 @@
  deploy/scripts/install-central-trust.sh            |  76 ++++
  deploy/scripts/install-vendor-trust-key.sh         | 102 +++++
  deploy/scripts/lib-central-endpoint.sh             | 208 +++++++++
- deploy/scripts/provision-fresh-appliance.sh        | 349 +++++++++++++++
+ deploy/scripts/provision-fresh-appliance.sh        | 349 ++++++++++++++
  deploy/scripts/vendor-signing-key.sh               | 231 ++++++++++
  deploy/systemd/stayconnect-ctrlapi.service         |  21 +
  deploy/systemd/stayconnect-scd.service             |  13 +
@@ -337,7 +337,7 @@
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |  11 +-
  docs/context/StayConnect-IAM-Handoff.md            |  11 +-
  docs/manifests/Phase7-change-manifest.md           | 108 ++---
- docs/manifests/PostClosure-change-manifest.md      | 496 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 500 +++++++++++++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317213 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 129081 bytes
@@ -364,16 +364,16 @@
  governance/decision-register.json                  |   7 +
  governance/project-state.json                      | 141 +++++-
  governance/transitions/T0083.json                  |  58 +++
- governance/transitions/T0084.json                  |  47 ++
- governance/transitions/T0085.json                  |  48 ++
+ governance/transitions/T0084.json                  |  48 ++
+ governance/transitions/T0085.json                  |  49 ++
  hotel-admin/app/(app)/commercial-packages/page.tsx | 396 +---------------
  hotel-admin/app/(app)/health/page.tsx              |  10 +-
- hotel-admin/app/(app)/internet-packages/page.tsx   | 249 +++++++++++
+ hotel-admin/app/(app)/internet-packages/page.tsx   | 249 ++++++++++
  .../publish-form.tsx                               |  78 +++-
  hotel-admin/app/(app)/network/system/page.tsx      |   2 +-
  hotel-admin/app/(app)/pms-interfaces/page.tsx      | 329 +++++++++++---
  hotel-admin/app/(app)/pms-providers/page.tsx       | 329 --------------
- hotel-admin/app/(app)/service-plans/page.tsx       | 298 +++++++++++++
+ hotel-admin/app/(app)/service-plans/page.tsx       | 298 ++++++++++++
  hotel-admin/app/(app)/setup/enrollment/page.tsx    | 244 ++++++++--
  hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 +++++++++++++++++
  hotel-admin/app/(app)/stays/page.tsx               | 277 ++++++++----
@@ -407,7 +407,7 @@
  tools/project-state.py                             |  69 ++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 196 files changed, 15823 insertions(+), 2231 deletions(-)
+ 196 files changed, 15829 insertions(+), 2231 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -417,6 +417,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: f89ccb7 Use the established phase_affected convention in the post-closure receipts
+HISTORICAL: 6d0ead6 Delivery: manifest at the retargeted-mutation tree
 HISTORICAL: a421189 Point M46 and M48 at the manifest that is actually checked
 HISTORICAL: f63a571 Delivery: post-closure manifest at the final tree
 HISTORICAL: 66aca15 Rebuild the evidence packs at the current source commit
