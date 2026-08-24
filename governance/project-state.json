@@ -735,9 +735,12 @@
     "room_signin_accepted_to_offer": true,
     "guest_access_granted_ever": false,
     "financial_traffic_ever": false,
-    "go_live_performed": false
+    "go_live_performed": false,
+    "room_signin_accepted_via": "scd resolve socket only (portald bypassed)",
+    "room_signin_portal_path_proven": false,
+    "portald_verification_forwarding_fixed": true
   },
-  "latest_transition_id": "T0087",
+  "latest_transition_id": "T0088",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1060,6 +1063,17 @@
         "PR #24 untouched. No Go Live."
       ],
       "phase3_impact": "NONE. Phase 3 remains ACCEPTED_AND_CLOSED at verified DARK maturity and MERGED."
+    },
+    {
+      "id": "PC-0002",
+      "title": "portald dropped the guest's verification value before forwarding it to scd",
+      "classification": "POST-CLOSURE CORRECTIVE DEFECT FIX. It corrects the guest-portal forwarding hop. It does NOT reopen, extend or re-evaluate Phase 3 or any closed phase; Phase 3 remains ACCEPTED AND CLOSED at verified DARK maturity (D16/T0024) and MERGED (D17/T0025).",
+      "discovered": "2026-08-24, by a Product-Owner test from a real guest device on the PRE-LIVE guest network.",
+      "symptom": "Room sign-in returned the uniform guest failure. scd logged reason `incomplete_evidence` three times; no auth_resolution row was created, because the resolver was never reached with usable evidence.",
+      "root_cause": "cmd/portald/pms_phase3_handlers.go phase3In named only room, last_name, reservation_number and request_id. The portal script sends `verification` for room_any and `first_name` for room_firstname. Both were decoded into nothing and forwarded as nothing — silently, with no error at any layer — so scd received a room with no evidence beside it. room_any and room_firstname were therefore incapable of ever succeeding on the real guest path; only room_lastname and room_reservation worked.",
+      "why_tests_missed_it": "Every existing test called scd's handler directly. None crossed the portald hop, so the hop was the one part of the path nothing asserted. The new coverage exercises the hop itself.",
+      "introduced_by": "The room_any work (PR #32) added the field to the portal script and to scd and did not update phase3In. room_firstname had the same gap from the start.",
+      "phase3_impact": "NONE."
     }
   ],
   "governance_check_state": {
@@ -1146,9 +1160,11 @@
       },
       "acceptance_testing": {
         "occurred": "PARTIAL",
-        "proven": "PMS Room sign-in reached VERIFIED -> PMS Auth Context issued -> one eligible Internet Package offer returned, at 2026-08-23T11:59:40Z, under an explicit Product-Owner authorization for a single resolve-only check. 8 auth_resolutions are recorded; 1 auth_context was issued and deliberately left UNCONSUMED.",
+        "proven": "PMS Room sign-in reached VERIFIED -> PMS Auth Context issued -> one eligible Internet Package offer returned, at 2026-08-23T11:59:40Z, under an explicit Product-Owner authorization for a single resolve-only check. 8 auth_resolutions are recorded; 1 auth_context was issued and deliberately left UNCONSUMED. SCOPE CORRECTION (PC-0002, 2026-08-25): that check was made against scd's own socket (/v1/phase3/auth/pms/resolve), which BYPASSES portald. It proves the scd resolve path and the offer engine. It does NOT prove the guest-visible portal path. On the real portal, room_any and room_firstname could not work at all: portald's phase3In struct named neither `verification` nor `first_name`, so the browser's value was decoded into nothing and forwarded as nothing, and scd answered `incomplete_evidence`. Confirmed live on 2026-08-24 from a guest device. Corrected by PC-0002; the portal path itself remains unproven end to end until the PMS link returns and a real sign-in is authorized.",
         "not_proven": "No end-to-end guest access has ever been exercised on this appliance: purchases=0, entitlements=0, sessions=0. Package acquisition, entitlement issue, session activation and network enforcement are all UNPROVEN here. Voucher and Guest-Account sign-in are unexercised on this appliance.",
-        "po_authorization": "PRESENT for what was executed. The acceptance instruction required stopping before package acquisition, and execution stopped there."
+        "po_authorization": "PRESENT for what was executed. The acceptance instruction required stopping before package acquisition, and execution stopped there.",
+        "portal_path_proven": false,
+        "portal_path_note": "The guest-visible portal path (browser -> portald -> scd) has never completed a successful Room sign-in on this appliance. Two of the four sign-in modes were structurally incapable of it until PC-0002."
       },
       "guest_financial_and_go_live": {
         "guest_traffic": "NONE granted. sessions=0, entitlements=0, purchases=0. Authentication attempts did occur - 8 resolutions and 1 unconsumed Auth Context - but no guest was ever given network access.",

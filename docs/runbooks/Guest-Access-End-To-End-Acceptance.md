@@ -10,7 +10,14 @@ contract, and read-only evidence collected from the appliance on 2026-08-24.
 The chain **Room authentication → eligible offer → package acquisition → entitlement issuance → session
 activation → actual network enforcement** has never been exercised on this appliance. `purchases`,
 `entitlements` and `sessions` are all zero. Room sign-in is proven only as far as VERIFIED → Auth Context →
-eligible offer (2026-08-23T11:59:40Z).
+eligible offer (2026-08-23T11:59:40Z), **and that check was made against scd's own socket, which bypasses
+portald.**
+
+The guest-visible portal path has never completed a successful Room sign-in here, and until PC-0002
+(2026-08-25) it could not: portald's `phase3In` named neither `verification` nor `first_name`, so `room_any`
+and `room_firstname` reached scd with no evidence at all and were answered `incomplete_evidence`. A real
+guest attempt on 2026-08-24 failed for exactly that reason. Stage 4 below is therefore the first time the
+real portal path would be exercised end to end.
 
 This is the currently unproven end-to-end guest-access acceptance. It is **not** "the last Go-Live
 prerequisite" and this document makes no Go-Live claim. Go-Live readiness is assessed separately, after
