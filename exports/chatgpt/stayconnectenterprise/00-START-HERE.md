@@ -11,7 +11,7 @@
 **Development reference appliance (172.21.60.23):** UNTOUCHED by this work and NOT cut over. Retains the historical live-dark runtime its accepted evidence records, including its superseded guest-IAM schema (68 iam_v2 tables live). Reference and evidence only, never an installation source.
 **Lifecycle:** PRE-LIVE (D24): no real hotel guest or staff depends on StayConnect for live service yet.
 **Single next authorized action:** MANUAL ENROLLMENT of the deployed Fresh Production appliance 172.21.60.25: issue a bootstrap token from the Central Control Plane and enrol the appliance through its local setup wizard. Claim, signed assignment, licence installation, LAN/guest networking, packages, access policy, PMS interfaces and acceptance testing are LATER onboarding steps, each requiring its own state advancement once the preceding milestone completes. A separate Product-Owner Go-Live decision remains required. No guest, PMS, payment or financial traffic is authorized. 172.21.60.23 remains the DEVELOPMENT reference appliance and is not to be changed.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D36`.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D35`.
 <!-- END GENERATED PROJECT STATE -->
 
 

@@ -628,7 +628,9 @@
       "title": "POST-CLOSURE CORRECTIONS ARE THEIR OWN DELIVERY LINEAGE (2026-08-24). The Product Owner resolves the governance-gate gap reported at T0084. With every numbered phase closed, corrective work after closure is recognised as a delivery lineage in its own right, with its own change manifest based at the Phase-7 delivery head (ac68164). A CLOSED phase's manifest is HISTORICAL: it records what that phase delivered and is never range-checked against a later HEAD. governance/project-state.json now names the current delivery explicitly (current_delivery: kind, manifest, base, head) rather than inferring it from current_phase, and tools/project-state.py applies the path/status equality to that manifest. This changes HOW the delivery rule is applied to post-closure work; it does not relax what the rule requires, does not alter any phase status or maturity, and does not reopen any phase. Phase 3 specifically remains ACCEPTED AND CLOSED at verified DARK maturity (D16/T0024) and MERGED (D17/T0025). The rejected alternative was regenerating the Phase-7 manifest over base..master, which would have folded post-closure work into a closed phase's delivery record.",
       "decided_on": "2026-08-24",
       "phase": "post-roadmap",
-      "accepted": true
+      "accepted": false,
+      "acceptance_status": "PROPOSED_AND_IMPLEMENTED_PENDING_EXPLICIT_PO_ACCEPTANCE",
+      "authorization_evidence": "VERBATIM Product-Owner authorization in the conversation record: \"option a\" — an explicit selection of option (a) from the two options presented in the T0084 report. That selection authorizes the DESIGN (post-closure corrections as their own delivery lineage; a closed phase's manifest is historical and not range-checked) and the implementation carried out under it. It is NOT an explicit acceptance of a numbered decision record: the agent proposed the label D36 and set accepted=true without the Product Owner stating acceptance of a decision. D36 is therefore recorded as PROPOSED and IMPLEMENTED, not accepted, and latest_accepted_po_decision remains D35 until the Product Owner accepts D36 explicitly."
     }
   ]
 }

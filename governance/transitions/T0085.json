@@ -25,12 +25,12 @@
   "transition_accepted": true,
   "po_authorization_ref": "Product Owner selected option (a) from the T0084 report: recognise post-closure corrections as their own delivery lineage with their own manifest, and stop range-checking a closed phase's manifest against master.",
   "previous_state_note": "T0084 reported the governance check RED on master since PR #22 (c72b49e), with 17 PRs merged through a gate the delivery rule says must pass, and left the fix to a Product-Owner decision.",
-  "new_state_note": "D36 adopted. current_delivery names the post-closure lineage, its manifest (docs/manifests/PostClosure-change-manifest.md, 188 paths), its base (ac68164, the Phase-7 delivery head) and its head. tools/project-state.py range-checks that manifest and states the Phase-7 manifest as historical. PROJECT_STATE_GOVERNANCE = PASS.",
+  "new_state_note": "D36 PROPOSED and IMPLEMENTED under the Product Owner's selection of option (a); formal decision acceptance is NOT recorded (see authorization_evidence). current_delivery names the post-closure lineage, its manifest (docs/manifests/PostClosure-change-manifest.md, 196 paths), its base (ac68164, the Phase-7 delivery head) and its head. tools/project-state.py range-checks that manifest and states the Phase-7 manifest as historical. PROJECT_STATE_GOVERNANCE = PASS.",
   "what_changed": [
     "governance/project-state.json: current_delivery declared; governance_check_state marked RESOLVED.",
     "governance/decision-register.json: D36.",
     "tools/project-state.py: current_delivery is honoured for manifest selection, HEAD identity and base; a closed phase's manifest is skipped with a stated note.",
-    "docs/manifests/PostClosure-change-manifest.md: generated, 188 paths, ac68164..delivery head."
+    "docs/manifests/PostClosure-change-manifest.md: generated, 196 paths, ac68164..delivery head."
   ],
   "what_did_not_change": [
     "No phase status, maturity, activity or next_authorized_action.",
@@ -45,5 +45,7 @@
     "No networking, no PMS/Protel traffic, no guest authentication, no financial action, no Go Live.",
     "PR #24 untouched."
   ],
-  "next": "Record the outstanding onboarding milestones against the post-closure lineage under their own Product-Owner decision, so current_activity and next_authorized_action describe the appliance as it is."
+  "next": "Record the outstanding onboarding milestones against the post-closure lineage under their own Product-Owner decision, so current_activity and next_authorized_action describe the appliance as it is.",
+  "authorization_evidence": "VERBATIM Product-Owner authorization in the conversation record: \"option a\" — an explicit selection of option (a) from the two options presented in the T0084 report. That selection authorizes the DESIGN (post-closure corrections as their own delivery lineage; a closed phase's manifest is historical and not range-checked) and the implementation carried out under it. It is NOT an explicit acceptance of a numbered decision record: the agent proposed the label D36 and set accepted=true without the Product Owner stating acceptance of a decision. D36 is therefore recorded as PROPOSED and IMPLEMENTED, not accepted, and latest_accepted_po_decision remains D35 until the Product Owner accepts D36 explicitly.",
+  "decision_acceptance_status": "D36 is PROPOSED and IMPLEMENTED, not accepted. latest_accepted_po_decision remains D35."
 }
