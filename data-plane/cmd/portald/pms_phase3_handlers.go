@@ -48,8 +48,25 @@ type scdGrantResp struct {
 }
 
 // phase3In is the guest's submission. Note what is NOT here: no ip, no mac, no stay, no interface, no price.
+//
+// EVERY VERIFICATION FIELD THE PORTAL CAN SEND MUST HAVE A HOME HERE. This struct is the whole of what
+// survives the hop to scd: a field the browser sends and this type does not name is decoded into nothing and
+// forwarded as nothing, silently. scd then sees a room with no evidence beside it and answers
+// `incomplete_evidence`, which reaches the guest as the uniform failure — indistinguishable from a wrong
+// surname.
+//
+// That is exactly what happened. `verification` (room_any) and `first_name` (room_firstname) were added to
+// the portal script and to scd, and this struct was not updated, so both modes were dead on the real guest
+// path while every test that called scd directly passed. Two of the four sign-in modes could never work,
+// and nothing said so.
 type phase3In struct {
-	Room              string `json:"room"`
+	Room string `json:"room"`
+	// Verification is the ONE value a guest types under room_any, where the portal does not ask which kind of
+	// identifier it is. It is forwarded verbatim; scd compares it against first name, last name and
+	// reservation number together. Nothing here inspects its shape — guessing "digits mean a reservation
+	// number" is the legacy behaviour room_any exists to remove.
+	Verification      string `json:"verification,omitempty"`
+	FirstName         string `json:"first_name,omitempty"`
 	LastName          string `json:"last_name,omitempty"`
 	ReservationNumber string `json:"reservation_number,omitempty"`
 	// RequestID makes a retry idempotent: the same attempt resolved twice records one resolution, not two.
@@ -139,8 +156,13 @@ func (h *handler) authPMSPhase3(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) phase3Resolve(w http.ResponseWriter, r *http.Request, b *phase3Budget, in phase3In, device map[string]string) (scdResolveResp, bool) {
+	// Every verification field is forwarded, and the guest-supplied identity stops here. `device` is built by
+	// the appliance from its own neighbour table — the guest cannot supply ip, mac, stay or interface, and no
+	// field of phase3In can reach those keys.
 	body, _ := json.Marshal(map[string]any{
 		"room":               in.Room,
+		"verification":       in.Verification,
+		"first_name":         in.FirstName,
 		"last_name":          in.LastName,
 		"reservation_number": in.ReservationNumber,
 		"request_id":         in.RequestID,

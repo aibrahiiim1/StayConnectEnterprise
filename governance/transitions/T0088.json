@@ -1,0 +1,39 @@
+{
+  "transition_id": "T0088",
+  "seq": 88,
+  "timestamp": "2026-08-24T22:00:10Z",
+  "record_type": "POST_CLOSURE_CORRECTION_PORTALD_VERIFICATION_FORWARDING",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (PC-0002 defect correction; no phase is affected)",
+  "decision": "D37",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Product-Owner authorization, 2026-08-25: 'Room Sign-in forwarding defect — END-TO-END corrective delivery authorized ... Fix portald so Verification and FirstName are accepted and forwarded correctly to the existing scd contract.' Merge and deployment of portald were authorized in the same instruction, conditional on all required CI being green.",
+  "previous_state_note": "The register recorded Room sign-in as accepted to the offer stage. That was true of the scd resolve path and was never true of the guest-visible portal path.",
+  "new_state_note": "PC-0002 records the portald forwarding defect and its correction. The acceptance-testing milestone now states plainly that the accepted check bypassed portald, and that the portal path is not proven. The activity and execution state do not change: the PMS link is still intentionally disconnected, so no real sign-in is possible and none was attempted.",
+  "boundaries_observed": [
+    "Protel NOT reconnected. No PMS traffic.",
+    "No real guest authentication. No Purchase, Entitlement or Session.",
+    "No Free Internet plan or package change.",
+    "No financial action. No Go-Live.",
+    "portald was the only runtime component deployed.",
+    "PR #24 untouched."
+  ],
+  "blocker": "The PMS link remains intentionally disconnected, so the corrected portal path cannot be proven with a real guest sign-in. The fix is verified by regression coverage across the hop and by the deployed artifact's behaviour, not by a live authentication.",
+  "next": "Unchanged: the controlled end-to-end guest-access acceptance (D38 preparation), once the Protel socket is returned to StayConnect. That requires its own Product-Owner decision."
+}
