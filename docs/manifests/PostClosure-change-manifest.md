@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `c8a87dd65bb0713f879dd404e3bb05c9be4345e9`
-- **Provenance (generation HEAD = inventory_head):** `c8a87dd65bb0713f879dd404e3bb05c9be4345e9`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `8b82ff89a0762a1902b3f15ba1bcd2cbc72044e6`
+- **Provenance (generation HEAD = inventory_head):** `8b82ff89a0762a1902b3f15ba1bcd2cbc72044e6`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/portald-forwards-verification-and-firstname`
 - **Remote branch:** `origin/fix/portald-forwards-verification-and-firstname`
 - **Changed files:** 202
@@ -140,33 +140,33 @@
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | portald dropped the guest verification value before it reached scd |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | portald dropped the guest verification value before it reached scd |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest at the portald forwarding fix |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest at the T0088 timestamp correction |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | portald dropped the guest verification value before it reached scd |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the facts reconciliation |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the facts reconciliation |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the facts reconciliation |
-| `exports/chatgpt/phase-evidence/GIT_STAT_2724417.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Rebuild packs at the facts reconciliation |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
+| `exports/chatgpt/phase-evidence/GIT_STAT_a66c005.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Rebuild packs after the PC-0002 records update |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the facts reconciliation |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the facts reconciliation |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the facts reconciliation |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the facts reconciliation |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the facts reconciliation |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | portald dropped the guest verification value before it reached scd |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the facts reconciliation |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | portald dropped the guest verification value before it reached scd |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest at the portald forwarding fix |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest at the T0088 timestamp correction |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
@@ -321,7 +321,7 @@
  deploy/scripts/appliance-central-cutover.sh        | 218 +++++++++
  deploy/scripts/appliance-dns-align.sh              | 138 ++++++
  deploy/scripts/central-firewall.sh                 |  61 +++
- deploy/scripts/central-migrate.sh                  | 268 +++++++++++
+ deploy/scripts/central-migrate.sh                  | 268 ++++++++++
  deploy/scripts/central-mint-tls.sh                 | 148 ++++++
  deploy/scripts/central-preflight.sh                | 174 +++++++
  deploy/scripts/deploy-hotel-admin.sh               |   9 +-
@@ -331,7 +331,7 @@
  deploy/scripts/install-central-trust.sh            |  76 +++
  deploy/scripts/install-vendor-trust-key.sh         | 102 ++++
  deploy/scripts/lib-central-endpoint.sh             | 208 ++++++++
- deploy/scripts/provision-fresh-appliance.sh        | 349 ++++++++++++++
+ deploy/scripts/provision-fresh-appliance.sh        | 349 +++++++++++++
  deploy/scripts/vendor-signing-key.sh               | 231 +++++++++
  deploy/systemd/stayconnect-ctrlapi.service         |  21 +
  deploy/systemd/stayconnect-scd.service             |  13 +
@@ -345,13 +345,13 @@
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |  11 +-
  docs/context/StayConnect-IAM-Handoff.md            |  11 +-
  docs/manifests/Phase7-change-manifest.md           | 108 +++--
- docs/manifests/PostClosure-change-manifest.md      | 535 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 537 +++++++++++++++++++++
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 358 ++++++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 ++++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317586 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 129786 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42589 bytes
- .../chatgpt/phase-evidence/GIT_STAT_2724417.txt    |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317588 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 129778 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42588 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_a66c005.txt    |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -412,14 +412,14 @@
  scripts/factory-clean-baseline-verify.sh           |  27 ++
  scripts/gatep-grant-survives-reconcile.sh          | 151 ++++++
  scripts/gatep-reconcile-acceptance.sh              | 236 +++++++++
- scripts/gatep-reconcile.sh                         | 161 +++++++
+ scripts/gatep-reconcile.sh                         | 161 ++++++
  scripts/generate-production-baseline.sh            |  38 +-
  scripts/phase5-pg-integration.sh                   |   8 +-
  scripts/pmsd-pg-integration.sh                     |  32 ++
  tools/project-state.py                             |  69 ++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 202 files changed, 16661 insertions(+), 2233 deletions(-)
+ 202 files changed, 16663 insertions(+), 2233 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -429,6 +429,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 8b82ff8 Rebuild packs after the PC-0002 records update
+HISTORICAL: a66c005 Delivery: manifest at the T0088 timestamp correction
 HISTORICAL: c8a87dd Derive the T0088 timestamp from the commit clock instead of guessing it
 HISTORICAL: a0d8385 Delivery: manifest at the portald forwarding fix
 HISTORICAL: 14a2cb9 portald dropped the guest verification value before it reached scd
