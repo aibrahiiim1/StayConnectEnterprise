@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `8d70f715b2b7dd5d4405aa250b64c06539b69b06`
-- **Provenance (generation HEAD = inventory_head):** `8d70f715b2b7dd5d4405aa250b64c06539b69b06`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `0de8c94064dc63a59e43c1cc66131e60c35dca6b`
+- **Provenance (generation HEAD = inventory_head):** `0de8c94064dc63a59e43c1cc66131e60c35dca6b`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `records/d37-onboarding-reconciliation`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 198
@@ -138,7 +138,7 @@
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: post-closure manifest at the D36 acceptance |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: post-closure manifest at the D37 reconciliation |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
@@ -163,12 +163,12 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: post-closure manifest at the D37 reconciliation |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
 | `governance/transitions/T0086.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
-| `governance/transitions/T0087.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D37: reconcile the onboarding state to verified reality |
+| `governance/transitions/T0087.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Date T0087 before the commit that introduces it |
 | `hotel-admin/app/(app)/commercial-packages/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `hotel-admin/app/(app)/commercial-packages/publish-form.tsx -> hotel-admin/app/(app)/internet-packages/publish-form.tsx` | RENAMED | `R065 (hotel-admin/app/(app)/commercial-packages/publish-form.tsx -> hotel-admin/app/(app)/internet-packages/publish-form.tsx)` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `hotel-admin/app/(app)/health/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Activation, licensing, Central FQDN and Kea health: production readiness |
@@ -244,7 +244,7 @@
  data-plane/cmd/edged/resources_phase3.go           |  53 ++-
  .../edged/resources_phase3_interface_authoring.go  | 177 ++++++-
  .../cmd/edged/resources_phase3_interfaces.go       | 315 ++++++++++++-
- data-plane/cmd/edged/resources_providers.go        | 386 +---------------
+ data-plane/cmd/edged/resources_providers.go        | 386 +--------------
  data-plane/cmd/edged/resources_site.go             | 124 ++++-
  data-plane/cmd/keybootstrap/main.go                |  16 +-
  data-plane/cmd/netd/kea.go                         |  13 +
@@ -264,7 +264,7 @@
  .../appliancecert/bootstrap_recovery_test.go       | 261 +++++++++++
  .../appliancecert/bootstrap_states_test.go         | 270 +++++++++++
  data-plane/internal/appliancecert/cert.go          | 425 +++++++++++++++--
- .../appliancecert/rotation_restart_test.go         | 231 ++++++++++
+ .../appliancecert/rotation_restart_test.go         | 231 +++++++++
  data-plane/internal/assignment/resolve.go          | 219 +++++++++
  .../internal/assignment/resolve_outcome_test.go    |  85 ++++
  data-plane/internal/authctx/authctx.go             |  63 ++-
@@ -326,7 +326,7 @@
  deploy/scripts/install-vendor-trust-key.sh         | 102 ++++
  deploy/scripts/lib-central-endpoint.sh             | 208 +++++++++
  deploy/scripts/provision-fresh-appliance.sh        | 349 ++++++++++++++
- deploy/scripts/vendor-signing-key.sh               | 231 ++++++++++
+ deploy/scripts/vendor-signing-key.sh               | 231 +++++++++
  deploy/systemd/stayconnect-ctrlapi.service         |  21 +
  deploy/systemd/stayconnect-scd.service             |  13 +
  docs/APPLIANCE_ACTIVATION_AND_LICENSING.md         | 207 +++++++++
@@ -339,7 +339,7 @@
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |  11 +-
  docs/context/StayConnect-IAM-Handoff.md            |  11 +-
  docs/manifests/Phase7-change-manifest.md           | 108 +++--
- docs/manifests/PostClosure-change-manifest.md      | 511 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 517 +++++++++++++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 ++++++++++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317587 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 129779 bytes
@@ -349,7 +349,7 @@
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
  .../governance/decision-register.json              |  20 +
- .../chatgpt/phase-evidence/tools/project-state.py  | 129 +++++-
+ .../chatgpt/phase-evidence/tools/project-state.py  | 129 ++++-
  .../phase-evidence/tools/validate-project-state.sh |  12 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |   6 +-
@@ -379,7 +379,7 @@
  hotel-admin/app/(app)/pms-providers/page.tsx       | 329 -------------
  hotel-admin/app/(app)/service-plans/page.tsx       | 298 ++++++++++++
  hotel-admin/app/(app)/setup/enrollment/page.tsx    | 244 +++++++++-
- hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 +++++++++++++++++
+ hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 ++++++++++++++++
  hotel-admin/app/(app)/stays/page.tsx               | 277 +++++++----
  hotel-admin/components/nav.tsx                     | 171 +++----
  hotel-admin/components/ui/error-banner.tsx         |   7 +-
@@ -397,7 +397,7 @@
  hotel-admin/lib/units.ts                           | 119 +++++
  ...ge.test.tsx => internet-packages-page.test.tsx} |  43 +-
  hotel-admin/test/nav.test.tsx                      |  18 +-
- hotel-admin/test/phase3-interface-pages.test.tsx   |  77 ++--
+ hotel-admin/test/phase3-interface-pages.test.tsx   |  77 +--
  hotel-admin/test/phase3-pages.test.tsx             |  32 +-
  hotel-admin/test/pms-availability.test.ts          | 220 +++++++++
  hotel-admin/test/publish-form.test.tsx             |   8 +-
@@ -411,7 +411,7 @@
  tools/project-state.py                             |  69 ++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 198 files changed, 16027 insertions(+), 2231 deletions(-)
+ 198 files changed, 16033 insertions(+), 2231 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -421,6 +421,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 0de8c94 Date T0087 before the commit that introduces it
+HISTORICAL: b176c1c Delivery: post-closure manifest at the D37 reconciliation
 HISTORICAL: 8d70f71 Rebuild packs at the D37 reconciliation
 HISTORICAL: 0bfc7fb D37: reconcile the onboarding state to verified reality
 HISTORICAL: bce8dac Merge pull request #40 - D36 accepted: post-closure delivery lineage and PR #39 correction record
