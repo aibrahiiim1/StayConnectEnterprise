@@ -720,7 +720,7 @@
     "fresh_production_readiness_merge_transition": "T0079",
     "fresh_production_readiness_merge_introduced_no_content": true
   },
-  "latest_transition_id": "T0083",
+  "latest_transition_id": "T0084",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -983,5 +983,73 @@
     "payment_or_financial_traffic": "NONE",
     "go_live": "NOT PERFORMED and NOT authorized",
     "development_appliance_contact": "NONE. Nothing was copied from or sent to 172.21.60.23."
+  },
+  "post_closure_corrections": [
+    {
+      "id": "PC-0001",
+      "pr": 39,
+      "title": "Server-authoritative Room-auth feed readiness and unknown-vs-outage correction",
+      "classification": "POST-CLOSURE CORRECTIVE IMPROVEMENT. It corrects Room-auth readiness REPORTING and the Hotel-Admin health surface. It does NOT reopen, extend or re-evaluate Phase 3, whose closure at verified DARK maturity (D16/T0024) and merge (D17/T0025) stand unchanged and are not touched by this record.",
+      "merged": true,
+      "merge_commit": "883b1f78ea4c8ce906f5d64f5a6bf255d64e765c",
+      "pr_head": "174461fb98dd757329c3e95c9c301e080a43463a",
+      "base": "master",
+      "merged_at": "2026-08-23T21:38:24Z",
+      "verified_against_remote": true,
+      "ci_on_pr_head": {
+        "phase3-full-software-gate": "success (97263513784)",
+        "phase4-financial-core-gate": "success (97263513508)",
+        "phase5-post-stay-transfer-gate": "success (97263513318)",
+        "governance": "failure (97263513370) — PRE-EXISTING and not caused by this PR; see governance_check_state"
+      },
+      "changed_files": {
+        "created": [
+          "data-plane/cmd/edged/phase3_room_auth_readiness_integration_test.go"
+        ],
+        "modified": [
+          "data-plane/cmd/edged/resources_phase3_interfaces.go",
+          "data-plane/internal/authctx/freshness_feed_health_integration_test.go",
+          "deploy/gatep/svc-edged-phase345-admin-grants.sql",
+          "hotel-admin/app/(app)/sign-in-methods/page.tsx",
+          "hotel-admin/lib/api.ts",
+          "hotel-admin/lib/pms-availability.ts",
+          "hotel-admin/test/pms-availability.test.ts"
+        ],
+        "deleted": [],
+        "renamed": [],
+        "generated": [],
+        "exported": [],
+        "counts": "1 created, 7 modified, 0 deleted/renamed/generated/exported; +538/-169 (GitHub: 8 changed files)"
+      },
+      "what_changed": "GET /pms-interfaces/{id}/health now returns room_auth_ready plus a bounded room_auth_reason, derived from the same runtime and active Revision that Phase 3 reads and mirroring the FEED half of iam_v2.p3_feed_authorizes. The Stay-specific half (occupancy evidence, its age, its revision pin) is deliberately excluded: it belongs to one guest's Stay, not to the interface. Hotel Admin consumes that result instead of re-implementing the rule with the 300-second DEFAULT hardcoded, which described any interface configured with a different heartbeat_timeout_ms using a number that interface does not use. An unreadable health result is now UNKNOWN and is never presented as a confirmed outage.",
+      "schema_change": "NONE. No migration. iam_v2.p3_cfg_secs already existed.",
+      "privilege_change": "svc_edged gained EXECUTE on iam_v2.p3_cfg_secs, written in deploy/gatep/svc-edged-phase345-admin-grants.sql so a Gate-P reconcile retains it. Read-only, non-mutating, no table privilege.",
+      "deployment": {
+        "host": "172.21.60.25 (PRE-LIVE Production)",
+        "components": "edged and the hotel-admin bundle only",
+        "edged_sha256_16": "b9d03ddb2fe17f38",
+        "edged_rollback": "/opt/stayconnect/bin/edged.bak-pre-883b1f7-20260823-214120",
+        "hotel_admin_release": "20260823-214120",
+        "hotel_admin_previous_release": "20260823-200549 (retained)",
+        "build_flags": "NEXT_PUBLIC_PHASE2_ADMIN=1, NEXT_PUBLIC_PHASE3_ADMIN=1; 4/5/6 unset — parity verified against the live bundle before deploy",
+        "post_deploy": "all seven services active; zero permission denials, zero PostgreSQL errors, zero edged errors in the observation window",
+        "deployed_sha_marker_note": "/opt/stayconnect/DEPLOYED_SHA still reads 7c94d6cf58abec603b2e0555d000e6b9c8294ac7 (the PR #23 marker). It was not advanced by this or the other post-closure deployments, so it is STALE for those components; the binary digests are the reliable identifier."
+      },
+      "boundaries_observed": [
+        "No Room-authentication behaviour change; no room_any change.",
+        "No guest authentication submitted and no PMS/Protel traffic generated.",
+        "No migration, no database state change, no networking change.",
+        "No package, service-plan, session, entitlement or financial change.",
+        "PR #24 untouched. No Go Live."
+      ],
+      "phase3_impact": "NONE. Phase 3 remains ACCEPTED_AND_CLOSED at verified DARK maturity and MERGED."
+    }
+  ],
+  "governance_check_state": {
+    "status": "FAILING on master, and NOT caused by PR #39",
+    "failure": "manifest omits 147 path(s) present in git base..HEAD (docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md 4.1)",
+    "mechanism": "current_phase is 7 and docs/manifests/Phase7-change-manifest.md exists, so tools/project-state.py treats that closed phase's manifest as the CURRENT delivery manifest and compares its path set against git diff base..HEAD. The manifest covers f3b6856..ac68164 (81 paths). master is now 883b1f7 — 73 commits and 17 merged PRs beyond that HEAD — and base..master is 229 paths, so 147 are reported missing.",
+    "first_failing_since": "the first merge after the Phase-7 manifest HEAD ac68164 (PR #22, c72b49e). It has been red for every merge since, including but not caused by PRs #25-#39.",
+    "why_not_fixed_here": "The two available fixes are both Product-Owner matters, not documentation edits. Regenerating the Phase-7 manifest over base..master would fold 17 PRs of POST-CLOSURE work into a CLOSED phase's delivery record, misrepresenting what Phase 7 delivered. Changing the validator so a closed phase's manifest stops being range-checked is a governance-rule change and must not be made by the agent whose merges it is currently failing. Neither was done."
   }
 }
