@@ -331,7 +331,7 @@
   "next_authorized_action": "MANUAL ENROLLMENT of the deployed Fresh Production appliance 172.21.60.25: issue a bootstrap token from the Central Control Plane and enrol the appliance through its local setup wizard. Claim, signed assignment, licence installation, LAN/guest networking, packages, access policy, PMS interfaces and acceptance testing are LATER onboarding steps, each requiring its own state advancement once the preceding milestone completes. A separate Product-Owner Go-Live decision remains required. No guest, PMS, payment or financial traffic is authorized. 172.21.60.23 remains the DEVELOPMENT reference appliance and is not to be changed.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D35",
+  "latest_accepted_po_decision": "D36",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -720,7 +720,7 @@
     "fresh_production_readiness_merge_transition": "T0079",
     "fresh_production_readiness_merge_introduced_no_content": true
   },
-  "latest_transition_id": "T0084",
+  "latest_transition_id": "T0085",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1056,7 +1056,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "a72474a6222102a93d7cd3ebe4766de105a0acb9",
+    "head": "96f3caa7477f590d4205e8ea63794ad87fa921dc",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to."
   }
