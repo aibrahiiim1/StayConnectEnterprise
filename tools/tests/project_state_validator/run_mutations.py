@@ -324,6 +324,37 @@ def both_status():
 
 # mutation = (name, relpath, op) ; op = ("replace",[(find,repl),...]) | ("append", text)
 
+def _current_delivery_manifest_relpath():
+    """The manifest tools/project-state.py currently range-checks, as a repo-relative path.
+
+    THIS MUST TRACK THE VALIDATOR OR THE CASES BELOW STOP TESTING ANYTHING. M46 and M48 mutate a manifest and
+    assert the validator notices. They named docs/manifests/Phase{current_phase}-change-manifest.md, which was
+    right while a numbered phase was the current delivery.
+
+    Under D36 it is not. Post-closure corrections are their own lineage, current_delivery names their
+    manifest, and a closed phase's manifest is explicitly historical and not range-checked. Both cases went
+    [MISS] the moment that landed -- not because the protection was gone, but because they were mutating a
+    file nobody checks any more. A mutation test pointed at the wrong file reports safety it has not
+    measured, which is worse than no test.
+    """
+    import io as _io
+    import json as _json
+    try:
+        st = _json.load(_io.open(os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return "docs/manifests/NO-SUCH-MANIFEST.md"
+    cur = (st.get("current_delivery") or {}).get("manifest")
+    if cur:
+        return cur.replace("\\", "/")
+    phase = str(st.get("current_phase", "")).strip()
+    if not phase:
+        return "docs/manifests/NO-SUCH-MANIFEST.md"
+    return "docs/manifests/Phase%s-change-manifest.md" % phase
+
+
+CURRENT_MANIFEST_RELPATH = _current_delivery_manifest_relpath()
+
+
 def _manifest_base_commit():
     """The base commit the CURRENT phase's change-manifest was generated against.
 
@@ -332,19 +363,13 @@ def _manifest_base_commit():
     the search string matched nothing, the mutation became a no-op, and the suite aborted on fixture drift
     without printing a [FAIL] line -- a log that simply stopped mid-matrix.
 
-    The phase is read from project-state exactly as tools/project-state.py picks the manifest, so this reads
-    the same file M48 mutates rather than whichever manifest sorts first.
+    The manifest is resolved exactly as tools/project-state.py resolves it, so this reads the same file M46
+    and M48 mutate rather than whichever manifest sorts first -- see _current_delivery_manifest_relpath.
     """
     import re as _re
     import io as _io
-    import json as _json
-    try:
-        st = _json.load(_io.open(os.path.join(ROOT, "governance", "project-state.json"), encoding="utf-8"))
-        phase = str(st.get("current_phase", "")).strip()
-    except Exception:  # noqa: BLE001
-        phase = ""
-    path = os.path.join(ROOT, "docs", "manifests", "Phase%s-change-manifest.md" % phase)
-    if not phase or not os.path.exists(path):
+    path = os.path.join(ROOT, _current_delivery_manifest_relpath())
+    if not os.path.exists(path):
         return "NO-MANIFEST-BASE-COMMIT-FOUND"
     txt = _io.open(path, encoding="utf-8").read()
     m = _re.search(r"\*\*Base commit:\*\*\s*`([0-9a-f]{40})`", txt)
@@ -482,7 +507,7 @@ MUTATIONS = [
  # mutate until Phase 7 published its own. The fix is not to weaken them -- it is to give Phase 7 the
  # authoritative manifest they need, and repoint them at it. They must be repointed at every phase boundary,
  # and the CI failure when they are not is the mechanism that makes anyone do it.
- ("M46 change-manifest lists a path not present in git base..HEAD", "docs/manifests/Phase7-change-manifest.md",
+ ("M46 change-manifest lists a path not present in git base..HEAD", CURRENT_MANIFEST_RELPATH,
    ("append", "\n| `zz-fabricated-extra-path.md` | CREATED | `A` | other | OTHER | rollback REMOVES it | fabricated |\n")),
  ("M47 acceptance decision D13 removed from the register", "governance/decision-register.json",
    ("replace", [('"id": "D13"', '"id": "D13-DISABLED"')])),
@@ -491,7 +516,7 @@ MUTATIONS = [
  # string matched nothing, the mutation became a no-op, and the suite aborted on fixture drift WITHOUT
  # printing a [FAIL] line -- a green-looking log that simply stopped at M47. Reading the base out of the
  # manifest keeps the case testing what it is named for however often the manifest is regenerated.
- ("M48 manifest base repointed so its path/status set no longer equals git base..delivery_head", "docs/manifests/Phase7-change-manifest.md",
+ ("M48 manifest base repointed so its path/status set no longer equals git base..delivery_head", CURRENT_MANIFEST_RELPATH,
    ("replace", [(_manifest_base_commit(), "a8c3b3caac6baf8ac41fa581fca5350c97219bb8")])),
  # --- Phase-3 governance contradiction classes (D14/T0015; DARK; no financial posting; Phase 4 gated) ---
  ("M49 decision D14 removed while Phase 3 is IN_PROGRESS", "governance/decision-register.json",

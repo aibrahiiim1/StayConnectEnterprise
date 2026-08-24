@@ -331,7 +331,7 @@
   "next_authorized_action": "MANUAL ENROLLMENT of the deployed Fresh Production appliance 172.21.60.25: issue a bootstrap token from the Central Control Plane and enrol the appliance through its local setup wizard. Claim, signed assignment, licence installation, LAN/guest networking, packages, access policy, PMS interfaces and acceptance testing are LATER onboarding steps, each requiring its own state advancement once the preceding milestone completes. A separate Product-Owner Go-Live decision remains required. No guest, PMS, payment or financial traffic is authorized. 172.21.60.23 remains the DEVELOPMENT reference appliance and is not to be changed.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D35",
+  "latest_accepted_po_decision": "D36",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -720,7 +720,7 @@
     "fresh_production_readiness_merge_transition": "T0079",
     "fresh_production_readiness_merge_introduced_no_content": true
   },
-  "latest_transition_id": "T0083",
+  "latest_transition_id": "T0086",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -983,5 +983,83 @@
     "payment_or_financial_traffic": "NONE",
     "go_live": "NOT PERFORMED and NOT authorized",
     "development_appliance_contact": "NONE. Nothing was copied from or sent to 172.21.60.23."
+  },
+  "post_closure_corrections": [
+    {
+      "id": "PC-0001",
+      "pr": 39,
+      "title": "Server-authoritative Room-auth feed readiness and unknown-vs-outage correction",
+      "classification": "POST-CLOSURE CORRECTIVE IMPROVEMENT. It corrects Room-auth readiness REPORTING and the Hotel-Admin health surface. It does NOT reopen, extend or re-evaluate Phase 3, whose closure at verified DARK maturity (D16/T0024) and merge (D17/T0025) stand unchanged and are not touched by this record.",
+      "merged": true,
+      "merge_commit": "883b1f78ea4c8ce906f5d64f5a6bf255d64e765c",
+      "pr_head": "174461fb98dd757329c3e95c9c301e080a43463a",
+      "base": "master",
+      "merged_at": "2026-08-23T21:38:24Z",
+      "verified_against_remote": true,
+      "ci_on_pr_head": {
+        "phase3-full-software-gate": "success (97263513784)",
+        "phase4-financial-core-gate": "success (97263513508)",
+        "phase5-post-stay-transfer-gate": "success (97263513318)",
+        "governance": "failure (97263513370) — PRE-EXISTING and not caused by this PR; see governance_check_state"
+      },
+      "changed_files": {
+        "created": [
+          "data-plane/cmd/edged/phase3_room_auth_readiness_integration_test.go"
+        ],
+        "modified": [
+          "data-plane/cmd/edged/resources_phase3_interfaces.go",
+          "data-plane/internal/authctx/freshness_feed_health_integration_test.go",
+          "deploy/gatep/svc-edged-phase345-admin-grants.sql",
+          "hotel-admin/app/(app)/sign-in-methods/page.tsx",
+          "hotel-admin/lib/api.ts",
+          "hotel-admin/lib/pms-availability.ts",
+          "hotel-admin/test/pms-availability.test.ts"
+        ],
+        "deleted": [],
+        "renamed": [],
+        "generated": [],
+        "exported": [],
+        "counts": "1 created, 7 modified, 0 deleted/renamed/generated/exported; +538/-169 (GitHub: 8 changed files)"
+      },
+      "what_changed": "GET /pms-interfaces/{id}/health now returns room_auth_ready plus a bounded room_auth_reason, derived from the same runtime and active Revision that Phase 3 reads and mirroring the FEED half of iam_v2.p3_feed_authorizes. The Stay-specific half (occupancy evidence, its age, its revision pin) is deliberately excluded: it belongs to one guest's Stay, not to the interface. Hotel Admin consumes that result instead of re-implementing the rule with the 300-second DEFAULT hardcoded, which described any interface configured with a different heartbeat_timeout_ms using a number that interface does not use. An unreadable health result is now UNKNOWN and is never presented as a confirmed outage.",
+      "schema_change": "NONE. No migration. iam_v2.p3_cfg_secs already existed.",
+      "privilege_change": "svc_edged gained EXECUTE on iam_v2.p3_cfg_secs, written in deploy/gatep/svc-edged-phase345-admin-grants.sql so a Gate-P reconcile retains it. Read-only, non-mutating, no table privilege.",
+      "deployment": {
+        "host": "172.21.60.25 (PRE-LIVE Production)",
+        "components": "edged and the hotel-admin bundle only",
+        "edged_sha256_16": "b9d03ddb2fe17f38",
+        "edged_rollback": "/opt/stayconnect/bin/edged.bak-pre-883b1f7-20260823-214120",
+        "hotel_admin_release": "20260823-214120",
+        "hotel_admin_previous_release": "20260823-200549 (retained)",
+        "build_flags": "NEXT_PUBLIC_PHASE2_ADMIN=1, NEXT_PUBLIC_PHASE3_ADMIN=1; 4/5/6 unset — parity verified against the live bundle before deploy",
+        "post_deploy": "all seven services active; zero permission denials, zero PostgreSQL errors, zero edged errors in the observation window",
+        "deployed_sha_marker_note": "/opt/stayconnect/DEPLOYED_SHA still reads 7c94d6cf58abec603b2e0555d000e6b9c8294ac7 (the PR #23 marker). It was not advanced by this or the other post-closure deployments, so it is STALE for those components; the binary digests are the reliable identifier."
+      },
+      "boundaries_observed": [
+        "No Room-authentication behaviour change; no room_any change.",
+        "No guest authentication submitted and no PMS/Protel traffic generated.",
+        "No migration, no database state change, no networking change.",
+        "No package, service-plan, session, entitlement or financial change.",
+        "PR #24 untouched. No Go Live."
+      ],
+      "phase3_impact": "NONE. Phase 3 remains ACCEPTED_AND_CLOSED at verified DARK maturity and MERGED."
+    }
+  ],
+  "governance_check_state": {
+    "status": "RESOLVED by D36",
+    "was": "manifest omits 147 path(s) present in git base..HEAD. current_phase was 7 and that CLOSED phase's manifest was still treated as the CURRENT delivery manifest, so it was range-checked against master: 81 paths recorded, 229 in base..HEAD. Red since PR #22 (c72b49e), the first merge past the Phase-7 delivery head; 17 PRs merged through it.",
+    "resolution": "Option (a). Post-closure corrections are recognised as their own delivery lineage: current_delivery names the manifest and its base, the validator range-checks THAT manifest, and a closed phase's manifest is stated as historical and skipped rather than asked a question it cannot answer. The Phase-7 manifest is unchanged — it was never wrong, it was being misapplied.",
+    "resolution_authorization": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
+  },
+  "current_delivery": {
+    "kind": "POST_CLOSURE_CORRECTIONS",
+    "decision": "D36",
+    "manifest": "docs/manifests/PostClosure-change-manifest.md",
+    "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
+    "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
+    "head": "44a9e12120b01da28c4dbd97f110f1928079f088",
+    "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
+    "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
+    "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."
   }
 }

@@ -622,6 +622,16 @@
       "decided_on": "2026-08-20",
       "phase": "post-roadmap",
       "accepted": true
+    },
+    {
+      "id": "D36",
+      "title": "POST-CLOSURE CORRECTIONS ARE THEIR OWN DELIVERY LINEAGE (2026-08-24). The Product Owner resolves the governance-gate gap reported at T0084. With every numbered phase closed, corrective work after closure is recognised as a delivery lineage in its own right, with its own change manifest based at the Phase-7 delivery head (ac68164). A CLOSED phase's manifest is HISTORICAL: it records what that phase delivered and is never range-checked against a later HEAD. governance/project-state.json now names the current delivery explicitly (current_delivery: kind, manifest, base, head) rather than inferring it from current_phase, and tools/project-state.py applies the path/status equality to that manifest. This changes HOW the delivery rule is applied to post-closure work; it does not relax what the rule requires, does not alter any phase status or maturity, and does not reopen any phase. Phase 3 specifically remains ACCEPTED AND CLOSED at verified DARK maturity (D16/T0024) and MERGED (D17/T0025). The rejected alternative was regenerating the Phase-7 manifest over base..master, which would have folded post-closure work into a closed phase's delivery record.",
+      "decided_on": "2026-08-24",
+      "phase": "post-roadmap",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED_BY_PRODUCT_OWNER",
+      "accepted_on": "2026-08-24",
+      "authorization_evidence": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
     }
   ]
 }

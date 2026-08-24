@@ -1,0 +1,37 @@
+{
+  "transition_id": "T0086",
+  "seq": 86,
+  "timestamp": "2026-08-24T12:00:00Z",
+  "record_type": "D36_ACCEPTED_POST_CLOSURE_DELIVERY_LINEAGE_IS_THE_APPROVED_GOVERNANCE_MODEL",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ENROLLMENT_CLAIM_ASSIGNMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ENROLLMENT_CLAIM_ASSIGNMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (D36 acceptance; no phase is affected)",
+  "decision": "D36",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision.",
+  "previous_state_note": "T0085 implemented option (a) on the strength of a one-word selection. The stale-record pass then withdrew the acceptance claim, recording D36 as PROPOSED and IMPLEMENTED and returning latest_accepted_po_decision to D35, because the record showed no explicit acceptance.",
+  "new_state_note": "The Product Owner has now accepted D36 explicitly. Post-closure corrective work has its own delivery lineage and manifest; every closed numbered-phase manifest is an immutable historical delivery record. latest_accepted_po_decision is D36. No phase status, maturity, activity or next-action changes.",
+  "phase_status_unchanged": "Phases 0-7 keep the status and maturity they already had. Phase 3 specifically remains ACCEPTED AND CLOSED at verified DARK maturity (D16/T0024) and MERGED (D17/T0025). The acceptance explicitly does not reopen or alter any of them.",
+  "boundaries_observed": [
+    "Records, docs and governance tooling only.",
+    "No application code, migration, database, grant, configuration, deployment, restart or service change.",
+    "No networking, no PMS/Protel traffic, no guest authentication, no financial action, no production mutation, no Go Live.",
+    "PR #24 untouched."
+  ],
+  "next": "Onboarding-state reconciliation: record the milestones reached on 172.21.60.25 since T0083 against the post-closure lineage. Deferred by Product-Owner instruction to a separate decision after this merge is verified."
+}

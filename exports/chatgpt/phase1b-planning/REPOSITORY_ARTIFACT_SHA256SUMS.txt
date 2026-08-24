@@ -1,17 +1,17 @@
-# cited committed source, not packaged. Verify at SOURCE_COMMIT ac68164.
-948849d2c5440693d9d55591692348421291393fc99344c54c1be9bf9740e8ab  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+# cited committed source, not packaged. Verify at SOURCE_COMMIT 8590019.
+823d840dd89e433faf8d7e18c0813f3b722d5de16266e715126a4eedc3a8c79f  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
 d7ffc726816e4ed6a677d35cf0b645b79278ea2a48ed4eb561008fcebb640e3d  docs/architecture/Phase1B-Privilege-Matrix.md
 bb6281470a81df07fc8060b559eb55cf1e9265c536e6fe43d8258f78072a93d0  data-plane/internal/pmsguard/guard.go
-d3f3e09419145e6a3b940286fdbe9169a30ca3c3e05bcc29e563eb8717dd5a34  data-plane/cmd/scd/main.go
+6e342646f89a73e68e6ab9fab1b3bdbb9690d123a5d7ac12c780fc4f87994a64  data-plane/cmd/scd/main.go
 66429a15336b6b0b72191174aa9539b1e56fa15c7879adb45ecf0e5623abfdb6  data-plane/cmd/acctd/main.go
-3d34cf26afa9bc8ab49a8956971e0060d8e3c02aed26d7c13428f162c55bdc48  data-plane/cmd/edged/main.go
-6e9dee60d64e2049a5dddb0373758156d88e52e431314f4a5db408981957444f  data-plane/cmd/netd/main.go
+a7f937f6ce9ad5d2729c5690bbfbb21e713bf4f49d0aec7b4c38a699f55a37d8  data-plane/cmd/edged/main.go
+116f07b5813550b3fc5fc052c2e23da4932feb6e496f0a49fe3035aca947eaf8  data-plane/cmd/netd/main.go
 3dce3a352c9669f99787f59f58b89e76f59a5cf79ad802e759f7055031244833  data-plane/cmd/portald/main.go
 MISSING  data-plane/internal/session/session.go
 MISSING  data-plane/internal/voucher/voucher.go
 3b40443df98a1daf833d2380f5cf60a2e420d26049e4e203712c573ec2873e91  data-plane/internal/otp/otp.go
 7b7cd6409e885aa3ec6a921c33e8e66d1648e39360d015529f52f5a39b8fe687  data-plane/cmd/scd/credentials_handlers.go
-8a5af17226a5409421c38bb88e6952d927708ef9bb78788fd48a712feae6e2f0  data-plane/cmd/scd/otp_handlers.go
+fecb355295e05ebd5faa6132301ed89bab1eff5fcd32cad8e0db8436c5a469c4  data-plane/cmd/scd/otp_handlers.go
 7afc06953a83307fd7bfbfce83768c91706ca3e4f0b2f680ce9fabf4c1c18e67  data-plane/cmd/scd/social_handlers.go
 MISSING  data-plane/cmd/scd/pms_handlers.go
 3420c8c0a824a7fa054b16af8381e61256bc4ff3764785a88235c3cf995a8237  iam_v2_scratch/roles.sql

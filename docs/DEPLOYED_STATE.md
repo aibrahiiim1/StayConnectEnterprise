@@ -1,7 +1,13 @@
 # Deployed state — activation, licensing, Central FQDN, Kea health
 
-Current as of **2026-08-21**. Status: **PRE-LIVE**. No Go-Live, no guest traffic, no LAN/guest VLAN/DHCP
-configuration, no PMS or payment traffic.
+Current as of **2026-08-21** for the PR #23 deployment this document describes, with a post-closure
+deployment table appended on **2026-08-24**. Status: **PRE-LIVE**. No Go-Live, no payment traffic.
+
+> **Scope note (2026-08-24).** The header sentence originally also said "no guest traffic, no LAN/guest
+> VLAN/DHCP configuration, no PMS or payment traffic". A guest network and a PMS Interface have since been
+> configured on the appliance, so that sentence is no longer true as written and has been narrowed to what is
+> still verifiable here. This document is evidence of the PR #23 deployment; it is not a current-state
+> inventory of the appliance, and the work that changed those facts is not recorded in `governance/`.
 
 ## What is deployed
 
@@ -29,11 +35,39 @@ assumed.
 | ctrlapi binary | same | `5477a2b` | yes — `control-plane/` unchanged since |
 | cloud-admin bundle | same | `5477a2b` | yes — `cloud-admin/` unchanged since |
 | Appliance source + tooling | `sce` (172.21.60.25) | branch head | — |
-| scd | same | `4be7adf` | yes — `data-plane/` unchanged since |
-| edged, netd | same | `97a9b9d` | yes — their `cmd/` trees unchanged since |
-| hotel-admin bundle | same | `5477a2b` | yes — `hotel-admin/` unchanged since |
+| scd | same | `4be7adf` | superseded — see the post-closure table below |
+| edged, netd | same | `97a9b9d` | superseded for `edged` — see below; `netd` unchanged |
+| hotel-admin bundle | same | `5477a2b` | superseded — see the post-closure table below |
 
 Branch `post-roadmap/activation-fqdn-kea-deploy`, PR #23, **unmerged** by instruction.
+
+### Post-closure corrective deployments (master)
+
+The table above records the PR #23 deployment and stays as written, because that is what it is evidence of.
+Appliance components have since been redeployed from **`master`** by post-closure corrections, so the rows
+above are no longer the current artefacts for those components.
+
+`/opt/stayconnect/DEPLOYED_SHA` on the appliance reads `7c94d6cf58abec603b2e0555d000e6b9c8294ac7`. It is the
+PR #23 marker and was NOT advanced by the corrective deployments below, so for these components it is stale;
+the binary digests are the reliable identifier.
+
+| Component | Deployed from | Artefact (sha256, first 16) | Landed |
+|---|---|---|---|
+| `edged` | `883b1f78ea4c8ce906f5d64f5a6bf255d64e765c` (PR #39) | `b9d03ddb2fe17f38` | 2026-08-23 |
+| hotel-admin bundle | `883b1f78ea4c8ce906f5d64f5a6bf255d64e765c` (PR #39) | release `20260823-214120` | 2026-08-23 |
+| `pmsd` | `4d391cd28be18805e01bb213c970315ac26bc9ae` (PR #36) | `878e8e719e5b0baf` | 2026-08-23 |
+| `scd` | `9ec156ea439963d2e5323b6f757c9b9fa3f680c3` (PR #32) | `694da112b0ba57e7` | 2026-08-23 |
+| `portald` | `9ec156ea439963d2e5323b6f757c9b9fa3f680c3` (PR #32) | `b9d0a232dfe8f0f4` | 2026-08-23 |
+| `netd`, `acctd` | unchanged since PR #23 | `86ec4d1e26b196c0`, `39caa17e6f2f7615` | — |
+
+Hotel Admin is rebuilt with `NEXT_PUBLIC_PHASE2_ADMIN=1` and `NEXT_PUBLIC_PHASE3_ADMIN=1`; 4, 5 and 6 stay
+unset. Those flags are inlined at build time, so the parity is verified against the previous bundle before
+each deployment rather than assumed.
+
+**This section covers only the components PR #39 deployed plus the digests read from the appliance at the
+same time. It is not a full reconciliation of the appliance against `master`** — the wider onboarding work
+that has happened since PR #23 is not recorded anywhere in `governance/`, and inventing that record is a
+Product-Owner matter, not a documentation edit. See "Real blocker" in the PR #39 synchronization report.
 
 ## Central endpoint
 

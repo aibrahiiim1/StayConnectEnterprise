@@ -1,0 +1,48 @@
+{
+  "transition_id": "T0084",
+  "seq": 84,
+  "timestamp": "2026-08-24T00:00:00Z",
+  "record_type": "POST_CLOSURE_CORRECTION_RECORDED_PR39_ROOM_AUTH_READINESS_REPORTING",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ENROLLMENT_CLAIM_ASSIGNMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ENROLLMENT_CLAIM_ASSIGNMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (PR #39 post-closure correction receipt; no phase is affected)",
+  "decision": "D35",
+  "new_decision_created": false,
+  "transition_accepted": true,
+  "po_authorization_ref": "Recorded under the Product-Owner instruction to synchronize records for PR #39 and to record it as a post-closure correction. This is a RECEIPT for already-merged, already-deployed work; it is not a new Product-Owner decision, does not advance the activity state, and creates no authorization. D35 is cited as the governing decision in force, following the T0083 precedent for state-synchronization receipts.",
+  "previous_state_note": "T0083 (2026-08-20) recorded the Fresh Production appliance as deployed and awaiting enrollment. That is still the last state the register describes.",
+  "new_state_note": "PR #39 is recorded as post_closure_corrections[PC-0001] in governance/project-state.json, with its merge commit, PR head, CI conclusions, complete file manifest and deployment evidence, all verified against the authoritative remote and the appliance. THE STATE IS DELIBERATELY NOT ADVANCED: PR #39 corrects Room-auth readiness reporting and reaches no onboarding milestone.",
+  "phase3_status_unchanged": "Phase 3 remains ACCEPTED AND CLOSED at verified DARK maturity (D16/T0024) and MERGED (D17/T0025). Nothing in this receipt reopens, extends, re-evaluates or qualifies that closure, and no Phase-3 field was edited.",
+  "records_synchronized": [
+    "governance/project-state.json — added post_closure_corrections[PC-0001] and governance_check_state; purely additive, 68 insertions, 0 deletions.",
+    "docs/DEPLOYED_STATE.md — appended a post-closure deployment table for the components PR #39 shipped, and narrowed a header sentence that had become false.",
+    "governance/transitions/T0084.json — this receipt."
+  ],
+  "records_deliberately_not_changed": {
+    "current_activity_and_next_authorized_action": "Left as T0083 wrote them. The appliance has demonstrably progressed well beyond 'awaiting enrollment' — it carries a signed assignment, a licence, a guest network, packages and a commissioned Protel Interface — but none of those milestones has a recorded Product-Owner decision or transition, and inventing that lineage to make the file look current would fabricate an authorization trail. The discrepancy is reported rather than papered over.",
+    "phase7_change_manifest": "NOT regenerated. Extending it over base..master would fold 17 PRs of post-closure work into a closed phase's delivery record.",
+    "governance_validator": "NOT modified. Changing the rule that is currently failing the agent's own merges is a Product-Owner decision, not a cleanup."
+  },
+  "boundaries_observed": [
+    "Records only. No application code, migration, database, grant, configuration, deployment, restart or service change.",
+    "No networking, no PMS/Protel traffic, no guest authentication, no financial action, no Go Live.",
+    "The appliance was read from only (binary digests, DEPLOYED_SHA, release symlink).",
+    "PR #24 untouched."
+  ],
+  "real_blocker": "The 'governance' CI check is RED on master and has been since PR #22 (c72b49e), the first merge past the Phase-7 manifest HEAD. delivery_governance.merge_gate states that merging requires that check; 17 PRs have merged with it red. This is a governance-integrity gap, not a code defect.",
+  "next": "Product-Owner decision on how the post-closure delivery record is to be kept: (a) recognise post-closure corrections as their own delivery lineage with their own manifest and stop range-checking a closed phase's manifest, or (b) declare the Phase-7 manifest historical and advance the current-delivery pointer. Until one is chosen the merge gate cannot pass, and the unrecorded onboarding milestones remain unrecorded."
+}
