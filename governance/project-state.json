@@ -738,7 +738,9 @@
     "go_live_performed": false,
     "room_signin_accepted_via": "scd resolve socket only (portald bypassed)",
     "room_signin_portal_path_proven": false,
-    "portald_verification_forwarding_fixed": true
+    "portald_verification_forwarding_fixed": true,
+    "portald_deployed_sha256": "1d2309ca25040948516b1ea618cf724773df7b6983d5e18986e3b7eeccea61a3",
+    "portald_verification_forwarding_deployed": true
   },
   "latest_transition_id": "T0088",
   "phase3_delivery_evidence": {
@@ -1073,7 +1075,20 @@
       "root_cause": "cmd/portald/pms_phase3_handlers.go phase3In named only room, last_name, reservation_number and request_id. The portal script sends `verification` for room_any and `first_name` for room_firstname. Both were decoded into nothing and forwarded as nothing — silently, with no error at any layer — so scd received a room with no evidence beside it. room_any and room_firstname were therefore incapable of ever succeeding on the real guest path; only room_lastname and room_reservation worked.",
       "why_tests_missed_it": "Every existing test called scd's handler directly. None crossed the portald hop, so the hop was the one part of the path nothing asserted. The new coverage exercises the hop itself.",
       "introduced_by": "The room_any work (PR #32) added the field to the portal script and to scd and did not update phase3In. room_firstname had the same gap from the start.",
-      "phase3_impact": "NONE."
+      "phase3_impact": "NONE.",
+      "merged": "PR #43 merged to master as 1482890aa1519651ff37e59352fe59eba88f4053 on 2026-08-25, with all four required checks SUCCESS on head 006a7434d02938e6543d81b9ccd25de2b7996e9c (governance, phase3-full-software-gate, phase4-financial-core-gate, phase5-post-stay-transfer-gate).",
+      "deployed": {
+        "component": "portald ONLY. No other runtime component was built, deployed or restarted.",
+        "appliance": "172.21.60.25 (Fresh Production, PRE-LIVE)",
+        "built_from": "master at 1482890aa1519651ff37e59352fe59eba88f4053",
+        "artifact_sha256": "1d2309ca25040948516b1ea618cf724773df7b6983d5e18986e3b7eeccea61a3",
+        "replaced_sha256": "b9d0a232dfe8f0f4e86ac6a49b74474ee4d740a27720d1ee49f183d0d3805462",
+        "rollback_copy": "/opt/stayconnect/bin/portald.bak-pc0002 (the exact binary that was replaced)",
+        "deployed_at": "2026-08-24T23:04:04Z",
+        "service_state": "stayconnect-portald active, serving HTTP on :8380"
+      },
+      "deployment_verification": "Three checks, none of which required PMS traffic or a guest authentication. (1) The installed artifact's sha256 equals the locally built one byte for byte. (2) The deployed binary contains all four verification keys - verification, first_name, last_name, reservation_number - and the binary it replaced contained neither `verification` nor `first_name`, which is the defect itself, visible in the shipped artifact. (3) A loopback POST carrying a `verification` field decoded cleanly and stopped at `device_not_on_guest_network`, the device check that sits AFTER decoding and BEFORE the scd hop: proof the new field shape is accepted, and proof the probe never reached scd or the PMS. Counters after the deploy: auth_resolutions unchanged at 8 (latest still 2026-08-23), purchases 0, entitlements 0, sessions 0.",
+      "still_unproven": "The guest-visible portal path remains unproven end to end. The fix is verified by regression coverage across the portald->scd hop and by the deployed artifact's behaviour, NOT by a real sign-in: the PMS link is intentionally disconnected, so no authentication is possible and none was attempted."
     }
   ],
   "governance_check_state": {
@@ -1088,7 +1103,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "8b82ff89a0762a1902b3f15ba1bcd2cbc72044e6",
+    "head": "ac0710320887c7d754d7692af699b7e3e3d8683d",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."
