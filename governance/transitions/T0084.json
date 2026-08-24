@@ -18,7 +18,8 @@
     "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
   },
   "state_advanced": false,
-  "phase_affected": "none",
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (PR #39 post-closure correction receipt; no phase is affected)",
   "decision": "D35",
   "new_decision_created": false,
   "transition_accepted": true,
