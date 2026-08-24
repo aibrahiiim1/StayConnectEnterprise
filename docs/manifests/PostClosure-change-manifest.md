@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `8a35bb850862dba56001e1a1279f162c17c4545f`
-- **Provenance (generation HEAD = inventory_head):** `8a35bb850862dba56001e1a1279f162c17c4545f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `523012927dab487bcd3ae78e0949d3023183ff26`
+- **Provenance (generation HEAD = inventory_head):** `523012927dab487bcd3ae78e0949d3023183ff26`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `records/pr39-post-closure-sync`
 - **Remote branch:** `origin/records/pr39-post-closure-sync`
 - **Changed files:** 196
@@ -138,32 +138,32 @@
 | `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest at the receipt-convention fix |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: post-closure manifest at the stale-record reconciliation |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
-| `exports/chatgpt/phase-evidence/GIT_STAT_f4b1211.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Rebuild the evidence packs at the current source commit |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/phase-evidence/GIT_STAT_38bf168.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Rebuild packs after the D36 acceptance-status correction |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
-| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the D36 acceptance-status correction |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: post-closure manifest at the stale-record reconciliation |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Correct stale counts and stop representing D36 as accepted |
@@ -337,30 +337,30 @@
  docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   9 +-
  docs/context/StayConnect-IAM-Handoff.md            |   9 +-
  docs/manifests/Phase7-change-manifest.md           | 108 +++--
- docs/manifests/PostClosure-change-manifest.md      | 502 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 504 +++++++++++++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317213 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 129081 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42558 bytes
- .../chatgpt/phase-evidence/GIT_STAT_f4b1211.txt    |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317214 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 129378 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42557 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_38bf168.txt    |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
- .../governance/decision-register.json              |   7 +
+ .../governance/decision-register.json              |   9 +
  .../chatgpt/phase-evidence/tools/project-state.py  | 129 +++++-
  .../phase-evidence/tools/validate-project-state.sh |  12 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |   2 +-
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |  12 +-
- .../StayConnect-IAM-Phase1B-Plan.md                |  13 +-
+ .../StayConnect-IAM-Phase1B-Plan.md                |  11 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |   9 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  71 +--
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  69 +--
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   9 +-
  .../Phase3-Privilege-Matrix.md                     |  12 +
- .../StayConnect-IAM-Handoff.md                     |  13 +-
- .../StayConnect-IAM-Phase0-Contract.md             |  13 +-
- .../StayConnect-IAM-Phase1A-Plan.md                |  13 +-
- .../StayConnect-IAM-Phase1B-Plan.md                |  13 +-
+ .../StayConnect-IAM-Handoff.md                     |  11 +-
+ .../StayConnect-IAM-Phase0-Contract.md             |  11 +-
+ .../StayConnect-IAM-Phase1A-Plan.md                |  11 +-
+ .../StayConnect-IAM-Phase1B-Plan.md                |  11 +-
  governance/decision-register.json                  |   9 +
  governance/project-state.json                      | 140 +++++-
  governance/transitions/T0083.json                  |  58 +++
@@ -376,7 +376,7 @@
  hotel-admin/app/(app)/service-plans/page.tsx       | 298 ++++++++++++
  hotel-admin/app/(app)/setup/enrollment/page.tsx    | 244 +++++++++-
  hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 +++++++++++++++++
- hotel-admin/app/(app)/stays/page.tsx               | 277 ++++++++----
+ hotel-admin/app/(app)/stays/page.tsx               | 277 +++++++----
  hotel-admin/components/nav.tsx                     | 171 +++----
  hotel-admin/components/ui/error-banner.tsx         |   7 +-
  hotel-admin/e2e/hotel-admin.spec.ts                |  67 +--
@@ -398,7 +398,7 @@
  hotel-admin/test/pms-availability.test.ts          | 220 +++++++++
  hotel-admin/test/publish-form.test.tsx             |   8 +-
  scripts/factory-clean-baseline-verify.sh           |  27 ++
- scripts/gatep-grant-survives-reconcile.sh          | 151 +++++++
+ scripts/gatep-grant-survives-reconcile.sh          | 151 ++++++
  scripts/gatep-reconcile-acceptance.sh              | 236 ++++++++++
  scripts/gatep-reconcile.sh                         | 161 +++++++
  scripts/generate-production-baseline.sh            |  38 +-
@@ -407,7 +407,7 @@
  tools/project-state.py                             |  69 ++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 196 files changed, 15829 insertions(+), 2224 deletions(-)
+ 196 files changed, 15827 insertions(+), 2218 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -417,6 +417,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 5230129 Rebuild packs after the D36 acceptance-status correction
+HISTORICAL: 38bf168 Delivery: post-closure manifest at the stale-record reconciliation
 HISTORICAL: 8a35bb8 Correct stale counts and stop representing D36 as accepted
 HISTORICAL: e09e7ad Delivery: manifest at the receipt-convention fix
 HISTORICAL: f89ccb7 Use the established phase_affected convention in the post-closure receipts
