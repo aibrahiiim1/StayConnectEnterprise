@@ -1,0 +1,4 @@
+commit fb360ab0c345211eeb9317d7f79489c4755f6f8b
+Date:   Tue Aug 25 02:05:00 2026 +0300
+
+    Record what the PC-0002 deployment actually proved, and what it did not
