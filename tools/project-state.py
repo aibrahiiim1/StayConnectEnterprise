@@ -430,6 +430,34 @@ def cmd_validate(deep=True, manifest_equality=True):
     # equality check silently skipped. Prefer the current phase's manifest, else fall back to the newest one
     # that actually exists — never to "no file, no checks".
     man_path = os.path.join(ROOT, f"docs/manifests/Phase{cp}-change-manifest.md")
+
+    # D36: THE CURRENT DELIVERY IS NOT ALWAYS A NUMBERED PHASE.
+    #
+    # Once every numbered phase is closed, work continues as post-closure corrections. That work is a delivery
+    # lineage of its own, and the reasoning below about closed-phase manifests applies to it with full force:
+    # Phase 7's manifest records what Phase 7 delivered and cannot also describe a range ending at a HEAD
+    # seventeen PRs later. Asking it to was what held the gate red from PR #22 onward while every one of those
+    # PRs merged through it.
+    #
+    # When state names a current_delivery manifest, that manifest IS the current delivery and the phase
+    # manifests are historical. The base comes from state too, so the range being asserted is explicit rather
+    # than inferred from whichever file happens to sort last.
+    cur_delivery = st.get("current_delivery") or {}
+    cur_delivery_manifest = cur_delivery.get("manifest")
+    cur_delivery_base = cur_delivery.get("base")
+    if cur_delivery_manifest:
+        cd_path = os.path.join(ROOT, cur_delivery_manifest)
+        if not os.path.isfile(cd_path):
+            fail(f"current_delivery.manifest missing/not found: {cur_delivery_manifest}")
+        else:
+            if not cur_delivery_base:
+                fail("current_delivery.manifest is declared without current_delivery.base; the range it "
+                     "asserts would be unstated")
+            print(f"  note: current delivery is {cur_delivery.get('kind','(unnamed)')} -- "
+                  f"{os.path.basename(cur_delivery_manifest)} is the delivery manifest; "
+                  f"Phase{cp} manifest is historical and is not range-checked")
+            man_path = cd_path
+
     # is_current_manifest decides whether the RANGE checks below may run at all.
     #
     # The fallback exists so that advancing the phase before its manifest is written does not silently skip
@@ -443,19 +471,27 @@ def cmd_validate(deep=True, manifest_equality=True):
     # HEAD is a defect whichever phase produced it), and the PATH-SET equality runs only for the manifest that
     # belongs to the current phase. A historical manifest is stated as skipped rather than quietly passed.
     is_current_manifest = os.path.isfile(man_path)
-    if not is_current_manifest:
+    if cur_delivery_manifest:
+        # Already resolved above: this manifest is the current delivery by declaration, not by phase number.
+        is_current_manifest = os.path.isfile(man_path)
+    elif not is_current_manifest:
         import glob as _glob
         cands = sorted(_glob.glob(os.path.join(ROOT, "docs/manifests/Phase*-change-manifest.md")))
         if cands:
             man_path = cands[-1]
-    if manifest_equality and ach and os.path.isfile(man_path):
+    # The HEAD a manifest must agree with is the head of the delivery that PRODUCED it: acceptance_candidate_head
+    # for a numbered phase, current_delivery.head for the post-closure lineage. Checking a post-closure manifest
+    # against the Phase-7 acceptance head would demand it record a commit from a delivery it is not part of.
+    expected_head = cur_delivery.get("head") if cur_delivery_manifest else ach
+    if manifest_equality and expected_head and os.path.isfile(man_path):
         mtext = open(man_path, encoding="utf-8").read()
         m = re.search(r"HEAD commit:\*\*\s*`([0-9a-f]{7,40})`", mtext)
         head_in_manifest = m.group(1) if m else ""
+        label = "current_delivery.head" if cur_delivery_manifest else "acceptance_candidate_head"
         if not head_in_manifest:
             fail("change-manifest has no recorded HEAD commit")
-        elif not (head_in_manifest.startswith(ach) or ach.startswith(head_in_manifest)):
-            fail(f"manifest HEAD {head_in_manifest} != acceptance_candidate_head {ach}")
+        elif not (head_in_manifest.startswith(expected_head) or expected_head.startswith(head_in_manifest)):
+            fail(f"manifest HEAD {head_in_manifest} != {label} {expected_head}")
 
     # Manifest <-> Git path/status equality (GH-COMPLETE-MANIFEST + self-reference protocol 4.1):
     # the committed manifest's complete {path: git-status-letter} set must equal
@@ -471,6 +507,13 @@ def cmd_validate(deep=True, manifest_equality=True):
         mtext = open(man_path, encoding="utf-8").read()
         bmm = re.search(r"Base commit:\*\*\s*`([0-9a-f]{7,40})`", mtext)
         base_sha = bmm.group(1) if bmm else ""
+        # A declared lineage states its own base, and the manifest must agree with it. Trusting only the
+        # manifest's self-reported base would let a regenerated manifest quietly move the range it is checked
+        # against, which is the one thing this check exists to prevent.
+        if cur_delivery_manifest and cur_delivery_base:
+            if base_sha and not (base_sha.startswith(cur_delivery_base) or cur_delivery_base.startswith(base_sha)):
+                fail(f"manifest base {base_sha} != current_delivery.base {cur_delivery_base}")
+            base_sha = cur_delivery_base
         # only enforce when the base commit is resolvable in this checkout (CI does a full checkout;
         # a shallow/partial clone that cannot resolve base is skipped rather than falsely failed).
         if base_sha and git("cat-file", "-t", base_sha) == "commit":

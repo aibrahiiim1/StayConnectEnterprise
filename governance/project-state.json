@@ -1046,10 +1046,18 @@
     }
   ],
   "governance_check_state": {
-    "status": "FAILING on master, and NOT caused by PR #39",
-    "failure": "manifest omits 147 path(s) present in git base..HEAD (docs/GITHUB_EXECUTION_AND_DELIVERY_RULE.md 4.1)",
-    "mechanism": "current_phase is 7 and docs/manifests/Phase7-change-manifest.md exists, so tools/project-state.py treats that closed phase's manifest as the CURRENT delivery manifest and compares its path set against git diff base..HEAD. The manifest covers f3b6856..ac68164 (81 paths). master is now 883b1f7 — 73 commits and 17 merged PRs beyond that HEAD — and base..master is 229 paths, so 147 are reported missing.",
-    "first_failing_since": "the first merge after the Phase-7 manifest HEAD ac68164 (PR #22, c72b49e). It has been red for every merge since, including but not caused by PRs #25-#39.",
-    "why_not_fixed_here": "The two available fixes are both Product-Owner matters, not documentation edits. Regenerating the Phase-7 manifest over base..master would fold 17 PRs of POST-CLOSURE work into a CLOSED phase's delivery record, misrepresenting what Phase 7 delivered. Changing the validator so a closed phase's manifest stops being range-checked is a governance-rule change and must not be made by the agent whose merges it is currently failing. Neither was done."
+    "status": "RESOLVED by D36",
+    "was": "manifest omits 147 path(s) present in git base..HEAD. current_phase was 7 and that CLOSED phase's manifest was still treated as the CURRENT delivery manifest, so it was range-checked against master: 81 paths recorded, 229 in base..HEAD. Red since PR #22 (c72b49e), the first merge past the Phase-7 delivery head; 17 PRs merged through it.",
+    "resolution": "Option (a). Post-closure corrections are recognised as their own delivery lineage: current_delivery names the manifest and its base, the validator range-checks THAT manifest, and a closed phase's manifest is stated as historical and skipped rather than asked a question it cannot answer. The Phase-7 manifest is unchanged — it was never wrong, it was being misapplied."
+  },
+  "current_delivery": {
+    "kind": "POST_CLOSURE_CORRECTIONS",
+    "decision": "D36",
+    "manifest": "docs/manifests/PostClosure-change-manifest.md",
+    "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
+    "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
+    "head": "a72474a6222102a93d7cd3ebe4766de105a0acb9",
+    "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
+    "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to."
   }
 }
