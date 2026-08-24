@@ -1,4 +1,0 @@
-commit 38bf16844a93f416d60aae05e15ba65f068f3f3a
-Date:   Mon Aug 24 13:38:55 2026 +0300
-
-    Delivery: post-closure manifest at the stale-record reconciliation
