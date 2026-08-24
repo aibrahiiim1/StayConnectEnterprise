@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `f89ccb784dc68b745b9ac84e3c83e18467dc2f6a`
-- **Provenance (generation HEAD = inventory_head):** `f89ccb784dc68b745b9ac84e3c83e18467dc2f6a`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `8a35bb850862dba56001e1a1279f162c17c4545f`
+- **Provenance (generation HEAD = inventory_head):** `8a35bb850862dba56001e1a1279f162c17c4545f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `records/pr39-post-closure-sync`
 - **Remote branch:** `origin/records/pr39-post-closure-sync`
 - **Changed files:** 196
@@ -133,12 +133,12 @@
 | `docs/DEPLOYMENT_CLOUD.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | DNS checks must ask a real nameserver; open Central's mTLS port |
 | `docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Point the runbooks at the verifying reconcile runner |
 | `docs/architecture/Phase3-Privilege-Matrix.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Commission the Protel PMS Interface end to end |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest at the retargeted-mutation tree |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest at the receipt-convention fix |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
@@ -154,19 +154,19 @@
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
 | `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
 | `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the evidence packs at the current source commit |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
-| `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest at the retargeted-mutation tree |
+| `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Correct stale counts and stop representing D36 as accepted |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
-| `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
+| `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Correct stale counts and stop representing D36 as accepted |
 | `hotel-admin/app/(app)/commercial-packages/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `hotel-admin/app/(app)/commercial-packages/publish-form.tsx -> hotel-admin/app/(app)/internet-packages/publish-form.tsx` | RENAMED | `R065 (hotel-admin/app/(app)/commercial-packages/publish-form.tsx -> hotel-admin/app/(app)/internet-packages/publish-form.tsx)` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `hotel-admin/app/(app)/health/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Activation, licensing, Central FQDN and Kea health: production readiness |
@@ -217,7 +217,7 @@
  cloud-admin/app/(app)/appliances/page.tsx          |   5 +-
  cloud-admin/app/(app)/licenses/page.tsx            |  37 ++
  cloud-admin/app/(app)/onboarding/page.tsx          |  61 +++
- cloud-admin/app/login/page.tsx                     |  90 ++--
+ cloud-admin/app/login/page.tsx                     |  90 +++-
  cloud-admin/components/nav.tsx                     |   2 +-
  control-plane/internal/activation/activation.go    | 237 ++++++++++
  control-plane/internal/api/common.go               |  10 +
@@ -261,7 +261,7 @@
  data-plane/internal/activation/activation_test.go  | 122 +++++
  .../appliancecert/bootstrap_recovery_test.go       | 261 +++++++++++
  .../appliancecert/bootstrap_states_test.go         | 270 +++++++++++
- data-plane/internal/appliancecert/cert.go          | 425 ++++++++++++++++--
+ data-plane/internal/appliancecert/cert.go          | 425 +++++++++++++++--
  .../appliancecert/rotation_restart_test.go         | 231 ++++++++++
  data-plane/internal/assignment/resolve.go          | 219 +++++++++
  .../internal/assignment/resolve_outcome_test.go    |  85 ++++
@@ -289,7 +289,7 @@
  data-plane/internal/pmsloader/loader.go            |  80 +++-
  data-plane/internal/pmsloader/single_owner_test.go | 158 +++++++
  .../occupancy_evidence_integration_test.go         | 220 +++++++++
- data-plane/internal/stayengine/pg.go               | 150 ++++++-
+ data-plane/internal/stayengine/pg.go               | 150 +++++-
  .../staygrant/staygrant_integration_test.go        |  11 +
  ...pms_auth_freshness_follows_feed_health.down.sql |  64 +++
  ...0_pms_auth_freshness_follows_feed_health.up.sql | 195 ++++++++
@@ -299,7 +299,7 @@
  ...ace_config_lock_without_update_privilege.up.sql |  83 ++++
  .../baseline/0000_production_baseline.sql          | 245 ++++++++--
  deploy/caddy/Caddyfile.central                     |   6 +-
- deploy/config/central-endpoint.env                 |  50 +++
+ deploy/config/central-endpoint.env                 |  50 ++
  deploy/env/ctrlapi.env.example                     |  61 +++
  deploy/gatep/gatep-grants.sql                      |  30 +-
  deploy/gatep/gatep-roles.sql                       |   9 +
@@ -332,12 +332,12 @@
  docs/DEPLOYMENT_CLOUD.md                           |  59 ++-
  docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md    |  12 +-
  docs/architecture/Phase3-Privilege-Matrix.md       |  12 +
- .../StayConnect-IAM-Phase0-Contract.md             |  11 +-
- docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |  11 +-
- docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |  11 +-
- docs/context/StayConnect-IAM-Handoff.md            |  11 +-
- docs/manifests/Phase7-change-manifest.md           | 108 ++---
- docs/manifests/PostClosure-change-manifest.md      | 500 +++++++++++++++++++++
+ .../StayConnect-IAM-Phase0-Contract.md             |   9 +-
+ docs/architecture/StayConnect-IAM-Phase1A-Plan.md  |   9 +-
+ docs/architecture/StayConnect-IAM-Phase1B-Plan.md  |   9 +-
+ docs/context/StayConnect-IAM-Handoff.md            |   9 +-
+ docs/manifests/Phase7-change-manifest.md           | 108 +++--
+ docs/manifests/PostClosure-change-manifest.md      | 502 +++++++++++++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317213 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 129081 bytes
@@ -353,19 +353,19 @@
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |   6 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |  12 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |  13 +-
- .../chatgpt/stayconnectenterprise/00-START-HERE.md |  11 +-
+ .../chatgpt/stayconnectenterprise/00-START-HERE.md |   9 +-
  exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  71 +--
- .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |  11 +-
+ .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |   9 +-
  .../Phase3-Privilege-Matrix.md                     |  12 +
  .../StayConnect-IAM-Handoff.md                     |  13 +-
  .../StayConnect-IAM-Phase0-Contract.md             |  13 +-
  .../StayConnect-IAM-Phase1A-Plan.md                |  13 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |  13 +-
- governance/decision-register.json                  |   7 +
- governance/project-state.json                      | 141 +++++-
+ governance/decision-register.json                  |   9 +
+ governance/project-state.json                      | 140 +++++-
  governance/transitions/T0083.json                  |  58 +++
  governance/transitions/T0084.json                  |  48 ++
- governance/transitions/T0085.json                  |  49 ++
+ governance/transitions/T0085.json                  |  51 +++
  hotel-admin/app/(app)/commercial-packages/page.tsx | 396 +---------------
  hotel-admin/app/(app)/health/page.tsx              |  10 +-
  hotel-admin/app/(app)/internet-packages/page.tsx   | 249 ++++++++++
@@ -374,7 +374,7 @@
  hotel-admin/app/(app)/pms-interfaces/page.tsx      | 329 +++++++++++---
  hotel-admin/app/(app)/pms-providers/page.tsx       | 329 --------------
  hotel-admin/app/(app)/service-plans/page.tsx       | 298 ++++++++++++
- hotel-admin/app/(app)/setup/enrollment/page.tsx    | 244 ++++++++--
+ hotel-admin/app/(app)/setup/enrollment/page.tsx    | 244 +++++++++-
  hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 +++++++++++++++++
  hotel-admin/app/(app)/stays/page.tsx               | 277 ++++++++----
  hotel-admin/components/nav.tsx                     | 171 +++----
@@ -407,7 +407,7 @@
  tools/project-state.py                             |  69 ++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 196 files changed, 15829 insertions(+), 2231 deletions(-)
+ 196 files changed, 15829 insertions(+), 2224 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -417,6 +417,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 8a35bb8 Correct stale counts and stop representing D36 as accepted
+HISTORICAL: e09e7ad Delivery: manifest at the receipt-convention fix
 HISTORICAL: f89ccb7 Use the established phase_affected convention in the post-closure receipts
 HISTORICAL: 6d0ead6 Delivery: manifest at the retargeted-mutation tree
 HISTORICAL: a421189 Point M46 and M48 at the manifest that is actually checked
