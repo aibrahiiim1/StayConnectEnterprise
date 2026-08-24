@@ -1,4 +1,0 @@
-commit 650d8489bcfa1c3d133974b19ed521bb1d08f525
-Date:   Mon Aug 24 11:04:01 2026 +0300
-
-    Delivery: D36 decision record, T0085 receipt, refreshed post-closure manifest

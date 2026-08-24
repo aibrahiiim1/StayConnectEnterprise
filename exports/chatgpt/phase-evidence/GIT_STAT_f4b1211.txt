@@ -1,0 +1,4 @@
+commit f4b121130d2558f31630fc3a514a3cceb6cfb885
+Date:   Mon Aug 24 11:35:01 2026 +0300
+
+    Rebuild the packs, and teach the allowlist the current next action
