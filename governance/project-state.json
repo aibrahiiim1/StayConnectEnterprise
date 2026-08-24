@@ -427,7 +427,7 @@
       "scripts/ci/phase3_evidence.py (modified)"
     ],
     "post_closure_operational_changes_note": "Caddy deployment configuration, the Caddy systemd unit sources and CI/operational tooling changed AFTER Phase-3 closure, under T0026 and T0027. No Phase-3 application binary, migration, schema, IAM-v2 authority, PMS behaviour or financial behaviour changed. Do not claim the whole deploy/ or scripts/ tree is identical to the accepted candidate.",
-    "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
+    "current_activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
     "live_increment9_executed": true,
     "live_increment9_executed_on": "2026-08-10",
     "live_increment9_item_verdicts": {
@@ -718,7 +718,24 @@
     "fresh_production_readiness_merge_commit": "02cc833db17d55be5a8c7a3356102569a0ef2ea2",
     "fresh_production_readiness_merged_head": "7f3c0d0800afdcc5bd7f7fa0c9679466d3f00410",
     "fresh_production_readiness_merge_transition": "T0079",
-    "fresh_production_readiness_merge_introduced_no_content": true
+    "fresh_production_readiness_merge_introduced_no_content": true,
+    "current_activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "onboarding_reconciled_decision": "D37",
+    "onboarding_reconciled_transition": "T0087",
+    "onboarding_reconciled_on": "2026-08-24",
+    "appliance_enrolled": true,
+    "appliance_claimed": true,
+    "appliance_assigned": true,
+    "appliance_licensed": true,
+    "appliance_license_valid_until": "2026-12-01T23:59:59Z",
+    "guest_network_configured": true,
+    "pms_interface_commissioned": true,
+    "pms_feed_connected": false,
+    "pms_feed_disconnect_is_intentional": true,
+    "room_signin_accepted_to_offer": true,
+    "guest_access_granted_ever": false,
+    "financial_traffic_ever": false,
+    "go_live_performed": false
   },
   "latest_transition_id": "T0087",
   "phase3_delivery_evidence": {
