@@ -1,16 +1,17 @@
 # StayConnect Internet Access Management — Phase 0 Contract
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0082 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0085 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
-**Current activity:** `FRESH_PRODUCTION_APPLIANCE_DEPLOYMENT_PREPARATION`
+**Current activity:** `FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
-**Fresh Production baseline (repository; NO appliance exists yet):** 74 iam_v2 tables, 37 public tables, ZERO identity rows. Factory-clean and current-only: the superseded guest-IAM runtime and schema are ABSENT, so IAM-v2 is structurally the sole guest-IAM authority from first operation. Not a cutover.
+**Fresh Production baseline:** 74 iam_v2 tables, 37 public tables, ZERO identity rows. Factory-clean and current-only: the superseded guest-IAM runtime and schema are ABSENT, so IAM-v2 is structurally the sole guest-IAM authority from first operation. Not a cutover.
+**Fresh Production appliance (172.21.60.25, sce):** DEPLOYED factory-clean from `c72b49e`; first-bring-up fixes were then applied live and afterwards committed (`1c55d7f`), so no single commit describes what is running. PRE-LIVE. Enrollment, claim and signed assignment are NOT complete and it is unlicensed; no tenant or site is pinned. ens192 is intentionally unconfigured. Guest traffic: none; PMS: none; payment/financial: none. Go-Live: not performed and not authorized. Hotel Admin: https://172.21.60.25/
 **Development reference appliance (172.21.60.23):** UNTOUCHED by this work and NOT cut over. Retains the historical live-dark runtime its accepted evidence records, including its superseded guest-IAM schema (68 iam_v2 tables live). Reference and evidence only, never an installation source.
 **Lifecycle:** PRE-LIVE (D24): no real hotel guest or staff depends on StayConnect for live service yet.
-**Single next authorized action:** Product-Owner provision of the NEW PRODUCTION SERVER and access, plus authorization to execute the fresh deployment on that exact target under D35. The repository-side Fresh Production readiness work is COMPLETE against the Zero-Legacy criterion (T0081). The authorized strategy is Fresh Appliance Deployment: fresh server, fresh OS, clean deployment from the authoritative repository following the ordered install path in docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md -- binaries built with -tags stayconnect_production -- enrollment and claim and signed assignment, required hotel configuration, IAM-v2 as the only guest IAM authority from first operation, complete acceptance testing, then a separate Product-Owner Go-Live decision. No DEVELOPMENT database, configuration, service state, identity, account or voucher may be restored or cloned onto it. Until that server exists nothing is deployed anywhere and 172.21.60.23 is not changed. PRODUCTION remains untouched and PRE-LIVE.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D35`.
+**Single next authorized action:** MANUAL ENROLLMENT of the deployed Fresh Production appliance 172.21.60.25: issue a bootstrap token from the Central Control Plane and enrol the appliance through its local setup wizard. Claim, signed assignment, licence installation, LAN/guest networking, packages, access policy, PMS interfaces and acceptance testing are LATER onboarding steps, each requiring its own state advancement once the preceding milestone completes. A separate Product-Owner Go-Live decision remains required. No guest, PMS, payment or financial traffic is authorized. 172.21.60.23 remains the DEVELOPMENT reference appliance and is not to be changed.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D36`.
 <!-- END GENERATED PROJECT STATE -->
 
 
