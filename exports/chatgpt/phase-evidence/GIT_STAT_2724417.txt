@@ -1,0 +1,4 @@
+commit 272441782d469e5d3e6217f4e5b046da05c498e1
+Date:   Mon Aug 24 18:34:41 2026 +0300
+
+    Reconcile current_state_facts, the second copy of the activity

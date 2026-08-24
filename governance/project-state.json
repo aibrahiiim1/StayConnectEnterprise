@@ -15,9 +15,9 @@
     "merge_gate": "PR merge requires the GitHub Actions 'Project Governance' check (job 'governance') to pass; local validator output alone is insufficient (GH-MANDATORY-CI)"
   },
   "current_phase": "7",
-  "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
-  "current_activity_execution_state": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ENROLLMENT_CLAIM_ASSIGNMENT",
-  "current_activity_execution_state_note": "THE FRESH PRODUCTION APPLIANCE EXISTS AND IS DEPLOYED. 172.21.60.25 (hostname sce, Ubuntu 22.04.5) was provisioned factory-clean from git c72b49e958a408c468bfb2c5da97b21a4f383a7d with binaries built -tags stayconnect_production. First-bring-up fixes were then applied live -- the edged and netd binaries and the Hotel-Admin bundle rebuilt, the two hypertables registered, Kea installed -- and those fixes were afterwards committed as 1c55d7f7a36547665457edb7ee2af1016b4ccdca. The running appliance therefore corresponds to no single commit and none is claimed for it; see production_appliance.runtime_provenance. Its database was built from the Zero-Legacy factory-clean baseline -- 74 iam_v2 tables, 37 public tables, none of the superseded guest-IAM tables, zero identity rows -- so IAM-v2 is structurally the sole guest-IAM authority from first operation. This was a fresh deployment, NOT a cutover: nothing was copied from the DEVELOPMENT appliance, which was never contacted. The appliance is PRE-LIVE and awaiting onboarding: NOT ENROLLED, NOT CLAIMED, NO SIGNED ASSIGNMENT and UNLICENSED, with no tenant or site pinned anywhere. LAN ens192 is present and intentionally unconfigured because no guest topology has been supplied; Kea is installed but not started for the same reason. There has been NO guest, PMS, payment or financial traffic, and NO Go-Live. Hotel Admin is available for the Product Owner at https://172.21.60.25/. See docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md.",
+  "current_activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+  "current_activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+  "current_activity_execution_state_note": "Reconciled against verified appliance evidence under D37 (T0087). The appliance is ENROLLED, CLAIMED and ASSIGNED (tenant 36f3ba78, site 0d40f7c8), LICENSED (Active, valid_until 2026-12-01), carries a configured guest network on ens192 with Kea DHCP, has service plans and packages, has sign-in methods set to room_any plus voucher, and runs a commissioned ACTIVE Protel PMS Interface mirroring 540 Stays. Room sign-in is proven as far as VERIFIED -> Auth Context -> eligible offer. The PMS link is DISCONNECTED by the Product Owner's own decision, because the single PMS client slot is in use by another system. NO guest access, financial activity or Go-Live has occurred: purchases=0, entitlements=0, sessions=0. The appliance remains PRE-LIVE. T0083's 'awaiting enrollment' description was obsolete and is superseded; the T0083 record itself is retained unchanged as history.",
   "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK (DEVELOPMENT appliance) + VERIFIED ZERO-LEGACY FACTORY-CLEAN BASELINE (Fresh Production repository)",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -328,10 +328,10 @@
     "Any Production contact or mutation.",
     "Re-executing, reopening or extending Phase 7, which is ACCEPTED_AND_CLOSED, and implementing any numbered development phase: none is open or authorized, and no Phase 8 exists."
   ],
-  "next_authorized_action": "MANUAL ENROLLMENT of the deployed Fresh Production appliance 172.21.60.25: issue a bootstrap token from the Central Control Plane and enrol the appliance through its local setup wizard. Claim, signed assignment, licence installation, LAN/guest networking, packages, access policy, PMS interfaces and acceptance testing are LATER onboarding steps, each requiring its own state advancement once the preceding milestone completes. A separate Product-Owner Go-Live decision remains required. No guest, PMS, payment or financial traffic is authorized. 172.21.60.23 remains the DEVELOPMENT reference appliance and is not to be changed.",
+  "next_authorized_action": "NONE is authorized. The prerequisites for a Go-Live readiness assessment are NOT proven complete, so Go-Live is not the next step. Two things are unproven on this appliance. First, the PMS link is DISCONNECTED by Product-Owner decision, so Room sign-in cannot serve a guest until the Protel socket is reassigned to StayConnect. Second, NO end-to-end guest access has ever been exercised here - purchases=0, entitlements=0, sessions=0 - so package acquisition, entitlement issue, session activation and network enforcement all remain unproven. The RECOMMENDED next step, requiring its own Product-Owner decision, is a controlled end-to-end guest-access acceptance once the Protel socket is returned to StayConnect. A separate Product-Owner Go-Live decision remains required and no current authorization supplies it.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D36",
+  "latest_accepted_po_decision": "D37",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -427,7 +427,7 @@
       "scripts/ci/phase3_evidence.py (modified)"
     ],
     "post_closure_operational_changes_note": "Caddy deployment configuration, the Caddy systemd unit sources and CI/operational tooling changed AFTER Phase-3 closure, under T0026 and T0027. No Phase-3 application binary, migration, schema, IAM-v2 authority, PMS behaviour or financial behaviour changed. Do not claim the whole deploy/ or scripts/ tree is identical to the accepted candidate.",
-    "current_activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
+    "current_activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
     "live_increment9_executed": true,
     "live_increment9_executed_on": "2026-08-10",
     "live_increment9_item_verdicts": {
@@ -718,9 +718,26 @@
     "fresh_production_readiness_merge_commit": "02cc833db17d55be5a8c7a3356102569a0ef2ea2",
     "fresh_production_readiness_merged_head": "7f3c0d0800afdcc5bd7f7fa0c9679466d3f00410",
     "fresh_production_readiness_merge_transition": "T0079",
-    "fresh_production_readiness_merge_introduced_no_content": true
+    "fresh_production_readiness_merge_introduced_no_content": true,
+    "current_activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "onboarding_reconciled_decision": "D37",
+    "onboarding_reconciled_transition": "T0087",
+    "onboarding_reconciled_on": "2026-08-24",
+    "appliance_enrolled": true,
+    "appliance_claimed": true,
+    "appliance_assigned": true,
+    "appliance_licensed": true,
+    "appliance_license_valid_until": "2026-12-01T23:59:59Z",
+    "guest_network_configured": true,
+    "pms_interface_commissioned": true,
+    "pms_feed_connected": false,
+    "pms_feed_disconnect_is_intentional": true,
+    "room_signin_accepted_to_offer": true,
+    "guest_access_granted_ever": false,
+    "financial_traffic_ever": false,
+    "go_live_performed": false
   },
-  "latest_transition_id": "T0086",
+  "latest_transition_id": "T0087",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1057,9 +1074,88 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "44a9e12120b01da28c4dbd97f110f1928079f088",
+    "head": "c756cbeb614cffef64bf8aa17cbe48a754e58727",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."
+  },
+  "onboarding_reconciliation": {
+    "decision": "D37",
+    "transition": "T0087",
+    "reconciled_on": "2026-08-24",
+    "appliance": "172.21.60.25 (sce), serial SC-7A8M-WM9R-KMAZ",
+    "method": "Read-only evidence collection from the appliance, plus the authoritative repository record. No appliance mutation of any kind.",
+    "authorization_principle": "D37 authorizes the RECORD to match reality. It is NOT retroactive authorization for any onboarding action that already occurred. Where no explicit Product-Owner authorization existed at the time, that absence is recorded as NOT FOUND rather than inferred, softened or back-filled.",
+    "milestones": {
+      "enrollment": {
+        "occurred": true,
+        "when": "2026-08-21T14:06:22Z (activation-request.json created_at 2026-08-21T14:06:22Z; file mtime agrees)",
+        "evidence": "/etc/stayconnect/identity/activation-request.json carries hardware_fingerprint, wan_mac, lan_mac, public_key and signature; appliance serial SC-7A8M-WM9R-KMAZ.",
+        "po_authorization": "NOT FOUND. No explicit Product-Owner authorization for this action exists in the authoritative record, and no transition receipted it. D35 authorized the fresh deployment and T0083 named enrollment as the next onboarding step, but neither is a per-action authorization for what was executed. Recorded as OBSERVED EXECUTION ONLY. D37 does not authorize it retroactively."
+      },
+      "claim": {
+        "occurred": true,
+        "when": "between 2026-08-21T14:06Z (enrollment) and 2026-08-21T15:21Z (licence issue); the exact instant is not provable from appliance artefacts",
+        "evidence": "A signed assignment and a licence bound to this appliance both exist, and Central issues neither to an unclaimed appliance. /etc/stayconnect/assignment/registry.json, mtime 2026-08-21T15:47Z.",
+        "po_authorization": "NOT FOUND. No explicit Product-Owner authorization for this action exists in the authoritative record, and no transition receipted it. D35 authorized the fresh deployment and T0083 named enrollment as the next onboarding step, but neither is a per-action authorization for what was executed. Recorded as OBSERVED EXECUTION ONLY. D37 does not authorize it retroactively."
+      },
+      "signed_assignment_and_identity": {
+        "occurred": true,
+        "when": "issued 2026-08-21T15:21:45Z; last successful refresh 2026-08-24T13:31:07Z",
+        "evidence": "/etc/stayconnect/assignment/assignment.json version 1, signed (signer_key_id + signature). tenant_id 36f3ba78-f8d8-41b6-aa2e-50d797e2d9c8, site_id 0d40f7c8-4a98-428a-a2f5-74f0cabf5d42, appliance_id c6faf4eb-33e4-41b3-9fcb-d902568cc1c9. The database carries exactly 1 tenant and 1 site, matching the pinned identity.",
+        "po_authorization": "NOT FOUND. No explicit Product-Owner authorization for this action exists in the authoritative record, and no transition receipted it. D35 authorized the fresh deployment and T0083 named enrollment as the next onboarding step, but neither is a per-action authorization for what was executed. Recorded as OBSERVED EXECUTION ONLY. D37 does not authorize it retroactively."
+      },
+      "licence": {
+        "occurred": true,
+        "when": "installed 2026-08-21T15:21:45Z; last cloud validation 2026-08-24T11:45:37Z",
+        "evidence": "/etc/stayconnect/license/current.json and state.json; scd runtime reports state=Active, license_id 2ffdb6ff-07f7-49d7-b6be-72d2566c8856, plan=direct, valid_until=2026-12-01T23:59:59Z, cloud_stale=false, clock_rollback=false.",
+        "validity": "ACTIVE and cloud-validated. Expires 2026-12-01.",
+        "po_authorization": "NOT FOUND. No explicit Product-Owner authorization for this action exists in the authoritative record, and no transition receipted it. D35 authorized the fresh deployment and T0083 named enrollment as the next onboarding step, but neither is a per-action authorization for what was executed. Recorded as OBSERVED EXECUTION ONLY. D37 does not authorize it retroactively."
+      },
+      "wan_lan_guest_network_dhcp": {
+        "occurred": true,
+        "when": "guest-network row created 2026-08-21T17:53:33Z",
+        "evidence": "WAN/management ens160 172.21.60.25/24 UP. ens192 UP and bridged as br-g-00d1fa1a (192.168.77.1/24). public.guest_networks holds one row, 'PRELIVE Test Guest', untagged on ens192, enabled. Kea DHCP4 is active with /etc/kea/kea-dhcp4.conf.",
+        "contradicts_T0083": "T0083 recorded 'ens192 is intentionally unconfigured' and 'no LAN/guest VLAN/DHCP configuration'. Both statements are now false. This is the largest single divergence between the register and the appliance.",
+        "po_authorization": "NOT FOUND. No explicit Product-Owner authorization for this action exists in the authoritative record, and no transition receipted it. D35 authorized the fresh deployment and T0083 named enrollment as the next onboarding step, but neither is a per-action authorization for what was executed. Recorded as OBSERVED EXECUTION ONLY. D37 does not authorize it retroactively."
+      },
+      "packages_and_service_plans": {
+        "occurred": true,
+        "when": "not provable to the minute from appliance artefacts; present and in use since at least 2026-08-22",
+        "evidence": "iam_v2.service_plans = 2. iam_v2.internet_packages = 3, of which 1 is non-system; the other two are the system-provisioned CHECKOUT_GRACE packages required by D32. One eligible offer was returned by the accepted Room sign-in check.",
+        "po_authorization": "PRESENT, in the Product Owner's own words: 'i have created service plan and the package for testing'. The Product Owner performed this action personally, so no agent-authorization question arises."
+      },
+      "sign_in_methods": {
+        "occurred": true,
+        "when": "room_any set 2026-08-23",
+        "evidence": "public.tenants.auth_methods = pms{mode=room_any, enabled=true, provider=protel-fias} plus voucher{enabled=true}.",
+        "po_authorization": "PRESENT and explicit, twice. The control surface: 'Product Owner authorization - complete Guest Portal Sign-in Methods management end-to-end on PRE-LIVE Production'. The combined mode separately: 'Re-introducing the combined mode is now explicitly Product-Owner-approved.'"
+      },
+      "pms_interface_commissioning": {
+        "occurred": true,
+        "when": "commissioned 2026-08-21/22; PR #25 merged 2026-08-22",
+        "evidence": "iam_v2.pms_interfaces: connector_kind protel-fias, display_label 'Protel', lifecycle ACTIVE, published revision present. 540 mirrored Stays, 461 IN_HOUSE.",
+        "po_authorization": "PRESENT and explicit, with the approved facts enumerated in the instruction: 'Product Owner authorization - complete the Coral Sea Holiday Protel Interface end-to-end in one execution' (label Protel, connector protel-fias, 150.0.0.18:5003, Africa/Cairo, USD/2, credential mode NONE, read-only, folio_identity_strategy UNSET)."
+      },
+      "pms_feed_state": {
+        "occurred": true,
+        "when": "observed 2026-08-24",
+        "evidence": "iam_v2.pms_interface_runtime: transport DISCONNECTED, sync RESYNC_REQUIRED, continuity CONTINUOUS, transport_error_code DIAL_FAILED. resync_started_at is NULL and resync_generation_seq equals published_resync_generation, so the 22-Aug reconnect wedge cannot recur.",
+        "cause": "INTENTIONAL, and stated by the Product Owner: 'The Product Owner intentionally disconnects the Protel Socket Server from StayConnect because the single PMS client slot is currently being used by another system.' Not a defect and not a StayConnect fault.",
+        "po_authorization": "PRESENT - the disconnect is the Product Owner's own action, stated in the record."
+      },
+      "acceptance_testing": {
+        "occurred": "PARTIAL",
+        "proven": "PMS Room sign-in reached VERIFIED -> PMS Auth Context issued -> one eligible Internet Package offer returned, at 2026-08-23T11:59:40Z, under an explicit Product-Owner authorization for a single resolve-only check. 8 auth_resolutions are recorded; 1 auth_context was issued and deliberately left UNCONSUMED.",
+        "not_proven": "No end-to-end guest access has ever been exercised on this appliance: purchases=0, entitlements=0, sessions=0. Package acquisition, entitlement issue, session activation and network enforcement are all UNPROVEN here. Voucher and Guest-Account sign-in are unexercised on this appliance.",
+        "po_authorization": "PRESENT for what was executed. The acceptance instruction required stopping before package acquisition, and execution stopped there."
+      },
+      "guest_financial_and_go_live": {
+        "guest_traffic": "NONE granted. sessions=0, entitlements=0, purchases=0. Authentication attempts did occur - 8 resolutions and 1 unconsumed Auth Context - but no guest was ever given network access.",
+        "financial_traffic": "NONE. purchases=0, and no PS/posting, payment, settlement, refund or FX traffic at any point.",
+        "go_live": "NOT PERFORMED and NOT AUTHORIZED. The appliance remains PRE-LIVE.",
+        "po_authorization": "N/A - nothing occurred that would require it."
+      }
+    }
   }
 }

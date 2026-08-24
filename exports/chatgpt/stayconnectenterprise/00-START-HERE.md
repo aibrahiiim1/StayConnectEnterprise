@@ -1,17 +1,17 @@
 # StayConnect Enterprise — START HERE (ChatGPT Project entry point)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0086 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0087 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
-**Current activity:** `FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING`
+**Current activity:** `FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
 **Phase 1A maturity:** ACCEPTED_AND_CLOSED — SCRATCH_VERIFIED + OFFLINE_REAL_SCHEMA_COMPATIBILITY_VERIFIED + PRODUCTION_LIVE_DARK_CREATED_AND_VERIFIED — DARK, NOT CUT OVER
 **Fresh Production baseline:** 74 iam_v2 tables, 37 public tables, ZERO identity rows. Factory-clean and current-only: the superseded guest-IAM runtime and schema are ABSENT, so IAM-v2 is structurally the sole guest-IAM authority from first operation. Not a cutover.
 **Fresh Production appliance (172.21.60.25, sce):** DEPLOYED factory-clean from `c72b49e`; first-bring-up fixes were then applied live and afterwards committed (`1c55d7f`), so no single commit describes what is running. PRE-LIVE. Enrollment, claim and signed assignment are NOT complete and it is unlicensed; no tenant or site is pinned. ens192 is intentionally unconfigured. Guest traffic: none; PMS: none; payment/financial: none. Go-Live: not performed and not authorized. Hotel Admin: https://172.21.60.25/
 **Development reference appliance (172.21.60.23):** UNTOUCHED by this work and NOT cut over. Retains the historical live-dark runtime its accepted evidence records, including its superseded guest-IAM schema (68 iam_v2 tables live). Reference and evidence only, never an installation source.
 **Lifecycle:** PRE-LIVE (D24): no real hotel guest or staff depends on StayConnect for live service yet.
-**Single next authorized action:** MANUAL ENROLLMENT of the deployed Fresh Production appliance 172.21.60.25: issue a bootstrap token from the Central Control Plane and enrol the appliance through its local setup wizard. Claim, signed assignment, licence installation, LAN/guest networking, packages, access policy, PMS interfaces and acceptance testing are LATER onboarding steps, each requiring its own state advancement once the preceding milestone completes. A separate Product-Owner Go-Live decision remains required. No guest, PMS, payment or financial traffic is authorized. 172.21.60.23 remains the DEVELOPMENT reference appliance and is not to be changed.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D36`.
+**Single next authorized action:** NONE is authorized. The prerequisites for a Go-Live readiness assessment are NOT proven complete, so Go-Live is not the next step. Two things are unproven on this appliance. First, the PMS link is DISCONNECTED by Product-Owner decision, so Room sign-in cannot serve a guest until the Protel socket is reassigned to StayConnect. Second, NO end-to-end guest access has ever been exercised here - purchases=0, entitlements=0, sessions=0 - so package acquisition, entitlement issue, session activation and network enforcement all remain unproven. The RECOMMENDED next step, requiring its own Product-Owner decision, is a controlled end-to-end guest-access acceptance once the Protel socket is returned to StayConnect. A separate Product-Owner Go-Live decision remains required and no current authorization supplies it.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D37`.
 <!-- END GENERATED PROJECT STATE -->
 
 

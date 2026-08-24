@@ -1,0 +1,41 @@
+{
+  "transition_id": "T0087",
+  "seq": 87,
+  "timestamp": "2026-08-24T13:20:00Z",
+  "record_type": "FRESH_PRODUCTION_ONBOARDING_STATE_RECONCILED_TO_VERIFIED_REALITY",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ONBOARDING",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "FRESH_PRODUCTION_APPLIANCE_DEPLOYED_AWAITING_ENROLLMENT_CLAIM_ASSIGNMENT",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": true,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (D37 onboarding-state reconciliation; no phase is affected)",
+  "decision": "D37",
+  "new_decision_created": true,
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-24, verbatim: 'Product Owner authorizes a records-only onboarding-state reconciliation for Fresh Production appliance 172.21.60.25. The purpose is to make the authoritative project state match verified reality after T0083. This authorization is NOT retroactive authorization for any onboarding action that already occurred.'",
+  "previous_state_note": "T0083 (2026-08-20) described an appliance awaiting enrollment, with ens192 unconfigured and no guest network, packages or PMS. That description had been obsolete since 2026-08-21 and had drifted further with every subsequent milestone.",
+  "new_state_note": "The register now describes the appliance as it verifiably is: enrolled, claimed, assigned, licensed, networked, configured, with a commissioned Protel Interface mirroring 540 Stays and Room sign-in proven to the offer stage. The PMS link is disconnected by the Product Owner's own decision. Nothing about the PRE-LIVE posture changes: no guest access, no financial activity, no Go-Live.",
+  "what_this_is_not": "NOT retroactive authorization. Five of the eleven milestones - enrollment, claim, signed assignment, licence installation and guest-network/DHCP configuration - have NO explicit Product-Owner authorization anywhere in the record. D35 authorized the fresh deployment and T0083 named enrollment as the next step, but neither is a per-action authorization for what was executed. Each is recorded as OBSERVED EXECUTION with authorization NOT FOUND. Six milestones do carry explicit authorization and are recorded with the verbatim instruction that granted it.",
+  "phase_status_unchanged": "Phase 0 remains FINAL_CLOSED and Phases 1A-7 remain ACCEPTED_AND_CLOSED. Phase 3 specifically remains ACCEPTED AND CLOSED at verified DARK maturity (D16/T0024) and MERGED (D17/T0025). The D36 post-closure delivery-lineage model is preserved unchanged.",
+  "evidence_method": "Read-only. Appliance artefacts (/etc/stayconnect/{identity,assignment,license}), runtime service state, network interfaces, Kea configuration and read-only SQL against the site database. No mutation, no PMS traffic, no guest authentication, no deployment, no restart.",
+  "boundaries_observed": [
+    "Records, docs and governance metadata only.",
+    "No application code, migration, database mutation, grant, configuration change, deployment, restart or service change.",
+    "No networking change, no PMS/Protel traffic, no guest authentication, no financial action, no production mutation, no Go Live.",
+    "Appliance access was read-only evidence collection.",
+    "PR #24 untouched."
+  ],
+  "blocker": "Go-Live prerequisites are NOT proven complete. The PMS link is intentionally disconnected, and no end-to-end guest access has ever been exercised on this appliance (purchases=0, entitlements=0, sessions=0), leaving package acquisition, entitlement issue, session activation and network enforcement unproven here.",
+  "next": "A controlled end-to-end guest-access acceptance, once the Protel socket is returned to StayConnect. It requires its own Product-Owner decision. Go-Live remains a separate decision and is not implied."
+}

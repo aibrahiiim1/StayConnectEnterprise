@@ -632,6 +632,16 @@
       "acceptance_status": "ACCEPTED_BY_PRODUCT_OWNER",
       "accepted_on": "2026-08-24",
       "authorization_evidence": "EXPLICIT Product-Owner acceptance, 2026-08-24, verbatim: \"I explicitly ACCEPT D36. Option (a) is the approved governance model: post-closure corrective work has its own delivery lineage and manifest, while all closed numbered-phase manifests remain immutable historical delivery records. This acceptance does not reopen or alter Phase 0-7, and specifically does not alter Phase 3 closure or maturity.\" This supersedes the earlier partial evidence (the one-word selection \"option a\"), which authorized the design but was not an acceptance of a numbered decision."
+    },
+    {
+      "id": "D37",
+      "title": "FRESH PRODUCTION ONBOARDING STATE RECONCILED TO VERIFIED REALITY (2026-08-24). The Product Owner authorizes a RECORDS-ONLY reconciliation of governance/project-state.json and the directly generated current-state documentation for appliance 172.21.60.25, so the register describes the appliance as it verifiably is rather than the obsolete T0083 'awaiting enrollment' state. Eleven milestones were reconciled from read-only appliance evidence and the authoritative repository record: enrollment, claim, signed assignment and identity, licence, WAN/LAN and guest network/DHCP, packages and service plans, sign-in methods, PMS Interface commissioning, current PMS feed state, acceptance testing, and guest/financial/Go-Live state. THIS DECISION IS EXPLICITLY NOT RETROACTIVE AUTHORIZATION for any onboarding action that already occurred: five milestones (enrollment, claim, signed assignment, licence, guest network/DHCP) carry NO explicit Product-Owner authorization in the record, and that absence is recorded as NOT FOUND rather than inferred. Phase 0 remains FINAL_CLOSED, Phases 1A-7 remain ACCEPTED_AND_CLOSED, Phase 3 closure and maturity are unchanged, the D36 post-closure delivery-lineage model is preserved, and the appliance remains PRE-LIVE with no Go-Live authorized.",
+      "decided_on": "2026-08-24",
+      "phase": "post-roadmap",
+      "accepted": true,
+      "acceptance_status": "ACCEPTED_BY_PRODUCT_OWNER",
+      "accepted_on": "2026-08-24",
+      "authorization_evidence": "EXPLICIT Product-Owner authorization, 2026-08-24, verbatim: 'Product Owner authorizes a records-only onboarding-state reconciliation for Fresh Production appliance 172.21.60.25. The purpose is to make the authoritative project state match verified reality after T0083. This authorization is NOT retroactive authorization for any onboarding action that already occurred.'"
     }
   ]
 }
