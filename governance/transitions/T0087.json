@@ -1,7 +1,7 @@
 {
   "transition_id": "T0087",
   "seq": 87,
-  "timestamp": "2026-08-24T14:00:00Z",
+  "timestamp": "2026-08-24T13:20:00Z",
   "record_type": "FRESH_PRODUCTION_ONBOARDING_STATE_RECONCILED_TO_VERIFIED_REALITY",
   "previous_state": {
     "phase": "7",
