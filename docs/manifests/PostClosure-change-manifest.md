@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `6a8a866605236e7c08374a98bd5de7306e77bb4d`
-- **Provenance (generation HEAD = inventory_head):** `6a8a866605236e7c08374a98bd5de7306e77bb4d`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `20b04436859e7c397a102cfbeae69da53a0a6701`
+- **Provenance (generation HEAD = inventory_head):** `20b04436859e7c397a102cfbeae69da53a0a6701`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/pc0002-delivery-record-correction`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 204
@@ -135,20 +135,20 @@
 | `docs/DEPLOYMENT_CLOUD.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | DNS checks must ask a real nameserver; open Central's mTLS port |
 | `docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Point the runbooks at the verifying reconcile runner |
 | `docs/architecture/Phase3-Privilege-Matrix.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Commission the Protel PMS Interface end to end |
-| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | portald dropped the guest verification value before it reached scd |
-| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | portald dropped the guest verification value before it reached scd |
-| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | portald dropped the guest verification value before it reached scd |
-| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | portald dropped the guest verification value before it reached scd |
+| `docs/architecture/StayConnect-IAM-Phase0-Contract.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Re-render generated blocks and packs for the PC-0003 state |
+| `docs/architecture/StayConnect-IAM-Phase1A-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Re-render generated blocks and packs for the PC-0003 state |
+| `docs/architecture/StayConnect-IAM-Phase1B-Plan.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Re-render generated blocks and packs for the PC-0003 state |
+| `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Re-render generated blocks and packs for the PC-0003 state |
 | `docs/manifests/PC-0002-complete-delivery-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Correct two reporting defects in the PC-0002 delivery record |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest for the PC-0002 deployment evidence |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest for the PC-0003 delivery-record correction |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | portald dropped the guest verification value before it reached scd |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the deployment-evidence update |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the deployment-evidence update |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the deployment-evidence update |
+| `exports/chatgpt/phase-evidence/GIT_STAT_b6fb34c.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_fb360ab.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Rebuild packs after the deployment-evidence update |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the deployment-evidence update |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the deployment-evidence update |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
@@ -158,16 +158,16 @@
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the deployment-evidence update |
 | `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the deployment-evidence update |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
-| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | portald dropped the guest verification value before it reached scd |
+| `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Re-render generated blocks and packs for the PC-0003 state |
 | `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the deployment-evidence update |
-| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | portald dropped the guest verification value before it reached scd |
+| `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Re-render generated blocks and packs for the PC-0003 state |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs after the PC-0002 records update |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Correct two reporting defects in the PC-0002 delivery record |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest for the PC-0003 delivery-record correction |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
@@ -221,7 +221,7 @@
 ```text
  .github/workflows/phase3-software.yml              |  18 +
  .gitignore                                         |   1 +
- CLAUDE.md                                          | 219 +++++++++
+ CLAUDE.md                                          | 219 ++++++++
  cloud-admin/app/(app)/appliances/page.tsx          |   5 +-
  cloud-admin/app/(app)/licenses/page.tsx            |  37 ++
  cloud-admin/app/(app)/onboarding/page.tsx          |  61 +++
@@ -250,7 +250,7 @@
  data-plane/cmd/edged/resources_phase3.go           |  53 +-
  .../edged/resources_phase3_interface_authoring.go  | 177 ++++++-
  .../cmd/edged/resources_phase3_interfaces.go       | 315 +++++++++++-
- data-plane/cmd/edged/resources_providers.go        | 386 +--------------
+ data-plane/cmd/edged/resources_providers.go        | 386 +-------------
  data-plane/cmd/edged/resources_site.go             | 124 ++++-
  data-plane/cmd/keybootstrap/main.go                |  16 +-
  data-plane/cmd/netd/kea.go                         |  13 +
@@ -262,7 +262,7 @@
  data-plane/cmd/scd/assignment.go                   |  96 ++--
  data-plane/cmd/scd/combined_verification_test.go   |  86 ++++
  data-plane/cmd/scd/main.go                         |  20 +-
- data-plane/cmd/scd/offline_first_activation.go     | 357 ++++++++++++++
+ data-plane/cmd/scd/offline_first_activation.go     | 357 +++++++++++++
  data-plane/cmd/scd/offline_import.go               |   6 +-
  data-plane/cmd/scd/otp_handlers.go                 |  67 ++-
  data-plane/cmd/scd/phase3_auth.go                  |  54 +-
@@ -273,7 +273,7 @@
  .../appliancecert/bootstrap_states_test.go         | 270 ++++++++++
  data-plane/internal/appliancecert/cert.go          | 425 ++++++++++++++--
  .../appliancecert/rotation_restart_test.go         | 231 +++++++++
- data-plane/internal/assignment/resolve.go          | 219 +++++++++
+ data-plane/internal/assignment/resolve.go          | 219 ++++++++
  .../internal/assignment/resolve_outcome_test.go    |  85 ++++
  data-plane/internal/authctx/authctx.go             |  63 ++-
  .../internal/authctx/authctx_integration_test.go   |  37 +-
@@ -288,7 +288,7 @@
  data-plane/internal/pmsd/adapter_fias.go           |  73 ++-
  data-plane/internal/pmsd/adapter_fias_test.go      |   2 +-
  data-plane/internal/pmsd/applier.go                |   7 +-
- data-plane/internal/pmsd/assignment.go             | 193 ++++----
+ data-plane/internal/pmsd/assignment.go             | 193 +++----
  .../internal/pmsd/assignment_identity_test.go      | 112 +++++
  data-plane/internal/pmsd/errcodes.go               |   4 +
  data-plane/internal/pmsd/events.go                 |  27 +-
@@ -298,7 +298,7 @@
  data-plane/internal/pmsd/strict_parse.go           |  53 +-
  data-plane/internal/pmsloader/loader.go            |  80 ++-
  data-plane/internal/pmsloader/single_owner_test.go | 158 ++++++
- .../occupancy_evidence_integration_test.go         | 220 +++++++++
+ .../occupancy_evidence_integration_test.go         | 220 ++++++++
  data-plane/internal/stayengine/pg.go               | 150 +++++-
  .../staygrant/staygrant_integration_test.go        |  11 +
  ...pms_auth_freshness_follows_feed_health.down.sql |  64 +++
@@ -307,7 +307,7 @@
  ...continuity_unknown_is_not_a_healthy_feed.up.sql |  89 ++++
  ...e_config_lock_without_update_privilege.down.sql |  13 +
  ...ace_config_lock_without_update_privilege.up.sql |  83 ++++
- .../baseline/0000_production_baseline.sql          | 245 ++++++++--
+ .../baseline/0000_production_baseline.sql          | 245 +++++++--
  deploy/caddy/Caddyfile.central                     |   6 +-
  deploy/config/central-endpoint.env                 |  50 ++
  deploy/env/ctrlapi.env.example                     |  61 +++
@@ -320,7 +320,7 @@
  deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql   |  69 +++
  deploy/pki/.gitignore                              |   5 +
  deploy/pki/README.md                               |  26 +
- deploy/scripts/appliance-central-cutover.sh        | 218 +++++++++
+ deploy/scripts/appliance-central-cutover.sh        | 218 ++++++++
  deploy/scripts/appliance-dns-align.sh              | 138 ++++++
  deploy/scripts/central-firewall.sh                 |  61 +++
  deploy/scripts/central-migrate.sh                  | 268 ++++++++++
@@ -329,7 +329,7 @@
  deploy/scripts/deploy-hotel-admin.sh               |   9 +-
  deploy/scripts/hotel-admin-mint-cert.sh            |  26 +-
  deploy/scripts/install-assignment-root-anchor.sh   |  87 ++++
- deploy/scripts/install-central-endpoint.sh         |  55 +++
+ deploy/scripts/install-central-endpoint.sh         |  55 ++
  deploy/scripts/install-central-trust.sh            |  76 +++
  deploy/scripts/install-vendor-trust-key.sh         | 102 ++++
  deploy/scripts/lib-central-endpoint.sh             | 208 ++++++++
@@ -348,14 +348,14 @@
  docs/context/StayConnect-IAM-Handoff.md            |  11 +-
  .../PC-0002-complete-delivery-manifest.md          | 159 ++++++
  docs/manifests/Phase7-change-manifest.md           | 108 ++--
- docs/manifests/PostClosure-change-manifest.md      | 544 +++++++++++++++++++++
- .../runbooks/Guest-Access-End-To-End-Acceptance.md | 358 ++++++++++++++
- docs/runbooks/PMS-Interface-Commissioning.md       | 357 ++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 552 +++++++++++++++++++++
+ .../runbooks/Guest-Access-End-To-End-Acceptance.md | 358 +++++++++++++
+ docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317588 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 129793 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42588 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 129785 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42589 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_b6fb34c.txt    |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_fb360ab.txt    |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
  .../governance/decision-register.json              |  20 +
@@ -387,11 +387,11 @@
  hotel-admin/app/(app)/internet-packages/page.tsx   | 249 ++++++++++
  .../publish-form.tsx                               |  78 ++-
  hotel-admin/app/(app)/network/system/page.tsx      |   2 +-
- hotel-admin/app/(app)/pms-interfaces/page.tsx      | 329 ++++++++++---
- hotel-admin/app/(app)/pms-providers/page.tsx       | 329 -------------
+ hotel-admin/app/(app)/pms-interfaces/page.tsx      | 329 +++++++++---
+ hotel-admin/app/(app)/pms-providers/page.tsx       | 329 ------------
  hotel-admin/app/(app)/service-plans/page.tsx       | 298 +++++++++++
  hotel-admin/app/(app)/setup/enrollment/page.tsx    | 244 ++++++++-
- hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 ++++++++++++++++
+ hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 +++++++++++++++
  hotel-admin/app/(app)/stays/page.tsx               | 277 +++++++----
  hotel-admin/components/nav.tsx                     | 171 ++++---
  hotel-admin/components/ui/error-banner.tsx         |   7 +-
@@ -411,7 +411,7 @@
  hotel-admin/test/nav.test.tsx                      |  18 +-
  hotel-admin/test/phase3-interface-pages.test.tsx   |  77 ++-
  hotel-admin/test/phase3-pages.test.tsx             |  32 +-
- hotel-admin/test/pms-availability.test.ts          | 220 +++++++++
+ hotel-admin/test/pms-availability.test.ts          | 220 ++++++++
  hotel-admin/test/publish-form.test.tsx             |   8 +-
  scripts/factory-clean-baseline-verify.sh           |  27 +
  scripts/gatep-grant-survives-reconcile.sh          | 151 ++++++
@@ -423,16 +423,35 @@
  tools/project-state.py                             |  69 ++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 204 files changed, 16910 insertions(+), 2233 deletions(-)
+ 204 files changed, 16918 insertions(+), 2233 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
 ```text
+M  docs/manifests/PostClosure-change-manifest.md
+M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
+M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
+A  exports/chatgpt/phase-evidence/GIT_STAT_b6fb34c.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_fb360ab.txt
+M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/MANIFEST.md
+M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
+M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
+M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
+M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 20b0443 Re-render generated blocks and packs for the PC-0003 state
+HISTORICAL: 1de03c8 Delivery: manifest for the PC-0003 delivery-record correction
 HISTORICAL: 6a8a866 Correct two reporting defects in the PC-0002 delivery record
 HISTORICAL: 82254f9 Merge PR #44: PC-0002 deployment evidence
 HISTORICAL: 5e4cdf7 Delivery: manifest for the PC-0002 deployment evidence
