@@ -118,6 +118,19 @@ GRANT SELECT ON iam_v2.appliance_product_settings TO svc_edged;
 -- cannot mutate anything.
 GRANT EXECUTE ON FUNCTION iam_v2.p3_cfg_secs(jsonb, text, int) TO svc_edged;
 
+-- iam_v2.request_full_resync is the ONLY way edged can ask for a PMS full resync, and it exists so that
+-- asking does not require write privilege on iam_v2.pms_interface_runtime. That row carries transport_status,
+-- sync_status, runtime_generation and the pinned revision -- the state a pmsd worker uses to prove it still
+-- owns a socket -- and an admin process able to write any of it could invalidate ownership or fake a
+-- connection. The function writes only the command and stage columns and takes the command's generation from
+-- the row itself, so a caller cannot aim a request at a generation it chose.
+--
+-- A migration-only GRANT does not survive a Gate-P reconcile, which REVOKEs everything before re-granting
+-- from these files. Without this line the Full Resync button would work until the next reconcile and then
+-- start returning permission denied, which is exactly the class of failure that reconcile safety exists to
+-- prevent.
+GRANT EXECUTE ON FUNCTION iam_v2.request_full_resync(uuid, uuid, uuid, text) TO svc_edged;
+
 -- NOT granted, on purpose, and each absence is load-bearing:
 --   * DELETE on anything -- no admin read surface deletes;
 --   * any privilege on iam_v2 vouchers, guest credentials or session secrets;
