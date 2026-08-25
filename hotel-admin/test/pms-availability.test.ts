@@ -83,7 +83,8 @@ describe("the server decides feed health, not this client", () => {
   });
 
   it.each([
-    ["TRANSPORT_DOWN", "the connection to the property management system is down"],
+    ["MIRROR_NEVER_SYNCHRONIZED", "the guest list has not been received from the property management system yet"],
+    ["RESYNC_IN_FLIGHT", "the guest list is being refreshed"],
     ["NOT_IN_SYNC", "the guest list is still loading"],
     ["CONTINUITY_GAP", "updates from the property management system were missed"],
     ["CONTINUITY_NOT_ESTABLISHED", "no updates have arrived from the property management system yet"],
@@ -124,7 +125,7 @@ describe("an unreadable health result is unknown, never an outage", () => {
   it("separates unchecked networks from affected ones", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe"), iface("c", "Protel Spa")],
-      [READY("a"), health("b", false, "TRANSPORT_DOWN")], // c's health missing
+      [READY("a"), health("b", false, "MIRROR_NEVER_SYNCHRONIZED")], // c's health missing
       [route("Main", "a", "Protel Main"), route("Annexe", "b", "Protel Annexe"), route("Spa", "c", "Protel Spa")],
     );
     expect(r.state).toBe("partial");
@@ -138,7 +139,7 @@ describe("an unreadable health result is unknown, never an outage", () => {
   it("is unchecked when an unread candidate could have been the healthy one", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [health("a", false, "TRANSPORT_DOWN")], // b unread
+      [health("a", false, "MIRROR_NEVER_SYNCHRONIZED")], // b unread
       [route("Guest Wi-Fi", "a", "Protel Main", "ALL_ACTIVE_INTERFACES")],
     );
     expect(r.state).toBe("unknown");
@@ -149,7 +150,7 @@ describe("routing semantics are unchanged", () => {
   it("reports a partial outage and names only the affected network and interface", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [READY("a"), health("b", false, "TRANSPORT_DOWN")],
+      [READY("a"), health("b", false, "MIRROR_NEVER_SYNCHRONIZED")],
       [route("Main Wi-Fi", "a", "Protel Main"), route("Annexe Wi-Fi", "b", "Protel Annexe")],
     );
     expect(r.state).toBe("partial");
@@ -163,7 +164,7 @@ describe("routing semantics are unchanged", () => {
   it("is down when every routed network with a known result is affected", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [health("a", false, "TRANSPORT_DOWN"), health("b", false, "TRANSPORT_DOWN")],
+      [health("a", false, "MIRROR_NEVER_SYNCHRONIZED"), health("b", false, "MIRROR_NEVER_SYNCHRONIZED")],
       [route("Main Wi-Fi", "a", "Protel Main"), route("Annexe Wi-Fi", "b", "Protel Annexe")],
     );
     expect(r.state).toBe("down");
@@ -172,7 +173,7 @@ describe("routing semantics are unchanged", () => {
   it("ignores an unrouted interface, however broken", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("spare", "Spare")],
-      [READY("a"), health("spare", false, "TRANSPORT_DOWN")],
+      [READY("a"), health("spare", false, "MIRROR_NEVER_SYNCHRONIZED")],
       [route("Main Wi-Fi", "a", "Protel Main")],
     );
     expect(r.state).toBe("ready");
@@ -181,7 +182,7 @@ describe("routing semantics are unchanged", () => {
   it("treats ALL_ACTIVE_INTERFACES as served while any active interface is healthy", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [health("a", false, "TRANSPORT_DOWN"), READY("b")],
+      [health("a", false, "MIRROR_NEVER_SYNCHRONIZED"), READY("b")],
       [route("Guest Wi-Fi", "a", "Protel Main", "ALL_ACTIVE_INTERFACES")],
     );
     expect(r.state).toBe("ready");
@@ -190,7 +191,7 @@ describe("routing semantics are unchanged", () => {
   it("reports ALL_ACTIVE_INTERFACES as down when no active interface is healthy", () => {
     const r = roomSignInReadiness(
       [iface("a", "Protel Main"), iface("b", "Protel Annexe")],
-      [health("a", false, "TRANSPORT_DOWN"), health("b", false, "TRANSPORT_DOWN")],
+      [health("a", false, "MIRROR_NEVER_SYNCHRONIZED"), health("b", false, "MIRROR_NEVER_SYNCHRONIZED")],
       [route("Guest Wi-Fi", "a", "Protel Main", "ALL_ACTIVE_INTERFACES")],
     );
     expect(r.state).toBe("down");

@@ -71,6 +71,15 @@ if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
 fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0052_grace_config_lock_without_update_privilege') ON CONFLICT DO NOTHING;" >/dev/null
+# 0053 splits the same predicate's transport term in two: a live feed OR a trusted local mirror. Without it
+# every offline case in the mirror-trust and local-mirror suites fails, because the database still refuses any
+# guest whose PMS socket is down -- which is the exact behaviour those suites exist to prove is gone.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1      < "$ROOT/data-plane/migrations/0053_local_mirror_authorizes_when_transport_is_down.up.sql" >/dev/null 2>&1; then
+  echo "0053 FAILED TO APPLY -- deterministic, not a flake"
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc   "INSERT INTO public.schema_migrations(version) VALUES ('0053_local_mirror_authorizes_when_transport_is_down') ON CONFLICT DO NOTHING;" >/dev/null
+
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi

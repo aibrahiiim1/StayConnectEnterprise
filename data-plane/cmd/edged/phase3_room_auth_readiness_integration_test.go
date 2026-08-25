@@ -163,7 +163,10 @@ func TestIntegration_API_RoomAuthReportsEachUnhealthyClause(t *testing.T) {
 		transport, sync, continuity string
 		want                        string
 	}{
-		{"disconnected", "DISCONNECTED", "IN_SYNC", "CONTINUOUS", roomAuthTransportDown},
+		// A transport failure is judged by the MIRROR now, and this fixture has never completed a sync, so
+		// the honest answer is that there is no local guest list — not that the socket is down. The
+		// transport's own state is still reported alongside, in transport_status and disconnected_since.
+		{"disconnected, mirror never synchronised", "DISCONNECTED", "IN_SYNC", "CONTINUOUS", roomAuthNeverSynced},
 		{"not in sync", "CONNECTED", "RESYNC_REQUIRED", "CONTINUOUS", roomAuthNotInSync},
 		{"gap detected", "CONNECTED", "IN_SYNC", "GAP_DETECTED", roomAuthContinuityGap},
 		{"continuity never established", "CONNECTED", "IN_SYNC", "UNKNOWN", roomAuthContinuityNone},
@@ -216,14 +219,78 @@ func TestIntegration_API_RoomAuthRefusesANonActiveInterface(t *testing.T) {
 }
 
 // An interface with no runtime row at all has never connected. It must read as not-ready rather than as an
-// error, and the reason must name the transport rather than something the operator cannot act on.
+// error, and the reason must be one the operator can act on.
+//
+// The reason is CONTINUITY_NOT_ESTABLISHED rather than anything about the transport, and that is the more
+// honest answer: nothing has ever arrived from this PMS. Naming the socket would suggest a connection problem
+// to investigate, when what is actually true is that the interface has never been commissioned.
 func TestIntegration_API_RoomAuthHandlesAnInterfaceThatNeverConnected(t *testing.T) {
 	f := newAPI(t)
 	iface, _, _ := f.seedInterface(t) // no runtime row seeded
 
 	ready, reason := f.readiness(t, iface)
-	if ready || reason != roomAuthTransportDown {
+	if ready || reason != roomAuthContinuityNone {
 		t.Fatalf("an interface that never connected must not serve Room auth; got ready=%v reason=%q",
 			ready, reason)
+	}
+}
+
+// THE OPERATOR MUST NOT BE TOLD GUESTS CANNOT SIGN IN WHEN THEY CAN.
+//
+// This is the readiness half of the Product Owner's local-first rule, and it is the half a hotel actually
+// experiences: the socket drops, and the front desk needs to know whether that is their problem. If the mirror
+// is intact it is not — guests carry on signing in — and saying otherwise invites staff to start handing out
+// workarounds for a problem nobody has.
+func TestIntegration_API_TransportDownWithTrustedMirrorStaysReady(t *testing.T) {
+	f := newAPI(t)
+	iface, rev1, _ := f.seedInterface(t)
+	f.runtimeState(t, iface, rev1, "DISCONNECTED", "RESYNC_REQUIRED", "CONTINUOUS",
+		ptrTime(time.Now().Add(-3*time.Hour)))
+	f.completeSync(t, iface, time.Now().Add(-4*time.Hour))
+
+	ready, reason := f.readiness(t, iface)
+	if !ready {
+		t.Fatalf("a disconnected interface with a complete local mirror reported Room sign-in unavailable "+
+			"(reason %q). Guests can sign in; telling staff otherwise is worse than saying nothing", reason)
+	}
+}
+
+// The other half of the same surface: while the transport is down, a resync in flight IS a real reason, and it
+// gets its own code so the operator can be told it is temporary rather than sent to investigate.
+func TestIntegration_API_TransportDownDuringResyncReportsResyncInFlight(t *testing.T) {
+	f := newAPI(t)
+	iface, rev1, _ := f.seedInterface(t)
+	f.runtimeState(t, iface, rev1, "DISCONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS",
+		ptrTime(time.Now().Add(-time.Hour)))
+	f.completeSync(t, iface, time.Now().Add(-6*time.Hour))
+	f.beginResync(t, iface, time.Now().Add(-time.Minute))
+
+	ready, reason := f.readiness(t, iface)
+	if ready || reason != roomAuthResyncInFlight {
+		t.Fatalf("a mirror partway through a refresh must report %q; got ready=%v reason=%q",
+			roomAuthResyncInFlight, ready, reason)
+	}
+}
+
+// completeSync records that a full sync finished — the durable evidence that a local mirror exists at all.
+func (f *apiFixture) completeSync(t *testing.T, iface string, at time.Time) {
+	t.Helper()
+	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
+		SET last_complete_sync_at=$2, resync_started_at=NULL, updated_at=GREATEST(now(), $2)
+		WHERE pms_interface_id=$1::uuid`, iface, at); err != nil {
+		t.Fatalf("record complete sync: %v", err)
+	}
+}
+
+// beginResync marks a complete sync as in flight, which is the one state where the mirror is inconsistent
+// rather than merely stale.
+func (f *apiFixture) beginResync(t *testing.T, iface string, at time.Time) {
+	t.Helper()
+	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
+		SET resync_requested_at=$2::timestamptz - interval '1 minute', resync_started_at=$2,
+		    updated_at=GREATEST(now(), $2)
+		WHERE pms_interface_id=$1::uuid`,
+		iface, at); err != nil {
+		t.Fatalf("begin resync: %v", err)
 	}
 }

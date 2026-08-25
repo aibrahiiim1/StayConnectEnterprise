@@ -1603,16 +1603,23 @@ CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interfac
      WHERE pi.tenant_id=p_tenant AND pi.site_id=p_site AND pi.id=p_interface
        AND pi.lifecycle_state='ACTIVE'
        AND p_evidence_at IS NOT NULL
-       -- (1) the feed is maintaining the mirror RIGHT NOW. A disconnected, out-of-sync, gapped or
-       --     never-established interface authorises nobody, however recent its stored evidence looks.
-       AND rt.transport_status  = 'CONNECTED'
-       AND rt.sync_status       = 'IN_SYNC'
+       -- (1) EITHER the feed is live, OR the mirror is trustworthy without it. Transport availability and
+       --     mirror trust are different properties; only the second is a reason to refuse a guest.
+       AND (
+             (    rt.transport_status = 'CONNECTED'
+              AND rt.sync_status      = 'IN_SYNC'
+              AND COALESCE(rt.last_heartbeat_at, rt.last_connected_at) IS NOT NULL
+              AND COALESCE(rt.last_heartbeat_at, rt.last_connected_at)
+                    > now() - make_interval(secs => iam_v2.p3_cfg_secs(pr.config,'heartbeat_timeout_ms',300)))
+             OR
+             (    rt.transport_status <> 'CONNECTED'
+              AND rt.last_complete_sync_at IS NOT NULL
+              AND rt.resync_started_at IS NULL)
+           )
+       -- (2) shared by both branches: no unresolved continuity loss, and the runtime is serving the Revision
+       --     the caller presented.
        AND rt.continuity_status = 'CONTINUOUS'
        AND rt.pinned_revision_id = p_revision
-       -- (2) proven liveness, so a silently hung socket cannot masquerade as a healthy one.
-       AND COALESCE(rt.last_heartbeat_at, rt.last_connected_at) IS NOT NULL
-       AND COALESCE(rt.last_heartbeat_at, rt.last_connected_at)
-             > now() - make_interval(secs => iam_v2.p3_cfg_secs(pr.config, 'heartbeat_timeout_ms', 300))
        -- (3) an absolute ceiling: one full resync cadence plus the heartbeat allowance, so a Stay the PMS has
        --     silently stopped carrying cannot authorise forever on a feed that is healthy for other guests.
        --     An explicit max_auth_cache_age_seconds overrides it where an operator has chosen one.
@@ -1632,7 +1639,7 @@ $_$;
 -- Name: FUNCTION p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the FEED-health half of PMS Room sign-in eligibility: interface ACTIVE, transport CONNECTED, sync IN_SYNC, continuity CONTINUOUS, pinned to the presented Revision, live within heartbeat_timeout_ms, and the supplied evidence timestamp within one complete-sync cadence. UNKNOWN continuity means never established and authorises nobody. Silence from a healthy feed confirms an unchanged Stay; a disconnected feed authorises nobody. Deliberately does NOT read iam_v2.stays: callers hold FOR UPDATE OF st and need those conditions inline so EvalPlanQual rechecks them against the locked tuple.';
+COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the feed half of PMS Room sign-in eligibility. Authorises on EITHER a live feed (transport CONNECTED, IN_SYNC, live within the Revision heartbeat_timeout_ms) OR a trusted local mirror (transport not connected, a complete sync has happened, no resync in flight). Both branches additionally require interface ACTIVE, continuity CONTINUOUS, runtime pinned to the presented Revision, and evidence within one complete-sync cadence - the same bound that serves as the offline validity limit, so no separate offline TTL exists. Transport availability and mirror trust are different properties: a disconnected socket no longer denies a guest whose Stay is mirrored coherently. Never synchronised, unresolved continuity loss, a resync in flight, revision drift or stale evidence still authorise nobody. Deliberately does NOT read iam_v2.stays: callers hold FOR UPDATE OF st and need those conditions inline so EvalPlanQual rechecks them against the locked tuple.';
 
 
 --

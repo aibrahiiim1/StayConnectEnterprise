@@ -53,6 +53,12 @@ existing production Wi-Fi system to StayConnect. The agent performs no reconnect
 configuration change; `pmsd`'s existing retry loop reconnects on its own.
 
 ### Stage 2 — feed reaches the authorising state
+
+The live branch is the target here because this acceptance is meant to exercise the whole system, including
+reconnect and resync. It is *not* the only state in which Room authentication works: since D39 a trusted local
+mirror authorises on its own, which the offline scenarios in `cmd/scd/phase3_local_mirror_integration_test.go`
+cover. Requiring CONNECTED for this run is a choice about test coverage, not a statement of the product rule.
+
 Wait, read-only, for `iam_v2.pms_interface_runtime` to reach
 `transport_status = CONNECTED`, `sync_status = IN_SYNC`, `continuity_status = CONTINUOUS`, with
 `pinned_revision_id` equal to the interface's published revision and
@@ -109,10 +115,24 @@ Prove from the kernel and from the device that access is real (§7).
 
 ### Blockers
 
-**B1 — Protel socket unavailable (stated, intentional). BLOCKING.**
+**B1 — Protel socket unavailable (stated, intentional). NO LONGER BLOCKING BY ITSELF.**
 The single PMS client slot is assigned to the existing production Wi-Fi system. Feed health is
-`DISCONNECTED / RESYNC_REQUIRED / CONTINUOUS`, `DIAL_FAILED`. Room authentication authorises nobody in this
-state, by design. Only the Product Owner can clear this, and doing so is Stage 1.
+`DISCONNECTED / RESYNC_REQUIRED / CONTINUOUS`, `DIAL_FAILED`.
+
+**A live PMS socket is no longer required for Room authentication.** Under the Product Owner's local-first
+rule (D39), `iam_v2.p3_feed_authorizes` authorises on *either* a live feed *or* a trusted local mirror, so a
+disconnected transport alone denies nobody. What blocks this appliance today is not the socket but the
+**mirror's freshness**: the last complete sync finished `2026-08-23T11:46Z` and the newest occupancy evidence
+is `2026-08-23T15:48Z`, both well beyond the interface's `complete_sync_ms` ceiling of 86 400 000 ms. Every
+Stay has therefore aged out of the evidence bound.
+
+Two ways to clear it, and the choice is the Product Owner's:
+* **return the socket** (Stage 1), after which a complete sync re-stamps evidence and the live branch applies; or
+* **raise `max_auth_cache_age_seconds`** on the published Revision, which is the operator lever for a longer
+  offline validity window. This is a configuration decision with real consequences — it governs how long a
+  guest list may be trusted with nothing maintaining it — and is not something to set merely to unblock a test.
+
+Stage 1 remains the recommended path, because it also exercises reconnect and resync.
 
 ### Other prerequisites examined — none blocking, three worth deciding first
 

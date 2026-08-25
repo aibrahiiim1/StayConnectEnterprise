@@ -51,12 +51,18 @@ export type RoomSignInReadiness =
 const REASON_WORDS: Record<string, string> = {
   INTERFACE_NOT_ACTIVE: "the property management system interface is not in use",
   NO_PUBLISHED_REVISION: "the property management system interface has no published configuration",
-  TRANSPORT_DOWN: "the connection to the property management system is down",
   CONTINUITY_GAP: "updates from the property management system were missed",
   CONTINUITY_NOT_ESTABLISHED: "no updates have arrived from the property management system yet",
   NOT_IN_SYNC: "the guest list is still loading",
   FEED_SILENT: "the property management system has stopped responding",
   REVISION_NOT_PINNED: "the property management system interface is being reconfigured",
+  // Sent only while the transport is down: the mirror is the fallback and it has nothing in it yet.
+  MIRROR_NEVER_SYNCHRONIZED: "the guest list has not been received from the property management system yet",
+  // Also transport-down only, and brief — a full refresh is partway through.
+  RESYNC_IN_FLIGHT: "the guest list is being refreshed",
+  // TRANSPORT_DOWN is deliberately absent. The server no longer sends it: a dropped connection does not stop
+  // guests signing in when the local guest list is intact, so it was never a reason on its own. Retaining a
+  // phrase for it would let a stale server keep telling staff that guests cannot sign in when they can.
 };
 const words = (code: string | undefined): string =>
   (code && REASON_WORDS[code]) || "the property management system is unavailable";

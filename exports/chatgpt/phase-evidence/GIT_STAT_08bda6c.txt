@@ -1,4 +1,0 @@
-commit 08bda6c5323a2a518115bef0c1aa4a7ce873f442
-Date:   Tue Aug 25 14:32:40 2026 +0300
-
-    Delivery: manifest and packs for the T0091 chronology correction
