@@ -20,12 +20,11 @@ package main
 
 import (
 	"context"
-	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 )
 
 // Bounded reason codes. A free-text reason from an operator would end up in a durable record and, eventually,
@@ -66,49 +65,38 @@ func (s *server) requestFullResync(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := dbCtx(r)
 	defer cancel()
 
-	// ONE STATEMENT, so the preconditions are evaluated against the row we write rather than against a row we
-	// read a moment earlier. The WHERE clause carries every rule:
+	// THE WRITE GOES THROUGH A FUNCTION, NOT A TABLE.
 	//
-	//   lifecycle ACTIVE + transport CONNECTED   there is a worker with a live socket to receive this
-	//   sync_status <> RESYNC_IN_PROGRESS        a resync is not already running
-	//   resync_command_id IS NULL                no earlier request is still waiting to be claimed
+	// svc_edged holds no write privilege on iam_v2.pms_interface_runtime and must not: that row carries
+	// transport_status, sync_status, runtime_generation and the pinned revision — the state a pmsd worker uses
+	// to prove it still owns a socket. An admin process able to write any of it could invalidate ownership or
+	// fake a connection. The first deployment of this handler failed with "permission denied" and that refusal
+	// was correct; iam_v2.request_full_resync (migration 0055) is the narrow capability that replaced it.
 	//
-	// resync_command_generation is set from the runtime's OWN runtime_generation in the same write, so the
-	// command is bound to the worker that currently owns the interface without this process having to know
-	// which generation that is.
-	var cmdID string
-	err := s.db.QueryRow(ctx, `
-		UPDATE iam_v2.pms_interface_runtime rt
-		   SET resync_command_id=gen_random_uuid(),
-		       resync_command_requested_at=now(),
-		       resync_command_reason=$4,
-		       resync_command_generation=rt.runtime_generation,
-		       resync_command_claimed_at=NULL,
-		       sync_stage='REQUESTING_FULL_SYNC', sync_stage_at=now(), sync_failure_code=NULL,
-		       updated_at=now()
-		  FROM iam_v2.pms_interfaces pi
-		 WHERE pi.tenant_id=rt.tenant_id AND pi.site_id=rt.site_id AND pi.id=rt.pms_interface_id
-		   AND rt.tenant_id=$1 AND rt.site_id=$2 AND rt.pms_interface_id=$3::uuid
-		   AND pi.lifecycle_state='ACTIVE'
-		   AND rt.transport_status='CONNECTED'
-		   AND rt.sync_status <> 'RESYNC_IN_PROGRESS'
-		   AND rt.resync_command_id IS NULL
-		RETURNING rt.resync_command_id::text`,
+	// The function returns NULL rather than raising when no row qualifies, so a refusal is an ordinary result
+	// here and the specific reason is read back below.
+	var cmdID *string
+	err := s.db.QueryRow(ctx,
+		`SELECT iam_v2.request_full_resync($1,$2,$3::uuid,$4)::text`,
 		s.tenantID, s.siteID, id, strings.TrimSpace(in.ReasonCode)).Scan(&cmdID)
 
-	if errors.Is(err, pgx.ErrNoRows) {
-		// The write matched nothing. Read the row back to tell the operator WHICH rule stopped them — a bare
+	if err == nil && cmdID == nil {
+		// Nothing qualified. Read the row back to tell the operator WHICH rule stopped them — a bare
 		// "refused" on a button that looks like it should work is how an operator concludes the product is
 		// broken and starts restarting services.
 		jsonErr(w, http.StatusConflict, "resync_not_possible", s.fullResyncRefusal(ctx, id))
 		return
 	}
 	if err != nil {
+		// Logged with the cause, because the operator-facing message deliberately carries none: a database
+		// error rendered into an admin screen is how internal detail escapes. Without this line the first
+		// deployment of this handler produced a bare 500 with nothing to diagnose it by.
+		slog.Error("full resync request could not be recorded", "interface", id, "err", err)
 		jsonErr(w, http.StatusInternalServerError, "internal", "could not record the request")
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
-		"command_id": cmdID,
+		"command_id": *cmdID,
 		"stage":      "REQUESTING_FULL_SYNC",
 		"note": "The request is recorded. The PMS connector that owns this interface will send it to the " +
 			"property management system; watch the Synchronization section for progress.",

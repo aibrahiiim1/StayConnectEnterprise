@@ -1589,6 +1589,50 @@ $$;
 -- Name: p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
+CREATE FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_id uuid;
+BEGIN
+  IF p_reason IS NULL OR p_reason NOT IN
+     ('SUSPECTED_STALE_GUEST_LIST','AFTER_PMS_MAINTENANCE','OPERATOR_VERIFICATION','SUPPORT_REQUEST') THEN
+    RAISE EXCEPTION 'unbounded resync reason' USING ERRCODE = 'check_violation';
+  END IF;
+  UPDATE iam_v2.pms_interface_runtime rt
+     SET resync_command_id            = gen_random_uuid(),
+         resync_command_requested_at  = now(),
+         resync_command_reason        = p_reason,
+         resync_command_generation    = rt.runtime_generation,
+         resync_command_claimed_at    = NULL,
+         sync_stage                   = 'REQUESTING_FULL_SYNC',
+         sync_stage_at                = now(),
+         sync_failure_code            = NULL,
+         updated_at                   = now()
+    FROM iam_v2.pms_interfaces pi
+   WHERE pi.tenant_id = rt.tenant_id AND pi.site_id = rt.site_id AND pi.id = rt.pms_interface_id
+     AND rt.tenant_id = p_tenant AND rt.site_id = p_site AND rt.pms_interface_id = p_interface
+     AND pi.lifecycle_state = 'ACTIVE'
+     AND rt.transport_status = 'CONNECTED'
+     AND rt.sync_status <> 'RESYNC_IN_PROGRESS'
+     AND rt.resync_command_id IS NULL
+  RETURNING rt.resync_command_id INTO v_id;
+  RETURN v_id;
+END;
+$$;
+
+
+--
+-- Name: FUNCTION request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) TO svc_edged;
+
+
+--
+-- Name: p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
 CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) RETURNS boolean
     LANGUAGE sql STABLE
     AS $_$

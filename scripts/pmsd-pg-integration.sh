@@ -90,6 +90,16 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0054_operator_resync_command_and_sync_progress') ON CONFLICT DO NOTHING;" >/dev/null
 
+# 0055 replaces edged direct write access with a narrow SECURITY DEFINER function. The edged API suite calls
+# the Full Resync endpoint, which fails with permission denied without it.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0055_request_full_resync_without_runtime_write.up.sql" >/dev/null 2>&1; then
+  echo "0055 FAILED TO APPLY -- deterministic, not a flake"
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0055_request_full_resync_without_runtime_write') ON CONFLICT DO NOTHING;" >/dev/null
+
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi
