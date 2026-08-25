@@ -1,0 +1,40 @@
+{
+  "transition_id": "T0089",
+  "seq": 89,
+  "timestamp": "2026-08-25T00:20:00Z",
+  "record_type": "PC0002_DELIVERY_RECORD_CORRECTION_MANIFEST_COMPLETENESS_AND_PR42_MERGE_DISCLOSURE",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (PC-0003 delivery-record correction; no phase is affected)",
+  "decision": "D37",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new Product-Owner decision was created. This transition neither advances state nor changes any phase status, maturity or authorization; it corrects how an already-delivered change was reported. Existing governance rules require a decision reference, which is satisfied by D37, the accepted decision governing the current post-roadmap state — the same reference T0088 used for the same reason.",
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-25, verbatim: 'PC-0002 delivery-record correction — RECORDS ONLY. The runtime corrective fix is accepted as technically delivered. Do not change or redeploy runtime. Correct the delivery record for two verified reporting/governance defects.' The same instruction states: 'Do not create a new Product-Owner decision unless required by existing governance rules. Do not backdate or fabricate authorization.'",
+  "previous_state_note": "The PC-0002 final report carried an incomplete file manifest and described PR #42 as pending when it had already been merged.",
+  "new_state_note": "Both defects are recorded as PC-0003. The complete deterministic manifest across PR #42, #43 and #44 is written to docs/manifests/PC-0002-complete-delivery-manifest.md: 28 paths in PR #43, 13 in PR #44, 12 shared, 29 unique, and 3 in PR #42 all of which sit inside PR #43's diff. The current-state facts now say without hedging that the accepted-to-offer evidence came from the scd resolve socket with portald bypassed, that the portal path is not proven, that the PC-0002 fix is deployed, and that no end-to-end guest sign-in has been proven. Runtime is untouched.",
+  "pr42_disclosure": "PR #42 was merged on 2026-08-24T23:03:34Z AGAINST the standing instruction to leave it unmerged. The PR #43 branch was cut from the PR #42 branch instead of from master, so PR #42's commits were ancestors of PR #43's head and merging PR #43 made them reachable from master; GitHub then closed PR #42 as merged on its own. PR #42's merge_commit_sha equals its own head 92dd151 rather than a distinct merge commit, and it closed two seconds after PR #43 — both signatures of an automatic close, not a merge. No merge API call was issued against it. This is recorded as a violation of the instruction. It is NOT authorization, retroactive or otherwise, and the D38 runbook remains preparation only with no execution and no Go-Live authority.",
+  "boundaries_observed": [
+    "Records, metadata and documentation only.",
+    "No application code, configuration, database mutation, deployment, restart or service change.",
+    "No networking change, no PMS traffic, no guest authentication, no purchase, entitlement or session, no financial action, no Go-Live.",
+    "The deployed portald artifact was neither changed nor redeployed.",
+    "PR #24 untouched."
+  ],
+  "blocker": "Unchanged. The PMS link is intentionally disconnected, so the corrected guest portal path still cannot be proven with a real sign-in.",
+  "next": "Unchanged: the controlled end-to-end guest-access acceptance (D38 preparation), once the Protel socket is returned to StayConnect. That requires its own Product-Owner decision."
+}
