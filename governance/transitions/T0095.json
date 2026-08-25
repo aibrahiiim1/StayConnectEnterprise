@@ -1,0 +1,52 @@
+{
+  "transition_id": "T0095",
+  "seq": 95,
+  "timestamp": "2026-08-25T21:10:04Z",
+  "timestamp_derivation": "Author timestamp of the introducing commit, read back from git, per T0091.",
+  "record_type": "FULL_RESYNC_CONTROL_DEPLOYED_PRELIVE",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (deployment of an operator control; no phase affected)",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision; executes work authorized under the PRE-LIVE readiness instruction.",
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-25: 'DELIVER THE PMS FULL-RESYNC CONTROL + LIVE SYNCHRONIZATION PROGRESS ... If all GREEN, merge and deploy only the components and migration genuinely required for this PMS resync feature to 172.21.60.25 PRE-LIVE.'",
+  "deployed": {
+    "appliance": "172.21.60.25 (Fresh Production, PRE-LIVE)",
+    "built_from": "master fa0886793c0d5602bb55ab2a53d0866ec39e1d37 (PR #52 merge)",
+    "migrations": "0054_operator_resync_command_and_sync_progress and 0055_request_full_resync_without_runtime_write APPLIED; schema_migrations head is 0055",
+    "edged_sha256": "46845e5f87108a374d9c8e32a0792b84ae8e6349ab8129391144fa4a7f5b6a76",
+    "pmsd_sha256": "79e7111e0ad4fcbee997810aad7291cb35c5e20a25bad9f1376e3b5b8f94cff5",
+    "hotel_admin_bundle_sha256": "b9acf27ce87c2bc68cd1de441321ee2d1fce44dd2c994c939ba9a12eef7d3144",
+    "hotel_admin_release": "/opt/stayconnect/releases/hotel-admin/20260825-203137",
+    "hotel_admin_build_flags": "NEXT_PUBLIC_PHASE2_ADMIN=1 NEXT_PUBLIC_PHASE3_ADMIN=1, verified inlined in the deployed bundle as resource:\"pms-stays\",enabled:!0",
+    "rollback": "/opt/stayconnect/bin/edged.bak-resync, /opt/stayconnect/bin/pmsd.bak-resync, and hotel-admin release 20260825-191137",
+    "not_deployed": "scd and portald were not rebuilt or restarted."
+  },
+  "live_verification": "With the transport DISCONNECTED the control refuses with HTTP 409 and the specific reason 'the PMS is not connected'; no command row and no stage were written. An unbounded reason is refused by the function itself, not only by edged. svc_edged holds EXECUTE on iam_v2.request_full_resync and still holds NO write privilege on iam_v2.pms_interface_runtime. No DR was sent and no PMS traffic occurred.",
+  "privilege_boundary_incident": "The first deployment (PR #51) failed live with 'permission denied for table pms_interface_runtime'. That refusal was correct and Gate-P was doing its job. Rather than widening the grant, PR #52 added a narrow SECURITY DEFINER function on the 0052 precedent, with the authoritative grant in deploy/gatep/svc-edged-phase345-admin-grants.sql so it survives a reconcile.",
+  "boundaries_observed": [
+    "Protel NOT reconnected and the socket NOT made available. No real DR sent. No live Full Resync performed.",
+    "No guest authentication. No Purchase, Entitlement or Session: all three remain 0.",
+    "No PMS posting, payment-provider traffic, reversal, FX action or Go-Live.",
+    "D39, the commercial packages, the guest offer and the 72-hour PRE-LIVE policy are unchanged.",
+    "PR #24 untouched."
+  ],
+  "blocker": "None. The Protel socket remains unavailable by the Product Owner's own decision.",
+  "next": "The Product Owner personally restores the Protel socket and watches the automatic first fresh sync through the new Synchronization section."
+}
