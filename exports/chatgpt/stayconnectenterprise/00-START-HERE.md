@@ -1,7 +1,7 @@
 # StayConnect Enterprise — START HERE (ChatGPT Project entry point)
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0091 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0092 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
 **Current activity:** `FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
@@ -11,7 +11,7 @@
 **Development reference appliance (172.21.60.23):** UNTOUCHED by this work and NOT cut over. Retains the historical live-dark runtime its accepted evidence records, including its superseded guest-IAM schema (68 iam_v2 tables live). Reference and evidence only, never an installation source.
 **Lifecycle:** PRE-LIVE (D24): no real hotel guest or staff depends on StayConnect for live service yet.
 **Single next authorized action:** NONE is authorized. The prerequisites for a Go-Live readiness assessment are NOT proven complete, so Go-Live is not the next step. Two things are unproven on this appliance. First, the PMS link is DISCONNECTED by Product-Owner decision, so Room sign-in cannot serve a guest until the Protel socket is reassigned to StayConnect. Second, NO end-to-end guest access has ever been exercised here - purchases=0, entitlements=0, sessions=0 - so package acquisition, entitlement issue, session activation and network enforcement all remain unproven. The RECOMMENDED next step, requiring its own Product-Owner decision, is a controlled end-to-end guest-access acceptance once the Protel socket is returned to StayConnect. A separate Product-Owner Go-Live decision remains required and no current authorization supplies it.
-**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D37`.
+**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D39`.
 <!-- END GENERATED PROJECT STATE -->
 
 
