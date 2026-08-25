@@ -80,6 +80,14 @@ if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1      < "$R
 fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc   "INSERT INTO public.schema_migrations(version) VALUES ('0053_local_mirror_authorizes_when_transport_is_down') ON CONFLICT DO NOTHING;" >/dev/null
 
+# 0054 adds the operator resync command channel and the durable sync-progress columns. The pmsd suites claim
+# commands and write stages against the real CHECK constraints, so without it they fail on missing columns.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1      < "$ROOT/data-plane/migrations/0054_operator_resync_command_and_sync_progress.up.sql" >/dev/null 2>&1; then
+  echo "0054 FAILED TO APPLY -- deterministic, not a flake"
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc   "INSERT INTO public.schema_migrations(version) VALUES ('0054_operator_resync_command_and_sync_progress') ON CONFLICT DO NOTHING;" >/dev/null
+
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi

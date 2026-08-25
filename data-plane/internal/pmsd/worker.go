@@ -208,6 +208,20 @@ type workerSink struct {
 	synced    bool
 	resyncing bool
 	resyncGen int64
+
+	// received counts records STAGED under the currently open generation. It is a plain field because only
+	// the Serve goroutine touches it, and it is reset at DS rather than accumulated across syncs: the number
+	// an operator watches must describe THIS roster, not every roster since the process started.
+	received int64
+}
+
+// stage writes durable operator-visible progress. Progress reporting must never break a sync, so a failed
+// write is swallowed here rather than returned — the alternative is a resync that aborts because a status
+// column could not be updated, which trades a working guest list for a tidier screen.
+func (s *workerSink) stage(st SyncStage, u StageUpdate) {
+	u.axisBase = s.ax()
+	u.Stage = st
+	_ = s.w.repo.UpdateSyncStage(s.ctx, u)
 }
 
 func (s *workerSink) ax() axisBase {
@@ -239,6 +253,9 @@ func (s *workerSink) OnResyncStart(at time.Time) error {
 	}
 	s.resyncGen = g
 	s.resyncing = true
+	s.received = 0
+	zero := int64(0)
+	s.stage(StageReceiving, StageUpdate{RecordsReceived: &zero})
 	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncInProgress, ResyncStartedAt: &at})
 }
 
@@ -249,14 +266,29 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 		// a DE without a preceding DS publishes nothing (partial/spurious) — leave the barrier up.
 		return nil
 	}
+	// PUBLISHING is written BEFORE the barrier runs, so an operator watching a large roster sees the sync
+	// reach its final step rather than sitting on RECEIVING through a publish that may take a moment.
+	s.stage(StagePublishing, StageUpdate{})
 	if err := s.w.repo.PublishResyncGeneration(s.ctx, ResyncScope{s.ax()}, s.resyncGen); err != nil {
+		// The generation was NOT published, so the previous mirror is still the live one — the operator has
+		// stale data, not partial data, which is the distinction this whole staging design exists to keep.
+		s.stage(StageFailed, StageUpdate{FailureCode: "PUBLISH_FAILED"})
 		return err
 	}
 	s.resyncing = false
 	s.synced = true
+	got := s.received
+	s.stage(StageComplete, StageUpdate{RecordsReceived: &got, InHouseCount: s.w.repo.InHouseCount(s.ctx, s.ax())})
 	return nil
 }
 func (s *workerSink) OnDisconnected(at time.Time, code Code) error {
+	// A socket lost mid-roster published nothing, so the last known-good mirror is untouched and still serving
+	// guests. INTERRUPTED rather than FAILED says exactly that: nothing was corrupted, the sync simply did not
+	// finish, and the operator can ask for another one.
+	if s.resyncing {
+		s.stage(StageInterrupted, StageUpdate{FailureCode: code.String()})
+		s.resyncing = false
+	}
 	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportDisconnected, DisconnectedSince: &at, ErrorCode: code})
 }
 
@@ -276,6 +308,14 @@ func (s *workerSink) OnDomainEvent(ctx context.Context, ev Event) error {
 		row.ResyncGeneration = s.resyncGen
 		if _, err := s.w.repo.StageResyncEvent(s.ctx, row); err != nil {
 			return err
+		}
+		// Counted only after the durable stage succeeded, so the number is records we HAVE, not records we
+		// were sent. Reported every 25 to keep a large roster from turning one sync into thousands of writes;
+		// the exact final count is written at COMPLETE regardless.
+		s.received++
+		if s.received%25 == 0 {
+			got := s.received
+			s.stage(StageReceiving, StageUpdate{RecordsReceived: &got})
 		}
 		return nil
 	case !s.synced:
@@ -339,4 +379,32 @@ func (d *Deps) rnd(n int64) int64 {
 		return d.jitter(n)
 	}
 	return time.Now().UnixNano()
+}
+
+// ClaimOperatorResync asks for an operator command, if one is pending for THIS owner.
+//
+// A claim failure is treated as "no command": the alternative is closing a healthy transport because a status
+// table could not be read, which would turn a cosmetic database hiccup into a guest-facing outage.
+func (s *workerSink) ClaimOperatorResync() *ResyncCommand {
+	cmd, err := s.w.repo.ClaimResyncCommand(s.ctx, ResyncScope{s.ax()})
+	if err != nil {
+		return nil
+	}
+	return cmd
+}
+
+// RecordSkipped publishes the adapter's running skipped-record count. Only ever called with a real total the
+// adapter has actually observed; nothing here derives or estimates it.
+func (s *workerSink) RecordSkipped(n int64) {
+	s.stage(s.currentStage(), StageUpdate{RecordsSkipped: &n})
+}
+
+// currentStage reports the stage the sink believes it is in, so a skipped-record update does not accidentally
+// move a sync backwards or forwards. Outside a resync window there is no stage to preserve, and RECEIVING is
+// the only stage during which records are counted at all.
+func (s *workerSink) currentStage() SyncStage {
+	if s.resyncing {
+		return StageReceiving
+	}
+	return StageComplete
 }

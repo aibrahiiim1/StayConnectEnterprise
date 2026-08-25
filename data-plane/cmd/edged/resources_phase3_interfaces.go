@@ -73,6 +73,7 @@ func (s *server) pmsInterfacesRoutes() http.Handler {
 	r.Post("/", s.createPMSInterface)
 	r.Post("/{id}/revisions", s.authorPMSInterfaceRevision)
 	r.Post("/{id}/publish", s.publishPMSInterfaceRevision)
+	r.Post("/{id}/full-resync", s.requestFullResync)
 	r.Post("/{id}/secret", s.rotatePMSInterfaceSecret)
 	// THE LIFECYCLE TRANSITION. An interface is created AUTH_DISABLED and publishing a revision does not
 	// change that — deliberately, because publishing decides WHAT the connector would dial and activating
@@ -682,6 +683,19 @@ type interfaceHealth struct {
 	InHouseStays  int        `json:"in_house_stays"`
 	LastStayEvent *time.Time `json:"last_stay_event_at,omitempty"`
 
+	// SYNCHRONIZATION, as an operator experiences it. Stage is a closed vocabulary the database enforces, and
+	// the counts are real: RecordsReceived is what has actually been staged under the open generation, and
+	// there is deliberately no total, percentage or remaining count beside it, because FIAS provides no total
+	// before DE and every such number would be invented.
+	SyncStage         string     `json:"sync_stage,omitempty"`
+	SyncStageAt       *time.Time `json:"sync_stage_at,omitempty"`
+	RecordsReceived   int64      `json:"sync_records_received"`
+	RecordsSkipped    int64      `json:"sync_records_skipped"`
+	SyncFailureCode   string     `json:"sync_failure_code,omitempty"`
+	LastSyncInHouse   *int64     `json:"last_sync_in_house_count,omitempty"`
+	ResyncRequestedBy string     `json:"resync_command_reason,omitempty"`
+	ResyncCommandAt   *time.Time `json:"resync_command_requested_at,omitempty"`
+
 	// Backlog is the ingestion queue: events admitted but not yet applied, and how old the oldest is. A
 	// backlog that is merely large is a busy morning; a backlog whose OLDEST item is hours old is a stuck
 	// processor, and the two need different responses.
@@ -768,6 +782,8 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		&h.Continuity, &h.LastValidEventAt, &h.DiscontinuityDetectedAt,
 		&h.Sync, &h.ResyncRequestedAt, &h.ResyncStartedAt, &h.LastCompleteSyncAt, &h.LastSyncFailureCode,
 		&h.InHouseStays, &h.LastStayEvent, &h.PendingEvents, &h.ReviewEvents, &h.OldestPendingAt,
+		&h.SyncStage, &h.SyncStageAt, &h.RecordsReceived, &h.RecordsSkipped, &h.SyncFailureCode,
+		&h.LastSyncInHouse, &h.ResyncRequestedBy, &h.ResyncCommandAt,
 		&h.RoomAuthReason)
 	h.RoomAuthReady = err == nil && h.RoomAuthReason == ""
 	return h, err

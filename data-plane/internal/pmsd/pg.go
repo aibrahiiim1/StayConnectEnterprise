@@ -400,3 +400,92 @@ func (l *pgLocker) Close() error {
 	l.conn = nil
 	return nil
 }
+
+// ClaimResyncCommand takes an operator's pending full-resync request, if there is one this worker may run.
+//
+// ONE STATEMENT DOES ALL OF IT, and that is deliberate. Reading the command and clearing it in separate
+// statements would leave a window where two workers both see it, and the obvious fix — a transaction — buys
+// nothing here that the CAS does not already provide. The UPDATE's WHERE clause is the entire safety model:
+//
+//	runtime_generation=$4          this worker still owns the interface (the same guard as every other write)
+//	resync_command_generation=$4   the command was issued against THIS worker, not one it replaced
+//	sync_status<>'RESYNC_IN_PROGRESS'  a resync is not already running, so no second DR can be opened
+//
+// Zero rows means "nothing to do", which covers all three refusals identically. The caller cannot tell them
+// apart and does not need to: in every case the correct behaviour is to carry on reading frames.
+//
+// Returning the command AFTER clearing it means a worker that dies between the claim and the DR loses the
+// request rather than repeating it. That is the safe direction — a lost click is a click away from being
+// fixed, and a duplicated DR mid-roster is not.
+func (r *pgRepo) ClaimResyncCommand(ctx context.Context, req ResyncScope) (*ResyncCommand, error) {
+	var c ResyncCommand
+	// The CTE reads the command BEFORE the UPDATE overwrites it. UPDATE ... RETURNING yields the NEW row, so
+	// a naive version returns the NULLs it just wrote — the command id would come back empty and the DR would
+	// be attributed to nothing. FOR UPDATE on the same row makes the read and the clear one atomic step.
+	err := r.pool.QueryRow(ctx, `
+		WITH claim AS (
+		  SELECT resync_command_id AS id,
+		         resync_command_requested_at AS requested_at,
+		         COALESCE(resync_command_reason,'') AS reason
+		    FROM iam_v2.pms_interface_runtime
+		   WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3
+		     AND runtime_generation=$4
+		     AND resync_command_id IS NOT NULL
+		     AND resync_command_generation=$4
+		     AND sync_status <> 'RESYNC_IN_PROGRESS'
+		   FOR UPDATE
+		)
+		UPDATE iam_v2.pms_interface_runtime rt
+		   SET resync_command_id=NULL, resync_command_requested_at=NULL, resync_command_reason=NULL,
+		       resync_command_generation=NULL, resync_command_claimed_at=$5,
+		       sync_stage='WAITING_FOR_PMS', sync_stage_at=$5, sync_failure_code=NULL,
+		       sync_records_received=0, sync_records_skipped=0, updated_at=now()
+		  FROM claim
+		 WHERE rt.tenant_id=$1 AND rt.site_id=$2 AND rt.pms_interface_id=$3
+		   AND rt.runtime_generation=$4
+		RETURNING claim.id::text, claim.requested_at, claim.reason`,
+		req.TenantID, req.SiteID, req.PMSInterfaceID, req.ExpectedGeneration, req.At).
+		Scan(&c.ID, &c.RequestedAt, &c.Reason)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil // nothing pending, not ours, or already resyncing — all the same answer
+		}
+		return nil, err
+	}
+	return &c, nil
+}
+
+// UpdateSyncStage records where a sync currently is. Guarded by the same CAS as everything else, so a worker
+// that has lost ownership cannot keep writing progress for a socket someone else now owns.
+//
+// Every counter is REPLACED rather than incremented. An increment would make this write non-idempotent, and
+// the one place that matters is exactly where retries happen — a transient error between staging a record and
+// reporting the count would otherwise inflate the number an operator is watching.
+func (r *pgRepo) UpdateSyncStage(ctx context.Context, u StageUpdate) error {
+	return r.cas(ctx, `UPDATE iam_v2.pms_interface_runtime SET
+		sync_stage=$5, sync_stage_at=$6,
+		sync_records_received=COALESCE($7,sync_records_received),
+		sync_records_skipped=COALESCE($8,sync_records_skipped),
+		sync_failure_code=NULLIF($9,''),
+		last_sync_in_house_count=COALESCE($10,last_sync_in_house_count),
+		updated_at=now()
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND runtime_generation=$4`,
+		u.TenantID, u.SiteID, u.PMSInterfaceID, u.ExpectedGeneration,
+		string(u.Stage), u.At, u.RecordsReceived, u.RecordsSkipped, u.FailureCode, u.InHouseCount)
+}
+
+// InHouseCount counts the Stays this interface currently holds IN_HOUSE.
+//
+// Deliberately NOT guarded by the runtime generation: it is a read, it feeds a display field, and a worker
+// that has just lost ownership reporting one last count is harmless. A nil return means "we could not count",
+// which the UI renders as absent rather than as zero — a zero here would read as "the sync found nobody".
+func (r *pgRepo) InHouseCount(ctx context.Context, ax axisBase) *int64 {
+	var n int64
+	if err := r.pool.QueryRow(ctx,
+		`SELECT count(*) FROM iam_v2.stays
+		  WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND status='IN_HOUSE'`,
+		ax.TenantID, ax.SiteID, ax.PMSInterfaceID).Scan(&n); err != nil {
+		return nil
+	}
+	return &n
+}
