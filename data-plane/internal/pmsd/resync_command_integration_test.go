@@ -44,7 +44,7 @@ func requestCommand(t *testing.T, pool *pgxpool.Pool, ax axisBase, reason string
 // This is the duplicate-click case. Two claims in a row model two workers racing, and one operator clicking
 // twice reaches the same place: the command row can only be consumed once, so only one DR can result.
 func TestIntegration_ResyncCommand_ClaimedExactlyOnce(t *testing.T) {
-	p, repo, ax := newResyncFixture(t)
+	p, repo, ax, _, _ := newResyncFixture(t)
 
 	id := requestCommand(t, p, ax, "OPERATOR_VERIFICATION")
 
@@ -72,12 +72,19 @@ func TestIntegration_ResyncCommand_ClaimedExactlyOnce(t *testing.T) {
 // instruction is about a connection the operator never saw, and the replacement has its own initial sync to
 // perform anyway.
 func TestIntegration_ResyncCommand_StaleGenerationIsRefused(t *testing.T) {
-	p, repo, ax := newResyncFixture(t)
+	p, repo, ax, rev, sg := newResyncFixture(t)
 	requestCommand(t, p, ax, "SUPPORT_REQUEST")
 
-	// A new owner allocates a fresh runtime generation — exactly what worker replacement does.
+	// A new owner allocates a fresh runtime generation — exactly what worker replacement does. The transport
+	// is dropped first because pir_connected_pins requires a CONNECTED runtime to carry its pins, and taking
+	// over an interface necessarily means the previous owner's socket is gone.
+	if _, err := p.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
+		SET transport_status='DISCONNECTED', disconnected_since=now(), updated_at=now()
+		WHERE pms_interface_id=$1`, ax.PMSInterfaceID); err != nil {
+		t.Fatalf("drop the previous owner's transport: %v", err)
+	}
 	newGen, err := repo.AllocateRuntimeGeneration(context.Background(), GenerationRequest{TenantID: ax.TenantID,
-		SiteID: ax.SiteID, PMSInterfaceID: ax.PMSInterfaceID})
+		SiteID: ax.SiteID, PMSInterfaceID: ax.PMSInterfaceID, PinnedRevisionID: rev, PinnedSecretGenerationID: sg})
 	if err != nil {
 		t.Fatalf("allocate a replacement generation: %v", err)
 	}
@@ -97,7 +104,7 @@ func TestIntegration_ResyncCommand_StaleGenerationIsRefused(t *testing.T) {
 // open one. The command is left on the row rather than discarded — the operator's request is not lost, it is
 // simply not run yet.
 func TestIntegration_ResyncCommand_RefusedWhileResyncing(t *testing.T) {
-	p, repo, ax := newResyncFixture(t)
+	p, repo, ax, _, _ := newResyncFixture(t)
 	ctx := context.Background()
 
 	if _, err := p.Exec(ctx, `UPDATE iam_v2.pms_interface_runtime
@@ -131,7 +138,7 @@ func TestIntegration_ResyncCommand_RefusedWhileResyncing(t *testing.T) {
 // These words are rendered to hotel staff. An unbounded column is how an internal token reaches a screen, so
 // the CHECK is the guard and this proves it is really there.
 func TestIntegration_ResyncCommand_StageVocabularyIsEnforced(t *testing.T) {
-	p, repo, ax := newResyncFixture(t)
+	p, repo, ax, _, _ := newResyncFixture(t)
 	ctx := context.Background()
 
 	for _, st := range []SyncStage{StageRequesting, StageWaiting, StageReceiving, StagePublishing,
@@ -151,7 +158,7 @@ func TestIntegration_ResyncCommand_StageVocabularyIsEnforced(t *testing.T) {
 // PROGRESS WRITES ARE GUARDED BY OWNERSHIP. A worker that has lost the interface cannot keep writing progress
 // for a socket someone else now owns.
 func TestIntegration_ResyncCommand_StaleWorkerCannotWriteProgress(t *testing.T) {
-	_, repo, ax := newResyncFixture(t)
+	_, repo, ax, _, _ := newResyncFixture(t)
 	stale := ax
 	stale.ExpectedGeneration = ax.ExpectedGeneration + 99
 
@@ -163,7 +170,7 @@ func TestIntegration_ResyncCommand_StaleWorkerCannotWriteProgress(t *testing.T) 
 
 // COUNTERS ARE REPLACED, NEVER INCREMENTED, so a retried write cannot inflate the number an operator watches.
 func TestIntegration_ResyncCommand_CountersAreIdempotent(t *testing.T) {
-	p, repo, ax := newResyncFixture(t)
+	p, repo, ax, _, _ := newResyncFixture(t)
 	ctx := context.Background()
 	n := int64(1847)
 
@@ -187,7 +194,7 @@ func TestIntegration_ResyncCommand_CountersAreIdempotent(t *testing.T) {
 // A CLAIM RESETS THE COUNTERS, so a new sync starts from zero rather than continuing the previous roster's
 // total. Without this the second sync of the day would appear to begin at whatever the first one ended on.
 func TestIntegration_ResyncCommand_ClaimResetsCounters(t *testing.T) {
-	p, repo, ax := newResyncFixture(t)
+	p, repo, ax, _, _ := newResyncFixture(t)
 	ctx := context.Background()
 	prev := int64(500)
 	if err := repo.UpdateSyncStage(ctx, StageUpdate{axisBase: ax, Stage: StageComplete, RecordsReceived: &prev}); err != nil {
@@ -216,7 +223,7 @@ func TestIntegration_ResyncCommand_ClaimResetsCounters(t *testing.T) {
 
 // newResyncFixture builds one ACTIVE, CONNECTED interface with a runtime row, and returns the axis a worker
 // would hold while serving it.
-func newResyncFixture(t *testing.T) (*pgxpool.Pool, Repo, axisBase) {
+func newResyncFixture(t *testing.T) (*pgxpool.Pool, Repo, axisBase, string, string) {
 	t.Helper()
 	p := integPool(t)
 	t.Cleanup(p.Close)
@@ -235,5 +242,5 @@ func newResyncFixture(t *testing.T) (*pgxpool.Pool, Repo, axisBase) {
 		t.Fatalf("mark the interface connected: %v", err)
 	}
 	return p, repo, axisBase{TenantID: s.tenant, SiteID: s.site, PMSInterfaceID: s.iface,
-		ExpectedGeneration: gen, At: time.Now().UTC()}
+		ExpectedGeneration: gen, At: time.Now().UTC()}, s.rev, s.sg
 }

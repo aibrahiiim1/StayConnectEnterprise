@@ -7066,7 +7066,7 @@ CREATE TABLE iam_v2.pms_interface_runtime (
     CONSTRAINT pir_connected_pins CHECK (((transport_status <> 'CONNECTED'::text) OR ((pinned_revision_id IS NOT NULL) AND (last_connected_at IS NOT NULL) AND ((credential_mode = 'NONE'::text) OR (pinned_secret_generation_id IS NOT NULL))))),
     CONSTRAINT pir_generation_nonneg CHECK ((runtime_generation >= 0)),
     CONSTRAINT pir_heartbeat_not_future CHECK (((last_heartbeat_at IS NULL) OR (last_heartbeat_at <= updated_at))),
-    CONSTRAINT pir_resync_command_coherent CHECK ((((resync_command_id IS NULL) = (resync_command_requested_at IS NULL)) AND ((resync_command_id IS NOT NULL) OR (resync_command_claimed_at IS NULL)) AND ((resync_command_claimed_at IS NULL) OR (resync_command_requested_at IS NULL) OR (resync_command_claimed_at >= resync_command_requested_at)))),
+    CONSTRAINT pir_resync_command_coherent CHECK ((((resync_command_id IS NULL) = (resync_command_requested_at IS NULL)) AND ((resync_command_generation IS NULL) = (resync_command_id IS NULL)))),
     CONSTRAINT pir_sync_stage_bounded CHECK (((sync_stage IS NULL) OR (sync_stage = ANY (ARRAY['REQUESTING_FULL_SYNC'::text, 'WAITING_FOR_PMS'::text, 'RECEIVING'::text, 'PUBLISHING'::text, 'COMPLETE'::text, 'FAILED'::text, 'INTERRUPTED'::text])))),
     CONSTRAINT pir_resync_coherent CHECK ((((resync_started_at IS NULL) OR (resync_requested_at IS NOT NULL)) AND ((resync_started_at IS NULL) OR (resync_requested_at IS NULL) OR (resync_started_at >= resync_requested_at)))),
     CONSTRAINT pir_resync_generation_coherent CHECK (((resync_generation_seq >= 0) AND (published_resync_generation >= 0) AND (published_resync_generation <= resync_generation_seq))),

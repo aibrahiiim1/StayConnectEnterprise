@@ -738,6 +738,10 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='MANUAL_REVIEW')::int,
 		       (SELECT min(ev.received_at) FROM iam_v2.stay_events ev
 		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='PENDING'),
+		       COALESCE(rt.sync_stage,''), rt.sync_stage_at,
+		       COALESCE(rt.sync_records_received,0), COALESCE(rt.sync_records_skipped,0),
+		       COALESCE(rt.sync_failure_code,''), rt.last_sync_in_house_count,
+		       COALESCE(rt.resync_command_reason,''), rt.resync_command_requested_at,
 		       -- ROOM-AUTH FEED READINESS. The clauses and their order mirror the feed half of
 		       -- iam_v2.p3_feed_authorizes; the Stay-specific half is deliberately absent. The heartbeat bound
 		       -- comes from THIS interface's published Revision via the same iam_v2.p3_cfg_secs the

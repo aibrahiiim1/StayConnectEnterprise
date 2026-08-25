@@ -75,10 +75,13 @@ ALTER TABLE iam_v2.pms_interface_runtime
   DROP CONSTRAINT IF EXISTS pir_resync_command_coherent;
 ALTER TABLE iam_v2.pms_interface_runtime
   ADD CONSTRAINT pir_resync_command_coherent CHECK (
+    -- A pending command is all-or-nothing: an id without a request time is a half-written instruction.
     (resync_command_id IS NULL) = (resync_command_requested_at IS NULL)
-    AND (resync_command_id IS NOT NULL OR resync_command_claimed_at IS NULL)
-    AND (resync_command_claimed_at IS NULL OR resync_command_requested_at IS NULL
-         OR resync_command_claimed_at >= resync_command_requested_at));
+    -- resync_command_claimed_at is deliberately NOT tied to the command being present. The claim CLEARS the
+    -- command and stamps this in the same statement, so requiring an id alongside it would forbid the one
+    -- write the column exists to record. It is a durable "when was the last one taken" marker that outlives
+    -- the command itself, which is exactly what an operator needs after the fact.
+    AND (resync_command_generation IS NULL) = (resync_command_id IS NULL));
 
 COMMENT ON COLUMN iam_v2.pms_interface_runtime.resync_command_id IS
   'Operator-requested full resync awaiting execution by the pmsd worker that owns this socket. Written by '
