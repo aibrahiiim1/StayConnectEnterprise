@@ -280,6 +280,17 @@ type Repo interface {
 	// Event-row update) under the exact runtime-generation CAS, and marks the interface IN_SYNC + CONTINUOUS.
 	// g must not exceed the allocated seq. ErrStaleGeneration if ownership moved.
 	PublishResyncGeneration(ctx context.Context, req ResyncScope, g int64) error
+	// ClaimResyncCommand takes an operator's pending full-resync request if this worker may run it, clearing
+	// it in the same statement. Returns (nil, nil) when there is nothing pending, when the command belongs to
+	// a generation this worker has replaced, or when a resync is already in progress — three refusals that
+	// are deliberately indistinguishable, because the correct response to all of them is to carry on.
+	ClaimResyncCommand(ctx context.Context, req ResyncScope) (*ResyncCommand, error)
+	// UpdateSyncStage records durable operator-visible progress under the same ownership CAS.
+	UpdateSyncStage(ctx context.Context, u StageUpdate) error
+	// InHouseCount reports how many Stays this interface currently holds IN_HOUSE. Stamped at publish so the
+	// figure describes what the completed sync produced. Returns nil on any error: a progress figure is never
+	// worth failing a resync over.
+	InHouseCount(ctx context.Context, ax axisBase) *int64
 	Close() error
 }
 
@@ -333,6 +344,13 @@ type AxisSink interface {
 	// adapter must never silently drop such a record. A persist failure is returned so the transport closes
 	// (a fault we cannot durably record must not be swallowed).
 	OnContinuityFault(ctx context.Context, code Code) error
+	// ClaimOperatorResync returns an operator's pending full-resync request if this owner may run it, and nil
+	// otherwise. The adapter polls this between frames; the sink performs the claim, so the adapter never
+	// needs to know that the command channel is a database row.
+	ClaimOperatorResync() *ResyncCommand
+	// RecordSkipped reports the running count of well-formed records that describe no keyable Stay, so the
+	// operator sees real rejected-record evidence rather than a number nobody can source.
+	RecordSkipped(n int64)
 }
 
 // Deps injects every external effect so flags-OFF and failure paths are provable with spies.

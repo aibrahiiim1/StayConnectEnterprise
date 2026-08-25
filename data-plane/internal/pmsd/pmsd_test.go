@@ -83,6 +83,18 @@ type fakeRepo struct {
 	publishedGen map[string]int64
 	liveRows     []string
 	stagedRows   []string
+	// Operator command channel + durable progress, faked at the repo boundary.
+	cmdQueue       []ResyncCommand
+	cmdGen         int64
+	claimErr       error
+	claimCount     int
+	syncInProgress bool
+	stages         []string
+	lastReceived   int64
+	lastSkipped    int64
+	lastInHouse    int64
+	lastFailure    string
+	inHouse        int64
 }
 
 func newFakeRepo(ifaces ...Interface) *fakeRepo {
@@ -657,4 +669,63 @@ func TestOneFailureDoesNotStopAnother(t *testing.T) {
 	waitFor(t, 2*time.Second, func() bool { return sp.dial.Load() >= 2 })
 	cancel()
 	<-done
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// Operator command channel, faked at the same boundary the real repo implements.
+//
+// cmdQueue is drained one command per claim, and claimGen models the generation guard: a command whose
+// generation does not match the caller's is never handed out, which is what lets the stale-ownership test be
+// written against this fake rather than only against PostgreSQL.
+// ---------------------------------------------------------------------------------------------------------
+
+func (r *fakeRepo) ClaimResyncCommand(ctx context.Context, req ResyncScope) (*ResyncCommand, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.claimErr != nil {
+		return nil, r.claimErr
+	}
+	if len(r.cmdQueue) == 0 {
+		return nil, nil
+	}
+	if r.cmdGen != 0 && r.cmdGen != req.ExpectedGeneration {
+		return nil, nil // issued against a worker this one replaced
+	}
+	if r.syncInProgress {
+		return nil, nil // a resync is already open; the claim refuses rather than opening a second
+	}
+	c := r.cmdQueue[0]
+	r.cmdQueue = r.cmdQueue[1:]
+	r.claimCount++
+	return &c, nil
+}
+
+func (r *fakeRepo) UpdateSyncStage(ctx context.Context, u StageUpdate) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// gen is keyed by interface, matching the CAS the real repo performs.
+	if want, ok := r.gen[u.PMSInterfaceID]; ok && want != u.ExpectedGeneration {
+		return ErrStaleGeneration
+	}
+	r.stages = append(r.stages, string(u.Stage))
+	if u.RecordsReceived != nil {
+		r.lastReceived = *u.RecordsReceived
+	}
+	if u.RecordsSkipped != nil {
+		r.lastSkipped = *u.RecordsSkipped
+	}
+	if u.InHouseCount != nil {
+		r.lastInHouse = *u.InHouseCount
+	}
+	if u.FailureCode != "" {
+		r.lastFailure = u.FailureCode
+	}
+	return nil
+}
+
+func (r *fakeRepo) InHouseCount(ctx context.Context, ax axisBase) *int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := r.inHouse
+	return &n
 }

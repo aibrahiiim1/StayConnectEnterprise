@@ -755,10 +755,12 @@
     "prelive_max_auth_cache_age_seconds_note": "PRE-LIVE TEST POLICY ONLY (revision 38207f74, published 2026-08-25). NOT an approved permanent Go-Live default; must be revisited before Go-Live.",
     "guest_offer_corrected": true,
     "guest_offer_corrected_note": "Exactly one guest-eligible free offer: package revision 11163227-1bc4-41c9-b982-06edcb41fc73 pinned to service plan revision b2f84f70-02e0-4026-bdef-f6decc92bf64 - 2000/2000 kbps, 100000000 byte quota, 1 device, REJECT_NEW_DEVICE, price 0, {NOT_REQUIRED}, MANUAL_END. Proven with the exact offer-engine predicate on the appliance.",
-    "full_resync_control_delivered": false,
-    "full_resync_control_delivered_note": "Items 3 and 4 of the 2026-08-25 authorization (Full Resync Now control, Synchronization progress UI) are NOT implemented and remain outstanding for a separate round."
+    "full_resync_control_delivered": true,
+    "full_resync_control_delivered_note": "Delivered 2026-08-25 (T0094): durable operator command channel claimed by the owning pmsd worker under its runtime_generation CAS, DR raised through the existing serialized writer, DS->DE staging and atomic publish reused unchanged, plus durable sync stages and real record counts. No total, percentage or remaining count anywhere: FIAS does not provide one.",
+    "hotel_admin_build_flags_required": "NEXT_PUBLIC_PHASE2_ADMIN=1 NEXT_PUBLIC_PHASE3_ADMIN=1",
+    "hotel_admin_build_flags_note": "Next inlines NEXT_PUBLIC_* at BUILD time. A rebuild without these flags compiles the PMS and commerce navigation entries to disabled, which hid Stays, PMS interfaces, Internet packages and Service plans after the T0093 deployment. Corrected operationally in release 20260825-191137 (bundle 2979236140c053996a93ca1c900d66c6aaee5d00c655039090cd1c83120dadbd) built from unchanged master; T0093 is not rewritten. Every Hotel Admin build must set both flags."
   },
-  "latest_transition_id": "T0093",
+  "latest_transition_id": "T0094",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1139,7 +1141,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "c260ac39ec5b2a2fdd22ee1b79f43016d140d67f",
+    "head": "aeebc14436b06368a4d2546130904b7eb827cd5e",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."

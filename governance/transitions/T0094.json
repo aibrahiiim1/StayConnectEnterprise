@@ -1,0 +1,44 @@
+{
+  "transition_id": "T0094",
+  "seq": 94,
+  "timestamp": "2026-08-25T19:31:07Z",
+  "timestamp_derivation": "Author timestamp of the introducing commit, read back from git, per T0091.",
+  "record_type": "PMS_FULL_RESYNC_OPERATOR_CONTROL_AND_DURABLE_SYNC_PROGRESS",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (operator control; no phase is reopened or affected)",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. This completes work the Product Owner authorized in the PRE-LIVE guest-trial-readiness instruction and re-authorized here. It changes no phase status, maturity or authorization.",
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-25: 'DELIVER THE PMS FULL-RESYNC CONTROL + LIVE SYNCHRONIZATION PROGRESS - THIS IS THE ONLY FEATURE IN THIS ROUND. Product Owner explicitly authorizes implementation, migration if genuinely required, CI, merge and PRE-LIVE deployment to 172.21.60.25 for the outstanding PMS Full Resync operator experience previously authorized but not delivered.'",
+  "what_was_built": "A durable operator command channel and durable sync progress. edged writes a command row; the pmsd worker that owns the socket claims it under its own runtime_generation CAS and raises the DR through the existing serialized writer. Nothing outside pmsd emits a frame. The DS->DE staging, the atomic PublishResyncGeneration barrier, the generation ownership guard and the automatic initial sync are reused unchanged.",
+  "safety_model": "The claim is one UPDATE whose WHERE clause carries every rule: runtime_generation matches (this worker still owns the interface), resync_command_generation matches (the command was issued to THIS worker, not one it replaced), and sync_status is not RESYNC_IN_PROGRESS (no second staging window). Zero rows means 'nothing to do' for all three, which is the correct response to each. A duplicate click cannot produce a second DR because the row can only be consumed once.",
+  "mirror_safety": "The last known-good mirror is never cleared at resync start. Records are staged under a new generation and become live only at the atomic publish; an interrupted sync therefore leaves the previous guest list serving, which the UI states plainly rather than leaving the operator to guess.",
+  "no_invented_numbers": "FIAS provides no record total before DE. There is deliberately no total, percentage or remaining-count column, field or UI element; the schema, the API type and a UI test all enforce the absence. What is shown is the real staged count and a sentence explaining why that is all there is.",
+  "not_deployed_yet": "Recorded before deployment; the deployment receipt follows in the same delivery.",
+  "boundaries_observed": [
+    "Protel NOT reconnected and the socket NOT made available. No real DR sent. No live Full Resync performed.",
+    "No guest authentication. No Purchase, Entitlement or Session.",
+    "No PMS posting, payment-provider traffic, reversal, FX action or Go-Live.",
+    "Synthetic protocol-level tests over net.Pipe only; no real hotel PMS traffic.",
+    "D39, the commercial packages, the guest offer and the 72-hour PRE-LIVE policy are unchanged.",
+    "PR #24 untouched."
+  ],
+  "blocker": "None. The Protel socket remains unavailable by the Product Owner's own decision.",
+  "next": "The Product Owner personally restores the Protel socket and watches the automatic first fresh sync through the new Synchronization section."
+}

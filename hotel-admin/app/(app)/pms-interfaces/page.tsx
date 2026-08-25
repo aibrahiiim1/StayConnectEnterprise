@@ -22,6 +22,7 @@
 // being held somewhere it could be read from.
 
 import { useCallback, useEffect, useState } from "react";
+import { SynchronizationCard } from "./synchronization-card";
 import {
   api, PmsInterface, PmsInterfaceHealth, PmsRevision, PmsGuestNetworkRoute,
 } from "@/lib/api";
@@ -300,6 +301,7 @@ function InterfaceDetail({
       )}
 
       <HealthCard health={health} />
+      <SynchronizationCard id={id} health={health} onRefreshed={load} />
       <RevisionsCard id={id} iface={iface} revisions={revisions} onPublished={reload} />
       {/* The Credential card is not rendered. The supported connector's link carries no transport
           authentication (credential_mode=NONE), so there is no credential to set or rotate — and the card's

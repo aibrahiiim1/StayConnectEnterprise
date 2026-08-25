@@ -14,7 +14,13 @@ import (
 
 // recordingSink captures axis calls + domain events for protocol assertions.
 type recordingSink struct {
-	mu             sync.Mutex
+	mu sync.Mutex
+	// pendingCmd is handed out ONCE, the way a real claim behaves: the durable row is cleared by the claim
+	// itself, so a sink that kept returning the same command would let a test pass while the production path
+	// issued a DR on every frame.
+	pendingCmd     *ResyncCommand
+	claims         int
+	skippedSeen    int64
 	connected      int
 	heartbeats     int
 	resyncStart    int
@@ -539,4 +545,20 @@ func TestAdapter_MalformedRecordFaultsNotSilentDrop(t *testing.T) {
 	if len(sink.events) != 0 {
 		t.Errorf("malformed record admitted %d events (must be zero — no truncated value reaches the inbox)", len(sink.events))
 	}
+}
+
+// ClaimOperatorResync mirrors the real claim's single-shot behaviour.
+func (s *recordingSink) ClaimOperatorResync() *ResyncCommand {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.claims++
+	c := s.pendingCmd
+	s.pendingCmd = nil
+	return c
+}
+
+func (s *recordingSink) RecordSkipped(n int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.skippedSeen = n
 }

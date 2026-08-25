@@ -868,6 +868,13 @@ export type PmsInterfaceHealth = {
   last_complete_sync_at?: string | null; last_sync_failure_code?: string;
   in_house_stays: number; last_stay_event_at?: string | null;
   pending_events: number; review_events: number; oldest_pending_at?: string | null;
+  // SYNCHRONIZATION. Note what is absent and stays absent: there is no total, no percentage and no
+  // remaining-record field, because FIAS provides no total before the end of a sync and any such number
+  // would be invented by the client. sync_records_received is a real running count of records staged so far.
+  sync_stage?: string; sync_stage_at?: string | null;
+  sync_records_received?: number; sync_records_skipped?: number;
+  sync_failure_code?: string; last_sync_in_house_count?: number | null;
+  resync_command_reason?: string; resync_command_requested_at?: string | null;
 };
 
 export type PmsGuestNetworkRoute = {

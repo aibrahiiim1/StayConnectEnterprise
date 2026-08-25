@@ -139,6 +139,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	// It is a running total rather than a per-resync one on purpose: the number an operator wants is "how much
 	// of this roster is unusable", and a counter that reset on every DS would only ever show the tail.
 	skippedNoIdentity := 0
+	lastReportedSkipped := 0
 	readDeadline := a.rev.HeartbeatTimeout
 	for {
 		if ctx.Err() != nil {
@@ -189,6 +190,29 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 		}
 
 		w.activity() // a VALID (strictly-parsed) frame resets the idle keepalive timer
+
+		// OPERATOR-REQUESTED FULL RESYNC, checked here and nowhere else.
+		//
+		// This is the only point in the process where a DR may be raised on an operator's behalf, and it is
+		// inside the read loop on purpose: the loop runs in the goroutine that owns the socket, so the request
+		// goes out through the same serialized writer as every other frame. Nothing outside pmsd can reach the
+		// writer, and edged does not try — it writes a row and this claims it.
+		//
+		// `resyncing` gates it exactly as it gates the fault-driven DR below: a command claimed while a DS…DE
+		// window is open would open a second window over the first. The claim itself also refuses in that
+		// state, so this is the second of two independent guards rather than the only one.
+		if !resyncing {
+			if cmd := sink.ClaimOperatorResync(); cmd != nil {
+				if a.log != nil {
+					a.log.Info("pmsd: operator requested full resync",
+						"interface", a.iface.ID, "command", cmd.ID, "reason", cmd.Reason)
+				}
+				if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
+					return werr
+				}
+				resyncing = true
+			}
+		}
 		switch pr.RecordType {
 		case RecLS, RecLA:
 			// Record the heartbeat evidence we OBSERVED first (receiving a valid LS/LA is the evidence), then
@@ -207,6 +231,12 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				return err
 			}
 		case RecDE:
+			// Flush the exact skipped total before the publish stamps COMPLETE, so the finished sync reports
+			// what it actually rejected rather than the last multiple of 25.
+			if skippedNoIdentity != lastReportedSkipped {
+				lastReportedSkipped = skippedNoIdentity
+				sink.RecordSkipped(int64(skippedNoIdentity))
+			}
 			resyncing = false
 			if err := sink.OnResyncComplete(a.now(), ""); err != nil { // never use the record id "DE" as a cursor
 				return err
@@ -229,6 +259,13 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 					a.log.Warn("pmsd: skipping record with no Stay identity",
 						"record_type", string(pr.RecordType), "interface", a.iface.ID,
 						"missing", missingIdentityField(perr), "skipped_this_cycle", skippedNoIdentity)
+				}
+				// Surfaced durably, batched, so an operator sees a real rejected-record count next to the
+				// received one. Batching matters on a roster with many unusable records: this would otherwise
+				// be one write per skip on exactly the feed already giving trouble.
+				if skippedNoIdentity-lastReportedSkipped >= 25 {
+					lastReportedSkipped = skippedNoIdentity
+					sink.RecordSkipped(int64(skippedNoIdentity))
 				}
 				continue
 			}
