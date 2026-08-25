@@ -1,0 +1,43 @@
+{
+  "transition_id": "T0092",
+  "seq": 92,
+  "timestamp": "2026-08-25T12:47:29Z",
+  "timestamp_derivation": "Set to the author timestamp of the commit that introduces this receipt, read back from git after the commit was made, per the rule adopted in T0091.",
+  "record_type": "POST_CLOSURE_PRODUCT_DECISION_LOCAL_FIRST_ROOM_AUTHENTICATION",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (D39 product rule; no phase is reopened or affected)",
+  "decision": "D39",
+  "new_decision_created": true,
+  "new_decision_rationale": "A new decision IS required here and was explicitly requested: the Product Owner changed a product rule, superseding behaviour that had been accepted. That is a decision, not a correction, and recording it as one keeps the supersession auditable.",
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-25, verbatim: 'New Product-Owner rule - Room authentication must be local-first during PMS Interface outage. A live PMS socket/Interface connection must NOT be required for a new guest Room sign-in when StayConnect already holds trustworthy PMS-derived Stay data locally. ... This Product-Owner rule intentionally supersedes the narrower existing behavior that treated PMS transport unavailability itself as sufficient to block Room authentication. Record it as a post-closure Product-Owner architecture/product decision, without reopening Phase 3 or Phase 7.'",
+  "previous_state_note": "iam_v2.p3_feed_authorizes required transport_status='CONNECTED'. The moment the PMS socket dropped, every guest lost the ability to sign in, including guests whose Stay was mirrored completely and coherently.",
+  "new_state_note": "Authentication authorises on either a live feed or a trusted local mirror. Every fail-closed condition is preserved and two are made explicit on the offline branch: last_complete_sync_at IS NOT NULL (never synchronised authorises nobody) and resync_started_at IS NULL (a mirror mid-refresh is inconsistent, not merely stale). The operator readiness surface no longer reports a dropped socket as Room sign-in being unavailable.",
+  "not_deployed": "NOT DEPLOYED. The Product Owner explicitly withheld deployment: 'Do NOT deploy the new runtime to the appliance yet.' Migration 0053 has NOT been applied to any database, and no appliance runtime was built or installed. The behaviour described here exists in the repository and in CI only.",
+  "boundaries_observed": [
+    "Code, tests, documentation and governance records only.",
+    "Protel NOT reconnected. No PMS traffic.",
+    "No real guest authentication. No Purchase, Entitlement or Session. No financial traffic.",
+    "No migration applied to any database. No deployment, restart or service change.",
+    "No networking change. No Go-Live.",
+    "Branched from master a09d5bcdd4b63de3e7410d9dbed94b6cfa9e8c57.",
+    "PR #24 untouched."
+  ],
+  "blocker": "The PRE-LIVE appliance's own mirror is currently OUTSIDE the evidence ceiling: last complete sync 2026-08-23T11:46Z, newest occupancy evidence 2026-08-23T15:48Z, against a complete_sync_ms of 86400000. So even with D39 deployed, this appliance would not authorise anyone until either the socket returns or the Product Owner raises max_auth_cache_age_seconds. That is a policy decision, not an agent decision.",
+  "next": "Product-Owner decisions, separately: deploy the new runtime and apply migration 0053; and the controlled end-to-end guest-access acceptance (D38 preparation)."
+}

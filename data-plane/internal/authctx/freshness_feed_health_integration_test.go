@@ -80,8 +80,13 @@ func TestIntegration_HealthyFeedAuthorisesAnUnchangedOvernightStay(t *testing.T)
 	}
 }
 
-// The other half. A dead feed authorises NOBODY, immediately — not for a further grace period on stored
-// evidence that nothing is maintaining any more.
+// The other half, as far as it still goes. A feed that is unhealthy WHILE CONNECTED authorises nobody, and a
+// transport failure authorises nobody when there is no trustworthy mirror behind it.
+//
+// This test originally read "a dead feed authorises NOBODY, immediately", full stop. The Product Owner's
+// local-first rule superseded that: transport availability and mirror trust are different properties, and a
+// dropped socket alone no longer denies a guest whose Stay is mirrored coherently. What survives unchanged is
+// every case where the mirror itself cannot be trusted, which is what the cases below now pin.
 func TestIntegration_DeadFeedAuthorisesNobody(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
@@ -93,8 +98,13 @@ func TestIntegration_DeadFeedAuthorisesNobody(t *testing.T) {
 		transport, syncSt, continuitySt string
 		live                            time.Time
 	}{
-		{"disconnected", "DISCONNECTED", "IN_SYNC", "CONTINUOUS", now},
-		{"error", "ERROR", "IN_SYNC", "CONTINUOUS", now},
+		// These two are transport failures on a mirror that has NEVER completed a sync — the fixture leaves
+		// last_complete_sync_at NULL. They are refused because there is no local guest list to fall back on,
+		// NOT because the socket is down: since the local-first rule, a disconnected interface whose mirror IS
+		// established authorises normally, which mirror_trust_integration_test.go asserts directly. Seeding a
+		// complete sync here would flip both of these to authorised, and that would be correct.
+		{"disconnected, mirror never synchronised", "DISCONNECTED", "IN_SYNC", "CONTINUOUS", now},
+		{"transport error, mirror never synchronised", "ERROR", "IN_SYNC", "CONTINUOUS", now},
 		{"resync required", "CONNECTED", "RESYNC_REQUIRED", "CONTINUOUS", now},
 		{"resync in progress", "CONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now},
 		{"sync failed", "CONNECTED", "SYNC_FAILED", "CONTINUOUS", now},

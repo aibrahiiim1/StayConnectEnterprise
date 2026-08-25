@@ -331,7 +331,7 @@
   "next_authorized_action": "NONE is authorized. The prerequisites for a Go-Live readiness assessment are NOT proven complete, so Go-Live is not the next step. Two things are unproven on this appliance. First, the PMS link is DISCONNECTED by Product-Owner decision, so Room sign-in cannot serve a guest until the Protel socket is reassigned to StayConnect. Second, NO end-to-end guest access has ever been exercised here - purchases=0, entitlements=0, sessions=0 - so package acquisition, entitlement issue, session activation and network enforcement all remain unproven. The RECOMMENDED next step, requiring its own Product-Owner decision, is a controlled end-to-end guest-access acceptance once the Protel socket is returned to StayConnect. A separate Product-Owner Go-Live decision remains required and no current authorization supplies it.",
   "current_phase_plan": "docs/architecture/StayConnect-IAM-Phase7-Plan.md",
   "privilege_matrix": "docs/architecture/Phase3-Privilege-Matrix.md",
-  "latest_accepted_po_decision": "D37",
+  "latest_accepted_po_decision": "D39",
   "current_state_facts": {
     "_note": "MACHINE-READABLE CURRENT STATE. Every current-state surface in this repository is validated against these fields by tools/validate-current-state-parity.py, which runs in the Project Governance gate. They exist because prose alone let a contradiction survive a green gate: current_maturity still said an authorization was awaited and iam_v2 was 49/0 while this file already recorded 63 tables and an executed Live Increment 9. A fact that is only asserted in sentences cannot be diffed; a fact recorded here can be.",
     "phase": "7",
@@ -746,9 +746,13 @@
     "guest_signin_end_to_end_proven": false,
     "guest_signin_end_to_end_proven_note": "NO end-to-end guest sign-in has been proven on this appliance. purchases=0, entitlements=0, sessions=0. The PMS link is intentionally disconnected, so no real authentication is currently possible.",
     "pr42_merged_unintentionally": true,
-    "pr42_merged_unintentionally_note": "PR #42 (D38 preparation runbook) was merged on 2026-08-24 as a side effect of PR #43 being branched from it, against the standing instruction to leave it unmerged. See PC-0003. The runbook remains preparation only and authorizes no execution and no Go-Live."
+    "pr42_merged_unintentionally_note": "PR #42 (D38 preparation runbook) was merged on 2026-08-24 as a side effect of PR #43 being branched from it, against the standing instruction to leave it unmerged. See PC-0003. The runbook remains preparation only and authorizes no execution and no Go-Live.",
+    "room_auth_local_first": true,
+    "room_auth_local_first_note": "D39 (2026-08-25): Room authentication authorises on EITHER a live PMS feed OR a trusted local mirror. A disconnected transport alone no longer denies a guest. Fail-closed is preserved for never-synchronised mirrors, unresolved continuity loss, a resync in flight, revision drift, stale evidence, ambiguity, unmatched verification and ineligible Stay lifecycle. Offline validity is bounded by the existing complete-sync evidence ceiling; no offline TTL was invented.",
+    "room_auth_local_first_deployed": false,
+    "room_auth_local_first_deployed_note": "NOT DEPLOYED and migration 0053 NOT applied anywhere. The Product Owner withheld deployment explicitly. In the repository and CI only."
   },
-  "latest_transition_id": "T0091",
+  "latest_transition_id": "T0092",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"

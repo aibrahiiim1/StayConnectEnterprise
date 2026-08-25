@@ -617,12 +617,21 @@ func (s *server) rotatePMSInterfaceSecret(w http.ResponseWriter, r *http.Request
 const (
 	roomAuthNotActive      = "INTERFACE_NOT_ACTIVE"
 	roomAuthNoRevision     = "NO_PUBLISHED_REVISION"
-	roomAuthTransportDown  = "TRANSPORT_DOWN"
 	roomAuthContinuityGap  = "CONTINUITY_GAP"
 	roomAuthContinuityNone = "CONTINUITY_NOT_ESTABLISHED"
 	roomAuthNotInSync      = "NOT_IN_SYNC"
 	roomAuthFeedSilent     = "FEED_SILENT"
 	roomAuthRevisionUnpin  = "REVISION_NOT_PINNED"
+
+	// THE MIRROR HAS NEVER BEEN FILLED. Distinct from NOT_IN_SYNC, which describes a mirror that exists and is
+	// momentarily behind. This one means no complete sync has ever finished, so there is nothing local to fall
+	// back to while the transport is down — the tables would answer "no such Stay" for a hotel full of guests.
+	roomAuthNeverSynced = "MIRROR_NEVER_SYNCHRONIZED"
+
+	// A COMPLETE SYNC IS PARTWAY THROUGH. Some of the truth has been applied and the rest has not, which is the
+	// one state where local Stay data is genuinely inconsistent rather than merely stale. Brief and
+	// self-clearing; the operator needs to know it is temporary, not investigate it.
+	roomAuthResyncInFlight = "RESYNC_IN_FLIGHT"
 )
 
 type interfaceHealth struct {
@@ -630,12 +639,20 @@ type interfaceHealth struct {
 
 	// ROOM-AUTH FEED READINESS, decided here rather than by whoever is displaying it.
 	//
-	// Phase 3 refuses to mint a PMS Auth Context unless the interface is ACTIVE, CONNECTED, IN_SYNC,
-	// CONTINUOUS, pinned to the published Revision and heard from within that Revision's own
-	// heartbeat_timeout_ms. A client cannot evaluate the last of those: the bound lives in the Revision's
-	// config, and Hotel Admin was hardcoding the 300-second DEFAULT as though it were the rule. An interface
-	// configured with a different timeout would then be described to an operator using a number that
-	// interface does not use.
+	// Phase 3 mints a PMS Auth Context on EITHER a live feed or a trusted local mirror, so this answer must
+	// not be derived from the socket alone. A client cannot evaluate the live branch's bound anyway: it lives
+	// in the Revision's config, and Hotel Admin was hardcoding the 300-second DEFAULT as though it were the
+	// rule. An interface configured with a different timeout would then be described to an operator using a
+	// number that interface does not use.
+	//
+	// TRANSPORT DOWN IS NO LONGER A REASON ON ITS OWN. Telling staff "guests cannot sign in" because the
+	// socket dropped was false whenever the mirror was intact, and false in the worst direction: it invites
+	// the front desk to start handing out workarounds for a problem the guests do not have. When the
+	// transport is down the readiness answer comes from the mirror instead — has a complete sync ever
+	// finished, and is one in flight right now — which is exactly the offline branch of
+	// iam_v2.p3_feed_authorizes. The transport's own state is still reported in full alongside this, in
+	// Transport/DisconnectedSince/TransportError, so an operator sees both facts and they no longer contradict
+	// each other.
 	//
 	// So the same runtime and the same active Revision that Phase 3 reads answer the question here, and the
 	// client renders the answer. What is deliberately EXCLUDED is the Stay-specific half of
@@ -715,15 +732,24 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		       CASE
 		         WHEN i.lifecycle_state <> 'ACTIVE'            THEN '`+roomAuthNotActive+`'
 		         WHEN pr.id IS NULL                            THEN '`+roomAuthNoRevision+`'
-		         WHEN COALESCE(rt.transport_status,'UNKNOWN') <> 'CONNECTED'
-		                                                       THEN '`+roomAuthTransportDown+`'
+		         -- Shared by both branches, so these are asked first and a transport-down interface is
+		         -- judged by them exactly as a connected one is.
 		         WHEN rt.continuity_status = 'GAP_DETECTED'    THEN '`+roomAuthContinuityGap+`'
-		         WHEN COALESCE(rt.sync_status,'UNKNOWN') <> 'IN_SYNC'
-		                                                       THEN '`+roomAuthNotInSync+`'
 		         WHEN COALESCE(rt.continuity_status,'UNKNOWN') <> 'CONTINUOUS'
 		                                                       THEN '`+roomAuthContinuityNone+`'
 		         WHEN rt.pinned_revision_id IS DISTINCT FROM pr.id
 		                                                       THEN '`+roomAuthRevisionUnpin+`'
+		         -- TRANSPORT DOWN: the mirror answers instead. Sign-in survives if a complete sync has
+		         -- actually happened and none is in flight; those two are the whole of the offline branch.
+		         WHEN COALESCE(rt.transport_status,'UNKNOWN') <> 'CONNECTED' THEN
+		           CASE
+		             WHEN rt.last_complete_sync_at IS NULL     THEN '`+roomAuthNeverSynced+`'
+		             WHEN rt.resync_started_at IS NOT NULL     THEN '`+roomAuthResyncInFlight+`'
+		             ELSE ''
+		           END
+		         -- TRANSPORT UP: the live-feed branch, unchanged.
+		         WHEN COALESCE(rt.sync_status,'UNKNOWN') <> 'IN_SYNC'
+		                                                       THEN '`+roomAuthNotInSync+`'
 		         WHEN COALESCE(rt.last_heartbeat_at, rt.last_connected_at) IS NULL
 		           OR COALESCE(rt.last_heartbeat_at, rt.last_connected_at)
 		              <= now() - make_interval(secs => iam_v2.p3_cfg_secs(pr.config,'heartbeat_timeout_ms',300))
