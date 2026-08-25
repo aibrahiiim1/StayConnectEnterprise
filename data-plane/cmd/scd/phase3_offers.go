@@ -91,9 +91,13 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID string, 
 		Stay:           evidence,
 	}
 
-	// Only CURRENT revisions of non-system, visible, zero-price packages are even candidates. The price and
-	// settlement filter is the same one staygrant enforces at grant time — two predicates that "should"
-	// agree are how a portal ends up offering something the grant then refuses.
+	// Only CURRENT revisions of ACTIVE, non-system, visible, zero-price packages are even candidates. The
+	// price and settlement filter is the same one staygrant enforces at grant time — two predicates that
+	// "should" agree are how a portal ends up offering something the grant then refuses.
+	//
+	// `active` is the operator's own switch and belongs here for the same reason: a package turned off in
+	// Hotel Admin that keeps appearing on the portal makes the admin UI a lie, and the operator's only
+	// remaining lever is visible_until, which dates a package rather than disabling it.
 	rows, err := p.srv.db.Query(ctx, `
 		SELECT ipr.id::text, ip.id::text, ip.code, ipr.service_plan_revision_id::text, ipr.package_type,
 		       ipr.duration_policy, COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0)
@@ -104,6 +108,11 @@ func (p *phase3Auth) offersFor(ctx context.Context, stayID, interfaceID string, 
 		 WHERE ipr.tenant_id=$1 AND ipr.site_id=$2
 		   AND ip.current_revision_id = ipr.id
 		   AND ip.is_system IS NOT TRUE
+		   -- DEACTIVATING A PACKAGE MUST REMOVE IT FROM THE PORTAL. It did not: this predicate never read
+		   -- ip.active, so a package an operator switched off in Hotel Admin carried on being offered to
+		   -- guests. It was found with a deactivated 2 Gbps package still guest-selectable beside its 2 Mbps
+		   -- replacement — two offers where the operator believed there was one, and the wrong one grantable.
+		   AND ip.active IS TRUE
 		   AND ipr.package_type <> 'CHECKOUT_GRACE'
 		   AND (ipr.visible_from IS NULL OR ipr.visible_from <= now())
 		   AND (ipr.visible_until IS NULL OR ipr.visible_until > now())
