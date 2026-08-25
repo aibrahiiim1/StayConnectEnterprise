@@ -88,7 +88,9 @@ func TestIntegration_Phase3Auth_SignsInWhilePMSIsDisconnected(t *testing.T) {
 	// normal sign-in, which is the point of the rule.
 	var sessions int
 	if err := f.pool.QueryRow(ctx,
-		`SELECT count(*) FROM iam_v2.sessions WHERE stay_id=$1`, f.stay).Scan(&sessions); err != nil {
+		`SELECT count(*) FROM iam_v2.sessions s
+		   JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
+		  WHERE e.stay_id=$1`, f.stay).Scan(&sessions); err != nil {
 		t.Fatalf("session count: %v", err)
 	}
 	if sessions != 1 {
@@ -129,10 +131,9 @@ func entitlementAndSessionState(t *testing.T, f *authFixture, sessionID string) 
 	t.Helper()
 	var state string
 	if err := f.pool.QueryRow(context.Background(), `
-		SELECT COALESCE(e.status,'?') || '/' || COALESCE(s.status,'?')
+		SELECT COALESCE(e.status,'?') || '/' || COALESCE(s.state,'?')
 		  FROM iam_v2.sessions s
-		  LEFT JOIN iam_v2.session_entitlement_bindings b ON b.session_id = s.id
-		  LEFT JOIN iam_v2.entitlements e ON e.id = b.entitlement_id
+		  LEFT JOIN iam_v2.entitlements e ON e.id = s.entitlement_id
 		 WHERE s.id=$1`, sessionID).Scan(&state); err != nil {
 		t.Fatalf("read entitlement/session state: %v", err)
 	}
@@ -150,7 +151,10 @@ func TestIntegration_Phase3Auth_CheckedOutStayIsRefusedWhileOffline(t *testing.T
 
 	takeInterfaceOffline(t, f, "DIAL_FAILED")
 	if _, err := f.pool.Exec(context.Background(),
-		`UPDATE iam_v2.stays SET status='CHECKED_OUT' WHERE id=$1`, f.stay); err != nil {
+		// effective_checkout_at is required by stays_checkedout_needs_boundary: a checked-out Stay must carry
+		// the boundary that Checkout-Grace is measured from, so there is no such thing as a checkout without one.
+		`UPDATE iam_v2.stays SET status='CHECKED_OUT', effective_checkout_at=now() WHERE id=$1`,
+		f.stay); err != nil {
 		t.Fatalf("check the stay out: %v", err)
 	}
 
@@ -243,16 +247,11 @@ func TestIntegration_Phase3Auth_NamespacingAndAmbiguitySurviveTheOutage(t *testi
 	defer f.startEnforcementOwner(t)()
 	takeInterfaceOffline(t, f, "DIAL_FAILED")
 
-	// f.otherStay is the fixture's second Stay, seeded to collide on the verification evidence. With the feed
-	// down it must still fail closed rather than resolving to whichever row is cheapest to find.
-	if _, err := f.pool.Exec(context.Background(),
-		`UPDATE iam_v2.stays SET room_number='412', last_name='Okonkwo', status='IN_HOUSE'
-		  WHERE id=$1`, f.otherStay); err != nil {
-		t.Fatalf("make the second stay ambiguous: %v", err)
-	}
-
+	// The fixture already seeds two Stays that collide on room 412 + surname "Shared" — the same ambiguity
+	// TestIntegration_Phase3Auth_AmbiguityGrantsNothing uses on a healthy feed. Reusing it means this test
+	// asserts the outage changes nothing, rather than asserting a differently-constructed ambiguity.
 	_, res := post(t, f.p3.resolveHandler,
-		f.resolveBody("412", "Okonkwo", "", "00000049-0000-4000-8000-000000000000"))
+		f.resolveBody("412", "Shared", "", "00000049-0000-4000-8000-000000000000"))
 	if res.Outcome == outcomeVerified {
 		t.Fatal("an ambiguous match verified during an outage. Ambiguity must fail closed whether or not the " +
 			"PMS is reachable, or the answer depends on which row was found first")
