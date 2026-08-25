@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `486fc641ca6bb99f96b188c9a16d371bfcd1fa80`
-- **Provenance (generation HEAD = inventory_head):** `974a7b6e5b9ce42d71b5444b4c9e32b65bd53610`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `aeebc14436b06368a4d2546130904b7eb827cd5e`
+- **Provenance (generation HEAD = inventory_head):** `f3724e2003f324ca334406620ff20bf3fe90a880`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `feat/pms-full-resync-control`
 - **Remote branch:** `origin/feat/pms-full-resync-control`
 - **Changed files:** 225
@@ -158,22 +158,22 @@
 | `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest and packs |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
-| `exports/chatgpt/phase-evidence/GIT_STAT_974a7b6e.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/phase-evidence/GIT_STAT_f3724e20.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the full-resync control |
@@ -232,8 +232,8 @@
 | `scripts/gatep-reconcile-acceptance.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Prove the reconcile is safe to run, and exercise the path that actually protects it |
 | `scripts/gatep-reconcile.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Address in-container paths so the copy verification looks where the files are |
 | `scripts/generate-production-baseline.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Regenerate the factory-clean baseline for migration 0050 |
-| `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | An operator can ask for a fresh guest list, and can watch it arrive |
-| `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | An operator can ask for a fresh guest list, and can watch it arrive |
+| `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Repair the migration-list line continuation in the Phase 5 harness |
+| `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Repair the migration-list line continuation in the Phase 5 harness |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D36: post-closure corrections are their own delivery lineage |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Point M46 and M48 at the manifest that is actually checked |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
@@ -242,7 +242,7 @@
 ```text
  .github/workflows/phase3-software.yml              |  18 +
  .gitignore                                         |   1 +
- CLAUDE.md                                          | 219 ++++++++
+ CLAUDE.md                                          | 219 +++++++
  cloud-admin/app/(app)/appliances/page.tsx          |   5 +-
  cloud-admin/app/(app)/licenses/page.tsx            |  37 ++
  cloud-admin/app/(app)/onboarding/page.tsx          |  61 ++
@@ -278,7 +278,7 @@
  data-plane/cmd/netd/kea.go                         |  13 +
  data-plane/cmd/netd/main.go                        |  39 +-
  data-plane/cmd/pmsd/main.go                        |  46 +-
- .../cmd/portald/pms_phase3_forwarding_test.go      | 156 ++++++
+ .../cmd/portald/pms_phase3_forwarding_test.go      | 156 +++++
  data-plane/cmd/portald/pms_phase3_handlers.go      |  24 +-
  data-plane/cmd/portald/templates.go                | 120 +++-
  data-plane/cmd/scd/assignment.go                   |  96 ++--
@@ -298,7 +298,7 @@
  .../appliancecert/bootstrap_states_test.go         | 270 +++++++++
  data-plane/internal/appliancecert/cert.go          | 425 ++++++++++++--
  .../appliancecert/rotation_restart_test.go         | 231 ++++++++
- data-plane/internal/assignment/resolve.go          | 219 ++++++++
+ data-plane/internal/assignment/resolve.go          | 219 +++++++
  .../internal/assignment/resolve_outcome_test.go    |  85 +++
  data-plane/internal/authctx/authctx.go             |  63 +--
  .../internal/authctx/authctx_integration_test.go   |  37 +-
@@ -383,13 +383,13 @@
  docs/context/StayConnect-IAM-Handoff.md            |  11 +-
  .../PC-0002-complete-delivery-manifest.md          | 159 ++++++
  docs/manifests/Phase7-change-manifest.md           | 108 ++--
- docs/manifests/PostClosure-change-manifest.md      | 624 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 626 +++++++++++++++++++++
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 +++++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 ++++++++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317587 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 130948 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42589 bytes
- .../chatgpt/phase-evidence/GIT_STAT_974a7b6e.txt   |   4 +
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 130944 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42588 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_f3724e20.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -460,12 +460,12 @@
  scripts/gatep-reconcile-acceptance.sh              | 236 ++++++++
  scripts/gatep-reconcile.sh                         | 161 ++++++
  scripts/generate-production-baseline.sh            |  38 +-
- scripts/phase5-pg-integration.sh                   |   9 +-
- scripts/pmsd-pg-integration.sh                     |  49 ++
+ scripts/phase5-pg-integration.sh                   |  10 +-
+ scripts/pmsd-pg-integration.sh                     |  51 ++
  tools/project-state.py                             |  69 ++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 225 files changed, 19764 insertions(+), 2242 deletions(-)
+ 225 files changed, 19769 insertions(+), 2242 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -473,8 +473,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_4c968c43.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_974a7b6e.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_974a7b6e.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_f3724e20.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -485,7 +485,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 974a7b6e Delivery: manifest and packs
+HISTORICAL: f3724e20 Delivery: manifest and packs
+HISTORICAL: aeebc144 Repair the migration-list line continuation in the Phase 5 harness
+HISTORICAL: 6b6571ba Delivery: manifest and packs
 HISTORICAL: 486fc641 The command CHECK forbade the claim it was written to protect
 HISTORICAL: 17e78475 Delivery: manifest and packs for the full-resync control
 HISTORICAL: 6c440d55 An operator can ask for a fresh guest list, and can watch it arrive
