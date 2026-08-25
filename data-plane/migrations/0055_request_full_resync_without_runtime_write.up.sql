@@ -70,6 +70,18 @@ COMMENT ON FUNCTION iam_v2.request_full_resync(uuid,uuid,uuid,text) IS
   'CONNECTED, a resync is already running, or a request is already pending.';
 
 REVOKE ALL ON FUNCTION iam_v2.request_full_resync(uuid,uuid,uuid,text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION iam_v2.request_full_resync(uuid,uuid,uuid,text) TO svc_edged;
+
+-- The grant is conditional because the service roles are created by the Gate-P role scripts, not by
+-- migrations, and the disposable CI databases have no svc_edged at all. An unconditional GRANT fails there
+-- with "role does not exist" and takes the whole migration down with it, which is how this one first broke.
+-- The authoritative grant lives in deploy/gatep/svc-edged-phase345-admin-grants.sql regardless: a
+-- migration-only grant does not survive a reconcile.
+DO $do$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_edged') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.request_full_resync(uuid,uuid,uuid,text) TO svc_edged;
+  END IF;
+END
+$do$;
 
 COMMIT;
