@@ -1,0 +1,40 @@
+{
+  "transition_id": "T0090",
+  "seq": 90,
+  "timestamp": "2026-08-25T01:40:00Z",
+  "record_type": "PC0003_EXECUTION_STATE_NOTE_QUALIFIED_AT_THE_ROOM_SIGNIN_STATEMENT",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (wording hygiene only; no phase is affected)",
+  "decision": "D37",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new Product-Owner decision was created. This transition changes no runtime fact, no phase status, no maturity and no authorization; it qualifies one sentence of an existing note so it cannot be read as a stronger claim than the evidence supports. Existing governance rules require a decision reference, satisfied by D37 — the same reference T0088 and T0089 used for the same reason.",
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-25, verbatim: 'Execute the previously requested FINAL PC-0003 record hygiene now. Start from current master e04363b5d9a95398714d8596a4d65b565ca90a00. Records/docs only: Fix governance/project-state.json current_activity_execution_state_note so the Room sign-in statement itself explicitly says: accepted-to-offer evidence was scd resolve socket only, portald bypassed; browser -> portald -> scd remains NOT proven end to end; PC-0002 forwarding is deployed but not live-guest proven.'",
+  "previous_state_note": "current_activity_execution_state_note said only 'Room sign-in is proven as far as VERIFIED -> Auth Context -> eligible offer.' The qualification lived elsewhere in current_state_facts and in PC-0002, so the sentence itself read as a stronger claim than the evidence supports. A reader taking that one sentence at face value would conclude the guest path works.",
+  "new_state_note": "The Room sign-in sentence now carries its own qualification: the accepted-to-offer evidence came from the scd resolve socket only with portald bypassed; browser -> portald -> scd is NOT proven end to end and has never completed a successful Room sign-in on this appliance; and the PC-0002 forwarding fix is deployed but NOT live-guest proven. Nothing else in the note changed.",
+  "what_did_not_change": "No runtime fact, phase status, maturity or authorization. current_activity and current_activity_execution_state are byte-identical. The deployed portald artifact was neither changed nor redeployed. Phase 0 remains FINAL_CLOSED, Phases 1A-7 remain ACCEPTED_AND_CLOSED, and Phase 3 remains ACCEPTED AND CLOSED at verified DARK maturity (D16/T0024), merged (D17/T0025).",
+  "boundaries_observed": [
+    "Records and documentation only.",
+    "No application code, configuration, database mutation, deployment, restart or service change.",
+    "No networking change, no PMS traffic, no guest authentication, no purchase, entitlement or session, no financial action, no Go-Live.",
+    "Branched from master e04363b5d9a95398714d8596a4d65b565ca90a00, not from another PR branch — the mistake recorded in PC-0003 was not repeated.",
+    "PR #24 untouched."
+  ],
+  "blocker": "Unchanged. The PMS link is intentionally disconnected, so the corrected guest portal path still cannot be proven with a real sign-in.",
+  "next": "Unchanged: the controlled end-to-end guest-access acceptance (D38 preparation), once the Protel socket is returned to StayConnect. That requires its own Product-Owner decision."
+}
