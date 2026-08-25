@@ -83,29 +83,36 @@ func TestIntegration_Phase3Offers_OnlyTheActivePackageSurvives(t *testing.T) {
 	ctx := context.Background()
 
 	// Clone the fixture's free package into a second, deactivated package — the retired predecessor.
+	//
+	// Three statements rather than one CTE: a data-modifying CTE cannot see rows its sibling CTEs insert,
+	// because every arm reads the same snapshot taken before the statement began. The single-statement
+	// version updated nothing and returned no rows.
+	var retiredPkg string
+	if err := f.pool.QueryRow(ctx, `
+		INSERT INTO iam_v2.internet_packages (id, tenant_id, site_id, code, active, is_system)
+		SELECT gen_random_uuid(), ip.tenant_id, ip.site_id, ip.code || '-retired', false, false
+		  FROM iam_v2.internet_packages ip
+		  JOIN iam_v2.internet_package_revisions ipr ON ipr.package_id = ip.id
+		 WHERE ipr.id = $1::uuid
+		RETURNING id::text`, f.pkgRev).Scan(&retiredPkg); err != nil {
+		t.Fatalf("seed the retired package: %v", err)
+	}
 	var retiredRev string
 	if err := f.pool.QueryRow(ctx, `
-		WITH pkg AS (
-		  INSERT INTO iam_v2.internet_packages (id, tenant_id, site_id, code, active, is_system)
-		  SELECT gen_random_uuid(), ip.tenant_id, ip.site_id, ip.code || '-retired', false, false
-		    FROM iam_v2.internet_packages ip
-		    JOIN iam_v2.internet_package_revisions ipr ON ipr.package_id = ip.id
-		   WHERE ipr.id = $1::uuid
-		  RETURNING id, tenant_id, site_id
-		), rev AS (
-		  INSERT INTO iam_v2.internet_package_revisions
-		    (id, tenant_id, site_id, package_id, revision_no, service_plan_revision_id, package_type,
-		     price_minor, currency, currency_exponent, settlement_methods, duration_policy, renewable)
-		  SELECT gen_random_uuid(), pkg.tenant_id, pkg.site_id, pkg.id, 1, ipr.service_plan_revision_id,
-		         ipr.package_type, 0, ipr.currency, ipr.currency_exponent, ipr.settlement_methods,
-		         ipr.duration_policy, ipr.renewable
-		    FROM pkg, iam_v2.internet_package_revisions ipr WHERE ipr.id = $1::uuid
-		  RETURNING id, package_id
-		)
-		UPDATE iam_v2.internet_packages ip SET current_revision_id = rev.id
-		  FROM rev WHERE ip.id = rev.package_id
-		RETURNING rev.id::text`, f.pkgRev).Scan(&retiredRev); err != nil {
-		t.Fatalf("seed the retired package: %v", err)
+		INSERT INTO iam_v2.internet_package_revisions
+		  (id, tenant_id, site_id, package_id, revision_no, service_plan_revision_id, package_type,
+		   price_minor, currency, currency_exponent, settlement_methods, duration_policy, renewable)
+		SELECT gen_random_uuid(), ipr.tenant_id, ipr.site_id, $2::uuid, 1, ipr.service_plan_revision_id,
+		       ipr.package_type, 0, ipr.currency, ipr.currency_exponent, ipr.settlement_methods,
+		       ipr.duration_policy, ipr.renewable
+		  FROM iam_v2.internet_package_revisions ipr WHERE ipr.id = $1::uuid
+		RETURNING id::text`, f.pkgRev, retiredPkg).Scan(&retiredRev); err != nil {
+		t.Fatalf("seed the retired revision: %v", err)
+	}
+	if _, err := f.pool.Exec(ctx,
+		`UPDATE iam_v2.internet_packages SET current_revision_id=$2::uuid WHERE id=$1::uuid`,
+		retiredPkg, retiredRev); err != nil {
+		t.Fatalf("point the retired package at its revision: %v", err)
 	}
 
 	_, res := post(t, f.p3.resolveHandler,
