@@ -1,0 +1,68 @@
+{
+  "transition_id": "T0093",
+  "seq": 93,
+  "timestamp": "2026-08-25T17:56:04Z",
+  "timestamp_derivation": "Author timestamp of the commit that introduces this receipt, read back from git after committing, per the rule adopted in T0091.",
+  "record_type": "PRELIVE_GUEST_TRIAL_READINESS_D39_DEPLOYED_AND_COMMERCIAL_OFFER_CORRECTED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (PRE-LIVE preparation; no phase is reopened or affected)",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. This transition executes D39, which the Product Owner had already approved, and corrects commercial configuration. It changes no phase status, maturity or authorization.",
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-25, verbatim: 'PRE-LIVE GUEST TRIAL READINESS - IMPLEMENT, MERGE AND DEPLOY TO 172.21.60.25. Product Owner explicitly authorizes this bounded preparation round. ... Apply migration 0053 and deploy the D39 runtime to Fresh Production PRE-LIVE appliance 172.21.60.25. Set max_auth_cache_age_seconds = 259200 (72 hours) for the active PMS Interface using a new immutable PMS Interface Revision. ... This 72-hour value is PRE-LIVE TEST POLICY ONLY, not an approved permanent Go-Live default.'",
+  "deployed": {
+    "appliance": "172.21.60.25 (Fresh Production, PRE-LIVE)",
+    "built_from": "master 9576a3b42b3ef1ff0d47421a2ebed5fea00ef0b3 (PR #49 merge)",
+    "migration": "0053_local_mirror_authorizes_when_transport_is_down APPLIED; schema_migrations head is now 0053",
+    "scd_sha256": "10d850239c9eb5288d9e2cf917b63ea3f6a4665d1fc62da963c77833022e7c88",
+    "edged_sha256": "a49c01785f1457687c96634a7a4560ee9a3c41f4812b4b9dd5f6f5e324a8eacb",
+    "hotel_admin_bundle_sha256": "d0d1646753686c92b3a48a6da51c4e7d35859f3a6331a1392d1b168f6f83cb00",
+    "hotel_admin_release": "/opt/stayconnect/releases/hotel-admin/20260825-175553",
+    "rollback": "/opt/stayconnect/bin/scd.bak-prelive, /opt/stayconnect/bin/edged.bak-prelive, and the previous hotel-admin release 20260823-214120 (the symlink target it replaced)",
+    "not_deployed": "No other service. pmsd and portald were left untouched and were not restarted.",
+    "gate_p": "svc_scd retained EXECUTE on the redefined iam_v2.p3_feed_authorizes: CREATE OR REPLACE preserves grants, and this was verified rather than assumed."
+  },
+  "commercial_configuration": {
+    "method": "Hotel Admin API only (POST /edge/v1/commercial-packages/plans and /edge/v1/commercial-packages). No direct SQL was used for any configuration change.",
+    "service_plan_revision": "b2f84f70-02e0-4026-bdef-f6decc92bf64 (Free Internet, revision 3): down_kbps=2000, up_kbps=2000, data_quota_bytes=100000000, max_concurrent_devices=1, device_limit_policy=REJECT_NEW_DEVICE",
+    "package_revision": "11163227-1bc4-41c9-b982-06edcb41fc73 (Freee, revision 2) pinned to that plan revision; price_minor=0, settlement_methods={NOT_REQUIRED}, duration_policy={\"end_mode\":\"MANUAL_END\"}",
+    "immutability": "New revisions were published. Revision 1 and 2 of the plan and revision 1 of each package remain unmodified as history.",
+    "proof": "The exact offer-engine predicate returns EXACTLY ONE row on the appliance: Freee / 11163227 / plan b2f84f70 / 2000 / 2000 / 100000000 / 1 / REJECT_NEW_DEVICE / 0 / {NOT_REQUIRED} / MANUAL_END.",
+    "defect_fixed": "iam_v2 offer selection now requires ip.active IS TRUE. Before this, the deactivated 2 Gbps 'Free Internet Package' was still guest-selectable, producing two offers and a choice screen where automatic access was intended. visible_until was deliberately NOT used as a workaround."
+  },
+  "prelive_cache_policy": {
+    "revision": "38207f74-0130-43e1-ac31-ce41ba5261b6 (revision 3), published and pinned",
+    "value": "max_auth_cache_age_seconds = 259200 (72 hours)",
+    "scope": "PRE-LIVE TEST POLICY ONLY. This is NOT an approved permanent Go-Live default and must be revisited before Go-Live.",
+    "preserved": "Every other Revision field is byte-identical to revision 2: endpoint 150.0.0.18:5003, Africa/Cairo, folio_identity_strategy UNSET, normalization_version 1, credential_mode NONE, read_only true, resync_supported true, and all six timeout/cadence values.",
+    "api_gap_closed": "The authoring API had no max_auth_cache_age_seconds field at all - the key was readable by the authentication path but not writable by any supported operator path. It is now authorable and bounded at 604800 to match what the predicate accepts.",
+    "effect_measured": "449 of 456 IN_HOUSE Stays carrying evidence now satisfy iam_v2.p3_feed_authorizes with the transport DISCONNECTED. The remaining 7 have evidence older than 72 hours. Evaluated read-only; no authentication was attempted."
+  },
+  "not_delivered_this_round": "Items 3 and 4 of the authorization - the Full Resync Now operator control and the Synchronization progress UI - were NOT implemented. They require a durable stage model, a command path through the PMS worker that owns the socket, and their own concurrency coverage; they are a separate round and are explicitly outstanding, not silently dropped.",
+  "boundaries_observed": [
+    "Protel socket NOT made available. No PMS traffic. No Full Resync triggered.",
+    "No real guest sign-in. No Purchase, Entitlement or Session created: all three remain 0.",
+    "No PMS financial posting, payment-provider traffic, reversal, FX action or Go-Live.",
+    "Only scd, edged and hotel-admin were deployed; pmsd and portald were not touched.",
+    "All commercial configuration went through the Hotel Admin API; no direct SQL.",
+    "PR #24 untouched."
+  ],
+  "blocker": "None for the trial itself. The Protel socket remains intentionally unavailable and the Product Owner will return it personally; the resulting automatic fresh sync is a separate execution step.",
+  "next": "Product-Owner decisions, separately: the Full Resync control and progress UI (items 3 and 4); returning the Protel socket; and the controlled end-to-end guest-access acceptance (D38 preparation)."
+}
