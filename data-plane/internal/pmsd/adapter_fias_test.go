@@ -18,18 +18,20 @@ type recordingSink struct {
 	// pendingCmd is handed out ONCE, the way a real claim behaves: the durable row is cleared by the claim
 	// itself, so a sink that kept returning the same command would let a test pass while the production path
 	// issued a DR on every frame.
-	pendingCmd     *ResyncCommand
-	claims         int
-	skippedSeen    int64
-	connected      int
-	heartbeats     int
-	resyncStart    int
-	resyncComplete int
-	events         []Event
-	overflow       bool
-	continuityFlt  int
-	initialResync  int
-	q              *BoundedQueue
+	pendingCmd        *ResyncCommand
+	skippedReports    []int64
+	fullSyncRequested int
+	claims            int
+	skippedSeen       int64
+	connected         int
+	heartbeats        int
+	resyncStart       int
+	resyncComplete    int
+	events            []Event
+	overflow          bool
+	continuityFlt     int
+	initialResync     int
+	q                 *BoundedQueue
 }
 
 func (s *recordingSink) OnConnected(time.Time) error {
@@ -557,8 +559,19 @@ func (s *recordingSink) ClaimOperatorResync() *ResyncCommand {
 	return c
 }
 
+// fullSyncRequested counts WAITING_FOR_PMS signals — one per DR the adapter puts on the wire, whether
+// automatic or operator-requested.
+func (s *recordingSink) OnFullSyncRequested() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fullSyncRequested++
+}
+
 func (s *recordingSink) RecordSkipped(n int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.skippedSeen = n
+	// Every report is kept, not just the last, so a test can prove the counter RESTARTS at a new roster
+	// rather than merely ending on a plausible number.
+	s.skippedReports = append(s.skippedReports, n)
 }

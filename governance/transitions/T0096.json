@@ -1,0 +1,46 @@
+{
+  "transition_id": "T0096",
+  "seq": 96,
+  "timestamp": "2026-08-25T22:08:27Z",
+  "timestamp_derivation": "Author timestamp of the introducing commit, read back from git, per T0091.",
+  "record_type": "AUTOMATIC_FIRST_SYNC_OBSERVABILITY_CORRECTION",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap (observability correction; no phase affected)",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. Corrects the delivery receipted by T0094/T0095; the command architecture from PR #51/#52 is unchanged and was not redesigned.",
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-26: 'FINAL PRE-PROTEL OBSERVABILITY CORRECTION - AUTOMATIC FIRST SYNC MUST BE WATCHABLE LIVE ... End only when the Product Owner can keep the PMS Interface screen open, personally restore Protel, and watch the automatic initial Full Sync from connection through COMPLETE without a manual page refresh.'",
+  "corrections": [
+    "AUTOMATIC PATH STAGED. RequireInitialResync now enters REQUESTING_FULL_SYNC and zeroes the counters, and the adapter signals WAITING_FOR_PMS once the initial DR has been accepted by the existing serialized writer. DS/DE, staging and the atomic publish are untouched; no second resync mechanism exists.",
+    "TRANSPORT LOST BEFORE DS is now FAILED rather than silence. INTERRUPTED still covers loss mid-roster, where a mirror was staged but never published.",
+    "SINGLE DUAL-RATE POLL. The Synchronization card polls whenever mounted - 10s idle, 3s during a sync - as ONE interval whose delay changes, so a rate change replaces the timer instead of adding one. Polling only while active could never observe the event that starts a sync, which is exactly the reconnect the operator is watching.",
+    "SKIPPED IS PER ROSTER. skippedNoIdentity and its report watermark reset at DS, where received already resets. It was a per-ownership-cycle total, so a second sync inherited the first one's rejects."
+  ],
+  "no_schema_change": "NONE. Migrations 0054 and 0055 already carried every column this correction needed; no migration was written or applied.",
+  "boundaries_observed": [
+    "Protel NOT reconnected and the socket NOT made available. No real DR sent. No live Full Resync performed.",
+    "No guest authentication. No Purchase, Entitlement or Session: all three remain 0.",
+    "No PMS posting, payment-provider traffic, reversal, FX action or Go-Live.",
+    "Synthetic net.Pipe and fake-timer tests only; no real hotel PMS traffic.",
+    "T0095 was NOT rewritten. D39, the commercial packages, the guest offer and the 72-hour PRE-LIVE policy are unchanged.",
+    "PR #24 untouched."
+  ],
+  "blocker": "None. The Protel socket remains unavailable by the Product Owner's own decision.",
+  "next": "The Product Owner keeps the PMS Interface page open, restores the Protel socket, and watches the automatic initial Full Sync from connection through COMPLETE without refreshing."
+}

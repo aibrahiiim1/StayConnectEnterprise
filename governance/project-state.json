@@ -760,9 +760,11 @@
     "hotel_admin_build_flags_required": "NEXT_PUBLIC_PHASE2_ADMIN=1 NEXT_PUBLIC_PHASE3_ADMIN=1",
     "hotel_admin_build_flags_note": "Next inlines NEXT_PUBLIC_* at BUILD time. A rebuild without these flags compiles the PMS and commerce navigation entries to disabled, which hid Stays, PMS interfaces, Internet packages and Service plans after the T0093 deployment. Corrected operationally in release 20260825-191137 (bundle 2979236140c053996a93ca1c900d66c6aaee5d00c655039090cd1c83120dadbd) built from unchanged master; T0093 is not rewritten. Every Hotel Admin build must set both flags.",
     "full_resync_control_deployed": true,
-    "full_resync_control_deployed_note": "Deployed to 172.21.60.25 on 2026-08-25 (T0095): migrations 0054 and 0055 applied, edged 46845e5f87108a374d9c8e32a0792b84ae8e6349ab8129391144fa4a7f5b6a76, pmsd 79e7111e0ad4fcbee997810aad7291cb35c5e20a25bad9f1376e3b5b8f94cff5, hotel-admin release 20260825-203137. Verified refusing correctly while disconnected; no DR sent."
+    "full_resync_control_deployed_note": "Deployed to 172.21.60.25 on 2026-08-25 (T0095): migrations 0054 and 0055 applied, edged 46845e5f87108a374d9c8e32a0792b84ae8e6349ab8129391144fa4a7f5b6a76, pmsd 79e7111e0ad4fcbee997810aad7291cb35c5e20a25bad9f1376e3b5b8f94cff5, hotel-admin release 20260825-203137. Verified refusing correctly while disconnected; no DR sent.",
+    "automatic_first_sync_observable": true,
+    "automatic_first_sync_observable_note": "T0096: the automatic initial sync enters the same durable stage model as an operator-requested one, and the Synchronization card polls whenever it is mounted (10s idle, 3s active, one interval) so an external reconnect is discovered without a manual refresh. sync_records_skipped now describes one roster."
   },
-  "latest_transition_id": "T0095",
+  "latest_transition_id": "T0096",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1143,7 +1145,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "432b2bacd7851b292e183d6450372f48d593df2f",
+    "head": "236e60ccb19e5c666b4f799887878658c46b54b5",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."
