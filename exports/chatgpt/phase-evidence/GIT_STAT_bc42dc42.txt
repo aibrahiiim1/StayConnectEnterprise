@@ -1,0 +1,4 @@
+commit bc42dc428207c72063a344d28a972ea42f8863d7
+Date:   Tue Aug 25 16:17:34 2026 +0300
+
+    Delivery: manifest and packs for the harness fix

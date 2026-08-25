@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `91be32ff54e29e82724fbde46911bc79352f53ba`
-- **Provenance (generation HEAD = inventory_head):** `e6ee84561da8cb1b65fc5ba79468572bf6f5582a`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `05a011cf9d6a4a1da6c6953a0c8825c1f44dd116`
+- **Provenance (generation HEAD = inventory_head):** `bc42dc428207c72063a344d28a972ea42f8863d7`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `feat/local-mirror-room-auth`
 - **Remote branch:** `origin/feat/local-mirror-room-auth`
 - **Changed files:** 211
@@ -38,7 +38,7 @@
 | `data-plane/cmd/edged/health_kea_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Activation, licensing, Central FQDN and Kea health: production readiness |
 | `data-plane/cmd/edged/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `data-plane/cmd/edged/phase3_api_integration_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Align the Phase-3 API integration fixtures with the authoring contract |
-| `data-plane/cmd/edged/phase3_room_auth_readiness_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Carry the local-first rule into the baseline the CI database is built from |
+| `data-plane/cmd/edged/phase3_room_auth_readiness_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Teach the integration harnesses about migration 0053 |
 | `data-plane/cmd/edged/pms_interface_capability_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Make the operator surface tell the truth about what this build does |
 | `data-plane/cmd/edged/resources_phase3.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `data-plane/cmd/edged/resources_phase3_interface_authoring.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
@@ -72,7 +72,7 @@
 | `data-plane/internal/authctx/authctx.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Unwedge the PMS link, judge freshness by feed health, and accept one verification value |
 | `data-plane/internal/authctx/authctx_integration_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Unwedge the PMS link, judge freshness by feed health, and accept one verification value |
 | `data-plane/internal/authctx/freshness_feed_health_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | A dead socket is not a dead mirror |
-| `data-plane/internal/authctx/mirror_trust_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Carry the local-first rule into the baseline the CI database is built from |
+| `data-plane/internal/authctx/mirror_trust_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Teach the integration harnesses about migration 0053 |
 | `data-plane/internal/checkout/checkout.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the Gate-P reconcile atomic, exact-sourced, and inclusive of svc_pmsd |
 | `data-plane/internal/checkout/grace_lock_boundary_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Make the Gate-P reconcile atomic, exact-sourced, and inclusive of svc_pmsd |
 | `data-plane/internal/iamv2/commerce_admin.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
@@ -145,25 +145,25 @@
 | `docs/context/StayConnect-IAM-Handoff.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `docs/manifests/PC-0002-complete-delivery-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Correct two reporting defects in the PC-0002 delivery record |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest and packs for the baseline carry-over |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest and packs for the harness fix |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
-| `exports/chatgpt/phase-evidence/GIT_STAT_e6ee8456.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the baseline carry-over |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the baseline carry-over |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the baseline carry-over |
+| `exports/chatgpt/phase-evidence/GIT_STAT_bc42dc42.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the baseline carry-over |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the baseline carry-over |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the baseline carry-over |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the baseline carry-over |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the baseline carry-over |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the baseline carry-over |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
@@ -171,7 +171,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A dead socket is not a dead mirror |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest and packs for the baseline carry-over |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest and packs for the harness fix |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
@@ -218,8 +218,8 @@
 | `scripts/gatep-reconcile-acceptance.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Prove the reconcile is safe to run, and exercise the path that actually protects it |
 | `scripts/gatep-reconcile.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Address in-container paths so the copy verification looks where the files are |
 | `scripts/generate-production-baseline.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Regenerate the factory-clean baseline for migration 0050 |
-| `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Make the Gate-P reconcile atomic, exact-sourced, and inclusive of svc_pmsd |
-| `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Make the Gate-P reconcile atomic, exact-sourced, and inclusive of svc_pmsd |
+| `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Teach the integration harnesses about migration 0053 |
+| `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Teach the integration harnesses about migration 0053 |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D36: post-closure corrections are their own delivery lineage |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Point M46 and M48 at the manifest that is actually checked |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
@@ -274,13 +274,13 @@
  data-plane/cmd/scd/otp_handlers.go                 |  67 ++-
  data-plane/cmd/scd/phase3_auth.go                  |  54 +-
  data-plane/cmd/scd/phase3_auth_integration_test.go |  12 +
- .../scd/phase3_local_mirror_integration_test.go    | 260 ++++++++++
+ .../scd/phase3_local_mirror_integration_test.go    | 260 +++++++++
  data-plane/internal/activation/activation.go       | 237 +++++++++
  data-plane/internal/activation/activation_test.go  | 122 +++++
  .../appliancecert/bootstrap_recovery_test.go       | 261 ++++++++++
  .../appliancecert/bootstrap_states_test.go         | 270 ++++++++++
  data-plane/internal/appliancecert/cert.go          | 425 +++++++++++++--
- .../appliancecert/rotation_restart_test.go         | 231 +++++++++
+ .../appliancecert/rotation_restart_test.go         | 231 ++++++++
  data-plane/internal/assignment/resolve.go          | 219 ++++++++
  .../internal/assignment/resolve_outcome_test.go    |  85 +++
  data-plane/internal/authctx/authctx.go             |  63 ++-
@@ -345,7 +345,7 @@
  deploy/scripts/install-vendor-trust-key.sh         | 102 ++++
  deploy/scripts/lib-central-endpoint.sh             | 208 ++++++++
  deploy/scripts/provision-fresh-appliance.sh        | 349 +++++++++++++
- deploy/scripts/vendor-signing-key.sh               | 231 +++++++++
+ deploy/scripts/vendor-signing-key.sh               | 231 ++++++++
  deploy/systemd/stayconnect-ctrlapi.service         |  21 +
  deploy/systemd/stayconnect-scd.service             |  13 +
  docs/APPLIANCE_ACTIVATION_AND_LICENSING.md         | 207 ++++++++
@@ -359,13 +359,13 @@
  docs/context/StayConnect-IAM-Handoff.md            |  11 +-
  .../PC-0002-complete-delivery-manifest.md          | 159 ++++++
  docs/manifests/Phase7-change-manifest.md           | 108 ++--
- docs/manifests/PostClosure-change-manifest.md      | 577 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 579 +++++++++++++++++++++
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 ++++++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317589 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 130965 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42588 bytes
- .../chatgpt/phase-evidence/GIT_STAT_e6ee8456.txt   |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317590 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 130960 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42587 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_bc42dc42.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -432,12 +432,12 @@
  scripts/gatep-reconcile-acceptance.sh              | 236 +++++++++
  scripts/gatep-reconcile.sh                         | 161 ++++++
  scripts/generate-production-baseline.sh            |  38 +-
- scripts/phase5-pg-integration.sh                   |   8 +-
- scripts/pmsd-pg-integration.sh                     |  32 ++
+ scripts/phase5-pg-integration.sh                   |   9 +-
+ scripts/pmsd-pg-integration.sh                     |  41 ++
  tools/project-state.py                             |  69 ++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 211 files changed, 17938 insertions(+), 2234 deletions(-)
+ 211 files changed, 17950 insertions(+), 2234 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -445,8 +445,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_9f5c979e.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_e6ee8456.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_bc42dc42.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_e6ee8456.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -457,7 +457,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: e6ee8456 Delivery: manifest and packs for the baseline carry-over
+HISTORICAL: bc42dc42 Delivery: manifest and packs for the harness fix
+HISTORICAL: 05a011cf Teach the integration harnesses about migration 0053
+HISTORICAL: 2141b08a Delivery: manifest and packs for the baseline carry-over
 HISTORICAL: 91be32ff Carry the local-first rule into the baseline the CI database is built from
 HISTORICAL: 066658fd Delivery: manifest and packs for the local-first Room authentication rule
 HISTORICAL: 087c514e A dead socket is not a dead mirror
