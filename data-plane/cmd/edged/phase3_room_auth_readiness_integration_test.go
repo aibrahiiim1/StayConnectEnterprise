@@ -287,7 +287,7 @@ func (f *apiFixture) completeSync(t *testing.T, iface string, at time.Time) {
 func (f *apiFixture) beginResync(t *testing.T, iface string, at time.Time) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
-		SET resync_requested_at=$2 - interval '1 minute', resync_started_at=$2,
+		SET resync_requested_at=$2::timestamptz - interval '1 minute', resync_started_at=$2,
 		    updated_at=GREATEST(now(), $2)
 		WHERE pms_interface_id=$1::uuid`,
 		iface, at); err != nil {
