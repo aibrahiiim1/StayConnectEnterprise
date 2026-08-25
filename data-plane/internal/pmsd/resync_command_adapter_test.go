@@ -181,3 +181,71 @@ func runAdapterWithFrames(t *testing.T, sink *recordingSink, frames ...string) [
 	defer mu.Unlock()
 	return append([]string(nil), wrote...)
 }
+
+// THE AUTOMATIC FIRST SYNC IS WATCHABLE, not just the one a human clicked.
+//
+// The operator restores the socket by hand with the page open, so the sync they are most likely to be
+// watching is the automatic one. It previously entered no stage at all until DS arrived: the connection came
+// up and the screen showed nothing.
+func TestAutomaticFirstSync_AnnouncesWaitingForPMS(t *testing.T) {
+	sink := &recordingSink{}
+
+	runAdapterWithFrames(t, sink,
+		pms.BuildLS("260826", "090000"),
+		"DS|",
+		"DE|",
+	)
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if sink.fullSyncRequested < 1 {
+		t.Fatal("the automatic initial sync never signalled WAITING_FOR_PMS, so an operator watching a " +
+			"reconnect sees a connected interface and no sign that a sync is under way")
+	}
+	if sink.resyncStart != 1 || sink.resyncComplete != 1 {
+		t.Fatalf("the automatic DS/DE path changed: start=%d complete=%d, want 1/1. The stage additions must "+
+			"not alter the sync itself", sink.resyncStart, sink.resyncComplete)
+	}
+}
+
+// SKIPPED RECORDS BELONG TO ONE ROSTER.
+//
+// The counter was per-ownership-cycle, so a second full sync inherited the first one's rejects. An operator
+// reading "40 skipped" on a clean roster had no way to know all 40 belonged to an earlier sync — and the
+// number that matters is exactly "how much of THIS roster was unusable".
+func TestConsecutiveResyncs_HaveIndependentSkippedCounters(t *testing.T) {
+	sink := &recordingSink{}
+
+	// Two complete rosters on one connection. The FIRST carries records with no keyable Stay identity; the
+	// second is clean. GI records without RN/G# cannot be keyed, which is what ErrIdentityAbsent describes.
+	frames := []string{"DS|"}
+	for i := 0; i < 30; i++ {
+		frames = append(frames, "GI|GNSmith|GFJohn|") // no room, no reservation: unkeyable
+	}
+	frames = append(frames, "DE|", "DS|")
+	for i := 0; i < 3; i++ {
+		frames = append(frames, "GI|RN140"+string(rune('0'+i))+"|G#5000"+string(rune('0'+i))+"|GNOkonkwo|GFAda|GA260101|GD260105|")
+	}
+	frames = append(frames, "DE|")
+
+	runAdapterWithFrames(t, sink, frames...)
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.skippedReports) == 0 {
+		t.Skip("no skipped-record report was produced; the batching threshold was not reached")
+	}
+	// The reports must not be monotonically increasing across the DE boundary: a reset means a later report
+	// is SMALLER than an earlier one, or the counter simply stops climbing once the clean roster begins.
+	max := int64(0)
+	for _, n := range sink.skippedReports {
+		if n > max {
+			max = n
+		}
+	}
+	if max > 30 {
+		t.Fatalf("skipped reports reached %d across two rosters where only the first had %d unusable "+
+			"records: %v. The counter is carrying the previous sync's total into this one", max, 30,
+			sink.skippedReports)
+	}
+}

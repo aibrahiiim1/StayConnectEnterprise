@@ -241,7 +241,22 @@ func (s *workerSink) OnHeartbeat(at time.Time) error {
 func (s *workerSink) RequireInitialResync(at time.Time) error {
 	s.synced = false
 	s.resyncing = false
+	// THE AUTOMATIC SYNC ENTERS THE SAME STAGE MODEL AS AN OPERATOR-REQUESTED ONE.
+	//
+	// It did not, and that was the whole of the problem: an operator watching a reconnect saw the connection
+	// come up and then nothing at all until DS arrived, because the stages only existed on the path a human
+	// had clicked. The first sync after a socket is restored is precisely the one somebody is watching.
+	//
+	// Counters are zeroed here rather than at DS so the screen does not show the previous roster's totals
+	// during the gap between requesting and receiving.
+	zero := int64(0)
+	s.stage(StageRequesting, StageUpdate{RecordsReceived: &zero, RecordsSkipped: &zero})
 	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncRequired, ResyncRequestedAt: &at})
+}
+
+// OnFullSyncRequested records that the DR is on the wire and the connector is waiting for the PMS to start.
+func (s *workerSink) OnFullSyncRequested() {
+	s.stage(StageWaiting, StageUpdate{})
 }
 
 // OnResyncStart (DS) allocates a NEW typed resync generation under the exact runtime-generation CAS and opens
@@ -285,9 +300,15 @@ func (s *workerSink) OnDisconnected(at time.Time, code Code) error {
 	// A socket lost mid-roster published nothing, so the last known-good mirror is untouched and still serving
 	// guests. INTERRUPTED rather than FAILED says exactly that: nothing was corrupted, the sync simply did not
 	// finish, and the operator can ask for another one.
-	if s.resyncing {
+	switch {
+	case s.resyncing:
+		// Lost mid-roster: nothing was published, so the last known-good mirror is untouched.
 		s.stage(StageInterrupted, StageUpdate{FailureCode: code.String()})
 		s.resyncing = false
+	case !s.synced:
+		// Lost after the DR but before DS ever arrived. The sync never started, so INTERRUPTED would
+		// overstate what happened; FAILED with the transport's own code is what an operator can act on.
+		s.stage(StageFailed, StageUpdate{FailureCode: code.String()})
 	}
 	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportDisconnected, DisconnectedSince: &at, ErrorCode: code})
 }

@@ -57,18 +57,27 @@ export function SynchronizationCard({
   const stage = health?.sync_stage ?? "";
   const active = ACTIVE_STAGES.has(stage);
 
-  // AUTO-POLL WHILE ACTIVE, and stop the moment it is not.
+  // ONE POLL LOOP, TWO RATES.
   //
-  // onRefreshed is held in a ref so the interval depends only on `active`. Putting the callback in the
-  // dependency array would tear down and recreate the timer on every parent render, which on a page that is
-  // itself re-rendering from poll results means an interval that effectively never fires.
+  // Polling only while a sync was already active was not enough, and the gap mattered: the operator restores
+  // the PMS socket by hand with this page open, and everything interesting — the connection coming up, the
+  // automatic full sync starting — happens BEFORE any stage is active. A page that only wakes up once
+  // something is active can never observe the thing that starts it.
+  //
+  // So the card polls whenever it is mounted: slowly while nothing is happening, quickly once a sync is
+  // running. It is deliberately ONE interval whose delay changes, not two effects that could both be alive:
+  // the effect depends only on `delay`, so changing rate replaces the timer rather than adding one.
+  //
+  // onRefreshed is held in a ref for the same reason. In the dependency array it would tear down and rebuild
+  // the timer on every parent render — and this page re-renders on every poll result, so the interval would
+  // reset just before it was due and effectively never fire.
   const refreshRef = useRef(onRefreshed);
   refreshRef.current = onRefreshed;
+  const delay = active ? 3000 : 10000;
   useEffect(() => {
-    if (!active) return;
-    const t = setInterval(() => void refreshRef.current(), 3000);
+    const t = setInterval(() => void refreshRef.current(), delay);
     return () => clearInterval(t);
-  }, [active]);
+  }, [delay]);
 
   const canRequest =
     health?.transport_status === "CONNECTED" && !active && health?.sync_status !== "RESYNC_IN_PROGRESS";
@@ -106,11 +115,9 @@ export function SynchronizationCard({
             use it if the list here looks out of date.
           </p>
         </div>
-        {active && (
-          <span className="text-xs rounded-full border px-2 py-1" aria-live="polite">
-            Updating automatically…
-          </span>
-        )}
+        <span className="text-xs rounded-full border px-2 py-1" aria-live="polite">
+          {active ? "Updating automatically…" : "Watching for changes"}
+        </span>
       </div>
 
       <dl className="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
@@ -147,6 +154,12 @@ export function SynchronizationCard({
           Receiving records — the PMS does not provide a total, so there is no percentage to show. Waiting for
           the end-of-sync signal. <strong>{(health?.sync_records_received ?? 0).toLocaleString()}</strong>{" "}
           records received so far.
+        </p>
+      )}
+      {(stage === "REQUESTING_FULL_SYNC" || stage === "WAITING_FOR_PMS") && (
+        <p className="text-sm rounded-md border bg-muted/30 p-3">
+          A full sync has been requested. This happens automatically the first time the connection to the
+          property management system succeeds — you do not need to do anything.
         </p>
       )}
       {stage === "INTERRUPTED" && (

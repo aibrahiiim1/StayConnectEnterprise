@@ -351,6 +351,10 @@ type AxisSink interface {
 	// RecordSkipped reports the running count of well-formed records that describe no keyable Stay, so the
 	// operator sees real rejected-record evidence rather than a number nobody can source.
 	RecordSkipped(n int64)
+	// OnFullSyncRequested marks the moment a DR has been accepted by the serialized writer and the connector
+	// is waiting for the PMS to begin. Called for the AUTOMATIC initial sync as well as for an operator's,
+	// because an operator watching a reconnect needs to see the same stages either way.
+	OnFullSyncRequested()
 }
 
 // Deps injects every external effect so flags-OFF and failure paths are provable with spies.

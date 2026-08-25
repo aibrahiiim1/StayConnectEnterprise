@@ -133,6 +133,9 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 	if err := w.Submit(ctx, pms.BuildDR()); err != nil {
 		return err
 	}
+	// The automatic sync is now waiting on the PMS, and says so. Without this the operator who has just
+	// plugged the socket back in sees a connected interface sitting on REQUESTING_FULL_SYNC indefinitely.
+	sink.OnFullSyncRequested()
 
 	resyncing := true // a DR is outstanding; we are awaiting DS…DE (gates duplicate DR requests only)
 	// skippedNoIdentity counts well-formed records this ownership cycle carried that describe no keyable Stay.
@@ -210,6 +213,7 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 				if werr := w.SubmitSync(ctx, pms.BuildDR()); werr != nil {
 					return werr
 				}
+				sink.OnFullSyncRequested()
 				resyncing = true
 			}
 		}
@@ -227,6 +231,12 @@ func (a *fiasAdapter) Serve(ctx context.Context, sink AxisSink) error {
 			return coded(CodeProtocolLinkEnded, nil)
 		case RecDS:
 			resyncing = true
+			// PER-ROSTER, NOT PER-CONNECTION. skippedNoIdentity was a running total for the whole ownership
+			// cycle, so a second full sync inherited the first one's rejects and an operator reading "40
+			// skipped" on a clean roster had no way to know 40 of them belonged to an earlier sync. Reset
+			// here, at the only point that means "a new roster starts now".
+			skippedNoIdentity = 0
+			lastReportedSkipped = 0
 			if err := sink.OnResyncStart(a.now()); err != nil {
 				return err
 			}
