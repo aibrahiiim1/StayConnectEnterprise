@@ -1,4 +1,0 @@
-commit b6fb34caaf60311c97b7103a5a93cf0b3c3802e9
-Date:   Tue Aug 25 06:31:49 2026 +0300
-
-    Delivery: manifest for the PC-0003 delivery-record correction
