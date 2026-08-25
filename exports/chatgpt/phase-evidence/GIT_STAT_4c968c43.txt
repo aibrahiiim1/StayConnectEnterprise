@@ -1,4 +1,0 @@
-commit 4c968c434a93aeb626e69fd16dd359e760704348
-Date:   Tue Aug 25 22:31:33 2026 +0300
-
-    Delivery: manifest and packs for the full-resync control
