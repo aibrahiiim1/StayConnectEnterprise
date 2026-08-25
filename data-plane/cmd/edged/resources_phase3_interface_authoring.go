@@ -166,8 +166,16 @@ type authorRevisionReq struct {
 	HeartbeatTimeoutMS    int64  `json:"heartbeat_timeout_ms"`
 	FeedFreshnessMS       int64  `json:"feed_freshness_ms"`
 	CompleteSyncMS        int64  `json:"complete_sync_ms"`
-	FinancialBaseCurrency string `json:"financial_base_currency"`
-	FinancialCurrencyExp  *int   `json:"financial_base_currency_exponent"`
+	// MaxAuthCacheAgeSeconds is the operator's override for how long PMS-derived Stay evidence may still
+	// authorise a Room sign-in. Absent, the bound is one complete_sync_ms cadence plus the heartbeat
+	// allowance, which is also what limits authentication while the transport is down (D39). This is the
+	// only lever for a property that needs a longer offline window, and it had no way into a Revision at
+	// all — the value could be read by the authentication path but never written by the admin API.
+	//
+	// Optional: 0 or absent means "no override", which is why it is not in the mandatory-bounds loop below.
+	MaxAuthCacheAgeSeconds int64  `json:"max_auth_cache_age_seconds"`
+	FinancialBaseCurrency  string `json:"financial_base_currency"`
+	FinancialCurrencyExp   *int   `json:"financial_base_currency_exponent"`
 }
 
 func (s *server) authorPMSInterfaceRevision(w http.ResponseWriter, r *http.Request) {
@@ -467,11 +475,19 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 			return nil, fmt.Errorf("financial_base_currency_exponent must be between 0 and 4")
 		}
 	}
+	// Bounded independently of the millisecond timeouts: this is a seconds value and a legitimately long one
+	// (72 hours is 259200), so the 86400000 ceiling above would be meaningless here. The upper bound matches
+	// the one iam_v2.p3_feed_authorizes enforces when it reads the key, because a value the predicate will
+	// silently ignore is worse than one the API refuses: the operator would see it saved and believe it.
+	if in.MaxAuthCacheAgeSeconds < 0 || in.MaxAuthCacheAgeSeconds > 604800 {
+		return nil, fmt.Errorf("max_auth_cache_age_seconds must be between 0 and 604800 seconds (7 days); " +
+			"0 or omitted means the default complete-sync bound applies")
+	}
 	resync := in.ResyncSupported != nil && *in.ResyncSupported
 	// The shape pgRepo.LoadInterface projects, key for key. Anything else an operator sent is dropped rather
 	// than stored: the config is read with ->> on named keys, so an unknown key is silently inert, and inert
 	// configuration that looks saved is how an operator ends up debugging a setting that never applied.
-	return map[string]any{
+	cfg := map[string]any{
 		"endpoint":              strings.TrimSpace(in.Endpoint),
 		"dial_timeout_ms":       in.DialTimeoutMS,
 		"read_timeout_ms":       in.ReadTimeoutMS,
@@ -485,7 +501,14 @@ func validateRevisionConfig(in *authorRevisionReq) (map[string]any, error) {
 			"credential_mode": in.CredentialMode,
 			"read_only":       true,
 		},
-	}, nil
+	}
+	// Written only when set, so an unset override leaves the key ABSENT rather than present-and-zero. The
+	// predicate reads it with a regex that rejects 0, so both forms behave identically at authentication
+	// time — but an absent key reads as "not configured" to an operator, and "0" reads as a setting.
+	if in.MaxAuthCacheAgeSeconds > 0 {
+		cfg["max_auth_cache_age_seconds"] = in.MaxAuthCacheAgeSeconds
+	}
+	return cfg, nil
 }
 
 // isLockNotAvailable reports PostgreSQL's lock_timeout expiry (SQLSTATE 55P03), which is contention rather
