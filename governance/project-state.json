@@ -16,8 +16,8 @@
   },
   "current_phase": "7",
   "current_activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
-  "current_activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
-  "current_activity_execution_state_note": "Reconciled against verified appliance evidence under D37 (T0087). The appliance is ENROLLED, CLAIMED and ASSIGNED (tenant 36f3ba78, site 0d40f7c8), LICENSED (Active, valid_until 2026-12-01), carries a configured guest network on ens192 with Kea DHCP, has service plans and packages, has sign-in methods set to room_any plus voucher, and runs a commissioned ACTIVE Protel PMS Interface mirroring 540 Stays. Room sign-in is proven as far as VERIFIED -> Auth Context -> eligible offer, BUT that evidence came from the scd resolve socket only (/v1/phase3/auth/pms/resolve) with portald BYPASSED. The guest-visible path browser -> portald -> scd is NOT proven end to end and has never completed a successful Room sign-in on this appliance. The PC-0002 portald forwarding fix IS deployed (artifact 1d2309ca25040948516b1ea618cf724773df7b6983d5e18986e3b7eeccea61a3, 2026-08-24T23:04:04Z) but is NOT live-guest proven: it is verified by regression coverage across the portald->scd hop and by the deployed artifact, not by a real sign-in. The PMS link is DISCONNECTED by the Product Owner's own decision, because the single PMS client slot is in use by another system. NO guest access, financial activity or Go-Live has occurred: purchases=0, entitlements=0, sessions=0. The appliance remains PRE-LIVE. T0083's 'awaiting enrollment' description was obsolete and is superseded; the T0083 record itself is retained unchanged as history.",
+  "current_activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_PMS_FEED_CONNECTED_FRESH_SYNC_VERIFIED_FIRST_ROOM_LOGIN_BLOCKED_ON_MATERIALIZATION_READINESS",
+  "current_activity_execution_state_note": "Reconciled against verified appliance evidence under D37 (T0087). The appliance is ENROLLED, CLAIMED and ASSIGNED (tenant 36f3ba78, site 0d40f7c8), LICENSED (Active, valid_until 2026-12-01), carries a configured guest network on ens192 with Kea DHCP, has service plans and packages, has sign-in methods set to room_any plus voucher, and runs a commissioned ACTIVE Protel PMS Interface mirroring 540 Stays. Room sign-in is proven as far as VERIFIED -> Auth Context -> eligible offer, and no real guest sign-in has yet been performed, BUT that evidence came from the scd resolve socket only (/v1/phase3/auth/pms/resolve) with portald BYPASSED. The guest-visible path browser -> portald -> scd is NOT proven end to end and has never completed a successful Room sign-in on this appliance. The PC-0002 portald forwarding fix IS deployed (artifact 1d2309ca25040948516b1ea618cf724773df7b6983d5e18986e3b7eeccea61a3, 2026-08-24T23:04:04Z) but is NOT live-guest proven: it is verified by regression coverage across the portald->scd hop and by the deployed artifact, not by a real sign-in. The PMS link is CONNECTED. The Product Owner personally restored the Protel socket on 2026-08-25 and the automatic fresh Full Sync succeeded: transport CONNECTED, sync IN_SYNC, continuity CONTINUOUS, generation 20 published only at successful DE, 588 events (525 applied, 63 manual review, 0 skipped), final roster 686 Stays and 595 IN_HOUSE. FIRST REAL GUEST ROOM LOGIN IS BLOCKED: publication precedes materialization, so p3_feed_authorizes can authorize before iam_v2.stays has caught up - proven unsafe as a design property, with zero actual exposure (auth_resolutions=0). See T0097 and docs/design/Room-Auth-Materialization-Readiness.md. NO guest access, financial activity or Go-Live has occurred: purchases=0, entitlements=0, sessions=0. The appliance remains PRE-LIVE. T0083's 'awaiting enrollment' description was obsolete and is superseded; the T0083 record itself is retained unchanged as history.",
   "current_maturity": "VERIFIED FULL-SYSTEM LIVE-DARK (DEVELOPMENT appliance) + VERIFIED ZERO-LEGACY FACTORY-CLEAN BASELINE (Fresh Production repository)",
   "phase1b_execution": {
     "implementation_authorized": true,
@@ -730,8 +730,8 @@
     "appliance_license_valid_until": "2026-12-01T23:59:59Z",
     "guest_network_configured": true,
     "pms_interface_commissioned": true,
-    "pms_feed_connected": false,
-    "pms_feed_disconnect_is_intentional": true,
+    "pms_feed_connected": true,
+    "pms_feed_disconnect_is_intentional": false,
     "room_signin_accepted_to_offer": true,
     "guest_access_granted_ever": false,
     "financial_traffic_ever": false,
@@ -762,9 +762,16 @@
     "full_resync_control_deployed": true,
     "full_resync_control_deployed_note": "Deployed to 172.21.60.25 on 2026-08-25 (T0095): migrations 0054 and 0055 applied, edged 46845e5f87108a374d9c8e32a0792b84ae8e6349ab8129391144fa4a7f5b6a76, pmsd 79e7111e0ad4fcbee997810aad7291cb35c5e20a25bad9f1376e3b5b8f94cff5, hotel-admin release 20260825-203137. Verified refusing correctly while disconnected; no DR sent.",
     "automatic_first_sync_observable": true,
-    "automatic_first_sync_observable_note": "T0096: the automatic initial sync enters the same durable stage model as an operator-requested one, and the Synchronization card polls whenever it is mounted (10s idle, 3s active, one interval) so an external reconnect is discovered without a manual refresh. sync_records_skipped now describes one roster."
+    "automatic_first_sync_observable_note": "T0096: the automatic initial sync enters the same durable stage model as an operator-requested one, and the Synchronization card polls whenever it is mounted (10s idle, 3s active, one interval) so an external reconnect is discovered without a manual refresh. sync_records_skipped now describes one roster.",
+    "pms_feed_connected_note": "Restored by the Product Owner 2026-08-25T23:17:20.790Z. CONNECTED / IN_SYNC / CONTINUOUS on revision 38207f74-0130-43e1-ac31-ce41ba5261b6, max_auth_cache_age_seconds=259200 (PRE-LIVE test policy).",
+    "live_fresh_sync_verified": true,
+    "live_fresh_sync_verified_note": "Automatic first Full Sync succeeded 2026-08-25T23:17:57.801404Z (T0097). Generation 20 published only at successful DE; 588 events, 525 applied, 63 manual review, 0 skipped; materialization drained after publish, completing 3.487993 s later; final 686 Stays, 595 IN_HOUSE.",
+    "first_room_login_blocked": true,
+    "first_room_login_blocked_reason": "MATERIALIZATION-READINESS RACE, proven unsafe as a design property with zero actual exposure. published_resync_generation / IN_SYNC / COMPLETE precede terminal application of the published generation's Stay events, and ordinary LIVE applier backlog produces the same class of race continuously. Design in docs/design/Room-Auth-Materialization-Readiness.md; not implemented.",
+    "go_unknown_stay_backlog": 608,
+    "go_unknown_stay_backlog_note": "GO_UNKNOWN_STAY MANUAL_REVIEW rows accumulate across Full Sync generations with NO cleanup or retention lifecycle. Consistent with orphan checkout history and not the Room Login blocker, but unbounded and tracked as a follow-up."
   },
-  "latest_transition_id": "T0096",
+  "latest_transition_id": "T0097",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
