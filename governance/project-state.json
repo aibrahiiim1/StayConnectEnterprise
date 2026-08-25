@@ -748,7 +748,7 @@
     "pr42_merged_unintentionally": true,
     "pr42_merged_unintentionally_note": "PR #42 (D38 preparation runbook) was merged on 2026-08-24 as a side effect of PR #43 being branched from it, against the standing instruction to leave it unmerged. See PC-0003. The runbook remains preparation only and authorizes no execution and no Go-Live."
   },
-  "latest_transition_id": "T0090",
+  "latest_transition_id": "T0091",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1129,7 +1129,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "6cd889c196b42014b48265c42a5db968dfd5f7d0",
+    "head": "2a637851824d43dbc77263cfdf353868bceda1a8",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."
@@ -1214,5 +1214,15 @@
         "po_authorization": "N/A - nothing occurred that would require it."
       }
     }
-  }
+  },
+  "receipt_chronology_corrections": [
+    {
+      "corrected_receipt": "T0090",
+      "erroneous_timestamp": "2026-08-25T01:40:00Z",
+      "correcting_receipt": "T0091",
+      "defect": "T0090's timestamp predates its own introducing commit (6cd889c, 2026-08-25T10:25:22Z) by 8h45m and the Product-Owner authorization (2026-08-25T10:21:45Z) by 8h41m. It was hand-picked, not derived.",
+      "rule": "MUST NOT be used as evidence of authorization or execution chronology. T0090's substantive content remains valid; only its timestamp is wrong. T0090 is preserved unchanged as evidence of the mistake.",
+      "verified_chronology": "PO authorization 2026-08-25T10:21:45Z; T0090 introducing commit 6cd889c authored 10:25:22Z; PR #46 delivery commit 8552ba7 authored 10:26:22Z, committed 10:34:17Z; PR #46 created 10:41:11Z, merged 11:01:28Z as 1624c22b37a8e9bd3c7da4125e8f6d7371186b43."
+    }
+  ]
 }
