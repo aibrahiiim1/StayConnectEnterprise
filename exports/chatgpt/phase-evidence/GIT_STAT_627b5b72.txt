@@ -1,0 +1,4 @@
+commit 627b5b72dcb204759f3a67b276d1b5330b17b940
+Date:   Tue Aug 25 16:29:24 2026 +0300
+
+    Delivery: manifest and packs for the schema-accurate test helpers
