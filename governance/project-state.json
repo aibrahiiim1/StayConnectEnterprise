@@ -736,13 +736,19 @@
     "guest_access_granted_ever": false,
     "financial_traffic_ever": false,
     "go_live_performed": false,
-    "room_signin_accepted_via": "scd resolve socket only (portald bypassed)",
+    "room_signin_accepted_via": "scd resolve socket only (/v1/phase3/auth/pms/resolve) — portald BYPASSED. This evidence proves the scd resolve path and the offer engine. It does NOT prove the guest-visible portal path.",
     "room_signin_portal_path_proven": false,
     "portald_verification_forwarding_fixed": true,
     "portald_deployed_sha256": "1d2309ca25040948516b1ea618cf724773df7b6983d5e18986e3b7eeccea61a3",
-    "portald_verification_forwarding_deployed": true
+    "portald_verification_forwarding_deployed": true,
+    "room_signin_portal_path_proven_note": "The guest-visible path (browser -> portald -> scd) has never completed a successful Room sign-in on this appliance. Until PC-0002 two of the four sign-in modes were structurally incapable of it.",
+    "portald_verification_forwarding_deployed_note": "PC-0002 deployed to 172.21.60.25 on 2026-08-24T23:04:04Z, artifact sha256 1d2309ca25040948516b1ea618cf724773df7b6983d5e18986e3b7eeccea61a3, built from master 1482890. Verified by artifact identity and by the deployed binary carrying all four verification keys; NOT verified by a live sign-in.",
+    "guest_signin_end_to_end_proven": false,
+    "guest_signin_end_to_end_proven_note": "NO end-to-end guest sign-in has been proven on this appliance. purchases=0, entitlements=0, sessions=0. The PMS link is intentionally disconnected, so no real authentication is currently possible.",
+    "pr42_merged_unintentionally": true,
+    "pr42_merged_unintentionally_note": "PR #42 (D38 preparation runbook) was merged on 2026-08-24 as a side effect of PR #43 being branched from it, against the standing instruction to leave it unmerged. See PC-0003. The runbook remains preparation only and authorizes no execution and no Go-Live."
   },
-  "latest_transition_id": "T0088",
+  "latest_transition_id": "T0089",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1089,6 +1095,26 @@
       },
       "deployment_verification": "Three checks, none of which required PMS traffic or a guest authentication. (1) The installed artifact's sha256 equals the locally built one byte for byte. (2) The deployed binary contains all four verification keys - verification, first_name, last_name, reservation_number - and the binary it replaced contained neither `verification` nor `first_name`, which is the defect itself, visible in the shipped artifact. (3) A loopback POST carrying a `verification` field decoded cleanly and stopped at `device_not_on_guest_network`, the device check that sits AFTER decoding and BEFORE the scd hop: proof the new field shape is accepted, and proof the probe never reached scd or the PMS. Counters after the deploy: auth_resolutions unchanged at 8 (latest still 2026-08-23), purchases 0, entitlements 0, sessions 0.",
       "still_unproven": "The guest-visible portal path remains unproven end to end. The fix is verified by regression coverage across the portald->scd hop and by the deployed artifact's behaviour, NOT by a real sign-in: the PMS link is intentionally disconnected, so no authentication is possible and none was attempted."
+    },
+    {
+      "id": "PC-0003",
+      "title": "Two reporting/governance defects in the PC-0002 delivery record",
+      "classification": "RECORDS-ONLY CORRECTION of how the PC-0002 delivery was reported. It changes no runtime, no application code, no configuration and no database. It does NOT reopen, extend or re-evaluate any closed phase; Phase 3 remains ACCEPTED AND CLOSED at verified DARK maturity (D16/T0024) and MERGED (D17/T0025).",
+      "defect_1": {
+        "what": "The final report's file manifest was incomplete.",
+        "detail": "It listed six human-authored paths and silently omitted every generated pack, export artefact and checksum file the same delivery changed. A manifest that lists only the interesting files is a summary that reads like a manifest, and it understates what entered master.",
+        "corrected_to": "PR #43 = 28 paths, PR #44 = 13 paths, 12 paths touched by both, 29 unique paths across the two. PR #42 = 3 paths, all of which also appear inside PR #43's diff. Reconstructed from the GitHub files API per pull request, not from memory; the per-PR counts match what GitHub reports.",
+        "recorded_in": "docs/manifests/PC-0002-complete-delivery-manifest.md"
+      },
+      "defect_2": {
+        "what": "The report described PR #42 as 'last seen with governance in progress'. It was MERGED.",
+        "how_it_merged": "The PR #43 branch was cut from the PR #42 branch rather than from master, so every PR #42 commit was an ancestor of PR #43's head. Merging PR #43 made them reachable from master, and GitHub marked PR #42 merged and closed automatically.",
+        "evidence": "git merge-base --is-ancestor 92dd15101218c8324318b2f59baac7d0be0133c7 006a7434d02938e6543d81b9ccd25de2b7996e9c returns true, and the same commit is an ancestor of master. PR #42's merge_commit_sha equals its OWN head 92dd151 rather than a distinct merge commit, which is what GitHub records when no merge was performed. PR #42 merged_at 2026-08-24T23:03:34Z is two seconds after PR #43 merged_at 2026-08-24T23:03:32Z. No merge API call was ever issued against PR #42.",
+        "against_instruction": "YES. The standing instruction was to leave PR #42 unmerged. It was merged anyway, as a consequence of branching from it. This is recorded as a violation of that instruction. It is NOT prior authorization, was not authorized before or after the fact, and is not being reinterpreted as anything other than what it was.",
+        "what_does_not_change": "The D38 runbook remains PREPARATION ONLY. Being present in master grants no execution authority and no Go-Live authority. No step of it has been run.",
+        "pr_metadata_corrected": "PR #42's body no longer presents itself as DO NOT MERGE or pending, because it is neither; it now records that it was merged unintentionally and restates the preparation-only boundary."
+      },
+      "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-25, verbatim: 'PC-0002 delivery-record correction — RECORDS ONLY. The runtime corrective fix is accepted as technically delivered. Do not change or redeploy runtime. Correct the delivery record for two verified reporting/governance defects.'"
     }
   ],
   "governance_check_state": {
