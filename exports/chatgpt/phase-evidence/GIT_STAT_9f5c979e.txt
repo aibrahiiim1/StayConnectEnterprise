@@ -1,4 +1,0 @@
-commit 9f5c979e585d5b4aa43c2ef426c58fc4219be52f
-Date:   Tue Aug 25 15:47:53 2026 +0300
-
-    Delivery: manifest and packs for the local-first Room authentication rule

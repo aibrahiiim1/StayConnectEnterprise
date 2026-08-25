@@ -1,0 +1,4 @@
+commit e6ee84561da8cb1b65fc5ba79468572bf6f5582a
+Date:   Tue Aug 25 16:05:21 2026 +0300
+
+    Delivery: manifest and packs for the baseline carry-over
