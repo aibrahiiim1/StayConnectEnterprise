@@ -749,10 +749,16 @@
     "pr42_merged_unintentionally_note": "PR #42 (D38 preparation runbook) was merged on 2026-08-24 as a side effect of PR #43 being branched from it, against the standing instruction to leave it unmerged. See PC-0003. The runbook remains preparation only and authorizes no execution and no Go-Live.",
     "room_auth_local_first": true,
     "room_auth_local_first_note": "D39 (2026-08-25): Room authentication authorises on EITHER a live PMS feed OR a trusted local mirror. A disconnected transport alone no longer denies a guest. Fail-closed is preserved for never-synchronised mirrors, unresolved continuity loss, a resync in flight, revision drift, stale evidence, ambiguity, unmatched verification and ineligible Stay lifecycle. Offline validity is bounded by the existing complete-sync evidence ceiling; no offline TTL was invented.",
-    "room_auth_local_first_deployed": false,
-    "room_auth_local_first_deployed_note": "NOT DEPLOYED and migration 0053 NOT applied anywhere. The Product Owner withheld deployment explicitly. In the repository and CI only."
+    "room_auth_local_first_deployed": true,
+    "room_auth_local_first_deployed_note": "D39 DEPLOYED to 172.21.60.25 on 2026-08-25: migration 0053 applied, scd 10d850239c9eb5288d9e2cf917b63ea3f6a4665d1fc62da963c77833022e7c88, edged a49c01785f1457687c96634a7a4560ee9a3c41f4812b4b9dd5f6f5e324a8eacb, hotel-admin release 20260825-175553. Hotel Admin reports room_auth_ready=true with transport DISCONNECTED, which is the rule working.",
+    "prelive_max_auth_cache_age_seconds": 259200,
+    "prelive_max_auth_cache_age_seconds_note": "PRE-LIVE TEST POLICY ONLY (revision 38207f74, published 2026-08-25). NOT an approved permanent Go-Live default; must be revisited before Go-Live.",
+    "guest_offer_corrected": true,
+    "guest_offer_corrected_note": "Exactly one guest-eligible free offer: package revision 11163227-1bc4-41c9-b982-06edcb41fc73 pinned to service plan revision b2f84f70-02e0-4026-bdef-f6decc92bf64 - 2000/2000 kbps, 100000000 byte quota, 1 device, REJECT_NEW_DEVICE, price 0, {NOT_REQUIRED}, MANUAL_END. Proven with the exact offer-engine predicate on the appliance.",
+    "full_resync_control_delivered": false,
+    "full_resync_control_delivered_note": "Items 3 and 4 of the 2026-08-25 authorization (Full Resync Now control, Synchronization progress UI) are NOT implemented and remain outstanding for a separate round."
   },
-  "latest_transition_id": "T0092",
+  "latest_transition_id": "T0093",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1133,7 +1139,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "0aa9fde56e264c25f3384c0c1c8e9f98d4937c58",
+    "head": "c260ac39ec5b2a2fdd22ee1b79f43016d140d67f",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."
