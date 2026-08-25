@@ -1,4 +1,0 @@
-commit 96415bc23506c0106965f4e81a36258921814c86
-Date:   Tue Aug 25 20:56:19 2026 +0300
-
-    Delivery: manifest and packs for the PRE-LIVE deployment record
