@@ -1,0 +1,4 @@
+commit f85aef17dd463a4b28bd556c5536943cc68f799b
+Date:   Tue Aug 25 20:05:34 2026 +0300
+
+    Delivery: manifest and packs for the offer-active fix
