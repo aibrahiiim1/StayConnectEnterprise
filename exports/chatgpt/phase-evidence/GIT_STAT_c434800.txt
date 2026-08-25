@@ -1,4 +1,0 @@
-commit c43480063f205407003a6c73dcdcdfea556e18f5
-Date:   Tue Aug 25 13:26:22 2026 +0300
-
-    Delivery: manifest and packs for the T0090 note correction
