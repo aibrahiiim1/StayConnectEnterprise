@@ -1,0 +1,80 @@
+{
+  "transition_id": "T0097",
+  "seq": 97,
+  "timestamp": "2026-08-25T23:54:04Z",
+  "timestamp_derivation": "Author timestamp of the introducing commit, read back from git, per T0091.",
+  "record_type": "LIVE_PMS_ACCEPTANCE_VERIFIED_AND_MATERIALIZATION_RACE_RECORDED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ROOM_SIGNIN_ACCEPTED_TO_OFFER_PMS_LINK_INTENTIONALLY_DISCONNECTED",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_PMS_FEED_CONNECTED_FRESH_SYNC_VERIFIED_FIRST_ROOM_LOGIN_BLOCKED_ON_MATERIALIZATION_READINESS",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": true,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase is advanced or reopened; Phase 0 remains FINAL_CLOSED and Phases 1A-7 remain ACCEPTED_AND_CLOSED. What advances is the post-roadmap activity execution state: the PMS feed is connected and fresh-sync verified where it was previously intentionally disconnected.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. This records the outcome of an acceptance the Product Owner authorized separately, and a design spike that implements nothing. No phase status, maturity or authorization changes.",
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-26: 'POST-LIVE-SYNC RECORDS CORRECTION + MATERIALIZATION-READINESS DESIGN SPIKE - NO RUNTIME IMPLEMENTATION. This round is limited to: synchronizing authoritative records with the already-completed, previously-authorized live PMS acceptance; and producing a verified implementation design for the proven Room-auth/materialization race.' The live reconnect and automatic Full Sync it records were authorized separately on 2026-08-25 ('LIVE ACCEPTANCE - PRODUCT OWNER WILL RESTORE PROTEL').",
+  "verified_live_acceptance": {
+    "socket_restored_by": "The Product Owner personally restored the Protel socket. The agent did not create, enable or redirect the connection and changed no PMS configuration.",
+    "transport_connected_at": "2026-08-25T23:17:20.790Z",
+    "automatic_full_sync": "SUCCEEDED. Automatic on first successful connection; no operator Full Resync was requested and no additional DR was sent.",
+    "transport_status": "CONNECTED",
+    "sync_status": "IN_SYNC",
+    "continuity_status": "CONTINUOUS",
+    "revision": "38207f74-0130-43e1-ac31-ce41ba5261b6 (unchanged; pinned equals published)",
+    "max_auth_cache_age_seconds": 259200,
+    "generation_published_at": "2026-08-25T23:17:57.801404Z, only at successful DE",
+    "generation_20_events": 588,
+    "applied": 525,
+    "manual_review": "63, all review_code GO_UNKNOWN_STAY",
+    "skipped": 0,
+    "materialization_drain": "Began 211 ms AFTER publish (first terminal 23:17:58.012291Z) and completed 3.487993 seconds after publish (last terminal 23:18:01.289397Z). Materialization drained only after publication, never during the open generation.",
+    "final_stay_count": 686,
+    "final_in_house_count": 595,
+    "guest_artifacts": "purchases=0, entitlements=0, sessions=0",
+    "financial_traffic": "ZERO. pms_postings=0, posting_attempts=0, posting_outbox=0, payment_transactions=0, payment provider callbacks=0. No posting, payment, reversal or FX traffic of any kind.",
+    "go_live": "NONE. The appliance remains PRE-LIVE."
+  },
+  "publication_was_atomic_and_safe": "The staging and publish design behaved exactly as specified and this is recorded as a POSITIVE result. resync_generation_seq advanced to 20 at DS while published_resync_generation remained 19 for the entire DS->DE window; published became 20 only at successful completion. last_complete_sync_at held its previous value throughout and moved only at the barrier. At no point was a partial roster visible.",
+  "proven_defect": {
+    "statement": "PUBLICATION IS NOT MATERIALIZATION. published_resync_generation / IN_SYNC / COMPLETE currently precede terminal application of the published generation's Stay events, so iam_v2.p3_feed_authorizes can authorize before the materialized iam_v2.stays view has caught up.",
+    "severity": "PROVEN UNSAFE AS A DESIGN PROPERTY.",
+    "actual_exposure": "NONE. auth_resolutions during and since the window = 0. No guest request occurred, so the race was not run. This is a race that exists, not an incident that happened.",
+    "measured_window": "Approximately 3.0 seconds: sync_status became IN_SYNC at 23:17:58.280Z while the last generation-20 event reached terminal state at 23:18:01.289Z. During it roughly 129 in-house guests were not yet present in iam_v2.stays.",
+    "scope_correction": "The race is NOT confined to full sync. stayengine claims LIVE events unconditionally while p3_feed_authorizes never consults the event backlog, so ordinary applier lag produces the same class of race continuously. See docs/design/Room-Auth-Materialization-Readiness.md section 2.",
+    "consequence": "First real guest Room Login is BLOCKED pending correction. This is the only blocker recorded."
+  },
+  "go_unknown_stay_classification": {
+    "count": 63,
+    "admission": "All 63 RESYNC, generation 20, event type GO.",
+    "keying": "All 63 room-only: no reservation identity present in the payload.",
+    "matching_gi": "None. No GI for the same room or reservation arrived in generation 20.",
+    "room_match": "Zero current IN_HOUSE room match for all 63. 60 rooms appear in no Stay at all in any status; 3 appear in exactly one Stay that is not IN_HOUSE.",
+    "duplicates": "None. 63 distinct rooms, one event each.",
+    "classification": "CONSISTENT WITH ORPHAN CHECKOUT HISTORY: departure notices for rooms absent from the in-house snapshot a DR returns. Not an identity-resolution defect and not an ordering defect - the 15 generation-20 GOs that applied successfully were keyed IDENTICALLY (room-only, no reservation), so keying is not the differentiator; occupancy is.",
+    "operational_limitation": "NOT HARMLESS. GO_UNKNOWN_STAY MANUAL_REVIEW rows accumulate across Full Sync generations and currently have NO cleanup or retention lifecycle: the backlog stands at 608 (544 earlier, spanning only 93 distinct rooms, plus this sync's 63) and grows by roughly one per absent room per full sync. Nothing drains it and nothing bounds it.",
+    "follow_up_status": "TRACKED FOLLOW-UP. This is NOT the blocker for the first Room Login; the materialization race is."
+  },
+  "design_spike": "docs/design/Room-Auth-Materialization-Readiness.md. DESIGN ONLY, nothing implemented. Recommends a single authoritative readiness invariant - no occupancy-affecting event PENDING for the interface - applied to BOTH the live and local-mirror branches, supported by one partial index, with last_sync_in_house_count removed. Preserves local-first behaviour and introduces no cloud dependency. Explicitly does NOT fabricate a PMS sequence number: FIAS provides none (SequenceVersion is written as a literal 0), so the ordering authority is the applier's own serialized (received_at, id) order.",
+  "boundaries_observed": [
+    "Records and design documentation only. No runtime implementation, migration, deployment, service restart, PMS command, Full Resync, Room Login, Purchase, Entitlement, Session, financial traffic or Go-Live.",
+    "Nothing was deployed to 172.21.60.25 in this round.",
+    "T0096 and every prior transition are preserved unchanged.",
+    "The live-sync evidence is preserved: /var/log/stayconnect-sync-observation.log plus the durable stay_events and pms_interface_runtime rows.",
+    "PR #24 untouched."
+  ],
+  "blocker": "First real guest Room Login is BLOCKED pending correction of the materialization-readiness race. The PMS feed itself is connected, in sync, continuous and fresh-sync verified.",
+  "next": "Product-Owner decision on the minimal implementation scope proposed in section 6 of the design spike. Separately tracked: a retention lifecycle for GO_UNKNOWN_STAY MANUAL_REVIEW rows."
+}
