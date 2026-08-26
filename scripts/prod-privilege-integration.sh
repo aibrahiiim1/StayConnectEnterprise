@@ -167,6 +167,21 @@ END $$;
 FIXGUARD
 echo "  writerguard triggers disabled for fixture seeding (disposable database only)"
 
+# ONE MORE FIXTURE ACCOMMODATION, same category and same scope.
+#
+# The shared fixture hardcodes bridge_name 'br-p3', so a second fixture in the same run collides with
+# guest_networks_bridge_uniq — a constraint the real baseline has and the DARK schema does not. Each test
+# builds its own fixture, so on this database only the first would ever succeed.
+#
+# Dropped here rather than renaming the bridge in the shared fixture, because that fixture belongs to the DARK
+# suites and must not change. Nothing about the privilege model or the grant path depends on bridge names
+# being unique.
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 >/dev/null <<'FIXUNIQ'
+ALTER TABLE public.guest_networks DROP CONSTRAINT IF EXISTS guest_networks_bridge_uniq;
+DROP INDEX IF EXISTS public.guest_networks_bridge_uniq;
+FIXUNIQ
+echo "  bridge-name uniqueness relaxed for repeated fixtures (disposable database only)"
+
 have="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM pg_roles WHERE rolname='svc_scd'")"
 [ "${have:-0}" = "1" ] || { echo "  FAIL: svc_scd is not provisioned; this harness exists to exercise it"; exit 1; }
 
