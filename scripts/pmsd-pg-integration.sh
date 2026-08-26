@@ -124,7 +124,11 @@ docker exec "$C" psql -U postgres -d "$DB" -tAqc \
 # privilege defects that reached production (the pms_interface_runtime read, and the auth_context_offers row
 # lock that broke the first real guest Room Login) both passed CI green. A skipped assertion is not an
 # assertion. Provisioning the roles makes those tests run for real.
-for f in gatep-roles.sql gatep-iam-roles.sql gatep-iam-ownership.sql gatep-grants.sql; do
+# ROLES AND GRANTS ONLY. gatep-iam-ownership.sql reassigns table ownership, which changes who the
+# writerguard triggers see as the caller and made every pre-existing suite that inserts as postgres fail
+# with "writes to the stay family require an open controlled operation". The least-privilege tests need
+# the ROLES to exist and their grants to be real; they do not need production ownership.
+for f in gatep-roles.sql gatep-grants.sql; do
   [ -f "$ROOT/deploy/gatep/$f" ] || continue
   docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/deploy/gatep/$f" >/dev/null 2>&1 ||
     echo "  note: $f did not apply cleanly in the disposable database"
