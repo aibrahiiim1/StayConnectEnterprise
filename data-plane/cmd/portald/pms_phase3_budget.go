@@ -69,6 +69,21 @@ import (
 // been cheaper for the guest and would have handed an attacker the distinction the budget exists to remove:
 // "this room answers at 2.5s and every other room answers at 1.2s" enumerates the property just as neatly as
 // a distinguishing message would.
+// REVIEWED AGAINST THE CORRECTED ENFORCEMENT CYCLE, AND LEFT UNCHANGED.
+//
+// The first two real Room Logins both failed here — portald abandoned each at its deadline and reported
+// scd_unavailable — which looks like a budget that is too short and was not. Nothing was converging at all:
+// the enforcement producer and the network writer were both gated on an unrelated feature flag, so the wait
+// could never have ended at any budget.
+//
+// With the plane running, the cycle was measured end to end against a real database and a real socket
+// (TestIntegration_EnforcementCycle_ConvergesWellInsideTheGuestBudget): derive the plan, submit it over the
+// authenticated socket, apply both kernel halves and promote the Session takes ~66ms. The worst ordinary
+// connect is therefore about one producer interval (1s) + that pass + scd's 100ms polling granularity + two
+// local hops — comfortably inside the 2300ms handed upstream, with room for a loaded appliance.
+//
+// So the arithmetic above still holds and the number stays. Raising it would spend real guest patience on a
+// margin that is already there; lowering it would re-create the failure mode it was raised to fix.
 const phase3FailureBudget = 2500 * time.Millisecond
 
 // phase3EnforcementReserve is how much of the budget is held back from the upstream hops so that a request

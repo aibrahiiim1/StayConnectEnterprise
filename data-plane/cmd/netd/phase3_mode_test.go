@@ -28,17 +28,28 @@ func TestModeIsDarkByDefault(t *testing.T) {
 	}
 }
 
-// The master flag alone does not turn shaping on: enforcement follows the checkout-grace surface flag, and a
-// child flag without its master is a startup error everywhere else in the product.
-func TestModeRequiresBothFlags(t *testing.T) {
+// THE MASTER FLAG IS THE GATE, and a child flag without its master is a startup error everywhere else in the
+// product.
+//
+// This test used to assert the opposite of its first case — that the master flag ALONE left shaping off,
+// because enforcement followed the checkout-grace surface flag. That is the defect: an appliance running Room
+// authentication with grace off had a network writer that refused every plan, so two real guests were granted
+// sessions the kernel never heard about. Enforcement is the substrate under every guest-session surface, not a
+// surface of its own, so it follows the master flag. Scope still has to resolve (see the next test), and a
+// producer still has to authenticate (see main.go), so this is a gate, not a bypass.
+func TestModeFollowsTheMasterFlag(t *testing.T) {
 	mode, err := loadPhase3Mode(context.Background(), env(map[string]string{
 		"STAYCONNECT_PHASE3_MASTER": "true",
+		"NETD_IDENTITY_DIR":         t.TempDir(),
+		"NETD_ASSIGNMENT_DIR":       t.TempDir(),
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
+	// No identity is enrolled in those empty dirs, so the mode correctly stays inactive — what matters here is
+	// that it got as far as TRYING to resolve a scope instead of returning dark on the flag alone.
 	if mode.Active {
-		t.Fatal("shaping went live with the master flag alone")
+		t.Fatal("shaping went live without a resolvable scope")
 	}
 
 	if _, err := loadPhase3Mode(context.Background(), env(map[string]string{

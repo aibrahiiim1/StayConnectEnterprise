@@ -33,13 +33,31 @@ func (f *fakeNetd) SubmitShapingPlan(ctx context.Context, env shapeplan.Envelope
 	return res, nil
 }
 
+// THE ARM FOLLOWS THE MASTER FLAG, NOT CHECKOUT GRACE.
+//
+// It used to be constructed only when checkout grace was on, and this test asserted that {MasterEnabled: true}
+// produced NOTHING — which is precisely the defect, written down as an expectation. An appliance running Room
+// authentication therefore had no shaping producer: two real guests were granted entitlements and sessions
+// that stayed PENDING_ENFORCEMENT because nothing ever derived a plan for them.
+func TestPhase3ArmRunsWheneverPhase3IsEnabled(t *testing.T) {
+	for _, cfg := range []iamv2.PMSConfig{
+		{MasterEnabled: true},                             // the Room-authentication appliance: grace OFF
+		{MasterEnabled: true, PMSAuthEnabled: true},       // ...with the surface that mints the sessions
+		{MasterEnabled: true, CheckoutGraceEnabled: true}, // ...and the case that used to be the only one
+	} {
+		if p := newPhase3(cfg, &acctd{}, "t", "s", planScope{}, nil); p == nil {
+			t.Fatalf("no enforcement producer while Phase 3 is enabled: %+v — sessions would stay pending forever", cfg)
+		}
+	}
+}
+
 // While dark, the arm is never constructed and every entry point is a safe no-op: acctd keeps running exactly
 // the legacy path, issuing zero Phase-3 queries and submitting no plan.
 func TestPhase3ArmIsInertWhileDark(t *testing.T) {
 	for _, cfg := range []iamv2.PMSConfig{
 		{},                           // everything off
-		{MasterEnabled: true},        // master on, checkout-grace off
 		{CheckoutGraceEnabled: true}, // surface on without master (invalid; still off)
+		{PMSAuthEnabled: true},       // likewise: a child flag cannot enable anything on its own
 	} {
 		p := newPhase3(cfg, &acctd{}, "t", "s", planScope{}, nil)
 		if p != nil {

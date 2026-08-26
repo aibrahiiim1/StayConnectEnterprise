@@ -270,6 +270,14 @@ jobs:
           ./cmd/netd/ ./internal/shape/
           -run 'Provision|Prepare|Activate|ReRate|Abort|Deny|SessionForwarding' -count=1
 
+      # The enforcement plane is what turns a granted Session into access. A surface enabled without it is the
+      # state that granted two real guests entitlements and sessions nothing ever enforced, so the checker that
+      # refuses that combination is itself proven here rather than trusted.
+      - name: Phase-3 enforcement-plane coherence checker (selftest)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh enforcement-plane-check --
+          bash $GITHUB_WORKSPACE/deploy/scripts/check-phase3-enforcement-plane-selftest.sh
+
       # ---------------------------------------------------------------- Hotel Admin / Guest Portal
       - name: npm ci (locked dependencies)
         working-directory: hotel-admin

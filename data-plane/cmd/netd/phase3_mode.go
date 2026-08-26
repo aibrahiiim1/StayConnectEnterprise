@@ -37,9 +37,14 @@ func loadPhase3Mode(ctx context.Context, getenv func(string) string) (phase3Mode
 	if err != nil {
 		return phase3Mode{}, err
 	}
-	if !cfg.CheckoutGraceOn() {
+	if !cfg.EnforcementOn() {
 		// DARK: no scope is resolved at all, so there is nothing for a plan to match and every submission is
 		// refused. Note that netd does not even read the assignment while dark.
+		//
+		// The gate is the ENFORCEMENT PLANE's, not Checkout Grace's. It used to be CheckoutGraceOn, which made
+		// the network writer depend on an unrelated post-departure feature: an appliance running Room
+		// authentication had scd minting sessions while netd refused every plan, so two real guests were
+		// granted access that nothing ever put in the kernel.
 		return phase3Mode{}, nil
 	}
 
