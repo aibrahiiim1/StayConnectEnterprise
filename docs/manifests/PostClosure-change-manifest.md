@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `1ab807b9f65a89ae94a823eaae823bdaa649709a`
-- **Provenance (generation HEAD = inventory_head):** `a3fe2c15b8515619e0eddaeeef28318465d3062d`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `175e021516745bcaf6008a68bbc2bc2582767ee6`
+- **Provenance (generation HEAD = inventory_head):** `c5c6f835a529e930ebb764ae46bf6bf3ab27836f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/grant-offer-lock-privilege`
 - **Remote branch:** `origin/fix/grant-offer-lock-privilege`
 - **Changed files:** 239
@@ -170,7 +170,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_a3fe2c15.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_c5c6f835.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -247,7 +247,7 @@
 | `scripts/generate-production-baseline.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Regenerate the factory-clean baseline for migration 0050 |
 | `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Give the grant its row lock without giving it the power to rewrite the check |
 | `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Give the privilege tests their own production-like database |
-| `scripts/prod-privilege-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Copy the proven factory-clean bootstrap instead of approximating it again |
+| `scripts/prod-privilege-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Run only the prodprivilege tests in the prodprivilege harness |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Make the generated blocks describe the appliance that exists |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Point M46 and M48 at the manifest that is actually checked |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
@@ -406,13 +406,13 @@
  docs/design/Room-Auth-Materialization-Readiness.md | 197 ++++++
  .../PC-0002-complete-delivery-manifest.md          | 159 +++++
  docs/manifests/Phase7-change-manifest.md           | 108 ++--
- docs/manifests/PostClosure-change-manifest.md      | 703 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 705 +++++++++++++++++++++
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 +++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318815 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132325 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318816 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132326 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42754 bytes
- .../chatgpt/phase-evidence/GIT_STAT_a3fe2c15.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_c5c6f835.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -489,11 +489,11 @@
  scripts/generate-production-baseline.sh            |  38 +-
  scripts/phase5-pg-integration.sh                   |  13 +-
  scripts/pmsd-pg-integration.sh                     |  80 +++
- scripts/prod-privilege-integration.sh              | 114 ++++
+ scripts/prod-privilege-integration.sh              | 118 ++++
  tools/project-state.py                             | 134 +++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 239 files changed, 22089 insertions(+), 2260 deletions(-)
+ 239 files changed, 22095 insertions(+), 2260 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -501,8 +501,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_28b00558.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_a3fe2c15.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_a3fe2c15.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_c5c6f835.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -513,7 +513,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: a3fe2c15 Delivery: manifest and packs
+HISTORICAL: c5c6f835 Delivery: manifest and packs
+HISTORICAL: 175e0215 Run only the prodprivilege tests in the prodprivilege harness
+HISTORICAL: 05daa01b Delivery: manifest and packs
 HISTORICAL: 1ab807b9 Copy the proven factory-clean bootstrap instead of approximating it again
 HISTORICAL: 68c296ee Delivery: manifest and packs
 HISTORICAL: e4437aac Create the service roles before applying the baseline
