@@ -137,7 +137,7 @@ done
 # created without privilege. Grant EXACTLY what the least-privilege tests assert about production: schema
 # usage, the reads the auth path performs, and EXECUTE on the scoped offer-lock helper. Nothing wider — the
 # tests exist to prove svc_scd CANNOT update auth_context_offers, so granting broadly would defeat them.
-docker exec "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 >/dev/null 2>&1 <<'GRANTS'
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 <<'GRANTS'
 GRANT USAGE ON SCHEMA iam_v2 TO svc_scd;
 GRANT SELECT ON iam_v2.auth_context_offers, iam_v2.stay_events, iam_v2.pms_interface_runtime,
                 iam_v2.stays, iam_v2.auth_contexts TO svc_scd;
