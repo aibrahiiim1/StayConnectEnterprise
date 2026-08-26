@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `cbe35a3fd1431c81d34b7fff2af31c6a5198a444`
-- **Provenance (generation HEAD = inventory_head):** `f0170d1ed6ac825a04d30b91112aa9c6b472cfa2`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `ac52d59c71e189f12882e531ea035977be2de615`
+- **Provenance (generation HEAD = inventory_head):** `16609623812654a6762ece04b8c54848542a121a`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/grant-offer-lock-privilege`
 - **Remote branch:** `origin/fix/grant-offer-lock-privilege`
 - **Changed files:** 240
@@ -65,7 +65,7 @@
 | `data-plane/cmd/scd/phase3_local_mirror_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Write the offline test helpers against the real schema |
 | `data-plane/cmd/scd/phase3_offer_active_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Seed the retired package in three statements, not one CTE |
 | `data-plane/cmd/scd/phase3_offers.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Deactivating a package must remove it from the portal |
-| `data-plane/cmd/scd/phase3_prod_fixture_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Give the prodprivilege tests a fixture the real baseline accepts |
+| `data-plane/cmd/scd/phase3_prod_fixture_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | sites requires code and name too |
 | `data-plane/internal/activation/activation.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Activation, licensing, Central FQDN and Kea health: production readiness |
 | `data-plane/internal/activation/activation_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Activation, licensing, Central FQDN and Kea health: production readiness |
 | `data-plane/internal/appliancecert/bootstrap_recovery_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Certificate bootstrap must survive waiting for a human |
@@ -171,7 +171,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_f0170d1e.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_16609623.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -308,7 +308,7 @@
  .../scd/phase3_local_mirror_integration_test.go    | 259 ++++++++
  .../scd/phase3_offer_active_integration_test.go    | 132 ++++
  data-plane/cmd/scd/phase3_offers.go                |  15 +-
- data-plane/cmd/scd/phase3_prod_fixture_test.go     | 128 ++++
+ data-plane/cmd/scd/phase3_prod_fixture_test.go     | 129 ++++
  data-plane/internal/activation/activation.go       | 237 +++++++
  data-plane/internal/activation/activation_test.go  | 122 ++++
  .../appliancecert/bootstrap_recovery_test.go       | 261 ++++++++
@@ -408,13 +408,13 @@
  docs/design/Room-Auth-Materialization-Readiness.md | 197 ++++++
  .../PC-0002-complete-delivery-manifest.md          | 159 +++++
  docs/manifests/Phase7-change-manifest.md           | 108 ++--
- docs/manifests/PostClosure-change-manifest.md      | 715 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 717 +++++++++++++++++++++
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 +++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 ++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318818 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132325 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42753 bytes
- .../chatgpt/phase-evidence/GIT_STAT_f0170d1e.txt   |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318817 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132328 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42756 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_16609623.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -495,7 +495,7 @@
  tools/project-state.py                             | 134 +++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 240 files changed, 22233 insertions(+), 2260 deletions(-)
+ 240 files changed, 22236 insertions(+), 2260 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -503,8 +503,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_7aab31e9.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_f0170d1e.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_16609623.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_f0170d1e.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -515,7 +515,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: f0170d1e Delivery: manifest and packs
+HISTORICAL: 16609623 Delivery: manifest and packs
+HISTORICAL: ac52d59c sites requires code and name too
+HISTORICAL: 3f28383a Delivery: manifest and packs
 HISTORICAL: cbe35a3f Give the prodprivilege tests a fixture the real baseline accepts
 HISTORICAL: 815d3639 Delivery: manifest and packs
 HISTORICAL: aa2a714d Let each prodprivilege test build its own fixture
