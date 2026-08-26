@@ -1,4 +1,0 @@
-commit 3a9cc1ec6a071c78951d8e5eb2d87f3f06ea8133
-Date:   Wed Aug 26 16:46:34 2026 +0300
-
-    Delivery: manifest and packs
