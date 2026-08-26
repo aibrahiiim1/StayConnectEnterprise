@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `d84f9e5e3e898f473b5217920b3f4a65ab0ee8ea`
-- **Provenance (generation HEAD = inventory_head):** `d84f9e5e3e898f473b5217920b3f4a65ab0ee8ea`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `411b142b90db88b0ca3b22696c5d513db4e3563f`
+- **Provenance (generation HEAD = inventory_head):** `411b142b90db88b0ca3b22696c5d513db4e3563f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `master`
 - **Remote branch:** `origin/master`
 - **Changed files:** 244
@@ -168,7 +168,7 @@
 | `docs/design/Room-Auth-Materialization-Readiness.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Record the live sync, and that publication is not materialization |
 | `docs/manifests/PC-0002-complete-delivery-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Correct two reporting defects in the PC-0002 delivery record |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: manifest, packs and the corrected attempt record |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Record the Room Login privilege chain deployed to .25 |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -514,7 +514,7 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: d84f9e5e Record the Room Login privilege chain deployed to .25
+HISTORICAL: 411b142b Record the Room Login privilege chain deployed to .25
 HISTORICAL: 1a5482c8 Merge pull request #60 from aibrahiiim1/fix/grant-offer-lock-privilege
 HISTORICAL: d7b7460a Delivery: manifest, packs and the corrected attempt record
 HISTORICAL: a704d520 Close the whole Room Login chain against the real service role
