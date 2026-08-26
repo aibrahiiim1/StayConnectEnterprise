@@ -95,6 +95,50 @@ MSYS_NO_PATHCONV=1 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STO
   -f /tmp/gatep/gatep-grants.sql >"$OUT/grants-recheck.log" 2>&1 \
   || { echo "  FAIL gatep-grants.sql (reconcile):"; tail -3 "$OUT/grants-recheck.log"; exit 1; }
 
+# BASELINE-COMPATIBLE FIXTURE DEFAULTS, for this disposable database only.
+#
+# The shared Go fixture seeds public.tenants(id) alone, which the DARK schema accepts because its tenants
+# table carries only id. The REAL baseline declares slug and name NOT NULL, so the same fixture cannot seed
+# here. The DARK fixture must not change — it is exercising a different schema on purpose — so the
+# accommodation lives here instead: every NOT NULL column without a default on the platform tables the fixture
+# touches gets a synthetic default.
+#
+# This is schema convenience on a throwaway database, NOT a privilege. Nothing below grants anything, and the
+# privilege model under test is untouched: it still comes entirely from deploy/gatep.
+docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 >/dev/null <<'FIXDEF'
+DO $$
+DECLARE r record;
+BEGIN
+  FOR r IN
+    SELECT c.table_name, c.column_name, c.data_type
+      FROM information_schema.columns c
+     WHERE c.table_schema='public'
+       AND c.table_name IN ('tenants','sites','guest_networks','appliances','operators')
+       AND c.is_nullable='NO'
+       AND c.column_default IS NULL
+       AND c.column_name <> 'id'
+  LOOP
+    -- A value shaped for the column's type; uniqueness matters for slug-like text columns because the
+    -- fixture runs many times against one database.
+    IF r.data_type IN ('text','character varying') THEN
+      EXECUTE format('ALTER TABLE public.%I ALTER COLUMN %I SET DEFAULT (%L || substr(gen_random_uuid()::text,1,8))',
+                     r.table_name, r.column_name, 'fixture-');
+    ELSIF r.data_type IN ('boolean') THEN
+      EXECUTE format('ALTER TABLE public.%I ALTER COLUMN %I SET DEFAULT false', r.table_name, r.column_name);
+    ELSIF r.data_type IN ('integer','bigint','smallint','numeric') THEN
+      EXECUTE format('ALTER TABLE public.%I ALTER COLUMN %I SET DEFAULT 0', r.table_name, r.column_name);
+    ELSIF r.data_type LIKE 'timestamp%' THEN
+      EXECUTE format('ALTER TABLE public.%I ALTER COLUMN %I SET DEFAULT now()', r.table_name, r.column_name);
+    ELSIF r.data_type = 'jsonb' THEN
+      EXECUTE format('ALTER TABLE public.%I ALTER COLUMN %I SET DEFAULT ''{}''::jsonb', r.table_name, r.column_name);
+    ELSIF r.data_type = 'uuid' THEN
+      EXECUTE format('ALTER TABLE public.%I ALTER COLUMN %I SET DEFAULT gen_random_uuid()', r.table_name, r.column_name);
+    END IF;
+  END LOOP;
+END $$;
+FIXDEF
+echo "  fixture defaults applied to the platform tables"
+
 have="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM pg_roles WHERE rolname='svc_scd'")"
 [ "${have:-0}" = "1" ] || { echo "  FAIL: svc_scd is not provisioned; this harness exists to exercise it"; exit 1; }
 
