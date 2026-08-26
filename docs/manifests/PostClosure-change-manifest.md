@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `d6570c6af4df2e15c79dd7810976acb3ed13e697`
-- **Provenance (generation HEAD = inventory_head):** `913c15f8eaa4f974990fa71fdb44fec9d8317565`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `ed9ac98486cea66e2aa15c0653fd543ba7361f96`
+- **Provenance (generation HEAD = inventory_head):** `890d77e18d8680ca21e7c88a9b99072d01ce3309`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/grant-offer-lock-privilege`
 - **Remote branch:** `origin/fix/grant-offer-lock-privilege`
 - **Changed files:** 238
@@ -61,7 +61,7 @@
 | `data-plane/cmd/scd/otp_handlers.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Give Post-Stay its own gate, and withdraw room_any |
 | `data-plane/cmd/scd/phase3_auth.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Give the grant its row lock without giving it the power to rewrite the check |
 | `data-plane/cmd/scd/phase3_auth_integration_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Unwedge the PMS link, judge freshness by feed health, and accept one verification value |
-| `data-plane/cmd/scd/phase3_grant_privilege_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Give the grant its row lock without giving it the power to rewrite the check |
+| `data-plane/cmd/scd/phase3_grant_privilege_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Grant the disposable database exactly what production grants |
 | `data-plane/cmd/scd/phase3_local_mirror_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Write the offline test helpers against the real schema |
 | `data-plane/cmd/scd/phase3_offer_active_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Seed the retired package in three statements, not one CTE |
 | `data-plane/cmd/scd/phase3_offers.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Deactivating a package must remove it from the portal |
@@ -170,7 +170,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_913c15f8.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_890d77e1.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -246,7 +246,7 @@
 | `scripts/gatep-reconcile.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Address in-container paths so the copy verification looks where the files are |
 | `scripts/generate-production-baseline.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Regenerate the factory-clean baseline for migration 0050 |
 | `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Give the grant its row lock without giving it the power to rewrite the check |
-| `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Provision roles and grants only, not ownership |
+| `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Grant the disposable database exactly what production grants |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Make the generated blocks describe the appliance that exists |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Point M46 and M48 at the manifest that is actually checked |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
@@ -302,7 +302,7 @@
  data-plane/cmd/scd/otp_handlers.go                 |  67 +-
  data-plane/cmd/scd/phase3_auth.go                  |  79 ++-
  data-plane/cmd/scd/phase3_auth_integration_test.go |  12 +
- .../scd/phase3_grant_privilege_integration_test.go | 176 ++++++
+ .../scd/phase3_grant_privilege_integration_test.go | 179 ++++++
  .../scd/phase3_local_mirror_integration_test.go    | 259 ++++++++
  .../scd/phase3_offer_active_integration_test.go    | 132 ++++
  data-plane/cmd/scd/phase3_offers.go                |  15 +-
@@ -405,13 +405,13 @@
  docs/design/Room-Auth-Materialization-Readiness.md | 197 ++++++
  .../PC-0002-complete-delivery-manifest.md          | 159 +++++
  docs/manifests/Phase7-change-manifest.md           | 108 ++--
- docs/manifests/PostClosure-change-manifest.md      | 687 +++++++++++++++++++++
- .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 ++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 689 +++++++++++++++++++++
+ .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 +++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318816 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132325 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42757 bytes
- .../chatgpt/phase-evidence/GIT_STAT_913c15f8.txt   |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318814 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132326 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42755 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_890d77e1.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -458,7 +458,7 @@
  hotel-admin/app/(app)/pms-providers/page.tsx       | 329 ----------
  hotel-admin/app/(app)/service-plans/page.tsx       | 298 +++++++++
  hotel-admin/app/(app)/setup/enrollment/page.tsx    | 244 +++++++-
- hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 +++++++++++++
+ hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 ++++++++++++
  hotel-admin/app/(app)/stays/page.tsx               | 277 ++++++---
  hotel-admin/components/nav.tsx                     | 171 ++---
  hotel-admin/components/ui/error-banner.tsx         |   7 +-
@@ -480,18 +480,18 @@
  hotel-admin/test/phase3-pages.test.tsx             |  32 +-
  hotel-admin/test/pms-availability.test.ts          | 221 +++++++
  hotel-admin/test/publish-form.test.tsx             |   8 +-
- hotel-admin/test/synchronization-card.test.tsx     | 275 +++++++++
+ hotel-admin/test/synchronization-card.test.tsx     | 275 ++++++++
  scripts/factory-clean-baseline-verify.sh           |  27 +
  scripts/gatep-grant-survives-reconcile.sh          | 151 +++++
  scripts/gatep-reconcile-acceptance.sh              | 236 +++++++
  scripts/gatep-reconcile.sh                         | 161 +++++
  scripts/generate-production-baseline.sh            |  38 +-
  scripts/phase5-pg-integration.sh                   |  13 +-
- scripts/pmsd-pg-integration.sh                     | 102 +++
+ scripts/pmsd-pg-integration.sh                     | 113 ++++
  tools/project-state.py                             | 134 +++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 238 files changed, 21964 insertions(+), 2260 deletions(-)
+ 238 files changed, 21980 insertions(+), 2260 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -499,8 +499,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_6bd5b5cb.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_913c15f8.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_890d77e1.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_913c15f8.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -511,7 +511,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 913c15f8 Delivery: manifest and packs
+HISTORICAL: 890d77e1 Delivery: manifest and packs
+HISTORICAL: ed9ac984 Grant the disposable database exactly what production grants
+HISTORICAL: dfe114fe Delivery: manifest and packs
 HISTORICAL: d6570c6a Provision roles and grants only, not ownership
 HISTORICAL: 31fc74d4 Delivery: manifest and packs
 HISTORICAL: 1dc42f14 Give the grant its row lock without giving it the power to rewrite the check
