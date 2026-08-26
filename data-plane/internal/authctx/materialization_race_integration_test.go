@@ -33,7 +33,7 @@ import (
 
 // admitPending inserts a durable PENDING occupancy event exactly as pmsd's admission path does: runtime row
 // locked first, then the insert, then commit.
-func admitPending(t *testing.T, s fixture, kind string, gen *int64) {
+func admitPending(t *testing.T, s fixture, kind string, gen int64) {
 	t.Helper()
 	p := pool(t)
 	defer p.Close()
@@ -74,7 +74,7 @@ func TestIntegration_Materialization_LivePendingBlocks(t *testing.T) {
 	if !authorizable(t, p, s) {
 		t.Fatal("setup: a healthy caught-up feed should authorise")
 	}
-	admitPending(t, s, "LIVE", nil)
+	admitPending(t, s, "LIVE", 0) // se_admission_coherent: LIVE rows carry generation 0
 	if authorizable(t, p, s) {
 		t.Fatal("a guest was authorised while a LIVE occupancy event was durable and unapplied. If that " +
 			"event is a GO, this is a checked-out guest getting internet")
@@ -101,8 +101,8 @@ func TestIntegration_Materialization_AbandonedGenerationDoesNotBlock(t *testing.
 		s.iface).Scan(&published); err != nil {
 		t.Fatal(err)
 	}
-	abandoned := published + 1
-	admitPending(t, s, "RESYNC", &abandoned)
+	abandoned := published + 1 // never published, so the applier can never claim it
+	admitPending(t, s, "RESYNC", abandoned)
 
 	if !authorizable(t, p, s) {
 		t.Fatal("an abandoned resync generation blocked Room auth. The applier can never consume those rows, " +
@@ -125,7 +125,17 @@ func TestIntegration_Materialization_PublishedGenerationPendingBlocks(t *testing
 		s.iface).Scan(&published); err != nil {
 		t.Fatal(err)
 	}
-	admitPending(t, s, "RESYNC", &published) // at the published generation: claimable
+	// se_admission_coherent requires a RESYNC row to carry a generation > 0, so a fixture published at 0 has
+	// to advance first. This is what a completed sync leaves behind anyway.
+	if published == 0 {
+		if _, err := p.Exec(context.Background(), `UPDATE iam_v2.pms_interface_runtime
+			SET resync_generation_seq=1, published_resync_generation=1 WHERE pms_interface_id=$1`,
+			s.iface); err != nil {
+			t.Fatal(err)
+		}
+		published = 1
+	}
+	admitPending(t, s, "RESYNC", published) // at the published generation: claimable
 
 	if authorizable(t, p, s) {
 		t.Fatal("a guest was authorised during the post-publish drain — the exact 3.5-second window measured " +
@@ -145,7 +155,7 @@ func TestIntegration_Materialization_TerminalRowsDoNotBlock(t *testing.T) {
 			now := time.Now().UTC()
 			setFeed(t, p, s, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
 			setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
-			admitPending(t, s, "LIVE", nil)
+			admitPending(t, s, "LIVE", 0) // se_admission_coherent: LIVE rows carry generation 0
 			if _, err := p.Exec(ctx,
 				`UPDATE iam_v2.stay_events SET processing_status=$2, processed_at=now()
 				  WHERE pms_interface_id=$1 AND processing_status='PENDING'`, s.iface, status); err != nil {
@@ -172,7 +182,7 @@ func TestIntegration_Materialization_OfflineBranchIsAlsoGated(t *testing.T) {
 	if !authorizable(t, p, s) {
 		t.Fatal("setup: D39 offline auth should work on a trusted drained mirror")
 	}
-	admitPending(t, s, "LIVE", nil)
+	admitPending(t, s, "LIVE", 0) // se_admission_coherent: LIVE rows carry generation 0
 	if authorizable(t, p, s) {
 		t.Fatal("the offline branch authorised with a claimable pending event outstanding. The applier keeps " +
 			"draining without the socket, so this resolves in seconds — but not before")

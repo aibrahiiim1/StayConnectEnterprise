@@ -101,11 +101,13 @@ docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0055_request_full_resync_without_runtime_write') ON CONFLICT DO NOTHING;" >/dev/null
 
 # 0056 adds the materialization-readiness term and the partial index the authctx suites assert.
-if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \n     < "$ROOT/data-plane/migrations/0056_materialization_readiness.up.sql" >/dev/null 2>&1; then
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0056_materialization_readiness.up.sql" >/dev/null 2>&1; then
   echo "0056 FAILED TO APPLY -- deterministic, not a flake"
   exit 1
 fi
-docker exec "$C" psql -U postgres -d "$DB" -tAqc \n  "INSERT INTO public.schema_migrations(version) VALUES ('0056_materialization_readiness') ON CONFLICT DO NOTHING;" >/dev/null
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0056_materialization_readiness') ON CONFLICT DO NOTHING;" >/dev/null
 
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
