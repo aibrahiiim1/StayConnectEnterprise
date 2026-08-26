@@ -7,7 +7,6 @@
 // scripts/prod-privilege-integration.sh builds a PRODUCTION-LIKE database from the Gate-P files and runs only
 // this tag against it. Neither posture has to pretend to be the other.
 
-
 package main
 
 // THE GRANT MUST WORK AS THE ROLE THAT ACTUALLY RUNS IT.
