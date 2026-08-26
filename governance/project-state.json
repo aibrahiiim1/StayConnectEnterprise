@@ -766,12 +766,14 @@
     "pms_feed_connected_note": "Restored by the Product Owner 2026-08-25T23:17:20.790Z. CONNECTED / IN_SYNC / CONTINUOUS on revision 38207f74-0130-43e1-ac31-ce41ba5261b6, max_auth_cache_age_seconds=259200 (PRE-LIVE test policy).",
     "live_fresh_sync_verified": true,
     "live_fresh_sync_verified_note": "Automatic first Full Sync succeeded 2026-08-25T23:17:57.801404Z (T0097). Generation 20 published only at successful DE; 588 events, 525 applied, 63 manual review, 0 skipped; materialization drained after publish, completing 3.487993 s later; final 686 Stays, 595 IN_HOUSE.",
-    "first_room_login_blocked": false,
-    "first_room_login_blocked_reason": "CLEARED IN CODE by migration 0056 and the linearization lock (not yet deployed). p3_feed_authorizes now requires the materialized roster to have caught up, scoped to events the applier can actually claim, and issue_or_return_pms_context plus internal/authctx take pms_interface_runtime FOR UPDATE after the Stay lock so the STABLE predicate is true at commit rather than only at snapshot. Deployment is a separate authorization; .25 still runs the pre-fix binaries.",
+    "first_room_login_blocked": true,
+    "first_room_login_blocked_reason": "BLOCKED ON THE APPLIANCE. The materialization-readiness race is FIXED IN MERGED CODE (PR #56, migration 0056, the linearization lock in issue_or_return_pms_context and internal/authctx) but that fix is NOT DEPLOYED: 172.21.60.25 still runs the pre-fix scd/edged/pmsd binaries and migration 0056 has never been applied to its database. Until it is, published_resync_generation / IN_SYNC / COMPLETE still precede terminal application of the published generation's Stay events on the appliance, and ordinary LIVE applier backlog still produces the same race continuously. This flag tracks the appliance, not the repository, and must stay true while materialization_readiness_deployed is false.",
     "go_unknown_stay_backlog": 608,
     "go_unknown_stay_backlog_note": "GO_UNKNOWN_STAY MANUAL_REVIEW rows accumulate across Full Sync generations with NO cleanup or retention lifecycle. Consistent with orphan checkout history and not the Room Login blocker, but unbounded and tracked as a follow-up.",
     "materialization_readiness_implemented": true,
-    "materialization_readiness_deployed": false
+    "materialization_readiness_deployed": false,
+    "first_room_login_blocked_fix_status": "FIXED IN CODE, NOT CLEARED ON THE APPLIANCE. Merged to master as 5a462c5ea56a5b1e3558c84d2615a81ec6fd926a with all four CI checks green. Clearing this blocker requires a separate Product-Owner deployment authorization: apply migration 0056 and deploy scd, edged and pmsd to 172.21.60.25.",
+    "materialization_readiness_deployed_note": "NOT DEPLOYED. Migration 0056 is not applied on 172.21.60.25 (schema_migrations head remains 0055) and the running binaries predate PR #56. The appliance's behaviour is unchanged by that merge."
   },
   "latest_transition_id": "T0097",
   "phase3_delivery_evidence": {
@@ -1154,7 +1156,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "29a2c2f3efb0577abb878002dfd4be272f942df7",
+    "head": "1897a38862ba64e2142d54c5ed69aa39b039f90a",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."
