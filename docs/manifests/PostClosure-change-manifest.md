@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `a5b758194fad8a1b3c2ee52538b21c6f76c55a81`
-- **Provenance (generation HEAD = inventory_head):** `1c84190f068769174b5834f4d5d78e2ab45de988`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `aa2a714d1dc4f03048a47671df56701b5d4ba899`
+- **Provenance (generation HEAD = inventory_head):** `7aab31e9ce6ebe36cf7638c347a0e4f846c7189b`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/grant-offer-lock-privilege`
 - **Remote branch:** `origin/fix/grant-offer-lock-privilege`
 - **Changed files:** 239
@@ -170,7 +170,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_1c84190f.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_7aab31e9.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -247,7 +247,7 @@
 | `scripts/generate-production-baseline.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Regenerate the factory-clean baseline for migration 0050 |
 | `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Give the grant its row lock without giving it the power to rewrite the check |
 | `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Give the privilege tests their own production-like database |
-| `scripts/prod-privilege-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Relax the writerguard for fixture seeding on the disposable database |
+| `scripts/prod-privilege-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Let each prodprivilege test build its own fixture |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Make the generated blocks describe the appliance that exists |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Point M46 and M48 at the manifest that is actually checked |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
@@ -336,7 +336,7 @@
  data-plane/internal/pmsd/events.go                 |  27 +-
  data-plane/internal/pmsd/pg.go                     |  92 ++-
  data-plane/internal/pmsd/pmsd.go                   |  27 +
- data-plane/internal/pmsd/pmsd_test.go              |  71 +++
+ data-plane/internal/pmsd/pmsd_test.go              |  71 ++
  data-plane/internal/pmsd/resync_command.go         |  67 ++
  .../internal/pmsd/resync_command_adapter_test.go   | 251 ++++++++
  .../pmsd/resync_command_integration_test.go        | 246 +++++++
@@ -406,13 +406,13 @@
  docs/design/Room-Auth-Materialization-Readiness.md | 197 ++++++
  .../PC-0002-complete-delivery-manifest.md          | 159 +++++
  docs/manifests/Phase7-change-manifest.md           | 108 ++--
- docs/manifests/PostClosure-change-manifest.md      | 709 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 711 +++++++++++++++++++++
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 +++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318816 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132326 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42755 bytes
- .../chatgpt/phase-evidence/GIT_STAT_1c84190f.txt   |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318817 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132325 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42756 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_7aab31e9.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -424,7 +424,7 @@
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |  12 +-
  .../StayConnect-IAM-Phase1B-Plan.md                |  13 +-
  .../chatgpt/stayconnectenterprise/00-START-HERE.md |  11 +-
- exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  71 ++-
+ exports/chatgpt/stayconnectenterprise/MANIFEST.md  |  71 +-
  .../stayconnectenterprise/PROJECT-INSTRUCTIONS.md  |  11 +-
  .../Phase3-Privilege-Matrix.md                     |  12 +
  .../StayConnect-IAM-Handoff.md                     |  13 +-
@@ -489,11 +489,11 @@
  scripts/generate-production-baseline.sh            |  38 +-
  scripts/phase5-pg-integration.sh                   |  13 +-
  scripts/pmsd-pg-integration.sh                     |  80 +++
- scripts/prod-privilege-integration.sh              | 190 ++++++
+ scripts/prod-privilege-integration.sh              | 205 ++++++
  tools/project-state.py                             | 134 +++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 239 files changed, 22171 insertions(+), 2260 deletions(-)
+ 239 files changed, 22188 insertions(+), 2260 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -501,8 +501,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_1c84190f.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_3a9cc1ec.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_1c84190f.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_7aab31e9.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -513,7 +513,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 1c84190f Delivery: manifest and packs
+HISTORICAL: 7aab31e9 Delivery: manifest and packs
+HISTORICAL: aa2a714d Let each prodprivilege test build its own fixture
+HISTORICAL: 7dc9b0a6 Delivery: manifest and packs
 HISTORICAL: a5b75819 Relax the writerguard for fixture seeding on the disposable database
 HISTORICAL: ccfb69c0 Delivery: manifest and packs
 HISTORICAL: 033a426a Make the production database accept the shared fixture
