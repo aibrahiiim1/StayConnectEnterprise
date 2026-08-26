@@ -537,16 +537,27 @@ func (p *phase3Auth) grantHandler(w http.ResponseWriter, r *http.Request) {
 	// consumption cannot slip between the check and the grant.
 	var offeredTier *int
 	var offerEvidence int64
-	err = tx.QueryRow(ctx, `
-		SELECT o.matched_tier_order, o.evidence_version
-		  FROM iam_v2.auth_context_offers o
-		 WHERE o.tenant_id=$1 AND o.site_id=$2 AND o.auth_context_id=$3::uuid
-		   AND o.package_revision_id=$4::uuid AND o.expires_at > now()
-		 FOR UPDATE`,
+	// The lock goes through iam_v2.lock_auth_context_offer (migration 0057) rather than an inline
+	// SELECT ... FOR UPDATE. PostgreSQL requires UPDATE privilege for a row lock, and granting scd UPDATE on
+	// auth_context_offers would let it rewrite the matched tier, the evidence version and the expiry — the
+	// exact fields validated below. The function hands over the lock and nothing else.
+	err = tx.QueryRow(ctx,
+		`SELECT matched_tier_order, evidence_version
+		   FROM iam_v2.lock_auth_context_offer($1,$2,$3::uuid,$4::uuid)`,
 		p.srv.tenID, p.srv.siteID, strings.TrimSpace(req.AuthContextID),
 		strings.TrimSpace(req.PackageRevID)).Scan(&offeredTier, &offerEvidence)
 	if err != nil {
-		notVerified(w, "package_not_offered_to_this_context")
+		// ONLY "no such offer" is an authorisation answer. Everything else — a permission error, a dead
+		// connection, a timeout — is an internal failure, and reporting it as "not offered" is how the first
+		// real Room Login on this appliance spent a diagnosis cycle looking like a data problem. The guest
+		// still sees the uniform envelope either way; the difference is entirely in what the operator is told.
+		if errors.Is(err, pgx.ErrNoRows) {
+			notVerified(w, "package_not_offered_to_this_context")
+			return
+		}
+		slog.Error("phase3 grant: offer lock failed", "err", err,
+			"context", strings.TrimSpace(req.AuthContextID))
+		notVerified(w, "offer_lock_unavailable")
 		return
 	}
 	// The evidence must still be the evidence the offer was decided under. A Stay that moved room, changed

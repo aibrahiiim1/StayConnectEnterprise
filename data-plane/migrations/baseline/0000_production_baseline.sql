@@ -1644,6 +1644,32 @@ GRANT ALL ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_i
 -- Name: p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
+CREATE FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) RETURNS TABLE(matched_tier_order integer, evidence_version bigint)
+    LANGUAGE sql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT o.matched_tier_order, o.evidence_version
+    FROM iam_v2.auth_context_offers o
+   WHERE o.tenant_id = p_tenant
+     AND o.site_id = p_site
+     AND o.auth_context_id = p_context
+     AND o.package_revision_id = p_package_revision
+     AND o.expires_at > now()
+   FOR UPDATE;
+$$;
+
+
+--
+-- Name: FUNCTION lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) TO svc_scd;
+
+
+--
+-- Name: p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
 CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) RETURNS boolean
     LANGUAGE sql STABLE
     AS $_$

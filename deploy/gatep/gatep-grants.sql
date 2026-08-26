@@ -386,3 +386,18 @@ BEGIN
 END $$;
 
 COMMIT;
+
+-- iam_v2.lock_auth_context_offer is how svc_scd takes the grant's row lock WITHOUT holding UPDATE on
+-- iam_v2.auth_context_offers. PostgreSQL requires UPDATE for SELECT ... FOR UPDATE, and granting it would let
+-- scd rewrite the matched tier, the evidence version and the expiry -- the exact fields the grant validates
+-- against, so the role being checked would gain the ability to edit the check.
+--
+-- Absent this line the first real guest Room Login fails at the grant with a permission error reported as
+-- package_not_offered_to_this_context, which is what happened on 2026-08-26 before the helper existed.
+DO $do$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'svc_scd') THEN
+    GRANT EXECUTE ON FUNCTION iam_v2.lock_auth_context_offer(uuid,uuid,uuid,uuid) TO svc_scd;
+  END IF;
+END
+$do$;

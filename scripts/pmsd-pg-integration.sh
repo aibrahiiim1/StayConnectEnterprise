@@ -109,6 +109,34 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0056_materialization_readiness') ON CONFLICT DO NOTHING;" >/dev/null
 
+# 0057 adds the scoped offer-lock helper the grant needs; without it the svc_scd grant test fails.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0057_lock_auth_context_offer.up.sql" >/dev/null 2>&1; then
+  echo "0057 FAILED TO APPLY -- deterministic, not a flake"
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0057_lock_auth_context_offer') ON CONFLICT DO NOTHING;" >/dev/null
+
+# THE REAL SERVICE ROLES, and the Gate-P grants that go with them.
+#
+# The least-privilege tests used to SKIP when svc_scd was absent, which it always was here -- so the two
+# privilege defects that reached production (the pms_interface_runtime read, and the auth_context_offers row
+# lock that broke the first real guest Room Login) both passed CI green. A skipped assertion is not an
+# assertion. Provisioning the roles makes those tests run for real.
+for f in gatep-roles.sql gatep-iam-roles.sql gatep-iam-ownership.sql gatep-grants.sql; do
+  [ -f "$ROOT/deploy/gatep/$f" ] || continue
+  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/deploy/gatep/$f" >/dev/null 2>&1 ||
+    echo "  note: $f did not apply cleanly in the disposable database"
+done
+roles_ok="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM pg_roles WHERE rolname='svc_scd'")"
+if [ "${roles_ok:-0}" != "1" ]; then
+  echo "svc_scd WAS NOT PROVISIONED -- the least-privilege tests would silently skip"
+  exit 1
+fi
+echo "  svc_scd provisioned; least-privilege tests will run for real"
+
+
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi
