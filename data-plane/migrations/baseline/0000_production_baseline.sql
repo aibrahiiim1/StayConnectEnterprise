@@ -1644,8 +1644,106 @@ GRANT ALL ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_i
 -- Name: p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
+CREATE FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) RETURNS TABLE(matched_tier_order integer, evidence_version bigint)
+    LANGUAGE sql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT o.matched_tier_order, o.evidence_version
+    FROM iam_v2.auth_context_offers o
+   WHERE o.tenant_id = p_tenant
+     AND o.site_id = p_site
+     AND o.auth_context_id = p_context
+     AND o.package_revision_id = p_package_revision
+     AND o.expires_at > now()
+   FOR UPDATE;
+$$;
+
+
+--
+-- Name: FUNCTION lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) TO svc_scd;
+
+
+--
+-- Name: lock_pms_interface_runtime(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_one int;
+BEGIN
+  SELECT 1 INTO v_one FROM iam_v2.pms_interface_runtime rt
+   WHERE rt.tenant_id = p_tenant AND rt.site_id = p_site AND rt.pms_interface_id = p_interface
+   FOR UPDATE;
+END $$;
+
+
+--
+-- Name: FUNCTION lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_scd;
+
+
+--
+-- Name: lock_stay(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_one int;
+BEGIN
+  SELECT 1 INTO v_one FROM iam_v2.stays st
+   WHERE st.tenant_id = p_tenant AND st.site_id = p_site AND st.id = p_stay
+   FOR UPDATE;
+END $$;
+
+
+--
+-- Name: FUNCTION lock_stay(p_tenant uuid, p_site uuid, p_stay uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) TO svc_scd;
+
+
+--
+-- Name: lock_origin_stay(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_one int;
+BEGIN
+  SELECT 1 INTO v_one
+    FROM iam_v2.post_stay_profiles psp
+    JOIN iam_v2.stays st
+      ON st.tenant_id = psp.tenant_id AND st.site_id = psp.site_id AND st.id = psp.origin_stay_id
+   WHERE psp.tenant_id = p_tenant AND psp.site_id = p_site AND psp.id = p_profile
+   FOR UPDATE OF st;
+END $$;
+
+
+--
+-- Name: FUNCTION lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid) TO svc_scd;
+
+
+--
+-- Name: p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
 CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) RETURNS boolean
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
     AS $_$
   SELECT EXISTS (
     SELECT 1
@@ -12885,6 +12983,7 @@ REVOKE ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text
 GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
+GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_scd;
 
 
 --
@@ -12900,6 +12999,7 @@ REVOKE ALL ON FUNCTION iam_v2.apply_payment_callback_v2(p_tenant uuid, p_provide
 
 REVOKE ALL ON FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone) TO svc_acctd;
+GRANT ALL ON FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone) TO svc_scd;
 
 
 --
@@ -13749,6 +13849,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_device_authorizations TO 
 
 GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_edged;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_devices TO svc_pmsd;
+GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_scd;
 
 
 --

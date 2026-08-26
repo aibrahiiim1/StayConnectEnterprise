@@ -109,6 +109,25 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0056_materialization_readiness') ON CONFLICT DO NOTHING;" >/dev/null
 
+# 0057 adds the scoped offer-lock helper the grant needs; without it the svc_scd grant test fails.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0057_lock_auth_context_offer.up.sql" >/dev/null 2>&1; then
+  echo "0057 FAILED TO APPLY -- deterministic, not a flake"
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0057_lock_auth_context_offer') ON CONFLICT DO NOTHING;" >/dev/null
+# 0058 adds the scoped row-lock helpers. internal/authctx calls them on both the issue and the
+# consume path, so without it every PMS auth test fails with "function does not exist".
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0058_guest_auth_row_locks.up.sql" >/dev/null 2>&1; then
+  echo "0058 FAILED TO APPLY -- deterministic, not a flake"
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0058_guest_auth_row_locks') ON CONFLICT DO NOTHING;" >/dev/null
+
+
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi

@@ -774,7 +774,9 @@
     "materialization_readiness_deployed": true,
     "first_room_login_blocked_fix_status": "FIXED IN CODE, NOT CLEARED ON THE APPLIANCE. Merged to master as 5a462c5ea56a5b1e3558c84d2615a81ec6fd926a with all four CI checks green. Clearing this blocker requires a separate Product-Owner deployment authorization: apply migration 0056 and deploy scd, edged and pmsd to 172.21.60.25.",
     "materialization_readiness_deployed_note": "DEPLOYED 2026-08-26 (T0098): migration 0056 applied (schema_migrations head 0056), scd 6e9a815be1f55aa8163c7b75e0e4928de4e5f0a9f6adeba24cf9302a9c87f4e3, edged bd0bc3b8aa4e7d3a3e01f535854d4800386fbf90b5c1d6ddbd72f7e58c18890f, pmsd b34f6ea6a52c99defe02b999e62c5d0d2142aed6886a521e9db313faa55ebaaf, hotel-admin release 20260826-084348.",
-    "first_room_login_performed": false
+    "first_room_login_performed": false,
+    "first_room_login_attempted": true,
+    "first_room_login_attempted_note": "2026-08-26T10:23:03Z: the first real guest Room Login VERIFIED correctly (auth_resolutions 11->12, auth_contexts 2->3, one correct package offered) and then FAILED AT THE GRANT with package_not_offered_to_this_context. The reported reason was wrong twice over: it was a PERMISSION error, not an authorisation decision, and the offer lock was only the FIRST of five capabilities svc_scd does not hold. Driving the whole chain as the real service role in CI (scripts/prod-privilege-integration.sh) found the rest: the grant-time linearization lock on iam_v2.pms_interface_runtime, the L1 Stay lock, EXECUTE on apply_entitlement_transition, EXECUTE on authorize_entitlement_device and SELECT on iam_v2.entitlement_devices. Every one is fixed at its authoritative source -- migrations 0057 and 0058 plus the per-service Gate-P files, so a reconcile keeps them -- and proven end to end under SET ROLE svc_scd through Purchase, Entitlement and Session. The retry is NOT performed and requires deployment first."
   },
   "latest_transition_id": "T0098",
   "phase3_delivery_evidence": {
@@ -1157,7 +1159,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "f90d581aa9fd65e38c5792f769dc78ea613b6075",
+    "head": "a704d520ff69c7865f4c818c5f6190f5df54db97",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."

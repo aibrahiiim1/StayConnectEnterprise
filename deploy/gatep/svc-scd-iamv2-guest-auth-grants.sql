@@ -142,6 +142,32 @@ GRANT EXECUTE ON FUNCTION iam_v2.p3_controlled_operation_open(text) TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.p5_controlled_operation_open(text) TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.p5_begin_controlled_operation(text) TO svc_scd;
 
+-- ---------------------------------------------------------------------------
+-- THE TWO ROW LOCKS THE GRANT TAKES, as scoped EXECUTE rather than table UPDATE.
+--
+-- PostgreSQL requires UPDATE as well as SELECT for SELECT ... FOR UPDATE. Both of these rows are ones scd
+-- must LOCK and must never WRITE, so each lock lives behind a SECURITY DEFINER function that takes it and
+-- returns nothing else:
+--
+--   * iam_v2.lock_auth_context_offer (migration 0057) -- UPDATE on iam_v2.auth_context_offers would let scd
+--     rewrite the matched tier, the evidence version and the expiry, which are the very fields the grant
+--     validates against.
+--   * iam_v2.lock_pms_interface_runtime (migration 0058) -- UPDATE on iam_v2.pms_interface_runtime would let
+--     the role being authorised rewrite the PMS feed health it is authorised against.
+--   * iam_v2.lock_stay and iam_v2.lock_origin_stay (migration 0058) -- the L1 lock the whole approved lock
+--     order starts from. UPDATE on iam_v2.stays belongs to the stay engine, which writes it from the PMS
+--     feed; a guest-facing service able to rewrite a Stay could put anybody in any room.
+--
+-- None of them is optional, and they fail in sequence: without the first, a real Room Login verifies and then
+-- fails at the grant with a permission error reported to the operator as
+-- package_not_offered_to_this_context -- which is exactly what happened to the first live guest on
+-- 2026-08-26. Without the second it fails one statement later at the grant-time linearization lock, and
+-- without the third one statement after that, each with no reason code at all.
+GRANT EXECUTE ON FUNCTION iam_v2.lock_auth_context_offer(uuid,uuid,uuid,uuid) TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.lock_pms_interface_runtime(uuid,uuid,uuid)   TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.lock_stay(uuid,uuid,uuid)                    TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.lock_origin_stay(uuid,uuid,uuid)             TO svc_scd;
+
 -- NOT granted, on purpose:
 --   * DELETE on anything -- no authentication path deletes;
 --   * UPDATE on vouchers or guest_access_accounts from THIS file. Redemption
