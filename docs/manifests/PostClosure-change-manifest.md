@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `ed9ac98486cea66e2aa15c0653fd543ba7361f96`
-- **Provenance (generation HEAD = inventory_head):** `890d77e18d8680ca21e7c88a9b99072d01ce3309`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `1d56d7f0b0bb5859433e9360a8a5a828606426db`
+- **Provenance (generation HEAD = inventory_head):** `20df7d5829c36afaf5e1c2088e19ec11f0329b22`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/grant-offer-lock-privilege`
 - **Remote branch:** `origin/fix/grant-offer-lock-privilege`
 - **Changed files:** 238
@@ -170,7 +170,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_890d77e1.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_20df7d58.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -246,7 +246,7 @@
 | `scripts/gatep-reconcile.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Address in-container paths so the copy verification looks where the files are |
 | `scripts/generate-production-baseline.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Regenerate the factory-clean baseline for migration 0050 |
 | `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Give the grant its row lock without giving it the power to rewrite the check |
-| `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Grant the disposable database exactly what production grants |
+| `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | docker exec needs -i for the heredoc to reach psql |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Make the generated blocks describe the appliance that exists |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Point M46 and M48 at the manifest that is actually checked |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
@@ -373,11 +373,11 @@
  deploy/gatep/svc-acctd-iamv2-accounting-grants.sql |  35 ++
  deploy/gatep/svc-edged-phase345-admin-grants.sql   |  41 +-
  deploy/gatep/svc-pmsd-iamv2-connector-grants.sql   | 249 ++++++++
- deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql   |  69 +++
+ deploy/gatep/svc-scd-iamv2-guest-auth-grants.sql   |  69 ++
  deploy/pki/.gitignore                              |   5 +
  deploy/pki/README.md                               |  26 +
  deploy/scripts/appliance-central-cutover.sh        | 218 +++++++
- deploy/scripts/appliance-dns-align.sh              | 138 +++++
+ deploy/scripts/appliance-dns-align.sh              | 138 ++++
  deploy/scripts/central-firewall.sh                 |  61 ++
  deploy/scripts/central-migrate.sh                  | 268 ++++++++
  deploy/scripts/central-mint-tls.sh                 | 148 +++++
@@ -393,7 +393,7 @@
  deploy/scripts/vendor-signing-key.sh               | 231 +++++++
  deploy/systemd/stayconnect-ctrlapi.service         |  21 +
  deploy/systemd/stayconnect-scd.service             |  13 +
- docs/APPLIANCE_ACTIVATION_AND_LICENSING.md         | 207 +++++++
+ docs/APPLIANCE_ACTIVATION_AND_LICENSING.md         | 207 ++++++
  docs/DEPLOYED_STATE.md                             | 208 +++++++
  docs/DEPLOYMENT_CLOUD.md                           |  59 +-
  docs/DISASTER_RECOVERY_FACTORY_CLEAN_INSTALL.md    |  12 +-
@@ -405,13 +405,13 @@
  docs/design/Room-Auth-Materialization-Readiness.md | 197 ++++++
  .../PC-0002-complete-delivery-manifest.md          | 159 +++++
  docs/manifests/Phase7-change-manifest.md           | 108 ++--
- docs/manifests/PostClosure-change-manifest.md      | 689 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 691 +++++++++++++++++++++
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 +++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318814 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318816 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132326 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42755 bytes
- .../chatgpt/phase-evidence/GIT_STAT_890d77e1.txt   |   4 +
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42754 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_20df7d58.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -468,7 +468,7 @@
  hotel-admin/e2e/phase3-stays-grace.spec.ts         |   5 +-
  hotel-admin/e2e/phase4-financial-operator.spec.ts  |  10 +-
  hotel-admin/e2e/phase5-guest-post-stay.spec.ts     |   8 +-
- hotel-admin/e2e/portal-request-id.spec.ts          |  69 +++
+ hotel-admin/e2e/portal-request-id.spec.ts          |  69 ++
  hotel-admin/lib/api.ts                             |  29 +-
  hotel-admin/lib/commerce-form.ts                   |  43 +-
  hotel-admin/lib/pms-availability.ts                | 155 +++++
@@ -491,7 +491,7 @@
  tools/project-state.py                             | 134 +++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 238 files changed, 21980 insertions(+), 2260 deletions(-)
+ 238 files changed, 21982 insertions(+), 2260 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -499,8 +499,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_890d77e1.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_913c15f8.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_20df7d58.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_890d77e1.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -511,7 +511,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 890d77e1 Delivery: manifest and packs
+HISTORICAL: 20df7d58 Delivery: manifest and packs
+HISTORICAL: 1d56d7f0 docker exec needs -i for the heredoc to reach psql
+HISTORICAL: 790f72b6 Delivery: manifest and packs
 HISTORICAL: ed9ac984 Grant the disposable database exactly what production grants
 HISTORICAL: dfe114fe Delivery: manifest and packs
 HISTORICAL: d6570c6a Provision roles and grants only, not ownership
