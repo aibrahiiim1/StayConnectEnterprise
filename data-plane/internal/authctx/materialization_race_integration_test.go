@@ -156,9 +156,16 @@ func TestIntegration_Materialization_TerminalRowsDoNotBlock(t *testing.T) {
 			setFeed(t, p, s, "CONNECTED", "IN_SYNC", "CONTINUOUS", now)
 			setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
 			admitPending(t, s, "LIVE", 0) // se_admission_coherent: LIVE rows carry generation 0
+			// Terminal states have their own guards: APPLIED demands a resolved same-interface stay_id and
+			// MANUAL_REVIEW a bounded review_code. Satisfying them is the point — these are real terminal
+			// rows, not a status string forced onto the column.
 			if _, err := p.Exec(ctx,
-				`UPDATE iam_v2.stay_events SET processing_status=$2, processed_at=now()
-				  WHERE pms_interface_id=$1 AND processing_status='PENDING'`, s.iface, status); err != nil {
+				`UPDATE iam_v2.stay_events
+				    SET processing_status=$2, processed_at=now(),
+				        stay_id = CASE WHEN $2='APPLIED' THEN $3::uuid ELSE stay_id END,
+				        review_code = CASE WHEN $2='MANUAL_REVIEW' THEN 'GO_UNKNOWN_STAY' ELSE review_code END
+				  WHERE pms_interface_id=$1 AND processing_status='PENDING'`,
+				s.iface, status, s.stay); err != nil {
 				t.Fatal(err)
 			}
 			if !authorizable(t, p, s) {

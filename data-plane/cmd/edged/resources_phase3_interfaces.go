@@ -746,7 +746,15 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		         WHERE ev.pms_interface_id=$3::uuid AND ev.processing_status='PENDING'),
 		       COALESCE(rt.sync_stage,''), rt.sync_stage_at,
 		       COALESCE(rt.sync_records_received,0), COALESCE(rt.sync_records_skipped,0),
-		       COALESCE(rt.sync_failure_code,''), rt.last_sync_in_house_count,
+		       COALESCE(rt.sync_failure_code,''),
+			       -- Materialization readiness, using the SAME claimable-pending term the auth predicate
+			       -- uses. A display that disagreed with the authorisation rule would be worse than none.
+			       NOT EXISTS (SELECT 1 FROM iam_v2.stay_events se
+			                    WHERE se.tenant_id=rt.tenant_id AND se.site_id=rt.site_id
+			                      AND se.pms_interface_id=rt.pms_interface_id
+			                      AND se.processing_status='PENDING'
+			                      AND (se.admission_kind='LIVE'
+			                           OR se.resync_generation <= rt.published_resync_generation)),
 		       COALESCE(rt.resync_command_reason,''), rt.resync_command_requested_at,
 		       -- ROOM-AUTH FEED READINESS. The clauses and their order mirror the feed half of
 		       -- iam_v2.p3_feed_authorizes; the Stay-specific half is deliberately absent. The heartbeat bound
