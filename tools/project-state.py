@@ -95,9 +95,14 @@ def render_block(st):
         f"**Fresh Production appliance ({prod['host']}, {prod['hostname']}):** DEPLOYED factory-clean from "
         f"`{prod['initial_deployment_source_sha'][:7]}`; first-bring-up fixes were then applied live and "
         f"afterwards committed (`{prod['first_bringup_fixes_commit_sha'][:7]}`), so no single commit "
-        f"describes what is running. {prod['lifecycle']}. Enrollment, claim and signed "
-        f"assignment are NOT complete and it is {prod['license'].split('.')[0].lower()}; no tenant or site "
-        f"is pinned. {prod['lan_interface'].split(':')[0]} is "
+        f"describes what is running. {prod['lifecycle']}. "
+        # DERIVED, never asserted. This sentence used to read "Enrollment, claim and signed assignment are NOT
+        # complete" as fixed English with only the licence word substituted, so it kept saying so through
+        # enrollment, claim, assignment and licensing — the generated blocks contradicted the register they
+        # are generated FROM. Each clause now comes from its own field.
+        f"Enrollment: {_status(prod['enrollment'])}; claim: {_status(prod['claim'])}; "
+        f"signed assignment: {_status(prod['signed_assignment'])}; licence: "
+        f"{_status(prod['license'])}. {prod['lan_interface'].split(':')[0]} is "
         f"{'intentionally unconfigured' if 'UNCONFIGURED' in prod['lan_interface'].upper() else 'configured'}. "
         f"Guest traffic: {prod['guest_traffic'].lower()}; PMS: {prod['pms_traffic'].lower()}; "
         f"payment/financial: {prod['payment_or_financial_traffic'].lower()}. "
@@ -114,6 +119,15 @@ def render_block(st):
         f"**Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `{st['latest_accepted_po_decision']}`.",
         END]
     return "\n".join(lines)
+
+def _status(field):
+    """The bare status of a source field, without its citation or elaboration.
+
+    Lowercasing the whole clause turned "(D37/T0087)" into "(d37/t0087)", so the trailing reference is dropped
+    rather than mangled: the decision that granted a fact belongs in the register, not in a one-line summary.
+    """
+    head = field.split('.')[0].split('(')[0].split(':')[0].strip()
+    return head.lower()
 
 def inject(text, block, anchor):
     if BEGIN in text and END in text:
@@ -1073,6 +1087,50 @@ def cmd_build_packs(allow_dirty=False):
     print("BUILD-PACKS = PASS (deterministic; SOURCE_COMMIT recorded; export commit is external)")
     return 0
 
+def check_appliance_facts_agree(st):
+    """The generated blocks must not contradict current_state_facts.
+
+    THIS EXISTS BECAUSE IT HAPPENED. production_appliance is a SOURCE for the rendered current-state block, and
+    it sat frozen at its T0083 values — NOT ENROLLED, UNLICENSED, ens192 unconfigured, PMS none — straight
+    through enrollment, claim, signed assignment, licensing, guest-network configuration, PMS commissioning
+    and a verified live fresh sync. Every generated doc said the appliance was unenrolled and disconnected
+    while project-state.json and the transitions said the opposite, and ZERO_STALE passed the whole time
+    because nothing compared the two.
+
+    Each rule below pairs a fact the register asserts with a phrase the rendered block must therefore NOT
+    contain. Cheap, blunt, and exactly the class of contradiction that slipped through.
+    """
+    f = st.get("current_state_facts", {})
+    prod = st.get("production_appliance", {})
+    bad = []
+
+    def contradicts(cond, field, forbidden, why):
+        if not cond:
+            return
+        value = str(prod.get(field, ""))
+        for token in forbidden:
+            if token.lower() in value.lower():
+                bad.append(f"production_appliance.{field} says {token!r} but {why}")
+
+    contradicts(f.get("pms_feed_connected") is True, "pms_traffic", ["NONE"],
+                "current_state_facts.pms_feed_connected is true")
+    contradicts(f.get("live_fresh_sync_verified") is True, "pms_traffic", ["NONE"],
+                "current_state_facts.live_fresh_sync_verified is true")
+    contradicts(f.get("pms_feed_connected") is True, "enrollment", ["NOT ENROLLED"],
+                "the appliance cannot run a live PMS feed unenrolled")
+    contradicts(f.get("pms_feed_connected") is True, "license", ["UNLICENSED"],
+                "the appliance cannot run a live PMS feed unlicensed")
+    contradicts(f.get("pms_feed_connected") is True, "claim", ["NOT CLAIMED"],
+                "the appliance cannot run a live PMS feed unclaimed")
+    contradicts(f.get("guest_offer_corrected") is True, "lan_interface", ["INTENTIONALLY UNCONFIGURED"],
+                "a guest offer is published, which requires a guest network")
+
+    # The reverse direction: never claim guest traffic that the counters deny.
+    if f.get("first_room_login_performed") is False and "NONE" not in str(prod.get("guest_traffic", "")).upper():
+        bad.append("production_appliance.guest_traffic implies guest activity but "
+                   "current_state_facts.first_room_login_performed is false")
+    return bad
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "validate"
     if cmd == "validate":
@@ -1086,7 +1144,12 @@ def main():
     elif cmd == "check-generated":
         st = load(STATE); bad = cmd_check_generated(st)
         for p, why in bad: print(f"  DRIFT: {os.path.relpath(p, ROOT)} — {why}")
-        print("GENERATED_BLOCKS =", "PASS" if not bad else f"FAIL ({len(bad)})"); sys.exit(0 if not bad else 1)
+        # A rendered block that matches its source is not enough: the SOURCE itself can be stale, which is how
+        # every generated doc came to describe an enrolled, licensed, PMS-connected appliance as none of those.
+        contradictions = check_appliance_facts_agree(st)
+        for why in contradictions: print(f"  CONTRADICTION: {why}")
+        total = len(bad) + len(contradictions)
+        print("GENERATED_BLOCKS =", "PASS" if not total else f"FAIL ({total})"); sys.exit(0 if not total else 1)
     elif cmd == "transition":
         sys.exit(cmd_transition(sys.argv[2:]))
     elif cmd == "build-packs":
