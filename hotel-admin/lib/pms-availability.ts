@@ -60,6 +60,8 @@ const REASON_WORDS: Record<string, string> = {
   MIRROR_NEVER_SYNCHRONIZED: "the guest list has not been received from the property management system yet",
   // Also transport-down only, and brief — a full refresh is partway through.
   RESYNC_IN_FLIGHT: "the guest list is being refreshed",
+  // Seconds, not an outage: the list has arrived and is being written in.
+  MATERIALIZATION_BEHIND: "the guest list is being applied",
   // TRANSPORT_DOWN is deliberately absent. The server no longer sends it: a dropped connection does not stop
   // guests signing in when the local guest list is intact, so it was never a reason on its own. Retaining a
   // phrase for it would let a stale server keep telling staff that guests cannot sign in when they can.

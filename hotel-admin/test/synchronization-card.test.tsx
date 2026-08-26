@@ -213,3 +213,63 @@ describe("observing an external reconnect", () => {
     expect(onRefreshed.mock.calls.length).toBe(1);
   });
 });
+
+// COMPLETE MUST NOT MEAN "DONE" WHILE GUESTS ARE STILL BEING REFUSED.
+//
+// sync_stage=COMPLETE means a generation was published; materialization_ready means the applier has finished
+// writing it into the Stay tables. Room sign-in is closed until the second is true, so a card that showed
+// "Complete" in between told the operator the sync had finished while guests were being turned away.
+describe("materialization readiness", () => {
+  it("shows Applying guest list while COMPLETE but not yet materialized", () => {
+    render(
+      <SynchronizationCard
+        id="i1"
+        health={health({ sync_stage: "COMPLETE", materialization_ready: false, in_house_stays: 461 })}
+        onRefreshed={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Applying guest list/i)).toBeInTheDocument();
+    expect(screen.getByText(/Room sign-in resumes automatically/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Complete$/)).toBeNull();
+  });
+
+  it("shows Complete once materialization is ready", () => {
+    render(
+      <SynchronizationCard
+        id="i1"
+        health={health({ sync_stage: "COMPLETE", materialization_ready: true, in_house_stays: 595 })}
+        onRefreshed={() => {}}
+      />,
+    );
+    // "Complete" appears both as the stage value and in the Last-completed-full-sync label.
+    expect(screen.getAllByText(/Complete/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Applying guest list/i)).toBeNull();
+  });
+
+  it("keeps polling while applying, because the guest list is still changing", async () => {
+    vi.useFakeTimers();
+    const onRefreshed = vi.fn();
+    render(
+      <SynchronizationCard
+        id="i1"
+        health={health({ sync_stage: "COMPLETE", materialization_ready: false })}
+        onRefreshed={onRefreshed}
+      />,
+    );
+    await vi.advanceTimersByTimeAsync(7000);
+    expect(onRefreshed.mock.calls.length).toBeGreaterThanOrEqual(2); // the fast 3s cadence
+  });
+
+  it("shows the live in-house figure only, never a stamped one", () => {
+    render(
+      <SynchronizationCard
+        id="i1"
+        health={health({ sync_stage: "COMPLETE", materialization_ready: true, in_house_stays: 595 })}
+        onRefreshed={() => {}}
+      />,
+    );
+    // 595 is the live count. 461 was the publish-barrier stamp that used to contradict it on this screen.
+    expect(screen.getByText(/595/)).toBeInTheDocument();
+    expect(screen.queryByText(/461/)).toBeNull();
+  });
+});

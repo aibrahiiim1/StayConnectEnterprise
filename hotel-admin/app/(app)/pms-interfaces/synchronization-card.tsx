@@ -23,12 +23,25 @@ const STAGE_WORDS: Record<string, string> = {
   RECEIVING: "Receiving the guest list",
   PUBLISHING: "Publishing the new guest list",
   COMPLETE: "Complete",
+  APPLYING: "Applying guest list",
   FAILED: "Failed",
   INTERRUPTED: "Interrupted",
 };
 
 // While a sync is in one of these stages there is more to come, so the page keeps polling.
-const ACTIVE_STAGES = new Set(["REQUESTING_FULL_SYNC", "WAITING_FOR_PMS", "RECEIVING", "PUBLISHING"]);
+const ACTIVE_STAGES = new Set(["REQUESTING_FULL_SYNC", "WAITING_FOR_PMS", "RECEIVING", "PUBLISHING", "APPLYING"]);
+
+// THE EFFECTIVE STAGE, from two durable facts the server reports separately.
+//
+// sync_stage=COMPLETE means the generation was PUBLISHED. It does NOT mean the guest list is usable: the
+// applier writes it into the Stay tables afterwards, and Room sign-in is correctly closed until it finishes.
+// Showing "Complete" during that gap told the operator the sync was done while guests were still being
+// refused, so the card derives an APPLYING stage instead. The durable COMPLETE token is not redefined —
+// nothing here writes it, and the server still reports it verbatim.
+function effectiveStage(stage: string, ready: boolean | undefined): string {
+  if (stage === "COMPLETE" && ready === false) return "APPLYING";
+  return stage;
+}
 
 const REASONS: { value: string; label: string }[] = [
   { value: "SUSPECTED_STALE_GUEST_LIST", label: "The guest list looks out of date" },
@@ -54,7 +67,7 @@ export function SynchronizationCard({
   const [reason, setReason] = useState(REASONS[0].value);
   const [password, setPassword] = useState("");
 
-  const stage = health?.sync_stage ?? "";
+  const stage = effectiveStage(health?.sync_stage ?? "", health?.materialization_ready);
   const active = ACTIVE_STAGES.has(stage);
 
   // ONE POLL LOOP, TWO RATES.
@@ -136,14 +149,10 @@ export function SynchronizationCard({
               : "0"
           }
         />
-        <Row
-          label="Guests in house"
-          value={
-            health?.last_sync_in_house_count != null
-              ? health.last_sync_in_house_count.toLocaleString()
-              : (health?.in_house_stays ?? 0).toLocaleString()
-          }
-        />
+        {/* The ordinary live figure, and only that. The old last_sync_in_house_count was stamped at the
+            publish barrier and reported the roster the sync replaced — 461 beside a live 595. Once the stage
+            above means materialized, this number is correct by the time it says Complete. */}
+        <Row label="Guests in house" value={(health?.in_house_stays ?? 0).toLocaleString()} />
         {health?.sync_failure_code && <Row label="Reason it stopped" value={health.sync_failure_code} />}
       </dl>
 
@@ -160,6 +169,12 @@ export function SynchronizationCard({
         <p className="text-sm rounded-md border bg-muted/30 p-3">
           A full sync has been requested. This happens automatically the first time the connection to the
           property management system succeeds — you do not need to do anything.
+        </p>
+      )}
+      {stage === "APPLYING" && (
+        <p className="text-sm rounded-md border bg-muted/30 p-3">
+          The guest list has arrived and is being applied. Room sign-in resumes automatically the moment it
+          finishes — usually a few seconds.
         </p>
       )}
       {stage === "INTERRUPTED" && (

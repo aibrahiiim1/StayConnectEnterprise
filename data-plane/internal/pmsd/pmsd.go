@@ -287,10 +287,6 @@ type Repo interface {
 	ClaimResyncCommand(ctx context.Context, req ResyncScope) (*ResyncCommand, error)
 	// UpdateSyncStage records durable operator-visible progress under the same ownership CAS.
 	UpdateSyncStage(ctx context.Context, u StageUpdate) error
-	// InHouseCount reports how many Stays this interface currently holds IN_HOUSE. Stamped at publish so the
-	// figure describes what the completed sync produced. Returns nil on any error: a progress figure is never
-	// worth failing a resync over.
-	InHouseCount(ctx context.Context, ax axisBase) *int64
 	Close() error
 }
 
