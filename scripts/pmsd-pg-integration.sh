@@ -118,39 +118,6 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0057_lock_auth_context_offer') ON CONFLICT DO NOTHING;" >/dev/null
 
-# THE REAL SERVICE ROLES, and the Gate-P grants that go with them.
-#
-# The least-privilege tests used to SKIP when svc_scd was absent, which it always was here -- so the two
-# privilege defects that reached production (the pms_interface_runtime read, and the auth_context_offers row
-# lock that broke the first real guest Room Login) both passed CI green. A skipped assertion is not an
-# assertion. Provisioning the roles makes those tests run for real.
-# ROLES AND GRANTS ONLY. gatep-iam-ownership.sql reassigns table ownership, which changes who the
-# writerguard triggers see as the caller and made every pre-existing suite that inserts as postgres fail
-# with "writes to the stay family require an open controlled operation". The least-privilege tests need
-# the ROLES to exist and their grants to be real; they do not need production ownership.
-for f in gatep-roles.sql gatep-grants.sql; do
-  [ -f "$ROOT/deploy/gatep/$f" ] || continue
-  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/deploy/gatep/$f" >/dev/null 2>&1 ||
-    echo "  note: $f did not apply cleanly in the disposable database"
-done
-# The Gate-P grant chain depends on ownership, which we deliberately do not reassign here, so the roles are
-# created without privilege. Grant EXACTLY what the least-privilege tests assert about production: schema
-# usage, the reads the auth path performs, and EXECUTE on the scoped offer-lock helper. Nothing wider — the
-# tests exist to prove svc_scd CANNOT update auth_context_offers, so granting broadly would defeat them.
-docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 <<'GRANTS'
-GRANT USAGE ON SCHEMA iam_v2 TO svc_scd;
-GRANT SELECT ON iam_v2.auth_context_offers, iam_v2.stay_events, iam_v2.pms_interface_runtime,
-                iam_v2.stays, iam_v2.auth_contexts TO svc_scd;
-GRANT EXECUTE ON FUNCTION iam_v2.lock_auth_context_offer(uuid,uuid,uuid,uuid) TO svc_scd;
-GRANT EXECUTE ON FUNCTION iam_v2.p3_feed_authorizes(uuid,uuid,uuid,uuid,timestamptz) TO svc_scd;
-GRANTS
-roles_ok="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM pg_roles WHERE rolname='svc_scd'")"
-if [ "${roles_ok:-0}" != "1" ]; then
-  echo "svc_scd WAS NOT PROVISIONED -- the least-privilege tests would silently skip"
-  exit 1
-fi
-echo "  svc_scd provisioned; least-privilege tests will run for real"
-
 
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"

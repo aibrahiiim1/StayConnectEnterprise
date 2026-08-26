@@ -190,6 +190,13 @@ jobs:
       - name: PG16 integration — all eleven Phase-3 suites (disposable PG16)
         run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh pg16-integration -- bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/pmsd-pg-integration.sh"
 
+      # THE PRODUCTION PRIVILEGE HARNESS, separate on purpose. The step above asserts the DARK posture, in
+      # which svc_scd holds no runtime grants; this one builds a production-like database from the real Gate-P
+      # files and runs the prodprivilege tag against it. Two privilege defects reached production because no
+      # suite ever ran as a real service role -- this is the step that would have caught both.
+      - name: Production privilege model (real Gate-P roles, disposable PG16)
+        run: "bash $GITHUB_WORKSPACE/scripts/ci/step.sh prod-privilege -- bash $GITHUB_WORKSPACE/scripts/prod-privilege-integration.sh"
+
       - name: Phase-3 offline preflight
         run: |
           set -euo pipefail

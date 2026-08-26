@@ -1,4 +1,12 @@
-//go:build integration
+//go:build integration && prodprivilege
+
+// BUILD TAG: prodprivilege. These tests need the REAL Gate-P service roles with their REAL grants, which the
+// ordinary integration database deliberately does not have — it asserts the DARK posture, in which svc_scd
+// holds no runtime grants at all. Granting them there would break that assertion, and skipping these when the
+// role is absent is what let two privilege defects reach production green. So they get their own harness:
+// scripts/prod-privilege-integration.sh builds a PRODUCTION-LIKE database from the Gate-P files and runs only
+// this tag against it. Neither posture has to pretend to be the other.
+
 
 package main
 
