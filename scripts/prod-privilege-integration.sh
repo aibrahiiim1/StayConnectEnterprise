@@ -22,8 +22,10 @@ DB="prodpriv"
 cleanup() { docker rm -f "$C" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-echo "== disposable PostgreSQL 16 =="
-docker run -d --name "$C" -p 0:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" postgres:16 >/dev/null
+# THE IMAGE MATTERS. The baseline creates TimescaleDB hypertables, so plain postgres:16 cannot apply it —
+# the appliance runs timescale/timescaledb:2.16.1-pg16 and so does scripts/factory-clean-baseline-verify.sh.
+echo "== disposable TimescaleDB PG16 =="
+docker run -d --name "$C" -p 0:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" "${CLEANROOM_IMAGE:-timescale/timescaledb:2.16.1-pg16}" >/dev/null
 for _ in $(seq 1 60); do docker exec "$C" pg_isready -U postgres >/dev/null 2>&1 && break; sleep 1; done
 
 echo "== factory-clean baseline =="
