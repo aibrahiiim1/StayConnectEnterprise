@@ -62,7 +62,8 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 	const seed = `WITH
 	  t AS (INSERT INTO public.tenants(id, slug, name)
 	        VALUES (gen_random_uuid(), 'prodpriv-' || $4::text, 'prodpriv fixture') RETURNING id),
-	  si AS (INSERT INTO public.sites(id,tenant_id) SELECT gen_random_uuid(), id FROM t RETURNING id, tenant_id),
+	  si AS (INSERT INTO public.sites(id,tenant_id,code,name)
+	         SELECT gen_random_uuid(), id, 'site-' || $4::text, 'prodpriv site' FROM t RETURNING id, tenant_id),
 	  gn AS (INSERT INTO public.guest_networks
 	           (id,tenant_id,site_id,name,parent_interface,bridge_name,gateway_cidr,gateway_ip,subnet_cidr,enabled)
 	         SELECT gen_random_uuid(), si.tenant_id, si.id,'p3-guests','ens-' || $4::text, 'br-' || $4::text,
