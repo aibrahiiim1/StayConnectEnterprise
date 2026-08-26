@@ -1,0 +1,63 @@
+{
+  "transition_id": "T0099",
+  "seq": 99,
+  "timestamp": "2026-08-26T17:05:00Z",
+  "timestamp_derivation": "The completion of the deployment it records (the scd restart at 17:04:44Z), which precedes the author timestamp of the introducing commit. Per T0091.",
+  "record_type": "ROOM_LOGIN_PRIVILEGE_CHAIN_DEPLOYED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_PMS_FEED_CONNECTED_FRESH_SYNC_VERIFIED_MATERIALIZATION_READINESS_DEPLOYED_AWAITING_FIRST_ROOM_LOGIN_AUTHORIZATION",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_PMS_FEED_CONNECTED_FRESH_SYNC_VERIFIED_ROOM_LOGIN_PRIVILEGE_CHAIN_DEPLOYED_AWAITING_PRODUCT_OWNER_ROOM_LOGIN_RETRY",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": true,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. This is the fix for the failed first Room Login attempt recorded under T0098's successor state, deployed under the same explicit Product-Owner authorization that ordered it.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-26: 'Complete PR #60 now, end-to-end ... Deployment to PRE-LIVE appliance .25 is explicitly authorized as part of this fix once CI is green and the PR is merged.'",
+  "what_failed": "The first real guest Room Login (2026-08-26T10:23:03Z) verified correctly and was refused at the grant with package_not_offered_to_this_context. That reason was wrong in two ways: the failure was a PERMISSION error rather than an authorisation decision, and the offer lock it names was only the FIRST of five capabilities svc_scd does not hold. Driving the whole chain as the real service role against a production-like database found the rest.",
+  "capabilities_added": [
+    "iam_v2.lock_auth_context_offer (0057) - the grant's offer row lock",
+    "iam_v2.lock_pms_interface_runtime (0058) - the grant-time linearization lock added by 0056",
+    "iam_v2.lock_stay and iam_v2.lock_origin_stay (0058) - the L1 Stay lock every auth path takes first",
+    "iam_v2.p3_feed_authorizes made SECURITY DEFINER (0058) - so the predicate reads pms_interface_runtime and stay_events as its owner instead of requiring scd to hold SELECT on the whole PMS event stream",
+    "EXECUTE on iam_v2.apply_entitlement_transition - the only writer of entitlement state",
+    "EXECUTE on iam_v2.authorize_entitlement_device and SELECT on iam_v2.entitlement_devices - the device binding, and the trigger that guards the session insert"
+  ],
+  "privilege_model": "No table UPDATE was granted. A row lock requires UPDATE in PostgreSQL, and each locked table is one scd must never write: auth_context_offers carries the fields the grant validates against, pms_interface_runtime is the feed health the authorisation is decided from, and stays is the stay engine's record of who is in the room. Each lock is therefore a scoped SECURITY DEFINER helper that takes it and returns nothing else. All six privileges live in the per-service Gate-P files, so a reconcile keeps them; scripts/gatep-grant-survives-reconcile.sh proves that across two consecutive reconciles.",
+  "merged": {
+    "pr": "#60",
+    "accepted_head": "d7b7460a540ec0e90ac2dc6dd9f3d6c79f4fac48",
+    "merge_commit": "1a5482c8163a593029c701ed4312cfec0a94b8fd",
+    "ci": "All eight check runs on the accepted head green: phase3-full-software-gate, phase4-financial-core-gate, phase5-post-stay-transfer-gate and governance, each once from the pull_request event and once from a workflow_dispatch issued while GitHub Actions was in a declared major outage and was not creating runs from pushes."
+  },
+  "deployed": {
+    "appliance": "172.21.60.25 (Fresh Production, PRE-LIVE)",
+    "built_from": "master 1a5482c8163a593029c701ed4312cfec0a94b8fd",
+    "migrations": "0057_lock_auth_context_offer and 0058_guest_auth_row_locks APPLIED; schema_migrations head 0058_guest_auth_row_locks",
+    "gatep": "gatep-grants.sql reconciled from the merged repository copy (15 files, including svc-pmsd-iamv2-connector-grants.sql which the appliance copy was missing)",
+    "scd_sha256": "0861fd5b631387de62b2b49d699f798d04f6588998be59c9f8f1097065fbace3",
+    "rollback": "/opt/stayconnect/bin/scd.bak-gatep0058 (6e9a815be1f55aa8163c7b75e0e4928de4e5f0a9f6adeba24cf9302a9c87f4e3, the T0098 binary) and /opt/stayconnect/src-current/deploy/gatep.bak-20260826T170319Z",
+    "not_deployed": "edged (bd0bc3b8aa4e7d3a3e01f535854d4800386fbf90b5c1d6ddbd72f7e58c18890f), pmsd (b34f6ea6a52c99defe02b999e62c5d0d2142aed6886a521e9db313faa55ebaaf), portald and Hotel Admin were NOT rebuilt or restarted. Only scd changed."
+  },
+  "verified_live": {
+    "services": "stayconnect-scd, stayconnect-pmsd, stayconnect-edged and stayconnect-netd all active; scd restarted clean, license Active, health 200.",
+    "privileges_held": "svc_scd EXECUTE on lock_auth_context_offer, lock_pms_interface_runtime, lock_stay, lock_origin_stay, apply_entitlement_transition and authorize_entitlement_device; SELECT on entitlement_devices.",
+    "privileges_withheld": "svc_scd holds NO UPDATE on auth_context_offers, stays or pms_interface_runtime, and PUBLIC cannot EXECUTE the lock helpers.",
+    "pms": "CONNECTED / IN_SYNC / CONTINUOUS, sync_stage COMPLETE. Protel was not touched and no Full Resync was triggered.",
+    "counters": "purchases=0, entitlements=0, sessions=0",
+    "financial": "pms_postings=0, posting_attempts=0, payment_transactions=0"
+  },
+  "room_login": "NOT PERFORMED. No guest authentication was attempted before, during or after this deployment. The retry is the Product Owner's to run.",
+  "transition_accepted": true
+}
