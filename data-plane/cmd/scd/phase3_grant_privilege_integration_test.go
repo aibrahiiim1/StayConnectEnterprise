@@ -160,7 +160,10 @@ func TestIntegration_Phase3Grant_ExpiredOfferIsNoRow(t *testing.T) {
 	offered := res.Offers[0].PackageRevisionID
 
 	if _, err := f.pool.Exec(ctx,
-		`UPDATE iam_v2.auth_context_offers SET expires_at = now() - interval '1 second'
+		// aco_expiry_after_offer requires expires_at > offered_at, so the whole offer is moved into the past
+		// rather than only its expiry — which is what an offer that simply lapsed looks like.
+		`UPDATE iam_v2.auth_context_offers
+		    SET offered_at = now() - interval '20 minutes', expires_at = now() - interval '10 minutes'
 		  WHERE auth_context_id=$1::uuid`, res.AuthContextID); err != nil {
 		t.Fatal(err)
 	}

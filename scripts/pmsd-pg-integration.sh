@@ -133,6 +133,17 @@ for f in gatep-roles.sql gatep-grants.sql; do
   docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 < "$ROOT/deploy/gatep/$f" >/dev/null 2>&1 ||
     echo "  note: $f did not apply cleanly in the disposable database"
 done
+# The Gate-P grant chain depends on ownership, which we deliberately do not reassign here, so the roles are
+# created without privilege. Grant EXACTLY what the least-privilege tests assert about production: schema
+# usage, the reads the auth path performs, and EXECUTE on the scoped offer-lock helper. Nothing wider — the
+# tests exist to prove svc_scd CANNOT update auth_context_offers, so granting broadly would defeat them.
+docker exec "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 >/dev/null 2>&1 <<'GRANTS'
+GRANT USAGE ON SCHEMA iam_v2 TO svc_scd;
+GRANT SELECT ON iam_v2.auth_context_offers, iam_v2.stay_events, iam_v2.pms_interface_runtime,
+                iam_v2.stays, iam_v2.auth_contexts TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.lock_auth_context_offer(uuid,uuid,uuid,uuid) TO svc_scd;
+GRANT EXECUTE ON FUNCTION iam_v2.p3_feed_authorizes(uuid,uuid,uuid,uuid,timestamptz) TO svc_scd;
+GRANTS
 roles_ok="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM pg_roles WHERE rolname='svc_scd'")"
 if [ "${roles_ok:-0}" != "1" ]; then
   echo "svc_scd WAS NOT PROVISIONED -- the least-privilege tests would silently skip"
