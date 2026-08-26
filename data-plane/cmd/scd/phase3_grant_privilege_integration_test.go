@@ -53,7 +53,7 @@ func requireServiceRole(t *testing.T, f *authFixture, role string) {
 // The whole point is the last step. A guest who verifies and is offered a package must be able to redeem it
 // while scd is running as svc_scd, which is what production does.
 func TestIntegration_Phase3Grant_SucceedsAsServiceRole(t *testing.T) {
-	f := newAuthFixture(t)
+	f := newProdAuthFixture(t)
 	defer f.startEnforcementOwner(t)()
 	requireServiceRole(t, f, "svc_scd")
 	ctx := context.Background()
@@ -93,7 +93,7 @@ func TestIntegration_Phase3Grant_SucceedsAsServiceRole(t *testing.T) {
 // would give it both, and the fields it could then rewrite — matched tier, evidence version, expiry — are the
 // fields the grant validates against, so the role being checked would gain the ability to edit the check.
 func TestIntegration_Phase3Grant_ServiceRoleCannotRewriteOffers(t *testing.T) {
-	f := newAuthFixture(t)
+	f := newProdAuthFixture(t)
 	requireServiceRole(t, f, "svc_scd")
 	ctx := context.Background()
 
@@ -125,7 +125,7 @@ func TestIntegration_Phase3Grant_ServiceRoleCannotRewriteOffers(t *testing.T) {
 // reported to the operator as an authorisation decision. The helper returns NO ROW for a genuinely absent
 // offer, which is the only case that may become that reason code.
 func TestIntegration_Phase3Grant_AbsentOfferReturnsNoRowNotAnError(t *testing.T) {
-	f := newAuthFixture(t)
+	f := newProdAuthFixture(t)
 	requireServiceRole(t, f, "svc_scd")
 	ctx := context.Background()
 
@@ -155,7 +155,7 @@ func TestIntegration_Phase3Grant_AbsentOfferReturnsNoRowNotAnError(t *testing.T)
 // AN EXPIRED OFFER IS ALSO NO-ROW, not an error — the expiry test lives inside the locked read, so an offer
 // that lapses between resolve and grant is refused as an authorisation decision rather than a fault.
 func TestIntegration_Phase3Grant_ExpiredOfferIsNoRow(t *testing.T) {
-	f := newAuthFixture(t)
+	f := newProdAuthFixture(t)
 	requireServiceRole(t, f, "svc_scd")
 	ctx := context.Background()
 
