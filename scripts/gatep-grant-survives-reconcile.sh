@@ -64,6 +64,15 @@ KEPT_PAIRS=(
   "svc_scd|iam_v2.p3_cfg_secs(jsonb, text, int)"
   "svc_scd|iam_v2.record_auth_context_offer(uuid, uuid, uuid, uuid, integer, bigint, timestamptz)"
   "svc_scd|iam_v2.issue_or_return_pms_context(uuid, uuid, uuid, uuid, uuid, uuid, uuid, uuid, integer)"
+  # The Room Login chain, added after the first real guest was refused at the grant. The offer-lock helper was
+  # first granted only from gatep-grants.sql AFTER its COMMIT, which works once and is outside the reconcile's
+  # own transaction; all six now live in the per-service files, and this proves they stay there.
+  "svc_scd|iam_v2.lock_auth_context_offer(uuid, uuid, uuid, uuid)"
+  "svc_scd|iam_v2.lock_pms_interface_runtime(uuid, uuid, uuid)"
+  "svc_scd|iam_v2.lock_stay(uuid, uuid, uuid)"
+  "svc_scd|iam_v2.lock_origin_stay(uuid, uuid, uuid)"
+  "svc_scd|iam_v2.apply_entitlement_transition(uuid, text, timestamptz, text)"
+  "svc_scd|iam_v2.authorize_entitlement_device(uuid, uuid, timestamptz)"
 )
 
 # The control: a function granted by a migration and named in NO per-service file, so it must NOT survive.

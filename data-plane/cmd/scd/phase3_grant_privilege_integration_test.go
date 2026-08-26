@@ -27,9 +27,14 @@ package main
 // is not "no such row" never becomes an auth answer.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // requireServiceRole fails rather than skips. The least-privilege tests used to skip when svc_scd was absent,
@@ -164,23 +169,77 @@ func TestIntegration_Phase3Grant_ExpiredOfferIsNoRow(t *testing.T) {
 	if res.Outcome != outcomeVerified || len(res.Offers) != 1 {
 		t.Fatalf("setup: %+v", res)
 	}
-	offered := res.Offers[0].PackageRevisionID
 
+	// THE OFFER IS MADE THROUGH THE APPROVED WRITER, then allowed to lapse on its own.
+	//
+	// An earlier version backdated the row with a direct UPDATE. The real schema refuses that — auth_context_offers
+	// is guarded, and only iam_v2.record_auth_context_offer may write it — and disabling the guard would have made
+	// this database less like production, which is the one thing this harness must not do. So the offer is
+	// recorded exactly as the offer engine records it, with a short life, and the test waits for it to expire.
+	// aco_expiry_after_offer requires expires_at > offered_at, so the expiry is computed in SQL against the same
+	// clock the insert stamps offered_at from.
 	if _, err := f.pool.Exec(ctx,
-		// aco_expiry_after_offer requires expires_at > offered_at, so the whole offer is moved into the past
-		// rather than only its expiry — which is what an offer that simply lapsed looks like.
-		`UPDATE iam_v2.auth_context_offers
-		    SET offered_at = now() - interval '20 minutes', expires_at = now() - interval '10 minutes'
-		  WHERE auth_context_id=$1::uuid`, res.AuthContextID); err != nil {
-		t.Fatal(err)
+		`SELECT iam_v2.record_auth_context_offer($1,$2,$3::uuid,$4::uuid,1,1,now() + interval '1200 milliseconds')`,
+		f.tenant, f.site, res.AuthContextID, f.priced); err != nil {
+		t.Fatalf("record a short-lived offer: %v", err)
 	}
+	time.Sleep(1500 * time.Millisecond)
+
 	var tier *int
 	var evidence int64
 	err := f.pool.QueryRow(ctx,
 		`SELECT matched_tier_order, evidence_version
 		   FROM iam_v2.lock_auth_context_offer($1,$2,$3::uuid,$4::uuid)`,
-		f.tenant, f.site, res.AuthContextID, offered).Scan(&tier, &evidence)
+		f.tenant, f.site, res.AuthContextID, f.priced).Scan(&tier, &evidence)
 	if err == nil || !strings.Contains(err.Error(), "no rows") {
 		t.Fatalf("an expired offer produced %v, want a no-row result", err)
+	}
+}
+
+// THE WHOLE ROOM LOGIN, AS THE ROLE THAT ACTUALLY SERVES IT.
+//
+// Everything above tests the offer lock in isolation. This runs the real chain a guest walks — verify, the
+// offer, the grant, and the Purchase, Entitlement and Session the grant creates — with scd's own pool running
+// as svc_scd, which is what the appliance does. Nothing here is granted for the test: if a statement in that
+// chain needs a privilege svc_scd does not hold, this fails, and the fix belongs in deploy/gatep.
+func TestIntegration_Phase3Grant_FullChainAsServiceRole(t *testing.T) {
+	f := newProdAuthFixture(t)
+	defer f.startEnforcementOwner(t)()
+	requireServiceRole(t, f, "svc_scd")
+	p3 := f.serviceRolePhase3(t)
+
+	_, res := post(t, p3.resolveHandler,
+		f.resolveBody("412", "Okonkwo", "", "00000064-0000-4000-8000-000000000000"))
+	if res.Outcome != outcomeVerified || len(res.Offers) != 1 {
+		t.Fatalf("svc_scd could not verify the stay and offer the included package: %+v", res)
+	}
+	if res.Offers[0].PackageRevisionID != f.pkgRev {
+		t.Fatalf("offers = %+v, want exactly the included package", res.Offers)
+	}
+
+	rec := httptest.NewRecorder()
+	raw, _ := json.Marshal(map[string]any{
+		"auth_context_id":     res.AuthContextID,
+		"package_revision_id": f.pkgRev,
+		"device":              map[string]string{"ip": f.net.guestIP, "mac": f.net.mac},
+	})
+	p3.grantHandler(rec, httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(raw)))
+	var granted phase3GrantResp
+	if err := json.Unmarshal(rec.Body.Bytes(), &granted); err != nil {
+		t.Fatalf("undecodable grant response %q: %v", rec.Body.String(), err)
+	}
+	if granted.Outcome != outcomeVerified || granted.SessionID == "" || granted.EntitlementID == "" {
+		t.Fatalf("the grant produced no access as svc_scd: %s. This is the shape of the live failure — a "+
+			"clean verify followed by a refusal at the grant", rec.Body.String())
+	}
+
+	// The census runs as the owner, so it reads what really landed rather than what svc_scd can see.
+	c := f.census(t, res.AuthContextID)
+	if c.purchases != 1 || c.entitlements != 1 || c.sessions != 1 {
+		t.Fatalf("purchases=%d entitlements=%d sessions=%d, want exactly one of each", c.purchases,
+			c.entitlements, c.sessions)
+	}
+	if !c.contextConsumed {
+		t.Fatal("a successful grant left the Auth Context unconsumed, so the proof was never spent")
 	}
 }

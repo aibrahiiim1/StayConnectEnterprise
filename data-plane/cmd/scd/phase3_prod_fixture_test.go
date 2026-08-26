@@ -27,6 +27,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	iamv2 "github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 )
 
 func newProdAuthFixture(t *testing.T) *authFixture {
@@ -122,8 +124,62 @@ func newProdAuthFixture(t *testing.T) *authFixture {
 		f.tenant, f.site, f.iface, f.revision); err != nil {
 		t.Fatalf("seed runtime: %v", err)
 	}
+	// scd pins the PUBLISHED revision pointer, never max(revision_no); an unpublished revision is correctly
+	// refused, so without this the resolve never authenticates.
+	if _, err := tx.Exec(ctx, `UPDATE iam_v2.pms_interfaces SET current_revision_id=$3
+		 WHERE tenant_id=$1 AND site_id=$2`, f.tenant, f.site, f.revision); err != nil {
+		t.Fatalf("publish the interface revision: %v", err)
+	}
+	// Same for the catalog: the offer engine reads current_revision_id, so a package that never got its
+	// pointer set is invisible and the verify returns no offers at all.
+	if _, err := tx.Exec(ctx, `UPDATE iam_v2.internet_packages ip SET current_revision_id = r.id
+		  FROM iam_v2.internet_package_revisions r
+		 WHERE r.package_id = ip.id AND ip.tenant_id=$1 AND ip.site_id=$2`, f.tenant, f.site); err != nil {
+		t.Fatalf("point packages at their current revision: %v", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit seed: %v", err)
 	}
+
+	f.appliance = mustUUID(t, p)
+	f.srv = &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan"}
+	f.p3 = newPhase3Auth(iamv2.PMSConfig{MasterEnabled: true, PMSAuthEnabled: true}, f.srv)
+	if f.p3 == nil {
+		t.Fatal("the Phase-3 auth arm was not constructed with the flags on")
+	}
 	return f
+}
+
+// serviceRolePhase3 returns the Phase-3 auth arm bound to a pool where EVERY connection runs as svc_scd.
+//
+// SET LOCAL ROLE inside one test transaction proves the offer lock; it cannot prove the grant, because the
+// grant opens its own transactions through the pool. Production runs the whole of scd as svc_scd, so the only
+// honest way to exercise verify -> offer -> grant -> Purchase -> Entitlement -> Session against the real
+// privilege model is to make the handler's own pool that role. Any grant this role is missing then fails here
+// rather than in front of a guest, which is exactly how the offer-lock defect escaped.
+func (f *authFixture) serviceRolePhase3(t *testing.T) *phase3Auth {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(os.Getenv("PHASE3_TEST_DSN"))
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	cfg.ConnConfig.RuntimeParams["options"] = "-c role=svc_scd"
+	p, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("connect as svc_scd: %v", err)
+	}
+	t.Cleanup(p.Close)
+	var who string
+	if err := p.QueryRow(context.Background(), `SELECT current_user`).Scan(&who); err != nil {
+		t.Fatalf("check the effective role: %v", err)
+	}
+	if who != "svc_scd" {
+		t.Fatalf("the pool runs as %q, not svc_scd; this test would prove nothing about the production role", who)
+	}
+	srv := &server{db: p, tenID: f.tenant, siteID: f.site, applID: f.appliance, legacyBridge: "br-lan"}
+	p3 := newPhase3Auth(iamv2.PMSConfig{MasterEnabled: true, PMSAuthEnabled: true}, srv)
+	if p3 == nil {
+		t.Fatal("the Phase-3 auth arm was not constructed with the flags on")
+	}
+	return p3
 }

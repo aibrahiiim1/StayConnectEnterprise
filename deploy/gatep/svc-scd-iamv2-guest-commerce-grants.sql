@@ -38,6 +38,16 @@ GRANT SELECT, INSERT         ON iam_v2.settlements  TO svc_scd;
 GRANT SELECT, INSERT, UPDATE ON iam_v2.entitlements TO svc_scd;
 GRANT SELECT, INSERT, UPDATE ON iam_v2.sessions     TO svc_scd;
 
+-- SELECT (and only SELECT) on the device bindings. Opening a session fires
+-- iam_v2.p6_session_requires_authorized_binding, a trigger that runs with the WRITER's rights and reads
+-- iam_v2.entitlement_devices to refuse a live session on a device that holds no authorized binding. Without
+-- this the INSERT into iam_v2.sessions fails with "permission denied for table entitlement_devices" — an
+-- error naming a table the handler never mentions, raised by a guard that is doing its job.
+--
+-- The bindings themselves are written by iam_v2.authorize_entitlement_device, granted above; scd reads them
+-- and never writes them directly.
+GRANT SELECT ON iam_v2.entitlement_devices TO svc_scd;
+
 -- NOT granted: any write to internet_packages, its revisions, service plans or
 -- their revisions. A guest buying a package must never be able to change what
 -- the package IS -- the immutable revision pin depends on exactly that.
@@ -57,3 +67,21 @@ GRANT EXECUTE ON FUNCTION iam_v2.p4_grant_quoted_entitlement(uuid, uuid, uuid) T
 GRANT EXECUTE ON FUNCTION iam_v2.p4_mark_purchase_granted(uuid) TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_insert_entitlement(uuid, uuid, uuid, uuid, uuid, uuid, jsonb, uuid, uuid, text, text, timestamptz, uuid) TO svc_scd;
 GRANT EXECUTE ON FUNCTION iam_v2.p4_terminate_live_entitlement_for_subject(uuid, uuid, uuid, uuid, uuid) TO svc_scd;
+
+-- ---- the Entitlement STATE MACHINE ----------------------------------------
+-- iam_v2.apply_entitlement_transition is the ONLY writer of an entitlement's state, and
+-- p3_entitlement_controlled_writer refuses any other route. internal/staygrant calls it to move the freshly
+-- inserted entitlement to ACTIVE with reason GRANT, so a Room Login that reaches this point without EXECUTE
+-- dies with "permission denied for function apply_entitlement_transition" — after the Purchase has been
+-- written, which means the guest is refused at the very last step of a grant that otherwise succeeded.
+--
+-- svc_netd, svc_acctd and svc_pmsd already hold exactly this grant for their own transitions; the guest
+-- grant path is the one that was missed, because it had never been exercised as this role.
+GRANT EXECUTE ON FUNCTION iam_v2.apply_entitlement_transition(uuid, text, timestamptz, text) TO svc_scd;
+
+-- ---- the DEVICE AUTHORIZATION writer --------------------------------------
+-- iam_v2.entitlement_device_authorizations is capability-scoped in the database: nothing writes it except
+-- iam_v2.authorize_entitlement_device, which enforces the per-plan device limit as it inserts. That is the
+-- statement that turns "this guest has an entitlement" into "this laptop may use it", so without EXECUTE the
+-- grant fails one step past the entitlement transition, again after the Purchase is durable.
+GRANT EXECUTE ON FUNCTION iam_v2.authorize_entitlement_device(uuid, uuid, timestamptz) TO svc_scd;

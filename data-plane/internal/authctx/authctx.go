@@ -172,8 +172,11 @@ func (s *Store) IssuePMSTx(ctx context.Context, tx pgx.Tx, g PMSGrant) (string, 
 	// So the fix is a lock, on the row admission already serializes on: from here until commit, no new
 	// occupancy event can be admitted for this interface, which turns "true a moment ago" into "true as of a
 	// point no admission can precede".
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM iam_v2.pms_interface_runtime
-		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 FOR UPDATE`,
+	//
+	// Taken through the scoped helper (migration 0058), not inline: PostgreSQL requires UPDATE as well as
+	// SELECT for a row lock, and this table is the PMS feed's own state. Granting scd UPDATE on it would let
+	// the role being authorised rewrite the feed health it is authorised against.
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.lock_pms_interface_runtime($1,$2,$3)`,
 		g.Tenant, g.Site, g.Interface); err != nil {
 		return "", err
 	}
@@ -341,13 +344,14 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 
 	// (1) Resolve the context's scoped Stay identity WITHOUT locking the context. Presenter scope + one-time +
 	//     unexpired are enforced here (and re-asserted atomically in step 3). We learn only which Stay to lock.
-	var method, stayID string
-	err := tx.QueryRow(ctx, `SELECT ac.method, COALESCE(ac.stay_id::text,'')
+	var method, stayID, ifaceID, profileID string
+	err := tx.QueryRow(ctx, `SELECT ac.method, COALESCE(ac.stay_id::text,''),
+		       COALESCE(ac.pms_interface_id::text,''), COALESCE(ac.post_stay_profile_id::text,'')
 		FROM iam_v2.auth_contexts ac
 		WHERE ac.id=$1 AND ac.tenant_id=$2 AND ac.site_id=$3
 		  AND ac.device_id=$4 AND ac.guest_network_id=$5
 		  AND ac.consumed_at IS NULL AND ac.expires_at > now()`,
-		id, p.Tenant, p.Site, p.Device, p.GuestNetwork).Scan(&method, &stayID)
+		id, p.Tenant, p.Site, p.Device, p.GuestNetwork).Scan(&method, &stayID, &ifaceID, &profileID)
 	// NOTE for anyone adding a method here: step (2) below re-verifies live subject state, and it is written
 	// PER METHOD. A method with no arm gets NO re-verification at all — the context stays usable for its whole
 	// TTL no matter what happens to its subject in the meantime. That is correct for a voucher (the subject is
@@ -371,9 +375,20 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 		// Same lock, same reason, same order as IssuePMSTx — taken before the Stay lock here only because the
 		// Stay id comes from the context row read above, and the runtime row is reached through it. The Stay
 		// lock still precedes every Stay-row condition, so L1 Stay-first is preserved for the Stay itself.
-		if _, lerr := tx.Exec(ctx, `SELECT 1 FROM iam_v2.pms_interface_runtime rt
-			WHERE rt.pms_interface_id = (SELECT s.pms_interface_id FROM iam_v2.stays s WHERE s.id=$1)
-			FOR UPDATE`, stayID); lerr != nil {
+		//
+		// Through the scoped helper (migration 0058) for the same reason as the issue path: a row lock needs
+		// UPDATE, and UPDATE here would let scd rewrite the feed health it is authorised against. The
+		// interface is the one PINNED IN THE CONTEXT, and step (2) below re-verifies that it is still the
+		// Stay's interface, so the row locked is the row the admission serializes on.
+		if _, lerr := tx.Exec(ctx, `SELECT iam_v2.lock_pms_interface_runtime($1,$2,$3::uuid)`,
+			p.Tenant, p.Site, ifaceID); lerr != nil {
+			return Consumed{}, lerr
+		}
+		// L1: the Stay lock itself, taken through the scoped helper before its conditions are tested. The lock
+		// blocks until a concurrent Checkout commits, and the statement below then reads a fresh READ COMMITTED
+		// snapshot — so a departed guest is refused exactly as the combined FOR UPDATE refused them.
+		if _, lerr := tx.Exec(ctx, `SELECT iam_v2.lock_stay($1,$2,$3::uuid)`,
+			p.Tenant, p.Site, stayID); lerr != nil {
 			return Consumed{}, lerr
 		}
 		err := tx.QueryRow(ctx, `SELECT 1
@@ -403,7 +418,7 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 			  -- A feed that has gone away between issue and consume stops the consumption here.
 			  AND iam_v2.p3_feed_authorizes(st.tenant_id, st.site_id, st.pms_interface_id,
 			                                ac.authentication_interface_revision_id, st.occupancy_evidence_at)
-			FOR UPDATE OF st`, id).Scan(&one)
+			`, id).Scan(&one)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return Consumed{}, ErrContextInvalid
@@ -428,6 +443,11 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 	// the context — a profile that is authenticable again for a LATER episode is not this context's subject.
 	if method == "POST_STAY_PIN" {
 		var one int
+		// L1 first here too, keyed by the profile the context pins.
+		if _, lerr := tx.Exec(ctx, `SELECT iam_v2.lock_origin_stay($1,$2,$3::uuid)`,
+			p.Tenant, p.Site, profileID); lerr != nil {
+			return Consumed{}, lerr
+		}
 		err := tx.QueryRow(ctx, `SELECT 1
 			FROM iam_v2.auth_contexts ac
 			JOIN iam_v2.post_stay_profiles psp
@@ -437,7 +457,7 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 			WHERE ac.id=$1
 			  AND st.lifecycle_version IS NOT DISTINCT FROM ac.pinned_lifecycle_version
 			  AND iam_v2.p5_post_stay_authenticable(ac.tenant_id, ac.site_id, ac.post_stay_profile_id)
-			FOR UPDATE OF st`, id).Scan(&one)
+			`, id).Scan(&one)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return Consumed{}, ErrContextInvalid

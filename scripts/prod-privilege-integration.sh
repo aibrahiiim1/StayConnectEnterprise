@@ -82,7 +82,8 @@ done
 
 # Migrations published after the baseline snapshot. 0057 is the one this harness exists to exercise; the
 # others keep the schema matching a current appliance.
-for m in 0056_materialization_readiness 0057_lock_auth_context_offer; do
+for m in 0056_materialization_readiness 0057_lock_auth_context_offer \
+         0058_guest_auth_row_locks; do
   f="$ROOT/data-plane/migrations/$m.up.sql"
   [ -f "$f" ] || continue
   psql_run < "$f" >"$OUT/$m.log" 2>&1 || { echo "  FAIL $m:"; tail -3 "$OUT/$m.log"; exit 1; }
@@ -97,6 +98,20 @@ MSYS_NO_PATHCONV=1 docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STO
 
 have="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM pg_roles WHERE rolname='svc_scd'")"
 [ "${have:-0}" = "1" ] || { echo "  FAIL: svc_scd is not provisioned; this harness exists to exercise it"; exit 1; }
+
+# The full matrix for every table the guest-auth chain touches, printed on every run. A row lock needs
+# UPDATE as well as SELECT, so this is where a missing capability is visible BEFORE the test says
+# "permission denied" — and where an over-broad grant is visible too.
+echo "== svc_scd on the guest-auth chain (select/insert/update) =="
+docker exec "$C" psql -U postgres -d "$DB" -tAqc "
+  SELECT '  ' || rpad(t, 38) ||
+         CASE WHEN has_table_privilege('svc_scd','iam_v2.'||t,'SELECT') THEN 's' ELSE '-' END ||
+         CASE WHEN has_table_privilege('svc_scd','iam_v2.'||t,'INSERT') THEN 'i' ELSE '-' END ||
+         CASE WHEN has_table_privilege('svc_scd','iam_v2.'||t,'UPDATE') THEN 'u' ELSE '-' END
+    FROM unnest(ARRAY['stays','auth_contexts','auth_context_offers','pms_interface_runtime','offer_quotes',
+                      'purchases','entitlements','entitlement_state_transitions',
+                      'entitlement_device_authorizations','sessions','session_entitlement_bindings',
+                      'stay_guests','stay_events']) AS t"
 
 echo "== the privilege model under test =="
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
@@ -114,5 +129,5 @@ export PHASE3_TEST_DSN="postgres://postgres:postgres@127.0.0.1:${PORT}/${DB}?ssl
 # (tenants.slug NOT NULL, among others). Those suites are the DARK harness's job; this one exists solely to
 # exercise the real service role against the real Gate-P grants.
 echo "== go test -run TestIntegration_Phase3Grant_ -tags 'integration prodprivilege' ./cmd/scd =="
-( cd "$ROOT/data-plane" && go test -tags "integration prodprivilege" -run 'TestIntegration_Phase3Grant_' ./cmd/scd/ -count=1 )
+( cd "$ROOT/data-plane" && go test -tags "integration prodprivilege" -run 'TestIntegration_Phase3Grant_' -timeout 15m ./cmd/scd/ -count=1 )
 echo "PROD_PRIVILEGE = PASS"
