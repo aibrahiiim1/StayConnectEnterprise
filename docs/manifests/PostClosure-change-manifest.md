@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `7195e725d5ecca7f2718e89c710e4fa1dffcc624`
-- **Provenance (generation HEAD = inventory_head):** `11c72af110cb33665026a49903adc9368dcc6428`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `1086c2444fbb5892f7ac2e338cef77ea8eac6135`
+- **Provenance (generation HEAD = inventory_head):** `bde32fbe2cf0b5ea0948e08aed0861a3f66e6902`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/grant-offer-lock-privilege`
 - **Remote branch:** `origin/fix/grant-offer-lock-privilege`
 - **Changed files:** 239
@@ -170,7 +170,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_11c72af1.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_bde32fbe.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -247,7 +247,7 @@
 | `scripts/generate-production-baseline.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Regenerate the factory-clean baseline for migration 0050 |
 | `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Give the grant its row lock without giving it the power to rewrite the check |
 | `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Give the privilege tests their own production-like database |
-| `scripts/prod-privilege-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Give the privilege tests their own production-like database |
+| `scripts/prod-privilege-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | The privilege harness needs the TimescaleDB image |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Make the generated blocks describe the appliance that exists |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Point M46 and M48 at the manifest that is actually checked |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
@@ -264,7 +264,7 @@
  cloud-admin/components/nav.tsx                     |   2 +-
  control-plane/internal/activation/activation.go    | 237 +++++++
  control-plane/internal/api/common.go               |  10 +
- .../internal/api/offline_activation_api.go         | 279 +++++++++
+ .../internal/api/offline_activation_api.go         | 279 ++++++++
  control-plane/internal/config/config.go            |   6 +-
  control-plane/internal/http/mtls.go                |  97 ++-
  control-plane/internal/http/mtls_names_test.go     |  81 +++
@@ -390,7 +390,7 @@
  deploy/scripts/install-central-trust.sh            |  76 +++
  deploy/scripts/install-vendor-trust-key.sh         | 102 +++
  deploy/scripts/lib-central-endpoint.sh             | 208 ++++++
- deploy/scripts/provision-fresh-appliance.sh        | 349 +++++++++++
+ deploy/scripts/provision-fresh-appliance.sh        | 349 ++++++++++
  deploy/scripts/vendor-signing-key.sh               | 231 +++++++
  deploy/systemd/stayconnect-ctrlapi.service         |  21 +
  deploy/systemd/stayconnect-scd.service             |  13 +
@@ -406,13 +406,13 @@
  docs/design/Room-Auth-Materialization-Readiness.md | 197 ++++++
  .../PC-0002-complete-delivery-manifest.md          | 159 +++++
  docs/manifests/Phase7-change-manifest.md           | 108 ++--
- docs/manifests/PostClosure-change-manifest.md      | 697 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 699 +++++++++++++++++++++
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 +++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318816 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132326 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42755 bytes
- .../chatgpt/phase-evidence/GIT_STAT_11c72af1.txt   |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 318818 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 132324 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42752 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_bde32fbe.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -458,7 +458,7 @@
  .../(app)/pms-interfaces/synchronization-card.tsx  | 248 ++++++++
  hotel-admin/app/(app)/pms-providers/page.tsx       | 329 ----------
  hotel-admin/app/(app)/service-plans/page.tsx       | 298 +++++++++
- hotel-admin/app/(app)/setup/enrollment/page.tsx    | 244 +++++++-
+ hotel-admin/app/(app)/setup/enrollment/page.tsx    | 244 ++++++-
  hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 ++++++++++++
  hotel-admin/app/(app)/stays/page.tsx               | 277 +++++---
  hotel-admin/components/nav.tsx                     | 171 ++---
@@ -489,11 +489,11 @@
  scripts/generate-production-baseline.sh            |  38 +-
  scripts/phase5-pg-integration.sh                   |  13 +-
  scripts/pmsd-pg-integration.sh                     |  80 +++
- scripts/prod-privilege-integration.sh              |  72 +++
+ scripts/prod-privilege-integration.sh              |  74 +++
  tools/project-state.py                             | 134 +++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 239 files changed, 22041 insertions(+), 2260 deletions(-)
+ 239 files changed, 22045 insertions(+), 2260 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -501,8 +501,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_11c72af1.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_663c80ab.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_11c72af1.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_bde32fbe.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -513,7 +513,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 11c72af1 Delivery: manifest and packs
+HISTORICAL: bde32fbe Delivery: manifest and packs
+HISTORICAL: 1086c244 The privilege harness needs the TimescaleDB image
+HISTORICAL: 86133b4d Delivery: manifest and packs
 HISTORICAL: 7195e725 gofmt: the build tag needs a blank line before package
 HISTORICAL: 7b1a728b Delivery: manifest and packs
 HISTORICAL: 061cdc68 Give the privilege tests their own production-like database
