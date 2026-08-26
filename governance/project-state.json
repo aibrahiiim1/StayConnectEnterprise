@@ -733,7 +733,7 @@
     "pms_feed_connected": true,
     "pms_feed_disconnect_is_intentional": false,
     "room_signin_accepted_to_offer": true,
-    "guest_access_granted_ever": false,
+    "guest_access_granted_ever": true,
     "financial_traffic_ever": false,
     "go_live_performed": false,
     "room_signin_accepted_via": "scd resolve socket only (/v1/phase3/auth/pms/resolve) — portald BYPASSED. This evidence proves the scd resolve path and the offer engine. It does NOT prove the guest-visible portal path.",
@@ -774,11 +774,15 @@
     "materialization_readiness_deployed": true,
     "first_room_login_blocked_fix_status": "FIXED AND DEPLOYED (T0099). The offer-lock fix merged as PR #60 (merge commit 1a5482c8163a593029c701ed4312cfec0a94b8fd) together with the four further capabilities the same chain needs. Migrations 0057 and 0058 are applied on 172.21.60.25, the Gate-P reconcile ran from the merged copy, and scd 0861fd5b631387de62b2b49d699f798d04f6588998be59c9f8f1097065fbace3 is live with rollback scd.bak-gatep0058. What remains is the Product Owner's Room Login retry, which has NOT been performed.",
     "materialization_readiness_deployed_note": "DEPLOYED 2026-08-26 (T0098): migration 0056 applied (schema_migrations head 0056), scd 6e9a815be1f55aa8163c7b75e0e4928de4e5f0a9f6adeba24cf9302a9c87f4e3, edged bd0bc3b8aa4e7d3a3e01f535854d4800386fbf90b5c1d6ddbd72f7e58c18890f, pmsd b34f6ea6a52c99defe02b999e62c5d0d2142aed6886a521e9db313faa55ebaaf, hotel-admin release 20260826-084348.",
-    "first_room_login_performed": false,
+    "first_room_login_performed": true,
     "first_room_login_attempted": true,
     "first_room_login_attempted_note": "2026-08-26T10:23:03Z: the first real guest Room Login VERIFIED correctly (auth_resolutions 11->12, auth_contexts 2->3, one correct package offered) and then FAILED AT THE GRANT with package_not_offered_to_this_context. The reported reason was wrong twice over: it was a PERMISSION error, not an authorisation decision, and the offer lock was only the FIRST of five capabilities svc_scd does not hold. Driving the whole chain as the real service role in CI (scripts/prod-privilege-integration.sh) found the rest: the grant-time linearization lock on iam_v2.pms_interface_runtime, the L1 Stay lock, EXECUTE on apply_entitlement_transition, EXECUTE on authorize_entitlement_device and SELECT on iam_v2.entitlement_devices. Every one is fixed at its authoritative source -- migrations 0057 and 0058 plus the per-service Gate-P files, so a reconcile keeps them -- and proven end to end under SET ROLE svc_scd through Purchase, Entitlement and Session. The retry is NOT performed and requires deployment first.",
     "room_login_privilege_chain_deployed": true,
-    "room_login_privilege_chain_deployed_note": "2026-08-26T17:04Z: svc_scd now holds EXECUTE on iam_v2.lock_auth_context_offer, lock_pms_interface_runtime, lock_stay, lock_origin_stay, apply_entitlement_transition and authorize_entitlement_device, and SELECT on iam_v2.entitlement_devices; it holds NO UPDATE on auth_context_offers, stays or pms_interface_runtime, and PUBLIC cannot execute the lock helpers. Verified on the appliance after the reconcile. PMS remained CONNECTED / IN_SYNC / CONTINUOUS throughout and purchases, entitlements and sessions are all still 0."
+    "room_login_privilege_chain_deployed_note": "2026-08-26T17:04Z: svc_scd now holds EXECUTE on iam_v2.lock_auth_context_offer, lock_pms_interface_runtime, lock_stay, lock_origin_stay, apply_entitlement_transition and authorize_entitlement_device, and SELECT on iam_v2.entitlement_devices; it holds NO UPDATE on auth_context_offers, stays or pms_interface_runtime, and PUBLIC cannot execute the lock helpers. Verified on the appliance after the reconcile. PMS remained CONNECTED / IN_SYNC / CONTINUOUS throughout and purchases, entitlements and sessions are all still 0.",
+    "first_room_login_performed_note": "2026-08-26T22:35:53Z and 22:37:43Z: TWO real guest Room Logins were performed by the Product Owner from one device (192.168.77.139) into rooms 11209 and 11112. Both VERIFIED, both created a Purchase (amount 0, GUEST_SELECTION), an ACTIVE Entitlement, a device authorization and a Session — the privilege chain deployed under T0099 worked. Both then FAILED AT NETWORK ENFORCEMENT: portald abandoned each attempt at its 2500ms budget with scd_unavailable, and both Sessions stayed PENDING_ENFORCEMENT with the nft set empty and no tc class. Neither guest reached the internet. Root cause: the enforcement plane (acctd's shaping producer and netd's network writer) was gated on the unrelated STAYCONNECT_PHASE3_CHECKOUT_GRACE flag AND absent from netd.env and acctd.env entirely.",
+    "guest_access_granted_ever_note": "Entitlements and Sessions have been granted (2 of each, both real, both free stay-included packages at amount 0). NO GUEST HAS EVER REACHED THE INTERNET on this appliance: neither session was ever enforced. No PMS posting, payment or financial traffic has occurred — pms_postings, posting_attempts, posting_outbox, payment_transactions, settlements and accounting_records are all still 0.",
+    "network_enforcement_plane_live": false,
+    "network_enforcement_plane_live_note": "FIXED IN CODE, NOT YET DEPLOYED at this commit. The plane now follows the Phase-3 master flag, the unit installer refuses a guest surface without it, and deploy/scripts/enable-phase3-enforcement-plane.sh configures netd and acctd coherently including the producer uid netd authenticates by SO_PEERCRED."
   },
   "latest_transition_id": "T0099",
   "phase3_delivery_evidence": {
@@ -1161,7 +1165,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "411b142b90db88b0ca3b22696c5d513db4e3563f",
+    "head": "2430fff2251058b67c549d836b68555ee7127529",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."
