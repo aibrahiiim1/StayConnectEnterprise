@@ -1,0 +1,64 @@
+{
+  "transition_id": "T0098",
+  "seq": 98,
+  "timestamp": "2026-08-26T08:44:53Z",
+  "timestamp_derivation": "Author timestamp of the introducing commit, read back from git, per T0091.",
+  "record_type": "MATERIALIZATION_READINESS_DEPLOYED_AND_LIVE_ACCEPTED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_PMS_FEED_CONNECTED_FRESH_SYNC_VERIFIED_FIRST_ROOM_LOGIN_BLOCKED_ON_MATERIALIZATION_READINESS",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_PMS_FEED_CONNECTED_FRESH_SYNC_VERIFIED_MATERIALIZATION_READINESS_DEPLOYED_AWAITING_FIRST_ROOM_LOGIN_AUTHORIZATION",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": true,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision; deploys the fix merged as PR #56 under an explicit deployment authorization.",
+  "transition_accepted": true,
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-26: 'Deploy Room Auth materialization fix to .25 - PRE-LIVE acceptance', continued as 'Continue the authorized PRE-LIVE acceptance now that the PO restored Protel.'",
+  "deployed": {
+    "appliance": "172.21.60.25 (Fresh Production, PRE-LIVE)",
+    "built_from": "master fa4246b505811bcd29a42daf377c7c80754e228c",
+    "migration": "0056_materialization_readiness APPLIED; schema_migrations head 0056; index se_pending_claimable present",
+    "scd_sha256": "6e9a815be1f55aa8163c7b75e0e4928de4e5f0a9f6adeba24cf9302a9c87f4e3",
+    "edged_sha256": "bd0bc3b8aa4e7d3a3e01f535854d4800386fbf90b5c1d6ddbd72f7e58c18890f",
+    "pmsd_sha256": "b34f6ea6a52c99defe02b999e62c5d0d2142aed6886a521e9db313faa55ebaaf",
+    "hotel_admin_bundle_sha256": "1a57ba551f63baa53f7399c36139948fe3eb1fcc5f017b2ee10a2ad586f92297",
+    "hotel_admin_release": "/opt/stayconnect/releases/hotel-admin/20260826-084348",
+    "hotel_admin_build_flags": "NEXT_PUBLIC_PHASE2_ADMIN=1 NEXT_PUBLIC_PHASE3_ADMIN=1, verified inlined as enabled:!0 for pms-stays and commercial-packages BEFORE deployment",
+    "rollback": "/opt/stayconnect/bin/scd.bak-mat0056, edged.bak-mat0056, pmsd.bak-mat0056, and hotel-admin release 20260825-224224",
+    "not_deployed": "portald was not rebuilt or restarted."
+  },
+  "live_acceptance": {
+    "automatic_reconnect": "OBSERVED ONLY. No manual Full Resync was triggered. The Product Owner restored Protel and pmsd reconnected and resynced on its own, publishing generation 138 at 2026-08-26T08:34:04.147678Z.",
+    "feed_state": "CONNECTED / IN_SYNC / CONTINUOUS, sync_stage COMPLETE, no open generation (138=138).",
+    "materialization_ready": true,
+    "claimable_pending_backlog": 0,
+    "room_auth_ready": true,
+    "records": "589 received, 0 skipped. Roster 692 Stays, 576 IN_HOUSE.",
+    "counters": "purchases=0, entitlements=0, sessions=0",
+    "financial": "pms_postings=0, posting_attempts=0, payment_transactions=0",
+    "room_login": "NOT PERFORMED. No guest authentication was attempted."
+  },
+  "not_observed_live": "The APPLYING GUEST LIST -> COMPLETE transition was NOT observed on the appliance. Observing it requires a sync to be in flight, and triggering one was explicitly out of scope. The behaviour is covered by four UI tests and the deployed bundle contains both the effective-stage logic and the materialization_ready field; the live transition itself remains unobserved and is recorded as such rather than as verified.",
+  "preceding_incident": "Between 2026-08-26T00:57:33Z and roughly 08:34Z the interface was in a reconnect loop: 247 attempts, PROTOCOL_LINK_ENDED mid-roster about every 25 seconds, 94 generations allocated and abandoned (resync_generation_seq 115 against published 21), leaving 14,563 orphaned pending events. It predated and was unrelated to this deployment, and it resolved without intervention when the Product Owner restored Protel. It incidentally validated the abandoned-generation exclusion: ALL 14,563 rows sat at generations above published, so the deployed predicate blocked on zero of them. Had the readiness term been written as 'all PENDING' - the form first proposed in the design spike - this appliance would have been permanently unable to authorise any guest.",
+  "privilege_finding": "svc_scd holds no SELECT on iam_v2.pms_interface_runtime or iam_v2.stay_events. The production path is unaffected: scd calls iam_v2.issue_or_return_pms_context, which is SECURITY DEFINER and reaches both as its owner - verified live. The Go helpers in internal/authctx run as the invoker and fail for svc_scd, but they failed identically BEFORE this change (the pre-existing direct p3_feed_authorizes call errors the same way), so no new failure mode was introduced. The one production caller, internal/poststay/convert.go, is NOT PROVEN either safe or exercised for a PMS-method context and needs its own review. No privilege was widened: svc_scd still holds no UPDATE on pms_interface_runtime.",
+  "boundaries_observed": [
+    "No manual Full Resync. No Room Login. No Purchase, Entitlement or Session.",
+    "No PMS posting, payment, reversal, FX or Go-Live.",
+    "Protel was restored by the Product Owner; the agent made no PMS configuration or connection change.",
+    "portald untouched. PR #24 untouched."
+  ],
+  "blocker": "None technical. First real guest Room Login awaits a separate Product-Owner authorization.",
+  "next": "Product-Owner decision on the first real guest Room Login. Separately tracked: the internal/poststay ConsumeTx privilege question, and a retention lifecycle for GO_UNKNOWN_STAY rows."
+}
