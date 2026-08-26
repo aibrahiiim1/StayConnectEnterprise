@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `fdddb29da5a44a0b531052d93fcabb4accc48e98`
-- **Provenance (generation HEAD = inventory_head):** `fb7376c24d3e91b3bda2d87ce567cb5921a6e28e`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `29a2c2f3efb0577abb878002dfd4be272f942df7`
+- **Provenance (generation HEAD = inventory_head):** `155a3516ac5d1fdb702221962f3f663afe168752`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/materialization-readiness`
 - **Remote branch:** `origin/fix/materialization-readiness`
 - **Changed files:** 234
@@ -43,7 +43,7 @@
 | `data-plane/cmd/edged/resources_phase3.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `data-plane/cmd/edged/resources_phase3_full_resync.go` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Ask for a resync through a function, not a table grant |
 | `data-plane/cmd/edged/resources_phase3_interface_authoring.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Let an operator actually set max_auth_cache_age_seconds |
-| `data-plane/cmd/edged/resources_phase3_interfaces.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Close the Room-auth materialization race at both issue and grant |
+| `data-plane/cmd/edged/resources_phase3_interfaces.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Land the health SELECT change, and satisfy the terminal-row guards |
 | `data-plane/cmd/edged/resources_providers.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `data-plane/cmd/edged/resources_site.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Unwedge the PMS link, judge freshness by feed health, and accept one verification value |
 | `data-plane/cmd/keybootstrap/main.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Fix four faults found on the first Fresh Production bring-up |
@@ -75,7 +75,7 @@
 | `data-plane/internal/authctx/authctx.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Close the Room-auth materialization race at both issue and grant |
 | `data-plane/internal/authctx/authctx_integration_test.go` | MODIFIED | `M` | tests/tooling | RUNTIME | rollback RESTORES prior content | Unwedge the PMS link, judge freshness by feed health, and accept one verification value |
 | `data-plane/internal/authctx/freshness_feed_health_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | A dead socket is not a dead mirror |
-| `data-plane/internal/authctx/materialization_race_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Seed the race tests against the real constraints, and repair the harnesses |
+| `data-plane/internal/authctx/materialization_race_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Land the health SELECT change, and satisfy the terminal-row guards |
 | `data-plane/internal/authctx/mirror_trust_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Teach the integration harnesses about migration 0053 |
 | `data-plane/internal/checkout/checkout.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the Gate-P reconcile atomic, exact-sourced, and inclusive of svc_pmsd |
 | `data-plane/internal/checkout/grace_lock_boundary_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Make the Gate-P reconcile atomic, exact-sourced, and inclusive of svc_pmsd |
@@ -167,8 +167,8 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/phase-evidence/GIT_STAT_155a3516.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/GIT_STAT_fb7376c2.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
@@ -280,7 +280,7 @@
  data-plane/cmd/edged/resources_phase3.go           |  53 +-
  .../cmd/edged/resources_phase3_full_resync.go      | 135 +++++
  .../edged/resources_phase3_interface_authoring.go  | 208 ++++++-
- .../cmd/edged/resources_phase3_interfaces.go       | 367 +++++++++++-
+ .../cmd/edged/resources_phase3_interfaces.go       | 375 +++++++++++-
  data-plane/cmd/edged/resources_providers.go        | 386 +-----------
  data-plane/cmd/edged/resources_site.go             | 124 +++-
  data-plane/cmd/keybootstrap/main.go                |  16 +-
@@ -312,7 +312,7 @@
  data-plane/internal/authctx/authctx.go             |  96 +--
  .../internal/authctx/authctx_integration_test.go   |  37 +-
  .../freshness_feed_health_integration_test.go      | 209 +++++++
- .../materialization_race_integration_test.go       | 327 ++++++++++
+ .../materialization_race_integration_test.go       | 334 +++++++++++
  .../authctx/mirror_trust_integration_test.go       | 245 ++++++++
  data-plane/internal/checkout/checkout.go           |  13 +-
  .../grace_lock_boundary_integration_test.go        | 146 +++++
@@ -398,14 +398,14 @@
  docs/design/Room-Auth-Materialization-Readiness.md | 197 ++++++
  .../PC-0002-complete-delivery-manifest.md          | 159 +++++
  docs/manifests/Phase7-change-manifest.md           | 108 ++--
- docs/manifests/PostClosure-change-manifest.md      | 663 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 665 +++++++++++++++++++++
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 ++++++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 +++++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317591 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 317590 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 130946 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42590 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_155a3516.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
- .../chatgpt/phase-evidence/GIT_STAT_fb7376c2.txt   |   4 +
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
  .../governance/decision-register.json              |  33 +
@@ -483,7 +483,7 @@
  tools/project-state.py                             |  69 ++-
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-project-state.sh                    |  12 +-
- 234 files changed, 21390 insertions(+), 2251 deletions(-)
+ 234 files changed, 21407 insertions(+), 2251 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -491,8 +491,8 @@
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-D  exports/chatgpt/phase-evidence/GIT_STAT_14de337b.txt
-A  exports/chatgpt/phase-evidence/GIT_STAT_fb7376c2.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_155a3516.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_fb7376c2.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -503,7 +503,9 @@ M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: fb7376c2 Delivery: manifest and packs
+HISTORICAL: 155a3516 Delivery: manifest and packs
+HISTORICAL: 29a2c2f3 Land the health SELECT change, and satisfy the terminal-row guards
+HISTORICAL: 9ae29334 Delivery: manifest and packs
 HISTORICAL: fdddb29d Seed the race tests against the real constraints, and repair the harnesses
 HISTORICAL: 40834d46 Delivery: manifest and packs
 HISTORICAL: 1ef21941 Close the Room-auth materialization race at both issue and grant
