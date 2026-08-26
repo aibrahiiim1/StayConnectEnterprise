@@ -109,6 +109,10 @@ docker exec "$C" psql -U postgres -d "$DB" -tAqc \
 
 PORT="$(docker inspect -f '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$C")"
 export PHASE3_TEST_DSN="postgres://postgres:postgres@127.0.0.1:${PORT}/${DB}?sslmode=disable"
-echo "== go test -tags 'integration prodprivilege' ./cmd/scd =="
-( cd "$ROOT/data-plane" && go test -tags "integration prodprivilege" -run Integration ./cmd/scd/ -count=1 )
+# ONLY the prodprivilege tests. -run Integration pulled in every other cmd/scd integration suite, whose
+# fixtures build their own schema rather than the baseline and so fail on constraints the real schema has
+# (tenants.slug NOT NULL, among others). Those suites are the DARK harness's job; this one exists solely to
+# exercise the real service role against the real Gate-P grants.
+echo "== go test -run TestIntegration_Phase3Grant_ -tags 'integration prodprivilege' ./cmd/scd =="
+( cd "$ROOT/data-plane" && go test -tags "integration prodprivilege" -run 'TestIntegration_Phase3Grant_' ./cmd/scd/ -count=1 )
 echo "PROD_PRIVILEGE = PASS"
