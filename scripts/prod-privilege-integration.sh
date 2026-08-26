@@ -28,19 +28,28 @@ echo "== disposable TimescaleDB PG16 =="
 docker run -d --name "$C" -p 0:5432 -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB="$DB" "${CLEANROOM_IMAGE:-timescale/timescaledb:2.16.1-pg16}" >/dev/null
 for _ in $(seq 1 60); do docker exec "$C" pg_isready -U postgres >/dev/null 2>&1 && break; sleep 1; done
 
+# ROLES BEFORE THE BASELINE. The baseline contains unconditional GRANT ... TO svc_scd statements, so applying
+# it against a database with no service roles fails outright. This is the same order the factory-clean
+# verifier uses: roles, then the baseline, then ownership and grants.
+echo "== Gate-P roles =="
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1      < "$ROOT/deploy/gatep/gatep-roles.sql" >/tmp/prodpriv-roles.log 2>&1; then
+  echo "GATE-P ROLES FAILED:"; tail -15 /tmp/prodpriv-roles.log; exit 1
+fi
+echo "  roles created"
+
 echo "== factory-clean baseline =="
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "CREATE TABLE IF NOT EXISTS public.schema_migrations(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now());" >/dev/null
 if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
      < "$ROOT/data-plane/migrations/baseline/0000_production_baseline.sql" >/tmp/prodpriv-baseline.log 2>&1; then
-  echo "BASELINE FAILED TO APPLY:"; tail -20 /tmp/prodpriv-baseline.log; exit 1
+  echo "BASELINE FAILED TO APPLY:"; grep -iE "^ERROR|^psql:" /tmp/prodpriv-baseline.log | tail -5; tail -5 /tmp/prodpriv-baseline.log; exit 1
 fi
 
 # THE REAL GATE-P CHAIN, in the order production applies it: roles, then ownership, then grants. Ownership
 # matters here — it is what makes the grants mean anything, and it is precisely what the DARK harness must not
 # have.
-echo "== Gate-P roles, ownership and grants =="
-for f in gatep-roles.sql gatep-iam-roles.sql gatep-iam-ownership.sql gatep-grants.sql \
+echo "== Gate-P ownership and grants =="
+for f in gatep-iam-roles.sql gatep-iam-ownership.sql gatep-grants.sql \
          svc-edged-phase345-admin-grants.sql; do
   [ -f "$ROOT/deploy/gatep/$f" ] || continue
   if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
