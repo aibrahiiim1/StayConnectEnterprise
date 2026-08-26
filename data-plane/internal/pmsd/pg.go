@@ -473,19 +473,3 @@ func (r *pgRepo) UpdateSyncStage(ctx context.Context, u StageUpdate) error {
 		u.TenantID, u.SiteID, u.PMSInterfaceID, u.ExpectedGeneration,
 		string(u.Stage), u.At, u.RecordsReceived, u.RecordsSkipped, u.FailureCode, u.InHouseCount)
 }
-
-// InHouseCount counts the Stays this interface currently holds IN_HOUSE.
-//
-// Deliberately NOT guarded by the runtime generation: it is a read, it feeds a display field, and a worker
-// that has just lost ownership reporting one last count is harmless. A nil return means "we could not count",
-// which the UI renders as absent rather than as zero — a zero here would read as "the sync found nobody".
-func (r *pgRepo) InHouseCount(ctx context.Context, ax axisBase) *int64 {
-	var n int64
-	if err := r.pool.QueryRow(ctx,
-		`SELECT count(*) FROM iam_v2.stays
-		  WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 AND status='IN_HOUSE'`,
-		ax.TenantID, ax.SiteID, ax.PMSInterfaceID).Scan(&n); err != nil {
-		return nil
-	}
-	return &n
-}

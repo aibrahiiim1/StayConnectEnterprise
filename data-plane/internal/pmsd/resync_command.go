@@ -59,7 +59,9 @@ type StageUpdate struct {
 	RecordsReceived *int64
 	RecordsSkipped  *int64
 	FailureCode     string
-	// InHouseCount is stamped only at COMPLETE, so the number an operator reads is what that sync produced
-	// rather than what the table happens to hold when they open the page.
+	// InHouseCount is NO LONGER SET BY ANYTHING. It was stamped at the publish barrier, which is before the
+	// applier writes the new roster, so it reported the previous one. The field and its column survive only
+	// so a rollback to the prior binary finds the shape it expects; the write path leaves it nil and
+	// UpdateSyncStage COALESCEs it away.
 	InHouseCount *int64
 }

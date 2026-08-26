@@ -157,6 +157,27 @@ func (s *Store) IssuePMSTx(ctx context.Context, tx pgx.Tx, g PMSGrant) (string, 
 	//
 	// It is still revalidated HERE as well as in the function, so a context that has become ineligible at the
 	// moment of issue is never persisted.
+	// THE LINEARIZATION POINT. Taken AFTER the Stay lock, preserving the L1 Stay-first order.
+	//
+	// p3_feed_authorizes is STABLE and this transaction is READ COMMITTED, so evaluating it proves only that
+	// the roster was materialized as of that statement's snapshot. A concurrent pmsd admission can commit a
+	// new PENDING occupancy event immediately afterwards and this transaction can still commit — authorising
+	// on a snapshot that predates a fact already durable. Demonstrated against PostgreSQL 16: auth predicate
+	// true at T, admission committed at T+3s, auth committed at T+8s, with the pending row never observed.
+	//
+	// SERIALIZABLE does not close it. This transaction reads stay_events and writes auth_contexts while
+	// admission writes stay_events and reads nothing we wrote, so SSI sees no dangerous cycle and aborts
+	// nobody — also measured, both transactions committed cleanly.
+	//
+	// So the fix is a lock, on the row admission already serializes on: from here until commit, no new
+	// occupancy event can be admitted for this interface, which turns "true a moment ago" into "true as of a
+	// point no admission can precede".
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM iam_v2.pms_interface_runtime
+		WHERE tenant_id=$1 AND site_id=$2 AND pms_interface_id=$3 FOR UPDATE`,
+		g.Tenant, g.Site, g.Interface); err != nil {
+		return "", err
+	}
+
 	err := tx.QueryRow(ctx, `SELECT st.lifecycle_version, st.occupancy_evidence_version
 		FROM iam_v2.stays st
 		WHERE st.tenant_id=$1 AND st.site_id=$2 AND st.pms_interface_id=$3 AND st.id=$4
@@ -343,6 +364,18 @@ func (s *Store) ConsumeTx(ctx context.Context, tx pgx.Tx, id string, p Presenter
 	//     Reinstatement / evidence replacement, which acquire the same Stay lock before mutating it.
 	if method == "PMS" {
 		var one int
+		// GRANT-TIME LINEARIZATION. A PMS Auth Context lives for minutes, so gating only issuance leaves the
+		// entire window between issue and grant unguarded: a GO can be admitted, still be unapplied, and the
+		// guest can redeem a context that was perfectly valid when minted.
+		//
+		// Same lock, same reason, same order as IssuePMSTx — taken before the Stay lock here only because the
+		// Stay id comes from the context row read above, and the runtime row is reached through it. The Stay
+		// lock still precedes every Stay-row condition, so L1 Stay-first is preserved for the Stay itself.
+		if _, lerr := tx.Exec(ctx, `SELECT 1 FROM iam_v2.pms_interface_runtime rt
+			WHERE rt.pms_interface_id = (SELECT s.pms_interface_id FROM iam_v2.stays s WHERE s.id=$1)
+			FOR UPDATE`, stayID); lerr != nil {
+			return Consumed{}, lerr
+		}
 		err := tx.QueryRow(ctx, `SELECT 1
 			FROM iam_v2.stays st
 			JOIN iam_v2.auth_contexts ac

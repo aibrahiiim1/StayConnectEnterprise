@@ -292,8 +292,12 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 	}
 	s.resyncing = false
 	s.synced = true
+	// last_sync_in_house_count is NO LONGER STAMPED. It was written here, at the publish barrier, before the
+	// applier had written a single record of the new roster — so it reported the roster this sync REPLACED.
+	// On the live PRE-LIVE sync it read 461 beside a live 595 on the same screen. The column stays in the
+	// schema for rollback; nothing writes it and nothing reads it.
 	got := s.received
-	s.stage(StageComplete, StageUpdate{RecordsReceived: &got, InHouseCount: s.w.repo.InHouseCount(s.ctx, s.ax())})
+	s.stage(StageComplete, StageUpdate{RecordsReceived: &got})
 	return nil
 }
 func (s *workerSink) OnDisconnected(at time.Time, code Code) error {

@@ -633,6 +633,11 @@ const (
 	// one state where local Stay data is genuinely inconsistent rather than merely stale. Brief and
 	// self-clearing; the operator needs to know it is temporary, not investigate it.
 	roomAuthResyncInFlight = "RESYNC_IN_FLIGHT"
+
+	// THE GUEST LIST IS ARRIVING, not absent. Distinct from NOT_IN_SYNC on purpose: the feed is healthy and a
+	// generation is published, but the applier has not finished writing it into iam_v2.stays yet, so Room
+	// sign-in is briefly and correctly closed. Seconds, not an outage, and the operator should be told which.
+	roomAuthMaterializing = "MATERIALIZATION_BEHIND"
 )
 
 type interfaceHealth struct {
@@ -687,14 +692,15 @@ type interfaceHealth struct {
 	// the counts are real: RecordsReceived is what has actually been staged under the open generation, and
 	// there is deliberately no total, percentage or remaining count beside it, because FIAS provides no total
 	// before DE and every such number would be invented.
-	SyncStage         string     `json:"sync_stage,omitempty"`
-	SyncStageAt       *time.Time `json:"sync_stage_at,omitempty"`
-	RecordsReceived   int64      `json:"sync_records_received"`
-	RecordsSkipped    int64      `json:"sync_records_skipped"`
-	SyncFailureCode   string     `json:"sync_failure_code,omitempty"`
-	LastSyncInHouse   *int64     `json:"last_sync_in_house_count,omitempty"`
-	ResyncRequestedBy string     `json:"resync_command_reason,omitempty"`
-	ResyncCommandAt   *time.Time `json:"resync_command_requested_at,omitempty"`
+	MaterializationReady bool       `json:"materialization_ready"`
+	SyncStage            string     `json:"sync_stage,omitempty"`
+	SyncStageAt          *time.Time `json:"sync_stage_at,omitempty"`
+	RecordsReceived      int64      `json:"sync_records_received"`
+	RecordsSkipped       int64      `json:"sync_records_skipped"`
+	SyncFailureCode      string     `json:"sync_failure_code,omitempty"`
+	LastSyncInHouse      *int64     `json:"last_sync_in_house_count,omitempty"`
+	ResyncRequestedBy    string     `json:"resync_command_reason,omitempty"`
+	ResyncCommandAt      *time.Time `json:"resync_command_requested_at,omitempty"`
 
 	// Backlog is the ingestion queue: events admitted but not yet applied, and how old the oldest is. A
 	// backlog that is merely large is a busy morning; a backlog whose OLDEST item is hours old is a stuck
@@ -787,7 +793,7 @@ func (s *server) interfaceHealthRow(ctx context.Context, id string) (interfaceHe
 		&h.Sync, &h.ResyncRequestedAt, &h.ResyncStartedAt, &h.LastCompleteSyncAt, &h.LastSyncFailureCode,
 		&h.InHouseStays, &h.LastStayEvent, &h.PendingEvents, &h.ReviewEvents, &h.OldestPendingAt,
 		&h.SyncStage, &h.SyncStageAt, &h.RecordsReceived, &h.RecordsSkipped, &h.SyncFailureCode,
-		&h.LastSyncInHouse, &h.ResyncRequestedBy, &h.ResyncCommandAt,
+		&h.MaterializationReady, &h.ResyncRequestedBy, &h.ResyncCommandAt,
 		&h.RoomAuthReason)
 	h.RoomAuthReady = err == nil && h.RoomAuthReason == ""
 	return h, err

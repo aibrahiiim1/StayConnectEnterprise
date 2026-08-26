@@ -1030,9 +1030,20 @@ BEGIN
      AND st.occupancy_clock_suspect IS NOT TRUE
      AND st.occupancy_evidence_version > 0
      AND st.occupancy_revision_id = p_revision
-     -- Feed health + the freshness ceiling, judged against the locked tuple's own evidence timestamp.
-     AND iam_v2.p3_feed_authorizes(p_tenant, p_site, p_interface, p_revision, st.occupancy_evidence_at)
    FOR UPDATE OF st;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
+  END IF;
+
+  -- THE LINEARIZATION POINT, after the Stay lock so L1 Stay-first is preserved. The same row pmsd's admission
+  -- locks, so no occupancy event can be admitted between the check below and this transaction's commit.
+  PERFORM 1 FROM iam_v2.pms_interface_runtime rt
+    WHERE rt.tenant_id=p_tenant AND rt.site_id=p_site AND rt.pms_interface_id=p_interface
+    FOR UPDATE;
+
+  PERFORM 1 FROM iam_v2.stays st
+   WHERE st.id = p_stay
+     AND iam_v2.p3_feed_authorizes(p_tenant, p_site, p_interface, p_revision, st.occupancy_evidence_at);
   IF NOT FOUND THEN
     RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
   END IF;
@@ -1664,6 +1675,16 @@ CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interfac
        --     the caller presented.
        AND rt.continuity_status = 'CONTINUOUS'
        AND rt.pinned_revision_id = p_revision
+       -- (2b) MATERIALIZATION READINESS, both branches. Mirrors the applier's claim predicate exactly, so
+       --      rows it can never consume (an abandoned or unpublished generation) do not block forever.
+       AND NOT EXISTS (
+             SELECT 1 FROM iam_v2.stay_events se
+              WHERE se.tenant_id = rt.tenant_id
+                AND se.site_id = rt.site_id
+                AND se.pms_interface_id = rt.pms_interface_id
+                AND se.processing_status = 'PENDING'
+                AND (se.admission_kind = 'LIVE'
+                     OR se.resync_generation <= rt.published_resync_generation))
        -- (3) an absolute ceiling: one full resync cadence plus the heartbeat allowance, so a Stay the PMS has
        --     silently stopped carrying cannot authorise forever on a feed that is healthy for other guests.
        --     An explicit max_auth_cache_age_seconds overrides it where an operator has chosen one.
@@ -10659,6 +10680,13 @@ CREATE UNIQUE INDEX se_live_identity ON iam_v2.stay_events USING btree (tenant_i
 
 --
 -- Name: se_resync_identity; Type: INDEX; Schema: iam_v2; Owner: -
+--
+
+CREATE INDEX se_pending_claimable ON iam_v2.stay_events USING btree (tenant_id, site_id, pms_interface_id, admission_kind, resync_generation) WHERE (processing_status = 'PENDING'::text);
+
+
+--
+-- Name: se_pending_claimable; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
 CREATE UNIQUE INDEX se_resync_identity ON iam_v2.stay_events USING btree (tenant_id, site_id, pms_interface_id, resync_generation, external_event_identity) WHERE (admission_kind = 'RESYNC'::text);

@@ -873,7 +873,12 @@ export type PmsInterfaceHealth = {
   // would be invented by the client. sync_records_received is a real running count of records staged so far.
   sync_stage?: string; sync_stage_at?: string | null;
   sync_records_received?: number; sync_records_skipped?: number;
-  sync_failure_code?: string; last_sync_in_house_count?: number | null;
+  sync_failure_code?: string;
+  // Two DIFFERENT facts. sync_stage=COMPLETE means a generation was published; materialization_ready means
+  // the applier has finished writing it into the Stay tables. The UI renders the effective state from both.
+  // last_sync_in_house_count is gone: it was stamped at the publish barrier and described the roster the sync
+  // replaced, contradicting the live figure on the same screen.
+  materialization_ready?: boolean;
   resync_command_reason?: string; resync_command_requested_at?: string | null;
 };
 
