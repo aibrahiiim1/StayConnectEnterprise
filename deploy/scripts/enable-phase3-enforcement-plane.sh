@@ -35,7 +35,7 @@ producer_uid="$(id -u "$producer_user" 2>/dev/null || true)"
 [ -n "$producer_uid" ] || die "cannot resolve a uid for acctd's user '$producer_user'"
 say "acctd runs as $producer_user (uid $producer_uid) — that is the only producer netd will accept"
 
-changed=()
+changed=""
 
 # set_kv writes KEY=VALUE into an env file exactly once, replacing any existing line for that key.
 set_kv() {
@@ -54,7 +54,7 @@ set_kv() {
   printf '%s=%s\n' "$key" "$value" >> "$tmp"
   install -m 0640 -o root -g stayconnect "$tmp" "$path"
   rm -f "$tmp"
-  case " ${changed[*]-} " in *" $file "*) ;; *) changed+=("$file");; esac
+  case " $changed " in *" $file "*) ;; *) changed="$changed $file";; esac
 }
 
 set_kv netd.env  STAYCONNECT_PHASE3_MASTER true
@@ -65,24 +65,37 @@ set_kv acctd.env STAYCONNECT_PHASE3_MASTER true
 # checker would refuse.
 bash "$(dirname "$0")/check-phase3-enforcement-plane.sh" "$ETC"
 
-if [ "${#changed[@]-0}" = "0" ]; then
-  say "no configuration change was needed"
-  exit 0
-fi
 if [ "$APPLY" != "1" ]; then
   say "APPLY=0: nothing was written and nothing was restarted"
   exit 0
 fi
 
-# RESTART ONLY WHAT CHANGED, and netd before acctd: netd must be ready to accept a plan before the producer
-# starts submitting one, otherwise the first tick after the restart is a refusal in the log for no reason.
-for f in netd.env acctd.env; do
-  case " ${changed[*]} " in
-    *" $f "*)
-      svc="stayconnect-${f%.env}"
-      say "restarting $svc"
-      systemctl restart "$svc"
-      ;;
-  esac
+# RESTART WHAT IS RUNNING STALE CONFIGURATION, which is not the same question as "did this run change a file".
+#
+# A daemon reads its environment once, at start. So the thing that decides whether it needs restarting is
+# whether it started BEFORE its env file was last written — by this run, by a previous half-finished run, or by
+# an operator's editor. Keying the restart to "did I just change something" leaves the worst case untouched: a
+# file that was already correct, in front of a process that has never read it.
+needs_restart() { # needs_restart <env-file> <unit>
+  local envfile="$ETC/$1" unit="$2" started env_mtime
+  systemctl is-active --quiet "$unit" || return 0
+  started="$(systemctl show -p ActiveEnterTimestamp --value "$unit" 2>/dev/null)"
+  [ -n "$started" ] || return 0
+  started="$(date -d "$started" +%s 2>/dev/null || echo 0)"
+  env_mtime="$(stat -c %Y "$envfile" 2>/dev/null || echo 0)"
+  [ "$env_mtime" -ge "$started" ]
+}
+
+# netd before acctd: netd must be ready to accept a plan before the producer starts submitting one, or the
+# first tick after the restart is a refusal in the log for no reason.
+restarted=0
+for pair in "netd.env stayconnect-netd" "acctd.env stayconnect-acctd"; do
+  set -- $pair
+  if needs_restart "$1" "$2"; then
+    say "restarting $2 (running configuration predates $ETC/$1)"
+    systemctl restart "$2"
+    restarted=1
+  fi
 done
+[ "$restarted" = "1" ] || say "both daemons are already running the current configuration"
 say "enforcement plane enabled"
