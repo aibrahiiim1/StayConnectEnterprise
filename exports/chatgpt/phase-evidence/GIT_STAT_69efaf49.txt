@@ -1,4 +1,0 @@
-commit 69efaf49c7aa5695c4827ff370662e57bcd88a3e
-Date:   Thu Aug 27 03:59:08 2026 +0300
-
-    A handover is not a teardown
