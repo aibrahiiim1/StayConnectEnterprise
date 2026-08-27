@@ -1369,3 +1369,59 @@ func (f *fakeTC) hasForwarding(bridge string, minor int) bool {
 	defer f.mu.Unlock()
 	return f.forwarding[bridge][minor]
 }
+
+// A HANDOVER MUST NOT TAKE THE NEW OWNER OFFLINE.
+//
+// One address, two sessions in one plan: the older is torn down, the newer is entitled. Teardown works by
+// address, so the naive order revokes the element and deletes the class that the surviving session is about to
+// be given — and the next pass re-creates both with a fresh generation. On the appliance that produced a guest
+// flickering offline once a second and an accounting series that restarted every tick.
+func TestHandoverLeavesTheNewOwnersKernelStateAlone(t *testing.T) {
+	const handoverIP = "10.0.0.44"
+	tc := newFakeTC()
+	p := liveWriter(tc)
+	gate := newFakeGate()
+	p.gate = gate
+
+	// The newer session is already provisioned and online at this address.
+	older := shapeplan.Session{SessionID: "s-older", DeviceID: "dev", IP: handoverIP, Bridge: "br-guest",
+		Entitled: false, EndReason: "SUPERSEDED_ON_ADDRESS"}
+	newer := shapeplan.Session{SessionID: "s-newer", DeviceID: "dev", IP: handoverIP, Bridge: "br-guest",
+		DownKbps: 9000, UpKbps: 4000, Entitled: true}
+
+	if _, err := p.submit(context.Background(), envelope(1, newer), time.Now()); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	if !gate.isAuthorized("br-guest", handoverIP) {
+		t.Fatal("the new owner was not authorized by the first pass")
+	}
+	epochBefore := p.epochs[classKey("br-guest", "s-newer")]
+	if epochBefore == 0 {
+		t.Fatal("the new owner has no accounting generation")
+	}
+
+	// Now the plan carries BOTH: the superseded session and its successor.
+	res, err := p.submit(context.Background(), envelope(2, older, newer), time.Now())
+	if err != nil {
+		t.Fatalf("handover pass: %v", err)
+	}
+	if res.Failed != 0 {
+		t.Fatalf("a handover reported failures: %+v", res.Problems)
+	}
+	if !gate.isAuthorized("br-guest", handoverIP) {
+		t.Fatal("the handover revoked the surviving session's packet authorization")
+	}
+	if fwd, err := tc.SessionForwarding(context.Background(), "br-guest", net.ParseIP(handoverIP)); err != nil || !fwd {
+		t.Fatalf("the handover deleted the surviving session's class (fwd=%v err=%v)", fwd, err)
+	}
+	if got := p.epochs[classKey("br-guest", "s-newer")]; got != epochBefore {
+		t.Fatalf("the surviving session's accounting generation changed %d -> %d across a handover: its "+
+			"counter series was restarted for a teardown that was not its own", epochBefore, got)
+	}
+	if _, held := p.classes[classKey("br-guest", "s-older")]; held {
+		t.Fatal("the superseded session is still recorded as holding a managed class")
+	}
+	if res.TornDown != 1 {
+		t.Fatalf("torn_down=%d, want 1 — the superseded session must still be recorded as ended", res.TornDown)
+	}
+}

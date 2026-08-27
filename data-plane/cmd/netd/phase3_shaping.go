@@ -320,6 +320,30 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Problems = append(res.Problems, "tear: unusable addressing for session "+s.SessionID)
 			continue
 		}
+		// A HANDOVER IS NOT A TEARDOWN.
+		//
+		// Teardown is BY ADDRESS — deny the element, delete the class — because that is the only precise way
+		// to stop forwarding. But when the same plan hands that address to a newer session, the kernel state
+		// at that address now belongs to the session taking it over, and removing it would take the NEW guest
+		// offline and destroy the accounting series that was just created for them.
+		//
+		// It is not a hypothetical race. On the appliance, a device that authenticated as two rooms produced
+		// exactly this plan every second: the superseded session's teardown revoked the surviving session's
+		// authorization and deleted its class, the shaping step re-created both a moment later with a FRESH
+		// generation, and the accounting origin was reset once per pass — a guest flickering offline and a
+		// counter series that restarted every tick.
+		//
+		// So the durable half still runs (this session is genuinely over, and the record must say so with its
+		// own reason), and the kernel half is left to its new owner.
+		if minor, ok := shape.MinorForIP(ip); ok {
+			if next, taken := desired[s.Bridge][minor]; taken && next.SessionID != s.SessionID {
+				p.endSeries(s.Bridge, s.SessionID)
+				p.markEnded(ctx, s.SessionID, s.EndReason)
+				delete(p.classes, classKey(s.Bridge, s.SessionID))
+				res.TornDown++
+				continue
+			}
+		}
 		p.endSeries(s.Bridge, s.SessionID) // the series ends here; a future class for this session is a new one
 		// PACKET AUTHORIZATION FIRST. An entitlement that expired must stop reaching the internet even if tc
 		// teardown then fails; the reverse order would leave a guest online because a class delete failed.
