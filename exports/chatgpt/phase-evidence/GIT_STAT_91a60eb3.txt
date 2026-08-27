@@ -1,0 +1,4 @@
+commit 91a60eb3854cd27d99b688a10f774d12ce6454a4
+Date:   Thu Aug 27 02:28:26 2026 +0300
+
+    Delivery: manifest, packs and the live enforcement failure record
