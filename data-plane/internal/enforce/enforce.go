@@ -39,6 +39,10 @@ type SessionShape struct {
 	// WindowEndsAt is the entitlement's hard validity boundary, carried to the edge so the applier can bound
 	// its kernel authorization lease by it. Nil means the entitlement states no wall-clock end.
 	WindowEndsAt *time.Time
+	// EndReason is why a TEAR entry must stop being enforced, as a bounded machine code. It is empty for a
+	// session torn down for the ordinary reason (its access ended), and set when the plan is teaing a session
+	// down for a reason the durable record should name — today, only address supersession.
+	EndReason string
 }
 
 // Plan is what the edge should be enforcing right now for a site.
@@ -146,7 +150,9 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 		LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = e.service_plan_revision_id
 		WHERE s.tenant_id=$1 AND s.site_id=$2
 		  AND (s.state IN ('active','PENDING_ENFORCEMENT') OR s.ended > now() - interval '1 hour')
-		ORDER BY s.started`, tenant, site)
+		-- TOTAL order, not merely by time: resolveAddressOwnership below keeps the LAST session it sees for
+		-- an address, so two sessions sharing a started timestamp must still arrive in one fixed order.
+		ORDER BY s.started, s.id`, tenant, site)
 	if err != nil {
 		return p, err
 	}
@@ -166,7 +172,72 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 			p.Tear = append(p.Tear, sh)
 		}
 	}
-	return p, rows.Err()
+	if err := rows.Err(); err != nil {
+		return p, err
+	}
+	return resolveAddressOwnership(p), nil
+}
+
+// EndReasonSupersededOnAddress is recorded on a session torn down because a newer session took over its
+// address. It is deliberately distinct from ENFORCEMENT_TORN_DOWN: nothing failed, and the entitlement behind
+// it is untouched.
+const EndReasonSupersededOnAddress = "SUPERSEDED_ON_ADDRESS"
+
+// resolveAddressOwnership makes the plan COHERENT AT THE ADDRESS, which the applier requires and cannot fix.
+//
+// One (bridge, IP) is one network endpoint and one accountable tc class. Two entitled sessions claiming it is
+// a state netd refuses outright — installing either would attribute the other's traffic to it — so it fails
+// BOTH closed and reports a class conflict. That is the correct kernel answer and the wrong end state: the
+// address stays unenforced for as long as both rows are live, and every later session on that address joins
+// the pile.
+//
+// It is not hypothetical. A device that authenticates as one room and then as another holds two live
+// entitlements — legitimately, because the uniqueness rules are per SUBJECT (one live entitlement per Stay,
+// per account, per principal, per voucher) and a device is not a subject. Both sessions carry that device's
+// single address, and the appliance can enforce neither.
+//
+// So the producer decides, rather than emitting a state the applier can only refuse: THE NEWEST SESSION OWNS
+// THE ADDRESS. Older sessions on the same address are torn down and recorded as SUPERSEDED_ON_ADDRESS.
+//
+// What this deliberately does NOT do is touch the ENTITLEMENT. The older guest's entitlement stays ACTIVE and
+// remains usable from another device or another address; only the network attachment is superseded, which is
+// the only thing that was ever in conflict. Deciding that one of two live entitlements should END would be a
+// commercial policy question, and this is not one — it is which row owns an IP.
+//
+// Ordering: the plan query orders by (started, id), a TOTAL order, so the last entitled session seen for an
+// address is the newest one and the outcome is the same on every pass rather than whichever row the planner
+// happened to return first.
+func resolveAddressOwnership(p Plan) Plan {
+	// The rows arrive in the query's total (started, id) order, so the LAST entry seen for an address is the
+	// newest session on it. Overwriting as we go is therefore "the newest wins" without a second comparison.
+	owners := map[string]int{}
+	addressed := 0
+	for i, sh := range p.Shape {
+		if sh.IP == "" {
+			continue // an unaddressed session cannot conflict for an address; the applier reports it separately
+		}
+		addressed++
+		owners[sh.Bridge+"|"+sh.IP] = i
+	}
+	if len(owners) == addressed {
+		return p // the common case: every address has exactly one claimant
+	}
+	keep := make(map[int]bool, len(owners))
+	for _, idx := range owners {
+		keep[idx] = true
+	}
+	shape := make([]SessionShape, 0, len(owners))
+	for i, sh := range p.Shape {
+		if sh.IP == "" || keep[i] {
+			shape = append(shape, sh)
+			continue
+		}
+		sh.DownKbps, sh.UpKbps = 0, 0
+		sh.EndReason = EndReasonSupersededOnAddress
+		p.Tear = append(p.Tear, sh)
+	}
+	p.Shape = shape
+	return p
 }
 
 // Expiry is one enforced ending.

@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -250,13 +251,28 @@ func problemFor(sessionID string, err, cerr error) string {
 func (p *phase3Shaping) wallStamp() string { return time.Now().UTC().Format(time.RFC3339) }
 
 // markEnded converges durable state after access has been denied and torn down. Caller holds p.mu.
-func (p *phase3Shaping) markEnded(ctx context.Context, sessionID string) {
+//
+// The reason comes from the plan when the producer supplied one, because it knows things the applier cannot
+// see: a session torn down because a newer session took its address is a routine handover, not a teardown, and
+// the durable record should not call it one. Anything malformed falls back to the default rather than being
+// passed to the writer, which validates the code and would refuse the whole call.
+func (p *phase3Shaping) markEnded(ctx context.Context, sessionID, reason string) {
 	if p.enforcement == nil {
 		return
 	}
-	if err := p.enforcement.Ended(ctx, sessionID, "ENFORCEMENT_TORN_DOWN"); err != nil {
+	if !validEndReason(reason) {
+		reason = "ENFORCEMENT_TORN_DOWN"
+	}
+	if err := p.enforcement.Ended(ctx, sessionID, reason); err != nil {
 		// Access is already denied at the packet layer, so this is a bookkeeping lag, not continued access.
 		slog.Warn("phase3: session enforcement ended but durable state not converged",
 			"session", sessionID, "err", err)
 	}
 }
+
+// endReasonPattern is the writer's own rule, restated here so a malformed code is replaced rather than sent:
+// iam_v2.end_session_enforcement refuses anything outside it, and a refused call would leave durable state
+// claiming a session is still live after its access was already removed from the kernel.
+var endReasonPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
+
+func validEndReason(s string) bool { return endReasonPattern.MatchString(s) }

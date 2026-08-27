@@ -23,12 +23,12 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"sort"
 	"time"
 
 	"github.com/stayconnect/enterprise/data-plane/internal/enforce"
 	"github.com/stayconnect/enterprise/data-plane/internal/iamv2"
 	"github.com/stayconnect/enterprise/data-plane/internal/shapeplan"
+	"github.com/stayconnect/enterprise/data-plane/internal/shapeproducer"
 )
 
 // phase3 is acctd's Phase-3 arm. A zero value is inert, which is what a dark appliance gets.
@@ -53,10 +53,16 @@ type phase3 struct {
 	plans *planCounter
 }
 
-// newPhase3 constructs the enforcement arm ONLY when the Phase-3 master + checkout-grace flags are on. It
-// returns nil while dark, and a nil *phase3 is safe to call — so the tick path needs no flag checks of its own.
+// newPhase3 constructs the enforcement arm whenever the Phase-3 ENFORCEMENT PLANE is on. It returns nil while
+// dark, and a nil *phase3 is safe to call — so the tick path needs no flag checks of its own.
+//
+// The gate used to be CheckoutGraceOn. That made the shaping PRODUCER — the half that notices a session in
+// PENDING_ENFORCEMENT and tells netd to enforce it — conditional on an unrelated post-departure feature. On an
+// appliance running Room authentication with Checkout Grace off, nothing derived a plan at all: two real
+// guests were granted entitlements and sessions that stayed pending forever, and the guest was told the
+// connection had failed while the rows said otherwise.
 func newPhase3(cfg iamv2.PMSConfig, a *acctd, tenant, site string, scope planScope, plans *planCounter) *phase3 {
-	if !cfg.CheckoutGraceOn() {
+	if !cfg.EnforcementOn() {
 		return nil
 	}
 	enf := enforce.New(a.db)
@@ -171,63 +177,11 @@ const planValidity = 90 * time.Second
 // appears exactly once — entitled or not — because "not mentioned" must never be how access ends: that is
 // indistinguishable from a truncated body.
 func (p *phase3) buildEnvelope(plan enforce.Plan, managedBridges []string, fallbackBridge string, now time.Time) shapeplan.Envelope {
-	bridgeOf := func(b string) string {
-		if b != "" {
-			return b
-		}
-		return fallbackBridge
-	}
-	sessions := make([]shapeplan.Session, 0, len(plan.Tear)+len(plan.Shape))
-	for _, s := range plan.Tear {
-		sessions = append(sessions, shapeplan.Session{
-			SessionID: s.SessionID, DeviceID: s.DeviceID, IP: s.IP, Bridge: bridgeOf(s.Bridge), Entitled: false})
-	}
-	for _, s := range plan.Shape {
-		// The entitlement's hard boundary travels with the session so the applier can bound its kernel lease by
-		// it. It is passed through unchanged — the producer does not get to soften a deadline it did not set.
-		sessions = append(sessions, shapeplan.Session{
-			SessionID: s.SessionID, DeviceID: s.DeviceID, IP: s.IP, Bridge: bridgeOf(s.Bridge),
-			DownKbps: s.DownKbps, UpKbps: s.UpKbps, Entitled: true, AccessEndsAt: s.WindowEndsAt})
-	}
-	// Every bridge a session is on must be declared, plus every guest bridge the site has — including ones
-	// with no sessions at all. Those are the ones that can quietly keep forwarding for access that ended.
-	declared := map[string]bool{}
-	for _, b := range managedBridges {
-		if b != "" {
-			declared[b] = true
-		}
-	}
-	for _, s := range sessions {
-		if s.Bridge != "" {
-			declared[s.Bridge] = true
-		}
-	}
-	if fallbackBridge != "" {
-		declared[fallbackBridge] = true
-	}
-	bridges := make([]string, 0, len(declared))
-	for b := range declared {
-		bridges = append(bridges, b)
-	}
-	sort.Strings(bridges)
-
 	gen, runtime := p.plans.next()
-	env := shapeplan.Envelope{
-		ContractVersion:    shapeplan.ContractVersion,
-		TenantID:           p.tenant,
-		SiteID:             p.site,
-		ApplianceID:        p.scope.ApplianceID,
-		AssignmentID:       p.scope.AssignmentID,
-		AssignmentGen:      p.scope.AssignmentGe,
-		ProducerRuntimeGen: runtime,
-		PlanGeneration:     gen,
-		GeneratedAt:        now.UTC(),
-		ExpiresAt:          now.UTC().Add(planValidity),
-		ManagedBridges:     bridges,
-		Sessions:           sessions,
-	}
-	env.DesiredStateHash = shapeplan.HashDesiredState(bridges, sessions)
-	return env
+	return shapeproducer.BuildEnvelope(plan, shapeproducer.Scope{
+		TenantID: p.tenant, SiteID: p.site, ApplianceID: p.scope.ApplianceID,
+		AssignmentID: p.scope.AssignmentID, AssignmentGen: p.scope.AssignmentGe,
+	}, gen, runtime, managedBridges, fallbackBridge, now, planValidity)
 }
 
 // reconcileShaping derives the current desired state and submits it to netd. It is a full RECONCILIATION every

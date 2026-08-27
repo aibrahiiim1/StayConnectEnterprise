@@ -54,6 +54,14 @@ type Session struct {
 	// entitlements. Nil means "no wall-clock end is currently known", which is NOT "unbounded" — the applier
 	// still leases, bounded by the producer's own cadence.
 	AccessEndsAt *time.Time `json:"access_ends_at,omitempty"`
+	// EndReason names WHY an un-entitled session is being torn down, as a bounded machine code, so the durable
+	// record says something truer than "enforcement was torn down". It is meaningful only when Entitled is
+	// false, and empty means the ordinary reason: this session's access ended.
+	//
+	// The one code the producer sets today is SUPERSEDED_ON_ADDRESS — a newer session took over the address,
+	// nothing failed, and the superseded session's entitlement is untouched. Recording that as a teardown
+	// failure would misdescribe a routine, deliberate handover in the one place an operator goes to look.
+	EndReason string `json:"end_reason,omitempty"`
 }
 
 // Envelope is a COMPLETE, scoped, versioned statement of the Phase-3 managed state.
@@ -129,9 +137,12 @@ func HashDesiredState(bridges []string, sessions []Session) string {
 		if s.AccessEndsAt != nil {
 			ends = s.AccessEndsAt.UTC().Format(time.RFC3339Nano)
 		}
+		// The end reason is hashed with everything else: it is written to the durable record, so a body that
+		// lost or altered it would produce a different audit trail while still looking like a complete plan.
 		rows = append(rows, strings.Join([]string{
 			"S", s.SessionID, s.DeviceID, s.IP, s.Bridge,
 			strconv.Itoa(s.DownKbps), strconv.Itoa(s.UpKbps), strconv.FormatBool(s.Entitled), ends,
+			s.EndReason,
 		}, "\x1f"))
 	}
 	sort.Strings(rows)

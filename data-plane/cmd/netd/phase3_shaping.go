@@ -336,7 +336,7 @@ func (p *phase3Shaping) reconcileLocked(ctx context.Context, env shapeplan.Envel
 			res.Problems = append(res.Problems, "tear "+s.SessionID+": access denied but tc cleanup failed: "+err.Error())
 			continue
 		}
-		p.markEnded(ctx, s.SessionID)
+		p.markEnded(ctx, s.SessionID, s.EndReason)
 		if minor, ok := shape.MinorForIP(ip); ok {
 			delete(p.minorOwner, minorKey(s.Bridge, minor))
 		}

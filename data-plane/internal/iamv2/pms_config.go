@@ -41,6 +41,30 @@ func (c PMSConfig) AuthOn() bool          { return c.MasterEnabled && c.PMSAuthE
 func (c PMSConfig) CheckoutGraceOn() bool { return c.MasterEnabled && c.CheckoutGraceEnabled }
 func (c PMSConfig) AdminOn() bool         { return c.MasterEnabled && c.AdminEnabled }
 
+// EnforcementOn reports whether this appliance must run the Phase-3 ENFORCEMENT PLANE: acctd's authenticated
+// shaping producer and netd's network writer.
+//
+// IT FOLLOWS THE MASTER FLAG, AND DELIBERATELY NOT ANY SURFACE FLAG.
+//
+// Enforcement is not a feature. It is the substrate every guest-session surface stands on: a Session commits
+// as PENDING_ENFORCEMENT and only the enforcement plane can make it real, so an appliance that mints sessions
+// without it produces access nobody delivers and rows nothing converges.
+//
+// It used to follow CheckoutGraceOn, and that is exactly how the first real guest Room Login failed. Room
+// authentication is enabled by STAYCONNECT_PHASE3_PMS_AUTH; Checkout Grace is an unrelated post-departure
+// feature; and tying the enforcement plane to the second meant the first could be fully live — verifying
+// guests, granting entitlements, opening sessions — on an appliance where nothing was watching for a session
+// to enforce. Two real guests reached PENDING_ENFORCEMENT and stayed there.
+//
+// Following the master flag also means enforcement cannot be half-enabled by a surface flag landing in one
+// service's environment and not another's, which is the other half of what happened: scd had PMS_AUTH, netd
+// and acctd had no Phase-3 flags at all.
+//
+// A fully dark appliance (master OFF) still runs nothing, which is the DARK contract. Beyond that the plane is
+// DATA-DRIVEN and costs nothing when idle — the same reasoning Phase-6 accrual already uses: with no sessions
+// the pass finds nothing to do, and it must be ready the moment one exists rather than switched on afterwards.
+func (c PMSConfig) EnforcementOn() bool { return c.MasterEnabled }
+
 // Enabled reports whether any Phase-3 surface is live (i.e. a repository/engine may be constructed).
 func (c PMSConfig) Enabled() bool {
 	return c.MasterEnabled &&

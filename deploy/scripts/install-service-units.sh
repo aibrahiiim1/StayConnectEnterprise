@@ -24,11 +24,21 @@ if ! bash "$GUARD" "$ENVDIR"; then
   die "PMS-dependent guest configuration is invalid (see REFUSED above). Nothing was installed."
 fi
 
+# ...and the ENFORCEMENT PLANE, for the same reason and with worse symptoms. A Phase-3 guest surface enabled
+# without the plane does not crash anything: the appliance authenticates guests, grants entitlements and
+# sessions, tells each guest the connection failed, and enforces nothing. It looks healthy from every angle
+# except the guest's.
+PLANE="$SRC/scripts/check-phase3-enforcement-plane.sh"
+[ -x "$PLANE" ] || chmod +x "$PLANE" 2>/dev/null
+if ! bash "$PLANE" "$ENVDIR"; then
+  die "the Phase-3 enforcement plane is not configured (see REFUSED above). Nothing was installed."
+fi
+
 # ---- 2. gate scripts, installed before the units that reference them --------
 # A unit whose ExecStartPre points at a missing file fails to start, so these
 # must land first. Copy to a temp name and mv, so a running ExecStartPre never
 # reads a half-written script.
-for s in check-phase6-guest-dependency.sh wait-for-site-db.sh; do
+for s in check-phase6-guest-dependency.sh check-phase3-enforcement-plane.sh wait-for-site-db.sh; do
   [ -f "$SRC/scripts/$s" ] || die "missing $SRC/scripts/$s"
   install -m 0755 "$SRC/scripts/$s" "$BIN/.$s.tmp" || die "cannot write $BIN/.$s.tmp"
   mv -f "$BIN/.$s.tmp" "$BIN/$s" || die "cannot install $BIN/$s"

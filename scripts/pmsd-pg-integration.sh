@@ -176,8 +176,8 @@ if [ "$leak" != 0 ]; then
 fi
 echo "  ok: every test compiled into this gate is Phase-3-owned"
 
-echo "== go test -tags integration ./internal/pmsd ./internal/stayengine ./internal/authctx ./internal/checkout ./internal/staygrant ./internal/pmsresolve ./internal/enforce ./internal/writerguard ./cmd/edged ./cmd/acctd ./cmd/scd (Integration) =="
-( cd "$ROOT/data-plane" && go test -tags integration -run Integration ./internal/pmsd/ ./internal/stayengine/ ./internal/authctx/ ./internal/checkout/ ./internal/staygrant/ ./internal/pmsresolve/ ./internal/enforce/ ./internal/writerguard/ ./cmd/edged/ ./cmd/acctd/ ./cmd/scd/ -count=1 )
+echo "== go test -tags integration ./internal/pmsd ./internal/stayengine ./internal/authctx ./internal/checkout ./internal/staygrant ./internal/pmsresolve ./internal/enforce ./internal/writerguard ./cmd/edged ./cmd/acctd ./cmd/netd ./cmd/scd (Integration) =="
+( cd "$ROOT/data-plane" && go test -tags integration -run Integration ./internal/pmsd/ ./internal/stayengine/ ./internal/authctx/ ./internal/checkout/ ./internal/staygrant/ ./internal/pmsresolve/ ./internal/enforce/ ./internal/writerguard/ ./cmd/edged/ ./cmd/acctd/ ./cmd/netd/ ./cmd/scd/ -count=1 )
 rc=$?
 echo "PMSD_PG_INTEGRATION rc=$rc"
 exit $rc
