@@ -1,7 +1,7 @@
 # StayConnect IAM — Context Handoff
 
 <!-- BEGIN GENERATED PROJECT STATE — DO NOT EDIT -->
-<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0099 -->
+<!-- source: governance/project-state.json (schema 1.0.0) @ transition T0100 -->
 **Current phase:** 7 — Cleanup, final docs, full-system re-acceptance
 **Current activity:** `FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE`
 **Phase status:** 0 FINAL_CLOSED · 1A **ACCEPTED_AND_CLOSED** (DARK, NOT CUT OVER) · 1B ACCEPTED_AND_CLOSED (DARK — accepted & closed; no cutover; no production iam_v2 use) · 2 ACCEPTED_AND_CLOSED · 3 ACCEPTED_AND_CLOSED · 4 ACCEPTED_AND_CLOSED · 5 ACCEPTED_AND_CLOSED · 6 ACCEPTED_AND_CLOSED · 7 ACCEPTED_AND_CLOSED
@@ -10,7 +10,7 @@
 **Fresh Production appliance (172.21.60.25, sce):** DEPLOYED factory-clean from `c72b49e`; first-bring-up fixes were then applied live and afterwards committed (`1c55d7f`), so no single commit describes what is running. PRE-LIVE. Enrollment: enrolled; claim: claimed; signed assignment: signed and pinned; licence: licensed. ens192 is configured. Guest traffic: none. no guest has authenticated: purchases=0, entitlements=0, sessions=0, and the first real room login has not been performed.; PMS: read-only pms feed, live. protel interface ddff5d07 is active, connected, in_sync and continuous on revision 38207f74; the automatic fresh full sync completed 2026-08-26 (t0098). no pms posting, payment, reversal or fx traffic has ever occurred.; payment/financial: none. Go-Live: not performed and not authorized. Hotel Admin: https://172.21.60.25/
 **Development reference appliance (172.21.60.23):** UNTOUCHED by this work and NOT cut over. Retains the historical live-dark runtime its accepted evidence records, including its superseded guest-IAM schema (68 iam_v2 tables live). Reference and evidence only, never an installation source.
 **Lifecycle:** PRE-LIVE (D24): no real hotel guest or staff depends on StayConnect for live service yet.
-**Single next authorized action:** NONE is authorized beyond the enforcement-plane fix the Product Owner has already authorized to be implemented, merged and deployed to 172.21.60.25. Two real Room Logins were performed and both failed at network enforcement: authentication, Purchase, Entitlement and Session all succeeded, and no guest reached the internet because the enforcement plane was not running. Once the fix is deployed and verified live, the recommended next step - requiring its own Product-Owner decision - is ONE controlled real-device Room Login test. A separate Product-Owner Go-Live decision remains required and no current authorization supplies it.
+**Single next authorized action:** NONE is authorized beyond ONE controlled real-device Room Login test, which requires its own Product-Owner decision. The enforcement plane that refused the first two real Room Logins is fixed, merged and deployed, and verified live on 172.21.60.25 (T0100): the producer is active and authenticated, netd is applying the plan, nft and tc carry the expected state, and durable Session state agrees with the kernel. What remains unproven is a Room Login that succeeds from the GUEST's point of view, end to end, in one attempt. A separate Product-Owner Go-Live decision remains required and no current authorization supplies it.
 **Governance:** current state is generated from `governance/project-state.json`; do not edit this block by hand. Latest accepted PO decision: `D39`.
 <!-- END GENERATED PROJECT STATE -->
 

@@ -1,0 +1,66 @@
+{
+  "transition_id": "T0100",
+  "seq": 100,
+  "timestamp": "2026-08-27T01:36:00Z",
+  "timestamp_derivation": "The completion of the live verification it records (netd restarted with the handover fix at 01:34Z; the churn was confirmed gone at 01:35:29Z), which precedes the author timestamp of the introducing commit. Per T0091.",
+  "record_type": "ENFORCEMENT_PLANE_DEPLOYED_AND_LIVE_VERIFIED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_PMS_FEED_CONNECTED_FRESH_SYNC_VERIFIED_ROOM_LOGIN_PRIVILEGE_CHAIN_DEPLOYED_AWAITING_PRODUCT_OWNER_ROOM_LOGIN_RETRY",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_PMS_FEED_CONNECTED_ENFORCEMENT_PLANE_LIVE_ONE_SESSION_ENFORCED_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": true,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. This closes the network-enforcement failure of the two real Room Logins recorded under T0099's successor state, under the Product Owner's explicit authorization to implement, merge and deploy it.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-27: 'Complete the current Room Login network-enforcement failure end-to-end. This prompt explicitly authorizes implementation, merge, and deployment of this defect to PRE-LIVE appliance .25.'",
+  "what_failed_live": "Two real Room Logins (2026-08-26T22:35:53Z room 11209, 22:37:43Z room 11112, one device 192.168.77.139) VERIFIED and were granted a Purchase, an ACTIVE Entitlement, a device authorization and a Session each. Both then failed at NETWORK ENFORCEMENT: portald abandoned each attempt at its 2500ms budget (scd_unavailable), both Sessions stayed PENDING_ENFORCEMENT, iam_v2 phase3_auth_ipv4 was empty and no tc class existed. Neither guest reached the internet. Root cause: acctd's shaping producer and netd's network writer were both gated on STAYCONNECT_PHASE3_CHECKOUT_GRACE - an unrelated post-departure feature - and netd.env and acctd.env carried no Phase-3 configuration at all.",
+  "fix": [
+    "iamv2.PMSConfig.EnforcementOn(): the enforcement plane follows the Phase-3 MASTER flag, because it is the substrate every guest-session surface stands on rather than a surface of its own. acctd and netd both use it. Checkout Grace was NOT enabled anywhere.",
+    "deploy/scripts/check-phase3-enforcement-plane.sh refuses a session-minting surface without a configured plane; install-service-units.sh gates on it as it already gates the Phase-6 guest dependency; a selftest proves the checker refuses the exact live state.",
+    "deploy/scripts/enable-phase3-enforcement-plane.sh is the single coherent enabler: it derives the producer uid from the unit acctd actually runs under, writes netd.env and acctd.env, re-runs the checker, and restarts a daemon whose running configuration predates its env file.",
+    "internal/enforce: one address is one accountable class, so the newest session owns it and older ones are torn down as SUPERSEDED_ON_ADDRESS. Entitlements are untouched - the uniqueness rules are per subject and a device is not a subject.",
+    "cmd/netd: a handover is not a teardown. When the same plan hands an address to a newer session, the kernel state there belongs to its new owner; only the durable half runs for the superseded session.",
+    "portald's 2500ms guest budget was REVIEWED against the corrected cycle and left unchanged."
+  ],
+  "merged": {
+    "pr_61": "Run the enforcement plane whenever guest sessions need it - accepted head fea2e6866fecbca3cf42ec9e6372d9f7abcd40ed, merge commit 7233d1f8e49ce2cdb11070293766757208dcf46c, all four gates green",
+    "pr_62": "A handover is not a teardown - accepted head 7c26f83b307335cefacda49bc915b95c5548e12d, merge commit 5e1bade5c83bd2c9b1b3497b9db456713b1c46fc, all four gates green (the Phase-5 gate's first attempt failed on disposable-container infrastructure, exit 2, and passed on re-run with every assertion already green)"
+  },
+  "regression_coverage": "cmd/netd TestIntegration_EnforcementCycle_* drives the REAL producer (internal/shapeproducer, the call acctd makes) against a real PostgreSQL and submits over a REAL unix socket, so producer authentication is genuine SO_PEERCRED: pending becomes active; an already-pending session is recovered by a restarted applier with an empty state directory; an unauthenticated producer enforces nothing. internal/kerneltest TestKernel_EnforcedGuestIsBothAuthorizedAndAccounted proves on a live kernel that neither half alone grants access, that both together do, that the guest's OWN tc class counts the bytes, and that revoking the gate ends access. cmd/netd TestHandoverLeavesTheNewOwnersKernelStateAlone pins the handover. The measured healthy cycle is 66ms.",
+  "deployed": {
+    "appliance": "172.21.60.25 (Fresh Production, PRE-LIVE)",
+    "built_from": "master 5e1bade5c83bd2c9b1b3497b9db456713b1c46fc (netd) and 7233d1f8e49ce2cdb11070293766757208dcf46c (acctd)",
+    "acctd_sha256": "1b2ef693334a79ab11a659b7ebfd70d2535f6b43f8ab2e1fc3a344468c5e05c1",
+    "netd_sha256": "1f1f007bc22724bc4a06eeb9225862e7fa8d304266fe8f0eb156bdf73cb3b424",
+    "scd_sha256": "0861fd5b631387de62b2b49d699f798d04f6588998be59c9f8f1097065fbace3 (unchanged from T0099)",
+    "configuration": "netd.env STAYCONNECT_PHASE3_MASTER=true + NETD_PHASE3_PRODUCER_UID=0; acctd.env STAYCONNECT_PHASE3_MASTER=true. No surface flag was added or changed anywhere; Checkout Grace remains as it was.",
+    "rollback": "/opt/stayconnect/bin/acctd.bak-plane (39caa17e6f2f7615d115875e8d267286ae29c9aa19221c596b5d1f0f97d98da6), netd.bak-plane (86ec4d1e26b196c0728cda69df8b03e48027e366cbb299686cbac063b5d737e4, the pre-fix binary) and netd.bak-handover (014d0ce553c97a1551218dbc3afb7228645ca83689bcac7b18f389391963db83, the PR-61 binary)",
+    "not_deployed": "scd, pmsd, portald and Hotel Admin were NOT rebuilt or restarted. No migration was applied - the schema is unchanged at 0058_guest_auth_row_locks."
+  },
+  "verified_live": {
+    "producer": "acctd phase3 arm active=true, accounting_owner=phase3, flags 'master=true connector=false ingest=false auth=false grace=false admin=false' - the plane runs with every surface flag OFF, which is the whole correction.",
+    "producer_authentication": "netd accepts plans only from uid 0, the uid acctd's unit runs as, established by SO_PEERCRED.",
+    "nft": "phase3_auth_ipv4 holds br-g-00d1fa1a . 192.168.77.139 with a 90s lease that is refreshed every pass.",
+    "tc": "class 1:1d8b (minor 7563) present on the download bridge br-g-00d1fa1a AND the upload ifb-g-00d1fa1a, both at 2Mbit, 0 bytes carried so far.",
+    "durable_agreement": "Session 8b5758bf-341a-4a6b-850f-1713b3cafc0a is 'active' with a stable accounting generation (epoch 2260, no longer moving); Session 9f6b62dc-53f1-49aa-bb35-d3ae7b7279e0 is 'ended' with end_reason SUPERSEDED_ON_ADDRESS. Both entitlements remain ACTIVE with 0 consumed bytes.",
+    "pms": "CONNECTED / IN_SYNC / CONTINUOUS, sync_stage COMPLETE, generation 143/143. Protel was not touched and no Full Resync was triggered.",
+    "counters": "purchases=2, entitlements=2, sessions=2 (1 active, 1 ended)",
+    "financial": "pms_postings=0, posting_attempts=0, posting_outbox=0, payment_transactions=0, settlements=0, accounting_records=0"
+  },
+  "pending_sessions_treatment": "NOT deleted and NOT rewritten by hand. Both were reconciled by the product's own rules the moment the plane came up: the newest session on the shared address kept it and was enforced; the older one was ended through iam_v2.end_session_enforcement with reason SUPERSEDED_ON_ADDRESS. Neither entitlement was terminated. No Product-Owner policy decision was required, because the question was never which of two entitlements should live - the subject rules already permit both - but which session owns one IP.",
+  "defect_found_by_deploying": "The first deployment (PR 61) exposed a second defect that only two live sessions on one address and a real second-by-second producer could produce: the superseded session's teardown was removing the surviving session's nft element and tc class, so the guest flickered offline once a second and the accounting origin reset every tick (epoch 3 to 31 in half a minute). PR 62 fixed it; the appliance now shows zero ORIGIN_RESET and a stable generation.",
+  "room_login": "NOT PERFORMED by the agent. No guest authentication was initiated at any point. The appliance is ready for ONE controlled real-device Room Login test, which requires its own Product-Owner decision.",
+  "transition_accepted": true
+}
