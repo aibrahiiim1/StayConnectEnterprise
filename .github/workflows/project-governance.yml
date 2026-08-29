@@ -36,6 +36,13 @@ jobs:
       - name: Generated-block consistency
         run: python tools/project-state.py check-generated
 
+      # The rule that compares the generated appliance summary to the live counters, watched failing. It was
+      # added after eight documents and three packs spent two days reporting "no guest has authenticated:
+      # purchases=0, entitlements=0, sessions=0" about an appliance holding two real Room Logins and one
+      # kernel-enforced session, with Governance green throughout.
+      - name: Generated-block contradiction rules — negative tests
+        run: python tools/tests/generated_block_contradiction/run_negative.py
+
       # The merge-timing rule is grandfathered for T0054 on the real ledger, so a normal run reports it as a
       # listed exception and passes -- which is correct, and also indistinguishable from a rule that does
       # nothing. This drives the real validator with the grandfather list emptied and fails if the historical

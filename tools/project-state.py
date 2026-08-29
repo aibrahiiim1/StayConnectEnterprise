@@ -1129,6 +1129,64 @@ def check_appliance_facts_agree(st):
     if f.get("first_room_login_performed") is False and "NONE" not in str(prod.get("guest_traffic", "")).upper():
         bad.append("production_appliance.guest_traffic implies guest activity but "
                    "current_state_facts.first_room_login_performed is false")
+
+    # ...AND THE OTHER REVERSE DIRECTION, which is the one that got through.
+    #
+    # The rule above only caught a summary that CLAIMED MORE than the facts. The failure that actually
+    # survived a green gate was a summary that claimed LESS: two real Room Logins had happened, two purchases,
+    # two entitlements and two sessions existed, one of them was enforced in the kernel — and the generated
+    # appliance summary in eight documents and three packs still read "No guest has authenticated:
+    # purchases=0, entitlements=0, sessions=0, and the first real Room Login has not been performed."
+    #
+    # Prose cannot be checked against prose, so current_state_facts.live_counters carries the NUMBERS, read
+    # from the appliance, and every rule below compares a sentence to one of them.
+    counters = f.get("live_counters") or {}
+
+    def counted(name):
+        v = counters.get(name)
+        return v if isinstance(v, int) else None
+
+    # A zero claimed for a counter that is not zero. Written out per counter rather than as one regex, so the
+    # failure message names the number that disagrees instead of pointing at a paragraph.
+    for field in ("guest_traffic", "payment_or_financial_traffic"):
+        value = str(prod.get(field, ""))
+        for counter in ("purchases", "entitlements", "sessions", "accounting_records", "pms_postings",
+                        "payment_transactions"):
+            live = counted(counter)
+            if live is None or live == 0:
+                continue
+            if f"{counter}=0" in value.lower().replace(" ", ""):
+                bad.append(f"production_appliance.{field} says {counter}=0 but "
+                           f"current_state_facts.live_counters.{counter} is {live}")
+
+    # A denial of the thing the counters record having happened.
+    denials = ("no guest has authenticated", "first real room login has not been performed",
+               "no real guest sign-in has yet been performed", "no room login has been performed")
+    if (counted("sessions") or 0) > 0 or f.get("first_room_login_performed") is True:
+        for field in ("guest_traffic",):
+            value = str(prod.get(field, "")).lower()
+            for phrase in denials:
+                if phrase in value:
+                    bad.append(f"production_appliance.{field} says {phrase!r} but a Room Login was performed "
+                               f"and live_counters.sessions is {counted('sessions')}")
+        note = str(f.get("guest_signin_end_to_end_proven_note", "")).lower().replace(" ", "")
+        for counter in ("purchases", "entitlements", "sessions"):
+            live = counted(counter)
+            if live and f"{counter}=0" in note:
+                bad.append(f"current_state_facts.guest_signin_end_to_end_proven_note says {counter}=0 but "
+                           f"live_counters.{counter} is {live}")
+
+    # The counters must exist at all once a Room Login has been performed. Without them the rules above are
+    # unenforceable, and "the numbers are missing" is exactly the state that let the prose drift.
+    if f.get("first_room_login_performed") is True and not counters:
+        bad.append("current_state_facts.live_counters is missing, so no prose about guest activity can be "
+                   "checked against a number")
+
+    # Enforcement being live is not the same fact as traffic having flowed. Claiming the second one while the
+    # accounting counter is zero is the most flattering possible way to be wrong.
+    if (counted("accounting_records") or 0) == 0 and f.get("guest_traffic_carried_ever") is True:
+        bad.append("current_state_facts.guest_traffic_carried_ever is true but live_counters."
+                   "accounting_records is 0")
     return bad
 
 def main():
