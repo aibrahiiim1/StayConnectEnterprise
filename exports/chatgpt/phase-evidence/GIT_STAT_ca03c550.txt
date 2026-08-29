@@ -1,0 +1,4 @@
+commit ca03c550972ff20321024d8db8846e1e87aa54d3
+Date:   Sat Aug 29 16:08:10 2026 +0300
+
+    Reconcile every current-state surface with the T0100 facts
