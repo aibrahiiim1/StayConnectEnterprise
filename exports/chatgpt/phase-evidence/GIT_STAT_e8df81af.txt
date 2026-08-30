@@ -1,0 +1,4 @@
+commit e8df81af803ec03f10b578c2f60a69cc60336dbd
+Date:   Sun Aug 30 11:13:46 2026 +0300
+
+    Ask systemd whether a unit is in service, through a seam a test can drive
