@@ -1,0 +1,54 @@
+{
+  "transition_id": "T0102",
+  "seq": 102,
+  "timestamp": "2026-08-30T08:49:31Z",
+  "timestamp_derivation": "The instant the cleanup service completed on the appliance (status=0/SUCCESS at 08:49:31Z), which is the event this receipt records and which precedes the author timestamp of the introducing commit. Per T0091.",
+  "record_type": "RETENTION_INSTALLER_DEPLOYED_AND_CLEANUP_PROVEN",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_FIRST_END_TO_END_GUEST_SIGNIN_PROVEN_PMS_FEED_DISCONNECTED_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_RETENTION_RESTORED_PMS_FEED_DISCONNECTED_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": true,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. This is the deployment of the retention/service-installation correction recorded in T0101, under the same Product-Owner authorization.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-30: 'deploy only the required retention/service-installation correction to PRE-LIVE .25, and prove the cleanup service/timer can run successfully.'",
+  "merged": "PR #64 'Install every helper the units name, and verify before installing any' - accepted head b6d7cd34a249693f12d101fbe292ddb19741f3b1, merge commit 45e187192e0c5de88f30aa82712d34a5f488825f, all four gates green (phase3, phase4, phase5, governance).",
+  "deployed": {
+    "appliance": "172.21.60.25 (Fresh Production, PRE-LIVE)",
+    "scope": "deploy/scripts and deploy/systemd only, applied through install-service-units.sh. NO service binary was rebuilt or restarted, NO migration was applied, NO configuration flag changed, and NO session or entitlement was touched.",
+    "installed": "/opt/stayconnect/bin/stayconnect-backup-cleanup (from deploy/scripts/stayconnect-backup-cleanup.sh) - the executable stayconnect-backup-cleanup.service has named since it was written and that nothing had ever installed. check-phase6-guest-dependency.sh and wait-for-site-db.sh were reinstalled unchanged.",
+    "verification_output": "Every unit's Exec paths were checked before any unit was copied: acctd, edged, hotel-admin/svc-run, netd, pmsd, portald, scd and their helpers all OK. stayconnect-ctrlapi was REPORTED, not refused - it belongs to Central, holds no binary here, and is disabled on this appliance.",
+    "units_changed": "1 (stayconnect-ctrlapi.service content refresh); daemon-reload performed."
+  },
+  "cleanup_proven": {
+    "dry_run_first": "The default DRY-RUN was run and its plan read before anything was applied. It kept every current rollback artifact - scd.bak-gatep0058, scd.bak-mat0056, acctd.bak-plane, netd.bak-plane, netd.bak-handover - as 'within newest 5'.",
+    "service_run": "systemctl start stayconnect-backup-cleanup.service -> Process 923151 ExecStart=/opt/stayconnect/bin/stayconnect-backup-cleanup --apply (code=exited, status=0/SUCCESS). The same unit exited 203/EXEC on every trigger before this deployment.",
+    "effect": "Backup artifacts 45 -> 29, all of them older than the newest five per binary name and dated 2026-08-20 to 2026-08-23. Root filesystem 9.4G -> 8.5G used, 7.7G -> 8.5G available.",
+    "timer": "stayconnect-backup-cleanup.timer is enabled and armed: next run 2026-08-31T03:33:55Z.",
+    "no_emergency_deletion": "NOTHING was deleted to reclaim space, and no journal was vacuumed. The only deletions were the retention policy running normally, after its installation and its dry-run safety check were proven."
+  },
+  "verified_after": {
+    "disk": "18G total, 8.5G used, 8.5G available, 51%",
+    "postgresql": "healthy; migration head 0058_guest_auth_row_locks",
+    "services": "scd, netd, acctd, pmsd, portald, edged all active; pg/redis/nats containers up",
+    "enforcement": "both active sessions still authorized in nft (192.168.77.102 and 192.168.77.139) and metered by their tc classes",
+    "counters": "purchases=3, entitlements=3, sessions=3 (2 active), accounting_records=1037 - unchanged by this deployment",
+    "financial": "pms_postings=0, payment_transactions=0, settlements=0",
+    "pms": "still DISCONNECTED since 2026-08-27T16:48:29Z; pmsd cannot dial Protel. Unchanged by this deployment and untouched by it - no Full Resync and no PMS action."
+  },
+  "room_login": "NOT PERFORMED. No guest authentication was initiated by the agent at any point.",
+  "transition_accepted": true
+}
