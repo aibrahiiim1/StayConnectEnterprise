@@ -148,28 +148,44 @@ for u in "$DEPLOY"/systemd/stayconnect-*.service; do
 done
 
 # ---------------------------------------------------------------- 6. a unit that is NOT in service here
-# stayconnect-ctrlapi belongs to the Central control plane and is deliberately disabled on an edge appliance,
-# which has no ctrlapi binary and no reason to hold one. Refusing the whole install over it would make the
-# correct configuration uninstallable, so it must be REPORTED and installed anyway. (SC_SKIP_SYSTEMD forces
-# the strict reading, so this case drives the real systemd path by asking the host about a unit that is not
-# enabled on it.)
-if command -v systemctl >/dev/null 2>&1; then
-  t="$(new_tree not_in_service)"
-  cp "$DEPLOY/systemd/stayconnect-ctrlapi.service" "$t/src/systemd/" 2>/dev/null
-  printf '#!/bin/sh
+# stayconnect-ctrlapi belongs to the Central control plane and is deliberately DISABLED on an edge appliance,
+# which holds no ctrlapi binary and has no reason to. Refusing the whole install over it would make the
+# correct configuration uninstallable, so it must be reported and the install must proceed.
+#
+# The enablement answer comes from a stub rather than from this machine's systemd: a test whose result depends
+# on which units happen to be enabled on the runner is not a test.
+t="$(new_tree not_in_service)"
+cp "$DEPLOY/systemd/stayconnect-ctrlapi.service" "$t/src/systemd/" 2>/dev/null
+printf '#!/bin/sh
 exit 0
 ' > "$t/src/scripts/wait-for-site-db.sh"
-  if SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DIR="$t/etc"        bash "$INSTALLER" "$t/src" >"$t/out" 2>&1; then
-    if grep -q "NOT enabled here" "$t/out"; then
-      ok "a unit that is not in service here is reported, not refused"
-    else
-      bad "it installed, but said nothing about the missing binary:"; sed 's/^/      /' "$t/out"
-    fi
+cat > "$t/is-enabled" <<'STUB'
+#!/bin/sh
+# systemd's answer for a unit shipped for another host: installed, deliberately off.
+echo disabled
+STUB
+chmod +x "$t/is-enabled"
+if SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DIR="$t/etc" SC_SKIP_SYSTEMD=1      SC_UNIT_ENABLED_CMD="$t/is-enabled" bash "$INSTALLER" "$t/src" >"$t/out" 2>&1; then
+  if grep -q "NOT enabled here" "$t/out"; then
+    ok "a unit that is not in service here is reported, not refused"
   else
-    bad "a unit that is not enabled on this host blocked the install:"; sed 's/^/      /' "$t/out"
+    bad "it installed, but said nothing about the missing binary:"; sed 's/^/      /' "$t/out"
   fi
 else
-  echo "  SKIP: no systemctl on this machine, so unit enablement cannot be interrogated"
+  bad "a unit that is disabled on this host blocked the install:"; sed 's/^/      /' "$t/out"
+fi
+
+# ...and the same unit, ENABLED, must be refused. Without this the case above would pass just as happily if
+# in_service() always answered "no", which would silently disable the whole protection.
+cat > "$t/is-enabled" <<'STUB'
+#!/bin/sh
+echo enabled
+STUB
+chmod +x "$t/is-enabled"
+if SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DIR="$t/etc" SC_SKIP_SYSTEMD=1      SC_UNIT_ENABLED_CMD="$t/is-enabled" bash "$INSTALLER" "$t/src" >"$t/out2" 2>&1; then
+  bad "an ENABLED unit with a missing executable was installed anyway"
+else
+  ok "the same unit, enabled, is refused"
 fi
 
 if [ "$fail" = "0" ]; then

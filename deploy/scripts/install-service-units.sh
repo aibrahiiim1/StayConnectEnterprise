@@ -106,12 +106,22 @@ done
 # So: enabled (directly, or through its timer, or currently running) is a hard failure; anything else is
 # reported and does not stop the install. Under SC_SKIP_SYSTEMD every unit is treated as in service, which is
 # the strict reading the self-test asserts against.
+# A unit systemd does not know yet is IN SERVICE by default: that is a first install, where every unit being
+# shipped is about to be enabled. Only an explicit "disabled" or "masked" from systemd downgrades a unit to
+# report-only. Unknown must not mean lax, or the protection would evaporate on exactly the install that most
+# needs it.
+#
+# SC_UNIT_ENABLED_CMD is the seam the self-test drives. It exists because the alternative is a test that
+# depends on the enablement state of the machine it runs on, which is not a test.
+ENABLED_CMD="${SC_UNIT_ENABLED_CMD:-systemctl is-enabled}"
 in_service() { # in_service <unit-basename-without-suffix>
-  [ "$SKIP_SYSTEMD" = "1" ] && return 0
-  case "$(systemctl is-enabled "$1.service" 2>/dev/null)" in enabled|enabled-runtime) return 0 ;; esac
-  case "$(systemctl is-enabled "$1.timer" 2>/dev/null)" in enabled|enabled-runtime) return 0 ;; esac
-  systemctl is-active --quiet "$1.service" 2>/dev/null && return 0
-  return 1
+  local svc tmr
+  svc="$($ENABLED_CMD "$1.service" 2>/dev/null)"
+  tmr="$($ENABLED_CMD "$1.timer" 2>/dev/null)"
+  case "$svc" in disabled|masked)
+    case "$tmr" in enabled|enabled-runtime) return 0 ;; *) return 1 ;; esac ;;
+  esac
+  return 0
 }
 
 missing=0
