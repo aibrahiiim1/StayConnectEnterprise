@@ -1,5 +1,5 @@
-# cited committed source, not packaged. Verify at SOURCE_COMMIT e8df81af.
-688a69c436818f06b1328d0df5ddf66de7c160827ee0b197c423ecf7658ef037  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
+# cited committed source, not packaged. Verify at SOURCE_COMMIT c06317d4.
+c9deafb650bd3041f41c99515504ad657c79c67e5b999371999c28074a43510e  docs/architecture/StayConnect-IAM-Phase1B-Plan.md
 d7ffc726816e4ed6a677d35cf0b645b79278ea2a48ed4eb561008fcebb640e3d  docs/architecture/Phase1B-Privilege-Matrix.md
 bb6281470a81df07fc8060b559eb55cf1e9265c536e6fe43d8258f78072a93d0  data-plane/internal/pmsguard/guard.go
 6e342646f89a73e68e6ab9fab1b3bdbb9690d123a5d7ac12c780fc4f87994a64  data-plane/cmd/scd/main.go
