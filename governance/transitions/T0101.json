@@ -1,0 +1,54 @@
+{
+  "transition_id": "T0101",
+  "seq": 101,
+  "timestamp": "2026-08-30T07:45:00Z",
+  "timestamp_derivation": "The completion of the post-recovery verification sweep it records (PostgreSQL healthy at 07:37:48Z, enforcement reconvergence confirmed at 07:42:16Z), which precedes the author timestamp of the introducing commit. Per T0091.",
+  "record_type": "DISK_FULL_OUTAGE_RECOVERY_AND_RETENTION_INSTALL_FIX",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_PMS_FEED_CONNECTED_ENFORCEMENT_PLANE_LIVE_ONE_SESSION_ENFORCED_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_FIRST_END_TO_END_GUEST_SIGNIN_PROVEN_PMS_FEED_DISCONNECTED_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": true,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. This records an availability incident, its recovery, and the durable fix for the defect that caused it, under the Product Owner's explicit authorization to fix the retention defect and deploy only that correction.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-30: 'Then fix the durable retention defect ... merge the fix through the normal PR path, deploy only the required retention/service-installation correction to PRE-LIVE .25, and prove the cleanup service/timer can run successfully.' The same instruction forbade emergency backup deletion, journal vacuuming and disk resizing, and none was performed.",
+  "first_end_to_end_guest_signin": "2026-08-27T07:02:42Z, ROOM 10212, device 96:48:f9:7a:9b:09 on address 192.168.77.102. Purchase 7ab7105d GRANTED at amount 0, an ACTIVE entitlement, and session 64e5f11c enforced in nft and metered by tc class 1:1d66 in both directions. It has carried 11,461,822 bytes up and 58,629,016 bytes down across 1036 accounting records sampled from 2026-08-27T07:02:43Z. THIS IS THE FIRST END-TO-END GUEST SIGN-IN ON THIS APPLIANCE. It was NOT observed live by the agent and is not a Product-Owner acceptance: it is read from durable state and the kernel after the fact.",
+  "outage": {
+    "window": "2026-08-29T13:37Z (first FATAL) to 2026-08-30T07:37Z (PostgreSQL healthy again)",
+    "symptom": "Root filesystem 100% of 9.8G. PostgreSQL: 'could not write lock file postmaster.pid: No space left on device', container restarting in a loop (3207 restarts). Every service that reads the database degraded with it.",
+    "root_cause": "stayconnect-backup-cleanup.service declares ExecStart=/opt/stayconnect/bin/stayconnect-backup-cleanup. Nothing installed that file: install-service-units.sh carried a hand-written helper list that omitted it, and its verification pass read only ExecStartPre, only for stayconnect-scd and stayconnect-netd, and only the first path it found. The timer therefore failed 203/EXEC every night, silently, and retention never ran: 45 rollback binaries (720 MB), 1.2 GB of releases and 800 MB of journals accumulated.",
+    "data_loss": "NONE. No table, session, entitlement or accounting record was lost.",
+    "remediation_by_product_owner": "Storage expanded to 18G. No agent deletion, vacuuming or resizing was performed, as instructed."
+  },
+  "verified_after_recovery": {
+    "disk": "18G total, 9.4G used, 7.7G available, 55% (was 9.8G / 9.4G / 0 / 100%)",
+    "postgresql": "container healthy and accepting connections; migration head 0058_guest_auth_row_locks",
+    "services": "scd, netd, acctd, pmsd, portald, edged, caddy all active; acctd and netd have run continuously since 2026-08-27 and rode the outage out without restarting",
+    "enforcement_plane": "RECONVERGED UNAIDED. netd promotes both active sessions every pass (ALREADY_ACTIVE) with stable generations 2260 and 2261 - no epoch churn. nft phase3_auth_ipv4 holds 192.168.77.102 and 192.168.77.139 on refreshing 90s leases. tc classes 1:1d66 and 1:1d8b are present on br-g-00d1fa1a and ifb-g-00d1fa1a and carry the byte counts that match the accounting records. acctd logged database errors ONLY during the outage window and none since.",
+    "durable_agreement": "2 sessions 'active' and 1 'ended' (SUPERSEDED_ON_ADDRESS); the two active sessions are exactly the two addresses authorized in the kernel.",
+    "counters": "purchases=3, entitlements=3 (all ACTIVE), sessions=3 (2 active), accounting_records=1037",
+    "financial": "pms_postings=0, posting_attempts=0, posting_outbox=0, payment_transactions=0, settlements=0 - unchanged and zero throughout",
+    "pms": "DISCONNECTED / RESYNC_IN_PROGRESS / CONTINUOUS, stage RECEIVING. pmsd has been unable to dial Protel since 2026-08-27T16:48:29Z (DIAL_FAILED, attempt 15,358). Predates the disk outage and is unrelated to it. NO Full Resync was triggered and no PMS action was taken."
+  },
+  "durable_fix": [
+    "install-service-units.sh derives its helper list FROM the units being installed rather than a hand-written list, so a unit that names a helper installs it automatically or refuses the install.",
+    "It verifies EVERY Exec directive of EVERY unit - not ExecStartPre of two remembered units - and does so BEFORE any unit is copied, so a unit whose executable is missing is never installed and enabled at all.",
+    "A unit that is in service here (enabled directly, through its timer, or currently running) is a hard failure; one that is not (stayconnect-ctrlapi belongs to Central and is disabled on an edge appliance) is reported and does not block the install.",
+    "deploy/scripts/install-service-units-selftest.sh proves each case against a disposable tree, including the missing-executable condition that caused the outage, and asserts that every bin path the shipped units name is produced by something in this repository."
+  ],
+  "room_login": "NOT PERFORMED. No guest authentication was initiated by the agent at any point.",
+  "transition_accepted": true
+}

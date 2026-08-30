@@ -278,6 +278,16 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh enforcement-plane-check --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-phase3-enforcement-plane-selftest.sh
 
+      # A unit whose ExecStart does not exist fails 203/EXEC on every trigger, silently.
+      # stayconnect-backup-cleanup.service did exactly that for weeks: retention never ran, the appliance root
+      # filesystem reached 100%, and PostgreSQL could not write postmaster.pid. The installer now derives its
+      # helper list from the units and verifies every Exec directive before installing anything; this proves
+      # it, including the missing-executable condition that caused the outage.
+      - name: Service-unit installer — helper installation and verification (selftest)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh unit-installer-check --
+          bash $GITHUB_WORKSPACE/deploy/scripts/install-service-units-selftest.sh
+
       # ---------------------------------------------------------------- Hotel Admin / Guest Portal
       - name: npm ci (locked dependencies)
         working-directory: hotel-admin
