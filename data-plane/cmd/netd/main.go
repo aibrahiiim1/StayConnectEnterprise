@@ -174,6 +174,10 @@ func main() {
 		// The confirmed kernel result, recorded through the controlled writers, so a Session only ever claims
 		// `active` once both halves are actually in force.
 		enforcement: &pgEnforcement{pool: pool, tenant: p3mode.TenantID, site: p3mode.SiteID},
+		// DHCP is the authority on who holds an address, and netd owns it. Without this the applier renews
+		// authorization on the producer's word alone, which is how an address reassigned to another guest kept
+		// carrying traffic under the previous guest's entitlement (phase3_address_owner.go).
+		owner: addressOwner{src: ap.kea},
 	}
 	// Continuity is PROVEN, not assumed: a persisted class is carried forward only when the kernel still has
 	// that exact slot under the same boot. A class that was flushed, recreated by hand, or whose minor now

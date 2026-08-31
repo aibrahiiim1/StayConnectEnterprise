@@ -273,6 +273,11 @@ func (p *phase3Shaping) markEnded(ctx context.Context, sessionID, reason string)
 // endReasonPattern is the writer's own rule, restated here so a malformed code is replaced rather than sent:
 // iam_v2.end_session_enforcement refuses anything outside it, and a refused call would leave durable state
 // claiming a session is still live after its access was already removed from the kernel.
+// endReasonAddressNotOwned is recorded when DHCP says the session's address belongs to somebody else, or to
+// nobody. It is deliberately distinct from an ordinary teardown: an operator reading it needs to know the
+// address moved, not that enforcement failed.
+const endReasonAddressNotOwned = "ADDRESS_NO_LONGER_OWNED"
+
 var endReasonPattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 
 func validEndReason(s string) bool { return endReasonPattern.MatchString(s) }

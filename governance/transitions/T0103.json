@@ -1,0 +1,48 @@
+{
+  "transition_id": "T0103",
+  "seq": 103,
+  "timestamp": "2026-08-31T09:00:00Z",
+  "timestamp_derivation": "The completion of the read-only audit and verification sweep this delivery is built on, which precedes the author timestamp of the introducing commit. Per T0091.",
+  "record_type": "DEVICE_SESSION_ACCOUNTING_MODEL_CORRECTION",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_RETENTION_RESTORED_PMS_FEED_DISCONNECTED_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": true,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. The product rules this implements were fixed by the Product Owner in the authorizing instruction itself.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-31: 'Implement and complete the device/session/accounting model correction end-to-end. This prompt explicitly authorizes implementation, CI, merge and deployment to PRE-LIVE appliance .25.' The same instruction forbade Go-Live, PMS configuration changes, Full Resync, PMS posting, payment and financial traffic, and deferred the Guest My Access and Hotel Admin Guest Access UI to a separate feature.",
+  "defect": "An address was treated as an account. One iPhone authenticated on 192.168.77.139, was switched off for days and returned on 192.168.77.102; the .139 Session stayed ACTIVE and netd went on renewing its nft authorization. DHCP had meanwhile reissued .139 to a different device (d6:5a:1c:d2:12:d6, hostname 'ipad', lease to 2026-08-29T13:11:06Z), so for that window a device that never authenticated held an address the appliance was authorizing, and any traffic it sent would have been forwarded and metered onto the absent guest's entitlement. Whether it transmitted is not provable from the single accounting sample; the exposure is structural.",
+  "rules_implemented": [
+    "The Entitlement is the authority for service limits, whatever authentication method produced the subject. IP and MAC are connection evidence and neither is the account nor the quota owner.",
+    "A device may receive different addresses over time, and doing so resets nothing: no new Purchase, no new Entitlement, no usage back to zero. Proven against a real database.",
+    "All Sessions under one Entitlement spend one aggregate data/time quota, while per-Session accounting detail survives for attribution.",
+    "Device limits apply across the Entitlement. A private or randomised MAC is simply a device the property has not seen, handled by the existing device-authorization policy rather than treated as a person.",
+    "An address is never renewed once it is no longer demonstrably the device's: the producer retires an attachment when its device appears at a newer address (SUPERSEDED_ON_DEVICE_MOVE), and the applier verifies ownership against DHCP before every renewal, withdrawing authorization and closing the Session through the controlled writer when it is foreign (ADDRESS_NO_LONGER_OWNED).",
+    "A Session's IP and accounting identity are never rewritten mid-series: a moved device gets a NEW Session under the same Entitlement rather than an edited old one.",
+    "Evidence outage is not evidence: when DHCP cannot be asked, nothing is torn down and the gap is reported."
+  ],
+  "speed_allocation": "Migration 0059 adds service_plan_revisions.speed_allocation, immutable with the revision it belongs to. PER_DEVICE is the default and preserves exactly what every existing revision was sold as. SHARED gives the Entitlement ONE aggregate ceiling: an HTB parent class per entitlement with each session a child holding a small guaranteed floor and the group's ceiling, so an active device borrows the whole ceiling when the others are idle. Deliberately not a division into fixed per-device portions.",
+  "pms_diagnostics": {
+    "scope": "READ-ONLY. No PMS configuration was changed, nothing was reconnected or probed, and no Full Resync was triggered.",
+    "dial_failure": "WORKER_DIAL_FAILED / DIAL_FAILED at stage DIAL, attempt 15,358 as at 2026-08-30T07:42Z, continuous since 2026-08-27T16:48:29Z. A refused TCP connection - not an authentication, protocol or credential failure, each of which surfaces at a later stage with its own code. Consistent with the Product Owner having stopped Protel intentionally. pmsd is behaving correctly: bounded retry, no data mutation, continuity CONTINUOUS.",
+    "local_first_cache": "DEFECTIVE, and not because of the window. The pinned revision configures max_auth_cache_age_seconds=259200 (72h). iam_v2.p3_feed_authorizes returns FALSE for every IN_HOUSE stay for two independent reasons. (1) The offline branch requires resync_started_at IS NULL, and pmsd set it at 2026-08-27T16:48:30Z for a resync that never completed because the dial failed - so a resync ATTEMPT permanently disables the approved local-first capability, which is exactly what the 72-hour window exists to cover. (2) The freshness ceiling has now genuinely elapsed: newest evidence 2026-08-27T16:33:10Z, about 96 hours old. RESYNC_IN_PROGRESS / RECEIVING therefore DOES incorrectly block the last successfully published roster, exactly as suspected.",
+    "materialization_readiness": "NOT the blocker. The claimable PENDING backlog is 0.",
+    "disposition": "REPORTED, NOT FIXED. Correcting the predicate changes guest-authorisation semantics during a PMS outage and was not part of the authorized scope."
+  },
+  "room_login": "NOT PERFORMED. No guest authentication was initiated by the agent.",
+  "transition_accepted": true
+}

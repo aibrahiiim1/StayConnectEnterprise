@@ -56,6 +56,10 @@ type fakeTC struct {
 	failActivateUpload map[string]error // upload filter activation
 	failReRate         map[string]error
 	failAbort          map[string]bool // AbortSession cannot remove the class (returns error, leaves it)
+
+	// SHARED-allocation bookkeeping: the aggregate classes created, and the parent each session hangs under.
+	groups  map[string]int
+	parents map[string]string
 }
 
 func newFakeTC() *fakeTC {
@@ -87,6 +91,47 @@ func (f *fakeTC) setFwd(device string, minor int, on bool) {
 
 // PrepareSession installs the download+upload classes WITHOUT forwarding filters, on both the bridge and its
 // ifb. It clears any stale class+filter for the slot first, as the real client does.
+// groups models the SHARED aggregate classes, per device (bridge or ifb) and classid, with the rate they were
+// last created or re-rated at. parents records which class each session was hung under, so a test can assert
+// that a SHARED session really borrows from its entitlement's ceiling instead of holding its own.
+func (f *fakeTC) EnsureGroupClass(ctx context.Context, ifc, groupCid string, kbps int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.groups == nil {
+		f.groups = map[string]int{}
+	}
+	f.calls = append(f.calls, tcCall{op: "group", bridge: ifc, ip: groupCid, down: kbps})
+	f.groups[ifc+"|"+groupCid] = kbps
+	return nil
+}
+
+func (f *fakeTC) PrepareSessionIn(ctx context.Context, bridge string, ip net.IP, down, up int, groupCid string) error {
+	f.mu.Lock()
+	if f.parents == nil {
+		f.parents = map[string]string{}
+	}
+	parent := groupCid
+	if parent == "" {
+		parent = shape.RootParent
+	}
+	f.parents[bridge+"|"+ip.String()] = parent
+	f.mu.Unlock()
+	return f.PrepareSession(ctx, bridge, ip, down, up)
+}
+
+func (f *fakeTC) groupRate(ifc, groupCid string) (int, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	v, ok := f.groups[ifc+"|"+groupCid]
+	return v, ok
+}
+
+func (f *fakeTC) parentOf(bridge, ip string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.parents[bridge+"|"+ip]
+}
+
 func (f *fakeTC) PrepareSession(ctx context.Context, bridge string, ip net.IP, down, up int) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

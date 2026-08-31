@@ -127,6 +127,15 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0058_guest_auth_row_locks') ON CONFLICT DO NOTHING;" >/dev/null
 
+# 0059 adds service_plan_revisions.speed_allocation, which the shaping planner reads directly.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0059_speed_allocation.up.sql" >/dev/null 2>&1; then
+  echo "0059 FAILED TO APPLY -- deterministic, not a flake"
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0059_speed_allocation') ON CONFLICT DO NOTHING;" >/dev/null
+
 
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"

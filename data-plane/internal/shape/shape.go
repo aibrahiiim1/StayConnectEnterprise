@@ -38,6 +38,11 @@ const (
 	RootParent     = "1:" // per-session classes hang directly off the root qdisc
 	GuestMinorBase = 0x1000
 	GuestMinorMax  = 0x1fff
+	// SHARED-allocation group classes live in their own band, above every per-session minor, so a group and a
+	// session can never claim the same classid. A group is one HTB class at the entitlement's aggregate rate;
+	// the sessions that share it hang off it and borrow up to it.
+	GroupMinorBase = 0x2000
+	GroupMinorMax  = 0x2fff
 )
 
 type Client struct {
@@ -82,6 +87,41 @@ func MinorForIP(ip net.IP) (int, bool) {
 // ClassidForIP returns "1:<minor-hex>" for a guest IP, or "" for non-IPv4.
 func ClassidForIP(ip net.IP) string {
 	minor, ok := MinorForIP(ip)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%s:%x", RootMajor, minor)
+}
+
+// GroupMinorFor maps an entitlement id to its SHARED group class minor.
+//
+// The mapping is a hash rather than an allocation table because the applier must be able to name the group
+// from the plan alone, on the first pass after a restart, with no memory of what it called it last time. It is
+// stable, and a collision between two entitlements is handled where it matters: the applier refuses to install
+// a group whose class already belongs to a different entitlement, exactly as it refuses two sessions on one
+// class minor, rather than silently pooling two accounts' bandwidth.
+func GroupMinorFor(entitlementID string) (int, bool) {
+	id := strings.TrimSpace(entitlementID)
+	if id == "" {
+		return 0, false
+	}
+	// FNV-1a, 32-bit: small, dependency-free and stable across processes and architectures.
+	const (
+		offset32 = 2166136261
+		prime32  = 16777619
+	)
+	h := uint32(offset32)
+	for i := 0; i < len(id); i++ {
+		h ^= uint32(id[i])
+		h *= prime32
+	}
+	span := uint32(GroupMinorMax - GroupMinorBase + 1)
+	return GroupMinorBase + int(h%span), true
+}
+
+// GroupClassid returns "1:<minor-hex>" for a SHARED group, or "" when there is no entitlement to group by.
+func GroupClassid(entitlementID string) string {
+	minor, ok := GroupMinorFor(entitlementID)
 	if !ok {
 		return ""
 	}
@@ -227,6 +267,15 @@ func (c *Client) AddSession(ctx context.Context, bridge string, ip net.IP, downK
 // prepared classes carry no guest packets; they exist only to be read (for the accounting origin) and later
 // activated. It clears any stale leaf first so a crashed prior attempt cannot survive as a half-class.
 func (c *Client) PrepareSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error {
+	return c.PrepareSessionIn(ctx, bridge, ip, downKbps, upKbps, "")
+}
+
+// PrepareSessionIn stages the accountable class, optionally inside a SHARED group.
+//
+// groupCid empty is PER_DEVICE: the class hangs off the root at its own rate, as it always has. Non-empty is
+// SHARED: the group must already exist (the caller creates it, because it is per entitlement and not per
+// session), and this session becomes a child of it with a small floor and the group's ceiling.
+func (c *Client) PrepareSessionIn(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int, groupCid string) error {
 	cid := ClassidForIP(ip)
 	if cid == "" {
 		return fmt.Errorf("ipv4 required, got %s", ip)
@@ -247,10 +296,15 @@ func (c *Client) PrepareSession(ctx context.Context, bridge string, ip net.IP, d
 		upRate = unlimitedKbps
 	}
 	ifb := IFBName(bridge)
-	if err := c.addClass(ctx, bridge, cid, downRate); err != nil {
+	parent, downFloor, upFloor := RootParent, downRate, upRate
+	if groupCid != "" {
+		parent = groupCid
+		downFloor, upFloor = sharedFloorKbps(downRate), sharedFloorKbps(upRate)
+	}
+	if err := c.addClassUnder(ctx, bridge, parent, cid, downFloor, downRate); err != nil {
 		return fmt.Errorf("prepare download class on %s: %w", bridge, err)
 	}
-	if err := c.addClass(ctx, ifb, cid, upRate); err != nil {
+	if err := c.addClassUnder(ctx, ifb, parent, cid, upFloor, upRate); err != nil {
 		// Roll the download class back so a failed prepare leaves no half-class behind.
 		c.removeClassByPref(ctx, bridge, cid, filterPrefFor(ip))
 		return fmt.Errorf("prepare upload class on %s: %w", ifb, err)
@@ -435,9 +489,21 @@ func (c *Client) addClassAndFilter(ctx context.Context, ifc, cid string, kbps in
 // addClass creates the HTB class and its leaf qdisc on a device, WITHOUT any classifying filter. A class with
 // no filter receives no packets, so this is the "prepared, non-forwarding" half of provisioning.
 func (c *Client) addClass(ctx context.Context, ifc, cid string, kbps int) error {
-	rate := fmt.Sprintf("%dkbit", kbps)
-	if err := c.run(ctx, "class", "add", "dev", ifc, "parent", RootParent,
-		"classid", cid, "htb", "rate", rate, "ceil", rate, "burst", "32k"); err != nil {
+	return c.addClassUnder(ctx, ifc, RootParent, cid, kbps, kbps)
+}
+
+// addClassUnder creates a class under an explicit parent with an explicit rate and ceiling.
+//
+// The two-number form is what makes SHARED work. A PER_DEVICE class is rate == ceil: it may use its allowance
+// and no more. A SHARED session class is a SMALL rate (its guaranteed floor) with the GROUP's ceiling, so HTB
+// lends it every spare bit the other devices on the account are not using and takes them back the moment they
+// are. That is "allocated dynamically" expressed in the one mechanism the kernel already has for it — not a
+// division into fixed portions, which would leave a guest throttled while their own idle laptop held capacity.
+func (c *Client) addClassUnder(ctx context.Context, ifc, parent, cid string, rateKbps, ceilKbps int) error {
+	rate := fmt.Sprintf("%dkbit", rateKbps)
+	ceil := fmt.Sprintf("%dkbit", ceilKbps)
+	if err := c.run(ctx, "class", "add", "dev", ifc, "parent", parent,
+		"classid", cid, "htb", "rate", rate, "ceil", ceil, "burst", "32k"); err != nil {
 		return err
 	}
 	minor := strings.SplitN(cid, ":", 2)[1]
@@ -446,6 +512,40 @@ func (c *Client) addClass(ctx context.Context, ifc, cid string, kbps int) error 
 		return err
 	}
 	return nil
+}
+
+// EnsureGroupClass creates (or re-rates) the aggregate class a SHARED entitlement's sessions borrow from.
+//
+// It is idempotent by construction: `class add` on an existing classid fails, so an existing group is re-rated
+// in place instead — which also keeps its counters, exactly as an ordinary re-rate does. The group carries no
+// filter of its own and therefore classifies nothing directly; only the session classes under it do.
+func (c *Client) EnsureGroupClass(ctx context.Context, ifc, groupCid string, kbps int) error {
+	if err := c.addClassUnder(ctx, ifc, RootParent, groupCid, kbps, kbps); err == nil {
+		return nil
+	}
+	// Already there (or unusable). Re-rate covers a plan revision whose aggregate changed and is a no-op
+	// otherwise; a genuinely broken class surfaces here rather than being papered over.
+	return c.run(ctx, "class", "change", "dev", ifc, "parent", RootParent,
+		"classid", groupCid, "htb", "rate", fmt.Sprintf("%dkbit", kbps), "ceil", fmt.Sprintf("%dkbit", kbps),
+		"burst", "32k")
+}
+
+// sharedFloorKbps is the guaranteed rate a single session gets inside a SHARED group.
+//
+// It is deliberately small and NOT the aggregate divided by the device count. HTB shares what nobody is using
+// in proportion to these floors, so a fixed small floor with the group ceiling gives every device an equal
+// claim on contention and the whole ceiling when it is alone — which is the product promise. Dividing by the
+// device count would instead reserve capacity per device and cap an active guest at their share while their
+// idle devices held the rest.
+func sharedFloorKbps(groupKbps int) int {
+	const floor = 64
+	if groupKbps <= floor {
+		return groupKbps
+	}
+	if tenth := groupKbps / 10; tenth > floor {
+		return tenth
+	}
+	return floor
 }
 
 // changeClass adjusts an existing class's rate/ceil in place. `class change` preserves the class's byte

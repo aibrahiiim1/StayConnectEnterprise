@@ -40,9 +40,11 @@ type SessionShape struct {
 	// its kernel authorization lease by it. Nil means the entitlement states no wall-clock end.
 	WindowEndsAt *time.Time
 	// EndReason is why a TEAR entry must stop being enforced, as a bounded machine code. It is empty for a
-	// session torn down for the ordinary reason (its access ended), and set when the plan is teaing a session
-	// down for a reason the durable record should name — today, only address supersession.
+	// session torn down for the ordinary reason (its access ended), and set when the plan is tearing a session
+	// down for a reason the durable record should name.
 	EndReason string
+	// SpeedAllocation is PER_DEVICE or SHARED, from the entitlement's pinned plan revision.
+	SpeedAllocation string
 }
 
 // Plan is what the edge should be enforcing right now for a site.
@@ -143,6 +145,10 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 	rows, err := e.pool.Query(ctx, `SELECT s.id::text, s.entitlement_id::text, s.device_id::text,
 			COALESCE(host(s.ip),''), COALESCE(s.mac::text,''), COALESCE(s.ingress_interface,''),
 			COALESCE(spr.down_kbps,0), COALESCE(spr.up_kbps,0), e.window_ends_at,
+			-- The column arrived with 0059. Reading it through a catalog-independent COALESCE would be
+			-- cheaper than a migration gate and would also silently produce PER_DEVICE on a database that has
+			-- the column set to SHARED, so it is read directly and the migration is a deployment prerequisite.
+			COALESCE(spr.speed_allocation,'PER_DEVICE'),
 			(s.state IN ('active','PENDING_ENFORCEMENT') AND s.ended IS NULL AND e.status='ACTIVE'
 			 AND (e.window_ends_at IS NULL OR e.window_ends_at > now())) AS entitled
 		FROM iam_v2.sessions s
@@ -161,7 +167,7 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 		var sh SessionShape
 		var entitled bool
 		if err := rows.Scan(&sh.SessionID, &sh.EntitlementID, &sh.DeviceID, &sh.IP, &sh.MAC, &sh.Bridge,
-			&sh.DownKbps, &sh.UpKbps, &sh.WindowEndsAt, &entitled); err != nil {
+			&sh.DownKbps, &sh.UpKbps, &sh.WindowEndsAt, &sh.SpeedAllocation, &entitled); err != nil {
 			return p, err
 		}
 		if entitled {
@@ -175,7 +181,65 @@ func (e *Enforcer) PlanForSite(ctx context.Context, tenant, site string) (Plan, 
 	if err := rows.Err(); err != nil {
 		return p, err
 	}
-	return resolveAddressOwnership(p), nil
+	return resolveAddressOwnership(retireMovedDevices(p)), nil
+}
+
+// EndReasonDeviceMoved is recorded on a session torn down because its own device is now attached at a
+// different address. Nothing failed and the guest did nothing wrong: the entitlement, its purchase and its
+// usage are untouched, and only the obsolete network attachment ends.
+const EndReasonDeviceMoved = "SUPERSEDED_ON_DEVICE_MOVE"
+
+// retireMovedDevices ends an attachment the device itself has abandoned.
+//
+// A DEVICE MOVES. DHCP hands it a new address after a lease lapses, after a reboot, after a day switched off.
+// The durable Session it left behind still names the OLD address, and the applier keeps renewing kernel
+// authorization for that address because durable state says the session is live. Nothing ever stops.
+//
+// That is not merely untidy, it is the whole exposure: DHCP reassigns the abandoned address to somebody else,
+// and the new holder inherits authorization — and metering — belonging to a guest who is no longer there. It
+// happened on the PRE-LIVE appliance: one iPhone authenticated on .139, was switched off for days, came back
+// on .102, and .139 was reissued to a different device while the appliance went on authorizing it.
+//
+// So when the same device appears at a NEWER address, its older attachments end. The evidence is the device's
+// own newer session, which is as authoritative as durable state gets — the device is demonstrably somewhere
+// else. This is deliberately narrower than the applier's DHCP check, which catches the other case (the device
+// left and never came back); the two together are what close the address.
+//
+// WHAT THIS DOES NOT TOUCH. The Entitlement, its Purchase, its quota and its accumulated usage all survive
+// unchanged, because none of them is a property of an address. A device changing address costs the guest
+// nothing and buys them nothing.
+func retireMovedDevices(p Plan) Plan {
+	// The newest entry per device, by the query's total (started, id) order.
+	newest := map[string]int{}
+	for i, sh := range p.Shape {
+		if sh.DeviceID == "" || sh.IP == "" {
+			continue
+		}
+		newest[sh.DeviceID] = i
+	}
+	keep := make([]SessionShape, 0, len(p.Shape))
+	for i, sh := range p.Shape {
+		if sh.DeviceID == "" || sh.IP == "" {
+			keep = append(keep, sh)
+			continue
+		}
+		latest, ok := newest[sh.DeviceID]
+		if !ok || latest == i {
+			keep = append(keep, sh)
+			continue
+		}
+		if p.Shape[latest].IP == sh.IP && p.Shape[latest].Bridge == sh.Bridge {
+			// Same device, same address: two sessions on ONE attachment. That is the address-ownership
+			// question, not a move, and resolveAddressOwnership decides it with its own reason code.
+			keep = append(keep, sh)
+			continue
+		}
+		sh.DownKbps, sh.UpKbps = 0, 0
+		sh.EndReason = EndReasonDeviceMoved
+		p.Tear = append(p.Tear, sh)
+	}
+	p.Shape = keep
+	return p
 }
 
 // EndReasonSupersededOnAddress is recorded on a session torn down because a newer session took over its
