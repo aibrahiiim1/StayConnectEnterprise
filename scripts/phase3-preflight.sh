@@ -179,7 +179,10 @@ fi
 PROV="$ROOT/data-plane/cmd/netd/phase3_provision.go"
 reg_line="$(grep -n 'registerOrigin(' "$PROV" | head -1 | cut -d: -f1)"
 act_line="$(grep -n 'ActivateSession(' "$PROV" | head -1 | cut -d: -f1)"
-prep_line="$(grep -n 'PrepareSession(' "$PROV" | head -1 | cut -d: -f1)"
+# PrepareSession OR PrepareSessionIn: the staged preparation gained a SHARED-group variant, and a pattern that
+# only knew the original name reported the invariant BROKEN when the call was renamed — a false alarm on a
+# check whose whole value is that it is trusted.
+prep_line="$(grep -nE 'PrepareSession(In)?\(' "$PROV" | head -1 | cut -d: -f1)"
 if [ -n "$reg_line" ] && [ -n "$act_line" ] && [ -n "$prep_line" ] \
    && [ "$prep_line" -lt "$reg_line" ] && [ "$reg_line" -lt "$act_line" ]; then
   ok "netd prepares, then registers the accounting origin, then activates forwarding (accountable before forwarding)"
