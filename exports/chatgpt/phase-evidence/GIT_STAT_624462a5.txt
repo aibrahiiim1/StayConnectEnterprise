@@ -1,4 +1,0 @@
-commit 624462a5ec4856ebc049b3f9225421c1dc863cf1
-Date:   Tue Sep 1 00:07:22 2026 +0300
-
-    Give the shaping tests the evidence the applier now requires
