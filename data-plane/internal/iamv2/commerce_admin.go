@@ -117,6 +117,7 @@ type PlanSummary struct {
 	TimeQuotaSeconds     *int64  `json:"time_quota_seconds,omitempty"`
 	DataQuotaBytes       *int64  `json:"data_quota_bytes,omitempty"`
 	TimeAccountingMode   *string `json:"time_accounting_mode,omitempty"`
+	SpeedAllocation      *string `json:"speed_allocation,omitempty"`
 }
 
 // GraceConfig is the read/write shape for site_checkout_grace_config.
@@ -176,6 +177,9 @@ type PlanPublishSpec struct {
 	TimeQuotaSeconds            *int64
 	DataQuotaBytes              *int64
 	TimeAccountingMode          string
+	// SpeedAllocation is PER_DEVICE or SHARED. Empty publishes PER_DEVICE, so an operator (or an older client)
+	// that says nothing about it gets exactly what every revision published so far promised.
+	SpeedAllocation string
 }
 
 // PackageSummary is the read shape for the admin list.
@@ -361,6 +365,24 @@ func validatePlanSpec(spec *PlanPublishSpec, allowAggregate bool) error {
 	// publishes VALIDITY_WINDOW, exactly as every revision published so far did.
 	if spec.TimeAccountingMode == "" {
 		spec.TimeAccountingMode = "VALIDITY_WINDOW"
+	}
+	// SPEED ALLOCATION, on the same principle. PER_DEVICE is what an unstated plan has always meant, so it is
+	// the default; SHARED has to be chosen. An unknown value is refused rather than defaulted, because
+	// defaulting it would hand a property that asked for one shared ceiling a per-device rate for every guest
+	// and overspend its capacity with nothing failing.
+	if spec.SpeedAllocation == "" {
+		spec.SpeedAllocation = "PER_DEVICE"
+	}
+	if spec.SpeedAllocation != "PER_DEVICE" && spec.SpeedAllocation != "SHARED" {
+		return &Error{Code: ErrInvalidInput, Msg: "unknown speed_allocation"}
+	}
+	// A SHARED plan without a rate is not a shared plan: with no ceiling to divide there is nothing to share,
+	// and the applier would build a group at the unlimited fallback. An operator choosing SHARED means to cap
+	// the account, so the cap has to be there.
+	if spec.SpeedAllocation == "SHARED" &&
+		((spec.DownKbps == nil || *spec.DownKbps <= 0) || (spec.UpKbps == nil || *spec.UpKbps <= 0)) {
+		return &Error{Code: ErrInvalidInput,
+			Msg: "SHARED speed_allocation requires positive down_kbps and up_kbps to share"}
 	}
 	switch spec.TimeAccountingMode {
 	case "VALIDITY_WINDOW":

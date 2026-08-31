@@ -100,6 +100,10 @@ type phase3Shaping struct {
 	// owner answers "does this address still belong to this session's device" from DHCP (phase3_address_owner.go).
 	// A zero value answers UNKNOWN for everything, which is the behaviour every existing test expects.
 	owner addressOwner
+	// unverified is the set of sessions this writer is currently declining to renew because ownership could
+	// not be checked. Their existing bounded leases are running down; confirmation before expiry resumes
+	// normal renewal, and silence lets the kernel drop them.
+	unverified map[string]bool
 
 	lastApplied time.Time
 	lastDegrade string

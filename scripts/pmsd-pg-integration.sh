@@ -136,6 +136,15 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0059_speed_allocation') ON CONFLICT DO NOTHING;" >/dev/null
 
+# 0060 restates p3_feed_authorizes so a failed resync no longer invalidates the published roster.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0060_last_good_roster_survives_a_failed_resync.up.sql" >/dev/null 2>&1; then
+  echo "0060 FAILED TO APPLY -- deterministic, not a flake"
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0060_last_good_roster_survives_a_failed_resync') ON CONFLICT DO NOTHING;" >/dev/null
+
 
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"

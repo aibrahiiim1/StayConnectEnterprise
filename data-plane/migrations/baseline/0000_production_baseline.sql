@@ -1766,8 +1766,7 @@ CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interfac
                     > now() - make_interval(secs => iam_v2.p3_cfg_secs(pr.config,'heartbeat_timeout_ms',300)))
              OR
              (    rt.transport_status <> 'CONNECTED'
-              AND rt.last_complete_sync_at IS NOT NULL
-              AND rt.resync_started_at IS NULL)
+              AND rt.last_complete_sync_at IS NOT NULL)
            )
        -- (2) shared by both branches: no unresolved continuity loss, and the runtime is serving the Revision
        --     the caller presented.

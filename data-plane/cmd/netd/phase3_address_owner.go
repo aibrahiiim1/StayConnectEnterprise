@@ -87,3 +87,24 @@ func (a addressOwner) Owns(ctx context.Context, ip net.IP, mac string) addressOw
 	// No live lease for the address at all. Nobody holds it, so this session does not either.
 	return addressForeign
 }
+
+// noteUnverified records that a pass declined to renew a session because ownership could not be checked.
+//
+// It exists so the state is VISIBLE rather than merely absent. A guest silently dropping off the network when
+// the DHCP control socket goes quiet is the kind of failure that gets diagnosed twice: once as a network
+// problem and once, much later, as this. The health surface reports the count, and a pass that verifies the
+// session again clears it.
+func (p *phase3Shaping) noteUnverified(bridge, sessionID string) {
+	if p.unverified == nil {
+		p.unverified = map[string]bool{}
+	}
+	p.unverified[classKey(bridge, sessionID)] = true
+}
+
+// clearUnverified records that ownership was positively confirmed again.
+func (p *phase3Shaping) clearUnverified(bridge, sessionID string) {
+	delete(p.unverified, classKey(bridge, sessionID))
+}
+
+// unverifiedCount is how many sessions this writer is currently declining to renew for want of evidence.
+func (p *phase3Shaping) unverifiedCount() int { return len(p.unverified) }
