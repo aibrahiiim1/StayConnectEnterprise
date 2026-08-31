@@ -149,7 +149,7 @@ func TestIntegration_ContinuityLossFailsClosedRegardlessOfTransport(t *testing.T
 
 // A RESYNC IN FLIGHT FAILS CLOSED. Part of the truth has been applied and the rest has not, which is the one
 // moment the mirror is inconsistent rather than merely behind. Brief, and worth refusing for.
-func TestIntegration_ResyncInFlightFailsClosed(t *testing.T) {
+func TestIntegration_ResyncInFlightKeepsTheLastGoodRoster(t *testing.T) {
 	p := pool(t)
 	defer p.Close()
 	s := seedCacheAge(t, p, "null")
@@ -160,9 +160,90 @@ func TestIntegration_ResyncInFlightFailsClosed(t *testing.T) {
 	startResync(t, p, s, now.Add(-time.Minute))
 	setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
 
+	if !authorizable(t, p, s) {
+		t.Fatal("a resync that has merely STARTED withdrew a roster that is published, whole and two hours " +
+			"old. This is the defect that refused Room authentication for four days: pmsd set " +
+			"resync_started_at, the dial failed, and the field was never cleared")
+	}
+}
+
+// ...AND A RESYNC THAT BEGAN AND FAILED IS NO DIFFERENT. This is the live shape of the outage: the attempt is
+// recorded, nothing ever completes it, and the roster it was going to replace is still the only one there is.
+func TestIntegration_FailedResyncDoesNotInvalidateThePublishedRoster(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := seedCacheAge(t, p, "259200") // the property's configured seventy-two hours
+
+	now := time.Now().UTC()
+	setFeed(t, p, s, "DISCONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now.Add(-71*time.Hour))
+	establishMirror(t, p, s, now.Add(-71*time.Hour))
+	startResync(t, p, s, now.Add(-70*time.Hour)) // began 70 hours ago and never finished
+	setEvidenceAge(t, p, s, now.Add(-71*time.Hour))
+
+	if !authorizable(t, p, s) {
+		t.Fatal("a roster 71 hours old was refused inside a 72-hour window because a failed resync attempt " +
+			"was on the record")
+	}
+}
+
+// THE WINDOW STILL CLOSES. One hour later the same roster is outside the cache age and nothing authorises —
+// which is the state the appliance is in today, four days into the outage, and the RIGHT reason to be blocked.
+func TestIntegration_TheSeventyTwoHourWindowStillExpires(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := seedCacheAge(t, p, "259200")
+
+	now := time.Now().UTC()
+	setFeed(t, p, s, "DISCONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now.Add(-73*time.Hour))
+	establishMirror(t, p, s, now.Add(-73*time.Hour))
+	startResync(t, p, s, now.Add(-72*time.Hour))
+	setEvidenceAge(t, p, s, now.Add(-73*time.Hour))
+
 	if authorizable(t, p, s) {
-		t.Fatal("a guest was authorised against a mirror that is partway through a complete resync, where " +
-			"some Stays have been updated and others still hold the previous generation's state")
+		t.Fatal("evidence older than the configured 72-hour cache age authorised a guest")
+	}
+}
+
+// THE PARTIAL GENERATION IS STILL NOT A ROSTER. A resync that is RECEIVING accumulates events for a generation
+// that has not been published; they are not claimable, so they neither block authorisation nor contribute to
+// it. What a guest is authenticated against remains the roster that was published before the attempt began.
+func TestIntegration_AnUnpublishedGenerationNeitherBlocksNorAuthorises(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	s := seedCacheAge(t, p, "null")
+
+	now := time.Now().UTC()
+	setFeed(t, p, s, "DISCONNECTED", "RESYNC_IN_PROGRESS", "CONTINUOUS", now.Add(-time.Hour))
+	establishMirror(t, p, s, now.Add(-6*time.Hour))
+	startResync(t, p, s, now.Add(-time.Minute))
+	setEvidenceAge(t, p, s, now.Add(-2*time.Hour))
+
+	// An event of the generation currently arriving: above the published one, therefore unclaimable.
+	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.stay_events
+		(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,
+		 processing_status,admission_kind,resync_generation,sequence_version,received_at)
+		SELECT gen_random_uuid(),$1,$2,$3,'partial-1','GO','{}'::jsonb,'PENDING','RESYNC',
+		       published_resync_generation + 1, 1, now()
+		  FROM iam_v2.pms_interface_runtime WHERE pms_interface_id=$3`,
+		s.tenant, s.site, s.iface); err != nil {
+		t.Fatalf("stage the arriving generation: %v", err)
+	}
+
+	if !authorizable(t, p, s) {
+		t.Fatal("an unpublished generation's event blocked authorisation against the roster that IS published")
+	}
+
+	// ...whereas a CLAIMABLE pending event — one the applier could consume and has not — still blocks, because
+	// then the published roster genuinely is behind.
+	if _, err := p.Exec(context.Background(), `INSERT INTO iam_v2.stay_events
+		(id,tenant_id,site_id,pms_interface_id,external_event_identity,event_type,payload,
+		 processing_status,admission_kind,resync_generation,sequence_version,received_at)
+		VALUES (gen_random_uuid(),$1,$2,$3,'claimable-1','GO','{}'::jsonb,'PENDING','LIVE',0,1,now())`,
+		s.tenant, s.site, s.iface); err != nil {
+		t.Fatalf("stage the claimable event: %v", err)
+	}
+	if authorizable(t, p, s) {
+		t.Fatal("a claimable PENDING event no longer blocks: the materialization-readiness rule was lost")
 	}
 }
 

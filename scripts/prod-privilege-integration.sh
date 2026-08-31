@@ -84,7 +84,8 @@ done
 # others keep the schema matching a current appliance.
 for m in 0056_materialization_readiness 0057_lock_auth_context_offer \
          0058_guest_auth_row_locks \
-         0059_speed_allocation; do
+         0059_speed_allocation \
+         0060_last_good_roster_survives_a_failed_resync; do
   f="$ROOT/data-plane/migrations/$m.up.sql"
   [ -f "$f" ] || continue
   psql_run < "$f" >"$OUT/$m.log" 2>&1 || { echo "  FAIL $m:"; tail -3 "$OUT/$m.log"; exit 1; }

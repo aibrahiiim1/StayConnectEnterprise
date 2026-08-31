@@ -215,6 +215,10 @@ func (f cycleFixture) applier(t *testing.T, stateDir string, tc *fakeTC, g *fake
 		generations: &pgGenerations{pool: f.pool},
 		enforcement: &pgEnforcement{pool: f.pool, tenant: f.tenant, site: f.site},
 		secClock:    newSecurityClock(),
+		// DHCP CONFIRMS THIS FIXTURE'S ADDRESS. Ownership verification sits in front of provisioning, so a
+		// writer with no evidence source answers UNKNOWN, withholds the renewal and never reaches the cycle
+		// these tests exist to prove. The lease is the one Kea would hold for this device.
+		owner: addressOwner{src: fakeLeases{rows: []KeaLease{lease(f.ip, f.mac)}}},
 	}
 }
 

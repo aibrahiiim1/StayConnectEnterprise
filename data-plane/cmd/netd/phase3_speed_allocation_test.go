@@ -20,17 +20,36 @@ import (
 )
 
 func allocSession(id, ip, ent, mode string) shapeplan.Session {
-	return shapeplan.Session{SessionID: id, DeviceID: "dev-" + id, IP: ip, MAC: "aa:bb:cc:00:00:01",
+	return shapeplan.Session{SessionID: id, DeviceID: "dev-" + id, IP: ip, MAC: allocMAC(ip),
 		Bridge: "br-guest", EntitlementID: ent, SpeedAllocation: mode,
 		DownKbps: 20000, UpKbps: 5000, Entitled: true}
+}
+
+// allocMAC gives each address its own device, so the ownership check has something coherent to verify.
+func allocMAC(ip string) string { return "aa:bb:cc:00:00:" + ip[len(ip)-2:] }
+
+// allocWriter is a live writer whose DHCP evidence CONFIRMS every address these tests use.
+//
+// Shaping is what is under test here, and ownership verification sits in front of it: a writer with no
+// evidence source answers UNKNOWN, withholds the renewal and never reaches the class construction. Supplying
+// the leases keeps these tests about the thing they are named after.
+func allocWriter(t *testing.T, tc *fakeTC, g *fakeGate, ips ...string) *phase3Shaping {
+	t.Helper()
+	rows := make([]KeaLease, 0, len(ips))
+	for _, ip := range ips {
+		rows = append(rows, lease(ip, allocMAC(ip)))
+	}
+	p := liveWriter(tc)
+	p.gate = g
+	p.owner = addressOwner{src: fakeLeases{rows: rows}}
+	return p
 }
 
 // PER_DEVICE: no group is created and every session hangs off the root at its own rate — byte for byte what
 // the applier did before speed allocation existed.
 func TestSpeedAllocation_PerDeviceKeepsIndependentRates(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
-	p := liveWriter(tc)
-	p.gate = g
+	p := allocWriter(t, tc, g, "10.0.0.11", "10.0.0.12")
 
 	res, err := p.submit(context.Background(), envelope(1,
 		allocSession("a", "10.0.0.11", "ent-1", "PER_DEVICE"),
@@ -55,8 +74,7 @@ func TestSpeedAllocation_PerDeviceKeepsIndependentRates(t *testing.T) {
 // quietly become SHARED — that would halve a property's sold bandwidth without anything failing.
 func TestSpeedAllocation_UnsetModeIsPerDevice(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
-	p := liveWriter(tc)
-	p.gate = g
+	p := allocWriter(t, tc, g, "10.0.0.11")
 
 	if _, err := p.submit(context.Background(), envelope(1,
 		allocSession("a", "10.0.0.11", "ent-1", "")), time.Now()); err != nil {
@@ -74,8 +92,7 @@ func TestSpeedAllocation_UnsetModeIsPerDevice(t *testing.T) {
 // bridge AND the upload IFB, because a shared plan is shared in both directions.
 func TestSpeedAllocation_SharedBuildsOneCeilingForTheEntitlement(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
-	p := liveWriter(tc)
-	p.gate = g
+	p := allocWriter(t, tc, g, "10.0.0.11", "10.0.0.12")
 
 	res, err := p.submit(context.Background(), envelope(1,
 		allocSession("a", "10.0.0.11", "ent-1", "SHARED"),
@@ -106,8 +123,7 @@ func TestSpeedAllocation_SharedBuildsOneCeilingForTheEntitlement(t *testing.T) {
 // spending another room's bandwidth.
 func TestSpeedAllocation_SeparateEntitlementsGetSeparateCeilings(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
-	p := liveWriter(tc)
-	p.gate = g
+	p := allocWriter(t, tc, g, "10.0.0.11", "10.0.0.12")
 
 	if _, err := p.submit(context.Background(), envelope(1,
 		allocSession("a", "10.0.0.11", "ent-1", "SHARED"),
@@ -127,8 +143,7 @@ func TestSpeedAllocation_SeparateEntitlementsGetSeparateCeilings(t *testing.T) {
 // class's counters and, worse, momentarily drop the ceiling every device is borrowing from.
 func TestSpeedAllocation_SharedGroupIsIdempotentAcrossPasses(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
-	p := liveWriter(tc)
-	p.gate = g
+	p := allocWriter(t, tc, g, "10.0.0.11")
 	s := allocSession("a", "10.0.0.11", "ent-1", "SHARED")
 
 	for gen := int64(1); gen <= 3; gen++ {
@@ -145,8 +160,7 @@ func TestSpeedAllocation_SharedGroupIsIdempotentAcrossPasses(t *testing.T) {
 // Defaulting there would hand one device the whole ceiling and call it shared.
 func TestSpeedAllocation_SharedWithoutAnEntitlementIsRefused(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
-	p := liveWriter(tc)
-	p.gate = g
+	p := allocWriter(t, tc, g, "10.0.0.11")
 	s := allocSession("a", "10.0.0.11", "", "SHARED")
 
 	res, err := p.submit(context.Background(), envelope(1, s), time.Now())

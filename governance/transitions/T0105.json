@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0105",
+  "seq": 105,
+  "timestamp": "2026-08-31T20:00:00Z",
+  "timestamp_derivation": "The completion of the local gate sweep this delivery rests on, which precedes the author timestamp of the introducing commit. Per T0091.",
+  "record_type": "LOCAL_FIRST_CONTRACT_AND_SPEED_ALLOCATION_SURFACE",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. The contracts implemented here were fixed by the Product Owner in the authorizing instruction.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-31: 'Complete the remaining access-model defects end-to-end. This prompt explicitly authorizes implementation, CI, merge and deployment to PRE-LIVE .25.'",
+  "local_first_fix": "Migration 0060 restates iam_v2.p3_feed_authorizes. The offline branch no longer requires resync_started_at IS NULL, so a resync that is in flight - or that began and failed, which is the live shape of this outage - does not invalidate the roster already published. That is safe because the applier claims only events that are LIVE or belong to a generation at or below published_resync_generation, so an unpublished generation is never applied and the live roster stays whole until a replacement completes. The partial RECEIVING generation therefore neither blocks authorisation nor contributes to it, the materialization-readiness term is unchanged, and the max_auth_cache_age_seconds ceiling still retires the roster when it genuinely ages out.",
+  "dhcp_unknown_rule": "Corrected to the approved rule. UNKNOWN ownership no longer renews the nft authorization and no longer ends anything: the bounded 90-second lease is the transient tolerance, ownership confirmed before expiry resumes normal renewal, and silence lets the kernel drop the authorization unaided. Durable Session state alone can no longer renew an address indefinitely. FOREIGN or absent ownership is still revoked immediately and the Session closed through the controlled writer. The count of sessions currently unrenewable for want of evidence is tracked so the state is visible rather than merely absent.",
+  "speed_allocation_surface": "speed_allocation is now authorable. It is on the authoritative service-plan revision API (PlanPublishSpec, the edged publish request and the plan read shape) and on the Hotel Admin publish form. PER_DEVICE is the default, so every revision published before the column keeps exactly what it was sold as; an unrecognised mode is refused rather than defaulted; and SHARED without a positive rate to share is refused, because a shared plan with no ceiling would be built at the applier's unlimited fallback. Immutable revision semantics are unchanged: the mode is chosen at publish and never edited.",
+  "pr65_count_correction": "PR #65 changed 47 paths. The delivery report's heading said 48 while the table beneath it listed 47 - the count was wrong and the list was right. NO repository artifact carried 48: the generated change manifest and the T0103 and T0104 receipts are derived and were correct. Nothing is rewritten and the historical evidence stands as recorded.",
+  "room_login": "NOT PERFORMED. No guest authentication was initiated and Protel was neither reconnected nor modified.",
+  "transition_accepted": true
+}

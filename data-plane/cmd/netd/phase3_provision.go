@@ -83,6 +83,8 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	// tearing every guest down over an unreadable control socket would manufacture an outage out of a missing
 	// answer. The session keeps whatever it already had and the pass reports the gap.
 	switch p.owner.Owns(ctx, ip, s.MAC) {
+	case addressOwned:
+		p.clearUnverified(bridge, s.SessionID)
 	case addressForeign:
 		p.failClosed(ctx, bridge, ip, res,
 			"shape "+s.SessionID+": "+s.IP+" is no longer leased to this session's device; authorization withdrawn")
@@ -90,10 +92,24 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		p.endSeries(bridge, s.SessionID)
 		return
 	case addressUnknown:
+		// EVIDENCE MISSING IS NOT PERMISSION TO CONTINUE.
+		//
+		// Durable state alone must never renew an address indefinitely: that is precisely how an address
+		// reassigned to another guest stayed authorized. So a pass that cannot verify ownership does NOT
+		// renew — and it does not destroy anything either. The authorization already installed is a BOUNDED
+		// 90-second lease, and letting it run is exactly the transient tolerance a brief Kea outage needs.
+		//
+		// If evidence returns and confirms ownership before that lease expires, the next pass renews normally
+		// and the guest never notices. If it does not, the kernel drops the authorization by itself, with no
+		// process having to be alive to make that happen. The Entitlement, the Purchase and the usage are
+		// untouched throughout: this withholds a renewal, it does not end an account.
 		if s.MAC != "" {
 			res.Problems = append(res.Problems,
 				"shape "+s.SessionID+": address ownership could not be verified (DHCP evidence unavailable); "+
-					"the existing authorization is left as it is")
+					"the authorization is NOT renewed and will expire with its current lease unless ownership "+
+					"is confirmed first")
+			p.noteUnverified(bridge, s.SessionID)
+			return
 		}
 	}
 

@@ -89,7 +89,8 @@ func (r *PgCommerceAdminRepository) ListPlans(ctx context.Context, tenantID, sit
 		        (SELECT count(*) FROM iam_v2.service_plan_revisions r WHERE r.service_plan_id = p.id),
 		        cur.name, cur.down_kbps, cur.up_kbps, cur.max_concurrent_devices, cur.device_limit_policy,
 		        cur.idle_timeout_seconds, cur.max_continuous_session_seconds,
-		        cur.time_quota_seconds, cur.data_quota_bytes, cur.time_accounting_mode
+		        cur.time_quota_seconds, cur.data_quota_bytes, cur.time_accounting_mode,
+		        cur.speed_allocation
 		   FROM iam_v2.service_plans p
 		   -- LEFT JOIN: a plan with no published revision yet is a real state, and it must still list.
 		   LEFT JOIN iam_v2.service_plan_revisions cur ON cur.id = p.current_revision_id
@@ -113,7 +114,7 @@ func (r *PgCommerceAdminRepository) ListPlans(ctx context.Context, tenantID, sit
 		if err := rows.Scan(&s.PlanID, &s.Code, &s.Enabled, &s.CurrentRevisionID, &s.RevisionCount,
 			&s.Name, &s.DownKbps, &s.UpKbps, &s.MaxConcurrentDevices, &s.DeviceLimitPolicy,
 			&s.IdleTimeoutSeconds, &s.MaxSessionSeconds, &s.TimeQuotaSeconds, &s.DataQuotaBytes,
-			&s.TimeAccountingMode); err != nil {
+			&s.TimeAccountingMode, &s.SpeedAllocation); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -436,12 +437,12 @@ func (t *pgCommerceAdminTx) InsertPlanRevision(ctx context.Context, spec PlanPub
 		`INSERT INTO iam_v2.service_plan_revisions
 		   (tenant_id, site_id, service_plan_id, revision_no, name, down_kbps, up_kbps,
 		    max_concurrent_devices, device_limit_policy, idle_timeout_seconds, max_continuous_session_seconds,
-		    time_accounting_mode, time_quota_seconds, data_quota_bytes)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		    time_accounting_mode, time_quota_seconds, data_quota_bytes, speed_allocation)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		 RETURNING id::text`,
 		spec.TenantID, spec.SiteID, planID, revNo, spec.Name, spec.DownKbps, spec.UpKbps,
 		spec.MaxConcurrentDevices, spec.DeviceLimitPolicy, spec.IdleTimeoutSeconds, spec.MaxContinuousSessionSeconds,
-		spec.TimeAccountingMode, spec.TimeQuotaSeconds, spec.DataQuotaBytes).Scan(&id)
+		spec.TimeAccountingMode, spec.TimeQuotaSeconds, spec.DataQuotaBytes, spec.SpeedAllocation).Scan(&id)
 	return id, err
 }
 

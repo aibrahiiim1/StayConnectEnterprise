@@ -29,6 +29,15 @@ type fakeLeases struct {
 
 func (f fakeLeases) Leases() ([]KeaLease, error) { return f.rows, f.err }
 
+// switchableLeases is the same evidence source with a failure that can be turned on and off between passes,
+// so an outage and its recovery are one continuous scenario rather than two unrelated tests.
+type switchableLeases struct {
+	rows []KeaLease
+	err  error
+}
+
+func (f *switchableLeases) Leases() ([]KeaLease, error) { return f.rows, f.err }
+
 func lease(ip, mac string) KeaLease {
 	return KeaLease{IPAddress: ip, HWAddr: mac, ValidLft: 600, State: 0}
 }
@@ -121,30 +130,92 @@ func TestApplier_ForeignAddressIsRevokedAndTornDown(t *testing.T) {
 	}
 }
 
-// UNKNOWN LEAVES THE GUEST ALONE. It is reported, so an operator sees that verification is not running, and
-// nothing is torn down over it.
-func TestApplier_UnknownOwnershipDoesNotDisconnectAnyone(t *testing.T) {
+// UNKNOWN WITHHOLDS THE RENEWAL AND DESTROYS NOTHING.
+//
+// Durable state alone must never renew an address indefinitely, so a pass that cannot verify ownership does
+// not renew. It also does not tear anything down: the authorization already installed is a bounded lease, and
+// letting it run out on its own is the transient tolerance a brief Kea outage needs. The account is untouched.
+func TestApplier_UnknownOwnershipWithholdsRenewalWithoutEndingAnything(t *testing.T) {
 	tc, g := newFakeTC(), newFakeGate()
-	p := ownershipWriter(t, tc, g, fakeLeases{err: errors.New("kea down")})
+	src := &switchableLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}}
+	p := ownershipWriter(t, tc, g, src)
+	s := sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")
 
-	res, err := p.submit(context.Background(), envelope(1, sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")), time.Now())
+	// A healthy pass first, so there is a live lease to let run down.
+	if res, err := p.submit(context.Background(), envelope(1, s), time.Now()); err != nil || res.Shaped != 1 {
+		t.Fatalf("setup: %+v %v", res, err)
+	}
+	before := g.leaseOf("br-guest", "10.0.0.5")
+	if before <= 0 {
+		t.Fatal("setup: no lease was installed")
+	}
+
+	// Kea goes away. The pass must not renew, must not revoke, and must say so.
+	src.err = errors.New("kea down")
+	g.advance(30 * time.Second)
+	res, err := p.submit(context.Background(), envelope(2, s), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Shaped != 1 {
-		t.Fatalf("a guest was refused because DHCP could not be asked: %+v", res)
+	if res.Shaped != 0 {
+		t.Fatalf("a session was counted as shaped while its ownership was unverifiable: %+v", res)
 	}
 	if !g.isAuthorized("br-guest", "10.0.0.5") {
-		t.Fatal("the guest lost authorization over an evidence outage")
+		t.Fatal("the guest was cut off the moment DHCP could not be asked — the bounded lease is the tolerance")
+	}
+	if after := g.leaseOf("br-guest", "10.0.0.5"); after >= before {
+		t.Fatalf("the lease was renewed anyway (%s -> %s): durable state alone must not renew an address",
+			before, after)
+	}
+	if p.unverifiedCount() != 1 {
+		t.Fatalf("unverified sessions = %d, want 1 — the state must be visible, not merely absent",
+			p.unverifiedCount())
 	}
 	var reported bool
-	for _, s := range res.Problems {
-		if len(s) > 0 && contains(s, "ownership could not be verified") {
+	for _, msg := range res.Problems {
+		if contains(msg, "NOT renewed") {
 			reported = true
 		}
 	}
 	if !reported {
-		t.Fatalf("the evidence gap was not reported: %+v", res.Problems)
+		t.Fatalf("the withheld renewal was not reported: %+v", res.Problems)
+	}
+}
+
+// ...AND EVIDENCE RETURNING BEFORE EXPIRY RESUMES NORMAL RENEWAL. The guest never notices the gap.
+func TestApplier_OwnershipConfirmedBeforeExpiryResumesRenewal(t *testing.T) {
+	tc, g := newFakeTC(), newFakeGate()
+	src := &switchableLeases{rows: []KeaLease{lease("10.0.0.5", "96:48:f9:7a:9b:09")}}
+	p := ownershipWriter(t, tc, g, src)
+	s := sessionOn("10.0.0.5", "96:48:f9:7a:9b:09")
+
+	if res, err := p.submit(context.Background(), envelope(1, s), time.Now()); err != nil || res.Shaped != 1 {
+		t.Fatalf("setup: %+v %v", res, err)
+	}
+	src.err = errors.New("kea down")
+	g.advance(30 * time.Second)
+	if _, err := p.submit(context.Background(), envelope(2, s), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if p.unverifiedCount() != 1 {
+		t.Fatalf("setup: the session was not marked unverified")
+	}
+
+	// Kea comes back, still naming this device, and the lease is refreshed to full length.
+	src.err = nil
+	g.advance(30 * time.Second)
+	res, err := p.submit(context.Background(), envelope(3, s), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Shaped != 1 {
+		t.Fatalf("renewal did not resume once ownership was confirmed again: %+v", res)
+	}
+	if p.unverifiedCount() != 0 {
+		t.Fatalf("the session is still marked unverified after confirmation")
+	}
+	if got := g.leaseOf("br-guest", "10.0.0.5"); got < 60*time.Second {
+		t.Fatalf("lease = %s after a confirming pass, want a full-length renewal", got)
 	}
 }
 

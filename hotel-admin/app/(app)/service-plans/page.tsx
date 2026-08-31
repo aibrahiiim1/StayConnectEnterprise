@@ -39,6 +39,7 @@ type PlanSummary = {
   idle_timeout_seconds?: number | null; max_continuous_session_seconds?: number | null;
   time_quota_seconds?: number | null; data_quota_bytes?: number | null;
   time_accounting_mode?: string | null;
+  speed_allocation?: string | null;
 };
 type RevisionInfo = { revision_id: string; revision_no: number; is_current: boolean; label?: string };
 
@@ -98,6 +99,7 @@ export default function ServicePlansPage() {
         time_quota_seconds: durationToSeconds(str("time_quota"), (str("time_quota_unit") as "hours" | "days") || "hours"),
         data_quota_bytes: gbToBytes(str("data_quota_gb")),
         time_accounting_mode: str("time_accounting_mode") || "VALIDITY_WINDOW",
+        speed_allocation: str("speed_allocation") || "PER_DEVICE",
       });
       el.reset(); setShowNew(false); setPrefill(null); await load();
     } catch (e) { setErr((e as Error)?.message ?? "Could not publish this plan revision"); }
@@ -208,6 +210,20 @@ export default function ServicePlansPage() {
                   </div>
 
                   <div className="sm:col-span-2">
+                    <Label>How the speed is shared</Label>
+                    <select name="speed_allocation" defaultValue={prefill?.speed_allocation ?? "PER_DEVICE"}
+                      className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm">
+                      <option value="PER_DEVICE">Per device — every device gets the full speed</option>
+                      <option value="SHARED">Shared — all the guest&rsquo;s devices share the speed</option>
+                    </select>
+                    <p className="text-xs text-muted mt-1">
+                      Shared gives the whole allowance to whichever devices are actually using it, so one
+                      device alone still gets the full speed. It is not divided into fixed portions.
+                      Shared needs a download and upload speed to share.
+                    </p>
+                  </div>
+
+                  <div className="sm:col-span-2">
                     <Label>How time is counted</Label>
                     <select name="time_accounting_mode" defaultValue="VALIDITY_WINDOW"
                       className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm">
@@ -247,7 +263,7 @@ export default function ServicePlansPage() {
                           <div className="text-xs text-muted">{p.code}</div>
                         </TD>
                         <TD>
-                          <div>{formatSpeed(p.down_kbps)} down</div>
+                          <div>{formatSpeed(p.down_kbps)} down{p.speed_allocation === "SHARED" ? " (shared)" : ""}</div>
                           <div className="text-xs text-muted">{formatSpeed(p.up_kbps)} up</div>
                         </TD>
                         <TD>

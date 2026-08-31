@@ -66,6 +66,7 @@ type publishPlanReq struct {
 	TimeQuotaSeconds            *int64 `json:"time_quota_seconds"`
 	DataQuotaBytes              *int64 `json:"data_quota_bytes"`
 	TimeAccountingMode          string `json:"time_accounting_mode"`
+	SpeedAllocation             string `json:"speed_allocation"`
 }
 
 func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +81,7 @@ func (s *server) publishServicePlan(w http.ResponseWriter, r *http.Request) {
 		DeviceLimitPolicy: in.DeviceLimitPolicy, IdleTimeoutSeconds: in.IdleTimeoutSeconds,
 		MaxContinuousSessionSeconds: in.MaxContinuousSessionSeconds, TimeQuotaSeconds: in.TimeQuotaSeconds,
 		DataQuotaBytes: in.DataQuotaBytes, TimeAccountingMode: in.TimeAccountingMode,
+		SpeedAllocation: in.SpeedAllocation,
 	})
 	if err != nil {
 		// A domain REFUSAL is not an internal error. Publishing onto a reserved system code is a policy
