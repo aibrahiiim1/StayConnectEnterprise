@@ -1,8 +1,8 @@
 {
   "transition_id": "T0107",
   "seq": 107,
-  "timestamp": "2026-08-31T23:25:00Z",
-  "timestamp_derivation": "The completion of the final PRE-LIVE verification pass this record rests on, which precedes the author timestamp of the introducing commit. Per T0091.",
+  "timestamp": "2026-08-31T23:19:00Z",
+  "timestamp_derivation": "The completion of the final PRE-LIVE deployment restart this record rests on (netd/acctd/scd/edged/portald/pmsd restarted at 23:19:51Z, verified immediately after), which precedes the author timestamp of the introducing commit. Per T0091.",
   "record_type": "FINAL_PRE_LIVE_DEPLOYED_HEAD_AND_OWNERSHIP_OUTCOME",
   "previous_state": {
     "phase": "7",
