@@ -822,7 +822,7 @@
     "address_ownership_unknown_rule_note": "FIXED IN CODE, PENDING DEPLOYMENT at this commit. When DHCP ownership evidence cannot be verified the applier does NOT renew the nft authorization and does not end anything: the bounded 90-second lease provides transient tolerance, confirmation before expiry resumes normal renewal, and silence lets the kernel drop the authorization by itself. Durable Session state alone can no longer renew an address indefinitely. Foreign or absent ownership is still revoked immediately and the Session closed through the controlled writer.",
     "pr65_changed_file_count_correction": "PR #65 changed 47 paths. The delivery report's heading said 48 while the table beneath it listed 47; the count was wrong, the list was right. No repository artifact ever carried 48 - the generated manifest and the transition receipts are derived and were correct - so nothing is rewritten and the historical evidence stands as recorded."
   },
-  "latest_transition_id": "T0105",
+  "latest_transition_id": "T0106",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1203,7 +1203,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "deb0823d7f4ddc709dec8df9e82e40a9f365cf19",
+    "head": "37df7e4f00c942a5ecf728d03e0e7a322d2328ed",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."

@@ -21,6 +21,7 @@ import (
 	"context"
 	"net"
 	"strings"
+	"time"
 )
 
 // addressOwnership is the answer to "does this address still belong to this device".
@@ -45,7 +46,36 @@ type leaseSource interface {
 }
 
 // addressOwner answers the ownership question from DHCP leases.
-type addressOwner struct{ src leaseSource }
+//
+// now is injectable because lease currency is a question about TIME as much as about identity, and a rule
+// that decides who is on the network must be provable at a chosen instant rather than only at whatever
+// instant the test happens to run.
+type addressOwner struct {
+	src leaseSource
+	now func() time.Time
+}
+
+func (a addressOwner) clock() time.Time {
+	if a.now != nil {
+		return a.now()
+	}
+	return time.Now()
+}
+
+// current reports whether a lease row is a lease somebody HOLDS, as opposed to one Kea is still carrying.
+//
+// This distinction was found on the PRE-LIVE appliance, and it is not academic. memfile keeps a lease row after
+// it lapses, with state 0, until the address is handed to somebody else or the file is compacted: the appliance
+// was holding ninety-two such rows, days past their six hundred second lifetime, every one of them still
+// labelled state 0. Believing them would mean an address that was abandoned last Tuesday still counts as owned
+// today — the precise failure the ownership check exists to stop, restored through the evidence rather than
+// through durable state.
+func (a addressOwner) current(l KeaLease, at time.Time) bool {
+	if l.State == keaLeaseStateExpired || l.ValidLft <= 0 || l.CLTT <= 0 {
+		return false
+	}
+	return l.CLTT+int64(l.ValidLft) > at.Unix()
+}
 
 // keaLeaseStateExpired is Kea's state for a lease that has been released or has expired. Such a lease is
 // history: it does not make its former holder the current owner of the address.
@@ -69,12 +99,12 @@ func (a addressOwner) Owns(ctx context.Context, ip net.IP, mac string) addressOw
 		// DHCP control socket hiccupped would be an outage manufactured out of a missing answer.
 		return addressUnknown
 	}
-	want := ip.String()
+	want, at := ip.String(), a.clock()
 	for _, l := range leases {
 		if l.IPAddress != want {
 			continue
 		}
-		if l.State == keaLeaseStateExpired || l.ValidLft == 0 {
+		if !a.current(l, at) {
 			continue // history, not a current holder
 		}
 		if strings.EqualFold(strings.TrimSpace(l.HWAddr), strings.TrimSpace(mac)) {

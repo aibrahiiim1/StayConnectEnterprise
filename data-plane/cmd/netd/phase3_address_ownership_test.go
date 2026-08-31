@@ -38,8 +38,10 @@ type switchableLeases struct {
 
 func (f *switchableLeases) Leases() ([]KeaLease, error) { return f.rows, f.err }
 
+// lease is a lease somebody holds right NOW — stamped at this instant, because a lease's identity is only half
+// of the evidence and the other half is that it has not lapsed.
 func lease(ip, mac string) KeaLease {
-	return KeaLease{IPAddress: ip, HWAddr: mac, ValidLft: 600, State: 0}
+	return KeaLease{IPAddress: ip, HWAddr: mac, ValidLft: 600, State: 0, CLTT: time.Now().Unix()}
 }
 
 func TestAddressOwner_LeasedToThisDeviceIsOwned(t *testing.T) {
@@ -254,5 +256,49 @@ func TestApplier_ForeignAddressIsStillRefusedAfterRestart(t *testing.T) {
 	}
 	if res.Shaped != 0 || g2.isAuthorized("br-guest", "10.0.0.5") {
 		t.Fatalf("a restarted applier authorized a reassigned address: %+v", res)
+	}
+}
+
+// A LAPSED LEASE THAT KEA STILL CARRIES IS NOT OWNERSHIP.
+//
+// Found on the PRE-LIVE appliance: memfile was holding ninety-two lease rows whose six hundred second lifetime
+// had run out days earlier, every one of them still labelled state 0 because nothing had reclaimed the address
+// yet. A check that reads only the state field calls all ninety-two of them owned, and the guest who walked out
+// on Tuesday still owns their address on Sunday.
+func TestOwnership_ALeaseThatHasLapsedIsNotCurrent(t *testing.T) {
+	stale := KeaLease{IPAddress: "192.168.77.102", HWAddr: "96:48:f9:7a:9b:09", ValidLft: 600, State: 0,
+		CLTT: time.Now().Add(-72 * time.Hour).Unix()}
+	o := addressOwner{src: fakeLeases{rows: []KeaLease{stale}}}
+
+	if got := o.Owns(context.Background(), net.ParseIP("192.168.77.102"), "96:48:f9:7a:9b:09"); got != addressForeign {
+		t.Fatalf("a lease three days past its lifetime was read as %v, want foreign", got)
+	}
+	// The same row, renewed a moment ago, IS ownership — the rule is about currency, not about age of acquaintance.
+	fresh := stale
+	fresh.CLTT = time.Now().Unix()
+	o2 := addressOwner{src: fakeLeases{rows: []KeaLease{fresh}}}
+	if got := o2.Owns(context.Background(), net.ParseIP("192.168.77.102"), "96:48:f9:7a:9b:09"); got != addressOwned {
+		t.Fatalf("a lease renewed a moment ago was read as %v, want owned", got)
+	}
+}
+
+// The boundary is the lease's own expiry, evaluated against a clock the test controls rather than the wall.
+func TestOwnership_CurrencyIsDecidedAtTheLeaseExpiry(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0)
+	l := KeaLease{IPAddress: "10.0.0.5", HWAddr: "96:48:f9:7a:9b:09", ValidLft: 600, State: 0, CLTT: base.Unix()}
+
+	for _, tc := range []struct {
+		at   time.Time
+		want addressOwnership
+		note string
+	}{
+		{at: base.Add(599 * time.Second), want: addressOwned, note: "one second before expiry"},
+		{at: base.Add(601 * time.Second), want: addressForeign, note: "one second after expiry"},
+	} {
+		at := tc.at
+		o := addressOwner{src: fakeLeases{rows: []KeaLease{l}}, now: func() time.Time { return at }}
+		if got := o.Owns(context.Background(), net.ParseIP("10.0.0.5"), "96:48:f9:7a:9b:09"); got != tc.want {
+			t.Fatalf("%s: got %v, want %v", tc.note, got, tc.want)
+		}
 	}
 }

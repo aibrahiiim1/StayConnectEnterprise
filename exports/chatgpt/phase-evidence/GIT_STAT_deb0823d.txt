@@ -1,4 +1,0 @@
-commit deb0823d7f4ddc709dec8df9e82e40a9f365cf19
-Date:   Tue Sep 1 00:20:41 2026 +0300
-
-    The enforcement-cycle fixture needs its lease too
