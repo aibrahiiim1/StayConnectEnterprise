@@ -1,0 +1,50 @@
+{
+  "transition_id": "T0104",
+  "seq": 104,
+  "timestamp": "2026-08-31T18:30:00Z",
+  "timestamp_derivation": "The completion of the live verification it records (netd promoting the surviving session at 18:29:25Z), which precedes the author timestamp of the introducing commit. Per T0091.",
+  "record_type": "DEVICE_SESSION_ACCOUNTING_MODEL_DEPLOYED_AND_VERIFIED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. This is the deployment of the correction recorded in T0103, under the same authorization.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-31: 'deploy the required runtime/schema/config changes to .25, verify hashes/rollback/live health, and prove no stale unauthorized IP remains in nft'.",
+  "merged": "PR #65 - accepted head a1241831cafceb6c2876e304afe4f7b0a9aae2f6, merge commit 2ce489a7c571a5baeccbfd833c5a22969b8a3e12, all four gates green.",
+  "deployed": {
+    "appliance": "172.21.60.25 (Fresh Production, PRE-LIVE)",
+    "migration": "0059_speed_allocation APPLIED; schema_migrations head 0059_speed_allocation",
+    "netd_sha256": "5506dd38e7006598df6cb895116fa77f66a73e2e608e89e5deef0e9ec6673c53",
+    "acctd_sha256": "9287aeb49f4fb1b7d4cddf6d8c962f480924588ccf89547009ccb4f8febd9f31",
+    "rollback": "/opt/stayconnect/bin/netd.bak-addrown and acctd.bak-addrown (the T0102 binaries)",
+    "not_deployed": "scd, pmsd, portald, edged and Hotel Admin were NOT rebuilt or restarted. No configuration flag changed and no PMS setting was touched."
+  },
+  "verified_live": {
+    "stale_authorization_removed": "The nft set now holds ONE element - br-g-00d1fa1a . 192.168.77.102. The stale 192.168.77.139 authorization, which had been renewed every 90 seconds since 2026-08-26, is GONE.",
+    "session_closed_through_the_state_machine": "Session 8b5758bf is 'ended' with end_reason SUPERSEDED_ON_DEVICE_MOVE, written by the controlled writer. Its Entitlement remains ACTIVE and its Purchase and usage are untouched.",
+    "durable_agrees_with_kernel": "1 active Session, 1 nft element, 1 tc class - and they are the same session.",
+    "ownership_evidence_working": "netd reported ZERO 'ownership could not be verified' messages, so the surviving address is being positively verified against DHCP rather than left alone for want of evidence.",
+    "counters": "purchases=3, entitlements=3 (all ACTIVE), sessions=3 (1 active, 2 ended), accounting_records=1037 - the correction ended an attachment and changed no account.",
+    "financial": "pms_postings=0, posting_attempts=0, posting_outbox=0, payment_transactions=0, settlements=0",
+    "speed_allocation": "Every existing plan revision reads PER_DEVICE, so no live guest's rate changed.",
+    "pms": "DISCONNECTED / RESYNC_IN_PROGRESS / CONTINUOUS - unchanged and untouched. No Full Resync, no configuration change.",
+    "disk": "18G total, 8.9G used, 8.2G available, 52%"
+  },
+  "room_login": "NOT PERFORMED. No guest authentication was initiated by the agent.",
+  "transition_accepted": true
+}
