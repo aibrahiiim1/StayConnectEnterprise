@@ -7591,11 +7591,13 @@ CREATE TABLE iam_v2.service_plan_revisions (
     idle_timeout_seconds integer,
     max_continuous_session_seconds integer,
     time_accounting_mode text DEFAULT 'VALIDITY_WINDOW'::text NOT NULL,
+    speed_allocation text DEFAULT 'PER_DEVICE'::text NOT NULL,
     time_quota_seconds bigint,
     data_quota_bytes bigint,
     CONSTRAINT service_plan_revisions_device_limit_policy_check CHECK ((device_limit_policy = ANY (ARRAY['REJECT_NEW_DEVICE'::text, 'DISCONNECT_OLDEST'::text, 'ADMIN_APPROVAL'::text]))),
     CONSTRAINT service_plan_revisions_max_concurrent_devices_check CHECK ((max_concurrent_devices >= 1)),
-    CONSTRAINT service_plan_revisions_time_accounting_mode_check CHECK ((time_accounting_mode = ANY (ARRAY['VALIDITY_WINDOW'::text, 'AGGREGATE_ONLINE_TIME'::text])))
+    CONSTRAINT service_plan_revisions_time_accounting_mode_check CHECK ((time_accounting_mode = ANY (ARRAY['VALIDITY_WINDOW'::text, 'AGGREGATE_ONLINE_TIME'::text]))),
+    CONSTRAINT spr_speed_allocation_check CHECK ((speed_allocation = ANY (ARRAY['PER_DEVICE'::text, 'SHARED'::text])))
 );
 
 

@@ -43,14 +43,17 @@ func BuildEnvelope(plan enforce.Plan, scope Scope, planGen, runtimeGen int64,
 			SessionID: s.SessionID, DeviceID: s.DeviceID, IP: s.IP, Bridge: bridgeOf(s.Bridge), Entitled: false,
 			// Carried through unchanged: the producer knows WHY this session must stop being enforced, and the
 			// applier is the only one that can write it down.
-			EndReason: s.EndReason})
+			EndReason: s.EndReason, MAC: s.MAC, EntitlementID: s.EntitlementID})
 	}
 	for _, s := range plan.Shape {
 		// The entitlement's hard boundary travels with the session so the applier can bound its kernel lease by
 		// it. It is passed through unchanged — the producer does not get to soften a deadline it did not set.
 		sessions = append(sessions, shapeplan.Session{
 			SessionID: s.SessionID, DeviceID: s.DeviceID, IP: s.IP, Bridge: bridgeOf(s.Bridge),
-			DownKbps: s.DownKbps, UpKbps: s.UpKbps, Entitled: true, AccessEndsAt: s.WindowEndsAt})
+			DownKbps: s.DownKbps, UpKbps: s.UpKbps, Entitled: true, AccessEndsAt: s.WindowEndsAt,
+			// The MAC is the applier's only means of asking DHCP whether this address is still this device's;
+			// the entitlement and the allocation mode are what let it build a SHARED ceiling.
+			MAC: s.MAC, EntitlementID: s.EntitlementID, SpeedAllocation: s.SpeedAllocation})
 	}
 	// Every bridge a session is on must be declared, plus every guest bridge the site has — including ones
 	// with no sessions at all. Those are the ones that can quietly keep forwarding for access that ended.

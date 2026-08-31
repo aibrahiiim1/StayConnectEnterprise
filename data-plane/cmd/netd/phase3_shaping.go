@@ -54,6 +54,12 @@ type shaper interface {
 	// The staged, accountable-before-forwarding provisioning surface. netd never installs a forwarding filter
 	// (ActivateSession) until the class has a durable generation and a registered accounting origin.
 	PrepareSession(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int) error
+	// PrepareSessionIn stages the class inside a SHARED group (empty groupCid == PER_DEVICE, and is exactly
+	// PrepareSession). It is separate rather than a changed signature so every existing caller and every
+	// existing test keeps its meaning.
+	PrepareSessionIn(ctx context.Context, bridge string, ip net.IP, downKbps, upKbps int, groupCid string) error
+	// EnsureGroupClass creates or re-rates the aggregate class a SHARED entitlement's sessions borrow from.
+	EnsureGroupClass(ctx context.Context, ifc, groupCid string, kbps int) error
 	ActivateSession(ctx context.Context, bridge string, ip net.IP) error
 	AbortSession(ctx context.Context, bridge string, ip net.IP) error
 	// RemoveClassification strips tc classification only. It does NOT deny access (see phase3_gate.go).
@@ -91,6 +97,9 @@ type phase3Shaping struct {
 	// enforcement records the confirmed kernel result durably, so a Session is only ever reported ACTIVE
 	// after both halves are actually in force (see phase3_enforcement.go).
 	enforcement enforcementRecorder
+	// owner answers "does this address still belong to this session's device" from DHCP (phase3_address_owner.go).
+	// A zero value answers UNKNOWN for everything, which is the behaviour every existing test expects.
+	owner addressOwner
 
 	lastApplied time.Time
 	lastDegrade string
@@ -148,6 +157,11 @@ type phase3Shaping struct {
 	// "nothing was running" from "we could not prove what was running".
 	restoreNote string
 }
+
+// speedAllocationShared is the plan-revision mode in which every session under one Entitlement borrows from a
+// single aggregate ceiling. Any other value — including the empty string a pre-0059 revision produces — is
+// PER_DEVICE, which is what those revisions were sold as.
+const speedAllocationShared = "SHARED"
 
 // classKey identifies one managed class for epoch purposes.
 func classKey(bridge, sessionID string) string { return bridge + "|" + sessionID }

@@ -62,6 +62,20 @@ type Session struct {
 	// nothing failed, and the superseded session's entitlement is untouched. Recording that as a teardown
 	// failure would misdescribe a routine, deliberate handover in the one place an operator goes to look.
 	EndReason string `json:"end_reason,omitempty"`
+	// MAC is the device evidence the applier checks the address against.
+	//
+	// The applier authorizes an ADDRESS. Whether that address still belongs to this session's device is a
+	// question only DHCP can answer, and answering it needs the MAC the session was granted to. Without it the
+	// applier would keep renewing an address indefinitely on the producer's word — which is how an address
+	// reassigned to another guest stayed authorized under someone else's entitlement.
+	MAC string `json:"mac,omitempty"`
+	// EntitlementID groups the sessions that share one account. SHARED speed allocation is defined at the
+	// entitlement, so the applier has to know which sessions belong together before it can build the ceiling
+	// they share.
+	EntitlementID string `json:"entitlement_id,omitempty"`
+	// SpeedAllocation is PER_DEVICE or SHARED, from the entitlement's pinned plan revision. Empty means
+	// PER_DEVICE: every revision written before the column existed behaves exactly as it always did.
+	SpeedAllocation string `json:"speed_allocation,omitempty"`
 }
 
 // Envelope is a COMPLETE, scoped, versioned statement of the Phase-3 managed state.
@@ -142,7 +156,7 @@ func HashDesiredState(bridges []string, sessions []Session) string {
 		rows = append(rows, strings.Join([]string{
 			"S", s.SessionID, s.DeviceID, s.IP, s.Bridge,
 			strconv.Itoa(s.DownKbps), strconv.Itoa(s.UpKbps), strconv.FormatBool(s.Entitled), ends,
-			s.EndReason,
+			s.EndReason, s.MAC, s.EntitlementID, s.SpeedAllocation,
 		}, "\x1f"))
 	}
 	sort.Strings(rows)

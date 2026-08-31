@@ -71,6 +71,32 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 		return
 	}
 
+	// ---- ADDRESS OWNERSHIP: is this still this device's address? ----------------------------------------
+	//
+	// Before anything is installed or renewed, DHCP is asked whose address this is. A session whose address
+	// has been reassigned — or released and taken by nobody — stops being enforced here, immediately and
+	// fail-closed: authorization revoked and proven gone, the accountable class torn down, and the Session
+	// closed through the controlled writer. The bounded nft lease is the backstop if netd itself dies; it is
+	// not the plan.
+	//
+	// UNKNOWN is not a failure. When Kea cannot be asked, the honest answer is that we do not know, and
+	// tearing every guest down over an unreadable control socket would manufacture an outage out of a missing
+	// answer. The session keeps whatever it already had and the pass reports the gap.
+	switch p.owner.Owns(ctx, ip, s.MAC) {
+	case addressForeign:
+		p.failClosed(ctx, bridge, ip, res,
+			"shape "+s.SessionID+": "+s.IP+" is no longer leased to this session's device; authorization withdrawn")
+		p.markEnded(ctx, s.SessionID, endReasonAddressNotOwned)
+		p.endSeries(bridge, s.SessionID)
+		return
+	case addressUnknown:
+		if s.MAC != "" {
+			res.Problems = append(res.Problems,
+				"shape "+s.SessionID+": address ownership could not be verified (DHCP evidence unavailable); "+
+					"the existing authorization is left as it is")
+		}
+	}
+
 	// ---- SECURITY TIME: the bound is measured against a clock nobody can move ---------------------------
 	//
 	// Everything below compares BOOT-RELATIVE MONOTONIC milliseconds, never the wall clock. A wall clock that
@@ -259,7 +285,29 @@ func (p *phase3Shaping) provisionSession(ctx context.Context, bridge string, min
 	}
 
 	// ---- (b) PREPARE both classes WITHOUT forwarding filters -------------------------------------------
-	if err := p.shp.PrepareSession(ctx, bridge, ip, s.DownKbps, s.UpKbps); err != nil {
+	//
+	// SHARED allocation puts this session's class under the ENTITLEMENT's aggregate class, so the devices on
+	// one account borrow from one ceiling instead of each holding the full rate. The group is created first
+	// and idempotently: it belongs to the entitlement, not to this session, and a second device joining must
+	// find it rather than replace it.
+	groupCid := ""
+	if s.SpeedAllocation == speedAllocationShared {
+		groupCid = shape.GroupClassid(s.EntitlementID)
+		if groupCid == "" {
+			p.failClosed(ctx, bridge, ip, res,
+				"shape "+s.SessionID+": SHARED allocation with no entitlement to group by")
+			return
+		}
+		if err := p.shp.EnsureGroupClass(ctx, bridge, groupCid, s.DownKbps); err != nil {
+			p.failClosed(ctx, bridge, ip, res, "shared group (download) "+s.SessionID+": "+err.Error())
+			return
+		}
+		if err := p.shp.EnsureGroupClass(ctx, shape.IFBName(bridge), groupCid, s.UpKbps); err != nil {
+			p.failClosed(ctx, bridge, ip, res, "shared group (upload) "+s.SessionID+": "+err.Error())
+			return
+		}
+	}
+	if err := p.shp.PrepareSessionIn(ctx, bridge, ip, s.DownKbps, s.UpKbps, groupCid); err != nil {
 		p.failClosed(ctx, bridge, ip, res, "prepare "+s.SessionID+": "+err.Error())
 		return
 	}
