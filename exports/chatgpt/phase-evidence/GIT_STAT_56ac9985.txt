@@ -1,0 +1,4 @@
+commit 56ac9985f7913a472274b444410a7132125d792e
+Date:   Mon Aug 31 23:45:45 2026 +0300
+
+    Receipt T0105: the local-first contract, the UNKNOWN rule and the speed surface
