@@ -53,7 +53,8 @@ for m in 0007_auth_throttle_buckets 0009_phase2_commerce 0010_phase3_stay_resolu
          0055_request_full_resync_without_runtime_write \
          0056_materialization_readiness \
          0057_lock_auth_context_offer \
-         0058_guest_auth_row_locks \n         0059_speed_allocation; do
+         0058_guest_auth_row_locks \
+         0059_speed_allocation; do
   # 0050 is out of numeric sequence with the rest of this list on purpose: this gate runs internal/authctx,
   # whose PMS arm now calls iam_v2.p3_feed_authorizes. Without it those tests fail with "function does not
   # exist" rather than on anything Phase 5 owns. It is applied last, after everything it redefines.
