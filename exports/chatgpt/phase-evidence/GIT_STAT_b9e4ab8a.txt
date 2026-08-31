@@ -1,4 +1,0 @@
-commit b9e4ab8a0040dd259f34dff220c776f98511d235
-Date:   Tue Sep 1 01:03:10 2026 +0300
-
-    A lease Kea still carries is not a lease somebody holds

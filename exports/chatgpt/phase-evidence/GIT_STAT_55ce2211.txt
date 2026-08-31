@@ -1,0 +1,4 @@
+commit 55ce22112c3c25467e1291b2d21a7dca1e33fe01
+Date:   Tue Sep 1 01:23:36 2026 +0300
+
+    T0106: PRE-LIVE deployment, DHCP evidence repair, lease currency
