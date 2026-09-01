@@ -1,0 +1,4 @@
+commit 0345b62d9ba3546f4af2817b2c81c65322cc6d66
+Date:   Tue Sep 1 06:07:41 2026 +0300
+
+    The fake Kea must survive being quoted, and must not hold the pipe open

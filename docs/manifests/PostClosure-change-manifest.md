@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `734de6359eed5f0a0939fa6d35e17dad32bf65bf`
-- **Provenance (generation HEAD = inventory_head):** `734de6359eed5f0a0939fa6d35e17dad32bf65bf`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `0345b62d9ba3546f4af2817b2c81c65322cc6d66`
+- **Provenance (generation HEAD = inventory_head):** `0345b62d9ba3546f4af2817b2c81c65322cc6d66`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/state-parity-and-dhcp-evidence-health`
 - **Remote branch:** `origin/fix/state-parity-and-dhcp-evidence-health`
 - **Changed files:** 299
@@ -177,9 +177,9 @@
 | `deploy/scripts/central-migrate.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | central-migrate: adopt production's ledger convention, and stop eating stdin |
 | `deploy/scripts/central-mint-tls.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | dig \| grep -q under pipefail reports failure on success |
 | `deploy/scripts/central-preflight.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | Activation, licensing, Central FQDN and Kea health: production readiness |
-| `deploy/scripts/check-dhcp-ownership-evidence-selftest.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | DHCP is a safety authority, and the state file must say what the appliance is |
+| `deploy/scripts/check-dhcp-ownership-evidence-selftest.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | The fake Kea must survive being quoted, and must not hold the pipe open |
 | `deploy/scripts/check-dhcp-ownership-evidence.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | DHCP is a safety authority, and the state file must say what the appliance is |
-| `deploy/scripts/check-phase3-enforcement-plane-selftest.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | DHCP is a safety authority, and the state file must say what the appliance is |
+| `deploy/scripts/check-phase3-enforcement-plane-selftest.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | The fake Kea must survive being quoted, and must not hold the pipe open |
 | `deploy/scripts/check-phase3-enforcement-plane.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | DHCP is a safety authority, and the state file must say what the appliance is |
 | `deploy/scripts/deploy-hotel-admin.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Fix four faults found on the first Fresh Production bring-up |
 | `deploy/scripts/enable-phase3-enforcement-plane.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | A handover is not a teardown |
@@ -212,22 +212,22 @@
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0108 is dated before its own commit and after its own events |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0108 is dated before its own commit and after its own events |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0108 is dated before its own commit and after its own events |
-| `exports/chatgpt/phase-evidence/GIT_STAT_734de635.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/phase-evidence/GIT_STAT_0345b62d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0108 is dated before its own commit and after its own events |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0108 is dated before its own commit and after its own events |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the T0100 reconciliation |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0108 is dated before its own commit and after its own events |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0108 is dated before its own commit and after its own events |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0108 is dated before its own commit and after its own events |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0108 is dated before its own commit and after its own events |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
@@ -479,9 +479,9 @@
  deploy/scripts/central-migrate.sh                  | 268 ++++++
  deploy/scripts/central-mint-tls.sh                 | 148 ++++
  deploy/scripts/central-preflight.sh                | 174 ++++
- .../check-dhcp-ownership-evidence-selftest.sh      | 108 +++
+ .../check-dhcp-ownership-evidence-selftest.sh      | 112 +++
  deploy/scripts/check-dhcp-ownership-evidence.sh    | 129 +++
- .../check-phase3-enforcement-plane-selftest.sh     | 128 +++
+ .../check-phase3-enforcement-plane-selftest.sh     | 132 +++
  deploy/scripts/check-phase3-enforcement-plane.sh   |  73 ++
  deploy/scripts/deploy-hotel-admin.sh               |   9 +-
  deploy/scripts/enable-phase3-enforcement-plane.sh  | 101 +++
@@ -510,14 +510,14 @@
  docs/design/Room-Auth-Materialization-Readiness.md | 197 +++++
  .../PC-0002-complete-delivery-manifest.md          | 159 ++++
  docs/manifests/Phase7-change-manifest.md           | 108 +--
- docs/manifests/PostClosure-change-manifest.md      | 904 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 906 +++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |   8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 +++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 ++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 320251 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 133451 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42983 bytes
- .../chatgpt/phase-evidence/GIT_STAT_734de635.txt   |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 320250 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 133459 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42982 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_0345b62d.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -613,7 +613,7 @@
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-current-state-parity.py             |  95 +++
  tools/validate-project-state.sh                    |  12 +-
- 299 files changed, 27922 insertions(+), 2384 deletions(-)
+ 299 files changed, 27932 insertions(+), 2384 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -622,8 +622,8 @@ M  docs/manifests/PostClosure-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_734de635.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_bb4d6fbc.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_0345b62d.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_734de635.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -635,6 +635,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 0345b62d The fake Kea must survive being quoted, and must not hold the pipe open
+HISTORICAL: d4708b2b Delivery: manifest and packs
 HISTORICAL: 734de635 T0108 is dated before its own commit and after its own events
 HISTORICAL: bb4d6fbc Delivery: manifest and packs
 HISTORICAL: dcfbf4ba DHCP is a safety authority, and the state file must say what the appliance is
