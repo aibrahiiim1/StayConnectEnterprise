@@ -449,7 +449,7 @@
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
     "deployed_head_on_appliance": "29a6b21fcf69f216e90630d427b64ad956f3c6b9",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25 runs binaries built from 29a6b21f, which is also repository master: after this delivery the deployed head and master are the same commit. Every binary digest was verified on the appliance against the build host and is recorded in T0109.",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25 runs binaries built from 29a6b21f. Every digest was verified on the appliance against the build host and is recorded in T0109. THE INVARIANT, not a second pointer: this field names the RUNTIME head, and the commits that follow it on master carry governance, documentation, manifests and packs only - the diff over data-plane/, control-plane/, hotel-admin/ and deploy/ is EMPTY, so the deployed artifacts remain the current ones. A field naming 'today's master' would be stale the moment the merge that recorded it landed, which is precisely the drift this state file is held to.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -821,7 +821,6 @@
     "address_ownership_unknown_rule": "WITHHOLD_RENEWAL",
     "address_ownership_unknown_rule_note": "FIXED IN CODE, PENDING DEPLOYMENT at this commit. When DHCP ownership evidence cannot be verified the applier does NOT renew the nft authorization and does not end anything: the bounded 90-second lease provides transient tolerance, confirmation before expiry resumes normal renewal, and silence lets the kernel drop the authorization by itself. Durable Session state alone can no longer renew an address indefinitely. Foreign or absent ownership is still revoked immediately and the Session closed through the controlled writer.",
     "pr65_changed_file_count_correction": "PR #65 changed 47 paths. The delivery report's heading said 48 while the table beneath it listed 47; the count was wrong, the list was right. No repository artifact ever carried 48 - the generated manifest and the transition receipts are derived and were correct - so nothing is rewritten and the historical evidence stands as recorded.",
-    "repository_master_head": "29a6b21fcf69f216e90630d427b64ad956f3c6b9",
     "live_purchases": 3,
     "live_entitlements": 3,
     "live_sessions_total": 3,
@@ -1222,7 +1221,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "c31df2597bdff069b131f714992f3c2044e17377",
+    "head": "d605885bf98e8ce8a3565ba3efb238c7e0f509e6",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."
