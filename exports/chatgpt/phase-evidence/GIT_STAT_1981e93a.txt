@@ -1,4 +1,0 @@
-commit 1981e93aff8d02f9f45db8e5d16e5a182888fc1a
-Date:   Tue Sep 1 08:25:03 2026 +0300
-
-    Merge PR #71: runtime identity as an invariant
