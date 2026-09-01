@@ -104,6 +104,10 @@ type phase3Shaping struct {
 	// not be checked. Their existing bounded leases are running down; confirmation before expiry resumes
 	// normal renewal, and silence lets the kernel drop them.
 	unverified map[string]bool
+	// leaseFiles reports where Kea keeps its lease database, so a failed lease query can be explained by the
+	// artifact that caused it instead of only by its error text (phase3_ownership_evidence.go). Optional: a
+	// nil inspector simply means health reports the symptom without the on-disk cause.
+	leaseFiles leaseFileInspector
 
 	lastApplied time.Time
 	lastDegrade string
@@ -631,10 +635,23 @@ func (p *phase3Shaping) shapingState(now time.Time) (string, bool) {
 }
 
 func (p *phase3Shaping) status() map[string]any {
+	return p.statusWithEvidence(evidenceHealth{Available: true, CheckedAt: time.Now()}, false)
+}
+
+// statusWithEvidence is status() with the ownership authority's own health folded in.
+//
+// The plane cannot be called healthy while the authority that decides who owns an address is unreachable: it
+// is still installing kernel state, but it can no longer tell whether that state belongs to the guest it says
+// it does, and it is withholding every renewal in the meantime. Reporting CONVERGED there was how an appliance
+// with no lease manager for two days looked perfectly well.
+func (p *phase3Shaping) statusWithEvidence(ev evidenceHealth, probed bool) map[string]any {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := time.Now()
 	state, degraded := p.shapingState(now)
+	if p.mode.Active && probed && !ev.Available {
+		state, degraded = shapingDegradedState, true
+	}
 	out := map[string]any{
 		"active":                 p.mode.Active,
 		"state":                  state,
@@ -642,6 +659,9 @@ func (p *phase3Shaping) status() map[string]any {
 		"degraded":               degraded,
 		"producer_authenticated": p.authz.configured,
 		"refused_total":          p.rejections,
+		// How many sessions this pass declined to renew for want of evidence. Zero is the normal state; a
+		// number here means guests are running down bounded authorizations that nothing is confirming.
+		"ownership_unverified": len(p.unverified),
 	}
 	if !p.lastApplied.IsZero() {
 		out["last_applied_at"] = p.lastApplied.UTC().Format(time.RFC3339)
@@ -667,6 +687,20 @@ func (p *phase3Shaping) status() map[string]any {
 	out["managed_classes"] = len(p.classes)
 	if p.restoreNote != "" {
 		out["restore_note"] = p.restoreNote
+	}
+	// LAST, so it cannot be overwritten by the ordinary degrade text. An evidence outage is not one problem
+	// among several: while it lasts, nothing this plane reports about ownership can be relied on, so it is the
+	// problem an operator must see first.
+	if probed {
+		oe := map[string]any{"available": ev.Available, "leases": ev.Leases}
+		if ev.Fault != "" {
+			oe["fault"] = ev.Fault
+			oe["detail"] = ev.Detail
+		}
+		out["ownership_evidence"] = oe
+		if p.mode.Active && !ev.Available {
+			out["problem"] = "DHCP ownership evidence unavailable (" + ev.Fault + "): " + ev.Detail
+		}
 	}
 	return out
 }

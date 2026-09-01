@@ -875,6 +875,51 @@ def _(d):
     io.open(p2, "w", encoding="utf-8", newline="\n").write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
 
 
+# ---- the live appliance: the contradictions T0105-T0107 left behind ----------------------------------------
+#
+# Every one of these sat, unlabelled and in the present tense, in the authoritative state file while a receipt
+# recorded the opposite. None contains a forbidden word; each is only wrong about the appliance.
+
+@case("a superseded active-session count presented as current", "live-session-count")
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "Live counters on the PRE-LIVE appliance: purchases=3, entitlements=3, sessions=3 (2 active), "
+               "accounting_records=1037.")
+
+
+@case("kernel authorization claimed while the recorded kernel is empty", "live-kernel-state")
+def _(d):
+    append_doc(d, "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
+               "## Current enforcement\n\nOn the appliance phase3_auth_ipv4 holds br-g-00d1fa1a . 192.168.77.102 "
+               "on a refreshing 90s lease, and 1 nft element is installed for the live guest.")
+
+
+@case("Room Auth described as blocked by the in-flight resync rather than by the roster's age",
+      "room-auth-blocker")
+def _(d):
+    append_doc(d, "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
+               "## Current behaviour\n\nRoom authentication is refused because RESYNC_IN_PROGRESS is set on the "
+               "interface runtime, so no guest can sign in until the resync completes.")
+
+
+@case("a superseded deployed head presented as what the appliance runs", "deployed-head")
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "The PRE-LIVE appliance runs b9cf8330d3511bd452931016ca6b0b1a65e13bc6 for all runtime services.")
+
+
+# ...and the other half for these four: the SAME sentences, labelled as the history they are, must pass. A rule
+# that cannot tell a record of what was true from a claim about what is true would delete this project's
+# evidence model.
+
+@case("the same live-state sentences, labelled as history, are not flagged", None)
+def _(d):
+    append_doc(d, "docs/context/StayConnect-IAM-Handoff.md",
+               "HISTORICAL. As at 2026-08-27 the appliance ran b9cf8330d3511bd452931016ca6b0b1a65e13bc6, "
+               "sessions=3 (2 active), and phase3_auth_ipv4 held 1 nft element. Room authentication was then "
+               "refused because RESYNC_IN_PROGRESS was set. None of that is the current state.")
+
+
 # ---- and the other half of the contract: a correct scope limit must NOT be flagged --------------------------
 #
 # The first version of authorized-activity-described-as-unauthorized failed the repository over the sentence

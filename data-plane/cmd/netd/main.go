@@ -178,6 +178,9 @@ func main() {
 		// authorization on the producer's word alone, which is how an address reassigned to another guest kept
 		// carrying traffic under the previous guest's entitlement (phase3_address_owner.go).
 		owner: addressOwner{src: ap.kea},
+		// ...and the same Kea tells us where its lease database lives, so an evidence outage can be reported
+		// with the artifact that caused it rather than as a bare query failure.
+		leaseFiles: ap.kea,
 	}
 	// Continuity is PROVEN, not assumed: a persisted class is carried forward only when the kernel still has
 	// that exact slot under the same boot. A class that was flushed, recreated by hand, or whose minor now
@@ -292,6 +295,14 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func (s *server) health(w http.ResponseWriter, r *http.Request) {
 	configured, healthy, detail := s.keaStatus(r.Context())
+	// ASK THE QUESTION OWNERSHIP DEPENDS ON. status-get answering is not evidence that leases can be read: on
+	// 2026-08-31 a Kea with no lease manager answered status-get for three days while refusing every lease
+	// command, and this surface called it healthy throughout (phase3_ownership_evidence.go).
+	ev := s.phase3.evidenceStatus(r.Context())
+	if configured && healthy && !ev.Available {
+		healthy = false
+		detail = "Kea answers its control socket but its LEASES CANNOT BE READ (" + ev.Fault + "): " + ev.Detail
+	}
 	writeJSON(w, 200, map[string]any{
 		"service": "netd", "version": version,
 		// TWO DIFFERENT QUESTIONS, DELIBERATELY NOT CONFLATED: is Kea supposed to be running on this
@@ -302,7 +313,7 @@ func (s *server) health(w http.ResponseWriter, r *http.Request) {
 		"kea_detail":     detail,
 		// Phase-3 shaping is reported here because netd is its only writer (ADR-0002): if a submitted plan
 		// could not be put in force, this is where it becomes visible.
-		"phase3_shaping": s.phase3.status(),
+		"phase3_shaping": s.phase3.statusWithEvidence(ev, true),
 	})
 }
 

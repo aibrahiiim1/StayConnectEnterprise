@@ -47,5 +47,30 @@ if ! in_file netd.env NETD_PHASE3_PRODUCER_UID; then
   bad=1
 fi
 
+# ...and the plane has one more prerequisite that is not a config file at all.
+#
+# ADDRESS OWNERSHIP IS DECIDED FROM DHCP LEASES. Without them netd cannot tell whether an authorized address
+# still belongs to the guest it was issued to, so it withholds every renewal and guests fall off as their
+# bounded leases expire. On 2026-08-31 this appliance ran for three days with a Kea that answered status-get
+# while refusing every lease command, and nothing said so. A plane whose ownership authority is unavailable is
+# NOT healthy, and this refuses to say otherwise.
+#
+# The probe is a RUNTIME one, so it only applies where there is a runtime to probe: given a control socket it
+# runs, and where there is none (a config-only check on a build host) it stays silent rather than inventing a
+# failure.
+EVIDENCE="$(dirname "${BASH_SOURCE[0]}")/check-dhcp-ownership-evidence.sh"
+SOCK="${KEA_CTRL_SOCKET:-/run/kea/kea4-ctrl-socket}"
+# -f, NOT -x. Every checker in this directory is invoked through `bash`, and none of them carries the executable
+# bit in the index; guarding on -x made this whole probe skip silently on a clean checkout while reporting the
+# plane OK — which is precisely the class of quiet pass it was written to stop.
+if [ "${SC_SKIP_DHCP_EVIDENCE_CHECK:-0}" != "1" ] && [ -S "$SOCK" ] && [ -f "$EVIDENCE" ]; then
+  if ! bash "$EVIDENCE" --socket "$SOCK"; then
+    echo "REFUSED: $surface is enabled but DHCP ownership evidence is UNAVAILABLE (see above)." >&2
+    echo "  netd cannot verify that an authorized address still belongs to its guest, so it renews nothing." >&2
+    echo "  Nothing was repaired: fix Kea and re-run. Do not delete DHCP state to make this pass." >&2
+    bad=1
+  fi
+fi
+
 [ "$bad" = "0" ] && echo "phase3 enforcement-plane check: OK ($DIR — $surface, plane configured in netd and acctd)"
 exit "$bad"

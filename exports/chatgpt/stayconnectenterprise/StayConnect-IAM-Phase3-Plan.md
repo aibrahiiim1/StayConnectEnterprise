@@ -114,7 +114,10 @@ false-PASS tooling defect since corrected, Item 5 (flags-OFF) PASS. Legacy live-
 **NOT PROVEN** — no legacy guest was online during the window.
 
 As a result: **migration 0010 IS applied** on the production site database (63 iam_v2 tables, **0 rows**), the
-appliance and the live PMS **were** contacted under that authorization, and the corrected software **is deployed** (accepted candidate `7c8b8cf0…`). Standing restrictions that remain true: all Phase-3 flags OFF, zero
+appliance and the live PMS **were** contacted under that authorization, and the corrected software **was deployed
+as at Phase-3 acceptance** on the DEVELOPMENT appliance (accepted candidate `7c8b8cf0…`; the head running on the
+PRE-LIVE appliance today is recorded in `governance/project-state.json` →
+`current_state_facts.deployed_head_on_appliance`). Standing restrictions that remain true: all Phase-3 flags OFF, zero
 runtime `iam_v2` privileges, no PS/PA, no financial posting, no cutover, no Phase 4.
 
 **No longer pending.** That re-validation was performed on 2026-08-11 with every item PASS, and Phase 3 has
