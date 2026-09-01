@@ -1,4 +1,0 @@
-commit dcfbf4bac6fd5c1fb1b97f486c7fc4f75b353ebe
-Date:   Tue Sep 1 05:31:25 2026 +0300
-
-    DHCP is a safety authority, and the state file must say what the appliance is

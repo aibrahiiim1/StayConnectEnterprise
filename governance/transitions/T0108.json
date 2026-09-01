@@ -1,8 +1,8 @@
 {
   "transition_id": "T0108",
   "seq": 108,
-  "timestamp": "2026-09-01T09:00:00Z",
-  "timestamp_derivation": "The completion of the current-state reconciliation and the DHCP-evidence implementation this record rests on, which precedes the author timestamp of the introducing commit. Per T0091.",
+  "timestamp": "2026-09-01T02:25:00Z",
+  "timestamp_derivation": "The completion of the local gate sweep this delivery rests on - full Go suite, preflight 83/83, semantic parity 51/51, parity negatives 77/77, zero-stale and transition-time validators - which follows every event this receipt reports and precedes the author timestamp of the introducing commit. Chosen in that order deliberately: T0107 satisfied the commit rule first and ended up dated before its own event, which is the defect this receipt corrects.",
   "record_type": "CURRENT_STATE_RECONCILIATION_AND_RECORD_CORRECTIONS",
   "previous_state": {
     "phase": "7",
