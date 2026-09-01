@@ -448,8 +448,8 @@
     "reboot_occurred": true,
     "rollback_rehearsal_occurred": true,
     "corrected_software_deployed": true,
-    "deployed_head_on_appliance": "042e0136ed23f607ba0c25fd497d3f98b2b55f8f",
-    "deployed_head_note": "PRE-LIVE 172.21.60.25 runs binaries built from 042e0136. The repository master that follows it, d77b3acbcd8ed3421c9e586d4409b26525d5b762, changes only governance, documentation, manifests and packs: the diff over data-plane/, control-plane/, hotel-admin/ and deploy/ is EMPTY, so the deployed artifacts are the current ones.",
+    "deployed_head_on_appliance": "29a6b21fcf69f216e90630d427b64ad956f3c6b9",
+    "deployed_head_note": "PRE-LIVE 172.21.60.25 runs binaries built from 29a6b21f, which is also repository master: after this delivery the deployed head and master are the same commit. Every binary digest was verified on the appliance against the build host and is recorded in T0109.",
     "live_increment9_revalidated": true,
     "live_increment9_revalidated_on": "2026-08-11",
     "live_increment9_revalidation_verdicts": {
@@ -821,7 +821,7 @@
     "address_ownership_unknown_rule": "WITHHOLD_RENEWAL",
     "address_ownership_unknown_rule_note": "FIXED IN CODE, PENDING DEPLOYMENT at this commit. When DHCP ownership evidence cannot be verified the applier does NOT renew the nft authorization and does not end anything: the bounded 90-second lease provides transient tolerance, confirmation before expiry resumes normal renewal, and silence lets the kernel drop the authorization by itself. Durable Session state alone can no longer renew an address indefinitely. Foreign or absent ownership is still revoked immediately and the Session closed through the controlled writer.",
     "pr65_changed_file_count_correction": "PR #65 changed 47 paths. The delivery report's heading said 48 while the table beneath it listed 47; the count was wrong, the list was right. No repository artifact ever carried 48 - the generated manifest and the transition receipts are derived and were correct - so nothing is rewritten and the historical evidence stands as recorded.",
-    "repository_master_head": "d77b3acbcd8ed3421c9e586d4409b26525d5b762",
+    "repository_master_head": "29a6b21fcf69f216e90630d427b64ad956f3c6b9",
     "live_purchases": 3,
     "live_entitlements": 3,
     "live_sessions_total": 3,
@@ -837,9 +837,11 @@
     "local_first_survives_failed_resync_note": "FIXED by migration 0060 (T0105, deployed T0106). The offline branch of iam_v2.p3_feed_authorizes no longer requires resync_started_at IS NULL, so a resync in flight - or one that began and failed - does not invalidate the roster already published. The applier claims only events that are LIVE or at or below published_resync_generation, so an unpublished generation is never applied and the partial RECEIVING generation neither blocks authorization nor contributes to it. Only max_auth_cache_age_seconds retires the last good roster.",
     "dhcp_ownership_evidence_monitored": true,
     "dhcp_ownership_evidence_monitored_note": "The ownership rule depends on Kea's leases, so DHCP is a safety authority and its silence is a safety condition. netd probes it on every health request by READING THE LEASES (status-get answering is not evidence that lease commands do), classifies LEASE_MANAGER_UNAVAILABLE, LEASE_QUERY_FAILED and MEMFILE_STATE_UNUSABLE separately, names the on-disk artifact responsible, and DEGRADES the reported enforcement plane while evidence is unavailable. deploy/scripts/check-dhcp-ownership-evidence.sh is the operational equivalent and the enforcement-plane gate refuses a session-minting surface without it. Nothing repairs, deletes or restarts DHCP state.",
-    "kea_lease_manager_incident": "2026-08-28 to 2026-08-31: /var/lib/kea/kea-leases4.csv.pid was zero bytes, memfile refused to open its lease database, and kea-dhcp4 ran with NO LEASE MANAGER while answering status-get normally. It issued no lease after 2026-08-30T15:16Z. Found by verifying the ownership rule (T0106); the empty artifact was preserved in the deployment rollback directory and Kea restarted, after which it reported 92 leases. The monitoring above exists so this condition cannot be silent again."
+    "kea_lease_manager_incident": "2026-08-28 to 2026-08-31: /var/lib/kea/kea-leases4.csv.pid was zero bytes, memfile refused to open its lease database, and kea-dhcp4 ran with NO LEASE MANAGER while answering status-get normally. It issued no lease after 2026-08-30T15:16Z. Found by verifying the ownership rule (T0106); the empty artifact was preserved in the deployment rollback directory and Kea restarted, after which it reported 92 leases. The monitoring above exists so this condition cannot be silent again.",
+    "dhcp_ownership_evidence_monitored_deployed": true,
+    "dhcp_ownership_evidence_monitored_deployed_note": "DEPLOYED AND VERIFIED LIVE 2026-09-01 (T0109). netd health carries an ownership_evidence block filled by a fresh lease read on every request; the operational checker returns OK on the real socket and refuses when the socket is absent; the enforcement-plane gate consults it. Kea's hourly lease-file cleanup, which had failed every hour since 2026-08-28, has run cleanly since the repair with zero PID failures."
   },
-  "latest_transition_id": "T0108",
+  "latest_transition_id": "T0109",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
