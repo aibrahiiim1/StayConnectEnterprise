@@ -1274,11 +1274,17 @@ def check_appliance_facts_agree(st):
     #    summary must not go on denying that such a head exists.
     head = str(f.get("deployed_head_on_appliance") or "").strip()
     if len(head) >= 8:
-        prov = str(prod.get("runtime_provenance", "")).lower()
+        # THE FIRST SENTENCE ONLY. This field states its verdict up front and then narrates the history that
+        # led there, and that history legitimately contains the words the verdict must no longer use — so a
+        # rule that scanned the whole value could only be satisfied by deleting the history, and one that
+        # excused the whole value whenever a correction phrase appeared anywhere could be defeated by leaving
+        # that phrase in place while flipping the verdict back. Which is exactly what the mutation does.
+        verdict = str(prod.get("runtime_provenance", "")).split(".")[0].lower()
         for phrase in ("no single commit describes what is running",
-                       "deliberately not stated as a single sha"):
-            if phrase in prov and "no longer the case" not in prov:
-                bad.append(f"production_appliance.runtime_provenance says {phrase!r} but "
+                       "deliberately not stated as a single sha",
+                       "mixed"):
+            if phrase in verdict:
+                bad.append(f"production_appliance.runtime_provenance opens with {phrase!r} but "
                            f"current_state_facts.deployed_head_on_appliance records {head[:8]}")
     return bad
 
