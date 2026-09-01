@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `0345b62d9ba3546f4af2817b2c81c65322cc6d66`
-- **Provenance (generation HEAD = inventory_head):** `0345b62d9ba3546f4af2817b2c81c65322cc6d66`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `d70f111024cce438a9c8f3afc7169d81050239e2`
+- **Provenance (generation HEAD = inventory_head):** `d70f111024cce438a9c8f3afc7169d81050239e2`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/state-parity-and-dhcp-evidence-health`
 - **Remote branch:** `origin/fix/state-parity-and-dhcp-evidence-health`
 - **Changed files:** 299
@@ -177,10 +177,10 @@
 | `deploy/scripts/central-migrate.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | central-migrate: adopt production's ledger convention, and stop eating stdin |
 | `deploy/scripts/central-mint-tls.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | dig \| grep -q under pipefail reports failure on success |
 | `deploy/scripts/central-preflight.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | Activation, licensing, Central FQDN and Kea health: production readiness |
-| `deploy/scripts/check-dhcp-ownership-evidence-selftest.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | The fake Kea must survive being quoted, and must not hold the pipe open |
-| `deploy/scripts/check-dhcp-ownership-evidence.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | DHCP is a safety authority, and the state file must say what the appliance is |
+| `deploy/scripts/check-dhcp-ownership-evidence-selftest.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | The probe guarded on a bit no checker in this directory carries |
+| `deploy/scripts/check-dhcp-ownership-evidence.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | The probe guarded on a bit no checker in this directory carries |
 | `deploy/scripts/check-phase3-enforcement-plane-selftest.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | The fake Kea must survive being quoted, and must not hold the pipe open |
-| `deploy/scripts/check-phase3-enforcement-plane.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | DHCP is a safety authority, and the state file must say what the appliance is |
+| `deploy/scripts/check-phase3-enforcement-plane.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | The probe guarded on a bit no checker in this directory carries |
 | `deploy/scripts/deploy-hotel-admin.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Fix four faults found on the first Fresh Production bring-up |
 | `deploy/scripts/enable-phase3-enforcement-plane.sh` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | A handover is not a teardown |
 | `deploy/scripts/hotel-admin-mint-cert.sh` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Synchronize current state to the deployed Fresh Production appliance |
@@ -215,7 +215,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_0345b62d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_d70f1110.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -358,7 +358,7 @@
  data-plane/cmd/netd/phase3_address_owner.go        | 140 ++++
  .../cmd/netd/phase3_address_ownership_test.go      | 304 +++++++
  data-plane/cmd/netd/phase3_enforcement.go          |  25 +-
- .../phase3_enforcement_cycle_integration_test.go   | 408 ++++++++++
+ .../phase3_enforcement_cycle_integration_test.go   | 408 +++++++++
  data-plane/cmd/netd/phase3_mode.go                 |   7 +-
  data-plane/cmd/netd/phase3_mode_test.go            |  19 +-
  data-plane/cmd/netd/phase3_ownership_evidence.go   | 146 ++++
@@ -482,7 +482,7 @@
  .../check-dhcp-ownership-evidence-selftest.sh      | 112 +++
  deploy/scripts/check-dhcp-ownership-evidence.sh    | 129 +++
  .../check-phase3-enforcement-plane-selftest.sh     | 132 +++
- deploy/scripts/check-phase3-enforcement-plane.sh   |  73 ++
+ deploy/scripts/check-phase3-enforcement-plane.sh   |  76 ++
  deploy/scripts/deploy-hotel-admin.sh               |   9 +-
  deploy/scripts/enable-phase3-enforcement-plane.sh  | 101 +++
  deploy/scripts/hotel-admin-mint-cert.sh            |  26 +-
@@ -510,14 +510,14 @@
  docs/design/Room-Auth-Materialization-Readiness.md | 197 +++++
  .../PC-0002-complete-delivery-manifest.md          | 159 ++++
  docs/manifests/Phase7-change-manifest.md           | 108 +--
- docs/manifests/PostClosure-change-manifest.md      | 906 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 908 +++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |   8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 +++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 ++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 320250 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 133459 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42982 bytes
- .../chatgpt/phase-evidence/GIT_STAT_0345b62d.txt   |   4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 320249 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 133457 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42981 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_d70f1110.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -613,7 +613,7 @@
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-current-state-parity.py             |  95 +++
  tools/validate-project-state.sh                    |  12 +-
- 299 files changed, 27932 insertions(+), 2384 deletions(-)
+ 299 files changed, 27937 insertions(+), 2384 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -622,8 +622,8 @@ M  docs/manifests/PostClosure-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_0345b62d.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_734de635.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_0345b62d.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_d70f1110.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
@@ -635,6 +635,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: d70f1110 The probe guarded on a bit no checker in this directory carries
+HISTORICAL: 05754be8 Delivery: manifest and packs
 HISTORICAL: 0345b62d The fake Kea must survive being quoted, and must not hold the pipe open
 HISTORICAL: d4708b2b Delivery: manifest and packs
 HISTORICAL: 734de635 T0108 is dated before its own commit and after its own events
