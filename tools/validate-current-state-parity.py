@@ -1719,6 +1719,101 @@ def main():
         ok("no current surface describes a merged pull request as open or unmerged (merged: %s)"
            % (", ".join("#%d" % n for n in sorted(merged_prs)) or "none recorded"))
 
+    # ---- N. THE LIVE APPLIANCE: counters, kernel state, deployed head, and why Room Auth is refused ---------
+    #
+    # These rules exist because of one delivery. T0105-T0107 recorded, in order: that the 72-hour local-first
+    # contract was fixed so an in-flight or failed resync no longer disables a fresh roster; that Room Auth is
+    # refused ONLY because the last good roster has aged out; that all three Sessions had ended and the kernel
+    # held nothing; and that the deployed head had moved. Every one of those facts contradicted a sentence that
+    # was still sitting, unlabelled and in the present tense, in the authoritative state file - "sessions=3 (2
+    # active)", an older deployed head, "no Full Resync was triggered" beside a resync that had been attempted
+    # and failed. None of it contains a forbidden word. It is only wrong about the appliance.
+    #
+    # So the live appliance is recorded as DATA and the prose is held to it.
+    live_rules = []
+
+    def live_int(name):
+        v = facts.get(name)
+        return v if isinstance(v, int) else None
+
+    active = live_int("live_sessions_active")
+    if active is not None:
+        # "N active sessions" anywhere on a current surface must agree. The count is what an operator reads to
+        # decide whether a guest is online right now.
+        rx = re.compile(r"sessions?\s*=\s*\d+\s*\((\d+)\s+active\)|(\d+)\s+active\s+sessions?\b", re.I)
+        live_rules.append(("live-session-count", rx, lambda m: int(m.group(1) or m.group(2)) != active,
+                           "the recorded facts say %d Session(s) are active" % active))
+    if facts.get("nft_managed_authorizations") == 0 and facts.get("tc_managed_classes") == 0:
+        # A surface claiming installed kernel state while the recorded state is empty sends an operator to look
+        # for an authorization that is not there.
+        rx = re.compile(r"\b(\d+)\s+nft\s+element|\bnft\s+set\s+holds\s+(?!no\b)|phase3_auth_ipv4\s+holds\s+(?!no\b)",
+                        re.I)
+        live_rules.append(("live-kernel-state", rx, lambda m: not (m.group(1) or "").startswith("0"),
+                           "the recorded facts say the kernel holds no authorization and no managed class"))
+    if facts.get("room_auth_blocked") and \
+            facts.get("room_auth_blocked_reason") == "LAST_GOOD_ROSTER_OLDER_THAN_MAX_AUTH_CACHE_AGE":
+        # THE ONE THAT MATTERS MOST. While the blocker is the cache age, no current surface may say the feed
+        # state or an in-progress resync is what refuses a guest: that is the defect 0060 fixed, and repeating
+        # it would send an operator to reconnect a PMS that is stopped on purpose.
+        rx = re.compile(
+            r"(?:room\s+(?:auth\w*|sign-?in|login)|guests?)[^.;\n]{0,80}?"
+            r"(?:refused|blocked|denied|cannot\s+(?:sign|log)\s*in)[^.;\n]{0,80}?"
+            r"(?:resync[_\s-]?in[_\s-]?progress|resync\s+is\s+in\s+flight|resync_started_at|"
+            r"because[^.;\n]{0,40}?disconnect)", re.I)
+        live_rules.append(("room-auth-blocker", rx, lambda m: True,
+                           "the recorded blocker is the roster's AGE, not the feed state or a resync in flight"))
+
+    deployed = str(facts.get("deployed_head_on_appliance") or "").strip()
+    if len(deployed) >= 8:
+        # A superseded deployed head presented as what the appliance runs. Any 8+ hex prefix that is claimed as
+        # deployed and is neither the recorded head nor the recorded repository master is a contradiction.
+        master = str(facts.get("repository_master_head") or "").strip()
+        # PRECISION MATTERS MORE THAN REACH HERE. A blunt "any sha near the word runs" rule fires on CI run
+        # identifiers (decimal is a subset of hex) and on every historical acceptance candidate, and a rule
+        # that cries wolf gets switched off. Three conditions together:
+        #   * the clause is ABOUT this appliance — an appliance, the PRE-LIVE box, or its deployed marker;
+        #   * the token looks like a git object rather than a run id, so it must contain a hex LETTER;
+        #   * and it is not a statement about what a workflow ran against.
+        appliance_rx = re.compile(r"\bappliance\b|\bPRE-?LIVE\b|172\.21\.60\.25|\bDEPLOYED_SHA\b|\bon \.25\b", re.I)
+        ci_rx = re.compile(r"\bCI\b|workflow|run \d{6,}|exact-head runs?|dispatch", re.I)
+        rx = re.compile(r"(?:runs|running|deployed(?:\s+(?:at|on|from))?|appliance\s+(?:is\s+)?at)"
+                        r"[^.;\n]{0,40}?\b([0-9a-f]{8,40})\b", re.I)
+
+        def wrong_head(m):
+            h = m.group(1).lower()
+            clause = m.string
+            if not appliance_rx.search(clause) or ci_rx.search(clause):
+                return False
+            if not re.search(r"[a-f]", h):
+                return False  # a decimal identifier: a CI run, not a commit
+            return not (deployed.startswith(h) or h.startswith(deployed[:8]) or
+                        (master and (master.startswith(h) or h.startswith(master[:8]))))
+        live_rules.append(("deployed-head", rx, wrong_head,
+                           "the recorded deployed head is %s (repository master %s)" % (deployed[:8], master[:8])))
+
+    for rel in DOC_SURFACES:
+        text = load_surface(rel)
+        if text is None:
+            continue
+        units = json_strings(load_json(rel)) if rel.endswith(".json") else [p for p, _ in paragraphs(text)]
+        for unit in units:
+            for off, clause in split_clauses(unit):
+                # DELIBERATELY THE EXPLICIT MARKERS ONLY, not the looser verb list the other rules use. That
+                # list counts "until" and "before" as history, and "no guest can sign in UNTIL the resync
+                # completes" is a claim about the present that happens to contain the word — the exact sentence
+                # this rule exists to refuse. Labelling a live-state claim as history has to be deliberate here:
+                # write HISTORICAL, or "as at <date>", and it is excused.
+                if HISTORY_MARKERS.search(clause):
+                    continue
+                for rule, rx, wrong, why in live_rules:
+                    m = rx.search(clause)
+                    if m and wrong(m):
+                        bad(rule, "%s, but this says: %s" % (why, " ".join(clause.split())[:180]), rel)
+    if not [f for f in failures if f[0] in
+            ("live-session-count", "live-kernel-state", "room-auth-blocker", "deployed-head")]:
+        ok("no current surface contradicts the recorded live appliance state "
+           "(sessions, kernel, deployed head, Room-Auth blocker)")
+
     # ---- report ----------------------------------------------------------------------------------------------------
     if as_json:
         print(json.dumps({

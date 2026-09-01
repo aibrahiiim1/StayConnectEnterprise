@@ -682,6 +682,42 @@ else
   no "scripts/binary-rollback.sh is missing"
 fi
 
+# ---------------------------------------------------------------- 12. the DHCP ownership authority
+#
+# Address ownership decides whether an authorized address still belongs to its guest, and it decides it from
+# Kea's leases. That makes DHCP a SAFETY authority, and its silence a safety condition. On 2026-08-31 the
+# PRE-LIVE appliance ran for three days with a Kea that answered status-get while refusing every lease command,
+# and every surface reported it healthy. These assert the code cannot do that again.
+EV="$ROOT/data-plane/cmd/netd/phase3_ownership_evidence.go"
+if [ -f "$EV" ]; then
+  ok "netd carries a DHCP ownership-evidence health probe"
+  grep -q 'no current lease manager' "$EV"     && ok "the exact live condition (no current lease manager) is classified as its own fault"     || no "the lease-manager-unavailable condition is not distinguished from any other query failure"
+  grep -q 'evidenceMemfileUnusable' "$EV"     && ok "an unusable memfile backing state is reported with the artifact that caused it"     || no "memfile state is not inspected, so the cause of an evidence outage cannot be named"
+  # The probe must not repair what it judges. os.Remove/Rename/Truncate or a service restart here would destroy
+  # the evidence and hide a recurring fault behind a self-healing loop.
+  if grep -qE 'os\.(Remove|Rename|Truncate|WriteFile|Create)|systemctl|exec\.Command' "$EV"; then
+    no "the evidence probe mutates DHCP state instead of reporting it"
+  else
+    ok "the evidence probe repairs nothing: it reads, reports and preserves"
+  fi
+else
+  no "netd has no DHCP ownership-evidence probe"
+fi
+grep -q 'statusWithEvidence' "$ROOT/data-plane/cmd/netd/main.go"   && ok "netd health reports the plane against a FRESH evidence probe, not a cached one"   || no "netd health does not consult the ownership authority"
+awk '/func \(p \*phase3Shaping\) statusWithEvidence/,/^}/' "$ROOT/data-plane/cmd/netd/phase3_shaping.go"   | grep -q 'shapingDegradedState'   && ok "an evidence outage degrades the reported enforcement plane"   || no "the plane can report itself healthy while its ownership authority is unavailable"
+CHK="$ROOT/deploy/scripts/check-dhcp-ownership-evidence.sh"
+if [ -f "$CHK" ]; then
+  ok "an operational DHCP ownership-evidence check ships with the appliance"
+  if grep -qE '^[^#]*(rm|systemctl restart|truncate|mv)' "$CHK"; then
+    no "the operational evidence check repairs or deletes DHCP state"
+  else
+    ok "the operational check deletes nothing and restarts nothing"
+  fi
+  grep -q 'check-dhcp-ownership-evidence.sh' "$ROOT/deploy/scripts/check-phase3-enforcement-plane.sh"     && ok "the enforcement-plane gate refuses a session-minting surface with no ownership evidence"     || no "the enforcement-plane gate ignores the ownership authority"
+else
+  no "no operational DHCP ownership-evidence check ships with the appliance"
+fi
+
 # ============================================================================== report
 # Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json
 # silently reported a smaller, all-passing suite.

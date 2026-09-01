@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -124,6 +125,32 @@ type KeaLease struct {
 	State     int    `json:"state"`
 	CLTT      int64  `json:"cltt"`
 	ValidLft  int    `json:"valid-lft"`
+}
+
+// LeaseFile reports the memfile path Kea is configured to keep its leases in.
+//
+// It exists so that a FAILED lease query can be explained rather than merely reported. When memfile cannot
+// open its database, Kea keeps answering status-get and refuses every lease command, and the reason is on
+// disk next to the lease file - so health has to be able to find that file without being told where it is.
+// Reading it from the server's own running configuration is the only way to be sure we inspect the file this
+// Kea is actually using, rather than a distribution default that may not apply.
+func (k *keaClient) LeaseFile() (string, error) {
+	resp, err := k.cmd("config-get", nil)
+	if err != nil {
+		return "", err
+	}
+	if code, text := resultOK(resp); code != 0 {
+		return "", fmt.Errorf("config-get: %s", text)
+	}
+	args, _ := resp["arguments"].(map[string]any)
+	dhcp4, _ := args["Dhcp4"].(map[string]any)
+	db, _ := dhcp4["lease-database"].(map[string]any)
+	name, _ := db["name"].(string)
+	if strings.TrimSpace(name) == "" {
+		// A non-memfile backend (or none named) has no such file, and that is not a fault.
+		return "", nil
+	}
+	return name, nil
 }
 
 // Leases returns all current DHCPv4 leases from the memfile backend via the

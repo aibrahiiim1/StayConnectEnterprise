@@ -278,6 +278,15 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh enforcement-plane-check --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-phase3-enforcement-plane-selftest.sh
 
+      # Address ownership is decided from Kea's leases, so DHCP is a SAFETY authority on this appliance. It
+      # spent three days on 2026-08-31 answering status-get while refusing every lease command, with a
+      # zero-byte kea-leases4.csv.pid behind it, and every surface called it healthy. The checker that refuses
+      # that state is proven here against the real replies Kea sends.
+      - name: DHCP ownership-evidence checker (selftest)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh dhcp-evidence-check --
+          bash $GITHUB_WORKSPACE/deploy/scripts/check-dhcp-ownership-evidence-selftest.sh
+
       # A unit whose ExecStart does not exist fails 203/EXEC on every trigger, silently.
       # stayconnect-backup-cleanup.service did exactly that for weeks: retention never ran, the appliance root
       # filesystem reached 100%, and PostgreSQL could not write postmaster.pid. The installer now derives its

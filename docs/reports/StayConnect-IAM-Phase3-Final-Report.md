@@ -334,7 +334,7 @@ artifact records; the run's numeric run IDs, artifact ID and integrity-manifest 
 
 | Test | Result | Evidence |
 |---|---|---|
-| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, write-ahead durable activation bound, monotonic security time, trusted boot identity, semantic journal validation, assignment-scope binding, canonical key identity, ruleset durability across restart/reboot, verified binary rollback, network lifecycle: confirmed-revision boot + safe rollback + marker truthfulness, pre-convergence rollback boundary, DARK pmsd deployment contract) | **PASS 74/74** | `scripts/phase3-preflight.sh --json` |
+| Offline preflight (build, flags, migration reversibility, zero runtime privilege, control-plane invariants, rollback ordering, accountable-before-forwarding order, bounded kernel lease, DB-enforced accountability, surgical nft foundation, hard-boundary lease truncation, write-ahead durable activation bound, monotonic security time, trusted boot identity, semantic journal validation, assignment-scope binding, canonical key identity, ruleset durability across restart/reboot, verified binary rollback, network lifecycle: confirmed-revision boot + safe rollback + marker truthfulness, pre-convergence rollback boundary, DARK pmsd deployment contract, DHCP ownership-evidence authority) | **PASS 83/83** | `scripts/phase3-preflight.sh --json` |
 | Migration lifecycle gate (apply → behaviour → down → re-apply, disposable PG16) | **PASS 362/362** | `iam_v2_scratch/phase3_0010_lifecycle.sh` |
 | PG16 integration suites (pmsd, stayengine, authctx, checkout, staygrant, pmsresolve, enforce, writerguard, edged, acctd, scd) | **PASS** (all eleven) | `scripts/pmsd-pg-integration.sh` |
 | Go unit tests, whole module | **PASS** | `go test ./... -count=1` (JSON-counted) |
@@ -537,8 +537,10 @@ that gap.
 
 What is true at acceptance:
 
-- **The appliance runs the accepted candidate** `7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4`, verified on disk and
-  in `/proc/<pid>/exe` for all five runtime services, after a controlled reboot.
+- **The DEVELOPMENT appliance ran the accepted candidate, as at Phase-3 acceptance,** `7c8b8cf019c5af3dd2294ee268e8f7137e6ef5d4`, verified on disk and
+  in `/proc/<pid>/exe` for all five runtime services, after a controlled reboot. This is the historical acceptance
+  record; the head deployed on the PRE-LIVE appliance today is recorded in `governance/project-state.json` ->
+  `current_state_facts.deployed_head_on_appliance`.
 - **Migration 0010 is applied**; iam_v2 is dark at **63 tables / 0 rows** with 4 controlled functions and
   **zero** grants to any `svc_*` role. `pms_postings`, `posting_outbox` and `payment_transactions` are all 0.
 - **The nft deployment/reboot architecture is `nftconverge`** (ADR-0003): `netd` reconciles the live ruleset

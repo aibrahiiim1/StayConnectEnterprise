@@ -65,6 +65,61 @@ printf 'NETD_DB_URL=x\n'  > "$d/netd.env"
 printf 'ACCTD_DB_URL=x\n' > "$d/acctd.env"
 expect 0 "$d" "a dark appliance needs no enforcement plane"
 
+# 6. A CORRECTLY CONFIGURED APPLIANCE WHOSE OWNERSHIP AUTHORITY IS DOWN IS STILL REFUSED.
+#
+# Every env file is right; the plane would start; and netd could not tell whether any authorized address still
+# belonged to its guest. That is the .25 state of 2026-08-31, and calling it healthy is what let it last three
+# days. Needs a unix socket to fake Kea with, so it skips honestly where the platform has none.
+if python3 -c 'import socket, sys; sys.exit(0 if hasattr(socket, "AF_UNIX") else 1)' 2>/dev/null; then
+  d="$(case_dir evidence_down)"
+  printf 'STAYCONNECT_PHASE3_MASTER=1
+STAYCONNECT_PHASE3_PMS_AUTH=1
+' > "$d/scd.env"
+  printf 'NETD_DB_URL=x
+STAYCONNECT_PHASE3_MASTER=true
+NETD_PHASE3_PRODUCER_UID=0
+' > "$d/netd.env"
+  printf 'ACCTD_DB_URL=x
+STAYCONNECT_PHASE3_MASTER=true
+' > "$d/acctd.env"
+  SOCK="$WORK/kea.sock"
+  SC_SOCK="$SOCK" python3 -c '
+import os, socket, threading, time
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind(os.environ["SC_SOCK"]); srv.listen(8)
+def run():
+    for _ in range(8):
+        try:
+            c, _a = srv.accept()
+        except OSError:
+            return
+        try:
+            c.recv(65536)
+            c.sendall(b'{ "result": 1, "text": "no current lease manager is available" }')
+        finally:
+            c.close()
+threading.Thread(target=run, daemon=True).start()
+time.sleep(20)
+' &
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -S "$SOCK" ] && break; sleep 0.2; done
+  KEA_CTRL_SOCKET="$SOCK" bash "$CHECK" "$d" >"$d/.out" 2>&1
+  if [ "$?" != "1" ]; then
+    echo "  *** FAIL: a plane with no DHCP ownership evidence was accepted"; sed 's/^/      /' "$d/.out"; fail=1
+  else
+    echo "  ok: a plane whose DHCP ownership authority is unavailable is REFUSED"
+  fi
+  # And the same appliance passes again once the evidence returns, so this is a real condition and not a
+  # permanent refusal that would make the check useless.
+  KEA_CTRL_SOCKET="$WORK/no-such.sock" bash "$CHECK" "$d" >"$d/.out2" 2>&1
+  if [ "$?" != "0" ]; then
+    echo "  *** FAIL: the check refuses when there is no runtime to probe at all"; sed 's/^/      /' "$d/.out2"; fail=1
+  else
+    echo "  ok: with no control socket present the config-only check is unchanged"
+  fi
+else
+  echo "  skip: this platform has no AF_UNIX, so the DHCP-evidence case cannot be staged"
+fi
+
 if [ "$fail" = "0" ]; then
   echo "PHASE3_ENFORCEMENT_PLANE_CHECK_SELFTEST = PASS"
   exit 0
