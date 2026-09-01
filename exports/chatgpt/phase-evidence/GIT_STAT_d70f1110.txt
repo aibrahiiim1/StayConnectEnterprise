@@ -1,4 +1,0 @@
-commit d70f111024cce438a9c8f3afc7169d81050239e2
-Date:   Tue Sep 1 06:20:05 2026 +0300
-
-    The probe guarded on a bit no checker in this directory carries
