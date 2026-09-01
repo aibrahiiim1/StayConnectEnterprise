@@ -60,7 +60,10 @@ fi
 # failure.
 EVIDENCE="$(dirname "${BASH_SOURCE[0]}")/check-dhcp-ownership-evidence.sh"
 SOCK="${KEA_CTRL_SOCKET:-/run/kea/kea4-ctrl-socket}"
-if [ "${SC_SKIP_DHCP_EVIDENCE_CHECK:-0}" != "1" ] && [ -S "$SOCK" ] && [ -x "$EVIDENCE" ]; then
+# -f, NOT -x. Every checker in this directory is invoked through `bash`, and none of them carries the executable
+# bit in the index; guarding on -x made this whole probe skip silently on a clean checkout while reporting the
+# plane OK — which is precisely the class of quiet pass it was written to stop.
+if [ "${SC_SKIP_DHCP_EVIDENCE_CHECK:-0}" != "1" ] && [ -S "$SOCK" ] && [ -f "$EVIDENCE" ]; then
   if ! bash "$EVIDENCE" --socket "$SOCK"; then
     echo "REFUSED: $surface is enabled but DHCP ownership evidence is UNAVAILABLE (see above)." >&2
     echo "  netd cannot verify that an authorized address still belongs to its guest, so it renews nothing." >&2
