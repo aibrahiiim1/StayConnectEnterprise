@@ -83,7 +83,11 @@ NETD_PHASE3_PRODUCER_UID=0
 STAYCONNECT_PHASE3_MASTER=true
 ' > "$d/acctd.env"
   SOCK="$WORK/kea.sock"
-  SC_SOCK="$SOCK" python3 -c '
+  # The reply travels in an environment variable, not inside the inlined program: a JSON literal carrying both
+  # brace and quote characters cannot survive being nested in a single-quoted shell string, and the first
+  # version of this case died of exactly that while still reporting a repository defect.
+  SC_REPLY='{ "result": 1, "text": "no current lease manager is available" }'
+  SC_SOCK="$SOCK" SC_REPLY="$SC_REPLY" python3 -c '
 import os, socket, threading, time
 srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 srv.bind(os.environ["SC_SOCK"]); srv.listen(8)
@@ -95,7 +99,7 @@ def run():
             return
         try:
             c.recv(65536)
-            c.sendall(b'{ "result": 1, "text": "no current lease manager is available" }')
+            c.sendall(os.environ["SC_REPLY"].encode())
         finally:
             c.close()
 threading.Thread(target=run, daemon=True).start()

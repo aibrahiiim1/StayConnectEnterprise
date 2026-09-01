@@ -50,7 +50,11 @@ def run():
 threading.Thread(target=run, daemon=True).start()
 import time
 time.sleep(20)
-' &
+' >/dev/null 2>&1 &
+  # The redirect is not tidiness. serve() is called inside a command substitution, and a background child that
+  # inherits the captured stdout keeps that substitution waiting until the child exits - which would hand back
+  # the socket path twenty seconds after the socket had already closed, and every case would then be testing an
+  # absent socket rather than the reply it staged.
   for _ in 1 2 3 4 5 6 7 8 9 10; do [ -S "$sock" ] && break; sleep 0.2; done
   echo "$sock"
 }
