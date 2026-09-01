@@ -62,6 +62,17 @@ def git(*a):
     return subprocess.run(["git", "-C", ROOT, *a], capture_output=True, text=True).stdout.strip()
 
 # ---------- generated block ----------
+def _runtime_head(st):
+    """The commit whose build the appliance's service binaries are actually running, or "" if none is recorded.
+
+    Read from current_state_facts, which is the register's one place for it: the renderer must never carry a
+    second copy of a fact, because two copies is precisely how a corrected fact and a stale summary came to
+    disagree while both looked authoritative.
+    """
+    head = str((st.get("current_state_facts") or {}).get("deployed_head_on_appliance") or "").strip()
+    return head if len(head) >= 8 else ""
+
+
 def render_block(st):
     ph = st["phases"]
     fp = st["fresh_production_baseline"]
@@ -93,9 +104,19 @@ def render_block(st):
         f"is structurally the sole guest-IAM authority from first operation. Not a cutover.",
     ] + ([
         f"**Fresh Production appliance ({prod['host']}, {prod['hostname']}):** DEPLOYED factory-clean from "
-        f"`{prod['initial_deployment_source_sha'][:7]}`; first-bring-up fixes were then applied live and "
-        f"afterwards committed (`{prod['first_bringup_fixes_commit_sha'][:7]}`), so no single commit "
-        f"describes what is running. {prod['lifecycle']}. "
+        f"`{prod['initial_deployment_source_sha'][:7]}`; " +
+        # THE RUNTIME HEAD IS RENDERED, not left to prose. This clause used to say, as fixed English, that
+        # first-bring-up fixes had been applied live "so no single commit describes what is running" — true
+        # when it was written, and false from the moment every service binary was reinstalled from one
+        # verified build. A summary that cannot express the appliance's current runtime identity will always
+        # end up describing an older one, so the head comes from the recorded fact and the older wording is
+        # kept only while there is no such fact to render.
+        (f"every service binary now runs repository head `{_runtime_head(st)[:8]}`, each digest verified on "
+         f"the appliance against the build host. "
+         if _runtime_head(st) else
+         f"first-bring-up fixes were then applied live and afterwards committed "
+         f"(`{prod['first_bringup_fixes_commit_sha'][:7]}`), so no single commit describes what is running. ")
+        + f"{prod['lifecycle']}. "
         # DERIVED, never asserted. This sentence used to read "Enrollment, claim and signed assignment are NOT
         # complete" as fixed English with only the licence word substituted, so it kept saying so through
         # enrollment, claim, assignment and licensing — the generated blocks contradicted the register they
@@ -798,6 +819,17 @@ def cmd_validate(deep=True, manifest_equality=True):
         for path, why in cmd_check_generated(st):
             fail(f"generated block: {os.path.relpath(path, ROOT)} — {why}")
 
+    # ...and the SOURCES those blocks are generated from must not contradict the recorded facts.
+    #
+    # This ran only under `check-generated` and was therefore invisible to everything that calls `validate` —
+    # including the adversarial mutation suite, which is the one thing that proves a rule can fail. The gap was
+    # not theoretical: a mutation that made live_counters stop adding up, or restored "PENDING DEPLOYMENT" to a
+    # capability recorded as delivered, sailed through the whole matrix while the rules meant to catch it sat
+    # in a command nobody in that path ran. A contradiction between a fact and its summary is a defect in the
+    # STATE, not in the rendering of it, so it belongs to validation proper.
+    for why in check_appliance_facts_agree(st):
+        fail(f"state contradiction: {why}")
+
     ok = len(fails) == 0
     for m in fails: print(f"  FAIL: {m}")
     print("PROJECT_STATE_GOVERNANCE =", "PASS" if ok else f"FAIL ({len(fails)})")
@@ -1187,6 +1219,84 @@ def check_appliance_facts_agree(st):
     if (counted("accounting_records") or 0) == 0 and f.get("guest_traffic_carried_ever") is True:
         bad.append("current_state_facts.guest_traffic_carried_ever is true but live_counters."
                    "accounting_records is 0")
+
+    # ---- SPLIT BRAIN: corrected facts, stale RENDERER SOURCES -------------------------------------------
+    #
+    # THIS EXISTS BECAUSE IT HAPPENED, AND BECAUSE THE PREVIOUS RULES DID NOT CATCH IT. current_state_facts
+    # was corrected to record 0 active Sessions, an empty kernel and three deployed product fixes; the fields
+    # the RENDERER reads — live_counters, production_appliance.guest_traffic, next_authorized_action — were
+    # not. Every generated block in six documents and three packs went on saying "sessions=3 (2 active)" and
+    # that the 72-hour cache was disabled by a failed resync, while semantic parity reported CLEAN because it
+    # was comparing prose to the facts that HAD been corrected. Two authoritative places for one fact is the
+    # defect; these rules make the second one fail.
+
+    # 1. The counters must add up. An active count that disagrees with total minus ended is a copy that was
+    #    edited in one place, which is exactly how this drifts.
+    tot, act, end = counted("sessions"), counted("sessions_active"), counted("sessions_ended")
+    if None not in (tot, act, end) and act + end != tot:
+        bad.append(f"live_counters: sessions_active {act} + sessions_ended {end} != sessions {tot}")
+
+    # 2. No renderer source may state an active-session count that disagrees with the number.
+    if act is not None:
+        import re as _re
+        srcs = [("production_appliance.guest_traffic", str(prod.get("guest_traffic", ""))),
+                ("next_authorized_action", str(st.get("next_authorized_action", ""))),
+                ("current_activity_execution_state_note", str(st.get("current_activity_execution_state_note", ""))),
+                ("onboarding_reconciliation.milestones.guest_financial_and_go_live.guest_traffic",
+                 str((((st.get("onboarding_reconciliation") or {}).get("milestones") or {})
+                      .get("guest_financial_and_go_live") or {}).get("guest_traffic", "")))]
+        for name, value in srcs:
+            for m in _re.finditer(r"(\d+)\s+active\b", value, _re.I):
+                if int(m.group(1)) != act:
+                    bad.append(f"{name} says {m.group(1)!r} active session(s) but "
+                               f"live_counters.sessions_active is {act}")
+
+    # 3. A renderer source may not claim installed kernel state while the recorded kernel is empty. The
+    #    appliance summary is where an operator looks to decide whether a guest is online right now.
+    if counted("nft_authorizations") == 0 and counted("tc_managed_classes") == 0:
+        gt = str(prod.get("guest_traffic", "")).lower()
+        for phrase in ("is enforced in nft", "currently enforced", "kernel-enforced session",
+                       "holds an nft element"):
+            if phrase in gt:
+                bad.append(f"production_appliance.guest_traffic says {phrase!r} but live_counters records "
+                           f"0 nft authorizations and 0 managed tc classes")
+
+    # 4. A capability recorded as DEPLOYED must not be described as pending deployment. The three product
+    #    corrections of T0105 were deployed at T0106 and verified at T0107, and their own notes still read
+    #    "PENDING DEPLOYMENT at this commit" — a sentence that was true for exactly one commit and then
+    #    became the most misleading kind of stale: precise, confident and wrong.
+    pending = ("pending deployment", "not yet deployed", "awaiting deployment", "pending merge")
+    for key, value in f.items():
+        if not key.endswith("_note") or not isinstance(value, str):
+            continue
+        low = value.lower()
+        if not any(p in low for p in pending):
+            continue
+        subject = key[:-5]
+        # The capability flag this note describes: <subject> or <subject>_deployed, either truthy.
+        for flag in (subject, subject + "_deployed", subject.replace("_verified", "") + "_deployed"):
+            v = f.get(flag)
+            if v is True or (isinstance(v, str) and v and v.upper() not in ("NO", "NONE", "FALSE")):
+                bad.append(f"current_state_facts.{key} still says the work is pending deployment, but "
+                           f"current_state_facts.{flag} records it as delivered")
+                break
+
+    # 5. The renderer must be able to state the runtime identity once it is recorded, and the appliance
+    #    summary must not go on denying that such a head exists.
+    head = str(f.get("deployed_head_on_appliance") or "").strip()
+    if len(head) >= 8:
+        # THE FIRST SENTENCE ONLY. This field states its verdict up front and then narrates the history that
+        # led there, and that history legitimately contains the words the verdict must no longer use — so a
+        # rule that scanned the whole value could only be satisfied by deleting the history, and one that
+        # excused the whole value whenever a correction phrase appeared anywhere could be defeated by leaving
+        # that phrase in place while flipping the verdict back. Which is exactly what the mutation does.
+        verdict = str(prod.get("runtime_provenance", "")).split(".")[0].lower()
+        for phrase in ("no single commit describes what is running",
+                       "deliberately not stated as a single sha",
+                       "mixed"):
+            if phrase in verdict:
+                bad.append(f"production_appliance.runtime_provenance opens with {phrase!r} but "
+                           f"current_state_facts.deployed_head_on_appliance records {head[:8]}")
     return bad
 
 def main():

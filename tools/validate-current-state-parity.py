@@ -1732,18 +1732,30 @@ def main():
     # So the live appliance is recorded as DATA and the prose is held to it.
     live_rules = []
 
-    def live_int(name):
-        v = facts.get(name)
-        return v if isinstance(v, int) else None
+    # ONE NUMERIC SOURCE: current_state_facts.live_counters. These rules first read flat fields beside it,
+    # which meant two authoritative places for one number — and that is exactly the split brain they exist to
+    # catch: live_counters said one active Session while a flat copy said none, the renderer read live_counters
+    # and this validator read the copy, so both reported themselves correct. The flat copies are gone; a
+    # fallback remains only so an older state file is still checkable rather than silently unchecked.
+    counters = facts.get("live_counters") or {}
 
-    active = live_int("live_sessions_active")
+    def live_int(name, *aliases):
+        for src in (counters, facts):
+            for key in (name,) + aliases:
+                v = src.get(key)
+                if isinstance(v, int):
+                    return v
+        return None
+
+    active = live_int("sessions_active", "live_sessions_active")
     if active is not None:
         # "N active sessions" anywhere on a current surface must agree. The count is what an operator reads to
         # decide whether a guest is online right now.
         rx = re.compile(r"sessions?\s*=\s*\d+\s*\((\d+)\s+active\)|(\d+)\s+active\s+sessions?\b", re.I)
         live_rules.append(("live-session-count", rx, lambda m: int(m.group(1) or m.group(2)) != active,
                            "the recorded facts say %d Session(s) are active" % active))
-    if facts.get("nft_managed_authorizations") == 0 and facts.get("tc_managed_classes") == 0:
+    if live_int("nft_authorizations", "nft_managed_authorizations") == 0 and \
+            live_int("tc_managed_classes") == 0:
         # A surface claiming installed kernel state while the recorded state is empty sends an operator to look
         # for an authorization that is not there.
         rx = re.compile(r"\b(\d+)\s+nft\s+element|\bnft\s+set\s+holds\s+(?!no\b)|phase3_auth_ipv4\s+holds\s+(?!no\b)",

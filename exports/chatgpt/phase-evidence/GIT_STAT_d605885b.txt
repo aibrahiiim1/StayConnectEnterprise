@@ -1,4 +1,0 @@
-commit d605885bf98e8ce8a3565ba3efb238c7e0f509e6
-Date:   Tue Sep 1 07:38:16 2026 +0300
-
-    The runtime identity is an invariant, not a second pointer at master

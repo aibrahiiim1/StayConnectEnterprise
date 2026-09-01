@@ -529,6 +529,26 @@ MUTATIONS = [
    ("replace", [('"authorization_transition_id": "T0015"', '"authorization_transition_id": "T0099"')])),
  ("M53 Phase-3 plan claims F8/F9 implemented", "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
    ("replace", [("F8/F9 NOT implemented", "F8/F9 implemented and accepted")])),
+ # --- SPLIT BRAIN: corrected current_state_facts beside stale RENDERER SOURCES -------------------------------
+ #
+ # These five are the condition that shipped through a green gate with semantic parity reporting CLEAN: the
+ # facts had been corrected, the fields the renderer actually reads had not, and six documents and three packs
+ # went on rendering "sessions=3 (2 active)" and a 72-hour cache "disabled by a resync that never completed".
+ # Parity could not see it because it was comparing prose against the facts that HAD been fixed.
+ ("M54 live_counters do not add up (active + ended != total)", "governance/project-state.json",
+   ("json_set", [(["current_state_facts", "live_counters", "sessions_active"], 2)])),
+ ("M55 renderer source states an active-session count the counters deny", "governance/project-state.json",
+   ("replace", [("sessions=3 - ALL THREE ENDED", "sessions=3 (2 active, 1 ended)")])),
+ ("M56 appliance summary claims kernel enforcement while the kernel is recorded empty",
+  "governance/project-state.json",
+   ("replace", [("It was ended with ADDRESS_NO_LONGER_OWNED",
+                 "It is enforced in nft and currently enforced. It was ended with ADDRESS_NO_LONGER_OWNED")])),
+ ("M57 a deployed capability still described as pending deployment", "governance/project-state.json",
+   ("replace", [("DEPLOYED AND LIVE-VERIFIED (migration 0060",
+                 "FIXED IN CODE, PENDING DEPLOYMENT at this commit (migration 0060")])),
+ ("M58 runtime provenance denies a recorded runtime head", "governance/project-state.json",
+   ("replace", [("SINGLE-COMMIT for every service binary, and stated as one.",
+                 "MIXED, and deliberately not stated as a single SHA.")])),
 ]
 
 def apply(relpath, op):
