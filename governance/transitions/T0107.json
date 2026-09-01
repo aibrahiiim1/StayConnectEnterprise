@@ -1,0 +1,33 @@
+{
+  "transition_id": "T0107",
+  "seq": 107,
+  "timestamp": "2026-08-31T23:19:00Z",
+  "timestamp_derivation": "The completion of the final PRE-LIVE deployment restart this record rests on (netd/acctd/scd/edged/portald/pmsd restarted at 23:19:51Z, verified immediately after), which precedes the author timestamp of the introducing commit. Per T0091.",
+  "record_type": "FINAL_PRE_LIVE_DEPLOYED_HEAD_AND_OWNERSHIP_OUTCOME",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. This records the deployed head and the first live outcome of the corrected ownership rule.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-08-31: 'Complete the remaining access-model defects end-to-end. This prompt explicitly authorizes implementation, CI, merge and deployment to PRE-LIVE .25.'",
+  "deployed_head": "PRE-LIVE 172.21.60.25 now runs master 042e0136ed23f607ba0c25fd497d3f98b2b55f8f. All nine service binaries reinstalled from one trimpath build and verified by sha256 on the appliance against the build host (netd 4e4c78c0b24e0ec29160cb30f451ddc8ac0ba487b74e9291fe22d395095e745b, acctd ee863e6712b0d8854ea0b915a9c69ea63136c3dfeeb776173cc27e8107ae805b, scd 18cdf037b9a020e7b1e65b20833207da5bf4e2ebfb31a8e92f8c2faafb1bc067, edged bcd27115927a015c3dd5a187fd1aae9eb2b53d6e051ea2e18ef8bbe695ec397a). Hotel Admin remains the c0207a28 bundle; PR #67 changed no UI. Schema head 0060_last_good_roster_survives_a_failed_resync. Rollback artifacts stand unchanged at /opt/stayconnect/backups/deploy-c0207a28-20260831T215740Z.",
+  "ownership_outcome": "The first pass under the corrected rule ended Session 64e5f11c-2f83-48df-a172-020dae450172 on 192.168.77.102 with end_reason ADDRESS_NO_LONGER_OWNED, through the controlled state machine. That is the designed outcome and not a regression: the device's lease on .102 lapsed on 2026-08-27 and DHCP now names no current holder for the address, so the appliance stopped authorizing it. Kernel state went to zero managed classes and the nft authorization set is empty. Nothing else was touched - the Purchase, the Entitlement and the accumulated usage are intact, and no Session was rewritten by hand.",
+  "live_state": "p3_feed_authorizes: FALSE against the real evidence (last_complete_sync_at 2026-08-27T16:33:10Z, 102.8 hours old), TRUE at one hour, TRUE at 71 hours, FALSE at 73 - while the runtime still reads DISCONNECTED / RESYNC_IN_PROGRESS. Room authentication is blocked for exactly one reason: the last good roster has aged past max_auth_cache_age_seconds = 259200. Claimable PENDING backlog 0. Purchases 3, entitlements 3, sessions 3 (all ended). Every financial counter zero: pms_postings 0, posting_attempts 0, posting_outbox 0, payment_transactions 0, folios 0. Service plan revisions 4, all PER_DEVICE.",
+  "room_login": "NOT PERFORMED. Protel was neither reconnected, probed, nor modified, and no Full Resync was requested.",
+  "transition_accepted": true
+}
