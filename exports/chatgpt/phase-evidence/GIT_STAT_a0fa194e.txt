@@ -1,4 +1,0 @@
-commit a0fa194ee206c569b226a1391c5697401b64f9be
-Date:   Tue Sep 1 16:20:55 2026 +0300
-
-    The provenance rule reads the verdict, not the history beneath it
