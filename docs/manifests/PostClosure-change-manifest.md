@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `0cf14affdecc639efccf31c375cea25708883685`
-- **Provenance (generation HEAD = inventory_head):** `0cf14affdecc639efccf31c375cea25708883685`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `c31df2597bdff069b131f714992f3c2044e17377`
+- **Provenance (generation HEAD = inventory_head):** `c31df2597bdff069b131f714992f3c2044e17377`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `record/t0109-dhcp-evidence-deployed`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 300
@@ -215,7 +215,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_0cf14aff.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_c31df259.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -225,18 +225,18 @@
 | `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0109: DHCP ownership-evidence health deployed to PRE-LIVE |
 | `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | T0109: DHCP ownership-evidence health deployed to PRE-LIVE |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A dead socket is not a dead mirror |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | T0109: DHCP ownership-evidence health deployed to PRE-LIVE |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: manifest and packs |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
@@ -263,7 +263,7 @@
 | `governance/transitions/T0106.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | T0106: PRE-LIVE deployment, DHCP evidence repair, lease currency |
 | `governance/transitions/T0107.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | T0107 receipt time precedes its introducing commit |
 | `governance/transitions/T0108.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | T0108 is dated before its own commit and after its own events |
-| `governance/transitions/T0109.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | T0109: DHCP ownership-evidence health deployed to PRE-LIVE |
+| `governance/transitions/T0109.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | T0109 dated after its events and before its commit |
 | `hotel-admin/app/(app)/commercial-packages/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `hotel-admin/app/(app)/commercial-packages/publish-form.tsx -> hotel-admin/app/(app)/internet-packages/publish-form.tsx` | RENAMED | `R065 (hotel-admin/app/(app)/commercial-packages/publish-form.tsx -> hotel-admin/app/(app)/internet-packages/publish-form.tsx)` | runtime | RUNTIME | rollback RESTORES prior content | Make the operator surface tell the truth about what this build does |
 | `hotel-admin/app/(app)/health/page.tsx` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Activation, licensing, Central FQDN and Kea health: production readiness |
@@ -511,14 +511,14 @@
  docs/design/Room-Auth-Materialization-Readiness.md | 197 +++++
  .../PC-0002-complete-delivery-manifest.md          | 159 ++++
  docs/manifests/Phase7-change-manifest.md           | 108 +--
- docs/manifests/PostClosure-change-manifest.md      | 918 +++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 915 +++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |   8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md | 378 +++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       | 357 ++++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 320250 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 133461 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip | Bin 315199 -> 320251 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  | Bin 125464 -> 133445 bytes
  ...StayConnectEnterprise-Phase1B-Planning-Pack.zip | Bin 42319 -> 42981 bytes
- .../chatgpt/phase-evidence/GIT_STAT_0cf14aff.txt   |   4 +
+ .../chatgpt/phase-evidence/GIT_STAT_c31df259.txt   |   4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |   4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |  10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |   6 +-
@@ -577,7 +577,7 @@
  hotel-admin/app/(app)/pms-providers/page.tsx       | 329 --------
  hotel-admin/app/(app)/service-plans/page.tsx       | 314 +++++++
  hotel-admin/app/(app)/setup/enrollment/page.tsx    | 244 +++++-
- hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 +++++++++
+ hotel-admin/app/(app)/sign-in-methods/page.tsx     | 413 ++++++++++
  hotel-admin/app/(app)/stays/page.tsx               | 277 +++++--
  hotel-admin/components/nav.tsx                     | 171 ++--
  hotel-admin/components/ui/error-banner.tsx         |   7 +-
@@ -599,7 +599,7 @@
  hotel-admin/test/phase3-pages.test.tsx             |  32 +-
  hotel-admin/test/pms-availability.test.ts          | 221 +++++
  hotel-admin/test/publish-form.test.tsx             |   8 +-
- hotel-admin/test/synchronization-card.test.tsx     | 275 ++++++
+ hotel-admin/test/synchronization-card.test.tsx     | 275 +++++++
  scripts/factory-clean-baseline-verify.sh           |  27 +
  scripts/gatep-grant-survives-reconcile.sh          | 160 ++++
  scripts/gatep-reconcile-acceptance.sh              | 236 ++++++
@@ -615,7 +615,7 @@
  .../tests/project_state_validator/run_mutations.py |  49 +-
  tools/validate-current-state-parity.py             |  95 +++
  tools/validate-project-state.sh                    |  12 +-
- 300 files changed, 27982 insertions(+), 2384 deletions(-)
+ 300 files changed, 27979 insertions(+), 2384 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -624,24 +624,21 @@ M  docs/manifests/PostClosure-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_0cf14aff.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_d70f1110.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_0cf14aff.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_c31df259.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md
 M  exports/chatgpt/stayconnectenterprise/MANIFEST.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md
-M  exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md
 M  governance/project-state.json
 ```
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: c31df259 T0109 dated after its events and before its commit
+HISTORICAL: 0f204fd8 Delivery: manifest and packs
 HISTORICAL: 0cf14aff T0109: DHCP ownership-evidence health deployed to PRE-LIVE
 HISTORICAL: 29a6b21f Merge PR #69: DHCP ownership-evidence health and current-state parity
 HISTORICAL: 0260a2d2 Delivery: manifest and packs
