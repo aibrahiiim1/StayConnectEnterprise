@@ -819,6 +819,17 @@ def cmd_validate(deep=True, manifest_equality=True):
         for path, why in cmd_check_generated(st):
             fail(f"generated block: {os.path.relpath(path, ROOT)} — {why}")
 
+    # ...and the SOURCES those blocks are generated from must not contradict the recorded facts.
+    #
+    # This ran only under `check-generated` and was therefore invisible to everything that calls `validate` —
+    # including the adversarial mutation suite, which is the one thing that proves a rule can fail. The gap was
+    # not theoretical: a mutation that made live_counters stop adding up, or restored "PENDING DEPLOYMENT" to a
+    # capability recorded as delivered, sailed through the whole matrix while the rules meant to catch it sat
+    # in a command nobody in that path ran. A contradiction between a fact and its summary is a defect in the
+    # STATE, not in the rendering of it, so it belongs to validation proper.
+    for why in check_appliance_facts_agree(st):
+        fail(f"state contradiction: {why}")
+
     ok = len(fails) == 0
     for m in fails: print(f"  FAIL: {m}")
     print("PROJECT_STATE_GOVERNANCE =", "PASS" if ok else f"FAIL ({len(fails)})")
