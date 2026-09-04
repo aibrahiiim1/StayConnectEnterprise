@@ -43,6 +43,11 @@ no()  { notes+=("FAIL|$1"); fails=$((fails+1)); [ $JSON -eq 1 ] || echo "  [FAIL
 
 command -v python3 >/dev/null 2>&1 || { echo "CANNOT CHECK: python3 is required"; exit 2; }
 
+# A carriage return, spelled so this file never CONTAINS one. The first version of these strips was
+# written as $'<literal CR>' and the byte did not survive editing, so the strip silently did nothing
+# and every route comparison failed on a bundle that contained every route.
+CR=$''
+
 jget() { python3 -c 'import json,sys
 try: d=json.load(open(sys.argv[1], encoding="utf-8"))
 except Exception: raise SystemExit(0)
@@ -103,6 +108,7 @@ CONTRACT="${HOTEL_ADMIN_CONTRACT:-$LIVE/capability-contract.json}"
 if [ -n "$LIVE" ] && [ -f "$CONTRACT" ]; then
   residual=0
   while IFS= read -r pat; do
+    pat="${pat%$CR}"   # a CR from a Windows-built stream would silently match nothing
     [ -n "$pat" ] || continue
     if grep -rql -- "$pat" "$LIVE/.next/static" 2>/dev/null; then
       no "the live client bundle still resolves '$pat' at runtime — it was built WITHOUT that capability flag, so the navigation it gates is compiled OFF"
@@ -110,12 +116,14 @@ if [ -n "$LIVE" ] && [ -f "$CONTRACT" ]; then
     fi
   done < <(python3 -c 'import json,sys
 d=json.load(open(sys.argv[1], encoding="utf-8"))
+sys.stdout.reconfigure(newline=chr(10))
 for p in d["forbidden_in_client_bundle"]["patterns"]: print(p)' "$CONTRACT" 2>/dev/null)
   [ "$residual" = "0" ] && ok "every capability flag was inlined at build time (no runtime lookups remain)"
 
   # ---- 5. the required operator surfaces answer ------------------------------------------------------------
   bad=0
   while IFS= read -r route; do
+    route="${route%$CR}"
     [ -n "$route" ] || continue
     code="$(curl -sS -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:$PORT$route" 2>/dev/null || echo 000)"
     case "$code" in
@@ -124,6 +132,7 @@ for p in d["forbidden_in_client_bundle"]["patterns"]: print(p)' "$CONTRACT" 2>/d
     esac
   done < <(python3 -c 'import json,sys
 d=json.load(open(sys.argv[1], encoding="utf-8"))
+sys.stdout.reconfigure(newline=chr(10))
 for r in d["required_routes"]["routes"]: print(r)' "$CONTRACT" 2>/dev/null)
   [ "$bad" = "0" ] && ok "every required operator surface is served"
 else
@@ -140,10 +149,12 @@ if [ -L "$PREVIOUS_LINK" ]; then
   else
     prev_bad=0
     while IFS= read -r pat; do
+      pat="${pat%$CR}"
       [ -n "$pat" ] || continue
       grep -rql -- "$pat" "$PREV/.next/static" 2>/dev/null && prev_bad=1
     done < <(python3 -c 'import json,sys
 d=json.load(open(sys.argv[1], encoding="utf-8"))
+sys.stdout.reconfigure(newline=chr(10))
 for p in d["forbidden_in_client_bundle"]["patterns"]: print(p)' "$CONTRACT" 2>/dev/null)
     if [ "$prev_bad" = "1" ]; then
       no "previous release $PREV was built WITHOUT the capability flags — rolling back to it would remove the operator surfaces. It must be archived, not wired as a rollback"
@@ -167,7 +178,7 @@ done
 
 if [ $JSON -eq 1 ]; then
   printf '{"healthy":%s,"failures":%d,"live_release":"%s","source_commit":"%s","build_id":"%s"}\n' \
-    "$([ $fails -eq 0 ] && echo true || echo false)" "$fails" "$LIVE" "$COMMIT" "$BID"
+    "$([ $fails -eq 0 ] && echo true || echo false | tr -d '')" "$fails" "$LIVE" "$COMMIT" "$BID"
 else
   echo "============================================================"
   echo "HOTEL_ADMIN_INTEGRITY = $([ $fails -eq 0 ] && echo PASS || echo "FAIL ($fails)")"

@@ -35,6 +35,11 @@ MANIFEST_NAME="hotel-admin-release.json"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+# A carriage return, spelled so this file never CONTAINS one. The first version of these strips was
+# written as $'<literal CR>' and the byte did not survive editing, so the strip silently did nothing
+# and every route comparison failed on a bundle that contained every route.
+CR=$''
+
 # jqless JSON reader: this runs on an appliance where jq is not guaranteed, and python3 is.
 jget() { # jget <file> <python-expression-on-d>
   python3 -c 'import json,sys
@@ -154,6 +159,7 @@ contract_file() {
 contract_flags() {
   python3 -c 'import json,sys
 d=json.load(open(sys.argv[1], encoding="utf-8"))
+sys.stdout.reconfigure(newline=chr(10))
 for k,v in d["required_build_flags"].items():
     if not k.startswith("_"): print("%s=%s" % (k,v))' "$1"
 }
@@ -183,29 +189,54 @@ print(" ".join(r for r in want if r not in have))' "$rel" "$contract")"
   # (2) THE FINGERPRINT OF A FLAGLESS BUILD. A residual runtime lookup in a CLIENT chunk means the flag was
   #     never substituted, whatever the build environment claimed. This is the check that would have caught
   #     the bundle now serving the appliance.
-  local pat hits
+  # A LOOP FED BY A PRODUCER THAT RETURNED NOTHING IS NOT A PASSING CHECK.
+  #
+  # This is not a hypothetical either: while this file was being written, an emitter acquired a syntax error,
+  # produced nothing, and every check below it "passed" on a bundle that was demonstrably built without its
+  # flags -- and the manifest recorded build_flags:{} while the script reported the contract satisfied. So the
+  # producer's output is MATERIALISED and asserted non-empty before anything iterates over it.
+  local pats pat hits
+  pats="$(python3 -c 'import json,sys
+d=json.load(open(sys.argv[1], encoding="utf-8"))
+sys.stdout.reconfigure(newline=chr(10))
+for p in d["forbidden_in_client_bundle"]["patterns"]: print(p)' "$contract")"
+  [ -n "$pats" ] || die "the capability contract yielded no forbidden-pattern list; the flag-inlining check cannot run and must not be reported as passed"
   while IFS= read -r pat; do
+    pat="${pat%$CR}"   # a packaging host may be Windows; a trailing CR would poison every comparison below
     [ -n "$pat" ] || continue
     hits="$(grep -rl -- "$pat" "$rel/.next/static" 2>/dev/null | head -3 || true)"
     if [ -n "$hits" ]; then
       echo "$hits" | sed 's/^/    /' >&2
       die "release $rel was built WITHOUT its capability flags: the client bundle still resolves '$pat' at runtime, so the navigation it gates is compiled OFF"
     fi
-  done < <(python3 -c 'import json,sys
-d=json.load(open(sys.argv[1], encoding="utf-8"))
-for p in d["forbidden_in_client_bundle"]["patterns"]: print(p)' "$contract")
+  done <<< "$pats"
 
   # (3) THE NAVIGATION ITSELF, entry by entry, named in the failure so an operator reads a surface and not a
   #     variable. Each entry needs its route present; (2) has already proved its flag was inlined.
-  local label route
-  while IFS='|' read -r label route; do
-    [ -n "$route" ] || continue
-    python3 -c 'import json,sys
-m=json.load(open(sys.argv[1] + "/.next/app-path-routes-manifest.json", encoding="utf-8"))
-raise SystemExit(0 if sys.argv[2] in set(v for v in m.values() if isinstance(v,str)) else 1)' "$rel" "$route"       || die "release $rel cannot serve '$label' ($route) — refusing to make it live"
-  done < <(python3 -c 'import json,sys
+  local navs label route
+  navs="$(python3 -c 'import json,sys
 d=json.load(open(sys.argv[1], encoding="utf-8"))
-for e in d["required_navigation"]["entries"]: print("%s|%s" % (e["label"], e["route"]))' "$contract")
+sys.stdout.reconfigure(newline=chr(10))
+for e in d["required_navigation"]["entries"]: print("%s|%s" % (e["label"], e["route"]))' "$contract")"
+  [ -n "$navs" ] || die "the capability contract yielded no required navigation; the operator-surface check cannot run and must not be reported as passed"
+  while IFS='|' read -r label route; do
+    route="${route%$CR}"
+    [ -n "$route" ] || continue
+    # THE ROUTE TRAVELS IN THE ENVIRONMENT, NOT IN ARGV. On a Git-Bash packaging host, an argument that begins
+    # with "/" is rewritten into a Windows path before a native python ever sees it: "/internet-packages"
+    # arrives as "C:/Program Files/Git/internet-packages" and every route lookup fails on a bundle that
+    # contains every route. A verification step that fails for a reason unrelated to what it verifies is worse
+    # than no step at all, because the next person deletes it.
+    # THE LEADING SLASH IS REMOVED IN TRANSIT AND PUT BACK INSIDE PYTHON. On a Git-Bash packaging host, MSYS
+    # rewrites anything that looks like a POSIX absolute path -- in argv AND in environment values -- before a
+    # native python ever sees it, so "/internet-packages" arrives as "C:/Program Files/Git/internet-packages"
+    # and every route lookup fails on a bundle that contains every route. A verification step that fails for a
+    # reason unrelated to what it verifies is worse than no step at all, because the next person deletes it.
+    SC_REL="$rel" SC_ROUTE="${route#/}" python3 -c 'import json, os
+m = json.load(open(os.environ["SC_REL"] + "/.next/app-path-routes-manifest.json", encoding="utf-8"))
+want = "/" + os.environ["SC_ROUTE"]
+raise SystemExit(0 if want in set(v for v in m.values() if isinstance(v, str)) else 1)'       || die "release $rel cannot serve '$label' ($route) — refusing to make it live"
+  done <<< "$navs"
 
   echo ">> capability contract satisfied (routes, inlined flags, operator navigation)"
 }
@@ -215,7 +246,7 @@ assert_manifest() {
   local rel="$1" mf="$1/$MANIFEST_NAME"
   [ -f "$mf" ] || die "release $rel carries no $MANIFEST_NAME — it cannot prove its provenance and will not be served"
   local commit bid
-  commit="$(jget "$mf" 'd["source_commit"]')"
+  commit="$(jget "$mf" 'd["source_commit"]' | tr -d '')"
   bid="$(jget "$mf" 'd["build_id"]')"
   [ -n "$commit" ] || die "$mf records no source_commit"
   [ -n "$bid" ]    || die "$mf records no build_id"
@@ -248,6 +279,7 @@ smoke_live() {
   # serving response; what must never happen is a 404, which is what a bundle missing the route returns.
   local route code bad=0
   while IFS= read -r route; do
+    route="${route%$CR}"
     [ -n "$route" ] || continue
     code="$(curl -sS -o /dev/null -w "%{http_code}" --max-time 5 "$base$route" 2>/dev/null || echo 000)"
     case "$code" in
@@ -255,8 +287,9 @@ smoke_live() {
       *) echo "   BAD $route -> $code" >&2; bad=1 ;;
     esac
   done < <(jget "$rel/$MANIFEST_NAME" 'd["required_routes"]' | python3 -c 'import json,sys
+sys.stdout.reconfigure(newline=chr(10))
 try: [print(r) for r in json.load(sys.stdin)]
-except Exception: pass')
+except Exception: pass' | tr -d '')
   [ "$bad" = "0" ] || { echo "SMOKE FAIL: a required operator surface is not being served" >&2; return 1; }
 
   # And the navigation those surfaces hang off must be COMPILED IN, not merely routable. This re-reads the
@@ -306,13 +339,16 @@ package() {
     # exact command that produced the flagless bundle now serving the appliance, and it succeeded quietly.
     local contract; contract="$(contract_file .)"
     [ -f "$contract" ] || die "no capability contract at $contract — refusing to build an unconstrained UI"
-    local flagline flags_json=""
+    local flaglist flagline flags_json=""
+    flaglist="$(contract_flags "$contract")"
+    [ -n "$flaglist" ] || die "the capability contract yielded no build flags; a build would silently produce a reduced UI"
     while IFS= read -r flagline; do
+      flagline="${flagline%$CR}"
       [ -n "$flagline" ] || continue
       export "${flagline?}"
       flags_json="$flags_json${flags_json:+, }\"${flagline%%=*}\": \"${flagline#*=}\""
       echo ">> build flag ${flagline}"
-    done < <(contract_flags "$contract")
+    done <<< "$flaglist"
 
     echo ">> npm ci"
     npm ci --no-fund --no-audit
