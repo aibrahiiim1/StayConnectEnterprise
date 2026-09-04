@@ -1,0 +1,4 @@
+commit f36a9b7822994f5d39b20db7ad1ca3b3c421e6dd
+Date:   Sat Sep 5 01:45:40 2026 +0300
+
+    The UI has its own identity, and a permanent deployment rule to keep it
