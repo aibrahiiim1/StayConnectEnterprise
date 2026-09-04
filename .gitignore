@@ -20,6 +20,9 @@ coverage/
 
 # Deploy staging bundles (built Next standalone output)
 .deploy/
+# Deployment artefacts: built on demand, shipped to the appliance, never source.
+hotel-admin-deploy.tgz
+hotel-admin-deploy.tgz.sha256
 
 # TypeScript incremental build cache
 *.tsbuildinfo

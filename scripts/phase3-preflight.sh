@@ -55,11 +55,24 @@ if grep -q "phase3 surface flag enabled while STAYCONNECT_PHASE3_MASTER is OFF" 
 else
   no "an incoherent flag set would not fail closed"
 fi
-# the deployed frontend bundle must not be built with the admin flag on
-if grep -RIl "NEXT_PUBLIC_PHASE3_ADMIN" "$ROOT/deploy" 2>/dev/null | grep -q .; then
-  no "a deployment file sets NEXT_PUBLIC_PHASE3_ADMIN (the deployed bundle must be dark)"
+# WHICH ADMIN SURFACES A DEPLOYMENT MAY ENABLE — decided by the contract, not by a blanket ban.
+#
+# This rule used to refuse ANY mention of NEXT_PUBLIC_PHASE3_ADMIN under deploy/, which was exactly right
+# while Phase 3 was DARK and the PMS admin surface was not authorized to ship. Phase 3 is now
+# ACCEPTED_AND_CLOSED and those surfaces are authorized and in operational use, so a blanket ban would now
+# forbid the appliance from serving the UI it is required to serve — and, worse, the version of this rule that
+# simply passed on "no mention anywhere" is what let a bundle ship with the flags MISSING.
+#
+# The question is therefore not "is the flag mentioned" but "is every admin flag a deployment sets one the
+# capability contract authorizes". An unlisted flag is still refused; a listed one is the point.
+_unauthorized=""
+for _f in $(grep -RIoh "NEXT_PUBLIC_PHASE[0-9]_ADMIN" "$ROOT/deploy" 2>/dev/null | sort -u); do
+  grep -qF -- "$_f" "$ROOT/hotel-admin/capability-contract.json" 2>/dev/null || _unauthorized="$_unauthorized $_f"
+done
+if [ -n "$_unauthorized" ]; then
+  no "a deployment file enables an admin surface the capability contract does not authorize:$_unauthorized"
 else
-  ok "no deployment file enables the Phase-3 admin bundle"
+  ok "every admin surface referenced under deploy/ is one the capability contract authorizes"
 fi
 
 # ---------------------------------------------------------------- 3. the migration is reversible
@@ -717,6 +730,34 @@ if [ -f "$CHK" ]; then
 else
   no "no operational DHCP ownership-evidence check ships with the appliance"
 fi
+
+# ---------------------------------------------------------------- 13. the Hotel Admin capability contract
+#
+# Next.js substitutes NEXT_PUBLIC_* at BUILD time. A flag that is absent when `next build` runs is never
+# substituted, so the compiled comparison is evaluated in the browser against an empty env shim and is
+# permanently false: the routes still compile and answer by URL, and the operator simply loses the navigation
+# to them. That is how the PRE-LIVE appliance served a Hotel Admin with no Internet Packages, no Service Plans
+# and no PMS Connection for five days while every structural check passed.
+CONTRACT="$ROOT/hotel-admin/capability-contract.json"
+if [ -f "$CONTRACT" ]; then
+  ok "the Hotel Admin capability contract is present"
+  # Read with grep rather than python: this preflight also runs on a Windows workstation, where a python3
+  # invoked from MSYS cannot open an MSYS-style path, and a check that errors is a check that does not run.
+  missing_contract=""
+  for token in NEXT_PUBLIC_PHASE2_ADMIN NEXT_PUBLIC_PHASE3_ADMIN /internet-packages /service-plans /pms-interfaces; do
+    grep -qF -- "$token" "$CONTRACT" || missing_contract="$missing_contract $token"
+  done
+  [ -z "$missing_contract" ]     && ok "the contract requires the Phase-2/Phase-3 admin flags and the Internet Packages, Service Plans and PMS routes"     || no "the capability contract omits:$missing_contract"
+else
+  no "hotel-admin/capability-contract.json is missing — a build has nothing to be held to"
+fi
+DHA="$ROOT/deploy/scripts/deploy-hotel-admin.sh"
+grep -q 'contract_flags' "$DHA"   && ok "packaging supplies the capability flags from the contract instead of a bare build"   || no "packaging still runs an unconstrained build"
+grep -q 'assert_contract_satisfied' "$DHA"   && ok "packaging and installation both prove the contract against the BUILT tree"   || no "nothing proves the capability contract against a built bundle"
+grep -q 'source_commit' "$DHA"   && ok "every bundle carries a machine-readable manifest naming its source commit"   || no "bundles ship without provenance"
+grep -q 'smoke_live' "$DHA"   && ok "installation smoke-tests the live endpoint for the served BUILD_ID and the required surfaces"   || no "installation trusts systemctl and HTTP 200 alone"
+grep -q 'rollback_eligible' "$DHA"   && ok "a rollback target must satisfy the current capability contract"   || no "an obsolete UI can still be wired as an executable rollback"
+[ -f "$ROOT/deploy/scripts/check-hotel-admin-integrity.sh" ]   && ok "a standing Hotel Admin integrity guard ships with the appliance"   || no "no standing Hotel Admin integrity guard exists"
 
 # ============================================================================== report
 # Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json

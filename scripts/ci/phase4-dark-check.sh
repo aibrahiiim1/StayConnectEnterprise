@@ -137,7 +137,16 @@ fi
 # 4c. The DELIVERED Hotel-Admin bundle does not enable the Phase-4 operator screens. The test profile in
 #     playwright.config.ts sets the flag deliberately and is excluded: it builds a server that is never
 #     deployed, and excluding it is what keeps this check about the shipped artefact.
-uiflag="$(grep -rn 'NEXT_PUBLIC_PHASE4_ADMIN' hotel-admin/ deploy/ 2>/dev/null           --include='*.json' --include='*.mjs' --include='*.env*' --include='*.yml' --include='*.sh'           | grep -v node_modules || true)"
+# ENABLEMENT, NOT MENTION. This grepped for the flag NAME, which is a proxy for the rule and not the rule:
+# it fires on a line that RECORDS the flag as deliberately unset, and the only way to satisfy it is to stop
+# writing down which surfaces are off — the opposite of what keeps them off. What must be refused is a
+# delivered configuration that turns the flag ON: "1", true, or yes, in JSON, env or shell form. A line that
+# names the flag while assigning anything else is documentation, and documentation of what is disabled is the
+# thing that stops someone enabling it by accident.
+uiflag="$(grep -rnE 'NEXT_PUBLIC_PHASE4_ADMIN[^A-Za-z0-9_]{0,4}(=|:)[[:space:]]*"?(1|true|yes)"?' \
+            hotel-admin/ deploy/ 2>/dev/null \
+            --include='*.json' --include='*.mjs' --include='*.env*' --include='*.yml' --include='*.sh' \
+            | grep -v node_modules || true)"
 if [ -z "$uiflag" ]; then
   say "no delivered Hotel-Admin configuration enables the Phase-4 financial screens"
 else
