@@ -287,6 +287,15 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh dhcp-evidence-check --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-dhcp-ownership-evidence-selftest.sh
 
+      # The Hotel Admin UI is gated on NEXT_PUBLIC_* flags that Next substitutes at BUILD time, so a bundle
+      # built without them compiles its own navigation off while every structural check passes. That shipped:
+      # the PRE-LIVE appliance served an operator surface with no Internet Packages, no Service Plans and no
+      # PMS Connection. The checker that refuses such a release is proven here against staged release trees.
+      - name: Hotel Admin deployment integrity (selftest)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-integrity --
+          bash $GITHUB_WORKSPACE/deploy/scripts/check-hotel-admin-integrity-selftest.sh
+
       # A unit whose ExecStart does not exist fails 203/EXEC on every trigger, silently.
       # stayconnect-backup-cleanup.service did exactly that for weeks: retention never ran, the appliance root
       # filesystem reached 100%, and PostgreSQL could not write postmaster.pid. The installer now derives its
