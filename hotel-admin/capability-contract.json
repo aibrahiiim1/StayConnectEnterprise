@@ -5,10 +5,7 @@
   "required_build_flags": {
     "_note": "Every flag MUST be present in the build environment with exactly this value. Packaging supplies them from this file and then PROVES the substitution happened, because supplying a variable and having it inlined are two different facts.",
     "NEXT_PUBLIC_PHASE2_ADMIN": "1",
-    "NEXT_PUBLIC_PHASE3_ADMIN": "1",
-    "NEXT_PUBLIC_PHASE4_ADMIN": "1",
-    "NEXT_PUBLIC_PHASE5_ADMIN": "1",
-    "NEXT_PUBLIC_PHASE6_ADMIN": "1"
+    "NEXT_PUBLIC_PHASE3_ADMIN": "1"
   },
   "required_routes": {
     "_note": "Operator surfaces that must exist in the built app-path route manifest. A build that cannot serve these is not a candidate for this appliance, whatever else is right about it.",
@@ -28,24 +25,39 @@
   "required_navigation": {
     "_note": "The gated NAVIGATION, which is the thing the operator actually sees and the thing that silently disappeared. Each entry names a capability flag and one route it must lead to; verification asserts the compiled bundle can reach the route AND that the flag governing it was inlined true.",
     "entries": [
-      { "label": "Internet Packages", "flag": "NEXT_PUBLIC_PHASE2_ADMIN", "route": "/internet-packages" },
-      { "label": "Service Plans",     "flag": "NEXT_PUBLIC_PHASE2_ADMIN", "route": "/service-plans" },
-      { "label": "PMS Connection",    "flag": "NEXT_PUBLIC_PHASE3_ADMIN", "route": "/pms-interfaces" }
+      {
+        "label": "Internet Packages",
+        "flag": "NEXT_PUBLIC_PHASE2_ADMIN",
+        "route": "/internet-packages"
+      },
+      {
+        "label": "Service Plans",
+        "flag": "NEXT_PUBLIC_PHASE2_ADMIN",
+        "route": "/service-plans"
+      },
+      {
+        "label": "PMS Connection",
+        "flag": "NEXT_PUBLIC_PHASE3_ADMIN",
+        "route": "/pms-interfaces"
+      }
     ]
   },
   "forbidden_in_client_bundle": {
-    "_note": "A residual runtime lookup of a capability flag in the CLIENT chunks is the fingerprint of a build that never received it: Next left the property access in place instead of substituting a literal. Finding one of these means the flag was missing however confidently the build environment was set up, so it is a hard packaging failure rather than a warning.",
+    "_note": "A residual runtime lookup of a REQUIRED capability flag in the CLIENT chunks is the fingerprint of a build that never received it: Next left the property access in place instead of substituting a literal. Finding one means the flag was missing however confidently the build environment was set up, so it is a hard packaging failure. Only the REQUIRED flags are listed: a lookup for a deliberately-absent flag is the correct compiled form of 'this surface is off'.",
     "patterns": [
       "env.NEXT_PUBLIC_PHASE2_ADMIN",
-      "env.NEXT_PUBLIC_PHASE3_ADMIN",
-      "env.NEXT_PUBLIC_PHASE4_ADMIN",
-      "env.NEXT_PUBLIC_PHASE5_ADMIN",
-      "env.NEXT_PUBLIC_PHASE6_ADMIN"
+      "env.NEXT_PUBLIC_PHASE3_ADMIN"
     ]
   },
   "minimum_rollback_contract": {
     "_note": "A rollback target must be able to operate this appliance. A release that predates these surfaces would remove PMS, Service Plan and Package management from the operator the moment it was served, so it is archive evidence and NOT an executable rollback, however recently it was deployed.",
     "must_satisfy_required_routes": true,
     "must_satisfy_required_build_flags": true
+  },
+  "deliberately_absent_flags": {
+    "_note": "NOT AN OVERSIGHT, AND NOT SAFE TO ADD. These surfaces exist in the source and are deliberately compiled OFF for this appliance. Phase 4 is accepted at DARK maturity with NO financial traffic authorized, and the Phase-4 DARK gate refuses any delivered configuration that enables its operator screens - correctly, and it refused the first draft of this contract. Phases 5 and 6 are likewise not part of the authorized PRE-LIVE operator surface. A residual runtime lookup for these flags in the client bundle is therefore EXPECTED and is what 'off' looks like; only the required flags above are forbidden to appear unsubstituted.",
+    "NEXT_PUBLIC_PHASE4_ADMIN": "deliberately unset — Phase 4 is DARK, no financial traffic authorized",
+    "NEXT_PUBLIC_PHASE5_ADMIN": "deliberately unset — post-stay operator surface not authorized for PRE-LIVE",
+    "NEXT_PUBLIC_PHASE6_ADMIN": "deliberately unset — guest device self-service not authorized for PRE-LIVE"
   }
 }
