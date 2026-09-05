@@ -538,11 +538,18 @@ MUTATIONS = [
  ("M54 live_counters do not add up (active + ended != total)", "governance/project-state.json",
    ("json_set", [(["current_state_facts", "live_counters", "sessions_active"], 2)])),
  ("M55 renderer source states an active-session count the counters deny", "governance/project-state.json",
-   ("replace", [("sessions=3 - ALL THREE ENDED", "sessions=3 (2 active, 1 ended)")])),
+   # RE-ANCHORED. The appliance summary changed when the fourth Room Login was accepted and one Session became
+   # live, so the old anchor ("sessions=3 - ALL THREE ENDED") no longer exists. The case is unchanged in
+   # substance: state an active-session count the recorded counters deny, and the parity rule must catch it.
+   ("replace", [("sessions=4 - three ENDED and ONE ACTIVE", "sessions=4 (3 active, 1 ended)")])),
  ("M56 appliance summary claims kernel enforcement while the kernel is recorded empty",
   "governance/project-state.json",
-   ("replace", [("It was ended with ADDRESS_NO_LONGER_OWNED",
-                 "It is enforced in nft and currently enforced. It was ended with ADDRESS_NO_LONGER_OWNED")])),
+   # RE-AIMED, SAME DEFECT CLASS. The kernel is no longer empty - one authorization and one shaping class
+   # belong to the live Session - so a summary claiming enforcement is now TRUE and cannot be the mutation.
+   # What must still be caught is a recorded kernel that contradicts the recorded sessions: zero managed
+   # classes while a Session is active.
+   ("json_set", [(["current_state_facts", "live_counters", "nft_authorizations"], 0),
+                 (["current_state_facts", "live_counters", "tc_managed_classes"], 0)])),
  ("M57 a deployed capability still described as pending deployment", "governance/project-state.json",
    ("replace", [("DEPLOYED AND LIVE-VERIFIED (migration 0060",
                  "FIXED IN CODE, PENDING DEPLOYMENT at this commit (migration 0060")])),
