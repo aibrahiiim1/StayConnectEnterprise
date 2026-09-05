@@ -1,0 +1,34 @@
+{
+  "transition_id": "T0114",
+  "seq": 114,
+  "timestamp": "2026-09-05T15:02:00Z",
+  "timestamp_derivation": "The completion of the PMS recovery verification: reconnect 14:50:03.827Z, generation 184 published 14:50:41.086Z, and the readiness evidence read through 15:01:18Z. Follows every event this receipt reports and precedes the author timestamp of the introducing commit. Per T0091, in the order T0108 requires.",
+  "record_type": "PMS_AUTOMATIC_RECOVERY_VERIFIED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. Observation of the already-implemented automatic recovery.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-09-05: 'The Product Owner has manually restored the Protel Socket Server. Perform one controlled PMS recovery-and-readiness verification on PRE-LIVE .25 ... observation of the normal automatic PMS recovery only.'",
+  "recovery": "AUTOMATIC AND IN-PROCESS. pmsd MainPID 3447131, running since 2026-09-01T03:41:49Z with NRestarts 0, performed the whole recovery itself: last WORKER_DIAL_FAILED at 14:49:46.901Z (attempt 25846), TCP/FIAS re-established at 14:50:03.827Z, a resync SELF-REQUESTED at 14:50:03.829Z - two milliseconds later - and generation 184 published COMPLETE at 14:50:41.086Z. A 37-second cycle. resync_command_id, resync_command_requested_at and resync_command_reason are all NONE: no operator or manual Full Resync was issued, nothing was restarted, and no PMS configuration was touched.",
+  "steady_state": "transport CONNECTED, sync IN_SYNC, continuity CONTINUOUS, stage COMPLETE. Roster 1141 Stays, 829 IN_HOUSE. Generation 184 carries 590 events - 535 APPLIED, 55 MANUAL_REVIEW, 0 PENDING - and published_resync_generation equals the maximum event generation, with zero events above it, so no RECEIVING or incomplete generation exists for an unfinished drain to hide in. Claimable PENDING backlog 0; PENDING at any generation 0.",
+  "authorization_semantics": "p3_feed_authorizes returns TRUE against the real evidence (last_complete_sync_at 2026-09-05T14:50:41.086Z) and TRUE at 1 hour and 71 hours, FALSE at 73 - the 72-hour boundary is unchanged and exact. The deployed function still carries the 0060 shape: zero occurrences of resync_started_at, the offline branch present, the materialization-readiness term present, the max_auth_cache_age_seconds ceiling present. The claim that RESYNC_IN_PROGRESS alone no longer disables a fresh roster was proven live at T0106 while the runtime genuinely read that state; today's runtime reads IN_SYNC and takes the live-feed branch, so that specific branch was not re-exercised - only the deployed function shape was re-verified.",
+  "observability_gap": "pmsd emits NOTHING on the success path. Every dial failure is logged at ERROR, but the reconnect, the resync, the DE marker and the publication of generation 184 produced no journal entry at all - `journalctl` reports no entries after the final DIAL_FAILED, with no rate-limiting recorded. An operator watching logs would have seen a wall of failures and then silence, unable to distinguish recovery from continued outage. The durable database record is complete and authoritative, so this is an OBSERVABILITY BACKLOG ITEM, not a functional defect and not a Room Login blocker. Diagnosed only; no fix implemented or authorized.",
+  "boundaries_respected": "Protel was not started, reconnected, probed, restarted or reconfigured; no Full Resync was requested; no Room Login was performed in this verification; no financial traffic was enabled. The repository was not modified.",
+  "transition_accepted": true
+}

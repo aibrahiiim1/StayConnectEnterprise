@@ -1,0 +1,40 @@
+{
+  "transition_id": "T0115",
+  "seq": 115,
+  "timestamp": "2026-09-05T15:07:30Z",
+  "timestamp_derivation": "The completion of the Room Login acceptance evidence: login 14:59:54.386Z, enforcement and accounting observed through 15:07:18Z. Follows every event this receipt reports and precedes the author timestamp of the introducing commit. Per T0091, in the order T0108 requires.",
+  "record_type": "CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "state_advanced_note": "The phase does not advance. The activity execution state does: the appliance is no longer awaiting the controlled Room Login test, because it has been performed and accepted. This is not Go-Live and implies no authorization for it.",
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. The Product Owner authorized exactly one controlled acceptance test; this records its result.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-09-05: 'The Product Owner explicitly authorizes exactly ONE controlled real-device Room Login on PRE-LIVE appliance .25 ... This is a controlled acceptance test only. It is not Go-Live.'",
+  "result": "PASS",
+  "the_real_path": "PROVEN, AND THIS IS THE FIRST TIME. Every earlier Room sign-in on this appliance reached scd through the resolve socket with portald bypassed; this one came from a real device through the real captive portal. At 14:59:30 the device's own connectivity probe (GET connectivitycheck.gstatic.com/generate_204 from 192.168.77.105) was redirected 302 and the portal served /api/auth-methods. At 14:59:54 the guest submitted POST http://portal.stayconnect.local/auth/pms/phase3 - portald answered 200 in 2.227s, having forwarded to scd, which logged POST /v1/phase3/auth/pms/resolve 200 (1.651s), then 'phase3 auth: access granted and enforced', then POST /v1/phase3/auth/pms/grant 200 (506ms). At 14:59:55 the device was served /success?s=5feee27d-2100-4140-9815-aa3584dd7ec0. NO GUEST-FACING PMS SELECTOR EXISTS: the portal offers voucher and pms with mode room_any, so the guest supplies a room and the system resolves the single ACTIVE interface itself.",
+  "subject": "Room 1104, Stay 63ca32d9-be45-47e4-b827-5c34ea89bd6b, status IN_HOUSE, resolved unambiguously to PMS interface ddff5d07-f588-4f1f-8133-a0f393524476 - the same interface recorded on the Purchase. The room had no prior Entitlement: the three earlier controlled tests used rooms 11209, 10212 and 12110. Device 2f4a6a39-75e9-486e-b76e-85c623084071, MAC 7e:58:52:fb:78:cd (a locally-administered address, as modern handsets use), address 192.168.77.105 on guest bridge br-g-00d1fa1a, holding a current Kea lease that still named that MAC when checked after enforcement.",
+  "commerce": "EXACTLY ONE OF EACH. Purchase cbd3384d-cc27-462a-82bb-ae1ac286b38d, state GRANTED, amount_minor 0, trigger GUEST_SELECTION, settlement_mapping_id NONE, package 'Freee' revision 11163227-1bc4-41c9-b982-06edcb41fc73 whose price_minor is 0 and whose settlement_methods are {NOT_REQUIRED}. Entitlement 59fbd7b8-d0e5-4038-9a31-76db1277c0d4, status ACTIVE, pinned to service plan revision b2f84f70-02e0-4026-bdef-f6decc92bf64 (2000/2000 kbps, PER_DEVICE, 1 device). Session 5feee27d-2100-4140-9815-aa3584dd7ec0 started 14:59:54.386Z and reached active. Counters moved from 3/3/3 to 4/4/4 - exactly one new row each.",
+  "enforcement": "One nft element and one tc class, both belonging to this Session and nothing else. nft phase3_auth_ipv4 holds exactly (br-g-00d1fa1a . 192.168.77.105) on a refreshing 90-second lease. tc carries HTB class 1:1d69 at rate 2Mbit ceil 2Mbit on the guest bridge for download and on ifb-g-00d1fa1a for upload, hanging off the ROOT rather than a group class - which is what PER_DEVICE means and matches the pinned plan. The minor differs from the historical Session's 1:1d66, so no class was reused. No other device or address was authorized.",
+  "traffic_and_accounting": "Real Internet access succeeded. 41 accounting records for the new Session between 14:59:55.756Z and 15:04:22.756Z, totalling 170,721 bytes down and 114,242 bytes up - IDENTICAL to the kernel counters on the bridge and the IFB, which is the proof there is no double counting. accounting_records rose from 1037 to 1078, distinct sessions in accounting from 2 to 3. Quota use is a small fraction of the plan's 100 MB allowance, as instructed.",
+  "entitlement_aggregate_usage": "NOT ACCRUED, AND NOT A REGRESSION. consumed_data_bytes and usage_version on the new Entitlement are both 0 while its Session shows 284,963 bytes. That is the configured behaviour, not a fault of this login: acctd logs 'phase6 aggregate acquisition is OFF; accrual still runs for entitlements already in that mode', the Entitlement's time_accounting_mode is VALIDITY_WINDOW with end_mode MANUAL_END and no window_ends_at, and ALL FOUR Entitlements - including the three whose Sessions carried 58 MB of real traffic in August - read 0/0. Per-Session accounting is authoritative and exact. SEPARATELY WORTH A PRODUCT-OWNER DECISION, and deliberately not acted on here: the pinned plan revision declares data_quota_bytes = 100000000 while the Entitlement's policy snapshot carries no data quota and no aggregate accrual, so a plan-level quota would not currently be enforced at the Entitlement level. That is a product-semantics question, which is a stop boundary.",
+  "safety": "No historical Session was reopened or rebound: 9f6b62dc, 8b5758bf and 64e5f11c remain ENDED with their original end reasons and timestamps. No unrelated device or Session became authorized. Nothing was manually deleted or modified to tidy the test - the real resulting state is preserved. All financial counters remain ZERO: pms_postings 0, posting_attempts 0, posting_outbox 0, payment_transactions 0, payment_transaction_events 0, folios 0. No settlement, charge, reversal or FX command was transmitted. Exactly one Room Login was performed and no retry of any kind was attempted.",
+  "observed_anomaly": "One cosmetic log line, not a failure. At 14:59:55, after the login had already succeeded, portald and scd recorded 'phase3 scd hop refused' for /v1/phase6/devices/list with status 404 and 'phase3 guest auth not verified, reason device_list_unavailable'. Phase 6 (guest device self-service) is deliberately OFF on this appliance, so that endpoint correctly does not exist; a subsequent POST /devices/list returned 200. The login, the grant and the enforcement were all complete before this line was emitted. Noted for the backlog; no fix authorized or made.",
+  "go_live": "NOT PERFORMED AND NOT AUTHORIZED. This is a controlled acceptance test on a PRE-LIVE appliance. No cutover was performed and none is implied.",
+  "transition_accepted": true
+}
