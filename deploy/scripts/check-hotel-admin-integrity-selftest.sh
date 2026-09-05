@@ -41,6 +41,13 @@ stage() {
   echo "BID-$name" > "$rel/.next/BUILD_ID"
   : > "$rel/server.js"
   cp "$CONTRACT" "$rel/capability-contract.json"
+  # A rollback target is now held to the FULL contract, so a fixture needs the route manifest a real release
+  # has. Without it every case would fail on a missing manifest rather than on the condition it is staging.
+  SC_REL="$rel" SC_CONTRACT="$CONTRACT" python3 -c 'import json, os
+c = json.load(open(os.environ["SC_CONTRACT"], encoding="utf-8"))
+routes = c["required_routes"]["routes"] + [e["route"] for e in c["required_navigation"]["entries"]]
+json.dump({r.rstrip("/") + "/page": r for r in routes},
+          open(os.environ["SC_REL"] + "/.next/app-path-routes-manifest.json", "w", encoding="utf-8"))' 
   if [ "$inlined" = "no" ]; then
     printf 'let B="1"===L.env.NEXT_PUBLIC_PHASE2_ADMIN,H="1"===L.env.NEXT_PUBLIC_PHASE3_ADMIN;\n' \
       > "$rel/.next/static/chunks/app/layout.js"
@@ -96,7 +103,7 @@ run "a plain directory at the runtime path is REFUSED" fail "PLAIN DIRECTORY"
 rm -rf "$WORK/current" "$WORK/previous"
 ln -sfn "$(stage good yes)" "$WORK/current"
 ln -sfn "$(stage obsolete no)" "$WORK/previous"
-run "an obsolete rollback target is REFUSED" fail "rolling back to it would remove the operator surfaces"
+run "an obsolete rollback target is REFUSED" fail "is NOT a legitimate rollback"
 
 # 4. A release that cannot prove its provenance.
 rm -f "$WORK/current" "$WORK/previous"

@@ -296,6 +296,15 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-integrity --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-hotel-admin-integrity-selftest.sh
 
+      # ...and the guards attacked. The first versions passed on good input AND on several bad ones: an
+      # identity comparison that is false when nothing could be extracted, a route loop over a producer never
+      # asserted non-empty, and a rollback target held only to the flag scan. Each case here drives the REAL
+      # function against a controlled endpoint or a staged release and asserts it REFUSES.
+      - name: Hotel Admin integrity guards — adversarial (selftest)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-adversarial --
+          bash $GITHUB_WORKSPACE/deploy/scripts/check-hotel-admin-integrity-adversarial.sh
+
       # A unit whose ExecStart does not exist fails 203/EXEC on every trigger, silently.
       # stayconnect-backup-cleanup.service did exactly that for weeks: retention never ran, the appliance root
       # filesystem reached 100%, and PostgreSQL could not write postmaster.pid. The installer now derives its

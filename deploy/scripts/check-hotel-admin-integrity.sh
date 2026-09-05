@@ -34,6 +34,15 @@ PREVIOUS_LINK="${HOTEL_ADMIN_PREVIOUS:-$CURRENT_LINK.previous}"
 RELEASES_DIR="${HOTEL_ADMIN_RELEASES:-/opt/stayconnect/releases/hotel-admin}"
 PORT="${HOTEL_ADMIN_PORT:-3100}"
 MANIFEST_NAME="hotel-admin-release.json"
+MANIFEST_NAME_DEFAULT="$MANIFEST_NAME"
+# THE OPERATOR ENDPOINT IS CONFIGURED, NOT REMEMBERED. Passing HOTEL_ADMIN_PUBLIC_* by hand means the external
+# check runs when someone thinks to run it that way, which is not a guarantee. An appliance records the real
+# endpoint here once and every invocation - by hand, by a deployment, by a timer - checks it.
+HA_ENV="${HOTEL_ADMIN_INTEGRITY_ENV:-/etc/stayconnect/hotel-admin-integrity.env}"
+# shellcheck disable=SC1090
+[ -f "$HA_ENV" ] && . "$HA_ENV"
+# shellcheck source=lib-hotel-admin-contract.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-hotel-admin-contract.sh"
 JSON=0
 [ "${1:-}" = "--json" ] && JSON=1
 
@@ -90,19 +99,42 @@ else
   no "the live Hotel Admin release carries NO $MANIFEST_NAME — it cannot prove which commit built it"
 fi
 
-# ---- 3. what the service is actually SERVING --------------------------------------------------------------
-BODY="$(curl -sS --max-time 5 "http://127.0.0.1:$PORT/login" 2>/dev/null || true)"
-if [ -z "$BODY" ]; then
-  no "the Hotel Admin service did not answer on :$PORT, so what it serves cannot be verified"
-else
-  # sed, NOT `tr -d '<!->'`: that set is the RANGE "!" to ">", which includes every digit and silently
-  # mangles the BUILD_ID being compared.
-  SERVED="$(grep -o '<!--[A-Za-z0-9_-]\{16,\}-->' <<<"$BODY" | head -1 | sed 's/^<!--//; s/-->$//')"
-  if [ -n "$SERVED" ] && [ -n "$BID" ] && [ "$SERVED" != "$BID" ]; then
-    no "the RUNNING service serves BUILD_ID '$SERVED' but the recorded live release is '$BID' — the process is running an older bundle than the one on disk"
-  elif [ -n "$SERVED" ]; then
+# ---- 3. what the service is actually SERVING, FAIL-CLOSED --------------------------------------------------
+#
+# This used to report a pass whenever a BUILD_ID could not be extracted: `[ -n "$SERVED" ] && ... != ...` is
+# false when SERVED is empty, and the else-branch said nothing at all. So a page rendered without the stamp, an
+# endpoint answering with something that is not this application, or an extraction that quietly broke, all left
+# the identity unverified and the checker green. An identity check that cannot obtain an identity has FAILED.
+if SERVED="$(ha_served_build_id "http://127.0.0.1:$PORT/login")"; then
+  if [ -z "$BID" ]; then
+    no "the service serves BUILD_ID '$SERVED' but the release on disk records none to compare it with"
+  elif [ "$SERVED" != "$BID" ]; then
+    no "the RUNNING service serves BUILD_ID '$SERVED' but the recorded live release is '$BID' — the process is running a different bundle than the one on disk"
+  else
     ok "the running service serves the recorded BUILD_ID ($SERVED)"
   fi
+else
+  no "no usable BUILD_ID could be read from http://127.0.0.1:$PORT/login (no answer, no stamp, or a malformed one) — what the service is serving is unverifiable, which is a failure and not a pass"
+fi
+
+# ---- 3b. THE ENDPOINT AN OPERATOR ACTUALLY USES ------------------------------------------------------------
+#
+# Localhost process health says nothing about what staff reach. A stale Caddy vhost, a proxy aimed at another
+# port or a cached upstream would all leave 127.0.0.1 perfect while the operator is on an old bundle - and the
+# operator's browser is the only place this defect was ever visible. Where a real endpoint is configured it is
+# checked, and it must serve the SAME BUILD_ID as the managed release.
+if [ -n "${HOTEL_ADMIN_PUBLIC_URL:-}" ]; then
+  if PUBLIC_ID="$(ha_served_build_id "${HOTEL_ADMIN_PUBLIC_URL%/}/login")"; then
+    if [ -n "$BID" ] && [ "$PUBLIC_ID" = "$BID" ]; then
+      ok "the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves the managed release ($PUBLIC_ID)"
+    else
+      no "the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves BUILD_ID '$PUBLIC_ID' but the managed release is '$BID'"
+    fi
+  else
+    no "the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} served no usable BUILD_ID — what staff actually reach is unverifiable"
+  fi
+else
+  ok "no external operator endpoint configured for this check (HOTEL_ADMIN_PUBLIC_URL unset)"
 fi
 
 # ---- 4. the capability flags were really inlined ----------------------------------------------------------
@@ -142,26 +174,22 @@ else
 fi
 
 # ---- 6. the rollback pointer is not a trap ----------------------------------------------------------------
+#
+# This checked ONLY the flag-inlining fingerprint, so a release with correctly inlined flags but missing a
+# current operator route - exactly what an older UI looks like - was reported as "a legitimate rollback" by the
+# tool whose job is to say otherwise. A rollback target is now held to the SAME full contract as a deployment
+# candidate, through the same shared implementation: provenance, inlined flags, every required route and every
+# required navigation entry.
 if [ -L "$PREVIOUS_LINK" ]; then
   PREV="$(readlink -f "$PREVIOUS_LINK")"
   if [ ! -d "$PREV" ]; then
     no "previous release pointer is dangling: $PREV"
-  elif [ ! -f "$PREV/$MANIFEST_NAME" ]; then
-    no "previous release $PREV carries no manifest — an unprovenanced rollback target"
   else
-    prev_bad=0
-    while IFS= read -r pat; do
-      pat="${pat%$CR}"
-      [ -n "$pat" ] || continue
-      grep -rql -- "$pat" "$PREV/.next/static" 2>/dev/null && prev_bad=1
-    done < <(python3 -c 'import json,sys
-d=json.load(open(sys.argv[1], encoding="utf-8"))
-sys.stdout.reconfigure(newline=chr(10))
-for p in d["forbidden_in_client_bundle"]["patterns"]: print(p)' "$CONTRACT" 2>/dev/null)
-    if [ "$prev_bad" = "1" ]; then
-      no "previous release $PREV was built WITHOUT the capability flags — rolling back to it would remove the operator surfaces. It must be archived, not wired as a rollback"
+    PREV_CONTRACT="${HOTEL_ADMIN_CONTRACT:-$CONTRACT}"
+    if PREV_WHY="$(ha_release_satisfies_contract "$PREV" "$PREV_CONTRACT" 2>&1)"; then
+      ok "previous release satisfies the FULL capability contract and is a legitimate rollback"
     else
-      ok "previous release satisfies the current capability contract and is a legitimate rollback"
+      no "previous release $PREV is NOT a legitimate rollback: ${PREV_WHY:-it does not satisfy the current capability contract}. It must be archived, not wired as an executable rollback"
     fi
   fi
 else

@@ -758,6 +758,12 @@ grep -q 'source_commit' "$DHA"   && ok "every bundle carries a machine-readable 
 grep -q 'smoke_live' "$DHA"   && ok "installation smoke-tests the live endpoint for the served BUILD_ID and the required surfaces"   || no "installation trusts systemctl and HTTP 200 alone"
 grep -q 'rollback_eligible' "$DHA"   && ok "a rollback target must satisfy the current capability contract"   || no "an obsolete UI can still be wired as an executable rollback"
 [ -f "$ROOT/deploy/scripts/check-hotel-admin-integrity.sh" ]   && ok "a standing Hotel Admin integrity guard ships with the appliance"   || no "no standing Hotel Admin integrity guard exists"
+# THE GUARDS MUST BE FAIL-CLOSED, and one shared implementation must decide what satisfies the contract.
+[ -f "$ROOT/deploy/scripts/lib-hotel-admin-contract.sh" ]   && ok "one shared implementation decides whether a release satisfies the contract"   || no "the deployment path and the standing checker define contract satisfaction separately"
+grep -q 'ha_served_build_id' "$ROOT/deploy/scripts/check-hotel-admin-integrity.sh"   && grep -q 'ha_served_build_id' "$DHA"   && ok "both guards read the served BUILD_ID through the same fail-closed extractor"   || no "a guard still compares a served BUILD_ID it may not have been able to extract"
+awk '/^smoke_live\(\)/,/^}/' "$DHA" | grep -q 'checked" -ne "$want_n'   && ok "the live smoke test proves it exercised every required route, by count"   || no "the live smoke test cannot tell a full route sweep from an empty one"
+grep -q 'HOTEL_ADMIN_PUBLIC_URL' "$ROOT/deploy/scripts/check-hotel-admin-integrity.sh"   && ok "a configured operator endpoint is verified to serve the managed release"   || no "localhost health alone is allowed to prove the operator endpoint is current"
+[ -f "$ROOT/deploy/scripts/check-hotel-admin-integrity-adversarial.sh" ]   && ok "the integrity guards carry an adversarial suite that drives them against controlled endpoints"   || no "nothing proves the integrity guards can fail"
 
 # ============================================================================== report
 # Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json

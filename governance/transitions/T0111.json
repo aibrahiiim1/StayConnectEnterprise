@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0111",
+  "seq": 111,
+  "timestamp": "2026-09-05T02:05:00Z",
+  "timestamp_derivation": "The completion of the guard hardening and its verification on the appliance - the corrected checker installed and run against the real operator endpoint, the live release confirmed unchanged - which follows every event this receipt reports and precedes the author timestamp of the introducing commit. Per T0091, and in that order per T0108.",
+  "record_type": "HOTEL_ADMIN_GUARD_FAIL_OPEN_GAPS_CLOSED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_INTENTIONALLY_DOWN_AWAITING_ONE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_TEST",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. This closes implementation defects inside the Hotel Admin deployment-integrity scope already authorized at T0110.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-09-05: 'Close the remaining fail-open gaps in the permanent Hotel Admin deployment-integrity guards. This is an implementation defect within the already authorized Hotel Admin integrity scope.'",
+  "relationship_to_t0110": "T0110 STANDS UNCHANGED and is not rewritten. It recorded the root cause, the permanent rule and the corrected release, all of which remain accurate. This receipt records that the GUARDS T0110 introduced contained fail-open paths of their own, and what was done about them.",
+  "gaps_closed": "FOUR, each of the same family the guards exist to prevent: a check that cannot run is indistinguishable from a check that passed. (1) The live-identity comparison in smoke_live was `[ -n \"$served\" ] && [ \"$served\" != \"$want\" ]`, which is FALSE when nothing could be extracted - so an endpoint serving no BUILD_ID at all reported its identity as verified. It is now fail-closed: unextractable, empty, malformed or shorter than a real Next id all FAIL, in the deployment smoke test and in the standing checker alike. (2) The required-route loop iterated a producer that was never asserted non-empty, so a producer returning nothing completed without making a single HTTP request and reported success. The list is now materialised, asserted non-empty, and the number of routes actually exercised is compared with the count the contract declares - the smoke test now reports 'checked N/N' and fails if they differ. (3) The standing checker held a ROLLBACK target only to the flag-inlining scan, so a release with correctly inlined flags and a missing operator route - exactly what an older UI looks like - was reported as 'a legitimate rollback' by the tool whose job is to say otherwise. Deployment and the checker now share ONE implementation (deploy/scripts/lib-hotel-admin-contract.sh) covering provenance, inlined flags, every required route and every required navigation entry, so the two questions cannot drift apart again. (4) Localhost health was allowed to stand for the endpoint staff actually reach; where an operator endpoint is configured it is now checked and must serve the SAME BUILD_ID as the managed release.",
+  "adversarial_coverage": "deploy/scripts/check-hotel-admin-integrity-adversarial.sh drives the REAL smoke_live against a controlled HTTP endpoint and the REAL contract check against staged releases. Nine cases, all green on Linux: an endpoint serving no BUILD_ID is refused; an endpoint serving a different BUILD_ID is refused; an empty route producer is refused; all ten required routes are individually requested - asserted from the SERVER's own request log, not from what the checker claims - and counted 10/10; a release with correct flags but a missing required route is refused; a release missing a required navigation target is refused; a release that cannot prove its provenance is refused; and both a correct release and a compatible previous release still pass. The deployment script gained a sourced/executed guard so the suite can drive its functions directly rather than testing a copy of them.",
+  "appliance": "The LIVE HOTEL ADMIN WAS NOT REBUILT OR REPLACED. It remains release 20260905-000420, commit 822e839581e7, BUILD_ID IHj6T6xLCvQBkQC4vZvIN, verified unchanged before and after this work. Only the operational tooling was installed: check-hotel-admin-integrity.sh (sha256 9425770462fe050237d804b01962a0611565fa0bcfc55882a8679bcc1e637950), lib-hotel-admin-contract.sh (d4f342c7c4554115acf2d99541dfdec35c67a6988ede581ba036ece2a6a60c24) and deploy-hotel-admin.sh (6535f97a33674bfa4959067a381363e05d103d01beec4d969a93097f2b5e3bd3), plus /etc/stayconnect/hotel-admin-integrity.env recording the real operator endpoint so the external identity check runs on every invocation rather than only when someone remembers to pass it. The checker reports PASS on all ten checks, including that https://172.21.60.25 (Host: hotel.stayconnect.local) serves BUILD_ID IHj6T6xLCvQBkQC4vZvIN.",
+  "separate_defect_noted_not_fixed": "The Caddy local-CA leaf for the Hotel Admin vhost is EXPIRED and stayconnect-hotel-admin-cert-renew.service is in a failed state. That is a real defect and it is NOT this one: it concerns certificate validity, while these guards concern which BUNDLE is served. The endpoint check therefore carries an explicit, recorded HOTEL_ADMIN_PUBLIC_INSECURE=1 rather than silently tolerating the failure, with a note to replace it with a CA bundle once the renewal is repaired. Raised for a separate decision; no certificate was changed in this run.",
+  "room_login": "NOT PERFORMED. Protel was neither reconnected, probed nor modified; no Full Resync was requested; no authentication was initiated; no financial traffic was enabled.",
+  "transition_accepted": true
+}
