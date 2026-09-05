@@ -1,4 +1,0 @@
-commit 69d960a6132163d63c37dc653b64968135563ca4
-Date:   Sat Sep 5 10:44:01 2026 +0300
-
-    The leaf was never the problem: the intermediate under it was
