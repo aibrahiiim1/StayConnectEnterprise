@@ -1,4 +1,0 @@
-commit a9335553170222ba73fb856a233f7703a21d6bf9
-Date:   Sun Sep 6 02:27:40 2026 +0300
-
-    Governance: T0117 records the data-quota defect, its cause and its fix
