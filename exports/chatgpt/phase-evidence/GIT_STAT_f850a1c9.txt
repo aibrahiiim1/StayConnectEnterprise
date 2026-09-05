@@ -1,4 +1,0 @@
-commit f850a1c93c1ba57b2c8410240ca7f5fbb2efafe4
-Date:   Sat Sep 5 17:02:46 2026 +0300
-
-    Retire the tc primer: netd has owned this since before the unit last worked

@@ -1,0 +1,4 @@
+commit 8f0b13580af1bd68e7b9dc3844925306cd46574e
+Date:   Sat Sep 5 18:22:00 2026 +0300
+
+    The guest path is proven, and the state file finally says so
