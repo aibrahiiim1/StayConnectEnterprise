@@ -11,6 +11,10 @@ set -uo pipefail
 
 SRC="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 BIN="${SC_BIN_DIR:-/opt/stayconnect/bin}"
+# A prefix for absolute Exec paths that live OUTSIDE $BIN (/usr/local/sbin/..., /opt/stayconnect/deploy/...).
+# Empty in production, where those paths are literal. The self-test sets it so it can exercise the real
+# install-and-verify code against a sandbox instead of a parallel copy of the logic that could drift.
+ROOT_PREFIX="${SC_ROOT_PREFIX:-}"
 UNITS="${SC_UNIT_DIR:-/etc/systemd/system}"
 # SC_SKIP_SYSTEMD lets the self-test drive the file-installation and verification logic on a machine with no
 # systemd and no /opt. It skips ONLY the daemon-reload; every existence and executability check still runs,
@@ -53,6 +57,39 @@ fi
 #
 # The source file may be named with or without .sh: the units name the installed path, and the repository
 # names the script. Both spellings are tried, in that order, so neither convention has to change.
+# unit_exec_paths — every absolute program path any shipped unit declares, ignoring distribution programs.
+# Used to VERIFY; helper INSTALLATION still targets $BIN, with non-$BIN destinations installed explicitly by
+# install_external_helpers below so a path outside /opt/stayconnect/bin can never be silently skipped again.
+unit_exec_paths() {
+  grep -hoE '^Exec[A-Za-z]*=-?/[^ ]+' "$SRC"/systemd/stayconnect-*.service 2>/dev/null |
+    sed -E 's/^Exec[A-Za-z]*=-?//' |
+    grep -vE '^/(bin|sbin|usr/bin|usr/sbin|usr/local/bin/node)/' | sort -u
+}
+
+# install_external_helpers — helpers a unit expects OUTSIDE /opt/stayconnect/bin.
+#
+# The Hotel Admin certificate manager is the case: its unit names /usr/local/sbin/..., the repository ships
+# deploy/scripts/hotel-admin-cert-manager.sh, and nothing connected the two. Every such pair is installed here
+# by deriving the source name from the unit's own path, so adding a unit that references a new location cannot
+# quietly produce another 203/EXEC service.
+install_external_helpers() {
+  local path want src
+  for path in $(unit_exec_paths); do
+    case "$path" in /opt/stayconnect/bin/*) continue ;; esac
+    want="$(basename "$path")"
+    # stayconnect-hotel-admin-cert-manager -> hotel-admin-cert-manager.sh
+    src=""
+    for cand in "$SRC/scripts/$want" "$SRC/scripts/$want.sh"                 "$SRC/scripts/${want#stayconnect-}" "$SRC/scripts/${want#stayconnect-}.sh"; do
+      [ -f "$cand" ] && { src="$cand"; break; }
+    done
+    [ -n "$src" ] || continue
+    local dest="$ROOT_PREFIX$path"
+    mkdir -p "$(dirname "$dest")"
+    install -m 0755 "$src" "$dest.tmp" && mv -f "$dest.tmp" "$dest"
+    say "installed external helper $(basename "$src") -> $dest"
+  done
+}
+
 unit_helpers() {
   # Every Exec* directive across the units in SRC, reduced to the bin paths they reference.
   grep -hoE '^Exec[A-Za-z]*=[^ ]*/opt/stayconnect/bin/[A-Za-z0-9._-]+' "$SRC"/systemd/stayconnect-*.service 2>/dev/null |
@@ -79,6 +116,10 @@ for want in $HELPERS; do
   mv -f "$BIN/.$want.tmp" "$BIN/$want" || die "cannot install $BIN/$want"
   say "installed $BIN/$want (from $(basename "$srcfile"))"
 done
+
+# ...and the helpers whose units name a path OUTSIDE $BIN. This call is the whole difference between a
+# certificate manager that renews nightly and a timer that has failed 203/EXEC every night for two weeks.
+install_external_helpers
 
 # ---- 3. VERIFY BEFORE INSTALLING ANY UNIT ----------------------------------
 #
@@ -129,13 +170,31 @@ for u in "$SRC"/systemd/stayconnect-*.service; do
   [ -f "$u" ] || continue
   b="$(basename "$u")"
   unit="${b%.service}"
-  for path in $(grep -hoE '^Exec[A-Za-z]*=[^ ]*/opt/stayconnect/bin/[A-Za-z0-9._-]+' "$u" 2>/dev/null |
-                grep -oE '/opt/stayconnect/bin/[A-Za-z0-9._-]+' | sort -u); do
+  # EVERY ABSOLUTE Exec PATH, WHATEVER DIRECTORY IT NAMES.
+  #
+  # This scanned only /opt/stayconnect/bin, which is where most helpers live -- and that is precisely why it
+  # could not see the one that broke. stayconnect-hotel-admin-cert-renew.service declares
+  # ExecStart=/usr/local/sbin/stayconnect-hotel-admin-cert-manager; nothing ever installed that file, the
+  # timer fired daily for two weeks, every firing failed 203/EXEC, the Hotel Admin certificate chain was never
+  # re-minted, and HTTPS broke for every operator. The guard written to prevent exactly this outcome was
+  # pinned to one directory and reported OK throughout.
+  #
+  # A guard against "the unit names a program that is not there" must not care WHERE the program was supposed
+  # to be. Anything not under a system path we deliberately ignore (/bin, /usr/bin, /usr/sbin -- distribution
+  # programs like /usr/bin/node) is checked at the path the unit actually declares.
+  for path in $(grep -hoE '^Exec[A-Za-z]*=-?/[^ ]+' "$u" 2>/dev/null |
+                sed -E 's/^Exec[A-Za-z]*=-?//' |
+                grep -vE '^/(bin|sbin|usr/bin|usr/sbin|usr/local/bin/node)/' | sort -u); do
     want="$(basename "$path")"
-    installed="$BIN/$want"
+    # The unit's OWN path is what systemd will exec. A helper that lives somewhere else entirely is still
+    # missing as far as that unit is concerned.
+    case "$path" in
+      /opt/stayconnect/bin/*) installed="$BIN/$want" ;;
+      *)                      installed="$ROOT_PREFIX$path" ;;
+    esac
     # The two ways this can be wrong read very differently to whoever has to fix it: a helper the repository
     # ships and this script failed to install, or a service binary the build was supposed to deliver.
-    if [ -f "$SRC/scripts/$want" ] || [ -f "$SRC/scripts/$want.sh" ]; then
+    if [ -f "$SRC/scripts/$want" ] || [ -f "$SRC/scripts/$want.sh" ]        || [ -f "$SRC/scripts/${want#stayconnect-}" ] || [ -f "$SRC/scripts/${want#stayconnect-}.sh" ]; then
       origin="a helper this installer ships"
     else
       origin="a service binary the build delivers (provisioning expects binaries to be present already)"

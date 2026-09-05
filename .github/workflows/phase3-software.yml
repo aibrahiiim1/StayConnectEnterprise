@@ -300,6 +300,15 @@ jobs:
       # identity comparison that is false when nothing could be extracted, a route loop over a producer never
       # asserted non-empty, and a rollback target held only to the flag scan. Each case here drives the REAL
       # function against a controlled endpoint or a staged release and asserts it REFUSES.
+      # HTTPS to the Hotel Admin failed verification for two weeks while status.json said "healthy,
+      # days_remaining 729". Both were true about the LEAF; the INTERMEDIATE pinned in the same served
+      # fullchain had expired, and `openssl x509 -in <fullchain>` reads only the first certificate. These
+      # cases mint a real leaf above a real expired intermediate and assert the manager sees it.
+      - name: Hotel Admin certificate chain health (selftest)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-cert --
+          bash $GITHUB_WORKSPACE/deploy/scripts/check-hotel-admin-cert-selftest.sh
+
       - name: Hotel Admin integrity guards — adversarial (selftest)
         run: >
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh hotel-admin-adversarial --

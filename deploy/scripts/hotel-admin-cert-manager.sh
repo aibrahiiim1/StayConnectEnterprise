@@ -27,7 +27,12 @@ STATUS_JSON="$STATE_DIR/status.json"
 CA_DIR="/var/lib/caddy/.local/share/caddy/pki/authorities/local"
 NETD_ENV="/etc/stayconnect/netd.env"
 CADDY_SVC="stayconnect-caddy"
-RENEW_DAYS=45           # renew when remaining validity <= this
+RENEW_DAYS=45           # renew when the LEAF has <= this much life left
+# THE CHAIN HAS ITS OWN, MUCH SHORTER CLOCK. Caddy's local authority mints seven-day intermediates and rotates
+# them itself, so a pinned fullchain must be re-minted on that cadence rather than on the leaf's. Two days
+# gives the daily timer several chances to act before the served chain goes bad, and a renewal that runs
+# early is a no-op-shaped event, while one that runs late is an outage.
+CHAIN_RENEW_DAYS=2      # renew when ANY certificate in the served chain has <= this much life left
 LEAF_DAYS=730           # minted leaf validity
 MIN_FRESH_DAYS=180      # a freshly minted cert must have at least this much life
 RETRY_BASE=300          # backoff base seconds
@@ -129,6 +134,13 @@ validate_candidate(){ # keyfile crtfile chainfile ip
   openssl x509 -in "$c" -noout -checkend 0 >/dev/null 2>&1 || { echo "cert not currently valid"; return 1; }
   openssl x509 -in "$c" -noout -checkend $((MIN_FRESH_DAYS*86400)) >/dev/null 2>&1 \
     || { echo "cert expires too soon (<${MIN_FRESH_DAYS}d)"; return 1; }
+  # AND THE CANDIDATE CHAIN AS A WHOLE. Validating only the leaf is what let a chain with an expired
+  # intermediate be installed and called healthy.
+  if [ -f "$ch" ]; then
+    chain_verifies "$ch" || { echo "candidate chain does not verify against the local root"; return 1; }
+    local cw
+    if cw="$(chain_expiring "$ch" 0)"; then echo "candidate chain contains an expired certificate: $cw"; return 1; fi
+  fi
   # serverAuth EKU
   openssl x509 -in "$c" -noout -ext extendedKeyUsage 2>/dev/null | grep -q "TLS Web Server Authentication" \
     || { echo "missing serverAuth EKU"; return 1; }
@@ -320,11 +332,73 @@ in_backoff(){
   [ "$(now)" -lt "${nx:-0}" ]
 }
 
+# ---- the CHAIN, not just the leaf --------------------------------------------
+#
+# THIS IS THE DEFECT THAT BROKE HTTPS FOR TWO WEEKS. `openssl x509 -in <fullchain>` reads only the FIRST
+# certificate in the file, so every health question this manager asked was answered by the LEAF alone. The leaf
+# was fine - minted 2026-08-20, valid until 2028 - and status.json duly reported "healthy, days_remaining 729"
+# while no client could complete a handshake, because the INTERMEDIATE pinned inside the same fullchain had
+# expired on 2026-08-27.
+#
+# Caddy's local authority issues SEVEN-DAY intermediates and rotates them itself. A vhost that serves a static
+# fullchain file captures whichever intermediate existed at mint time, so the served chain rots on a weekly
+# cadence no matter how long the leaf lives. Health therefore has to be a property of the WHOLE chain.
+chain_certs(){ # chainfile -> prints one PEM block per line-range into $1.d/NN.pem, echoes the files
+  local ch="$1" d; d="$(mktemp -d /tmp/ha-chain.XXXXXX)"
+  awk -v d="$d" 'BEGIN{n=0} /BEGIN CERT/{n++} {print > sprintf("%s/%02d.pem", d, n)}' "$ch" 2>/dev/null
+  ls "$d"/*.pem 2>/dev/null
+}
+
+# chain_expiring <chainfile> <seconds> -> 0 if ANY certificate in the chain expires within <seconds>
+# (or is already expired); echoes which one. The leaf is included, so this subsumes the old leaf-only test.
+chain_expiring(){
+  local ch="$1" secs="$2" f subj rc=1 dir=""
+  for f in $(chain_certs "$ch"); do
+    dir="$(dirname "$f")"
+    if ! openssl x509 -in "$f" -noout -checkend "$secs" >/dev/null 2>&1; then
+      subj="$(openssl x509 -in "$f" -noout -subject 2>/dev/null | sed 's/^subject=//')"
+      echo "${subj:-unknown certificate} in the served chain"
+      rc=0
+      break
+    fi
+  done
+  [ -n "$dir" ] && rm -rf "$dir" 2>/dev/null
+  return $rc
+}
+
+# chain_verifies <chainfile> -> 0 when the file, as served, verifies against the local root.
+# A chain whose intermediate no longer chains to the root is unusable however valid its leaf looks.
+chain_verifies(){
+  local ch="$1" f first="" rest="" dir="" ok=1
+  for f in $(chain_certs "$ch"); do
+    dir="$(dirname "$f")"
+    if [ -z "$first" ]; then first="$f"; else rest="$rest $f"; fi
+  done
+  if [ -n "$first" ]; then
+    if [ -n "$rest" ]; then
+      cat $rest > "$dir/untrusted.pem" 2>/dev/null
+      openssl verify -CAfile "$CA_DIR/root.crt" -untrusted "$dir/untrusted.pem" "$first" >/dev/null 2>&1 && ok=0
+    else
+      openssl verify -CAfile "$CA_DIR/root.crt" -untrusted "$CA_DIR/intermediate.crt" "$first" >/dev/null 2>&1 && ok=0
+    fi
+  fi
+  [ -n "$dir" ] && rm -rf "$dir" 2>/dev/null
+  return $ok
+}
+
 # ---- decide whether renewal is needed ----------------------------------------
 needs_renewal(){ # ip  -> 0 yes, 1 no; echoes reason
   local ip="$1"
   [ -f "$CHAIN" ] && [ -f "$KEY" ] || { echo "missing cert"; return 0; }
   openssl x509 -in "$CHAIN" -noout -checkend 0 >/dev/null 2>&1 || { echo "cert invalid/expired"; return 0; }
+  # EVERY certificate in the served chain, not just the leaf. An expired intermediate makes the chain
+  # unusable while the leaf still has years on it, which is exactly how this endpoint failed.
+  local which
+  if which="$(chain_expiring "$CHAIN" 0)"; then echo "expired in the served chain: $which"; return 0; fi
+  if ! chain_verifies "$CHAIN"; then echo "the served chain no longer verifies against the local root"; return 0; fi
+  if which="$(chain_expiring "$CHAIN" $((CHAIN_RENEW_DAYS*86400)))"; then
+    echo "within ${CHAIN_RENEW_DAYS}d of expiry in the served chain: $which"; return 0
+  fi
   openssl x509 -in "$CHAIN" -noout -checkend $((RENEW_DAYS*86400)) >/dev/null 2>&1 || { echo "within ${RENEW_DAYS}d of expiry"; return 0; }
   [ "$(cert_sans "$CHAIN")" = "$(want_sans "$ip")" ] || { echo "SAN drift (mgmt IP changed or SAN mismatch)"; return 0; }
   echo "valid and correct"; return 1
