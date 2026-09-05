@@ -101,14 +101,16 @@ web-install:
 	systemctl enable --now stayconnect-web-admin.service
 	systemctl restart stayconnect-web-admin.service
 
+# NO tc-setup. The HTB roots, the guest IFB, the ingress redirect and every per-session and SHARED class are
+# created and reconciled by netd (internal/shape EnsureBridgeInfra + the Phase-3 applier), idempotently, on
+# every submit pass and therefore on every boot. The retired stayconnect-tc-setup.service primed ens160 and
+# br-lan for an scd-owned shaping model that no longer exists, and its prime() opened by DELETING a root
+# qdisc - which against a current guest bridge would take out netd's live classes.
 phase2-install: dataplane-build
-	chmod 0755 deploy/scripts/tc-setup.sh
 	@[ $$(realpath bin/acctd) = $$(realpath /opt/stayconnect/bin/acctd 2>/dev/null || echo x) ] || install -m 0755 bin/acctd /opt/stayconnect/bin/acctd
 	chmod 0755 /opt/stayconnect/bin/acctd
-	install -m 0644 deploy/systemd/stayconnect-tc-setup.service /etc/systemd/system/
 	install -m 0644 deploy/systemd/stayconnect-acctd.service    /etc/systemd/system/
 	systemctl daemon-reload
-	systemctl enable --now stayconnect-tc-setup.service
 	systemctl restart stayconnect-scd.service
 	systemctl enable --now stayconnect-acctd.service
 

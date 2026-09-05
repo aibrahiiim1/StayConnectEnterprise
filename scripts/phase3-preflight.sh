@@ -778,6 +778,37 @@ fi
 # THE 203/EXEC GUARD MUST NOT BE PINNED TO ONE DIRECTORY. It scanned only /opt/stayconnect/bin, so a unit
 # naming /usr/local/sbin/... was invisible to it -- which is how a renewal timer failed nightly for two weeks.
 grep -q 'unit_exec_paths' "$ROOT/deploy/scripts/install-service-units.sh"   && ok "the installer verifies every absolute Exec path a unit declares, in any directory"   || no "the installer only checks helpers under one directory"
+# ---------------------------------------------------------------- 14. one shaping owner, no legacy priming
+#
+# stayconnect-tc-setup was a oneshot that primed HTB roots on ens160 and br-lan for a shaping model scd used to
+# own, with per-session classids described as `1:<last octet>`. netd has owned the guest-bridge/IFB roots, the
+# per-session classes (MinorForIP, 0x1000-0x1fff) and the SHARED groups (0x2000-0x2fff) for a long time, and it
+# builds all of it from zero on every pass. The unit was retired; these assertions keep it retired, because a
+# legacy primer that returns would open by deleting a root qdisc netd owns.
+# EXECUTABLE references, not prose. Comments explaining WHY the unit was retired are exactly what a future
+# reader needs; a rule that forbade the words would delete its own rationale. Comment lines are stripped first.
+# Self-tests are excluded because they STAGE the forbidden condition on purpose: the adversarial installer
+# case plants a retired unit precisely to prove the installer refuses to re-arm it. A rule that banned the
+# string everywhere would delete the test that proves the ban works.
+tc_live="$(grep -rIn "stayconnect-tc-setup" "$ROOT/deploy" "$ROOT/Makefile" 2>/dev/null            | grep -v -- "-selftest.sh:" | grep -v -- "-adversarial.sh:"            | grep -vE ':[0-9]+:[[:space:]]*#' | grep -vE '^[^:]*:[0-9]+:[[:space:]]*//' || true)"
+if [ -n "$tc_live" ]; then
+  no "a current deployment path still references stayconnect-tc-setup: $(printf '%s' "$tc_live" | head -1)"
+else
+  ok "no current deployment path or Makefile target references stayconnect-tc-setup (comments excepted)"
+fi
+[ -f "$ROOT/deploy/scripts/tc-setup.sh" ]   && no "the retired tc-setup.sh is still shipped and could be installed again"   || ok "the retired tc-setup.sh is gone from the repository"
+[ -f "$ROOT/deploy/systemd/stayconnect-tc-setup.service" ]   && no "the retired tc-setup unit is still shipped"   || ok "the retired tc-setup unit is gone from the repository"
+# No shipped script may delete a ROOT qdisc. Only netd owns those, and it never deletes one.
+qd_live="$(grep -rIn "qdisc del" "$ROOT/deploy/scripts" 2>/dev/null | grep "root"            | grep -vE ':[0-9]+:[[:space:]]*#' || true)"
+if [ -n "$qd_live" ]; then
+  no "a shipped deployment script deletes a root qdisc: $(printf '%s' "$qd_live" | head -1)"
+else
+  ok "no shipped deployment script deletes a root qdisc (comments excepted)"
+fi
+# The helper contract, not a basename, decides what becomes executable on an appliance.
+grep -q 'EXTERNAL_HELPER_CONTRACT' "$ROOT/deploy/scripts/install-service-units.sh"   && ok "external helpers are installed only from an enumerated contract, never by basename match"   || no "the installer can still install a helper because a filename happened to match"
+[ -f "$ROOT/deploy/scripts/check-appliance-units.sh" ]   && ok "a standing appliance unit-health audit ships (failed units, missing programs, dormancy proven)"   || no "nothing audits installed units for failed state or missing programs"
+[ -f "$ROOT/deploy/scripts/check-appliance-units-selftest.sh" ]   && ok "the appliance unit audit carries a self-test that proves it can fail"   || no "nothing proves the appliance unit audit can fail"
 
 # ============================================================================== report
 # Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json

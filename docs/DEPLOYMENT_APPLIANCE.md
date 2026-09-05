@@ -34,7 +34,6 @@ synchronization transport is an **OPEN architecture decision** (see §7 and
 | Unit | Component | Notes |
 |---|---|---|
 | `postgresql` | local Postgres 16 (+TimescaleDB where available) | database `stayconnect_site`, site-only credentials; loopback |
-| `stayconnect-tc-setup` | HTB roots (oneshot) | before scd |
 | `stayconnect-scd` | session controller **+ sync agent** (outbox drain, license fetch, config subscriber, heartbeat) | root (CAP_NET_ADMIN); `SCD_DB_URL` → site DSN; `SCD_CTRLAPI_BASE=https://api.<domain>`; `SCD_NATS_URL` with per-appliance creds |
 | `stayconnect-portald` | captive portal | user `stayconnect`, guest iface :8380/:8343 |
 | `stayconnect-acctd` | accounting/quotas | root (tc); site DSN |
@@ -87,7 +86,8 @@ WiFi ([OFFLINE_OPERATION.md](OFFLINE_OPERATION.md)).
 ## 6. Bring-up order (new site)
 
 1. OS, netplan (**WAN/management + LAN/guest** — two NICs; no dedicated hasync NIC),
-   sysctl, nftables, tc-setup, Kea (incl. option 114), Unbound.
+   sysctl, nftables, Kea (incl. option 114), Unbound. (No tc priming unit: netd owns the HTB roots,
+   the guest IFB and the ingress redirect, and rebuilds them from zero on every pass.)
 2. Local Postgres → create `stayconnect_site` + role → apply
    `data-plane/migrations/0001_edge_init.up.sql`.
 3. Install binaries + env files; **enroll**: mint a bootstrap token in

@@ -278,6 +278,15 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh enforcement-plane-check --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-phase3-enforcement-plane-selftest.sh
 
+      # Two units sat broken on the appliance for weeks — a helper nothing installed (203/EXEC nightly, disk
+      # to 100%) and an obsolete tc primer failing on a bridge that does not exist — while `systemctl
+      # --failed` listed both the whole time. This proves the standing audit refuses each of those states and
+      # still excuses the Central-only units an edge appliance legitimately carries.
+      - name: Appliance unit health (selftest)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh appliance-units --
+          bash $GITHUB_WORKSPACE/deploy/scripts/check-appliance-units-selftest.sh
+
       # Address ownership is decided from Kea's leases, so DHCP is a SAFETY authority on this appliance. It
       # spent three days on 2026-08-31 answering status-get while refusing every lease command, with a
       # zero-byte kea-leases4.csv.pid behind it, and every surface called it healthy. The checker that refuses

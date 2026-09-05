@@ -181,9 +181,11 @@ func (c *Client) EnsureBridgeInfra(ctx context.Context, bridge string) error {
 	// supported by specified qdisc"). `add` creates it on a fresh device and is a
 	// harmless no-op when it is already there — preserving any live classes.
 	_ = c.run(ctx, "qdisc", "add", "dev", ifb, "root", "handle", "1:", "htb", "default", "1")
-	// Bridge egress root for download classes — add only if absent (never
-	// replace: that would drop live per-session classes). netd/tc-setup
-	// usually primed it already.
+	// Bridge egress root for download classes — add only if absent (never replace: that would drop live
+	// per-session classes). THIS IS THE ONLY THING THAT PRIMES IT. An earlier oneshot unit
+	// (stayconnect-tc-setup) primed ens160 and br-lan for a shaping model scd used to own; it was retired
+	// because netd creates everything it needs here, idempotently, on every pass — so a boot with no tc
+	// state at all is fully rebuilt by the first submit.
 	_ = c.run(ctx, "qdisc", "add", "dev", bridge, "root", "handle", "1:", "htb", "default", "1")
 	// Bridge ingress: rebuild cleanly so we hold EXACTLY ONE redirect filter,
 	// even across a daemon restart (duplicate redirects would double-count

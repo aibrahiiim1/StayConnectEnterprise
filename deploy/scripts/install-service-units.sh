@@ -66,27 +66,48 @@ unit_exec_paths() {
     grep -vE '^/(bin|sbin|usr/bin|usr/sbin|usr/local/bin/node)/' | sort -u
 }
 
-# install_external_helpers — helpers a unit expects OUTSIDE /opt/stayconnect/bin.
+# ---- THE EXTERNAL-HELPER CONTRACT ------------------------------------------------------------------------
 #
-# The Hotel Admin certificate manager is the case: its unit names /usr/local/sbin/..., the repository ships
-# deploy/scripts/hotel-admin-cert-manager.sh, and nothing connected the two. Every such pair is installed here
-# by deriving the source name from the unit's own path, so adding a unit that references a new location cannot
-# quietly produce another 203/EXEC service.
+# A BASENAME MATCH IS NOT AUTHORITY TO MAKE A FILE EXECUTABLE ON AN APPLIANCE.
+#
+# The first version of this walked every absolute Exec path a unit declared and installed any repository
+# script whose basename happened to match. That is how a RETIRED unit could be re-armed: stayconnect-tc-setup
+# named /opt/stayconnect/deploy/scripts/tc-setup.sh, the repository still shipped a tc-setup.sh, and the
+# installer would have written it out - turning a dormant, harmless failure into a script that runs and whose
+# first act is `tc qdisc del dev <IF> root`. It would not have STARTED it; it did not need to, because
+# stayconnect-acctd.service carried Wants=stayconnect-tc-setup.service and would pull it in on its next start.
+#
+# So the set of helpers that may be placed outside /opt/stayconnect/bin is ENUMERATED here, deliberately, one
+# line per helper, naming the unit that needs it and the exact destination. Adding a helper is a visible,
+# reviewable change to this list rather than a side effect of a filename.
+#
+# Format: <unit-basename>|<absolute destination>|<source under deploy/scripts>
+EXTERNAL_HELPER_CONTRACT="stayconnect-hotel-admin-cert-renew|/usr/local/sbin/stayconnect-hotel-admin-cert-manager|hotel-admin-cert-manager.sh"
+
+contract_dest_for() { # contract_dest_for <absolute-path> -> source filename, or nothing
+  local path="$1" line
+  printf '%s
+' "$EXTERNAL_HELPER_CONTRACT" | while IFS='|' read -r _unit dest src; do
+    [ -n "${dest:-}" ] || continue
+    [ "$dest" = "$path" ] && { printf '%s
+' "$src"; break; }
+  done
+}
+
+# install_external_helpers — ONLY the helpers the contract above names.
 install_external_helpers() {
-  local path want src
-  for path in $(unit_exec_paths); do
-    case "$path" in /opt/stayconnect/bin/*) continue ;; esac
-    want="$(basename "$path")"
-    # stayconnect-hotel-admin-cert-manager -> hotel-admin-cert-manager.sh
-    src=""
-    for cand in "$SRC/scripts/$want" "$SRC/scripts/$want.sh"                 "$SRC/scripts/${want#stayconnect-}" "$SRC/scripts/${want#stayconnect-}.sh"; do
-      [ -f "$cand" ] && { src="$cand"; break; }
-    done
-    [ -n "$src" ] || continue
-    local dest="$ROOT_PREFIX$path"
-    mkdir -p "$(dirname "$dest")"
-    install -m 0755 "$src" "$dest.tmp" && mv -f "$dest.tmp" "$dest"
-    say "installed external helper $(basename "$src") -> $dest"
+  local line unit dest src
+  printf '%s
+' "$EXTERNAL_HELPER_CONTRACT" | while IFS='|' read -r unit dest src; do
+    [ -n "${dest:-}" ] && [ -n "${src:-}" ] || continue
+    # A contract entry for a unit this tree no longer ships is skipped, not installed: retiring a unit must
+    # not leave its helper behind, and must not fail the install either.
+    [ -f "$SRC/systemd/$unit.service" ] || { say "note: $unit is not shipped here; its helper is not installed"; continue; }
+    [ -f "$SRC/scripts/$src" ] || die "the helper contract names $src for $unit, but $SRC/scripts/$src does not exist"
+    local target="$ROOT_PREFIX$dest"
+    mkdir -p "$(dirname "$target")"
+    install -m 0755 "$SRC/scripts/$src" "$target.tmp" && mv -f "$target.tmp" "$target"
+    say "installed external helper $src -> $target (contract: $unit)"
   done
 }
 
@@ -182,6 +203,8 @@ for u in "$SRC"/systemd/stayconnect-*.service; do
   # A guard against "the unit names a program that is not there" must not care WHERE the program was supposed
   # to be. Anything not under a system path we deliberately ignore (/bin, /usr/bin, /usr/sbin -- distribution
   # programs like /usr/bin/node) is checked at the path the unit actually declares.
+  # not `local`: this loop runs at file scope, not inside a function
+  contract_src=""
   for path in $(grep -hoE '^Exec[A-Za-z]*=-?/[^ ]+' "$u" 2>/dev/null |
                 sed -E 's/^Exec[A-Za-z]*=-?//' |
                 grep -vE '^/(bin|sbin|usr/bin|usr/sbin|usr/local/bin/node)/' | sort -u); do
@@ -194,13 +217,30 @@ for u in "$SRC"/systemd/stayconnect-*.service; do
     esac
     # The two ways this can be wrong read very differently to whoever has to fix it: a helper the repository
     # ships and this script failed to install, or a service binary the build was supposed to deliver.
-    if [ -f "$SRC/scripts/$want" ] || [ -f "$SRC/scripts/$want.sh" ]        || [ -f "$SRC/scripts/${want#stayconnect-}" ] || [ -f "$SRC/scripts/${want#stayconnect-}.sh" ]; then
-      origin="a helper this installer ships"
+    # WHAT IS THIS PATH, according to the contract rather than according to a filename?
+    #
+    # Three distinct answers, and they need three different behaviours. A helper the CONTRACT owns must be
+    # present or the install is refused. A service binary the build delivers must be present for a unit that
+    # is in service. Anything else is a path this installer does not own - and the presence of a similarly
+    # named script in the repository does NOT make it ours.
+    contract_src="$(contract_dest_for "$path")"
+    if [ -n "$contract_src" ]; then
+      origin="a helper this installer ships under the external-helper contract"
     else
       origin="a service binary the build delivers (provisioning expects binaries to be present already)"
     fi
     problem=""
     [ -f "$installed" ] || problem="does not exist"
+    # A path that is neither contract-owned nor under $BIN belongs to something this installer does not
+    # manage. It is reported so it cannot hide, but a unit this tree does not ship its helper for must not
+    # abort an unrelated deployment - which is what a retired unit would otherwise do forever.
+    case "$path" in
+      /opt/stayconnect/bin/*) : ;;
+      *) if [ -z "$contract_src" ]; then
+           say "note: $b references $path, which no helper contract owns; not installed and not required here"
+           continue
+         fi ;;
+    esac
     if [ -z "$problem" ] && [ ! -x "$installed" ]; then problem="is not executable"; fi
     if [ -z "$problem" ]; then
       say "$b -> $want OK"

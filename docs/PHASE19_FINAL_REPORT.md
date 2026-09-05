@@ -9,7 +9,8 @@ with an isolated test VLAN.
 
 The appliance hardcoded exactly one guest network (`br-lan` / `10.10.0.0/24` /
 gateway `10.10.0.1`, WAN `ens160`, VLAN-less) across nftables, the shaping
-classids, tc-setup, Kea, netplan, Unbound, and the session model. Sessions
+classids, tc-setup (since RETIRED — netd owns tc infrastructure now), Kea, netplan,
+Unbound, and the session model. Sessions
 were keyed on `(tenant_id, ip)` with no network dimension; the nft auth set was
 IP-only; Kea was file-configured with no runtime control; option 114 existed
 only as a live-VM edit. Hotel staff had no way to add a VLAN, a second subnet, a

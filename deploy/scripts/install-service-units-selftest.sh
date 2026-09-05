@@ -34,11 +34,10 @@ new_tree() { # new_tree <name> -> echoes the tree root
   printf 'ACCTD_DB_URL=x\n' > "$t/etc/acctd.env"
   cp "$DEPLOY/scripts/check-phase6-guest-dependency.sh" \
      "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$t/src/scripts/"
-  # HELPERS WHOSE UNITS NAME A PATH OUTSIDE /opt/stayconnect/bin. They belong in the fixture because they
-  # belong in a real tree: stayconnect-hotel-admin-cert-renew.service names /usr/local/sbin/... and
-  # stayconnect-tc-setup.service names /opt/stayconnect/deploy/scripts/..., and BOTH were failing 203/EXEC on
-  # the appliance because nothing installed them. A fixture that omits them cannot notice that.
-  cp "$DEPLOY/scripts/hotel-admin-cert-manager.sh" "$DEPLOY/scripts/tc-setup.sh" "$t/src/scripts/" 2>/dev/null || true
+  # THE ONE HELPER THE EXTERNAL CONTRACT OWNS. stayconnect-hotel-admin-cert-renew.service names
+  # /usr/local/sbin/..., nothing installed it, and its timer failed 203/EXEC nightly for two weeks; a fixture
+  # that omits it cannot notice that.
+  cp "$DEPLOY/scripts/hotel-admin-cert-manager.sh" "$t/src/scripts/" 2>/dev/null || true
   echo "$t"
 }
 
@@ -191,6 +190,66 @@ if SC_ROOT_PREFIX="$t/root" SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DI
   bad "an ENABLED unit with a missing executable was installed anyway"
 else
   ok "the same unit, enabled, is refused"
+fi
+
+# ---------------------------------------------------------------- A RETIRED UNIT CANNOT BE RE-ARMED
+#
+# THE DEFECT THIS PROVES CLOSED. The first version of the external-helper step walked every absolute Exec path
+# and installed any repository script whose BASENAME matched. stayconnect-tc-setup.service named
+# /opt/stayconnect/deploy/scripts/tc-setup.sh and the repository still shipped a tc-setup.sh, so the installer
+# would have written it out - turning a dormant, harmless failure into a script whose first act is
+# `tc qdisc del dev <IF> root`. It would not have STARTED it; it did not need to, because
+# stayconnect-acctd.service carried Wants=stayconnect-tc-setup.service and pulls it in on its next start.
+echo "== a retired unit must not be re-armed by a matching filename =="
+d="$(new_tree retired_unit)"
+cp "$DEPLOY/systemd/stayconnect-acctd.service" "$d/src/systemd/"
+# The installer places binaries itself, at mode 0755. Creating them in $d/bin by hand relies on chmod
+# sticking, which it does not on every packaging host.
+printf '#!/bin/sh
+exit 0
+' > "$d/src/scripts/acctd"
+cp "$DEPLOY/scripts/wait-for-site-db.sh" "$d/src/scripts/" 2>/dev/null || printf '#!/bin/sh
+exit 0
+' > "$d/src/scripts/wait-for-site-db.sh"
+# A unit this tree does NOT ship, planted directly in the destination as a leftover from an older install...
+cat > "$d/units/stayconnect-tc-setup.service" <<'UNIT'
+[Service]
+ExecStart=/opt/stayconnect/deploy/scripts/tc-setup.sh
+UNIT
+# ...and a repository script whose basename matches exactly what that leftover unit wants.
+printf '#!/bin/sh
+echo would-delete-root-qdiscs
+' > "$d/src/scripts/tc-setup.sh"
+run_installer "$d"; rc=$?
+if [ "$rc" != "0" ]; then
+  bad "a retired unit's absent helper aborted an unrelated install"; sed 's/^/      /' "$d/out" | head -6
+elif [ -f "$d/root/opt/stayconnect/deploy/scripts/tc-setup.sh" ]; then
+  bad "the installer wrote a helper for a RETIRED unit purely because a matching filename existed"
+elif grep -q "tc-setup" "$d/out"; then
+  bad "the installer acted on the retired unit at all"; grep "tc-setup" "$d/out" | sed 's/^/      /' | head -3
+else
+  ok "a retired unit is neither installed nor allowed to block the install"
+fi
+
+# ...and the contract-owned helper IS still installed, or the hardening broke the T0112 fix.
+echo "== the contract-owned helper is still installed =="
+d="$(new_tree contract_helper)"
+cp "$DEPLOY/systemd/stayconnect-hotel-admin-cert-renew.service" "$d/src/systemd/"
+# A real tree always contains at least one $BIN-helper unit; the installer refuses a tree with none, and this
+# case is about the EXTERNAL helper, not about that guard.
+cp "$DEPLOY/systemd/stayconnect-acctd.service" "$d/src/systemd/"
+printf '#!/bin/sh
+exit 0
+' > "$d/src/scripts/acctd"
+cp "$DEPLOY/scripts/wait-for-site-db.sh" "$d/src/scripts/" 2>/dev/null || printf '#!/bin/sh
+exit 0
+' > "$d/src/scripts/wait-for-site-db.sh"
+run_installer "$d" || true
+if [ -x "$d/root/usr/local/sbin/stayconnect-hotel-admin-cert-manager" ]; then
+  ok "the certificate manager named by the contract is installed and executable"
+else
+  bad "the contract-owned certificate manager was NOT installed (the T0112 fix regressed)"
+  sed 's/^/      /' "$d/out" | head -8
 fi
 
 if [ "$fail" = "0" ]; then
