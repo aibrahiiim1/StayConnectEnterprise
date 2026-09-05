@@ -268,7 +268,11 @@ smoke_live() {
 
   # Next writes the build id into the served document as an HTML comment. This is the identity check that
   # "HTTP 200" cannot make.
-  local served; served="$(grep -o "<!--[A-Za-z0-9_-]\{16,\}-->" <<<"$body" | head -1 | tr -d "<!->")"
+  # sed, NOT `tr -d "<!->"`. That set is a RANGE: "!" to ">" spans ASCII 33-62, which includes every digit,
+  # so a BUILD_ID came back with its digits silently removed and the smoke test reported a mismatch against
+  # the release it had just installed. A verification step that fails for a reason unrelated to what it
+  # verifies is worse than no step at all.
+  local served; served="$(grep -o "<!--[A-Za-z0-9_-]\{16,\}-->" <<<"$body" | head -1 | sed 's/^<!--//; s/-->$//')"
   if [ -n "$served" ] && [ "$served" != "$want_bid" ]; then
     echo "SMOKE FAIL: the live endpoint is serving BUILD_ID '$served' but the release we installed is '$want_bid'" >&2
     return 1
@@ -519,6 +523,17 @@ install() {
       rm -f "$PREVIOUS_LINK"
     fi
   fi
+  # AND AN INHERITED POINTER IS AUDITED TOO. The branch above only reaches a previous pointer we ourselves are
+  # about to set. A pointer left by an earlier deployment - or by an install-by-copying that never touched it -
+  # survives untouched, and on this appliance that meant an obsolete release stayed wired as the rollback
+  # through the very deployment that was fixing the problem.
+  if [ -L "$PREVIOUS_LINK" ] && ! rollback_eligible "$(readlink -f "$PREVIOUS_LINK")"; then
+    echo ">> WARN: the inherited previous-release pointer references $(readlink -f "$PREVIOUS_LINK")," >&2
+    echo "   which does not satisfy the current capability contract. Clearing it: that release remains on disk" >&2
+    echo "   as archive evidence and is no longer reachable as an executable rollback." >&2
+    rm -f "$PREVIOUS_LINK"
+  fi
+
   # Atomic flip of the stable path to the new release.
   atomic_link "$rel" "$CURRENT_LINK"
 

@@ -95,7 +95,9 @@ BODY="$(curl -sS --max-time 5 "http://127.0.0.1:$PORT/login" 2>/dev/null || true
 if [ -z "$BODY" ]; then
   no "the Hotel Admin service did not answer on :$PORT, so what it serves cannot be verified"
 else
-  SERVED="$(grep -o '<!--[A-Za-z0-9_-]\{16,\}-->' <<<"$BODY" | head -1 | tr -d '<!->')"
+  # sed, NOT `tr -d '<!->'`: that set is the RANGE "!" to ">", which includes every digit and silently
+  # mangles the BUILD_ID being compared.
+  SERVED="$(grep -o '<!--[A-Za-z0-9_-]\{16,\}-->' <<<"$BODY" | head -1 | sed 's/^<!--//; s/-->$//')"
   if [ -n "$SERVED" ] && [ -n "$BID" ] && [ "$SERVED" != "$BID" ]; then
     no "the RUNNING service serves BUILD_ID '$SERVED' but the recorded live release is '$BID' — the process is running an older bundle than the one on disk"
   elif [ -n "$SERVED" ]; then
