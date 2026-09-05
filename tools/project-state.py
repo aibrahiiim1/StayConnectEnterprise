@@ -1236,6 +1236,26 @@ def check_appliance_facts_agree(st):
     if None not in (tot, act, end) and act + end != tot:
         bad.append(f"live_counters: sessions_active {act} + sessions_ended {end} != sessions {tot}")
 
+    # 1b. AN ACTIVE SESSION MUST HAVE KERNEL STATE, AND KERNEL STATE MUST HAVE AN ACTIVE SESSION.
+    #
+    # These two numbers describe the same fact from opposite ends - what durable state believes and what the
+    # kernel is actually doing - and the whole enforcement design is that they agree. A recorded Session that
+    # is active while the recorded kernel holds nothing means either a guest is paying for access they cannot
+    # use, or the record is stale; a recorded authorization with no active Session means a stranger may be
+    # reaching the internet on someone else's entitlement. Both are worth failing a gate over.
+    nft_n = counted("nft_authorizations")
+    tc_n = counted("tc_managed_classes")
+    if act is not None and nft_n is not None and tc_n is not None:
+        # `bad` is a LIST in this function, not the reporting helper of the parity validator. Calling it as a
+        # function raised TypeError the first time this rule actually fired - and the clean tree had passed
+        # only because it never did. A rule whose failure path has never executed is not a rule yet.
+        if act > 0 and (nft_n == 0 or tc_n == 0):
+            bad.append("live_counters records %d active Session(s) but %d nft authorization(s) and %d managed "
+                       "tc class(es): durable state and the kernel disagree" % (act, nft_n, tc_n))
+        if act == 0 and (nft_n > 0 or tc_n > 0):
+            bad.append("live_counters records no active Session but %d nft authorization(s) and %d managed tc "
+                       "class(es) remain: something is authorized that nothing accounts for" % (nft_n, tc_n))
+
     # 2. No renderer source may state an active-session count that disagrees with the number.
     if act is not None:
         import re as _re
