@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `7a7210a811fae213af5539586d5001d98bffef18`
-- **Provenance (generation HEAD = inventory_head):** `7a7210a811fae213af5539586d5001d98bffef18`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `c23fcc346f24a81f53cf1088d73ced8a8fc46dc8`
+- **Provenance (generation HEAD = inventory_head):** `c23fcc346f24a81f53cf1088d73ced8a8fc46dc8`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/entitlement-records-what-it-spent`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 336
@@ -120,7 +120,7 @@
 | `data-plane/internal/pmsd/applier.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Grant the two row locks a real checkout needs, and log why one failed |
 | `data-plane/internal/pmsd/assignment.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Tell a missing appliance identity apart from a corrupt one |
 | `data-plane/internal/pmsd/assignment_identity_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Tell a missing appliance identity apart from a corrupt one |
-| `data-plane/internal/pmsd/errcodes.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | The Entitlement now records what it spent |
+| `data-plane/internal/pmsd/errcodes.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | gofmt |
 | `data-plane/internal/pmsd/events.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Commission the Protel PMS Interface end to end |
 | `data-plane/internal/pmsd/pg.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Close the Room-auth materialization race at both issue and grant |
 | `data-plane/internal/pmsd/pmsd.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | Close the Room-auth materialization race at both issue and grant |
@@ -232,34 +232,34 @@
 | `docs/design/Room-Auth-Materialization-Readiness.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Record the live sync, and that publication is not materialization |
 | `docs/manifests/PC-0002-complete-delivery-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Correct two reporting defects in the PC-0002 delivery record |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: change manifest at the re-anchored head |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Retire the tc primer: netd has owned this since before the unit last worked |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
-| `exports/chatgpt/phase-evidence/GIT_STAT_a9335553.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs rebuilt at a9335553 |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/phase-evidence/GIT_STAT_4cde6d1d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs rebuilt at 4cde6d1d |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/DEPLOYMENT_APPLIANCE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at a9335553 |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A dead socket is not a dead mirror |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
@@ -387,7 +387,7 @@
  data-plane/cmd/edged/resources_phase3.go           |   53 +-
  .../cmd/edged/resources_phase3_full_resync.go      |  135 +++
  .../edged/resources_phase3_interface_authoring.go  |  208 +++-
- .../cmd/edged/resources_phase3_interfaces.go       |  375 +++++++-
+ .../cmd/edged/resources_phase3_interfaces.go       |  375 ++++++-
  data-plane/cmd/edged/resources_providers.go        |  386 +-------
  data-plane/cmd/edged/resources_site.go             |  124 ++-
  data-plane/cmd/keybootstrap/main.go                |   16 +-
@@ -429,8 +429,8 @@
  data-plane/internal/activation/activation.go       |  237 +++++
  data-plane/internal/activation/activation_test.go  |  122 +++
  .../appliancecert/bootstrap_recovery_test.go       |  261 +++++
- .../appliancecert/bootstrap_states_test.go         |  270 ++++++
- data-plane/internal/appliancecert/cert.go          |  425 ++++++++-
+ .../appliancecert/bootstrap_states_test.go         |  270 +++++
+ data-plane/internal/appliancecert/cert.go          |  425 +++++++-
  .../appliancecert/rotation_restart_test.go         |  231 +++++
  data-plane/internal/assignment/resolve.go          |  219 +++++
  .../internal/assignment/resolve_outcome_test.go    |   85 ++
@@ -443,7 +443,7 @@
  .../grace_lock_boundary_integration_test.go        |  146 +++
  .../internal/enforce/address_ownership_test.go     |  116 +++
  .../enforce/aggregate_quota_integration_test.go    |  197 ++++
- .../data_quota_contract_integration_test.go        |  643 +++++++++++++
+ .../data_quota_contract_integration_test.go        |  643 ++++++++++++
  .../internal/enforce/device_movement_test.go       |  125 +++
  data-plane/internal/enforce/enforce.go             |  141 ++-
  data-plane/internal/iamv2/commerce_admin.go        |   40 +
@@ -522,17 +522,17 @@
  deploy/scripts/appliance-central-cutover.sh        |  218 +++++
  deploy/scripts/appliance-dns-align.sh              |  138 +++
  deploy/scripts/central-firewall.sh                 |   61 ++
- deploy/scripts/central-migrate.sh                  |  268 ++++++
+ deploy/scripts/central-migrate.sh                  |  268 +++++
  deploy/scripts/central-mint-tls.sh                 |  148 +++
  deploy/scripts/central-preflight.sh                |  174 ++++
  deploy/scripts/check-appliance-units-selftest.sh   |   89 ++
- deploy/scripts/check-appliance-units.sh            |  106 +++
+ deploy/scripts/check-appliance-units.sh            |  106 ++
  .../check-dhcp-ownership-evidence-selftest.sh      |  112 +++
  deploy/scripts/check-dhcp-ownership-evidence.sh    |  129 +++
  deploy/scripts/check-hotel-admin-cert-selftest.sh  |  182 ++++
  .../check-hotel-admin-integrity-adversarial.sh     |  235 +++++
  .../check-hotel-admin-integrity-selftest.sh        |  136 +++
- deploy/scripts/check-hotel-admin-integrity.sh      |  216 +++++
+ deploy/scripts/check-hotel-admin-integrity.sh      |  216 ++++
  .../check-phase3-enforcement-plane-selftest.sh     |  132 +++
  deploy/scripts/check-phase3-enforcement-plane.sh   |   76 ++
  deploy/scripts/deploy-hotel-admin.sh               |  392 +++++++-
@@ -543,7 +543,7 @@
  deploy/scripts/install-central-endpoint.sh         |   55 ++
  deploy/scripts/install-central-trust.sh            |   76 ++
  deploy/scripts/install-service-units-selftest.sh   |  260 +++++
- deploy/scripts/install-service-units.sh            |  265 +++++-
+ deploy/scripts/install-service-units.sh            |  265 ++++-
  deploy/scripts/install-vendor-trust-key.sh         |  102 ++
  deploy/scripts/lib-central-endpoint.sh             |  208 ++++
  deploy/scripts/lib-hotel-admin-contract.sh         |  145 +++
@@ -569,16 +569,16 @@
  docs/architecture/StayConnect-IAM-Phase3-Plan.md   |    5 +-
  docs/context/StayConnect-IAM-Handoff.md            |   11 +-
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
- .../PC-0002-complete-delivery-manifest.md          |  159 ++++
- docs/manifests/Phase7-change-manifest.md           |  108 ++-
- docs/manifests/PostClosure-change-manifest.md      | 1007 ++++++++++++++++++++
+ .../PC-0002-complete-delivery-manifest.md          |  159 +++
+ docs/manifests/Phase7-change-manifest.md           |  108 +-
+ docs/manifests/PostClosure-change-manifest.md      | 1028 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
- .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 ++++++++
+ .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 +++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 322603 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136550 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 43313 bytes
- .../chatgpt/phase-evidence/GIT_STAT_a9335553.txt   |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 322601 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136547 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 43312 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_4cde6d1d.txt   |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -620,8 +620,8 @@
  governance/transitions/T0098.json                  |   64 ++
  governance/transitions/T0099.json                  |   63 ++
  governance/transitions/T0100.json                  |   66 ++
- governance/transitions/T0101.json                  |   54 ++
- governance/transitions/T0102.json                  |   54 ++
+ governance/transitions/T0101.json                  |   54 +
+ governance/transitions/T0102.json                  |   54 +
  governance/transitions/T0103.json                  |   48 +
  governance/transitions/T0104.json                  |   50 +
  governance/transitions/T0105.json                  |   34 +
@@ -673,21 +673,21 @@
  hotel-admin/test/synchronization-card.test.tsx     |  275 ++++++
  scripts/ci/phase4-dark-check.sh                    |   11 +-
  scripts/factory-clean-baseline-verify.sh           |   27 +
- scripts/gatep-grant-survives-reconcile.sh          |  160 ++++
+ scripts/gatep-grant-survives-reconcile.sh          |  160 +++
  scripts/gatep-reconcile-acceptance.sh              |  236 +++++
- scripts/gatep-reconcile.sh                         |  161 ++++
+ scripts/gatep-reconcile.sh                         |  161 +++
  scripts/generate-production-baseline.sh            |   38 +-
  scripts/phase3-preflight.sh                        |  141 ++-
  scripts/phase5-pg-integration.sh                   |   17 +-
  scripts/pmsd-pg-integration.sh                     |  123 ++-
  scripts/prod-privilege-integration.sh              |  136 +++
- tools/project-state.py                             |  322 ++++++-
+ tools/project-state.py                             |  322 +++++-
  tools/tests/current_state_parity/run_negative.py   |   65 ++
  .../generated_block_contradiction/run_negative.py  |  156 +++
  .../tests/project_state_validator/run_mutations.py |   78 +-
- tools/validate-current-state-parity.py             |  107 +++
+ tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   12 +-
- 336 files changed, 32332 insertions(+), 2483 deletions(-)
+ 336 files changed, 32353 insertions(+), 2483 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -697,8 +697,9 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 7a7210a8 Delivery: packs rebuilt at a9335553
-HISTORICAL: a9335553 Governance: T0117 records the data-quota defect, its cause and its fix
+HISTORICAL: c23fcc34 Delivery: packs rebuilt at 4cde6d1d
+HISTORICAL: 4cde6d1d Governance: T0117 records the data-quota defect, its cause and its fix
+HISTORICAL: de25ab05 gofmt
 HISTORICAL: 911bceb6 The Entitlement now records what it spent
 HISTORICAL: 64c3fe8c Merge PR #79: record the natural end of the accepted Room Login Session (T0116)
 HISTORICAL: 867ed1cd Delivery: change manifest at the re-anchored head
