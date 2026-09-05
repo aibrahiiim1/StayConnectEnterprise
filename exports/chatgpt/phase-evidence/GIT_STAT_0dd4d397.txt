@@ -1,4 +1,0 @@
-commit 0dd4d397ab77389d0634dbd937782f1888430aa6
-Date:   Sat Sep 5 09:19:47 2026 +0300
-
-    The guards had the same fail-open shape they exist to prevent
