@@ -1,0 +1,35 @@
+{
+  "transition_id": "T0116",
+  "seq": 116,
+  "timestamp": "2026-09-05T17:16:00Z",
+  "timestamp_derivation": "The completion of the post-acceptance verification: the Session ended 16:38:38.804Z and the final kernel, accounting and PMS state were read at 17:14:58Z. Follows every event this receipt reports and precedes the author timestamp of the introducing commit. Per T0091, in the order T0108 requires.",
+  "record_type": "ACCEPTED_ROOM_LOGIN_SESSION_ENDED_NATURALLY",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new decision. The accepted Session ended by itself while the acceptance run was being written up; this records the final state so the register matches the appliance.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-09-05, for the controlled Room Login acceptance run; this is that run's closing observation, not a new action.",
+  "what_happened": "The accepted Session 5feee27d ran for 1 hour 39 minutes and ended at 2026-09-05T16:38:38.804Z with ADDRESS_NO_LONGER_OWNED. Its DHCP lease on 192.168.77.105 expired at 16:38:38Z - cltt 1788625718 plus a 600-second lifetime - and the Session was ended 804 MILLISECONDS later, through the controlled state machine. That is the address-ownership rule doing precisely what T0106 and T0107 built it to do: the moment DHCP stopped naming that device as the holder of the address, the authorization stopped. Nothing was manually ended and no cleanup was performed.",
+  "final_state": "sessions 4, ALL ENDED, active 0. The kernel holds nothing: 0 nft elements, 0 tc classes on both the guest bridge and the IFB, netd ACTIVE_FRESH_CONVERGED and not degraded with ownership_unverified 0 - durable state and the kernel agree. The Entitlement 59fbd7b8 remains ACTIVE, which is correct: ending a Session does not consume an entitlement, and the guest could reconnect on it. Purchases 4, entitlements 4. THE ACCOUNTING IS PRESERVED AND IS LARGER THAN THE ACCEPTANCE SNAPSHOT: 359 records for that Session, 15,183,911 bytes down and 20,508,810 bytes up - roughly 34 MB - because the Product Owner kept browsing after the acceptance evidence was captured at 15:07. Nothing was deleted or modified to tidy the test.",
+  "financial": "ZERO throughout and at close: pms_postings 0, posting_attempts 0, posting_outbox 0, payment_transactions 0, payment_transaction_events 0, folios 0.",
+  "pms": "Unchanged and healthy: CONNECTED / IN_SYNC / CONTINUOUS at generation 184. Protel was not touched.",
+  "room_login": "NO FURTHER ROOM LOGIN was performed. Exactly one was authorized, exactly one was performed, and it is now closed.",
+  "go_live": "NOT PERFORMED AND NOT AUTHORIZED.",
+  "transition_accepted": true
+}
