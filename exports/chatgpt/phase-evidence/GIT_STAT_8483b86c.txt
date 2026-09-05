@@ -1,4 +1,0 @@
-commit 8483b86cd5ba25b91a4e4d54e23e7ee96505b60d
-Date:   Sat Sep 5 18:49:09 2026 +0300
-
-    An active Session must have kernel state, and kernel state an active Session

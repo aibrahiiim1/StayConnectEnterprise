@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `8483b86cd5ba25b91a4e4d54e23e7ee96505b60d`
-- **Provenance (generation HEAD = inventory_head):** `8483b86cd5ba25b91a4e4d54e23e7ee96505b60d`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `dc4f8f76ba81bbe5f63484ebbaffd9efda9c7201`
+- **Provenance (generation HEAD = inventory_head):** `dc4f8f76ba81bbe5f63484ebbaffd9efda9c7201`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `accept/room-login-and-pms-recovery`
 - **Remote branch:** `origin/accept/room-login-and-pms-recovery`
 - **Changed files:** 327
@@ -232,7 +232,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_8483b86c.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
+| `exports/chatgpt/phase-evidence/GIT_STAT_dc4f8f76.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -334,7 +334,7 @@
 | `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | A failed resync must not delete the roster we already have |
 | `scripts/prod-privilege-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | A failed resync must not delete the roster we already have |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | An active Session must have kernel state, and kernel state an active Session |
-| `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
+| `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | A negative test that only works in one operational state is not a test |
 | `tools/tests/generated_block_contradiction/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Reconcile every current-state surface with the T0100 facts |
 | `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | An active Session must have kernel state, and kernel state an active Session |
 | `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | The generated blocks were never wrong; their sources were |
@@ -555,14 +555,14 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 ++-
- docs/manifests/PostClosure-change-manifest.md      | 1008 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1009 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 ++++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 +++++++
  .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 321216 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136536 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 43113 bytes
- .../chatgpt/phase-evidence/GIT_STAT_8483b86c.txt   |    4 +
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136547 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 43112 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_dc4f8f76.txt   |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -664,12 +664,12 @@
  scripts/pmsd-pg-integration.sh                     |  111 ++-
  scripts/prod-privilege-integration.sh              |  135 +++
  tools/project-state.py                             |  322 ++++++-
- tools/tests/current_state_parity/run_negative.py   |   45 +
+ tools/tests/current_state_parity/run_negative.py   |   65 ++
  .../generated_block_contradiction/run_negative.py  |  156 +++
  .../tests/project_state_validator/run_mutations.py |   76 +-
  tools/validate-current-state-parity.py             |  107 +++
  tools/validate-project-state.sh                    |   12 +-
- 327 files changed, 30690 insertions(+), 2470 deletions(-)
+ 327 files changed, 30711 insertions(+), 2470 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -678,11 +678,10 @@ M  docs/manifests/PostClosure-change-manifest.md
 M  exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip
 M  exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip
-A  exports/chatgpt/phase-evidence/GIT_STAT_8483b86c.txt
-D  exports/chatgpt/phase-evidence/GIT_STAT_8f0b1358.txt
+D  exports/chatgpt/phase-evidence/GIT_STAT_8483b86c.txt
+A  exports/chatgpt/phase-evidence/GIT_STAT_dc4f8f76.txt
 M  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt
-M  exports/chatgpt/phase-evidence/tools/project-state.py
 M  exports/chatgpt/phase1b-planning/MANIFEST.md
 M  exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt
 M  exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt
@@ -692,6 +691,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: dc4f8f76 A negative test that only works in one operational state is not a test
+HISTORICAL: 738c35da Delivery: manifest and packs
 HISTORICAL: 8483b86c An active Session must have kernel state, and kernel state an active Session
 HISTORICAL: d9918631 Delivery: manifest and packs
 HISTORICAL: 8f0b1358 The guest path is proven, and the state file finally says so
