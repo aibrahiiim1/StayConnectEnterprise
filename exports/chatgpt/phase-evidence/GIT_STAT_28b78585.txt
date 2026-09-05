@@ -1,4 +1,0 @@
-commit 28b78585b4704334cbe3f5acb78f13ba259535a1
-Date:   Sat Sep 5 20:41:03 2026 +0300
-
-    The accepted Session ended by itself; the record now says so
