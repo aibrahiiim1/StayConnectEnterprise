@@ -137,14 +137,32 @@ func (h *handler) postStayConvert(w http.ResponseWriter, r *http.Request, b *pha
 // postStayDevice derives the guest's device from the connection and the appliance's own neighbour table. It
 // is the only place this flow acquires an identity, and it consults nothing the guest typed.
 func (h *handler) postStayDevice(w http.ResponseWriter, r *http.Request, b *phase3Budget) (map[string]string, bool) {
+	return h.originDevice(w, r, b, h.poststayFail)
+}
+
+// poststayFail keeps this flow's existing audit vocabulary exactly as it was: the shared helpers now name the
+// condition and the flow supplies its own prefix, so no recorded reason code changes.
+func (h *handler) poststayFail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason string) {
+	h.phase3Fail(w, r, b, "poststay_"+reason)
+}
+
+// uniformFail is how a flow says "this did not succeed" WITHOUT saying why. Every one of them writes 200,
+// waits the same budget first and returns one fixed message; they differ only in which flow's message and
+// audit vocabulary they use, which is why this is a parameter rather than a hardcoded call. The device flow
+// spent its whole life calling the AUTHENTICATION one, telling guests their stay could not be verified when
+// nothing had been authenticated at all.
+type uniformFail func(http.ResponseWriter, *http.Request, *phase3Budget, string)
+
+// originDevice is postStayDevice with the caller's own uniform failure.
+func (h *handler) originDevice(w http.ResponseWriter, r *http.Request, b *phase3Budget, fail uniformFail) (map[string]string, bool) {
 	ip := clientIP(r)
 	if ip == nil {
-		h.phase3Fail(w, r, b, "poststay_no_source_address")
+		fail(w, r, b, "no_source_address")
 		return nil, false
 	}
 	mac, ok := h.arpCache(ip)
 	if !ok {
-		h.phase3Fail(w, r, b, "poststay_device_not_on_guest_network")
+		fail(w, r, b, "device_not_on_guest_network")
 		return nil, false
 	}
 	return map[string]string{"ip": ipString(ip), "mac": mac.String()}, true
@@ -163,12 +181,18 @@ func (h *handler) postStayDevice(w http.ResponseWriter, r *http.Request, b *phas
 // Refusing outright makes the absence of those parameters an OBSERVABLE fact rather than an internal one.
 // The refusal is the ordinary uniform non-success: a guest cannot learn from it either.
 func decodePostStayStrict(w http.ResponseWriter, r *http.Request, b *phase3Budget, h *handler, dst any) bool {
+	return decodeStrict(w, r, b, dst, h.poststayFail)
+}
+
+// decodeStrict is decodePostStayStrict with the caller's own uniform failure, for the same reason
+// originDevice takes one.
+func decodeStrict(w http.ResponseWriter, r *http.Request, b *phase3Budget, dst any, fail uniformFail) bool {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		// One reason code for every decode failure, including an identity-looking field. Logging WHICH field
 		// was sent would be useful to an operator and is deliberately not returned to the guest.
-		h.phase3Fail(w, r, b, "poststay_malformed_request: "+strings.TrimSpace(err.Error()))
+		fail(w, r, b, "malformed_request: "+strings.TrimSpace(err.Error()))
 		return false
 	}
 	return true

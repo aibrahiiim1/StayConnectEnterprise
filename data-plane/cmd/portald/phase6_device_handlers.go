@@ -14,12 +14,15 @@ package main
 // device management exists on this appliance, which is what "absent, not present-and-refusing" has to mean
 // from outside.
 //
-// UNIFORM NON-SUCCESS through the SAME builder and the SAME response-time budget as Phase 3 and Phase 5. A
-// second implementation of "the uniform failure" is two things that can drift, and drift is only ever
-// discovered by somebody looking for it.
+// UNIFORM NON-SUCCESS on the SAME response-time budget as Phase 3 and Phase 5, and with the same shape — but
+// in this flow's OWN vocabulary. Sharing the authentication builder looked like the safe choice and was not:
+// it made every device request that was not served claim the guest's STAY could not be verified, on a page
+// they had already authenticated to reach. Uniformity means one answer per surface, not one answer for
+// surfaces that are answering different questions.
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -57,15 +60,40 @@ type scdDeviceResp struct {
 	} `json:"devices"`
 }
 
+// deviceMessage is the ONE thing a guest is told when a device request is not served, whatever the cause:
+// Phase 6 dark, the per-appliance setting off, no entitlement behind this connection, or a real failure. One
+// message for all of them is what keeps "the capability does not exist here" indistinguishable from "it does
+// and this request did not succeed".
+const deviceMessage = "Your devices are not available right now."
+
+// deviceFail is the uniform non-success for the DEVICE routes.
+//
+// IT EXISTS BECAUSE THESE ROUTES USED THE AUTHENTICATION ONE, and that was untrue twice over. The portal
+// page fires /devices/list on load, so on this appliance — where Phase 6 is deliberately dark — every guest
+// who reached the success page produced a body reading "We could not verify your stay. Please check your
+// details or contact reception." and a log line reading "phase3 guest auth not verified". The guest's stay
+// HAD been verified; that is how they got to the page. Nothing had been authenticated, nothing had failed to
+// verify, and an operator reading the journal saw apparent authentication failures manufactured by a feature
+// that is switched off.
+//
+// EVERY SECURITY PROPERTY OF THE OLD PATH IS KEPT: HTTP 200 (a distinct status is itself a signal), the same
+// {ok:false} shape, the same response-time budget waited BEFORE the write, and one message for every cause.
+// What changes is that the answer is about devices, and the audit line says what actually happened.
+func (h *handler) deviceFail(w http.ResponseWriter, r *http.Request, b *phase3Budget, reason string) {
+	slog.Info("phase6 device request not served", "reason", reason)
+	b.wait(r)
+	writeJSONPortal(w, http.StatusOK, deviceOut{OK: false, Message: deviceMessage})
+}
+
 // deviceList serves POST /devices/list — the guest asking which of their devices are using their allowance.
 func (h *handler) deviceList(w http.ResponseWriter, r *http.Request) {
 	b := h.newPhase3Budget(r)
 	defer b.cancel()
 	var in deviceListIn
-	if !decodePostStayStrict(w, r, b, h, &in) {
+	if !decodeStrict(w, r, b, &in, h.deviceFail) {
 		return
 	}
-	device, ok := h.postStayDevice(w, r, b)
+	device, ok := h.originDevice(w, r, b, h.deviceFail)
 	if !ok {
 		return
 	}
@@ -73,7 +101,7 @@ func (h *handler) deviceList(w http.ResponseWriter, r *http.Request) {
 	var out scdDeviceResp
 	if !h.scdPhase3Call(b, "http://unix/v1/phase6/devices/list", body, &out) || out.Outcome != "LISTED" {
 		// Phase 6 dark, the setting off, no entitlement for this device, or a genuine failure. All one answer.
-		h.phase3Fail(w, r, b, "device_list_unavailable")
+		h.deviceFail(w, r, b, "device_list_unavailable")
 		return
 	}
 	devices := make([]guestDevice, 0, len(out.Devices))
@@ -95,21 +123,21 @@ func (h *handler) deviceRelease(w http.ResponseWriter, r *http.Request) {
 	b := h.newPhase3Budget(r)
 	defer b.cancel()
 	var in deviceReleaseIn
-	if !decodePostStayStrict(w, r, b, h, &in) {
+	if !decodeStrict(w, r, b, &in, h.deviceFail) {
 		return
 	}
 	if strings.TrimSpace(in.DeviceID) == "" {
-		h.phase3Fail(w, r, b, "device_release_no_target")
+		h.deviceFail(w, r, b, "device_release_no_target")
 		return
 	}
-	device, ok := h.postStayDevice(w, r, b)
+	device, ok := h.originDevice(w, r, b, h.deviceFail)
 	if !ok {
 		return
 	}
 	body, _ := json.Marshal(map[string]any{"device": device, "device_id": strings.TrimSpace(in.DeviceID)})
 	var out scdDeviceResp
 	if !h.scdPhase3Call(b, "http://unix/v1/phase6/devices/release", body, &out) || out.Outcome != "RELEASED" {
-		h.phase3Fail(w, r, b, "device_release_unavailable")
+		h.deviceFail(w, r, b, "device_release_unavailable")
 		return
 	}
 	b.wait(r)

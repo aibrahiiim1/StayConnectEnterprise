@@ -154,6 +154,21 @@ const (
 	EventSupervisorReconcileErr LogEvent = "SUPERVISOR_RECONCILE_FAILED"
 	EventSupervisorAssignChange LogEvent = "SUPERVISOR_ASSIGNMENT_CHANGED"
 	EventSupervisorNoAssignment LogEvent = "SUPERVISOR_NO_ASSIGNMENT"
+
+	// THE SUCCESS PATH, WHICH USED TO EMIT NOTHING AT ALL.
+	//
+	// Every event above is a failure. That was the entire vocabulary, so a recovery was INVISIBLE: on
+	// 2026-09-05 the Protel socket was restored, pmsd reconnected in-process, self-requested a resync and
+	// published generation 184 — and the journal showed a wall of DIAL_FAILED lines and then silence. An
+	// operator could not tell a recovered feed from a dead one, because both look identical when the only
+	// thing a daemon says out loud is what went wrong.
+	//
+	// These three name the moments an operator is actually watching for. They carry the same bounded machine
+	// fields as every other line: an interface UUID, a generation, a stage, a count. No guest, reservation,
+	// room, name or PMS payload value can reach them — SafeFields is still the only way in.
+	EventWorkerConnected       LogEvent = "WORKER_CONNECTED"
+	EventWorkerResyncRequested LogEvent = "WORKER_RESYNC_REQUESTED"
+	EventWorkerResyncPublished LogEvent = "WORKER_RESYNC_PUBLISHED"
 )
 
 var logEventSet = map[LogEvent]struct{}{
@@ -163,6 +178,7 @@ var logEventSet = map[LogEvent]struct{}{
 	EventWorkerQueueOverflow: {}, EventWorkerPersistFailed: {}, EventWorkerPanicRecovered: {},
 	EventWorkerReconnect: {}, EventSupervisorReconcileErr: {}, EventSupervisorAssignChange: {},
 	EventSupervisorNoAssignment: {},
+	EventWorkerConnected: {}, EventWorkerResyncRequested: {}, EventWorkerResyncPublished: {},
 }
 
 func (e LogEvent) Valid() bool { _, ok := logEventSet[e]; return ok }
@@ -201,6 +217,9 @@ type SafeFields struct {
 	Generation  int64
 	Stage       Stage
 	Attempt     int
+	// Records is a count of domain records in a completed sync. It is a magnitude and nothing else: how many,
+	// never which. Only the progress lines render it, so no existing failure line changes shape.
+	Records int64
 }
 
 // logEvent emits a CLOSED LogEvent + Code + SafeFields. It receives no free-text message and no raw error;
@@ -215,5 +234,22 @@ func logEvent(log *slog.Logger, event LogEvent, code Code, sf SafeFields) {
 		"generation", sf.Generation,
 		"stage", sf.Stage.safe(),
 		"attempt", sf.Attempt,
+	)
+}
+
+// logProgress is logEvent for the things that went RIGHT: same closed vocabulary, same bounded fields, same
+// impossibility of free text — at INFO, because a reconnect is not an error and an operator filtering on
+// severity should still see it. It exists because the absence of one of these lines was, for a whole day,
+// indistinguishable from an outage.
+func logProgress(log *slog.Logger, event LogEvent, sf SafeFields) {
+	if log == nil {
+		return
+	}
+	log.Info(event.safe(),
+		"code", CodeNone.String(),
+		"interface", sf.InterfaceID.String(),
+		"generation", sf.Generation,
+		"stage", sf.Stage.safe(),
+		"records", sf.Records,
 	)
 }
