@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `c23fcc346f24a81f53cf1088d73ced8a8fc46dc8`
-- **Provenance (generation HEAD = inventory_head):** `c23fcc346f24a81f53cf1088d73ced8a8fc46dc8`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `0e61d8e88449c42f88f1664309ee8206b3a3a8e6`
+- **Provenance (generation HEAD = inventory_head):** `0e61d8e88449c42f88f1664309ee8206b3a3a8e6`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/entitlement-records-what-it-spent`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 336
@@ -166,7 +166,7 @@
 | `data-plane/migrations/0060_last_good_roster_survives_a_failed_resync.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | A failed resync must not delete the roster we already have |
 | `data-plane/migrations/0061_the_entitlement_records_what_it_spent.down.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | The Entitlement now records what it spent |
 | `data-plane/migrations/0061_the_entitlement_records_what_it_spent.up.sql` | CREATED | `A` | database | MIGRATIONS | rollback REMOVES it | The Entitlement now records what it spent |
-| `data-plane/migrations/baseline/0000_production_baseline.sql` | MODIFIED | `M` | database | MIGRATIONS | rollback RESTORES prior content | A failed resync must not delete the roster we already have |
+| `data-plane/migrations/baseline/0000_production_baseline.sql` | MODIFIED | `M` | database | MIGRATIONS | rollback RESTORES prior content | Regenerate the factory-clean baseline so a NEW appliance does not ship the defect |
 | `deploy/caddy/Caddyfile.central` | MODIFIED | `M` | configuration | DEPLOY | rollback RESTORES prior content | Activation, licensing, Central FQDN and Kea health: production readiness |
 | `deploy/config/central-endpoint.env` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | Central mTLS is on 9443, not 8443 |
 | `deploy/env/ctrlapi.env.example` | CREATED | `A` | configuration | DEPLOY | rollback REMOVES it | Activation, licensing, Central FQDN and Kea health: production readiness |
@@ -232,27 +232,27 @@
 | `docs/design/Room-Auth-Materialization-Readiness.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Record the live sync, and that publication is not materialization |
 | `docs/manifests/PC-0002-complete-delivery-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Correct two reporting defects in the PC-0002 delivery record |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0117 records the data-quota defect, its cause and its fix |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: change manifest |
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Retire the tc primer: netd has owned this since before the unit last worked |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
-| `exports/chatgpt/phase-evidence/GIT_STAT_4cde6d1d.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
+| `exports/chatgpt/phase-evidence/GIT_STAT_214c90d7.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs at the regenerated baseline |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/DEPLOYMENT_APPLIANCE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs rebuilt at 4cde6d1d |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -262,7 +262,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A dead socket is not a dead mirror |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: change manifest |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
@@ -505,7 +505,7 @@
  ...ast_good_roster_survives_a_failed_resync.up.sql |   97 ++
  ..._the_entitlement_records_what_it_spent.down.sql |  195 ++++
  ...61_the_entitlement_records_what_it_spent.up.sql |  339 +++++++
- .../baseline/0000_production_baseline.sql          |  441 ++++++++-
+ .../baseline/0000_production_baseline.sql          |  603 +++++++++++-
  deploy/caddy/Caddyfile.central                     |    6 +-
  deploy/config/central-endpoint.env                 |   50 +
  deploy/env/ctrlapi.env.example                     |   61 ++
@@ -571,14 +571,14 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1028 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1029 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 +++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 322601 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136547 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 43312 bytes
- .../chatgpt/phase-evidence/GIT_STAT_4cde6d1d.txt   |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 322602 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136560 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 43313 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_214c90d7.txt   |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -687,7 +687,7 @@
  .../tests/project_state_validator/run_mutations.py |   78 +-
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   12 +-
- 336 files changed, 32353 insertions(+), 2483 deletions(-)
+ 336 files changed, 32516 insertions(+), 2483 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -697,6 +697,9 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 0e61d8e8 Delivery: packs at the regenerated baseline
+HISTORICAL: 214c90d7 Regenerate the factory-clean baseline so a NEW appliance does not ship the defect
+HISTORICAL: cc5f5d47 Delivery: change manifest
 HISTORICAL: c23fcc34 Delivery: packs rebuilt at 4cde6d1d
 HISTORICAL: 4cde6d1d Governance: T0117 records the data-quota defect, its cause and its fix
 HISTORICAL: de25ab05 gofmt
