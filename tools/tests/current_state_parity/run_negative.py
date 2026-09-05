@@ -889,6 +889,17 @@ def _(d):
 
 @case("kernel authorization claimed while the recorded kernel is empty", "live-kernel-state")
 def _(d):
+    # THE CASE ESTABLISHES ITS OWN PRECONDITION. This rule only applies when the recorded kernel IS empty, and
+    # after the fourth Room Login the live appliance legitimately holds one authorization and one class — so a
+    # case that relied on today's counters stopped testing anything the moment a guest came online.
+    p2 = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p2, encoding="utf-8"))
+    lc = doc["current_state_facts"]["live_counters"]
+    lc["sessions_active"] = 0
+    lc["sessions_ended"] = lc.get("sessions", 0)
+    lc["nft_authorizations"] = 0
+    lc["tc_managed_classes"] = 0
+    io.open(p2, "w", encoding="utf-8", newline="\n").write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
     append_doc(d, "docs/PHASE3_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md",
                "## Current enforcement\n\nOn the appliance phase3_auth_ipv4 holds br-g-00d1fa1a . 192.168.77.102 "
                "on a refreshing 90s lease, and 1 nft element is installed for the live guest.")
@@ -897,6 +908,15 @@ def _(d):
 @case("Room Auth described as blocked by the in-flight resync rather than by the roster's age",
       "room-auth-blocker")
 def _(d):
+    # THE CASE ESTABLISHES ITS OWN PRECONDITION. This rule applies while Room Auth IS blocked by the roster's
+    # age. The PMS feed recovered on 2026-09-05 and Room Auth is READY, so a case that relied on the appliance
+    # being blocked stopped testing anything the moment it recovered.
+    p2 = os.path.join(d, "governance/project-state.json")
+    doc = json.load(io.open(p2, encoding="utf-8"))
+    f = doc["current_state_facts"]
+    f["room_auth_blocked"] = True
+    f["room_auth_blocked_reason"] = "LAST_GOOD_ROSTER_OLDER_THAN_MAX_AUTH_CACHE_AGE"
+    io.open(p2, "w", encoding="utf-8", newline="\n").write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
     append_doc(d, "docs/architecture/StayConnect-IAM-Phase3-Plan.md",
                "## Current behaviour\n\nRoom authentication is refused because RESYNC_IN_PROGRESS is set on the "
                "interface runtime, so no guest can sign in until the resync completes.")
