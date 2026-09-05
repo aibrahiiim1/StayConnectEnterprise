@@ -178,7 +178,7 @@ var logEventSet = map[LogEvent]struct{}{
 	EventWorkerQueueOverflow: {}, EventWorkerPersistFailed: {}, EventWorkerPanicRecovered: {},
 	EventWorkerReconnect: {}, EventSupervisorReconcileErr: {}, EventSupervisorAssignChange: {},
 	EventSupervisorNoAssignment: {},
-	EventWorkerConnected: {}, EventWorkerResyncRequested: {}, EventWorkerResyncPublished: {},
+	EventWorkerConnected:        {}, EventWorkerResyncRequested: {}, EventWorkerResyncPublished: {},
 }
 
 func (e LogEvent) Valid() bool { _, ok := logEventSet[e]; return ok }
