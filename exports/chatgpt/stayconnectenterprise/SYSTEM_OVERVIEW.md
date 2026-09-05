@@ -508,11 +508,10 @@ Two separate concepts:
 
 ### systemd units (`deploy/systemd/` + caddy)
 
-Dependency spine: `nftables` → **`stayconnect-scd`** → `stayconnect-portald` / `stayconnect-acctd`; `stayconnect-tc-setup` (oneshot, before scd); `docker` → `stayconnect-ctrlapi` → `stayconnect-web-admin`; plus `stayconnect-caddy`.
+Dependency spine: `nftables` → **`stayconnect-scd`** → `stayconnect-portald` / `stayconnect-acctd`; `docker` → `stayconnect-ctrlapi` → `stayconnect-web-admin`; plus `stayconnect-caddy`. There is no tc priming unit: `netd` creates and reconciles the HTB roots, the guest IFB and the ingress redirect itself (`internal/shape` `EnsureBridgeInfra`), so a boot with no tc state is rebuilt by the first submit pass.
 
 | Unit | Runs | User | Notes |
 |---|---|---|---|
-| stayconnect-tc-setup | `deploy/scripts/tc-setup.sh` | root | oneshot; primes HTB roots on ens160+br-lan (root `1:` htb, aggregate `1:fffe` @1gbit, default `1:1`+fq_codel); ExecStop tears down |
 | stayconnect-scd | `/opt/stayconnect/bin/scd` | root | needs CAP_NET_ADMIN for nft; RuntimeDirectory=stayconnect; env `/etc/stayconnect/scd.env` |
 | stayconnect-portald | `/opt/stayconnect/bin/portald` | stayconnect | CAP_NET_BIND_SERVICE only; ProtectSystem=strict |
 | stayconnect-acctd | `/opt/stayconnect/bin/acctd` | root | needs tc |
@@ -520,7 +519,7 @@ Dependency spine: `nftables` → **`stayconnect-scd`** → `stayconnect-portald`
 | stayconnect-web-admin | `npm run start` in `/opt/stayconnect/web-admin` | root | NODE_ENV=production |
 | stayconnect-caddy | `caddy run --config /etc/caddy/Caddyfile` | caddy | Type=notify, CAP_NET_BIND_SERVICE |
 
-Makefile targets install these: `ctrlapi-install`, `phase1-install` (scd+portald), `phase2-install` (tc-setup+acctd), `web-install`; plus `infra-up/down`, `migrate/migrate-down`, `psql`, builds, `fmt/vet/test`.
+Makefile targets install these: `ctrlapi-install`, `phase1-install` (scd+portald), `phase2-install` (acctd), `web-install`; plus `infra-up/down`, `migrate/migrate-down`, `psql`, builds, `fmt/vet/test`.
 
 ### Caddy (`deploy/caddy/`)
 

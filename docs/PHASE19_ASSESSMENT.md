@@ -9,7 +9,7 @@ The appliance hardcodes exactly **one** guest network everywhere. The single-net
 | Firewall | `br-lan`, DNAT→`10.10.0.1:8380/8343`, masquerade `10.10.0.0/24`, WAN `ens160` | `deploy/nftables/stayconnect.nft` |
 | nft auth set | `auth_ipv4` is **IP-only** (no interface/VLAN qualifier) | `data-plane/internal/nft/nft.go` |
 | Shaping | `WANIface=ens160`, `LANIface=br-lan`, classid `0x1000+last_octet`, IP readback `10.10.0.x` | `internal/shape/shape.go` |
-| tc root | primes/tears down `ens160`+`br-lan` only | `deploy/scripts/tc-setup.sh` |
+| tc root | HISTORICAL (Phase 19): primed/tore down `ens160`+`br-lan` only, via the since-RETIRED `deploy/scripts/tc-setup.sh`. Superseded: netd owns the guest-bridge/IFB roots today |
 | DHCP | single `subnet4 10.10.0.0/24` on `br-lan`, option-114 `http://10.10.0.1:8380/` | `deploy/kea/kea-dhcp4.conf` |
 | L2/L3 | single `br-lan` bridge, `10.10.0.1/24`, slave `ens192` | `deploy/netplan/02-lan-bridge.yaml` |
 | DNS | bind `10.10.0.1`, allow `10.10.0.0/24` | `deploy/unbound/…` |

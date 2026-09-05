@@ -865,9 +865,13 @@
       "renewal_timer": "ACTIVE",
       "external_tls_verification": "STRICT — CA bundle + --resolve, no -k anywhere in the healthy configuration",
       "chain_aware": "Renewal and validation examine EVERY certificate in the served chain and confirm it verifies against the root; CHAIN_RENEW_DAYS=2 tracks Caddy's seven-day intermediate rather than the two-year leaf."
-    }
+    },
+    "shaping_owner": "netd",
+    "shaping_owner_note": "SINGULAR AND PROVEN. acctd derives the authoritative desired enforcement state; netd owns every piece of kernel realization - the guest-bridge egress HTB root, the IFB device and its root, the ingress redirect, per-session classes (MinorForIP, 0x1000-0x1fff), SHARED entitlement groups (0x2000-0x2fff) and the nft authorization - and rebuilds all of it from zero tc state on every submit pass. netd never deletes a root qdisc. The stayconnect-tc-setup oneshot that once primed ens160 and br-lan for an scd-owned model was RETIRED at T0113: repository, Makefile, unit edges, appliance unit and the inert ens160 qdisc are gone, and preflight refuses any current deployment path that names it or any shipped script that deletes a root qdisc.",
+    "appliance_unit_health_audited": true,
+    "appliance_unit_health_note": "deploy/scripts/check-appliance-units.sh runs on the appliance and refuses a failed StayConnect unit or a runnable unit with a missing/non-executable program, while proving dormancy for the Central-only units an edge appliance carries (ctrlapi, web-admin: disabled, inactive, pulled in by nothing). It exists because two units sat broken for weeks - backup-cleanup 203/EXEC to a full disk, and tc-setup exiting 1 nightly - with both visible in `systemctl --failed` the whole time and nothing looking."
   },
-  "latest_transition_id": "T0112",
+  "latest_transition_id": "T0113",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
@@ -1248,7 +1252,7 @@
     "manifest": "docs/manifests/PostClosure-change-manifest.md",
     "base": "ac6816456be0e5bbaf2aa1c67c36b33032328ccb",
     "base_note": "The Phase-7 delivery head (== inventory_head == acceptance_candidate_head). Post-closure work begins exactly where the last numbered phase's delivery ended, so the two lineages abut without overlapping.",
-    "head": "b8ebee5291a793ff05adddb42062b71e787f2e4b",
+    "head": "f850a1c93c1ba57b2c8410240ca7f5fbb2efafe4",
     "head_note": "The post-closure delivery head: the committed HEAD immediately before the delivery-only commit that adds the manifest itself. Same self-reference protocol the phase manifests use — the manifest is generated from the STAGED tree so its own path is inside the range it describes.",
     "note": "D36: post-closure corrective work is its own delivery lineage with its own manifest. The numbered phases are closed and their manifests are HISTORICAL — each remains a faithful record of what that phase delivered and is never range-checked against a later HEAD. While this key is present it names THE current delivery manifest, and that manifest is what the path/status equality check applies to.",
     "decision_status": "ACCEPTED by the Product Owner on 2026-08-24 (T0086)."

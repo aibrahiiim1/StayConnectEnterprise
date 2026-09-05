@@ -2,10 +2,10 @@
 Description=StayConnect Accounting Daemon (acctd)
 # Soft dependencies: acctd polls scd's socket and the site DB per tick and
 # tolerates either being momentarily unavailable (it logs and retries on the
-# next tick), so scd/tc-setup being down must NOT stop it. docker.service for
+# next tick), so scd being down must NOT stop it. docker.service for
 # DB-container boot ordering.
-After=network-online.target docker.service stayconnect-scd.service stayconnect-tc-setup.service
-Wants=network-online.target docker.service stayconnect-scd.service stayconnect-tc-setup.service
+After=network-online.target docker.service stayconnect-scd.service
+Wants=network-online.target docker.service stayconnect-scd.service
 StartLimitIntervalSec=0
 
 [Service]
