@@ -1,4 +1,0 @@
-commit 687a2c32022833d0543ac20dabd9818ea1908d3f
-Date:   Sat Sep 5 22:30:34 2026 +0300
-
-    Re-anchor the two split-brain mutations to the state that now exists

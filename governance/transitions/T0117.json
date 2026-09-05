@@ -1,0 +1,39 @@
+{
+  "transition_id": "T0117",
+  "seq": 117,
+  "timestamp": "2026-09-05T23:26:00Z",
+  "timestamp_derivation": "After the diagnosis, the fix, the reconciliation rehearsal against a clone of the live database (23:0x) and the full contract suite passing on the real production schema (23:25Z); before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "DATA_QUOTA_CONTRACT_DEFECT_FIXED_PENDING_LIVE_ACCEPTANCE",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new product decision. The approved contract already says a data allowance is aggregate per Entitlement; this restores it rather than changing it.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-09-06: final data-quota contract closure and live acceptance run.",
+  "defect": "entitlements.consumed_data_bytes held 0 for all four entitlements this appliance has granted, with usage_version 0, through a real guest session that moved 35,692,721 bytes of a 100,000,000-byte package. The Entitlement had no record of what it had spent.",
+  "root_cause": "TWO INGESTION IMPLEMENTATIONS. iam_v2.ingest_sample (iam_base mg9) advances the entitlement aggregate; iam_v2.ingest_absolute_counters (migration 0010) is the one acctd calls, and it advanced the accounting record, the session byte totals and the checkpoint but never the entitlement. The running daemon used the implementation that forgot. No test caught it because every quota test inserts into accounting_records directly: the tested path and the live path were different paths.",
+  "not_the_cause": "DATA QUOTA IS NOT COUPLED TO THE PHASE-6 AGGREGATE_ONLINE_TIME FEATURE, which the Product Owner asked to be checked specifically. The DATA crossing is computed on every sweep regardless of that flag and the termination path is not gated by it; only the online-time accrual tick and the over-budget suspension are. Enforcement was therefore latently sound: run against the real accounting series with a lowered threshold, p6_data_crossing identifies the exact crossing sample (2026-09-05T15:16:12.756Z at 1 MB). It had simply never been reached, because 35.7 MB is not 100 MB.",
+  "fix": "Migration 0061. ingest_absolute_counters now advances consumed_data_bytes in the same transaction as the record that justifies it, attributed to the entitlement p3_entitlement_at resolves for THAT sample - the same attribution p6_data_crossing uses, so the counter and the crossing cannot disagree. Every exactly-once guard already runs above that line: replays, stale samples, counter regressions and epoch re-baselines all return before reaching it. p6_data_crossing remains the SINGLE authority for when a quota was crossed; no second opinion was introduced. A new p3_entitlement_data_usage(uuid) gives surfaces and tests one definition of attributed usage.",
+  "historical_entitlements": "CONTRACT-CORRECT AND NON-DESTRUCTIVE. A deterministic increase-only reconciliation sets each counter to the accounting already attributed to it and writes an entitlement_adjustments row for each. It terminates nothing: had it revealed a crossed quota, the sweep would end that entitlement at the crossing sample rather than at the migration. Rehearsed against a schema-and-data clone of the live database: 3 counters reconciled to 690, 70,090,838 and 35,692,721 bytes; 0 already over quota; all 1,396 accounting rows unchanged; no Purchase, Session or Stay altered.",
+  "coverage": "Fourteen integration cases that drive the REAL ingestion operation rather than inserting accounting rows: the entitlement records what it spent; usage increases monotonically; two devices spend one allowance; a new address does not reset it; duplicate and out-of-order readings do not double count; an epoch reset keeps the spent bytes; the crossing terminates exactly once AT THE CROSSING SAMPLE; every session under an exhausted entitlement is torn down; late accounting cannot reopen access and creates no replacement Purchase or Entitlement; usage survives restart; SHARED obeys the same aggregate quota; the quota applies under VALIDITY_WINDOW; no quota means unlimited; enforcement is identical with the aggregate-time feature OFF and ON; and nothing financial is touched. All pass against the real production schema with 0061 applied.",
+  "routine_backlog_closed": "Both known items, in this run. (1) pmsd emitted only failures, so the 2026-09-05 recovery was invisible in the journal; it now emits WORKER_CONNECTED, WORKER_RESYNC_REQUESTED and WORKER_RESYNC_PUBLISHED at INFO through the same closed vocabulary and bounded fields - a record count is a magnitude, never content. (2) The portal's device routes answered with the AUTHENTICATION uniform failure, so every guest who reached the success page was told their stay could not be verified and the journal recorded a guest auth failure, manufactured by a capability that is switched off. The device routes now have their own uniform non-success: same 200, same shape, same timing budget, one message for every cause.",
+  "financial": "ZERO. No posting, attempt, outbox row, payment, settlement, reversal or FX. Asserted by a test as well as observed.",
+  "live_acceptance": "NOT YET PERFORMED at the time of this receipt. Deployment and the single authorized live quota crossing follow.",
+  "go_live": "NOT PERFORMED AND NOT AUTHORIZED.",
+  "transition_accepted": true
+}
