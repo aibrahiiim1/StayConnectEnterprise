@@ -1,0 +1,4 @@
+commit 214c90d703acecbc58a591e28a1ad2a7e7a7e5a7
+Date:   Sun Sep 6 02:49:34 2026 +0300
+
+    Regenerate the factory-clean baseline so a NEW appliance does not ship the defect
