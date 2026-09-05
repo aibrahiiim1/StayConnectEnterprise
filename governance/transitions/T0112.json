@@ -1,8 +1,8 @@
 {
   "transition_id": "T0112",
   "seq": 112,
-  "timestamp": "2026-09-05T07:45:00Z",
-  "timestamp_derivation": "The completion of the certificate repair and its live verification - manager installed 07:37Z, leaf renewed 07:38:03Z, renewal unit run as a no-op 07:39:12Z, strict TLS and integrity checks read immediately after - which follows every event this receipt reports and precedes the author timestamp of the introducing commit. Per T0091, and in that order per T0108.",
+  "timestamp": "2026-09-05T07:41:00Z",
+  "timestamp_derivation": "The completion of the certificate repair and its live verification: manager installed 07:37Z, leaf renewed 07:38:03Z, the renewal unit run as a safe no-op 07:39:12Z, and the strict-TLS and integrity checks read in the minute that followed. The timestamp therefore FOLLOWS every event this receipt reports and PRECEDES the author timestamp of the introducing commit. Per T0091, and in that order per T0108.",
   "record_type": "HOTEL_ADMIN_TLS_RENEWAL_DEFECT_CLOSED",
   "previous_state": {
     "phase": "7",
