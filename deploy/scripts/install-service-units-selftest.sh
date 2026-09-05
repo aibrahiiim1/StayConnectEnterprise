@@ -34,12 +34,17 @@ new_tree() { # new_tree <name> -> echoes the tree root
   printf 'ACCTD_DB_URL=x\n' > "$t/etc/acctd.env"
   cp "$DEPLOY/scripts/check-phase6-guest-dependency.sh" \
      "$DEPLOY/scripts/check-phase3-enforcement-plane.sh" "$t/src/scripts/"
+  # HELPERS WHOSE UNITS NAME A PATH OUTSIDE /opt/stayconnect/bin. They belong in the fixture because they
+  # belong in a real tree: stayconnect-hotel-admin-cert-renew.service names /usr/local/sbin/... and
+  # stayconnect-tc-setup.service names /opt/stayconnect/deploy/scripts/..., and BOTH were failing 203/EXEC on
+  # the appliance because nothing installed them. A fixture that omits them cannot notice that.
+  cp "$DEPLOY/scripts/hotel-admin-cert-manager.sh" "$DEPLOY/scripts/tc-setup.sh" "$t/src/scripts/" 2>/dev/null || true
   echo "$t"
 }
 
 run_installer() { # run_installer <tree> ; echoes output, returns the installer's exit code
   local t="$1"
-  SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DIR="$t/etc" SC_SKIP_SYSTEMD=1 \
+  SC_ROOT_PREFIX="$t/root" SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DIR="$t/etc" SC_SKIP_SYSTEMD=1 \
     bash "$INSTALLER" "$t/src" >"$t/out" 2>&1
 }
 
@@ -165,7 +170,7 @@ cat > "$t/is-enabled" <<'STUB'
 echo disabled
 STUB
 chmod +x "$t/is-enabled"
-if SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DIR="$t/etc" SC_SKIP_SYSTEMD=1      SC_UNIT_ENABLED_CMD="$t/is-enabled" bash "$INSTALLER" "$t/src" >"$t/out" 2>&1; then
+if SC_ROOT_PREFIX="$t/root" SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DIR="$t/etc" SC_SKIP_SYSTEMD=1      SC_UNIT_ENABLED_CMD="$t/is-enabled" bash "$INSTALLER" "$t/src" >"$t/out" 2>&1; then
   if grep -q "NOT enabled here" "$t/out"; then
     ok "a unit that is not in service here is reported, not refused"
   else
@@ -182,7 +187,7 @@ cat > "$t/is-enabled" <<'STUB'
 echo enabled
 STUB
 chmod +x "$t/is-enabled"
-if SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DIR="$t/etc" SC_SKIP_SYSTEMD=1      SC_UNIT_ENABLED_CMD="$t/is-enabled" bash "$INSTALLER" "$t/src" >"$t/out2" 2>&1; then
+if SC_ROOT_PREFIX="$t/root" SC_BIN_DIR="$t/bin" SC_UNIT_DIR="$t/units" SC_ENV_DIR="$t/etc" SC_SKIP_SYSTEMD=1      SC_UNIT_ENABLED_CMD="$t/is-enabled" bash "$INSTALLER" "$t/src" >"$t/out2" 2>&1; then
   bad "an ENABLED unit with a missing executable was installed anyway"
 else
   ok "the same unit, enabled, is refused"

@@ -764,6 +764,20 @@ grep -q 'ha_served_build_id' "$ROOT/deploy/scripts/check-hotel-admin-integrity.s
 awk '/^smoke_live\(\)/,/^}/' "$DHA" | grep -q 'checked" -ne "$want_n'   && ok "the live smoke test proves it exercised every required route, by count"   || no "the live smoke test cannot tell a full route sweep from an empty one"
 grep -q 'HOTEL_ADMIN_PUBLIC_URL' "$ROOT/deploy/scripts/check-hotel-admin-integrity.sh"   && ok "a configured operator endpoint is verified to serve the managed release"   || no "localhost health alone is allowed to prove the operator endpoint is current"
 [ -f "$ROOT/deploy/scripts/check-hotel-admin-integrity-adversarial.sh" ]   && ok "the integrity guards carry an adversarial suite that drives them against controlled endpoints"   || no "nothing proves the integrity guards can fail"
+# THE CERTIFICATE CHAIN, not just the leaf. A leaf with two years of life above an intermediate that expired
+# last week is an endpoint no client can use, and it is what "healthy, days_remaining 729" meant here.
+CM="$ROOT/deploy/scripts/hotel-admin-cert-manager.sh"
+if [ -f "$CM" ]; then
+  grep -q 'chain_expiring' "$CM"     && ok "certificate health is decided from every certificate in the served chain"     || no "certificate health still reads only the leaf, so an expired intermediate is invisible"
+  grep -q 'chain_verifies' "$CM"     && ok "the served chain must verify against the local root before it is called healthy"     || no "nothing verifies that the served chain still chains to its root"
+  grep -q 'CHAIN_RENEW_DAYS' "$CM"     && ok "the renewal window tracks the chain's own clock, not the leaf's"     || no "the renewal window is measured against the leaf, which outlives the intermediate by years"
+else
+  no "the Hotel Admin certificate manager is missing"
+fi
+[ -f "$ROOT/deploy/scripts/check-hotel-admin-cert-selftest.sh" ]   && ok "the certificate chain rules carry a regression suite built from real certificates"   || no "nothing proves the certificate chain rules can fail"
+# THE 203/EXEC GUARD MUST NOT BE PINNED TO ONE DIRECTORY. It scanned only /opt/stayconnect/bin, so a unit
+# naming /usr/local/sbin/... was invisible to it -- which is how a renewal timer failed nightly for two weeks.
+grep -q 'unit_exec_paths' "$ROOT/deploy/scripts/install-service-units.sh"   && ok "the installer verifies every absolute Exec path a unit declares, in any directory"   || no "the installer only checks helpers under one directory"
 
 # ============================================================================== report
 # Emitting comes last on purpose: an earlier version printed the JSON before section 8 had run, so --json

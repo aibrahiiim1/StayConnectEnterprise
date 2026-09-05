@@ -851,9 +851,23 @@
     },
     "hotel_admin_deployment_contract": "PERMANENT RULE for every Hotel Admin release. (1) Exactly ONE servable release: /opt/stayconnect/hotel-admin is a symlink to a verified release under the managed releases directory - never a plain directory, which is what an install-by-copying leaves behind and what removes all provenance. (2) Every bundle carries hotel-admin-release.json recording source commit, BUILD_ID, release timestamp, the capability flags and their values, and the artifact checksum; packaging FAILS if the source commit cannot be identified or the contract is not satisfied. (3) Installation verifies the candidate - checksum, manifest, required routes, and that the flags were really inlined - BEFORE switching, and smoke-tests the live endpoint AFTER, proving the served BUILD_ID and that every required operator surface answers; a failure restores the previous verified release. (4) A rollback target must satisfy the same contract: an obsolete UI that would remove PMS, Service Plan or Package management is archive evidence, never an executable rollback, and the previous pointer is CLEARED rather than left aimed at one. (5) Release selection is explicit and provenance-verified - never by mtime, filename or 'latest-looking' directory. (6) Historical releases are retained under the archive directory, unreachable by Caddy, systemd or either pointer.",
     "hotel_admin_operator_endpoint_verified": true,
-    "hotel_admin_operator_endpoint_note": "The endpoint hotel staff actually reach is verified to serve the managed release, not merely the loopback process: a stale vhost, a proxy aimed at another port or a cached upstream would all leave 127.0.0.1 perfect while the operator is on an old bundle, and the operator's browser is the only place the original defect was ever visible. Configured permanently in /etc/stayconnect/hotel-admin-integrity.env. NOTE, separately: the local-CA leaf for that vhost is expired and its renewal unit is failing, so the check carries an explicit recorded insecure-transport flag; that is a certificate defect, not a bundle-identity one, and is raised for its own decision."
+    "hotel_admin_operator_endpoint_note": "The endpoint hotel staff actually reach is verified to serve the managed release, not merely the loopback process: a stale vhost, a proxy aimed at another port or a cached upstream would all leave 127.0.0.1 perfect while the operator is on an old bundle, and the operator's browser is the only place the original defect was ever visible. Configured permanently in /etc/stayconnect/hotel-admin-integrity.env. NOTE, separately: the local-CA leaf for that vhost is expired and its renewal unit is failing, so the check carries an explicit recorded insecure-transport flag; that is a certificate defect, not a bundle-identity one, and is raised for its own decision.",
+    "hotel_admin_tls": {
+      "_note": "The Hotel Admin HTTPS certificate, recorded as data because prose said 'healthy, days_remaining 729' for two weeks while no client could complete a handshake. The leaf was never the problem; the intermediate pinned in the served fullchain was.",
+      "leaf_serial": "35F2CBA4055458A19DEA41DED007BD1547707B89",
+      "leaf_sha256": "97:47:D0:DD:C0:F9:C2:D9:52:0E:2C:BE:3C:13:E4:22:9B:C0:D2:39:FA:5D:84:F8:C4:41:EA:A1:6D:E3:7A:30",
+      "leaf_not_after": "2028-09-04T07:37:58Z",
+      "sans": "DNS:hotel.stayconnect.local, IP:172.21.60.25",
+      "root_ca": "Caddy Local Authority - 2026 ECC Root, serial 990DFBFF2B14A2A84F56D2EB9A655418, to 2036-06-28",
+      "root_ca_sha256": "55:70:7E:AE:7C:E6:04:48:CE:D0:BF:C8:B9:C1:97:E1:9F:41:97:90:BA:95:46:A1:67:ED:DF:34:F7:2F:68:75",
+      "root_ca_changed": false,
+      "renewal_service": "HEALTHY (0/SUCCESS, safe no-op when outside the renewal window)",
+      "renewal_timer": "ACTIVE",
+      "external_tls_verification": "STRICT — CA bundle + --resolve, no -k anywhere in the healthy configuration",
+      "chain_aware": "Renewal and validation examine EVERY certificate in the served chain and confirm it verifies against the root; CHAIN_RENEW_DAYS=2 tracks Caddy's seven-day intermediate rather than the two-year leaf."
+    }
   },
-  "latest_transition_id": "T0111",
+  "latest_transition_id": "T0112",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"

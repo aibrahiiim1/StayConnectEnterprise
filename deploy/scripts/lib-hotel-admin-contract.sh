@@ -66,6 +66,10 @@ ha_served_build_id() {
   [ -n "${HOTEL_ADMIN_PUBLIC_CACERT:-}" ] && xopts+=(--cacert "$HOTEL_ADMIN_PUBLIC_CACERT")
   [ "${HOTEL_ADMIN_PUBLIC_INSECURE:-0}" = "1" ] && xopts+=(-k)
   [ -n "${HOTEL_ADMIN_PUBLIC_HOST:-}" ] && xopts+=(-H "Host: ${HOTEL_ADMIN_PUBLIC_HOST}")
+  # --resolve is how the real vhost NAME is used against a known address. A Host header reaches the right
+  # vhost but leaves TLS validating whatever name the URL carried; --resolve validates the certificate against
+  # the name a browser would use, which is what makes the DNS SAN part of the proof rather than an assumption.
+  [ -n "${HOTEL_ADMIN_PUBLIC_RESOLVE:-}" ] && xopts+=(--resolve "${HOTEL_ADMIN_PUBLIC_RESOLVE}")
   local body; body="$(curl -sS "${xopts[@]}" --max-time "${HOTEL_ADMIN_HTTP_TIMEOUT:-5}" "$1" 2>/dev/null || true)"
   [ -n "$body" ] || return 1
   local id; id="$(grep -o '<!--[A-Za-z0-9_-]\{16,\}-->' <<<"$body" | head -1 | sed 's/^<!--//; s/-->$//')"
