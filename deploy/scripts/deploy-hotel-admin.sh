@@ -32,6 +32,10 @@ RUN_USER="${HOTEL_ADMIN_USER:-stayconnect}"
 ARCHIVE_DIR="${HOTEL_ADMIN_ARCHIVE:-/opt/stayconnect/releases/hotel-admin-archive}"
 # The bundle's own machine-readable identity. Written at package time, verified before every switch.
 MANIFEST_NAME="hotel-admin-release.json"
+MANIFEST_NAME_DEFAULT="$MANIFEST_NAME"
+# The contract rules live in one file so the deployment path and the standing checker cannot drift apart.
+# shellcheck source=lib-hotel-admin-contract.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib-hotel-admin-contract.sh"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -262,44 +266,73 @@ assert_manifest() {
 # here, through the port the service really listens on, after the switch.
 smoke_live() {
   local want_bid="$1" rel="$2"
-  local port="${HOTEL_ADMIN_PORT:-3100}" base="http://127.0.0.1:${HOTEL_ADMIN_PORT:-3100}"
-  local body; body="$(curl -sS --max-time 5 "$base/login" 2>/dev/null || true)"
-  [ -n "$body" ] || { echo "SMOKE FAIL: $base/login returned nothing" >&2; return 1; }
+  local base="http://127.0.0.1:${HOTEL_ADMIN_PORT:-3100}"
+  local contract="${HOTEL_ADMIN_CONTRACT:-$rel/capability-contract.json}"
 
-  # Next writes the build id into the served document as an HTML comment. This is the identity check that
-  # "HTTP 200" cannot make.
-  # sed, NOT `tr -d "<!->"`. That set is a RANGE: "!" to ">" spans ASCII 33-62, which includes every digit,
-  # so a BUILD_ID came back with its digits silently removed and the smoke test reported a mismatch against
-  # the release it had just installed. A verification step that fails for a reason unrelated to what it
-  # verifies is worse than no step at all.
-  local served; served="$(grep -o "<!--[A-Za-z0-9_-]\{16,\}-->" <<<"$body" | head -1 | sed 's/^<!--//; s/-->$//')"
-  if [ -n "$served" ] && [ "$served" != "$want_bid" ]; then
+  # ---- IDENTITY, FAIL-CLOSED ------------------------------------------------------------------------------
+  # This used to read `[ -n "$served" ] && [ "$served" != "$want_bid" ]`, which passes when nothing could be
+  # extracted -- so a page that rendered without the stamp, an endpoint answering with something that is not
+  # this application, or an extraction that quietly broke, all reported the identity as verified. An identity
+  # check that cannot obtain an identity has FAILED.
+  local served
+  if ! served="$(ha_served_build_id "$base/login")"; then
+    echo "SMOKE FAIL: could not extract a BUILD_ID from $base/login — the served identity is unverifiable, which is a failure and not a pass" >&2
+    return 1
+  fi
+  if [ "$served" != "$want_bid" ]; then
     echo "SMOKE FAIL: the live endpoint is serving BUILD_ID '$served' but the release we installed is '$want_bid'" >&2
     return 1
   fi
-  echo ">> smoke: live endpoint serves BUILD_ID ${served:-$want_bid}"
+  echo ">> smoke: live endpoint serves BUILD_ID $served"
 
-  # Every required operator surface must ANSWER. Unauthenticated these redirect to /login, which is a correct
-  # serving response; what must never happen is a 404, which is what a bundle missing the route returns.
-  local route code bad=0
+  # ---- EVERY REQUIRED SURFACE, COUNTED -------------------------------------------------------------------
+  # The route list is MATERIALISED and asserted non-empty before anything iterates: a `while read` over a
+  # producer that returned nothing completes without a single request and reports success, which is precisely
+  # the shape of failure these guards exist to stop. The count checked is then compared with the count the
+  # contract declares, so a truncated or partially-consumed list is a failure too.
+  local routes want_n
+  routes="$(ha_contract_routes "$contract")"
+  want_n="$(ha_count "$routes")"
+  if [ "$want_n" -lt 1 ]; then
+    echo "SMOKE FAIL: the capability contract yielded no required routes; the surface check cannot run and must not be reported as passed" >&2
+    return 1
+  fi
+
+  local route code bad=0 checked=0
   while IFS= read -r route; do
     route="${route%$CR}"
     [ -n "$route" ] || continue
-    code="$(curl -sS -o /dev/null -w "%{http_code}" --max-time 5 "$base$route" 2>/dev/null || echo 000)"
+    checked=$((checked + 1))
+    code="$(curl -sS -o /dev/null -w "%{http_code}" --max-time "${HOTEL_ADMIN_HTTP_TIMEOUT:-5}" "$base$route" 2>/dev/null || echo 000)"
     case "$code" in
       200|302|303|307|308) echo "   ok  $route -> $code" ;;
       *) echo "   BAD $route -> $code" >&2; bad=1 ;;
     esac
-  done < <(jget "$rel/$MANIFEST_NAME" 'd["required_routes"]' | python3 -c 'import json,sys
-sys.stdout.reconfigure(newline=chr(10))
-try: [print(r) for r in json.load(sys.stdin)]
-except Exception: pass' | tr -d '')
-  [ "$bad" = "0" ] || { echo "SMOKE FAIL: a required operator surface is not being served" >&2; return 1; }
+  done <<< "$routes"
 
-  # And the navigation those surfaces hang off must be COMPILED IN, not merely routable. This re-reads the
-  # live tree because the whole defect was a bundle whose routes worked and whose navigation was gone.
-  assert_contract_satisfied "$rel" "${HOTEL_ADMIN_CONTRACT:-$rel/capability-contract.json}" >/dev/null     || { echo "SMOKE FAIL: the live release does not satisfy the capability contract" >&2; return 1; }
-  echo ">> smoke: required operator surfaces served and their navigation is compiled in"
+  if [ "$checked" -ne "$want_n" ]; then
+    echo "SMOKE FAIL: the contract requires $want_n operator route(s) but only $checked were exercised" >&2
+    return 1
+  fi
+  [ "$bad" = "0" ] || { echo "SMOKE FAIL: a required operator surface is not being served" >&2; return 1; }
+  echo ">> smoke: required operator surfaces served and checked $checked/$want_n"
+
+  # ---- THE NAVIGATION IS COMPILED IN, not merely routable ------------------------------------------------
+  ha_release_satisfies_contract "$rel" "$contract"     || { echo "SMOKE FAIL: the live release does not satisfy the capability contract" >&2; return 1; }
+
+  # ---- AND THE ENDPOINT AN OPERATOR ACTUALLY USES --------------------------------------------------------
+  # A healthy process on 127.0.0.1 proves nothing about what staff reach through Caddy: a stale vhost, a proxy
+  # pointing at another port, or a cached upstream would all leave localhost perfect and the operator on an
+  # old bundle. Where a real endpoint is configured, it must serve the SAME BUILD_ID.
+  if [ -n "${HOTEL_ADMIN_PUBLIC_URL:-}" ]; then
+    local public_id
+    if ! public_id="$(ha_served_build_id "${HOTEL_ADMIN_PUBLIC_URL%/}/login")"; then
+      echo "SMOKE FAIL: the configured operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} served no extractable BUILD_ID" >&2
+      return 1
+    fi
+    [ "$public_id" = "$want_bid" ]       || { echo "SMOKE FAIL: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves BUILD_ID '$public_id', not '$want_bid'" >&2; return 1; }
+    echo ">> smoke: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves the same BUILD_ID"
+  fi
   return 0
 }
 
@@ -310,9 +343,10 @@ except Exception: pass' | tr -d '')
 # the moment something else has already gone wrong. Such a release is archive evidence and nothing more.
 rollback_eligible() {
   local rel="$1"
-  [ -d "$rel" ] || return 1
-  [ -f "$rel/$MANIFEST_NAME" ] || return 1
-  assert_contract_satisfied "$rel" "${HOTEL_ADMIN_CONTRACT:-$rel/capability-contract.json}" >/dev/null 2>&1
+  # ONE implementation of the rule, shared with the standing integrity checker. When these were separate, the
+  # checker held a rollback target only to the flag scan and reported a release missing an operator route as
+  # "a legitimate rollback".
+  ha_release_satisfies_contract "$rel" "${HOTEL_ADMIN_CONTRACT:-$rel/capability-contract.json}" quiet
 }
 
 guard_not_root_cwd() {
@@ -575,6 +609,13 @@ rollback() {
   wait_healthy || die "hotel-admin failed to start after rollback"
   echo ">> rolled back to $prev"
 }
+
+# EXECUTED, NOT SOURCED. Guarding the dispatcher lets the adversarial self-test source this file and drive
+# smoke_live against a controlled endpoint, which is the only way to prove a live-identity check actually
+# fails when the identity is wrong. Without the guard, sourcing runs the usage branch and exits the test.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0 2>/dev/null || true
+fi
 
 case "${1:-}" in
   package) shift; package "${1:-.}" ;;

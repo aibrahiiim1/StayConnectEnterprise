@@ -1,0 +1,4 @@
+commit 304b9af8bfefd1568fa910c7a2693a67e9bacb49
+Date:   Sat Sep 5 09:21:13 2026 +0300
+
+    Delivery: manifest and packs
