@@ -1,4 +1,0 @@
-commit 38f99ffce72895b62e7321d1cbbe43fb25afcd46
-Date:   Sun Sep 6 05:24:09 2026 +0300
-
-    The 0010 lifecycle gate asserted the rule that broke factory-clean installs

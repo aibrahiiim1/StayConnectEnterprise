@@ -1,0 +1,4 @@
+commit 94a3413e7715a0f7b4a900cc81c4eaf6ad678f7a
+Date:   Sun Sep 6 05:35:52 2026 +0300
+
+    The selftest must run in live-site mode, which names the database
