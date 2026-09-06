@@ -17,7 +17,14 @@ set -uo pipefail
 export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 RUNNER="$ROOT/scripts/edge-migrate.sh"
-C="edge-migrate-selftest-$$"; DB="edge_selftest"; PORT="${EDGE_SELFTEST_PORT:-55461}"
+# THE DISPOSABLE DATABASE IS NAMED stayconnect_site ON PURPOSE.
+#
+# live-site mode - the mode that carries the least-privilege, superuser-refusal and destructive-ledger-rights
+# checks this suite exists to prove - requires --expect-db stayconnect_site. Testing in any other mode would
+# skip exactly the assertions that matter. The database lives inside a container this script creates with a
+# unique name, on its own port, and destroys in its EXIT trap; EDGE_PSQL names that container explicitly, so
+# nothing here can reach an appliance.
+C="edge-migrate-selftest-$$"; DB="stayconnect_site"; PORT="${EDGE_SELFTEST_PORT:-55461}"
 WORK="$(mktemp -d)"
 pass=0; fail=0
 ok(){ echo "  ok: $1"; pass=$((pass+1)); }
@@ -143,7 +150,7 @@ out="$(EDGE_PSQL="$PSQL" bash "$RUN" --apply-role edge_apply --only 0099_selftes
         --expect-db not_this_database --target-kind live-site \
         --ack-target I_UNDERSTAND_LIVE_DARK_SITE_MIGRATION --expect-sha256 "$SHA" 2>&1)"
 if applied; then no "a wrong --expect-db still applied the migration" "$out"
-else case "$out" in *"--expect-db"*|*"connected to"*) ok "a mismatched target database is REFUSED" ;;
+else case "$out" in *"--expect-db"*|*"connected to"*|*"requires --expect-db"*) ok "a mismatched target database is REFUSED" ;;
                     *) no "refused, but not for the target identity" "$out" ;; esac; fi
 undo
 
