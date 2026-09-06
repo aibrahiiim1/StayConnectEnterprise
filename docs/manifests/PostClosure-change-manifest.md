@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `0158f22809fa4910d0cef22d5b39f7d6e72b222f`
-- **Provenance (generation HEAD = inventory_head):** `0158f22809fa4910d0cef22d5b39f7d6e72b222f`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `73fb80fab4fa0de4a232930cef950a2178d01997`
+- **Provenance (generation HEAD = inventory_head):** `73fb80fab4fa0de4a232930cef950a2178d01997`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `close/quota-acceptance-and-migration-runner`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 339
@@ -232,14 +232,14 @@
 | `docs/design/Room-Auth-Materialization-Readiness.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Record the live sync, and that publication is not materialization |
 | `docs/manifests/PC-0002-complete-delivery-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Correct two reporting defects in the PC-0002 delivery record |
 | `docs/manifests/Phase7-change-manifest.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Delivery at ac68164: state-scope synchronization, packs and manifest |
-| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Delivery: change manifest |
+| `docs/manifests/PostClosure-change-manifest.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Governance: T0118 records the accepted live data-quota crossing |
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Retire the tc primer: netd has owned this since before the unit last worked |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_a342c048.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs |
+| `exports/chatgpt/phase-evidence/GIT_STAT_5b5021d8.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
@@ -249,17 +249,17 @@
 | `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
-| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
+| `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0118 records the accepted live data-quota crossing |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0118 records the accepted live data-quota crossing |
 | `exports/chatgpt/stayconnectenterprise/DEPLOYMENT_APPLIANCE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0118 records the accepted live data-quota crossing |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
-| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Handoff.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0118 records the accepted live data-quota crossing |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase0-Contract.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0118 records the accepted live data-quota crossing |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1A-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0118 records the accepted live data-quota crossing |
+| `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0118 records the accepted live data-quota crossing |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A dead socket is not a dead mirror |
 | `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0118 records the accepted live data-quota crossing |
@@ -357,7 +357,7 @@
  .github/workflows/phase3-software.yml              |  100 ++
  .github/workflows/project-governance.yml           |    7 +
  .gitignore                                         |    4 +
- CLAUDE.md                                          |  219 +++++
+ CLAUDE.md                                          |  219 ++++
  Makefile                                           |    8 +-
  cloud-admin/app/(app)/appliances/page.tsx          |    5 +-
  cloud-admin/app/(app)/licenses/page.tsx            |   37 +
@@ -435,7 +435,7 @@
  .../appliancecert/bootstrap_states_test.go         |  270 +++++
  data-plane/internal/appliancecert/cert.go          |  425 +++++++-
  .../appliancecert/rotation_restart_test.go         |  231 +++++
- data-plane/internal/assignment/resolve.go          |  219 +++++
+ data-plane/internal/assignment/resolve.go          |  219 ++++
  .../internal/assignment/resolve_outcome_test.go    |   85 ++
  data-plane/internal/authctx/authctx.go             |  126 ++-
  .../internal/authctx/authctx_integration_test.go   |   37 +-
@@ -481,7 +481,7 @@
  data-plane/internal/shape/shape_from_zero_test.go  |  105 ++
  data-plane/internal/shapeplan/plan.go              |   25 +
  data-plane/internal/shapeproducer/producer.go      |   96 ++
- .../occupancy_evidence_integration_test.go         |  220 +++++
+ .../occupancy_evidence_integration_test.go         |  220 ++++
  data-plane/internal/stayengine/pg.go               |  150 ++-
  .../staygrant/staygrant_integration_test.go        |   11 +
  ...pms_auth_freshness_follows_feed_health.down.sql |   64 ++
@@ -490,7 +490,7 @@
  ...continuity_unknown_is_not_a_healthy_feed.up.sql |   89 ++
  ...e_config_lock_without_update_privilege.down.sql |   13 +
  ...ace_config_lock_without_update_privilege.up.sql |   83 ++
- ...rror_authorizes_when_transport_is_down.down.sql |   55 ++
+ ...rror_authorizes_when_transport_is_down.down.sql |   55 +
  ...mirror_authorizes_when_transport_is_down.up.sql |  119 +++
  ...rator_resync_command_and_sync_progress.down.sql |   31 +
  ...perator_resync_command_and_sync_progress.up.sql |  101 ++
@@ -508,7 +508,7 @@
  ...ast_good_roster_survives_a_failed_resync.up.sql |   97 ++
  ..._the_entitlement_records_what_it_spent.down.sql |  195 ++++
  ...61_the_entitlement_records_what_it_spent.up.sql |  339 +++++++
- .../baseline/0000_production_baseline.sql          |  603 +++++++++++-
+ .../baseline/0000_production_baseline.sql          |  603 ++++++++++-
  deploy/caddy/Caddyfile.central                     |    6 +-
  deploy/config/central-endpoint.env                 |   50 +
  deploy/env/ctrlapi.env.example                     |   61 ++
@@ -522,7 +522,7 @@
  .../gatep/svc-scd-iamv2-guest-commerce-grants.sql  |   28 +
  deploy/pki/.gitignore                              |    5 +
  deploy/pki/README.md                               |   26 +
- deploy/scripts/appliance-central-cutover.sh        |  218 +++++
+ deploy/scripts/appliance-central-cutover.sh        |  218 ++++
  deploy/scripts/appliance-dns-align.sh              |  138 +++
  deploy/scripts/central-firewall.sh                 |   61 ++
  deploy/scripts/central-migrate.sh                  |  268 +++++
@@ -543,7 +543,7 @@
  deploy/scripts/hotel-admin-cert-manager.sh         |   76 +-
  deploy/scripts/hotel-admin-mint-cert.sh            |   26 +-
  deploy/scripts/install-assignment-root-anchor.sh   |   87 ++
- deploy/scripts/install-central-endpoint.sh         |   55 ++
+ deploy/scripts/install-central-endpoint.sh         |   55 +
  deploy/scripts/install-central-trust.sh            |   76 ++
  deploy/scripts/install-service-units-selftest.sh   |  260 +++++
  deploy/scripts/install-service-units.sh            |  265 ++++-
@@ -574,19 +574,19 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1035 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1046 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 +++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 320514 bytes
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 320517 bytes
  .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136544 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 42997 bytes
- .../chatgpt/phase-evidence/GIT_STAT_a342c048.txt   |    4 +
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 42999 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_5b5021d8.txt   |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
  .../governance/decision-register.json              |   33 +
- .../chatgpt/phase-evidence/tools/project-state.py  |  382 +++++++-
+ .../chatgpt/phase-evidence/tools/project-state.py  |  382 ++++++-
  .../phase-evidence/tools/validate-project-state.sh |   12 +-
  exports/chatgpt/phase1b-planning/MANIFEST.md       |    2 +-
  .../chatgpt/phase1b-planning/PACK_SHA256SUMS.txt   |    6 +-
@@ -613,7 +613,7 @@
  governance/transitions/T0088.json                  |   39 +
  governance/transitions/T0089.json                  |   40 +
  governance/transitions/T0090.json                  |   40 +
- governance/transitions/T0091.json                  |   55 ++
+ governance/transitions/T0091.json                  |   55 +
  governance/transitions/T0092.json                  |   43 +
  governance/transitions/T0093.json                  |   68 ++
  governance/transitions/T0094.json                  |   44 +
@@ -648,7 +648,7 @@
  hotel-admin/app/(app)/network/system/page.tsx      |    2 +-
  hotel-admin/app/(app)/pms-interfaces/page.tsx      |  331 +++++--
  .../(app)/pms-interfaces/synchronization-card.tsx  |  248 +++++
- hotel-admin/app/(app)/pms-providers/page.tsx       |  329 -------
+ hotel-admin/app/(app)/pms-providers/page.tsx       |  329 ------
  hotel-admin/app/(app)/service-plans/page.tsx       |  314 ++++++
  hotel-admin/app/(app)/setup/enrollment/page.tsx    |  244 ++++-
  hotel-admin/app/(app)/sign-in-methods/page.tsx     |  413 ++++++++
@@ -674,7 +674,7 @@
  hotel-admin/test/phase3-pages.test.tsx             |   32 +-
  hotel-admin/test/pms-availability.test.ts          |  221 +++++
  hotel-admin/test/publish-form.test.tsx             |    8 +-
- hotel-admin/test/synchronization-card.test.tsx     |  275 ++++++
+ hotel-admin/test/synchronization-card.test.tsx     |  275 +++++
  scripts/ci/phase4-dark-check.sh                    |   11 +-
  scripts/edge-migrate-selftest.sh                   |  223 +++++
  scripts/edge-migrate.sh                            |   51 +-
@@ -693,7 +693,7 @@
  .../tests/project_state_validator/run_mutations.py |   78 +-
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   12 +-
- 339 files changed, 32841 insertions(+), 2487 deletions(-)
+ 339 files changed, 32852 insertions(+), 2487 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -703,8 +703,8 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
-HISTORICAL: 0158f228 Delivery: packs
-HISTORICAL: a342c048 Governance: T0118 records the accepted live data-quota crossing
+HISTORICAL: 73fb80fa Delivery: packs
+HISTORICAL: 5b5021d8 Governance: T0118 records the accepted live data-quota crossing
 HISTORICAL: 7c664c47 The migration runner could not run on a factory-clean appliance
 HISTORICAL: 480fd213 Merge PR #80: the Entitlement now records what it spent (T0117)
 HISTORICAL: 9d22eeb4 Delivery: change manifest
