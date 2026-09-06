@@ -756,57 +756,54 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 		_ = json.Unmarshal(duration, &c.DurationPolicy)
 	}
 
-	// THESE TWO READS ARE THE ONES svc_edged IS NOT PERMITTED. It authors both tables through the controlled
-	// writers and holds no SELECT on either, so this fails under the real runtime role while passing as a
-	// superuser in tests. The failure is surfaced as its own condition rather than as "not found", because
-	// what the operator must be told is that editing cannot load the package's conditions -- and therefore
-	// must not save, since republishing without them would silently change who the package is offered to and
-	// could leave it offered to nobody.
-	rules, err := r.db.Query(ctx,
-		`SELECT rule_type, COALESCE(rule_value,'{}'::jsonb) FROM iam_v2.package_eligibility_rules
-		  WHERE package_revision_id=$1 ORDER BY rule_type`, c.RevisionID)
+	// THE CONDITIONS COME THROUGH THE SCOPED READER, NOT FROM THE TABLES.
+	//
+	// svc_edged holds INSERT on iam_v2.package_eligibility_rules and iam_v2.package_grant_tiers and no SELECT
+	// on either -- the admin service composes a package, the guest-auth service evaluates it. Reading them
+	// directly here is what returned 500 on the operator's package screen. iam_v2.p2_package_current_conditions
+	// answers the one question Edit needs, for the CURRENT revision of this non-system package in this tenant
+	// and site, and the scoping is inside the function rather than in this argument list.
+	//
+	// packageConditionsSQL is named so a test can assert this path references neither table.
+	rows, err := r.db.Query(ctx, packageConditionsSQL(), tenantID, siteID, packageID)
 	if err != nil {
 		return PackageCurrent{}, wrapIfDenied(err)
 	}
-	defer rules.Close()
-	for rules.Next() {
-		var ru EligibilityRule
+	defer rows.Close()
+	for rows.Next() {
+		var kind string
+		var ruleType *string
+		var tierOrder *int
 		var raw []byte
-		if err := rules.Scan(&ru.Type, &raw); err != nil {
+		if err := rows.Scan(&kind, &ruleType, &tierOrder, &raw); err != nil {
 			return PackageCurrent{}, wrapIfDenied(err)
 		}
+		var val map[string]any
 		if len(raw) > 0 {
-			_ = json.Unmarshal(raw, &ru.Value)
+			_ = json.Unmarshal(raw, &val)
 		}
-		c.EligibilityRules = append(c.EligibilityRules, ru)
+		switch kind {
+		case "RULE":
+			if ruleType != nil {
+				c.EligibilityRules = append(c.EligibilityRules, EligibilityRule{Type: *ruleType, Value: val})
+			}
+		case "TIER":
+			if tierOrder != nil {
+				c.GrantTiers = append(c.GrantTiers, GrantTier{Order: *tierOrder, Value: val})
+			}
+		}
 	}
-	// pgx REPORTS THIS ONE HERE, NOT AT Query. A denied SELECT surfaces when the rows are drained rather
-	// than when the statement is sent, so wrapping only the Query return left the real condition unwrapped —
-	// and the operator saw "no current configuration for this package", which reads as a missing package
-	// rather than a refusal to load one it cannot read in full.
-	if err := rules.Err(); err != nil {
-		return PackageCurrent{}, wrapIfDenied(err)
-	}
+	// pgx reports a denied read when the rows are DRAINED rather than when the statement is sent, so this
+	// return is classified too. Wrapping only the Query error is what made a permission problem surface to
+	// the operator as "no current configuration for this package".
+	return c, wrapIfDenied(rows.Err())
+}
 
-	tiers, err := r.db.Query(ctx,
-		`SELECT tier_order, COALESCE(grant_value,'{}'::jsonb) FROM iam_v2.package_grant_tiers
-		  WHERE package_revision_id=$1 ORDER BY tier_order`, c.RevisionID)
-	if err != nil {
-		return PackageCurrent{}, wrapIfDenied(err)
-	}
-	defer tiers.Close()
-	for tiers.Next() {
-		var t GrantTier
-		var raw []byte
-		if err := tiers.Scan(&t.Order, &raw); err != nil {
-			return PackageCurrent{}, wrapIfDenied(err)
-		}
-		if len(raw) > 0 {
-			_ = json.Unmarshal(raw, &t.Value)
-		}
-		c.GrantTiers = append(c.GrantTiers, t)
-	}
-	return c, wrapIfDenied(tiers.Err())
+// packageConditionsSQL calls the scoped reader. It is a function so commerce_admin_privilege_test.go can
+// assert that loading a package's conditions references neither protected table by name.
+func packageConditionsSQL() string {
+	return `SELECT kind, rule_type, tier_order, value
+	          FROM iam_v2.p2_package_current_conditions($1::uuid, $2::uuid, $3::uuid)`
 }
 
 // ErrPackageConditionsUnreadable means this runtime role cannot read a package's eligibility rules or grant

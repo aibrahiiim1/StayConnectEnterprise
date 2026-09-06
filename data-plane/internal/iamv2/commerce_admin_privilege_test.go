@@ -99,3 +99,38 @@ func TestWrapIfDenied(t *testing.T) {
 		t.Fatal("a plain error was misclassified")
 	}
 }
+
+// LOADING A PACKAGE'S CONDITIONS MUST GO THROUGH THE SCOPED READER, NOT THE TABLES.
+//
+// Package Edit needs the current eligibility rules and grant tiers before it can republish, and svc_edged
+// holds INSERT on both tables and SELECT on neither. Reading them directly is what produced the 500 on the
+// list and, once that was fixed, a misleading "no current configuration" on Edit. The conditions now come
+// from iam_v2.p2_package_current_conditions, and this asserts the path never regresses to the tables.
+func TestPackageConditionsAreReadThroughTheScopedReader(t *testing.T) {
+	sql := withoutSQLComments(packageConditionsSQL())
+	for _, table := range deniedToEdged {
+		if strings.Contains(sql, table) {
+			t.Fatalf("the conditions read references iam_v2.%s directly; svc_edged holds no SELECT on it and "+
+				"the whole statement fails under the real runtime role", table)
+		}
+	}
+	if !strings.Contains(sql, "p2_package_current_conditions") {
+		t.Fatal("the conditions read no longer goes through the scoped reader")
+	}
+}
+
+// THE SCOPE IS THE FUNCTION'S, NOT THE CALLER'S. Three arguments — tenant, site, package — and deliberately
+// no revision argument: the current revision is resolved inside the function, so no argument exists that
+// could reach a historical one.
+func TestScopedReaderTakesTenantSiteAndPackageOnly(t *testing.T) {
+	sql := withoutSQLComments(packageConditionsSQL())
+	for _, arg := range []string{"$1::uuid", "$2::uuid", "$3::uuid"} {
+		if !strings.Contains(sql, arg) {
+			t.Fatalf("the scoped reader is not passed %s; tenant, site and package are all required for scoping", arg)
+		}
+	}
+	if strings.Contains(sql, "$4") {
+		t.Fatal("the scoped reader gained a fourth argument — a revision parameter would put scoping back in " +
+			"the caller's hands and allow a historical revision to be requested")
+	}
+}

@@ -131,6 +131,23 @@ GRANT EXECUTE ON FUNCTION iam_v2.p3_cfg_secs(jsonb, text, int) TO svc_edged;
 -- prevent.
 GRANT EXECUTE ON FUNCTION iam_v2.request_full_resync(uuid, uuid, uuid, text) TO svc_edged;
 
+-- iam_v2.p2_package_current_conditions is how Hotel Admin reads a package's eligibility rules and grant
+-- tiers WITHOUT svc_edged holding SELECT on iam_v2.package_eligibility_rules or iam_v2.package_grant_tiers.
+--
+-- Those two tables are granted INSERT to svc_edged and SELECT to svc_scd: the admin service composes a
+-- package, the guest-auth service evaluates it. Package EDIT needs to read the current specification back,
+-- because publishing replaces the whole spec and a form loaded without the existing rules and tiers would
+-- silently drop them -- leaving a package with no grant tier offered to nobody. The function answers exactly
+-- that question for the CURRENT revision of ONE non-system package in the caller's own tenant and site, and
+-- returns no row ids, no tenant/site and no guest, Stay, reservation, folio, payment or PMS data.
+--
+-- EXECUTE only. It is STABLE and cannot mutate anything, and granting it does NOT grant the underlying
+-- tables -- which the migration asserts explicitly before it commits.
+--
+-- This line exists for the same reason as the one above it: a migration-only GRANT is wiped by the next
+-- reconcile, and package Edit would work until then and afterwards start refusing to open.
+GRANT EXECUTE ON FUNCTION iam_v2.p2_package_current_conditions(uuid, uuid, uuid) TO svc_edged;
+
 -- NOT granted, on purpose, and each absence is load-bearing:
 --   * DELETE on anything -- no admin read surface deletes;
 --   * any privilege on iam_v2 vouchers, guest credentials or session secrets;
