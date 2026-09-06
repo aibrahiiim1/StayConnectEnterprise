@@ -29,6 +29,9 @@ import {
   formatSpeed, formatData, formatDuration, formatDevices, mbpsToKbps, gbToBytes,
   durationToSeconds, DEVICE_LIMIT_POLICIES, TIME_ACCOUNTING_MODES,
 } from "@/lib/units";
+import {
+  stalePackagesFor, repinPayload, repinOutcomeMessage, type PackageCurrentDTO,
+} from "@/lib/repin";
 
 type PlanSummary = {
   plan_id: string; code: string; enabled: boolean;
@@ -47,14 +50,6 @@ type PackageRef = {
   service_plan_id?: string | null; service_plan_revision_id?: string | null;
 };
 type RevisionInfo = { revision_id: string; revision_no: number; is_current: boolean; label?: string };
-type PackageCurrentDTO = {
-  code: string;
-  display?: Record<string, unknown> | null;
-  duration_policy?: Record<string, unknown> | null;
-  eligibility_rules?: { type?: string; Type?: string; value?: Record<string, unknown>; Value?: Record<string, unknown> }[] | null;
-  grant_tiers?: { order?: number; Order?: number; value?: Record<string, unknown>; Value?: Record<string, unknown> }[] | null;
-  visible_from?: string | null; visible_until?: string | null;
-};
 
 export default function ServicePlansPage() {
   // The capability being OFF is not an error the operator can act on, so it gets its own state rather than a
@@ -73,7 +68,15 @@ export default function ServicePlansPage() {
   // specific revision, and that is what keeps a guest's terms stable. So after saving, the operator is asked
   // which packages should use the new settings for FUTURE guests. Nothing is repinned unless they say so,
   // and no existing Entitlement changes either way.
-  const [repin, setRepin] = useState<{ planRevisionID: string; planLabel: string; packages: PackageRef[]; chosen: Record<string, boolean> } | null>(null);
+  //
+  // The same step is reachable on its own from the plan row, because declining it once must not be a life
+  // sentence. A package left behind stays behind until somebody moves it, and the only other way to be
+  // offered this prompt was to publish ANOTHER plan revision — an immutable record created purely to see a
+  // button. `standing` only changes the wording; both routes publish exactly the same thing.
+  const [repin, setRepin] = useState<{
+    planRevisionID: string; planLabel: string; packages: PackageRef[];
+    chosen: Record<string, boolean>; standing: boolean;
+  } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -125,8 +128,13 @@ export default function ServicePlansPage() {
         speed_allocation: str("speed_allocation") || "PER_DEVICE",
       });
       el.reset(); setShowNew(false);
-      const affected = prefill
-        ? packages.filter((k) => k.active && k.service_plan_id === prefill.plan_id)
+      // Which packages are now behind is the same question as on the plan row, so it is the same answer:
+      // active packages of this plan not already pinned to what was just published.
+      const affected = prefill && res?.current_revision_id
+        ? stalePackagesFor(
+            { plan_id: prefill.plan_id, code: prefill.code, current_revision_id: res.current_revision_id },
+            packages,
+          )
         : [];
       if (affected.length > 0 && res?.current_revision_id) {
         setRepin({
@@ -134,6 +142,7 @@ export default function ServicePlansPage() {
           planLabel: prefill?.name || prefill?.code || "this plan",
           packages: affected,
           chosen: Object.fromEntries(affected.map((k) => [k.package_id, false])),
+          standing: false,
         });
       } else {
         setNotice("Changes saved. Existing guest access is unchanged; the new settings apply to future grants.");
@@ -143,9 +152,28 @@ export default function ServicePlansPage() {
     finally { setBusy(false); }
   }
 
-  // applyRepin republishes ONLY the chosen packages, each pinned to the new plan revision. Every package is
-  // republished from its own CURRENT configuration, so nothing but the plan pin changes — the eligibility
-  // rules and grant tiers it already had are carried across rather than dropped.
+  // startRepin opens the same prompt from a plan row, for packages that are ALREADY behind. It offers the
+  // plan's existing current revision — it does not publish a plan revision, so the plan's history is untouched
+  // and nothing at all happens until the operator ticks a package and applies.
+  function startRepin(p: PlanSummary) {
+    const stale = stalePackagesFor(p, packages);
+    if (stale.length === 0) return;
+    setNotice(null); setErr(null);
+    setRepin({
+      planRevisionID: p.current_revision_id,
+      planLabel: p.name || p.code,
+      packages: stale,
+      chosen: Object.fromEntries(stale.map((k) => [k.package_id, false])),
+      standing: true,
+    });
+  }
+
+  // applyRepin republishes ONLY the chosen packages, each pinned to the plan revision the prompt was opened
+  // with. Every package is republished from its own CURRENT configuration, so nothing but the plan pin
+  // changes — the eligibility rules and grant tiers it already had are carried across rather than dropped.
+  //
+  // It posts only to /commercial-packages. No service-plan revision is created on this path, whichever route
+  // opened the prompt.
   async function applyRepin() {
     if (!repin) return;
     const chosen = repin.packages.filter((k) => repin.chosen[k.package_id]);
@@ -153,25 +181,10 @@ export default function ServicePlansPage() {
     try {
       for (const k of chosen) {
         const cur = await api.get<PackageCurrentDTO>(`/commercial-packages/${k.package_id}/current`);
-        await api.post("/commercial-packages", {
-          code: cur.code,
-          service_plan_revision_id: repin.planRevisionID,
-          display: cur.display ?? { name: k.name || k.code },
-          duration_policy: cur.duration_policy ?? { end_mode: "MANUAL_END" },
-          eligibility_rules: (cur.eligibility_rules ?? []).map((r) => ({
-            type: r.type ?? r.Type, value: r.value ?? r.Value ?? {},
-          })),
-          grant_tiers: (cur.grant_tiers ?? []).map((t) => ({
-            order: t.order ?? t.Order ?? 10, grant: t.value ?? t.Value ?? {},
-          })),
-          visible_from: cur.visible_from ?? undefined,
-          visible_until: cur.visible_until ?? undefined,
-        });
+        await api.post("/commercial-packages", repinPayload(cur, repin.planRevisionID, k.name || k.code));
       }
       setRepin(null);
-      setNotice(chosen.length === 0
-        ? "Changes saved. No packages were updated, so guests continue to receive the settings they do now."
-        : `Changes saved. ${chosen.length} package${chosen.length === 1 ? "" : "s"} updated. Existing guest access is unchanged; the new settings apply to future grants.`);
+      setNotice(repinOutcomeMessage(chosen.length));
       await load();
     } catch (e) { setErr((e as Error)?.message ?? "Could not update those packages"); }
     finally { setBusy(false); }
@@ -201,12 +214,24 @@ export default function ServicePlansPage() {
 
       {repin && (
         <Card>
-          <CardHeader><CardTitle>Apply these settings to packages?</CardTitle></CardHeader>
+          <CardHeader><CardTitle data-testid="repin-title">
+            {repin.standing ? "Apply current settings to packages" : "Apply these settings to packages?"}
+          </CardTitle></CardHeader>
           <CardBody>
-            <p className="text-sm text-muted mb-3">
-              The new settings for <strong>{repin.planLabel}</strong> are saved. Choose which packages should
-              give them to <strong>future</strong> guests. Guests already connected are not affected either
-              way, and any package you leave unticked keeps the settings it has now.
+            <p className="text-sm text-muted mb-3" data-testid="repin-intro">
+              {repin.standing ? (
+                <>
+                  These packages still give guests older settings than <strong>{repin.planLabel}</strong> has
+                  now. Choose which of them should use the current settings for <strong>future</strong> guests.
+                </>
+              ) : (
+                <>
+                  The new settings for <strong>{repin.planLabel}</strong> are saved. Choose which packages
+                  should give them to <strong>future</strong> guests.
+                </>
+              )}{" "}
+              Guests already connected are not affected either way, and any package you leave unticked keeps
+              the settings it has now.
             </p>
             <div className="space-y-2 mb-4">
               {repin.packages.map((k) => (
@@ -222,8 +247,11 @@ export default function ServicePlansPage() {
             <div className="flex gap-2">
               <Button onClick={applyRepin} disabled={busy}>{busy ? "Applying…" : "Apply to selected packages"}</Button>
               <Button variant="ghost" disabled={busy} onClick={() => {
+                const wasStanding = repin.standing;
                 setRepin(null);
-                setNotice("Changes saved. No packages were updated, so guests continue to receive the settings they do now.");
+                setNotice(wasStanding
+                  ? "Nothing was changed. Those packages keep the settings they have now."
+                  : "Changes saved. No packages were updated, so guests continue to receive the settings they do now.");
               }}>Not now</Button>
             </div>
           </CardBody>
@@ -360,7 +388,12 @@ export default function ServicePlansPage() {
                   <TH>Plan</TH><TH>Speed</TH><TH>Devices</TH><TH>Time</TH><TH>Data</TH><TH>Used by</TH><TH>Status</TH><TH></TH>
                 </TR></THead>
                 <tbody>
-                  {rows.map((p) => (
+                  {rows.map((p) => {
+                    // Packages of this plan that still give guests older settings. Shown per row rather than
+                    // as one global banner, because the action is per plan and the operator needs to see WHICH
+                    // plan has drifted without opening anything.
+                    const stale = stalePackagesFor(p, packages);
+                    return (
                     <Fragment key={p.plan_id}>
                       <TR>
                         <TD>
@@ -383,9 +416,20 @@ export default function ServicePlansPage() {
                           {(p.used_by_active_packages ?? 0) === 0
                             ? "No active packages"
                             : `${p.used_by_active_packages} active package${p.used_by_active_packages === 1 ? "" : "s"}`}
+                          {stale.length > 0 && (
+                            <div className="text-amber-500 mt-0.5" data-testid={`stale-count-${p.code}`}>
+                              {stale.length} still on older settings
+                            </div>
+                          )}
                         </TD>
                         <TD>{p.enabled ? <Badge tone="ok">Active</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
                         <TD className="whitespace-nowrap">
+                          {writable && stale.length > 0 && (
+                            <Button variant="ghost" data-testid={`apply-current-${p.code}`}
+                              onClick={() => startRepin(p)}>
+                              Apply current settings to packages
+                            </Button>
+                          )}
                           {writable && <Button variant="ghost" onClick={() => startNew(p)}>Edit</Button>}
                           <button className="underline text-muted text-xs ml-2" onClick={() => toggleRevs(p.plan_id)}>
                             History
@@ -412,7 +456,8 @@ export default function ServicePlansPage() {
                         </TR>
                       )}
                     </Fragment>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </Table>
             )}
