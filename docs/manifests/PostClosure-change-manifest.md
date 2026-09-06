@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `135c18a4d4ee1d0e6ddd2e59d0e2e09fdb95a69a`
-- **Provenance (generation HEAD = inventory_head):** `135c18a4d4ee1d0e6ddd2e59d0e2e09fdb95a69a`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `11c6264de83b01c9ae7f780cbbde12427a6fd159`
+- **Provenance (generation HEAD = inventory_head):** `11c6264de83b01c9ae7f780cbbde12427a6fd159`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `close/quota-acceptance-and-migration-runner`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 340
@@ -239,7 +239,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_94a3413e.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs |
+| `exports/chatgpt/phase-evidence/GIT_STAT_eebbbf41.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
@@ -349,7 +349,7 @@
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | An active Session must have kernel state, and kernel state an active Session |
 | `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | A negative test that only works in one operational state is not a test |
 | `tools/tests/generated_block_contradiction/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Reconcile every current-state surface with the T0100 facts |
-| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Re-anchor the two split-brain mutations to the state that now exists |
+| `tools/tests/project_state_validator/run_mutations.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | Re-anchor M55 to the state the quota acceptance produced |
 | `tools/validate-current-state-parity.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | The generated blocks were never wrong; their sources were |
 | `tools/validate-project-state.sh` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | D37: reconcile the onboarding state to verified reality |
 
@@ -575,14 +575,14 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1051 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1054 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 +++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 320514 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136541 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 42998 bytes
- .../chatgpt/phase-evidence/GIT_STAT_94a3413e.txt   |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 320515 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136536 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 42996 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_eebbbf41.txt   |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -653,7 +653,7 @@
  hotel-admin/app/(app)/service-plans/page.tsx       |  314 ++++++
  hotel-admin/app/(app)/setup/enrollment/page.tsx    |  244 ++++-
  hotel-admin/app/(app)/sign-in-methods/page.tsx     |  413 ++++++++
- hotel-admin/app/(app)/stays/page.tsx               |  277 ++++--
+ hotel-admin/app/(app)/stays/page.tsx               |  277 +++--
  hotel-admin/capability-contract.json               |   63 ++
  hotel-admin/components/nav.tsx                     |  171 ++--
  hotel-admin/components/ui/error-banner.tsx         |    7 +-
@@ -695,7 +695,7 @@
  .../tests/project_state_validator/run_mutations.py |   78 +-
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   12 +-
- 340 files changed, 32881 insertions(+), 2489 deletions(-)
+ 340 files changed, 32884 insertions(+), 2489 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -705,6 +705,9 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 11c6264d Delivery: packs
+HISTORICAL: eebbbf41 Re-anchor M55 to the state the quota acceptance produced
+HISTORICAL: 9bd3ccb0 Delivery: change manifest
 HISTORICAL: 135c18a4 Delivery: packs
 HISTORICAL: 94a3413e The selftest must run in live-site mode, which names the database
 HISTORICAL: e9385e91 Delivery: change manifest
