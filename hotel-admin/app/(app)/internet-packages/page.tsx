@@ -1,35 +1,58 @@
 "use client";
 
-// INTERNET PACKAGES — what a guest is offered and can take.
+// INTERNET PACKAGES — what a guest is offered, managed like anything else an administrator manages.
 //
-// This was "Commercial packages", a four-tab screen holding packages, service plans, checkout grace and a
-// quotes/purchases inspector. Three of those are separate jobs done by different people at different times,
-// and burying them as tabs meant an operator looking for "what speed does Gold give" had to know that plans
-// lived inside packages. Service plans and Checkout grace are now their own pages in the same nav section;
-// what remains here is the package itself plus the read-only record of what guests took.
+// The list used to be a code, a status badge and a revision count, so the screen that owns the guest offer
+// could not say what any package GAVE. Finding out meant opening the revision history, reading a service-plan
+// revision id out of it and going to look that up on another page. Changing a speed meant doing that in
+// reverse, by hand, in the right order — and the step everyone forgets is the last one, which is why a
+// correctly published 10/5 Mbps plan revision left guests on 2 Mbps.
 //
-// edged is the authority: its routes return 503 while the capability is off, and the page renders a plain
-// "not switched on" state rather than an error.
+// So: one row per package showing what it actually gives, and Add / Edit / Enable / Disable. The revision
+// chain underneath is unchanged and still immutable — lib/package-save decides which revisions a save needs,
+// and History keeps them visible for audit.
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { api, ApiError, ListResp } from "@/lib/api";
 import { Card, CardBody, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, THead, TR, TH, TD } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Plus, X } from "lucide-react";
-import { PublishPackageForm } from "./publish-form";
-import type { PublishPayload } from "@/lib/commerce-form";
+import { Plus, X, AlertTriangle } from "lucide-react";
+import { PackageForm, type PackageFormInitial, type PackageFormValue } from "./package-form";
+import { decideSave, saveOutcomeMessage, type PlanFields } from "@/lib/package-save";
+import { formatSpeed, formatData, formatDuration, formatDevices } from "@/lib/units";
+import type { EligibilityRuleForm, GrantTierForm, DurationForm } from "@/lib/commerce-form";
 
-type PackageSummary = { package_id: string; code: string; active: boolean; current_revision_id: string; revision_count: number };
-// Only the fields the plan SELECTOR needs; /service-plans owns the full shape.
+type PackageSummary = {
+  package_id: string; code: string; active: boolean;
+  current_revision_id: string; revision_count: number;
+  name?: string | null; price_minor?: number | null; currency?: string | null;
+  package_type?: string | null;
+  eligibility_rule_count: number; grant_tier_count: number;
+  service_plan_id?: string | null; service_plan_revision_id?: string | null;
+  service_plan_code?: string | null; service_plan_revision_no?: number | null;
+  down_kbps?: number | null; up_kbps?: number | null;
+  max_concurrent_devices?: number | null; device_limit_policy?: string | null;
+  time_quota_seconds?: number | null; data_quota_bytes?: number | null;
+  speed_allocation?: string | null;
+  plan_has_newer_revision?: boolean;
+};
 type PlanSummary = {
   plan_id: string; code: string; current_revision_id: string;
-  name?: string | null; down_kbps?: number | null; max_concurrent_devices?: number | null;
+  name?: string | null; used_by_active_packages?: number;
 };
-type RevisionInfo = { revision_id: string; revision_no: number; is_current: boolean; label?: string; price_minor?: number; currency?: string; package_type?: string };
+type PackageCurrent = {
+  package_id: string; code: string; revision_id: string; revision_no: number;
+  service_plan_revision_id: string;
+  display?: Record<string, unknown> | null;
+  duration_policy?: Record<string, unknown> | null;
+  eligibility_rules?: { Type?: string; type?: string; Value?: Record<string, unknown>; value?: Record<string, unknown> }[] | null;
+  grant_tiers?: { Order?: number; order?: number; Value?: Record<string, unknown>; value?: Record<string, unknown> }[] | null;
+  visible_from?: string | null; visible_until?: string | null;
+};
+type RevisionInfo = { revision_id: string; revision_no: number; is_current: boolean; price_minor?: number; currency?: string; package_type?: string };
 type QuoteInspect = { id: string; package_revision_id: string; price_minor: number; currency: string; expires_at: string; consumed_at: string | null };
 type PurchaseInspect = { id: string; package_revision_id: string; state: string; amount_minor: number; currency: string };
 
@@ -41,10 +64,10 @@ function useDisabled() {
     if (e instanceof ApiError && e.status === 503) { setDisabled(true); return true; }
     return false;
   }, []);
-  return { disabled, setDisabled, guard };
+  return { disabled, guard };
 }
 
-export default function CommercialPackagesPage() {
+export default function InternetPackagesPage() {
   const [tab, setTab] = useState<Tab>("packages");
   const [err, setErr] = useState<string | null>(null);
   const { disabled, guard } = useDisabled();
@@ -59,15 +82,14 @@ export default function CommercialPackagesPage() {
       <div>
         <h1 className="text-lg font-semibold">Internet packages</h1>
         <p className="text-sm text-muted mt-1 max-w-2xl">
-          An internet package is what a guest sees and takes on the portal. Each one uses a{" "}
-          <a href="/service-plans" className="underline">service plan</a>, which defines the speed, device
-          count and duration behind it.
+          An internet package is what a guest sees and takes on the portal: how fast it is, how much data and
+          time it includes, and who is offered it.
         </p>
       </div>
       {disabled ? (
         <Card><CardBody>
           <EmptyState title="The internet offering is not switched on for this appliance"
-            hint="Internet packages and service plans become available once this capability is enabled for the site. Contact your StayConnect administrator." />
+            hint="Internet packages become available once this capability is enabled for the site. Contact your StayConnect administrator." />
         </CardBody></Card>
       ) : (
         <>
@@ -93,9 +115,12 @@ type TabProps = { guard: (e: unknown) => boolean; setErr: (s: string | null) => 
 function PackagesTab({ guard, setErr }: TabProps) {
   const [rows, setRows] = useState<PackageSummary[] | null>(null);
   const [plans, setPlans] = useState<PlanSummary[]>([]);
-  const [revs, setRevs] = useState<Record<string, RevisionInfo[]>>({});
-  const [showNew, setShowNew] = useState(false);
+  const [history, setHistory] = useState<Record<string, RevisionInfo[]>>({});
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<PackageFormInitial | null>(null);
+  const [editingID, setEditingID] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -104,83 +129,195 @@ function PackagesTab({ guard, setErr }: TabProps) {
         api.get<ListResp<PlanSummary>>("/commercial-packages/plans"),
       ]);
       setRows(pk.data ?? []); setPlans(pl.data ?? []);
-    } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Failed to load"); }
+    } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not load packages"); }
   }, [guard, setErr]);
   useEffect(() => { load(); }, [load]);
 
-  async function toggleRevs(id: string) {
-    if (revs[id]) { setRevs((r) => { const n = { ...r }; delete n[id]; return n; }); return; }
+  async function toggleHistory(id: string) {
+    if (history[id]) { setHistory((h) => { const n = { ...h }; delete n[id]; return n; }); return; }
     try {
       const r = await api.get<ListResp<RevisionInfo>>(`/commercial-packages/${id}/revisions`);
-      setRevs((s) => ({ ...s, [id]: r.data ?? [] }));
-    } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Failed"); }
+      setHistory((s) => ({ ...s, [id]: r.data ?? [] }));
+    } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not load history"); }
   }
 
-  async function handlePublish(payload: PublishPayload) {
-    setBusy(true); setErr(null);
+  // EDIT loads the CURRENT configuration — including the eligibility rules and grant tiers the form does not
+  // display prominently. Saving republishes all of it, so anything not loaded would be silently dropped.
+  async function startEdit(p: PackageSummary) {
+    setErr(null); setNotice(null);
     try {
-      await api.post("/commercial-packages", payload);
-      setShowNew(false); await load();
-    } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Publish failed"); }
+      const cur = await api.get<PackageCurrent>(`/commercial-packages/${p.package_id}/current`);
+      const plan = plans.find((x) => x.plan_id === p.service_plan_id);
+      setEditingID(p.package_id);
+      setEditing({
+        code: p.code,
+        name: (cur.display?.name as string) ?? p.name ?? p.code,
+        planCode: p.service_plan_code ?? plan?.code ?? "",
+        planRevisionID: cur.service_plan_revision_id,
+        plan: planFieldsOf(p),
+        rules: rulesToForm(cur.eligibility_rules),
+        tiers: tiersToForm(cur.grant_tiers),
+        duration: durationToForm(cur.duration_policy),
+        visibleFrom: toLocalInput(cur.visible_from),
+        visibleUntil: toLocalInput(cur.visible_until),
+        planSharedWith: plan?.used_by_active_packages ?? 0,
+      });
+      setAdding(false);
+    } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not open this package"); }
+  }
+
+  // SAVE. One operator action; lib/package-save decides whether that needs a new service-plan revision as
+  // well as the package revision, and in which order.
+  async function save(v: PackageFormValue) {
+    setBusy(true); setErr(null); setNotice(null);
+    try {
+      let planRevisionID = editing?.planRevisionID ?? "";
+      const decision = decideSave({
+        planCode: editing?.planCode || v.payload.code,
+        pinnedPlanRevisionID: planRevisionID,
+        currentPlan: editing?.plan ?? {},
+        nextPlan: v.plan,
+      });
+      if (!editing || decision.plan) {
+        // Adding a package, or changing what it gives: publish the service-plan revision first and pin to it.
+        const planCode = decision.plan?.code || v.payload.code;
+        const res = await api.post<{ current_revision_id: string }>("/commercial-packages/plans", {
+          code: planCode,
+          name: v.payload.display.name,
+          ...v.plan,
+        });
+        planRevisionID = res.current_revision_id;
+      } else {
+        planRevisionID = decision.reusePlanRevisionID ?? planRevisionID;
+      }
+      await api.post("/commercial-packages", { ...v.payload, service_plan_revision_id: planRevisionID });
+      setAdding(false); setEditing(null); setEditingID(null);
+      setNotice(saveOutcomeMessage(decision));
+      await load();
+    } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not save this package"); }
     finally { setBusy(false); }
   }
 
   async function toggleActive(p: PackageSummary) {
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setNotice(null);
     try {
       if (p.active) {
-        const reason = window.prompt("Why are you withdrawing this package? Guests will stop seeing it immediately.");
+        const reason = window.prompt("Why are you disabling this package? Guests will stop being offered it immediately.");
         if (!reason) { setBusy(false); return; }
-        const password = window.prompt("Confirm your password to deactivate");
+        const password = window.prompt("Confirm your password to disable");
         if (!password) { setBusy(false); return; }
         await api.post(`/commercial-packages/${p.package_id}/active`, { active: false, reason, password });
       } else {
         await api.post(`/commercial-packages/${p.package_id}/active`, { active: true });
       }
       await load();
-    } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Update failed"); }
+    } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not update this package"); }
     finally { setBusy(false); }
   }
 
   return (
     <div className="space-y-3">
+      {notice && (
+        <div className="text-sm rounded-md border border-border bg-panel2 px-3 py-2" role="status">{notice}</div>
+      )}
       <div className="flex justify-end">
-        <Button onClick={() => setShowNew((v) => !v)}>{showNew ? <X size={16} /> : <Plus size={16} />}{showNew ? "Cancel" : "Publish package"}</Button>
+        <Button onClick={() => { setAdding((v) => !v); setEditing(null); setEditingID(null); }}>
+          {adding ? <X size={16} /> : <Plus size={16} />}{adding ? "Cancel" : "Add package"}
+        </Button>
       </div>
-      {showNew && (
+
+      {adding && (
         <Card>
-          <CardHeader><CardTitle>New package</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Add package</CardTitle></CardHeader>
+          <CardBody><PackageForm mode="add" busy={busy} onSave={save} onCancel={() => setAdding(false)} /></CardBody>
+        </Card>
+      )}
+
+      {editing && (
+        <Card>
+          <CardHeader><CardTitle>Edit {editing.name || editing.code}</CardTitle></CardHeader>
           <CardBody>
-            <PublishPackageForm plans={plans} busy={busy} onPublish={handlePublish} />
+            <PackageForm mode="edit" initial={editing} busy={busy} onSave={save}
+              onCancel={() => { setEditing(null); setEditingID(null); }} />
           </CardBody>
         </Card>
       )}
+
       <Card><CardBody>
-        {rows && rows.length === 0 ? (
+        {rows === null ? (
+          <div className="text-sm text-muted py-6 text-center">Loading packages…</div>
+        ) : rows.length === 0 ? (
           <EmptyState title="No internet packages yet"
-            hint="Until a package exists, a verified guest has nothing to be given and cannot get online. Create a service plan first, then a package that uses it." />
+            hint="Until a package exists, a verified guest has nothing to be given and cannot get online." />
         ) : (
           <Table>
-            <THead><TR><TH>Package</TH><TH>Status</TH><TH>Revisions</TH><TH></TH></TR></THead>
+            <THead><TR>
+              <TH>Package</TH><TH>Status</TH><TH>Price</TH><TH>Speed</TH><TH>Data</TH><TH>Time</TH>
+              <TH>Devices</TH><TH>Offered to</TH><TH></TH>
+            </TR></THead>
             <tbody>
-              {(rows ?? []).map((p) => (
+              {rows.map((p) => (
                 <Fragment key={p.package_id}>
-                  <TR key={p.package_id}>
-                    <TD className="font-medium">{p.code}</TD>
-                    <TD>{p.active ? <Badge tone="ok">Offered to guests</Badge> : <Badge tone="default">Not offered</Badge>}</TD>
-                    <TD><button className="underline text-muted" onClick={() => toggleRevs(p.package_id)}>{p.revision_count} revision{p.revision_count === 1 ? "" : "s"} ▾</button></TD>
-                    <TD><Button variant="ghost" disabled={busy} onClick={() => toggleActive(p)}>{p.active ? "Stop offering" : "Start offering"}</Button></TD>
+                  <TR>
+                    <TD>
+                      <div className="font-medium">{p.name || p.code}</div>
+                      {/* Only when it adds something. A package with no separate display name printed its
+                          code twice, one line under the other. */}
+                      {p.name && p.name !== p.code && <div className="text-xs text-muted">{p.code}</div>}
+                    </TD>
+                    <TD>{p.active ? <Badge tone="ok">Active</Badge> : <Badge tone="default">Disabled</Badge>}</TD>
+                    <TD>{p.price_minor ? `${p.price_minor} ${p.currency ?? ""}` : "Free"}</TD>
+                    <TD>
+                      <div>{formatSpeed(p.down_kbps)} down{p.speed_allocation === "SHARED" ? " (shared)" : ""}</div>
+                      <div className="text-xs text-muted">{formatSpeed(p.up_kbps)} up</div>
+                    </TD>
+                    <TD>{formatData(p.data_quota_bytes)}</TD>
+                    <TD>{formatDuration(p.time_quota_seconds)}</TD>
+                    <TD>{formatDevices(p.max_concurrent_devices)}</TD>
+                    <TD className="text-xs text-muted">
+                      {p.eligibility_rule_count === 0
+                        ? "Everyone who signs in"
+                        : `${p.eligibility_rule_count} condition${p.eligibility_rule_count === 1 ? "" : "s"}`}
+                    </TD>
+                    <TD className="whitespace-nowrap">
+                      <Button variant="ghost" disabled={busy} onClick={() => startEdit(p)}>Edit</Button>
+                      <Button variant="ghost" disabled={busy} onClick={() => toggleActive(p)}>
+                        {p.active ? "Disable" : "Enable"}
+                      </Button>
+                      <button className="underline text-muted text-xs ml-2" onClick={() => toggleHistory(p.package_id)}>
+                        History
+                      </button>
+                    </TD>
                   </TR>
-                  {revs[p.package_id] && (
-                    <TR key={p.package_id + "-revs"}>
-                      <TD className="text-xs text-muted" >History</TD>
-                      <TD className="text-xs text-muted" ></TD>
-                      <TD className="text-xs" >
-                        {revs[p.package_id].map((r) => (
-                          <div key={r.revision_id}>#{r.revision_no} {r.is_current ? <Badge tone="info">current · immutable</Badge> : <span className="text-muted">immutable</span>} {r.package_type} {r.price_minor === 0 ? "free" : `${r.price_minor} ${r.currency}`}</div>
-                        ))}
+                  {/* The one internal fact worth surfacing: the plan this package uses has moved on and this
+                      package has not. That is precisely the state that silently produced a 2 Mbps guest. */}
+                  {p.plan_has_newer_revision && (
+                    <TR>
+                      <TD colSpan={9} className="text-xs">
+                        <span className="inline-flex items-center gap-1 text-amber-500">
+                          <AlertTriangle size={13} />
+                          The <strong>{p.service_plan_code}</strong> service plan has newer settings that this
+                          package does not use. Open Edit and save to bring it up to date.
+                        </span>
                       </TD>
-                      <TD></TD>
+                    </TR>
+                  )}
+                  {history[p.package_id] && (
+                    <TR>
+                      <TD colSpan={9} className="text-xs bg-panel2/40">
+                        <div className="font-medium mb-1">History</div>
+                        {history[p.package_id].map((r) => (
+                          <div key={r.revision_id} className="py-0.5">
+                            #{r.revision_no}{" "}
+                            {r.is_current ? <Badge tone="info">in force</Badge> : <span className="text-muted">superseded</span>}{" "}
+                            {r.price_minor === 0 ? "free" : `${r.price_minor} ${r.currency ?? ""}`}
+                          </div>
+                        ))}
+                        <p className="text-muted mt-1">
+                          Each saved change is kept permanently. A guest keeps the terms that applied
+                          when they connected.
+                        </p>
+                      </TD>
                     </TR>
                   )}
                 </Fragment>
@@ -189,14 +326,86 @@ function PackagesTab({ guard, setErr }: TabProps) {
           </Table>
         )}
       </CardBody></Card>
+      {editingID && null}
     </div>
   );
 }
 
-// PlansTab and GraceTab lived here and are gone, not commented out. Service plans are now /service-plans
-// (which also shows what each plan grants, which the tab could not) and checkout grace is /checkout-grace.
-// Leaving them behind a hidden tab would have recreated the duplicate-surface problem this pass exists to
-// remove — two places to publish a plan, differing in what they can express.
+// ---------------------------------------------------------------------------------------------------------
+// shaping the API's current-configuration into the form's shape
+// ---------------------------------------------------------------------------------------------------------
+
+function planFieldsOf(p: PackageSummary): PlanFields {
+  return {
+    down_kbps: p.down_kbps ?? null,
+    up_kbps: p.up_kbps ?? null,
+    max_concurrent_devices: p.max_concurrent_devices ?? null,
+    device_limit_policy: p.device_limit_policy ?? null,
+    time_quota_seconds: p.time_quota_seconds ?? null,
+    data_quota_bytes: p.data_quota_bytes ?? null,
+    speed_allocation: p.speed_allocation ?? null,
+    idle_timeout_seconds: null,
+    max_continuous_session_seconds: null,
+    time_accounting_mode: "VALIDITY_WINDOW",
+  };
+}
+
+// Go marshals these structs with capitalised keys (the fields carry no json tags), so both spellings are
+// accepted rather than assuming one. Getting this wrong would drop rules on save.
+const pick = <T,>(a: T | undefined, b: T | undefined): T | undefined => (a !== undefined ? a : b);
+
+function rulesToForm(rules: PackageCurrent["eligibility_rules"]): EligibilityRuleForm[] {
+  const out: EligibilityRuleForm[] = [];
+  for (const r of rules ?? []) {
+    const type = pick(r.type, r.Type);
+    const value = (pick(r.value, r.Value) ?? {}) as Record<string, unknown>;
+    const list = (k: string) => (Array.isArray(value[k]) ? (value[k] as string[]).join(", ") : "");
+    switch (type) {
+      case "AUTH_METHOD": out.push({ type: "AUTH_METHOD", methods: list("methods") }); break;
+      case "SUBJECT_KIND": out.push({ type: "SUBJECT_KIND", kinds: list("kinds") }); break;
+      case "DATE_WINDOW": out.push({
+        type: "DATE_WINDOW",
+        from: toLocalInput(value.from as string | undefined) ?? "",
+        until: toLocalInput(value.until as string | undefined) ?? "",
+      }); break;
+      case "PRIOR_PURCHASE": out.push({
+        type: "PRIOR_PURCHASE", mode: value.requires_prior ? "requires_prior" : "forbids_prior",
+      }); break;
+      case "SITE_NETWORK": out.push({ type: "SITE_NETWORK", guest_network_ids: list("guest_network_ids") }); break;
+      default: break; // an unknown/unsupported type is not re-emitted; the form only offers supported ones
+    }
+  }
+  return out;
+}
+
+function tiersToForm(tiers: PackageCurrent["grant_tiers"]): GrantTierForm[] {
+  const out: GrantTierForm[] = [];
+  for (const t of tiers ?? []) {
+    const value = (pick(t.value, t.Value) ?? {}) as Record<string, unknown>;
+    out.push({
+      order: pick(t.order, t.Order) ?? 10,
+      down_kbps: (value.down_kbps as number | undefined) ?? "",
+      up_kbps: (value.up_kbps as number | undefined) ?? "",
+    });
+  }
+  return out;
+}
+
+function durationToForm(d: PackageCurrent["duration_policy"]): DurationForm {
+  const mode = (d?.end_mode as string) ?? "MANUAL_END";
+  if (mode === "VALIDITY_WINDOW") return { end_mode: "VALIDITY_WINDOW", duration_seconds: Number(d?.duration_seconds ?? 0) };
+  if (mode === "FIXED_AT") return { end_mode: "FIXED_AT", ends_at: toLocalInput(d?.ends_at as string | undefined) ?? "" };
+  return { end_mode: "MANUAL_END" };
+}
+
+// datetime-local wants "YYYY-MM-DDTHH:mm" in local time; the API speaks RFC3339.
+function toLocalInput(iso?: string | null): string | undefined {
+  if (!iso) return undefined;
+  const t = new Date(iso);
+  if (!Number.isFinite(t.getTime())) return undefined;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
+}
 
 function InspectionTab({ guard, setErr }: TabProps) {
   const [quotes, setQuotes] = useState<QuoteInspect[]>([]);

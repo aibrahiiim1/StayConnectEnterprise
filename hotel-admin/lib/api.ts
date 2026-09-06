@@ -843,6 +843,9 @@ export type PmsInterface = {
   current_revision_id?: string; current_revision_no?: number | null;
   revision_count: number; published: boolean;
   secret_generation?: number | null; secret_rotated_at?: string | null;
+  // Projections of the published Revision, so the list can say what the interface points at without the
+  // operator opening its revision history.
+  endpoint?: string | null; source_timezone?: string | null; financial_base_currency?: string | null;
 };
 
 export type PmsRevision = {

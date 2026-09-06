@@ -37,6 +37,9 @@ func (s *server) commercialPackagesRoutes() http.Handler {
 	r.Get("/purchases", s.listCommercePurchases)
 	// package-scoped
 	r.Get("/{id}/revisions", s.listCommercialPackageRevisions)
+	// The CURRENT configuration, for the Edit form to load. Read-only: saving still goes through the ordinary
+	// publish route, which creates a new immutable revision.
+	r.Get("/{id}/current", s.getCommercialPackageCurrent)
 	r.Post("/{id}/active", s.setCommercialPackageActive)
 	return r
 }
@@ -456,4 +459,19 @@ func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Reque
 	}
 	s.audit(r, action, "commercial_package", id, nil)
 	writeJSON(w, http.StatusOK, map[string]any{"package_id": id, "active": in.Active})
+}
+
+func (s *server) getCommercialPackageCurrent(w http.ResponseWriter, r *http.Request) {
+	cur, disabled, err := s.commerce.GetPackageCurrent(r.Context(), s.tenantID, s.siteID, chi.URLParam(r, "id"))
+	if err != nil {
+		// A package with no current revision, or an id that is not this site's, is a NOT FOUND answer rather
+		// than a server fault: the operator asked for something that is not there.
+		jsonErr(w, http.StatusNotFound, "not_found", "no current configuration for this package")
+		return
+	}
+	if disabled {
+		jsonErr(w, http.StatusServiceUnavailable, "phase2_disabled", "commercial packages are not enabled")
+		return
+	}
+	writeJSON(w, http.StatusOK, cur)
 }

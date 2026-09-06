@@ -52,6 +52,7 @@ type CommerceAdminRepository interface {
 	WithTx(ctx context.Context, fn func(CommerceAdminTx) error) error
 	ListPackages(ctx context.Context, tenantID, siteID string) ([]PackageSummary, error)
 	ListPackageRevisions(ctx context.Context, tenantID, siteID, packageID string) ([]RevisionInfo, error)
+	GetPackageCurrent(ctx context.Context, tenantID, siteID, packageID string) (PackageCurrent, error)
 	ListPlans(ctx context.Context, tenantID, siteID string) ([]PlanSummary, error)
 	ListPlanRevisions(ctx context.Context, tenantID, siteID, planID string) ([]RevisionInfo, error)
 	GetGraceConfig(ctx context.Context, tenantID, siteID string) (GraceConfig, error)
@@ -118,6 +119,15 @@ type PlanSummary struct {
 	DataQuotaBytes       *int64  `json:"data_quota_bytes,omitempty"`
 	TimeAccountingMode   *string `json:"time_accounting_mode,omitempty"`
 	SpeedAllocation      *string `json:"speed_allocation,omitempty"`
+
+	// UsedByActivePackages is how many ACTIVE packages currently offer this plan — i.e. how many guest-facing
+	// offers change meaning if a new revision is published and those packages are repinned to it.
+	//
+	// It exists because "edit this plan" is a question the operator cannot answer safely without it. A plan is
+	// a reusable object; publishing a revision is harmless on its own, but repinning packages to it changes
+	// what future guests are given. Showing the count next to the plan is what turns that from a surprise
+	// into a decision.
+	UsedByActivePackages int `json:"used_by_active_packages"`
 }
 
 // GraceConfig is the read/write shape for site_checkout_grace_config.
@@ -189,6 +199,70 @@ type PackageSummary struct {
 	Active            bool   `json:"active"`
 	CurrentRevisionID string `json:"current_revision_id"`
 	RevisionCount     int    `json:"revision_count"`
+
+	// WHAT THE PACKAGE ACTUALLY OFFERS, from its current revision and the plan revision that revision pins.
+	//
+	// The summary used to be a code, a flag, a UUID and a revision count — so the package list, the screen an
+	// operator manages the guest offer from, could not say what any package GAVE. Answering "what speed is
+	// Gold?" meant opening the revision history, reading a plan revision id out of it, and going to find that
+	// plan. These fields come from the CURRENT revision, so they are what a guest granted right now would
+	// receive, not the newest values drafted anywhere.
+	//
+	// They are read-only projections. The revision chain underneath is untouched and still immutable; this
+	// only stops the operator having to reconstruct it by hand.
+	Name           *string `json:"name,omitempty"`
+	PriceMinor     *int64  `json:"price_minor,omitempty"`
+	Currency       *string `json:"currency,omitempty"`
+	PackageType    *string `json:"package_type,omitempty"`
+	VisibleFrom    *string `json:"visible_from,omitempty"`
+	VisibleUntil   *string `json:"visible_until,omitempty"`
+	EligibilityNum int     `json:"eligibility_rule_count"`
+	GrantTierNum   int     `json:"grant_tier_count"`
+
+	// The pinned service plan, named rather than referenced. ServicePlanRevisionID is still carried because
+	// republishing a package unchanged has to re-pin exactly the revision it already had.
+	ServicePlanID         *string `json:"service_plan_id,omitempty"`
+	ServicePlanRevisionID *string `json:"service_plan_revision_id,omitempty"`
+	ServicePlanCode       *string `json:"service_plan_code,omitempty"`
+	ServicePlanRevisionNo *int    `json:"service_plan_revision_no,omitempty"`
+	DownKbps              *int    `json:"down_kbps,omitempty"`
+	UpKbps                *int    `json:"up_kbps,omitempty"`
+	MaxConcurrentDevices  *int    `json:"max_concurrent_devices,omitempty"`
+	DeviceLimitPolicy     *string `json:"device_limit_policy,omitempty"`
+	TimeQuotaSeconds      *int64  `json:"time_quota_seconds,omitempty"`
+	DataQuotaBytes        *int64  `json:"data_quota_bytes,omitempty"`
+	SpeedAllocation       *string `json:"speed_allocation,omitempty"`
+
+	// PlanHasNewerRevision says the pinned plan revision is no longer the plan's current one. This is exactly
+	// the condition that made a new 10/5 Mbps plan revision produce a 2 Mbps guest: publishing a plan revision
+	// does not move any package onto it, and nothing on the package screen said so.
+	PlanHasNewerRevision bool `json:"plan_has_newer_revision"`
+}
+
+// PackageCurrent is the CURRENT configuration of one package, in the shape the authoring form needs to load
+// it and hand it straight back on save.
+//
+// IT EXISTS SO THAT SAVING CANNOT SILENTLY DROP THINGS. Publishing a revision replaces the whole spec, so a
+// form that only knew the fields it displayed would republish without the eligibility rules and grant tiers
+// it never loaded — quietly changing who the package is offered to. That is not a theoretical risk: a package
+// whose only grant tier disappeared would stop being offered to anyone.
+type PackageCurrent struct {
+	PackageID             string            `json:"package_id"`
+	Code                  string            `json:"code"`
+	Active                bool              `json:"active"`
+	RevisionID            string            `json:"revision_id"`
+	RevisionNo            int               `json:"revision_no"`
+	ServicePlanRevisionID string            `json:"service_plan_revision_id"`
+	PackageType           string            `json:"package_type"`
+	PriceMinor            int64             `json:"price_minor"`
+	Currency              string            `json:"currency"`
+	SettlementMethods     []string          `json:"settlement_methods"`
+	Display               map[string]any    `json:"display"`
+	DurationPolicy        map[string]any    `json:"duration_policy"`
+	EligibilityRules      []EligibilityRule `json:"eligibility_rules"`
+	GrantTiers            []GrantTier       `json:"grant_tiers"`
+	VisibleFrom           *string           `json:"visible_from,omitempty"`
+	VisibleUntil          *string           `json:"visible_until,omitempty"`
 }
 
 // PackagePublishSpec is a request to publish a new immutable free package revision.
@@ -220,6 +294,18 @@ func (a *CommerceAdmin) ListPackages(ctx context.Context, tenantID, siteID strin
 	out, err := a.repo.ListPackages(ctx, tenantID, siteID)
 	if err != nil {
 		return nil, false, &Error{Code: ErrRepo, Msg: "list packages"}
+	}
+	return out, false, nil
+}
+
+// GetPackageCurrent returns one package's current configuration for the authoring form to load.
+func (a *CommerceAdmin) GetPackageCurrent(ctx context.Context, tenantID, siteID, packageID string) (PackageCurrent, bool, error) {
+	if !a.cfg.AdminOn() {
+		return PackageCurrent{}, true, nil // disabled
+	}
+	out, err := a.repo.GetPackageCurrent(ctx, tenantID, siteID, packageID)
+	if err != nil {
+		return PackageCurrent{}, false, &Error{Code: ErrRepo, Msg: "read package"}
 	}
 	return out, false, nil
 }

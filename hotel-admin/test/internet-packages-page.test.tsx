@@ -35,17 +35,31 @@ describe("InternetPackagesPage", () => {
     expect(screen.queryByText("Service plans")).toBeNull();
   });
 
-  it("lists packages and populates the plan selector (no raw UUID entry)", async () => {
+  it("shows what each package GIVES, with no revision id or plan picker in sight", async () => {
+    // The old list was a code, a status and a revision count, so this screen could not answer "what speed is
+    // this?". It now answers it directly, and Add asks for the speed rather than for a plan revision.
     g.mockImplementation((path: string) => {
-      if (path === "/commercial-packages") return Promise.resolve(list([{ package_id: "pk1", code: "FREEWIFI", active: true, current_revision_id: "r1", revision_count: 2 }]));
+      if (path === "/commercial-packages") return Promise.resolve(list([{
+        package_id: "pk1", code: "FREEWIFI", name: "Free WiFi", active: true,
+        current_revision_id: "r1", revision_count: 2,
+        eligibility_rule_count: 0, grant_tier_count: 1,
+        service_plan_id: "p1", service_plan_revision_id: "rev-gold", service_plan_code: "GOLD",
+        down_kbps: 10000, up_kbps: 5000, data_quota_bytes: 100000000, max_concurrent_devices: 4,
+        speed_allocation: "PER_DEVICE", price_minor: 0,
+      }]));
       if (path === "/commercial-packages/plans") return Promise.resolve(list([{ plan_id: "p1", code: "GOLD", enabled: true, current_revision_id: "rev-gold", revision_count: 1 }]));
       return Promise.resolve(list([]));
     });
     render(<InternetPackagesPage />);
-    expect(await screen.findByText("FREEWIFI")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /publish package/i }));
-    const select = (await screen.findByLabelText("service-plan")) as HTMLSelectElement;
-    expect(Array.from(select.options).map((o) => o.value)).toContain("rev-gold");
+    expect(await screen.findByText("Free WiFi")).toBeInTheDocument();
+    expect(screen.getByText(/10 Mbps down/i)).toBeInTheDocument();
+    expect(screen.getByText(/Everyone who signs in/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /add package/i }));
+    // Speed is asked for directly; there is no service-plan revision selector any more.
+    expect(await screen.findByLabelText("down-mbps")).toBeInTheDocument();
+    expect(screen.queryByLabelText("service-plan")).toBeNull();
+    expect(document.body.innerHTML).not.toContain("rev-gold");
   });
 
   it("renders package revision history with current/immutable status", async () => {
@@ -60,8 +74,8 @@ describe("InternetPackagesPage", () => {
     });
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByText(/2 revisions/));
-    expect(await screen.findByText(/current · immutable/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/^History$/));
+    expect(await screen.findByText(/in force/i)).toBeInTheDocument();
     expect(screen.getByText(/#1/)).toBeInTheDocument();
   });
 
@@ -74,7 +88,7 @@ describe("InternetPackagesPage", () => {
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValueOnce("bad package").mockReturnValueOnce("secretpw");
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByRole("button", { name: /stop offering/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^disable$/i }));
     await waitFor(() => expect(p).toHaveBeenCalled());
     expect(promptSpy).toHaveBeenCalledTimes(2); // reason then password
     expect(p).toHaveBeenCalledWith("/commercial-packages/pk1/active", { active: false, reason: "bad package", password: "secretpw" });
@@ -88,7 +102,7 @@ describe("InternetPackagesPage", () => {
     vi.spyOn(window, "prompt").mockReturnValue(null); // cancel
     render(<InternetPackagesPage />);
     await screen.findByText("FREEWIFI");
-    fireEvent.click(screen.getByRole("button", { name: /stop offering/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^disable$/i }));
     await new Promise((r) => setTimeout(r, 10));
     expect(p).not.toHaveBeenCalled();
   });
@@ -112,7 +126,7 @@ describe("InternetPackagesPage", () => {
   // The grace tab was removed from this page: checkout grace is its own screen (/checkout-grace),
   // covered by the checkout-grace component tests. Asserting it here would pin a duplicate surface.
 
-  it("a failed publish shows an error and does not falsely report success", async () => {
+  it("a failed save shows an error and does not falsely report success", async () => {
     g.mockImplementation((path: string) => {
       if (path === "/commercial-packages") return Promise.resolve(list([]));
       if (path === "/commercial-packages/plans") return Promise.resolve(list([{ plan_id: "p1", code: "GOLD", enabled: true, current_revision_id: "rev-gold", revision_count: 1 }]));
@@ -120,12 +134,11 @@ describe("InternetPackagesPage", () => {
     });
     p.mockRejectedValue(new ApiError(400, { error: "invalid_grant_tier" }));
     render(<InternetPackagesPage />);
-    fireEvent.click(await screen.findByRole("button", { name: /publish package/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /add package/i }));
     fireEvent.change(await screen.findByLabelText("code"), { target: { value: "X" } });
-    fireEvent.change(screen.getByLabelText("service-plan"), { target: { value: "rev-gold" } });
-    fireEvent.click(screen.getByRole("button", { name: /^publish$/i }));
-    // error surfaces; the publish form stays open (no false "success"/navigation)
+    fireEvent.click(screen.getByRole("button", { name: /^add package$/i, hidden: false }));
     expect(await screen.findByText(/invalid_grant_tier/i)).toBeInTheDocument();
-    expect(screen.getByLabelText("service-plan")).toBeInTheDocument();
+    // the form stays open rather than reporting a success that did not happen
+    expect(screen.getByLabelText("code")).toBeInTheDocument();
   });
 });

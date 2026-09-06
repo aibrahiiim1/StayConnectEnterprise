@@ -32,8 +32,22 @@ func (r *PgCommerceAdminRepository) WithTx(ctx context.Context, fn func(Commerce
 func (r *PgCommerceAdminRepository) ListPackages(ctx context.Context, tenantID, siteID string) ([]PackageSummary, error) {
 	rows, err := r.db.Query(ctx,
 		`SELECT p.id::text, p.code, p.active, COALESCE(p.current_revision_id::text,''),
-		        (SELECT count(*) FROM iam_v2.internet_package_revisions r WHERE r.package_id = p.id)
+		        (SELECT count(*) FROM iam_v2.internet_package_revisions r WHERE r.package_id = p.id),
+		        cur.display->>'name', cur.price_minor, cur.currency, cur.package_type,
+		        cur.visible_from::text, cur.visible_until::text,
+		        (SELECT count(*) FROM iam_v2.package_eligibility_rules er WHERE er.package_revision_id = cur.id),
+		        (SELECT count(*) FROM iam_v2.package_grant_tiers gt WHERE gt.package_revision_id = cur.id),
+		        spr.service_plan_id::text, spr.id::text, sp.code, spr.revision_no,
+		        spr.down_kbps, spr.up_kbps, spr.max_concurrent_devices, spr.device_limit_policy,
+		        spr.time_quota_seconds, spr.data_quota_bytes, spr.speed_allocation,
+		        -- THE FACT THAT COST A GUEST 2 Mbps: the plan has moved on and this package has not.
+		        COALESCE(sp.current_revision_id <> spr.id, false)
 		   FROM iam_v2.internet_packages p
+		   -- LEFT JOINs throughout: a package with no published revision, or one whose plan revision has been
+		   -- removed, is a real state and must still list rather than vanish from the operator's catalogue.
+		   LEFT JOIN iam_v2.internet_package_revisions cur ON cur.id = p.current_revision_id
+		   LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = cur.service_plan_revision_id
+		   LEFT JOIN iam_v2.service_plans sp ON sp.id = spr.service_plan_id
 		  WHERE p.tenant_id=$1 AND p.site_id=$2
 		    -- D32: the system grace package is HIDDEN from the operator catalogue. Excluded here rather than
 		    -- filtered in the handler so every caller of the catalogue gets the same answer -- a listing that
@@ -48,7 +62,13 @@ func (r *PgCommerceAdminRepository) ListPackages(ctx context.Context, tenantID, 
 	var out []PackageSummary
 	for rows.Next() {
 		var s PackageSummary
-		if err := rows.Scan(&s.PackageID, &s.Code, &s.Active, &s.CurrentRevisionID, &s.RevisionCount); err != nil {
+		if err := rows.Scan(&s.PackageID, &s.Code, &s.Active, &s.CurrentRevisionID, &s.RevisionCount,
+			&s.Name, &s.PriceMinor, &s.Currency, &s.PackageType, &s.VisibleFrom, &s.VisibleUntil,
+			&s.EligibilityNum, &s.GrantTierNum,
+			&s.ServicePlanID, &s.ServicePlanRevisionID, &s.ServicePlanCode, &s.ServicePlanRevisionNo,
+			&s.DownKbps, &s.UpKbps, &s.MaxConcurrentDevices, &s.DeviceLimitPolicy,
+			&s.TimeQuotaSeconds, &s.DataQuotaBytes, &s.SpeedAllocation,
+			&s.PlanHasNewerRevision); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -90,7 +110,16 @@ func (r *PgCommerceAdminRepository) ListPlans(ctx context.Context, tenantID, sit
 		        cur.name, cur.down_kbps, cur.up_kbps, cur.max_concurrent_devices, cur.device_limit_policy,
 		        cur.idle_timeout_seconds, cur.max_continuous_session_seconds,
 		        cur.time_quota_seconds, cur.data_quota_bytes, cur.time_accounting_mode,
-		        cur.speed_allocation
+		        cur.speed_allocation,
+		        -- HOW MANY GUEST-FACING OFFERS THIS PLAN CURRENTLY DECIDES. Counted over ACTIVE packages whose
+		        -- CURRENT revision pins any revision of this plan, because those are the ones whose meaning
+		        -- would change if the operator repinned them to a new revision.
+		        (SELECT count(*) FROM iam_v2.internet_packages ip
+		           JOIN iam_v2.internet_package_revisions ipr ON ipr.id = ip.current_revision_id
+		           JOIN iam_v2.service_plan_revisions psr ON psr.id = ipr.service_plan_revision_id
+		          WHERE ip.tenant_id = p.tenant_id AND ip.site_id = p.site_id
+		            AND ip.is_system = false AND ip.active IS TRUE
+		            AND psr.service_plan_id = p.id)
 		   FROM iam_v2.service_plans p
 		   -- LEFT JOIN: a plan with no published revision yet is a real state, and it must still list.
 		   LEFT JOIN iam_v2.service_plan_revisions cur ON cur.id = p.current_revision_id
@@ -114,7 +143,7 @@ func (r *PgCommerceAdminRepository) ListPlans(ctx context.Context, tenantID, sit
 		if err := rows.Scan(&s.PlanID, &s.Code, &s.Enabled, &s.CurrentRevisionID, &s.RevisionCount,
 			&s.Name, &s.DownKbps, &s.UpKbps, &s.MaxConcurrentDevices, &s.DeviceLimitPolicy,
 			&s.IdleTimeoutSeconds, &s.MaxSessionSeconds, &s.TimeQuotaSeconds, &s.DataQuotaBytes,
-			&s.TimeAccountingMode, &s.SpeedAllocation); err != nil {
+			&s.TimeAccountingMode, &s.SpeedAllocation, &s.UsedByActivePackages); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -717,4 +746,76 @@ func (t *pgGraceProvisionTx) DefaultPlanRevisionForGrace(ctx context.Context, te
 		return "", err
 	}
 	return *rev, nil
+}
+
+// GetPackageCurrent reads one package's CURRENT revision in full — including the eligibility rules and grant
+// tiers, which the authoring form must hand back unchanged when it saves.
+//
+// Read-only. It resolves nothing and decides nothing; the revision chain is untouched.
+func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenantID, siteID, packageID string) (PackageCurrent, error) {
+	var c PackageCurrent
+	var display, duration []byte
+	err := r.db.QueryRow(ctx,
+		`SELECT p.id::text, p.code, p.active, cur.id::text, cur.revision_no,
+		        cur.service_plan_revision_id::text, cur.package_type, cur.price_minor,
+		        COALESCE(cur.currency,''), COALESCE(cur.settlement_methods, ARRAY[]::text[]),
+		        COALESCE(cur.display,'{}'::jsonb), COALESCE(cur.duration_policy,'{}'::jsonb),
+		        cur.visible_from::text, cur.visible_until::text
+		   FROM iam_v2.internet_packages p
+		   JOIN iam_v2.internet_package_revisions cur ON cur.id = p.current_revision_id
+		  WHERE p.tenant_id=$1 AND p.site_id=$2 AND p.id=$3 AND p.is_system = false`,
+		tenantID, siteID, packageID).Scan(&c.PackageID, &c.Code, &c.Active, &c.RevisionID, &c.RevisionNo,
+		&c.ServicePlanRevisionID, &c.PackageType, &c.PriceMinor, &c.Currency, &c.SettlementMethods,
+		&display, &duration, &c.VisibleFrom, &c.VisibleUntil)
+	if err != nil {
+		return PackageCurrent{}, err
+	}
+	if len(display) > 0 {
+		_ = json.Unmarshal(display, &c.Display)
+	}
+	if len(duration) > 0 {
+		_ = json.Unmarshal(duration, &c.DurationPolicy)
+	}
+
+	rules, err := r.db.Query(ctx,
+		`SELECT rule_type, COALESCE(rule_value,'{}'::jsonb) FROM iam_v2.package_eligibility_rules
+		  WHERE package_revision_id=$1 ORDER BY rule_type`, c.RevisionID)
+	if err != nil {
+		return PackageCurrent{}, err
+	}
+	defer rules.Close()
+	for rules.Next() {
+		var ru EligibilityRule
+		var raw []byte
+		if err := rules.Scan(&ru.Type, &raw); err != nil {
+			return PackageCurrent{}, err
+		}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &ru.Value)
+		}
+		c.EligibilityRules = append(c.EligibilityRules, ru)
+	}
+	if err := rules.Err(); err != nil {
+		return PackageCurrent{}, err
+	}
+
+	tiers, err := r.db.Query(ctx,
+		`SELECT tier_order, COALESCE(grant_value,'{}'::jsonb) FROM iam_v2.package_grant_tiers
+		  WHERE package_revision_id=$1 ORDER BY tier_order`, c.RevisionID)
+	if err != nil {
+		return PackageCurrent{}, err
+	}
+	defer tiers.Close()
+	for tiers.Next() {
+		var t GrantTier
+		var raw []byte
+		if err := tiers.Scan(&t.Order, &raw); err != nil {
+			return PackageCurrent{}, err
+		}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &t.Value)
+		}
+		c.GrantTiers = append(c.GrantTiers, t)
+	}
+	return c, tiers.Err()
 }
