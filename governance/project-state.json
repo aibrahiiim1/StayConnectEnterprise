@@ -888,9 +888,11 @@
       "edged": "798965b2b03b77b41f351ab3dc086a331cfafd4d26ce2e3bf60e789ed3ba6e9c",
       "netd": "3ac29653df1842f902cea7885b245c560757aae55105c04707ac2532ab081e5f"
     },
-    "entitlement_usage_invariant": "HOLDS FOR EVERY ENTITLEMENT, including terminated ones (migration 0062). Attribution follows the half-open binding interval PLUS the closing instant itself when no other binding for that session covers it. That extra arm is reachable only at a terminal boundary, where the crossing sample would otherwise belong to nothing; at a Phase-5 rebinding the successor binding always covers the instant, so the arm cannot fire and no sample is counted twice. The half-open bound is unchanged and iam_v2.p6_data_crossing - the enforcement authority - was not touched."
+    "entitlement_usage_invariant": "HOLDS FOR EVERY ENTITLEMENT, including terminated ones (migration 0062). Attribution follows the half-open binding interval PLUS the closing instant itself when no other binding for that session covers it. That extra arm is reachable only at a terminal boundary, where the crossing sample would otherwise belong to nothing; at a Phase-5 rebinding the successor binding always covers the instant, so the arm cannot fire and no sample is counted twice. The half-open bound is unchanged and iam_v2.p6_data_crossing - the enforcement authority - was not touched.",
+    "schema_head": "0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it",
+    "schema_head_note": "Applied to stayconnect_site 2026-09-06 through scripts/edge-migrate.sh as iam_v2_owner with --target-kind live-site - the first migration on this appliance to go through the authoritative runner, on the factory-clean path closed in T0118."
   },
-  "latest_transition_id": "T0118",
+  "latest_transition_id": "T0119",
   "phase3_delivery_evidence": {
     "protocol": "The numeric Software/Governance run ids, the artifact id and the artifact integrity SHA-256 are DELIBERATELY not recorded in any committed document. They describe the CI run that the delivery commit itself triggers, so a committed artifact could only ever cite a previous round's values -- which is the exact staleness the Zero-Stale rule exists to prevent. They live in the PR #6 body, which is written after the run completes and is independently verified. The Zero-Stale validator enforces this protocol by failing if any numeric run or artifact id appears in the Final Report.",
     "verified_by": "independent download of the artifact from the successful same-HEAD Software run, checked against MANIFEST.sha256 outside CI"
