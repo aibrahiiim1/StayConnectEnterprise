@@ -464,8 +464,20 @@ func (s *server) setCommercialPackageActive(w http.ResponseWriter, r *http.Reque
 func (s *server) getCommercialPackageCurrent(w http.ResponseWriter, r *http.Request) {
 	cur, disabled, err := s.commerce.GetPackageCurrent(r.Context(), s.tenantID, s.siteID, chi.URLParam(r, "id"))
 	if err != nil {
-		// A package with no current revision, or an id that is not this site's, is a NOT FOUND answer rather
-		// than a server fault: the operator asked for something that is not there.
+		// SAYING WHICH FAILURE IT IS, because the two need different actions from the operator.
+		//
+		// If this service cannot read the package's conditions, editing must not be offered at all: saving
+		// republishes the whole package, so a form loaded without the eligibility rules and speed steps would
+		// quietly drop them - and a package left with no grant tier is offered to nobody. Answering
+		// "not found" here would invite exactly that, by looking like a missing package rather than a
+		// refusal to risk one.
+		if errors.Is(err, iamv2.ErrPackageConditionsUnreadable) {
+			jsonErr(w, http.StatusConflict, "conditions_unreadable",
+				"This package cannot be edited here yet: its eligibility conditions and speed steps are not "+
+					"readable by this service, and saving without them would change who the package is "+
+					"offered to. Ask your StayConnect administrator to grant read access.")
+			return
+		}
 		jsonErr(w, http.StatusNotFound, "not_found", "no current configuration for this package")
 		return
 	}

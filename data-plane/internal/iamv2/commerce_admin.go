@@ -210,14 +210,15 @@ type PackageSummary struct {
 	//
 	// They are read-only projections. The revision chain underneath is untouched and still immutable; this
 	// only stops the operator having to reconstruct it by hand.
-	Name           *string `json:"name,omitempty"`
-	PriceMinor     *int64  `json:"price_minor,omitempty"`
-	Currency       *string `json:"currency,omitempty"`
-	PackageType    *string `json:"package_type,omitempty"`
-	VisibleFrom    *string `json:"visible_from,omitempty"`
-	VisibleUntil   *string `json:"visible_until,omitempty"`
-	EligibilityNum int     `json:"eligibility_rule_count"`
-	GrantTierNum   int     `json:"grant_tier_count"`
+	Name         *string `json:"name,omitempty"`
+	PriceMinor   *int64  `json:"price_minor,omitempty"`
+	Currency     *string `json:"currency,omitempty"`
+	PackageType  *string `json:"package_type,omitempty"`
+	VisibleFrom  *string `json:"visible_from,omitempty"`
+	VisibleUntil *string `json:"visible_until,omitempty"`
+	// The eligibility-rule and grant-tier counts are deliberately ABSENT. svc_edged authors both tables and
+	// holds no SELECT on either, so reading them here is what turned this list into a 500 under the real
+	// runtime role. See the note in ListPackages.
 
 	// The pinned service plan, named rather than referenced. ServicePlanRevisionID is still carried because
 	// republishing a package unchanged has to re-pin exactly the revision it already had.
@@ -305,6 +306,11 @@ func (a *CommerceAdmin) GetPackageCurrent(ctx context.Context, tenantID, siteID,
 	}
 	out, err := a.repo.GetPackageCurrent(ctx, tenantID, siteID, packageID)
 	if err != nil {
+		// The unreadable-conditions case is passed through unchanged: it is the one failure the caller must
+		// tell apart, because it means "do not offer to edit this", not "something broke".
+		if errors.Is(err, ErrPackageConditionsUnreadable) {
+			return PackageCurrent{}, false, err
+		}
 		return PackageCurrent{}, false, &Error{Code: ErrRepo, Msg: "read package"}
 	}
 	return out, false, nil

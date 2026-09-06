@@ -3,6 +3,9 @@ package iamv2
 import (
 	"context"
 	"encoding/json"
+	"errors"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,30 +34,7 @@ func (r *PgCommerceAdminRepository) WithTx(ctx context.Context, fn func(Commerce
 
 func (r *PgCommerceAdminRepository) ListPackages(ctx context.Context, tenantID, siteID string) ([]PackageSummary, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT p.id::text, p.code, p.active, COALESCE(p.current_revision_id::text,''),
-		        (SELECT count(*) FROM iam_v2.internet_package_revisions r WHERE r.package_id = p.id),
-		        cur.display->>'name', cur.price_minor, cur.currency, cur.package_type,
-		        cur.visible_from::text, cur.visible_until::text,
-		        (SELECT count(*) FROM iam_v2.package_eligibility_rules er WHERE er.package_revision_id = cur.id),
-		        (SELECT count(*) FROM iam_v2.package_grant_tiers gt WHERE gt.package_revision_id = cur.id),
-		        spr.service_plan_id::text, spr.id::text, sp.code, spr.revision_no,
-		        spr.down_kbps, spr.up_kbps, spr.max_concurrent_devices, spr.device_limit_policy,
-		        spr.time_quota_seconds, spr.data_quota_bytes, spr.speed_allocation,
-		        -- THE FACT THAT COST A GUEST 2 Mbps: the plan has moved on and this package has not.
-		        COALESCE(sp.current_revision_id <> spr.id, false)
-		   FROM iam_v2.internet_packages p
-		   -- LEFT JOINs throughout: a package with no published revision, or one whose plan revision has been
-		   -- removed, is a real state and must still list rather than vanish from the operator's catalogue.
-		   LEFT JOIN iam_v2.internet_package_revisions cur ON cur.id = p.current_revision_id
-		   LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = cur.service_plan_revision_id
-		   LEFT JOIN iam_v2.service_plans sp ON sp.id = spr.service_plan_id
-		  WHERE p.tenant_id=$1 AND p.site_id=$2
-		    -- D32: the system grace package is HIDDEN from the operator catalogue. Excluded here rather than
-		    -- filtered in the handler so every caller of the catalogue gets the same answer -- a listing that
-		    -- showed it would invite an operator to edit or deactivate a package whose existence, type and
-		    -- provenance are not theirs to change, and deactivating it would silently disable checkout grace.
-		    AND p.is_system = false
-		  ORDER BY p.code`, tenantID, siteID)
+		packagesListSQL(), tenantID, siteID)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +44,6 @@ func (r *PgCommerceAdminRepository) ListPackages(ctx context.Context, tenantID, 
 		var s PackageSummary
 		if err := rows.Scan(&s.PackageID, &s.Code, &s.Active, &s.CurrentRevisionID, &s.RevisionCount,
 			&s.Name, &s.PriceMinor, &s.Currency, &s.PackageType, &s.VisibleFrom, &s.VisibleUntil,
-			&s.EligibilityNum, &s.GrantTierNum,
 			&s.ServicePlanID, &s.ServicePlanRevisionID, &s.ServicePlanCode, &s.ServicePlanRevisionNo,
 			&s.DownKbps, &s.UpKbps, &s.MaxConcurrentDevices, &s.DeviceLimitPolicy,
 			&s.TimeQuotaSeconds, &s.DataQuotaBytes, &s.SpeedAllocation,
@@ -777,11 +756,17 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 		_ = json.Unmarshal(duration, &c.DurationPolicy)
 	}
 
+	// THESE TWO READS ARE THE ONES svc_edged IS NOT PERMITTED. It authors both tables through the controlled
+	// writers and holds no SELECT on either, so this fails under the real runtime role while passing as a
+	// superuser in tests. The failure is surfaced as its own condition rather than as "not found", because
+	// what the operator must be told is that editing cannot load the package's conditions -- and therefore
+	// must not save, since republishing without them would silently change who the package is offered to and
+	// could leave it offered to nobody.
 	rules, err := r.db.Query(ctx,
 		`SELECT rule_type, COALESCE(rule_value,'{}'::jsonb) FROM iam_v2.package_eligibility_rules
 		  WHERE package_revision_id=$1 ORDER BY rule_type`, c.RevisionID)
 	if err != nil {
-		return PackageCurrent{}, err
+		return PackageCurrent{}, wrapIfDenied(err)
 	}
 	defer rules.Close()
 	for rules.Next() {
@@ -803,7 +788,7 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 		`SELECT tier_order, COALESCE(grant_value,'{}'::jsonb) FROM iam_v2.package_grant_tiers
 		  WHERE package_revision_id=$1 ORDER BY tier_order`, c.RevisionID)
 	if err != nil {
-		return PackageCurrent{}, err
+		return PackageCurrent{}, wrapIfDenied(err)
 	}
 	defer tiers.Close()
 	for tiers.Next() {
@@ -818,4 +803,61 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 		c.GrantTiers = append(c.GrantTiers, t)
 	}
 	return c, tiers.Err()
+}
+
+// ErrPackageConditionsUnreadable means this runtime role cannot read a package's eligibility rules or grant
+// tiers. Editing must refuse rather than load a partial configuration it would then republish.
+var ErrPackageConditionsUnreadable = errors.New("iamv2: package conditions are not readable by this role")
+
+// wrapIfDenied turns PostgreSQL's insufficient_privilege (42501) into that condition and leaves every other
+// failure exactly as it was.
+func wrapIfDenied(err error) error {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "42501" {
+		return ErrPackageConditionsUnreadable
+	}
+	return err
+}
+
+// packagesListSQL is the operator package-catalogue query, named so a test can assert what it reads.
+//
+// IT IS A FUNCTION RATHER THAN A LITERAL BECAUSE OF WHAT IT MUST NOT CONTAIN. edged holds no SELECT on
+// iam_v2.package_eligibility_rules or iam_v2.package_grant_tiers; referencing either makes the whole
+// statement fail under the real runtime role, which is how the operator's package screen returned 500 in
+// PRE-LIVE while every superuser test passed. commerce_admin_privilege_test.go enforces that.
+func packagesListSQL() string {
+	return `SELECT p.id::text, p.code, p.active, COALESCE(p.current_revision_id::text,''),
+		        (SELECT count(*) FROM iam_v2.internet_package_revisions r WHERE r.package_id = p.id),
+		        cur.display->>'name', cur.price_minor, cur.currency, cur.package_type,
+		        cur.visible_from::text, cur.visible_until::text,
+		        -- THE ELIGIBILITY AND TIER COUNTS ARE NOT READ HERE, AND THAT IS A PRIVILEGE FACT.
+		        --
+		        -- svc_edged AUTHORS iam_v2.package_eligibility_rules and iam_v2.package_grant_tiers through the
+		        -- controlled SECURITY DEFINER writers, but holds no SELECT on either table. Counting them from
+		        -- this list made the whole query fail with "permission denied for table
+		        -- package_eligibility_rules" under the real runtime role -- a 500 on the operator's package
+		        -- screen -- while every test passed as a superuser.
+		        --
+		        -- A privilege-guarded CASE does not help: PostgreSQL checks table permissions for every
+		        -- relation the statement references, whichever branch would run. The only correct fix without
+		        -- a grant is not to reference them, so the summary they fed is absent until svc_edged is
+		        -- given SELECT on both.
+		        spr.service_plan_id::text, spr.id::text, sp.code, spr.revision_no,
+		        spr.down_kbps, spr.up_kbps, spr.max_concurrent_devices, spr.device_limit_policy,
+		        spr.time_quota_seconds, spr.data_quota_bytes, spr.speed_allocation,
+		        -- THE FACT THAT COST A GUEST 2 Mbps: the plan has moved on and this package has not.
+		        COALESCE(sp.current_revision_id <> spr.id, false)
+		   FROM iam_v2.internet_packages p
+		   -- LEFT JOINs throughout: a package with no published revision, or one whose plan revision has been
+		   -- removed, is a real state and must still list rather than vanish from the operator's catalogue.
+		   LEFT JOIN iam_v2.internet_package_revisions cur ON cur.id = p.current_revision_id
+		   LEFT JOIN iam_v2.service_plan_revisions spr ON spr.id = cur.service_plan_revision_id
+		   LEFT JOIN iam_v2.service_plans sp ON sp.id = spr.service_plan_id
+		  WHERE p.tenant_id=$1 AND p.site_id=$2
+		    -- D32: the system grace package is HIDDEN from the operator catalogue. Excluded here rather than
+		    -- filtered in the handler so every caller of the catalogue gets the same answer -- a listing that
+		    -- showed it would invite an operator to edit or deactivate a package whose existence, type and
+		    -- provenance are not theirs to change, and deactivating it would silently disable checkout grace.
+		    AND p.is_system = false
+		  ORDER BY p.code`
 }

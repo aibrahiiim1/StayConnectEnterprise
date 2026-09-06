@@ -30,7 +30,8 @@ type PackageSummary = {
   current_revision_id: string; revision_count: number;
   name?: string | null; price_minor?: number | null; currency?: string | null;
   package_type?: string | null;
-  eligibility_rule_count: number; grant_tier_count: number;
+  // The eligibility-rule and grant-tier counts are NOT returned: edged authors those tables and holds no
+  // SELECT on them, so reading them made this whole list 500 under the real runtime role.
   service_plan_id?: string | null; service_plan_revision_id?: string | null;
   service_plan_code?: string | null; service_plan_revision_no?: number | null;
   down_kbps?: number | null; up_kbps?: number | null;
@@ -253,7 +254,7 @@ function PackagesTab({ guard, setErr }: TabProps) {
           <Table>
             <THead><TR>
               <TH>Package</TH><TH>Status</TH><TH>Price</TH><TH>Speed</TH><TH>Data</TH><TH>Time</TH>
-              <TH>Devices</TH><TH>Offered to</TH><TH></TH>
+              <TH>Devices</TH><TH></TH>
             </TR></THead>
             <tbody>
               {rows.map((p) => (
@@ -274,11 +275,6 @@ function PackagesTab({ guard, setErr }: TabProps) {
                     <TD>{formatData(p.data_quota_bytes)}</TD>
                     <TD>{formatDuration(p.time_quota_seconds)}</TD>
                     <TD>{formatDevices(p.max_concurrent_devices)}</TD>
-                    <TD className="text-xs text-muted">
-                      {p.eligibility_rule_count === 0
-                        ? "Everyone who signs in"
-                        : `${p.eligibility_rule_count} condition${p.eligibility_rule_count === 1 ? "" : "s"}`}
-                    </TD>
                     <TD className="whitespace-nowrap">
                       <Button variant="ghost" disabled={busy} onClick={() => startEdit(p)}>Edit</Button>
                       <Button variant="ghost" disabled={busy} onClick={() => toggleActive(p)}>
@@ -293,7 +289,7 @@ function PackagesTab({ guard, setErr }: TabProps) {
                       package has not. That is precisely the state that silently produced a 2 Mbps guest. */}
                   {p.plan_has_newer_revision && (
                     <TR>
-                      <TD colSpan={9} className="text-xs">
+                      <TD colSpan={8} className="text-xs">
                         <span className="inline-flex items-center gap-1 text-amber-500">
                           <AlertTriangle size={13} />
                           The <strong>{p.service_plan_code}</strong> service plan has newer settings that this
@@ -304,7 +300,7 @@ function PackagesTab({ guard, setErr }: TabProps) {
                   )}
                   {history[p.package_id] && (
                     <TR>
-                      <TD colSpan={9} className="text-xs bg-panel2/40">
+                      <TD colSpan={8} className="text-xs bg-panel2/40">
                         <div className="font-medium mb-1">History</div>
                         {history[p.package_id].map((r) => (
                           <div key={r.revision_id} className="py-0.5">

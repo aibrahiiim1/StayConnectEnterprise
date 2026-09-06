@@ -42,7 +42,6 @@ describe("InternetPackagesPage", () => {
       if (path === "/commercial-packages") return Promise.resolve(list([{
         package_id: "pk1", code: "FREEWIFI", name: "Free WiFi", active: true,
         current_revision_id: "r1", revision_count: 2,
-        eligibility_rule_count: 0, grant_tier_count: 1,
         service_plan_id: "p1", service_plan_revision_id: "rev-gold", service_plan_code: "GOLD",
         down_kbps: 10000, up_kbps: 5000, data_quota_bytes: 100000000, max_concurrent_devices: 4,
         speed_allocation: "PER_DEVICE", price_minor: 0,
@@ -53,7 +52,8 @@ describe("InternetPackagesPage", () => {
     render(<InternetPackagesPage />);
     expect(await screen.findByText("Free WiFi")).toBeInTheDocument();
     expect(screen.getByText(/10 Mbps down/i)).toBeInTheDocument();
-    expect(screen.getByText(/Everyone who signs in/i)).toBeInTheDocument();
+    // The eligibility summary is deliberately absent: edged cannot read the rules table it writes, and
+    // reading it here is what made this list 500 in PRE-LIVE.
 
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
     // Speed is asked for directly; there is no service-plan revision selector any more.
