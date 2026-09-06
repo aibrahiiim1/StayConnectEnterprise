@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `4604178e391e6d28fcb49d252ae78c074d770cc0`
-- **Provenance (generation HEAD = inventory_head):** `4604178e391e6d28fcb49d252ae78c074d770cc0`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `135c18a4d4ee1d0e6ddd2e59d0e2e09fdb95a69a`
+- **Provenance (generation HEAD = inventory_head):** `135c18a4d4ee1d0e6ddd2e59d0e2e09fdb95a69a`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `close/quota-acceptance-and-migration-runner`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 340
@@ -239,7 +239,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_38f99ffc.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs |
+| `exports/chatgpt/phase-evidence/GIT_STAT_94a3413e.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
@@ -335,7 +335,7 @@
 | `hotel-admin/test/synchronization-card.test.tsx` | CREATED | `A` | runtime | RUNTIME | rollback REMOVES it | Close the Room-auth materialization race at both issue and grant |
 | `iam_v2_scratch/phase3_0010_lifecycle.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | The 0010 lifecycle gate asserted the rule that broke factory-clean installs |
 | `scripts/ci/phase4-dark-check.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Phase 4 stays dark, and the contract says so out loud |
-| `scripts/edge-migrate-selftest.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | The migration runner could not run on a factory-clean appliance |
+| `scripts/edge-migrate-selftest.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | The selftest must run in live-site mode, which names the database |
 | `scripts/edge-migrate.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | The migration runner could not run on a factory-clean appliance |
 | `scripts/factory-clean-baseline-verify.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Fix four faults found on the first Fresh Production bring-up |
 | `scripts/gatep-grant-survives-reconcile.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Close the whole Room Login chain against the real service role |
@@ -392,7 +392,7 @@
  .../cmd/edged/resources_phase3_full_resync.go      |  135 +++
  .../edged/resources_phase3_interface_authoring.go  |  208 +++-
  .../cmd/edged/resources_phase3_interfaces.go       |  375 ++++++-
- data-plane/cmd/edged/resources_providers.go        |  386 +-------
+ data-plane/cmd/edged/resources_providers.go        |  386 +------
  data-plane/cmd/edged/resources_site.go             |  124 ++-
  data-plane/cmd/keybootstrap/main.go                |   16 +-
  data-plane/cmd/netd/kea.go                         |   40 +
@@ -575,14 +575,14 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1046 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1051 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 +++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 320515 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136551 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 42997 bytes
- .../chatgpt/phase-evidence/GIT_STAT_38f99ffc.txt   |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 320514 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136541 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 42998 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_94a3413e.txt   |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -647,7 +647,7 @@
  hotel-admin/app/(app)/internet-packages/page.tsx   |  249 +++++
  .../publish-form.tsx                               |   78 +-
  hotel-admin/app/(app)/network/system/page.tsx      |    2 +-
- hotel-admin/app/(app)/pms-interfaces/page.tsx      |  331 +++++--
+ hotel-admin/app/(app)/pms-interfaces/page.tsx      |  331 ++++--
  .../(app)/pms-interfaces/synchronization-card.tsx  |  248 +++++
  hotel-admin/app/(app)/pms-providers/page.tsx       |  329 ------
  hotel-admin/app/(app)/service-plans/page.tsx       |  314 ++++++
@@ -673,12 +673,12 @@
  hotel-admin/test/nav.test.tsx                      |   18 +-
  hotel-admin/test/phase3-interface-pages.test.tsx   |   77 +-
  hotel-admin/test/phase3-pages.test.tsx             |   32 +-
- hotel-admin/test/pms-availability.test.ts          |  221 +++++
+ hotel-admin/test/pms-availability.test.ts          |  221 ++++
  hotel-admin/test/publish-form.test.tsx             |    8 +-
  hotel-admin/test/synchronization-card.test.tsx     |  275 +++++
  iam_v2_scratch/phase3_0010_lifecycle.sh            |   19 +-
  scripts/ci/phase4-dark-check.sh                    |   11 +-
- scripts/edge-migrate-selftest.sh                   |  223 +++++
+ scripts/edge-migrate-selftest.sh                   |  230 +++++
  scripts/edge-migrate.sh                            |   51 +-
  scripts/factory-clean-baseline-verify.sh           |   27 +
  scripts/gatep-grant-survives-reconcile.sh          |  160 +++
@@ -695,7 +695,7 @@
  .../tests/project_state_validator/run_mutations.py |   78 +-
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   12 +-
- 340 files changed, 32869 insertions(+), 2489 deletions(-)
+ 340 files changed, 32881 insertions(+), 2489 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -705,6 +705,9 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 135c18a4 Delivery: packs
+HISTORICAL: 94a3413e The selftest must run in live-site mode, which names the database
+HISTORICAL: e9385e91 Delivery: change manifest
 HISTORICAL: 4604178e Delivery: packs
 HISTORICAL: 38f99ffc The 0010 lifecycle gate asserted the rule that broke factory-clean installs
 HISTORICAL: 94844789 Delivery: change manifest
