@@ -5,7 +5,7 @@
 --
 -- This is the CURRENT schema and only the current schema. A new Production appliance is built from
 -- this file and never constructs the superseded guest-IAM tables, not even transiently. Existing
--- installations continue to upgrade through data-plane/migrations/0001..0052, which still create
+-- installations continue to upgrade through data-plane/migrations/0001..0061, which still create
 -- those tables and then remove them, because that is what actually happened to them.
 --
 -- OWNERSHIP is deliberately absent: it belongs to Gate-P (deploy/gatep/gatep-iam-ownership.sql), and
@@ -946,6 +946,35 @@ BEGIN
   UPDATE iam_v2.sessions SET bytes_up = bytes_up + v_up, bytes_down = bytes_down + v_down
    WHERE id = p_session;
 
+  -- THE ENTITLEMENT'S OWN AGGREGATE, ADVANCED IN THE SAME TRANSACTION AS THE RECORD THAT JUSTIFIES IT.
+  --
+  -- THIS IS THE LINE THAT WAS MISSING. Every other total was maintained here -- the accounting record, the
+  -- session's bytes, the checkpoint -- and the ENTITLEMENT's was not, so consumed_data_bytes sat at 0 and
+  -- usage_version at 0 for the entire life of every entitlement this appliance has ever granted. The column
+  -- is not decorative: the approved contract says the allowance belongs to the Entitlement, and this is where
+  -- the Entitlement records what it has spent. A guest who had used 35 MB of a 100 MB package was recorded,
+  -- authoritatively, as having used nothing.
+  --
+  -- (The OTHER ingestion function, iam_v2.ingest_sample from the iam_base engine, always did this. It is not
+  -- the one acctd calls. Two implementations of one operation, and the running daemon used the one that
+  -- forgot -- which is also why no test caught it: every quota test writes accounting_records directly.)
+  --
+  -- ATTRIBUTED TO v_ent, NOT TO THE SESSION'S CURRENT ENTITLEMENT. v_ent came from p3_entitlement_at at THIS
+  -- sample's own time, so a Phase-5 transfer charges each sample to whoever actually owned the session then.
+  -- It is the same attribution p6_data_crossing uses, so the counter and the crossing cannot disagree.
+  --
+  -- EXACTLY ONCE, and every guard that makes that true has already run above: a replay returned at the
+  -- DUPLICATE branch, an out-of-order sample at ACCT_STALE_SAMPLE, a regression at ACCT_COUNTER_REGRESSION,
+  -- and a re-baselined epoch returned before reaching here. Only a genuinely new delta arrives at this line.
+  --
+  -- A NEW ADDRESS, DEVICE OR SESSION CANNOT RESET IT: the row updated is the entitlement's, not the
+  -- session's, and the value only ever increases. The ent_guard trigger refuses any decrease that is not an
+  -- audited adjustment, so this cannot silently walk backwards either.
+  UPDATE iam_v2.entitlements
+     SET consumed_data_bytes = consumed_data_bytes + (v_up + v_down),
+         usage_version = usage_version + 1
+   WHERE id = v_ent;
+
   SELECT EXISTS (SELECT 1 FROM iam_v2.delayed_accounting_records WHERE accounting_record_id = v_rec)
     INTO v_delayed;
   v_class := CASE WHEN v_delayed THEN 'DELAYED' ELSE 'ACCEPTED' END;
@@ -1035,12 +1064,19 @@ BEGIN
     RAISE EXCEPTION 'CONTEXT_INVALID: stay % is not eligible for a PMS context', p_stay;
   END IF;
 
-  -- THE LINEARIZATION POINT, after the Stay lock so L1 Stay-first is preserved. The same row pmsd's admission
-  -- locks, so no occupancy event can be admitted between the check below and this transaction's commit.
+  -- THE LINEARIZATION POINT, taken AFTER the Stay lock so the global L1 Stay-first order is preserved.
+  --
+  -- This is the same row pmsd's admission path locks before inserting a stay_event, so from here until this
+  -- transaction commits no new occupancy event can be admitted for this interface. That converts the
+  -- readiness check below from "true a moment ago" into "true as of a point no admission can precede".
+  --
+  -- Deliberately a separate statement from the Stay lock above: the predicate MUST be evaluated after both
+  -- locks are held, and folding it into the Stay query would evaluate it while admission could still commit.
   PERFORM 1 FROM iam_v2.pms_interface_runtime rt
     WHERE rt.tenant_id=p_tenant AND rt.site_id=p_site AND rt.pms_interface_id=p_interface
     FOR UPDATE;
 
+  -- Feed health, materialization readiness and the freshness ceiling, now judged under both locks.
   PERFORM 1 FROM iam_v2.stays st
    WHERE st.id = p_stay
      AND iam_v2.p3_feed_authorizes(p_tenant, p_site, p_interface, p_revision, st.occupancy_evidence_at);
@@ -1057,6 +1093,111 @@ BEGIN
             v_lifecycle, v_ev, p_request, now() + make_interval(secs => p_ttl_seconds))
     RETURNING id, false;
 END $$;
+
+
+--
+-- Name: lock_auth_context_offer(uuid, uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) RETURNS TABLE(matched_tier_order integer, evidence_version bigint)
+    LANGUAGE sql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT o.matched_tier_order, o.evidence_version
+    FROM iam_v2.auth_context_offers o
+   WHERE o.tenant_id = p_tenant
+     AND o.site_id = p_site
+     AND o.auth_context_id = p_context
+     AND o.package_revision_id = p_package_revision
+     -- The expiry test stays INSIDE the locked read, exactly as the inline query had it: an offer that
+     -- expires between the check and the grant must not be redeemable.
+     AND o.expires_at > now()
+   FOR UPDATE;
+$$;
+
+
+--
+-- Name: FUNCTION lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) IS 'Locks ONE auth_context_offer row for the grant and returns the two values the grant validates against. Exists so svc_scd can take the row lock without holding UPDATE on iam_v2.auth_context_offers, which would let it rewrite the matched tier, the evidence version and the expiry — the very fields the grant checks. Returns no row when the offer does not exist, belongs to another tenant or site, or has expired; the caller must treat no-row as "not offered to this context" and any ERROR as an internal failure.';
+
+
+--
+-- Name: lock_origin_stay(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_one int;
+BEGIN
+  SELECT 1 INTO v_one
+    FROM iam_v2.post_stay_profiles psp
+    JOIN iam_v2.stays st
+      ON st.tenant_id = psp.tenant_id AND st.site_id = psp.site_id AND st.id = psp.origin_stay_id
+   WHERE psp.tenant_id = p_tenant AND psp.site_id = p_site AND psp.id = p_profile
+   FOR UPDATE OF st;
+END $$;
+
+
+--
+-- Name: FUNCTION lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid) IS 'Takes the L1 Stay lock on the origin Stay of ONE post-stay profile and returns nothing. Same reason as iam_v2.lock_stay, keyed by profile because a post-stay caller holds the profile, not the Stay.';
+
+
+--
+-- Name: lock_pms_interface_runtime(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_one int;
+BEGIN
+  SELECT 1 INTO v_one FROM iam_v2.pms_interface_runtime rt
+   WHERE rt.tenant_id = p_tenant AND rt.site_id = p_site AND rt.pms_interface_id = p_interface
+   FOR UPDATE;
+  -- NOT FOUND is deliberately not an error. An interface with no runtime row has never connected, and the
+  -- caller's own eligibility test — iam_v2.p3_feed_authorizes — refuses it a moment later with the reason a
+  -- guest should see. Raising here would turn "the PMS has never spoken to us" into an internal fault.
+END $$;
+
+
+--
+-- Name: FUNCTION lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid) IS 'Takes the grant-time linearization lock on ONE iam_v2.pms_interface_runtime row and returns nothing. Exists so svc_scd can hold that lock without holding UPDATE on the table, which would let the role being authorised rewrite the feed health it is authorised against. Tenant- and site-scoped; a missing runtime row is not an error, because the caller''s feed-health test refuses that interface on its own terms.';
+
+
+--
+-- Name: lock_stay(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_one int;
+BEGIN
+  SELECT 1 INTO v_one FROM iam_v2.stays st
+   WHERE st.tenant_id = p_tenant AND st.site_id = p_site AND st.id = p_stay
+   FOR UPDATE;
+  -- A Stay that does not exist is not an error here either: the caller's own pin set refuses it immediately
+  -- afterwards with the uniform "context invalid" answer, and that is the answer the guest must get.
+END $$;
+
+
+--
+-- Name: FUNCTION lock_stay(p_tenant uuid, p_site uuid, p_stay uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) IS 'Takes the L1 Stay lock on ONE iam_v2.stays row and returns nothing. Exists so the guest-auth services can hold the lock their lock order starts from without holding UPDATE on iam_v2.stays, which is the stay engine''s to write. Tenant- and site-scoped; a missing Stay is not an error, because the caller''s pin set refuses it on its own terms.';
 
 
 --
@@ -1490,6 +1631,29 @@ $$;
 
 
 --
+-- Name: p3_entitlement_data_usage(uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.p3_entitlement_data_usage(p_entitlement uuid) RETURNS bigint
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+  SELECT COALESCE(sum(ar.bytes_up + ar.bytes_down), 0)::bigint
+    FROM iam_v2.accounting_records ar
+    JOIN iam_v2.session_entitlement_bindings b ON b.session_id = ar.session_id
+     AND b.entitlement_id = p_entitlement AND b.bound_from <= ar.sampled_at
+     AND (b.bound_until IS NULL OR b.bound_until > ar.sampled_at)
+$$;
+
+
+--
+-- Name: FUNCTION p3_entitlement_data_usage(p_entitlement uuid); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.p3_entitlement_data_usage(p_entitlement uuid) IS 'Authoritative bytes attributed to an Entitlement across every Session and Device bound to it, by the same binding intervals p6_data_crossing uses. The maintained counter entitlements.consumed_data_bytes must equal this.';
+
+
+--
 -- Name: p3_entitlement_status_coherent(); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -1600,150 +1764,9 @@ $$;
 -- Name: p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
-CREATE FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) RETURNS uuid
-    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$
-DECLARE v_id uuid;
-BEGIN
-  IF p_reason IS NULL OR p_reason NOT IN
-     ('SUSPECTED_STALE_GUEST_LIST','AFTER_PMS_MAINTENANCE','OPERATOR_VERIFICATION','SUPPORT_REQUEST') THEN
-    RAISE EXCEPTION 'unbounded resync reason' USING ERRCODE = 'check_violation';
-  END IF;
-  UPDATE iam_v2.pms_interface_runtime rt
-     SET resync_command_id            = gen_random_uuid(),
-         resync_command_requested_at  = now(),
-         resync_command_reason        = p_reason,
-         resync_command_generation    = rt.runtime_generation,
-         resync_command_claimed_at    = NULL,
-         sync_stage                   = 'REQUESTING_FULL_SYNC',
-         sync_stage_at                = now(),
-         sync_failure_code            = NULL,
-         updated_at                   = now()
-    FROM iam_v2.pms_interfaces pi
-   WHERE pi.tenant_id = rt.tenant_id AND pi.site_id = rt.site_id AND pi.id = rt.pms_interface_id
-     AND rt.tenant_id = p_tenant AND rt.site_id = p_site AND rt.pms_interface_id = p_interface
-     AND pi.lifecycle_state = 'ACTIVE'
-     AND rt.transport_status = 'CONNECTED'
-     AND rt.sync_status <> 'RESYNC_IN_PROGRESS'
-     AND rt.resync_command_id IS NULL
-  RETURNING rt.resync_command_id INTO v_id;
-  RETURN v_id;
-END;
-$$;
-
-
---
--- Name: FUNCTION request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) TO svc_edged;
-
-
---
--- Name: p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) RETURNS TABLE(matched_tier_order integer, evidence_version bigint)
-    LANGUAGE sql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$
-  SELECT o.matched_tier_order, o.evidence_version
-    FROM iam_v2.auth_context_offers o
-   WHERE o.tenant_id = p_tenant
-     AND o.site_id = p_site
-     AND o.auth_context_id = p_context
-     AND o.package_revision_id = p_package_revision
-     AND o.expires_at > now()
-   FOR UPDATE;
-$$;
-
-
---
--- Name: FUNCTION lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) TO svc_scd;
-
-
---
--- Name: lock_pms_interface_runtime(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid) RETURNS void
-    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$
-DECLARE v_one int;
-BEGIN
-  SELECT 1 INTO v_one FROM iam_v2.pms_interface_runtime rt
-   WHERE rt.tenant_id = p_tenant AND rt.site_id = p_site AND rt.pms_interface_id = p_interface
-   FOR UPDATE;
-END $$;
-
-
---
--- Name: FUNCTION lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_scd;
-
-
---
--- Name: lock_stay(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) RETURNS void
-    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$
-DECLARE v_one int;
-BEGIN
-  SELECT 1 INTO v_one FROM iam_v2.stays st
-   WHERE st.tenant_id = p_tenant AND st.site_id = p_site AND st.id = p_stay
-   FOR UPDATE;
-END $$;
-
-
---
--- Name: FUNCTION lock_stay(p_tenant uuid, p_site uuid, p_stay uuid); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) TO svc_scd;
-
-
---
--- Name: lock_origin_stay(uuid, uuid, uuid); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
-CREATE FUNCTION iam_v2.lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid) RETURNS void
-    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
-    AS $$
-DECLARE v_one int;
-BEGIN
-  SELECT 1 INTO v_one
-    FROM iam_v2.post_stay_profiles psp
-    JOIN iam_v2.stays st
-      ON st.tenant_id = psp.tenant_id AND st.site_id = psp.site_id AND st.id = psp.origin_stay_id
-   WHERE psp.tenant_id = p_tenant AND psp.site_id = p_site AND psp.id = p_profile
-   FOR UPDATE OF st;
-END $$;
-
-
---
--- Name: FUNCTION lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid); Type: ACL; Schema: iam_v2; Owner: -
---
-
-REVOKE ALL ON FUNCTION iam_v2.lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid) TO svc_scd;
-
-
---
--- Name: p3_feed_authorizes(uuid, uuid, uuid, uuid, timestamp with time zone); Type: FUNCTION; Schema: iam_v2; Owner: -
---
-
 CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) RETURNS boolean
-    LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'iam_v2', 'pg_temp'
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
     AS $_$
   SELECT EXISTS (
     SELECT 1
@@ -1756,8 +1779,7 @@ CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interfac
      WHERE pi.tenant_id=p_tenant AND pi.site_id=p_site AND pi.id=p_interface
        AND pi.lifecycle_state='ACTIVE'
        AND p_evidence_at IS NOT NULL
-       -- (1) EITHER the feed is live, OR the mirror is trustworthy without it. Transport availability and
-       --     mirror trust are different properties; only the second is a reason to refuse a guest.
+       -- (1) EITHER the feed is live, OR the last published roster stands on its own (D39).
        AND (
              (    rt.transport_status = 'CONNECTED'
               AND rt.sync_status      = 'IN_SYNC'
@@ -1765,15 +1787,16 @@ CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interfac
               AND COALESCE(rt.last_heartbeat_at, rt.last_connected_at)
                     > now() - make_interval(secs => iam_v2.p3_cfg_secs(pr.config,'heartbeat_timeout_ms',300)))
              OR
+             -- THE LAST GOOD ROSTER. A resync that is in flight, or that began and failed, says nothing about
+             -- the roster already published: that roster is untouched until a replacement completes, so it
+             -- remains exactly as trustworthy as it was a moment before the attempt started. Only its AGE may
+             -- retire it, and term (3) is what does that.
              (    rt.transport_status <> 'CONNECTED'
               AND rt.last_complete_sync_at IS NOT NULL)
            )
-       -- (2) shared by both branches: no unresolved continuity loss, and the runtime is serving the Revision
-       --     the caller presented.
        AND rt.continuity_status = 'CONTINUOUS'
        AND rt.pinned_revision_id = p_revision
-       -- (2b) MATERIALIZATION READINESS, both branches. Mirrors the applier's claim predicate exactly, so
-       --      rows it can never consume (an abandoned or unpublished generation) do not block forever.
+       -- (2) MATERIALIZATION READINESS, unchanged — and the reason the partial generation cannot leak in.
        AND NOT EXISTS (
              SELECT 1 FROM iam_v2.stay_events se
               WHERE se.tenant_id = rt.tenant_id
@@ -1782,9 +1805,8 @@ CREATE FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interfac
                 AND se.processing_status = 'PENDING'
                 AND (se.admission_kind = 'LIVE'
                      OR se.resync_generation <= rt.published_resync_generation))
-       -- (3) an absolute ceiling: one full resync cadence plus the heartbeat allowance, so a Stay the PMS has
-       --     silently stopped carrying cannot authorise forever on a feed that is healthy for other guests.
-       --     An explicit max_auth_cache_age_seconds overrides it where an operator has chosen one.
+       -- (3) the absolute freshness ceiling. For the offline branch this IS the seventy-two hours: the last
+       --     good roster is usable until it ages out, and then nothing is.
        AND p_evidence_at > now() - make_interval(secs =>
              CASE
                WHEN (pr.config->>'max_auth_cache_age_seconds') ~ '^[1-9][0-9]{0,5}$'
@@ -1801,7 +1823,7 @@ $_$;
 -- Name: FUNCTION p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone); Type: COMMENT; Schema: iam_v2; Owner: -
 --
 
-COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the feed half of PMS Room sign-in eligibility. Authorises on EITHER a live feed (transport CONNECTED, IN_SYNC, live within the Revision heartbeat_timeout_ms) OR a trusted local mirror (transport not connected, a complete sync has happened, no resync in flight). Both branches additionally require interface ACTIVE, continuity CONTINUOUS, runtime pinned to the presented Revision, and evidence within one complete-sync cadence - the same bound that serves as the offline validity limit, so no separate offline TTL exists. Transport availability and mirror trust are different properties: a disconnected socket no longer denies a guest whose Stay is mirrored coherently. Never synchronised, unresolved continuity loss, a resync in flight, revision drift or stale evidence still authorise nobody. Deliberately does NOT read iam_v2.stays: callers hold FOR UPDATE OF st and need those conditions inline so EvalPlanQual rechecks them against the locked tuple.';
+COMMENT ON FUNCTION iam_v2.p3_feed_authorizes(p_tenant uuid, p_site uuid, p_interface uuid, p_revision uuid, p_evidence_at timestamp with time zone) IS 'Single source of truth for the feed half of PMS Room sign-in eligibility. Authorises on EITHER a live feed OR the LAST SUCCESSFULLY PUBLISHED roster (D39), in both cases only when the materialized roster has caught up: no CLAIMABLE PENDING stay_event may exist, where claimable mirrors the applier''s own predicate (LIVE, or a generation at or below the published one). A resync that is in flight or that began and failed does NOT invalidate the published roster — the applier cannot consume an unpublished generation, so the live roster is whole until a replacement completes, and only max_auth_cache_age_seconds retires it. STABLE and therefore NOT sufficient on its own: callers take the interface runtime row lock first.';
 
 
 --
@@ -5729,6 +5751,56 @@ END $$;
 
 
 --
+-- Name: request_full_resync(uuid, uuid, uuid, text); Type: FUNCTION; Schema: iam_v2; Owner: -
+--
+
+CREATE FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'iam_v2', 'pg_temp'
+    AS $$
+DECLARE v_id uuid;
+BEGIN
+  -- The reason vocabulary is closed HERE as well as in edged. A bounded set enforced only in the process that
+  -- happens to call today is not a bound; it is a convention that survives until the next caller.
+  IF p_reason IS NULL OR p_reason NOT IN
+     ('SUSPECTED_STALE_GUEST_LIST','AFTER_PMS_MAINTENANCE','OPERATOR_VERIFICATION','SUPPORT_REQUEST') THEN
+    RAISE EXCEPTION 'unbounded resync reason' USING ERRCODE = 'check_violation';
+  END IF;
+
+  UPDATE iam_v2.pms_interface_runtime rt
+     SET resync_command_id            = gen_random_uuid(),
+         resync_command_requested_at  = now(),
+         resync_command_reason        = p_reason,
+         resync_command_generation    = rt.runtime_generation,
+         resync_command_claimed_at    = NULL,
+         sync_stage                   = 'REQUESTING_FULL_SYNC',
+         sync_stage_at                = now(),
+         sync_failure_code            = NULL,
+         updated_at                   = now()
+    FROM iam_v2.pms_interfaces pi
+   WHERE pi.tenant_id = rt.tenant_id AND pi.site_id = rt.site_id AND pi.id = rt.pms_interface_id
+     AND rt.tenant_id = p_tenant AND rt.site_id = p_site AND rt.pms_interface_id = p_interface
+     -- there is a worker with a live socket to receive this
+     AND pi.lifecycle_state = 'ACTIVE'
+     AND rt.transport_status = 'CONNECTED'
+     -- a resync is not already running, and no earlier request is still waiting to be claimed
+     AND rt.sync_status <> 'RESYNC_IN_PROGRESS'
+     AND rt.resync_command_id IS NULL
+  RETURNING rt.resync_command_id INTO v_id;
+
+  RETURN v_id; -- NULL when no row qualified; the caller explains which precondition failed
+END;
+$$;
+
+
+--
+-- Name: FUNCTION request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text); Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) IS 'Records an operator full-resync request without granting the caller write access to iam_v2.pms_interface_runtime. Writes only the command and stage columns; cannot touch transport, sync, continuity, generations or pins. resync_command_generation is taken from the row own runtime_generation so a caller cannot aim a command at a generation it chose. Returns NULL when the interface is not ACTIVE and CONNECTED, a resync is already running, or a request is already pending.';
+
+
+--
 -- Name: reserve_device_slot(uuid, uuid, text, text, integer); Type: FUNCTION; Schema: iam_v2; Owner: -
 --
 
@@ -7228,15 +7300,43 @@ CREATE TABLE iam_v2.pms_interface_runtime (
     CONSTRAINT pir_connected_pins CHECK (((transport_status <> 'CONNECTED'::text) OR ((pinned_revision_id IS NOT NULL) AND (last_connected_at IS NOT NULL) AND ((credential_mode = 'NONE'::text) OR (pinned_secret_generation_id IS NOT NULL))))),
     CONSTRAINT pir_generation_nonneg CHECK ((runtime_generation >= 0)),
     CONSTRAINT pir_heartbeat_not_future CHECK (((last_heartbeat_at IS NULL) OR (last_heartbeat_at <= updated_at))),
-    CONSTRAINT pir_resync_command_coherent CHECK ((((resync_command_id IS NULL) = (resync_command_requested_at IS NULL)) AND ((resync_command_generation IS NULL) = (resync_command_id IS NULL)))),
-    CONSTRAINT pir_sync_stage_bounded CHECK (((sync_stage IS NULL) OR (sync_stage = ANY (ARRAY['REQUESTING_FULL_SYNC'::text, 'WAITING_FOR_PMS'::text, 'RECEIVING'::text, 'PUBLISHING'::text, 'COMPLETE'::text, 'FAILED'::text, 'INTERRUPTED'::text])))),
     CONSTRAINT pir_resync_coherent CHECK ((((resync_started_at IS NULL) OR (resync_requested_at IS NOT NULL)) AND ((resync_started_at IS NULL) OR (resync_requested_at IS NULL) OR (resync_started_at >= resync_requested_at)))),
+    CONSTRAINT pir_resync_command_coherent CHECK ((((resync_command_id IS NULL) = (resync_command_requested_at IS NULL)) AND ((resync_command_generation IS NULL) = (resync_command_id IS NULL)))),
     CONSTRAINT pir_resync_generation_coherent CHECK (((resync_generation_seq >= 0) AND (published_resync_generation >= 0) AND (published_resync_generation <= resync_generation_seq))),
+    CONSTRAINT pir_sync_stage_bounded CHECK (((sync_stage IS NULL) OR (sync_stage = ANY (ARRAY['REQUESTING_FULL_SYNC'::text, 'WAITING_FOR_PMS'::text, 'RECEIVING'::text, 'PUBLISHING'::text, 'COMPLETE'::text, 'FAILED'::text, 'INTERRUPTED'::text])))),
     CONSTRAINT pms_interface_runtime_continuity_status_check CHECK ((continuity_status = ANY (ARRAY['UNKNOWN'::text, 'CONTINUOUS'::text, 'DISCONTINUOUS'::text, 'GAP_DETECTED'::text]))),
     CONSTRAINT pms_interface_runtime_credential_mode_check CHECK ((credential_mode = ANY (ARRAY['NONE'::text, 'AUTH_KEY'::text]))),
     CONSTRAINT pms_interface_runtime_sync_status_check CHECK ((sync_status = ANY (ARRAY['UNKNOWN'::text, 'IN_SYNC'::text, 'RESYNC_REQUIRED'::text, 'RESYNC_IN_PROGRESS'::text, 'SYNC_FAILED'::text]))),
     CONSTRAINT pms_interface_runtime_transport_status_check CHECK ((transport_status = ANY (ARRAY['UNKNOWN'::text, 'CONNECTING'::text, 'CONNECTED'::text, 'DISCONNECTED'::text, 'ERROR'::text])))
 );
+
+
+--
+-- Name: COLUMN pms_interface_runtime.resync_command_id; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.pms_interface_runtime.resync_command_id IS 'Operator-requested full resync awaiting execution by the pmsd worker that owns this socket. Written by edged, claimed exactly once by the worker under a runtime_generation CAS, cleared on claim. edged never writes a PMS frame; this row is the whole of the command channel.';
+
+
+--
+-- Name: COLUMN pms_interface_runtime.resync_command_generation; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.pms_interface_runtime.resync_command_generation IS 'The runtime_generation the command was issued against. A worker whose generation has advanced refuses it: the operator asked a specific worker on a specific socket, and a replacement is not that worker.';
+
+
+--
+-- Name: COLUMN pms_interface_runtime.sync_records_received; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.pms_interface_runtime.sync_records_received IS 'Records actually staged under the open resync generation. FIAS provides no total before DE, so this is a real running count and there is deliberately no total, percentage or remaining-count column to pair it with — every such number would be invented.';
+
+
+--
+-- Name: COLUMN pms_interface_runtime.last_sync_in_house_count; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.pms_interface_runtime.last_sync_in_house_count IS 'IN_HOUSE Stays the last COMPLETED sync produced, stamped at publish rather than counted on read, so it reports what that sync delivered instead of what the table holds now.';
 
 
 --
@@ -7590,14 +7690,21 @@ CREATE TABLE iam_v2.service_plan_revisions (
     idle_timeout_seconds integer,
     max_continuous_session_seconds integer,
     time_accounting_mode text DEFAULT 'VALIDITY_WINDOW'::text NOT NULL,
-    speed_allocation text DEFAULT 'PER_DEVICE'::text NOT NULL,
     time_quota_seconds bigint,
     data_quota_bytes bigint,
+    speed_allocation text DEFAULT 'PER_DEVICE'::text NOT NULL,
     CONSTRAINT service_plan_revisions_device_limit_policy_check CHECK ((device_limit_policy = ANY (ARRAY['REJECT_NEW_DEVICE'::text, 'DISCONNECT_OLDEST'::text, 'ADMIN_APPROVAL'::text]))),
     CONSTRAINT service_plan_revisions_max_concurrent_devices_check CHECK ((max_concurrent_devices >= 1)),
     CONSTRAINT service_plan_revisions_time_accounting_mode_check CHECK ((time_accounting_mode = ANY (ARRAY['VALIDITY_WINDOW'::text, 'AGGREGATE_ONLINE_TIME'::text]))),
     CONSTRAINT spr_speed_allocation_check CHECK ((speed_allocation = ANY (ARRAY['PER_DEVICE'::text, 'SHARED'::text])))
 );
+
+
+--
+-- Name: COLUMN service_plan_revisions.speed_allocation; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON COLUMN iam_v2.service_plan_revisions.speed_allocation IS 'PER_DEVICE (default): every authorized device may use down_kbps/up_kbps independently. SHARED: all active sessions under the Entitlement share one aggregate ceiling of down_kbps/up_kbps, allocated dynamically rather than divided into fixed per-device portions. Immutable with the revision it belongs to.';
 
 
 --
@@ -10778,14 +10885,21 @@ CREATE UNIQUE INDEX se_live_identity ON iam_v2.stay_events USING btree (tenant_i
 
 
 --
--- Name: se_resync_identity; Type: INDEX; Schema: iam_v2; Owner: -
+-- Name: se_pending_claimable; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
 CREATE INDEX se_pending_claimable ON iam_v2.stay_events USING btree (tenant_id, site_id, pms_interface_id, admission_kind, resync_generation) WHERE (processing_status = 'PENDING'::text);
 
 
 --
--- Name: se_pending_claimable; Type: INDEX; Schema: iam_v2; Owner: -
+-- Name: INDEX se_pending_claimable; Type: COMMENT; Schema: iam_v2; Owner: -
+--
+
+COMMENT ON INDEX iam_v2.se_pending_claimable IS 'Supports the materialization-readiness term in iam_v2.p3_feed_authorizes. Partial on PENDING because that set is empty in steady state, so the readiness probe costs an index lookup that returns nothing.';
+
+
+--
+-- Name: se_resync_identity; Type: INDEX; Schema: iam_v2; Owner: -
 --
 
 CREATE UNIQUE INDEX se_resync_identity ON iam_v2.stay_events USING btree (tenant_id, site_id, pms_interface_id, resync_generation, external_event_identity) WHERE (admission_kind = 'RESYNC'::text);
@@ -12981,10 +13095,10 @@ REVOKE ALL ON FUNCTION iam_v2.allocate_p_number(p_tenant uuid, p_site uuid, p_in
 --
 
 REVOKE ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_scd;
 GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_netd;
 GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_pmsd;
-GRANT ALL ON FUNCTION iam_v2.apply_entitlement_transition(p_ent uuid, p_to text, p_at timestamp with time zone, p_reason text) TO svc_scd;
 
 
 --
@@ -12999,8 +13113,8 @@ REVOKE ALL ON FUNCTION iam_v2.apply_payment_callback_v2(p_tenant uuid, p_provide
 --
 
 REVOKE ALL ON FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone) FROM PUBLIC;
-GRANT ALL ON FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone) TO svc_acctd;
 GRANT ALL ON FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.authorize_entitlement_device(p_ent uuid, p_device uuid, p_at timestamp with time zone) TO svc_acctd;
 
 
 --
@@ -13098,6 +13212,38 @@ GRANT ALL ON FUNCTION iam_v2.issue_or_return_pms_context(p_tenant uuid, p_site u
 
 
 --
+-- Name: FUNCTION lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.lock_auth_context_offer(p_tenant uuid, p_site uuid, p_context uuid, p_package_revision uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.lock_origin_stay(p_tenant uuid, p_site uuid, p_profile uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.lock_pms_interface_runtime(p_tenant uuid, p_site uuid, p_interface uuid) TO svc_scd;
+
+
+--
+-- Name: FUNCTION lock_stay(p_tenant uuid, p_site uuid, p_stay uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.lock_stay(p_tenant uuid, p_site uuid, p_stay uuid) TO svc_scd;
+
+
+--
 -- Name: FUNCTION p3_accounting_needs_binding(); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -13124,6 +13270,7 @@ REVOKE ALL ON FUNCTION iam_v2.p3_alert_open_on_audit() FROM PUBLIC;
 
 REVOKE ALL ON FUNCTION iam_v2.p3_cfg_secs(p_config jsonb, p_key text, p_default integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION iam_v2.p3_cfg_secs(p_config jsonb, p_key text, p_default integer) TO svc_scd;
+GRANT ALL ON FUNCTION iam_v2.p3_cfg_secs(p_config jsonb, p_key text, p_default integer) TO svc_edged;
 
 
 --
@@ -13184,6 +13331,13 @@ REVOKE ALL ON FUNCTION iam_v2.p3_eda_insert_guard() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION iam_v2.p3_entitlement_at(p_session uuid, p_at timestamp with time zone) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION p3_entitlement_data_usage(p_entitlement uuid); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.p3_entitlement_data_usage(p_entitlement uuid) FROM PUBLIC;
 
 
 --
@@ -13726,6 +13880,14 @@ GRANT ALL ON FUNCTION iam_v2.register_class_origin(p_tenant uuid, p_site uuid, p
 
 
 --
+-- Name: FUNCTION request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text); Type: ACL; Schema: iam_v2; Owner: -
+--
+
+REVOKE ALL ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) FROM PUBLIC;
+GRANT ALL ON FUNCTION iam_v2.request_full_resync(p_tenant uuid, p_site uuid, p_interface uuid, p_reason text) TO svc_edged;
+
+
+--
 -- Name: FUNCTION selectable_grace_packages(p_tenant uuid, p_site uuid); Type: ACL; Schema: iam_v2; Owner: -
 --
 
@@ -13848,9 +14010,9 @@ GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_device_authorizations TO 
 -- Name: TABLE entitlement_devices; Type: ACL; Schema: iam_v2; Owner: -
 --
 
+GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_scd;
 GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_edged;
 GRANT SELECT,INSERT,UPDATE ON TABLE iam_v2.entitlement_devices TO svc_pmsd;
-GRANT SELECT ON TABLE iam_v2.entitlement_devices TO svc_scd;
 
 
 --

@@ -229,6 +229,9 @@ func (s *workerSink) ax() axisBase {
 }
 
 func (s *workerSink) OnConnected(at time.Time) error {
+	// SAY SO. This is the line whose absence made a recovered PMS look exactly like a dead one.
+	logProgress(s.w.deps.log(), EventWorkerConnected, SafeFields{
+		InterfaceID: NewUUIDValue(s.w.iface.ID), Generation: s.gen, Stage: StageServe})
 	return s.w.repo.UpdateTransport(s.ctx, TransportUpdate{axisBase: s.ax(), Status: TransportConnected, LastConnectedAt: &at})
 }
 func (s *workerSink) OnHeartbeat(at time.Time) error {
@@ -251,6 +254,10 @@ func (s *workerSink) RequireInitialResync(at time.Time) error {
 	// during the gap between requesting and receiving.
 	zero := int64(0)
 	s.stage(StageRequesting, StageUpdate{RecordsReceived: &zero, RecordsSkipped: &zero})
+	// The daemon asked for this itself. Recording that distinguishes an automatic recovery from an operator
+	// who clicked Full Resync, which the durable record can only tell apart by resync_command_id being NULL.
+	logProgress(s.w.deps.log(), EventWorkerResyncRequested, SafeFields{
+		InterfaceID: NewUUIDValue(s.w.iface.ID), Generation: s.gen, Stage: StageServe})
 	return s.w.repo.UpdateSync(s.ctx, SyncUpdate{axisBase: s.ax(), Status: SyncResyncRequired, ResyncRequestedAt: &at})
 }
 
@@ -298,6 +305,10 @@ func (s *workerSink) OnResyncComplete(at time.Time, _ string) error {
 	// schema for rollback; nothing writes it and nothing reads it.
 	got := s.received
 	s.stage(StageComplete, StageUpdate{RecordsReceived: &got})
+	// THE ONE AN OPERATOR IS WAITING FOR: the roster is published and guests can authenticate against it. The
+	// record count is a magnitude, not content — how many, never which.
+	logProgress(s.w.deps.log(), EventWorkerResyncPublished, SafeFields{
+		InterfaceID: NewUUIDValue(s.w.iface.ID), Generation: s.resyncGen, Stage: StageServe, Records: got})
 	return nil
 }
 func (s *workerSink) OnDisconnected(at time.Time, code Code) error {

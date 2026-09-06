@@ -145,7 +145,19 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0060_last_good_roster_survives_a_failed_resync') ON CONFLICT DO NOTHING;" >/dev/null
 
-
+# 0061 makes the ingestion operation advance the Entitlement's own consumed_data_bytes. WITHOUT IT the data
+# quota contract suite in ./internal/enforce fails on its first assertion, which is the point: that suite
+# drives iam_v2.ingest_absolute_counters -- the operation acctd actually calls -- rather than inserting
+# accounting rows directly, and before 0061 that operation left the entitlement's usage at zero forever.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0061_the_entitlement_records_what_it_spent.up.sql" >/dev/null 2>&1; then
+  echo "0061 FAILED TO APPLY -- deterministic, not a flake"
+  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+    < "$ROOT/data-plane/migrations/0061_the_entitlement_records_what_it_spent.up.sql" 2>&1 | tail -10
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0061_the_entitlement_records_what_it_spent') ON CONFLICT DO NOTHING;" >/dev/null
 
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi

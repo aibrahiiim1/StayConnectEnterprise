@@ -1,0 +1,4 @@
+commit 6803ac1307ae45cdc1b5cf1e1ad2ac16da3a4b1a
+Date:   Sun Sep 6 03:01:55 2026 +0300
+
+    The flag-ON half of that case needs a Phase-6 schema this gate does not build
