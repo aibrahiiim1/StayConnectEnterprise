@@ -192,13 +192,56 @@ verify_ledger_structural(){ # read-only, BEFORE lock; fail closed
   fi
 }
 
-verify_baseline_for(){ # $1=version ; require 0009 present before 0010+
+verify_baseline_for(){ # $1=version ; the Phase-2 commerce baseline must be present before 0010+
   local ver="$1"
   local num="${ver%%_*}"
-  if [ "$((10#$num))" -ge 10 ]; then
-    [ "$(q "SELECT count(*) FROM public.schema_migrations WHERE version='0009_phase2_commerce'")" = 1 ] \
-      || { echo "REFUSED: accepted baseline 0009_phase2_commerce must be applied before $ver" >&2; exit 3; }
+  [ "$((10#$num))" -ge 10 ] || return 0
+
+  # THE UPGRADE PATH: the ledger says 0009 was applied. Unchanged, and still the first thing tried.
+  if [ "$(q "SELECT count(*) FROM public.schema_migrations WHERE version='0009_phase2_commerce'")" = 1 ]; then
+    return 0
   fi
+
+  # A FACTORY-CLEAN APPLIANCE HAS NO 0009 ROW AND NEVER WILL.
+  #
+  # It is built from data-plane/migrations/baseline/0000_production_baseline.sql — a dump of the upgrade
+  # path's END STATE — precisely so a new appliance never constructs the superseded guest-IAM tables even
+  # momentarily. Migrations 0001..0049 are therefore not applied individually and are not in its ledger; the
+  # first row such an appliance ever records is the first migration published AFTER its baseline was cut.
+  #
+  # This check refused every one of those. It read the ledger for evidence of an event that, on that install
+  # path, correctly never happened — so the authoritative runner could not apply a migration to the very
+  # appliances the baseline exists to produce, and operators went around it. A guard that cannot be satisfied
+  # by a supported installation is not enforcing a precondition; it is training people to bypass it.
+  #
+  # WHAT THE CHECK IS ACTUALLY FOR is that the Phase-2 commerce baseline is PRESENT before anything from 0010
+  # onward touches the database. A ledger row is one proof of that. The structures themselves are a stronger
+  # and more direct one, so on a database with no 0009 row we ask the schema instead of the ledger: 0009's own
+  # artefacts — the purchase/quote pin-equality writer and the offer-quote immutability writer — must exist.
+  #
+  # AND ONLY ON A DATABASE THAT WAS NEVER WALKED UP THE MIGRATION PATH. If the ledger holds ANY migration
+  # below 0010, this is an upgrade-path installation that is missing 0009, which is exactly the broken state
+  # the original check was written to catch, and it is still refused. A baseline install has no such row.
+  local early
+  early="$(q "SELECT count(*) FROM public.schema_migrations WHERE substring(version from 1 for 4) < '0010'")"
+  if [ "${early:-1}" != "0" ]; then
+    echo "REFUSED: accepted baseline 0009_phase2_commerce must be applied before $ver" >&2
+    echo "         The ledger records $early migration(s) below 0010, so this is an upgrade-path" >&2
+    echo "         installation with a gap — not a factory-clean baseline install." >&2
+    exit 3
+  fi
+
+  local commerce
+  commerce="$(q "SELECT (to_regprocedure('iam_v2.trg_purchase_quote_pin_equal()') IS NOT NULL
+                     AND to_regprocedure('iam_v2.trg_offer_quote_immutable()') IS NOT NULL)")"
+  if [ "$commerce" != "t" ]; then
+    echo "REFUSED: neither the 0009 ledger row nor the Phase-2 commerce structures it creates are present" >&2
+    echo "         (iam_v2.trg_purchase_quote_pin_equal / iam_v2.trg_offer_quote_immutable). This database" >&2
+    echo "         is neither an upgrade-path install that has reached 0009 nor a factory-clean baseline." >&2
+    exit 3
+  fi
+  echo "  no 0009 ledger row, no migration below 0010, and the Phase-2 commerce structures are present:"
+  echo "  factory-clean baseline install; the commerce baseline came from the baseline dump"
 }
 
 apply_one(){ # $1=file  atomic lock-then-ledger

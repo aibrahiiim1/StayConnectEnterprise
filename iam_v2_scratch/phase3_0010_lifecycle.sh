@@ -1029,9 +1029,24 @@ o="$(RUN --apply-role mig_exec "${APPLY_ARGS[@]}" 2>&1 || true)"
 echo "$o" | grep -qE "skip-after-lock 0010|apply 0010" && ok "--apply-role executes the run as the named role (§3)" || no "--apply-role run did not proceed: $(echo "$o" | tail -2 | tr '\n' ' ')"
 Q "DROP ROLE IF EXISTS mig_exec;" >/dev/null
 Q "ALTER TABLE public.schema_migrations OWNER TO postgres;" >/dev/null
-# missing 0009 baseline before 0010 -> refused
+# AN UPGRADE-PATH INSTALL WITH A 0009 GAP -> refused.
+#
+# This case used to delete the 0009 row and expect a refusal on that alone. That was too strong, and it made
+# the runner unusable on a FACTORY-CLEAN appliance, where no 0009 row exists or ever will: such an appliance
+# is built from a dump of the upgrade path's end state, so 0001..0049 are never applied individually. The
+# runner refused the very installs the baseline exists to produce, and migration 0061 had to be applied
+# around it during a live window.
+#
+# The rule now distinguishes the two shapes, so this case supplies the one that must still be refused: a
+# ledger that HAS walked the migration path (a row below 0010 is present) but is missing 0009. That is a
+# genuine gap, and it stays refused even though the commerce structures happen to exist in this schema.
 Q "DELETE FROM public.schema_migrations WHERE version='0009_phase2_commerce';" >/dev/null
-o="$(RUN "${APPLY_ARGS[@]}" 2>&1 || true)"; echo "$o" | grep -q "baseline 0009_phase2_commerce must be applied before" && ok "missing 0009 baseline refused (§3)" || no "0010 allowed without 0009 baseline"
+Q "INSERT INTO public.schema_migrations(version) VALUES ('0007_auth_throttle_buckets') ON CONFLICT DO NOTHING;" >/dev/null
+o="$(RUN "${APPLY_ARGS[@]}" 2>&1 || true)"; echo "$o" | grep -q "baseline 0009_phase2_commerce must be applied before" && ok "an upgrade-path ledger missing 0009 is refused (§3)" || no "0010 allowed on an upgrade-path ledger with a 0009 gap"
+# ...and with NO ledger row below 0010 at all, the same database is a factory-clean install and proceeds:
+# the commerce structures are present, which is the evidence the ledger row would otherwise stand for.
+Q "DELETE FROM public.schema_migrations WHERE substring(version from 1 for 4) < '0010';" >/dev/null
+o="$(RUN "${APPLY_ARGS[@]}" 2>&1 || true)"; echo "$o" | grep -qE "factory-clean baseline install" && ok "a factory-clean ledger applies its next migration (§3)" || no "the runner still refuses a factory-clean baseline: $(echo "$o" | tail -2 | tr '\n' ' ')"
 Q "INSERT INTO public.schema_migrations(version) VALUES ('0009_phase2_commerce') ON CONFLICT DO NOTHING;" >/dev/null
 # ledger absent -> refused (no silent create); bootstrap standalone; bootstrap cannot combine with --only
 Q "ALTER TABLE public.schema_migrations RENAME TO schema_migrations_bak;" >/dev/null

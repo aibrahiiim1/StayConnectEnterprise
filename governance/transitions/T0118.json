@@ -1,0 +1,43 @@
+{
+  "transition_id": "T0118",
+  "seq": 118,
+  "timestamp": "2026-09-06T01:50:00Z",
+  "timestamp_derivation": "After the live crossing at 01:40:12.423805Z and the verification of the resulting state (netd re-read converged 01:49:18Z); before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "DATA_QUOTA_ENFORCEMENT_ACCEPTED_LIVE_PRE_LIVE",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new product decision. The aggregate-per-Entitlement data quota was already the approved contract; this proves it enforced live for the first time.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-09-06: exactly ONE real-device data-quota acceptance, plus closure of the migration-runner incompatibility found while deploying it.",
+  "deployed": "master 480fd2139ea2b296c2b9baa40fbb5edadb90798c. Migration 0061 applied to stayconnect_site as iam_v2_owner and recorded in public.schema_migrations; its reconciliation set 3 historical counters to 690, 70,090,838 and 35,692,721 bytes with 3 entitlement_adjustments rows, terminated nothing, and altered no accounting record. Six binaries rebuilt trimpath and verified by sha256 on the appliance against the build host: acctd 1a8ba08833442a670948ea8f9c1c5263fbbec35926d8968935681a141b891153, pmsd 5f710be7ba00754c67be0c6dbb79ba6e03b2bcfab46f0eb3329cb4c3f9246ed6, portald 1d091449a0a2c06287fd36f7cf9a6fbeac6a1a42a3b5c47eb2336ce9aba4ef31, scd fe0640763c4c29df3f0d324853e1d24d6a6a8bef81dc3ff6edae4b0ba085ade3, edged 798965b2b03b77b41f351ab3dc086a331cfafd4d26ce2e3bf60e789ed3ba6e9c, netd 3ac29653df1842f902cea7885b245c560757aae55105c04707ac2532ab081e5f. Rollback artifacts at /opt/stayconnect/backups/deploy-480fd213-20260906T003759Z: a custom-format dump plus every replaced binary.",
+  "live_acceptance": "ONE Room Login, room 3108, through the REAL captive portal. portald served POST /auth/pms/phase3 from the device at 192.168.77.100 with 200 in 1.049s at 01:33:09Z, and scd logged 'phase3 auth: access granted and enforced' for stay 149941c7, entitlement a7a024b0, session b29c4294. The zero-price Freee package revision 11163227 was used, pinned plan b2f84f70, data_quota_bytes exactly 100,000,000, settlement NOT_REQUIRED. Room 3108 had exactly one IN_HOUSE Stay and no prior Entitlement. (Room 14203 was offered as the prepared candidate; the Product Owner used 3108, which met the same conditions, and no second login was performed.)",
+  "the_crossing": "THE ACCOUNTING SERIES ESTABLISHES IT SAMPLE BY SAMPLE. Record 411 at 01:40:11.423766Z brought attributed usage to 99,611,446 bytes - under the quota, access still ACTIVE. Record 412 at 01:40:12.423805Z added 497,220 bytes for a running total of 100,108,666, and THAT sample is the crossing. The Entitlement's terminated_at is 2026-09-06T01:40:12.423805Z: the instant of the crossing sample itself, not of the sweep that noticed it. terminal_reason DATA. The overshoot is 108,666 bytes - a single one-second sample - and the series proves why, because the sample before it was genuinely under the quota.",
+  "exactly_once": "The Entitlement carries exactly TWO state transitions: ACTIVE at 01:33:08.632207Z and TERMINATED at 01:40:12.423805Z. It was not re-terminated and its ending was not re-dated.",
+  "teardown": "Session b29c4294 ended at 01:40:12.423805Z - the same instant - with end_reason ENTITLEMENT_ENDED, and one device authorization was closed. The kernel holds nothing: phase3_auth_ipv4 has no elements, 0 tc classes on br-g-00d1fa1a and 0 on ifb-g-00d1fa1a. netd reports ACTIVE_FRESH_CONVERGED, not degraded, managed_classes 0, ownership_unverified 0. Kea remains healthy.",
+  "three_views_agree": "412 accounting records summing to 100,108,666 bytes; the Session's own bytes_up + bytes_down = 42,913,230 + 57,195,436 = 100,108,666; the Entitlement's consumed_data_bytes = 100,108,666 with usage_version 412 - one increment per accepted sample, which is what exactly-once looks like from outside. Before this run that counter would have read 0.",
+  "derived_view_after_termination": "RECORDED PRECISELY, BECAUSE IT LOOKS LIKE A DISCREPANCY AND IS NOT ONE. After termination p3_entitlement_data_usage(a7a024b0) returns 99,611,446 and p6_data_crossing returns NULL, while the counter reads 100,108,666. The binding interval is half-open - bound_until > sampled_at - and this session's binding closed at 01:40:12.423805Z, the crossing sample's own instant, so that one sample falls outside the interval when the sum is re-derived afterwards. The difference is exactly that sample: 100,108,666 - 99,611,446 = 497,220. The half-open interval is deliberate and must not be widened: a closed upper bound would double-count a sample landing exactly on a Phase-5 rebinding boundary. So the maintained counter is the durable record of what was spent, the accounting series and the Session totals corroborate it exactly, and the derived view is exact while a binding is OPEN - which is when enforcement reads it. Nothing was altered to make these agree.",
+  "no_reset_no_replacement": "The Stay holds exactly ONE Purchase and ONE Entitlement: exhaustion ended access and silently sold nothing. No quota counter reset anywhere - the four earlier Entitlements still read 0, 690, 70,090,838 and 35,692,721 bytes, untouched by this test.",
+  "financial": "ZERO throughout and at close: pms_postings 0, posting_attempts 0, posting_outbox 0, payment_transactions 0, payment_transaction_events 0. No settlement, charge, reversal or FX.",
+  "pms": "Untouched and healthy: CONNECTED / IN_SYNC / CONTINUOUS. No configuration change and no manual Full Resync - resync_command_id is NONE.",
+  "routine_fixes_proven_live": "Both, in this run's own journal. pmsd emitted WORKER_CONNECTED, WORKER_RESYNC_REQUESTED and WORKER_RESYNC_PUBLISHED at INFO after the restart - the first time a recovery has been visible in the log at all. And the portal's device route logged 'phase6 device request not served / device_list_unavailable' instead of the old 'phase3 guest auth not verified', on the very page this accepted guest reached: a dark capability no longer manufactures authentication failures.",
+  "migration_runner_closure": "The authoritative runner refused this appliance because its baseline precondition read the ledger for 0009_phase2_commerce - a row that on a factory-clean install correctly never exists, since such an appliance is built from a dump of the upgrade path's end state and 0001..0049 are never applied individually. 0061 therefore had to be applied around it during a live window. edge-migrate.sh now accepts that install shape on POSITIVE evidence: no 0009 row, no ledger row below 0010 at all, and 0009's own writers present in the schema. An upgrade-path install with a 0009 gap is still refused, and so is a database with neither the row nor the structures. scripts/edge-migrate-selftest.sh pins both directions and re-proves that checksum, target identity, acknowledgement, superuser refusal, destructive-ledger-rights refusal, ledger structure, re-apply idempotence and the advisory lock all still fail closed, against a disposable PostgreSQL. Migration 0061 was NOT reapplied and no live data changed.",
+  "ledger_grant": "iam_v2_owner was granted exactly SELECT and INSERT on public.schema_migrations - the two privileges the runner itself names as its remedy, and no more. It holds no UPDATE, DELETE, TRUNCATE and no public CREATE.",
+  "go_live": "NOT PERFORMED AND NOT AUTHORIZED.",
+  "transition_accepted": true
+}

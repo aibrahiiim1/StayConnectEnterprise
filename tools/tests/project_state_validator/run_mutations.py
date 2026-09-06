@@ -543,7 +543,7 @@ MUTATIONS = [
    # unchanged in substance - have a renderer source state an active-session count the recorded counters deny.
    # THIS IS THE MUTATION THAT MATTERED: when the counters were corrected to sessions_active 0, three prose
    # surfaces were still claiming a live Session, and this is the rule that caught them.
-   ("replace", [("sessions=4 - ALL FOUR ENDED", "sessions=4 - three ENDED and ONE ACTIVE")])),
+   ("replace", [("sessions=5 - ALL FIVE ENDED", "sessions=5 - four ENDED and ONE ACTIVE")])),
  ("M56 kernel records an authorization and a shaping class while no Session is active",
   "governance/project-state.json",
    # RE-AIMED AGAIN, SAME DEFECT CLASS, NOW THE OTHER DIRECTION. No Session is live and the kernel is empty,
