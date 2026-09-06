@@ -136,7 +136,10 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON public.pms_providers              TO svc_ed
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.social_oauth_providers     TO svc_edged;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.stripe_accounts            TO svc_edged;
 GRANT SELECT,INSERT,UPDATE        ON public.sync_outbox                TO svc_edged;
-GRANT SELECT,INSERT               ON public.sync_checkpoints           TO svc_edged;
+-- sync_checkpoints is a single upserted row per checkpoint name, not a log: the outbox drainer writes it
+-- with INSERT ... ON CONFLICT (name) DO UPDATE, which needs UPDATE for the same reason as
+-- network_interfaces above. Without it the drain checkpoint silently stops advancing.
+GRANT SELECT,INSERT,UPDATE        ON public.sync_checkpoints           TO svc_edged;
 GRANT SELECT,UPDATE               ON public.tenants                    TO svc_edged;
 GRANT SELECT,INSERT,UPDATE        ON public.tenant_effective_limits    TO svc_edged;
 GRANT SELECT,INSERT,DELETE        ON public.walled_garden_rules        TO svc_edged;
@@ -154,7 +157,18 @@ GRANT USAGE ON SCHEMA public TO svc_netd;
 GRANT SELECT,INSERT,UPDATE ON public.network_config_revisions TO svc_netd;
 GRANT SELECT,INSERT        ON public.network_apply_events     TO svc_netd;
 GRANT SELECT,INSERT        ON public.network_health_checks    TO svc_netd;
-GRANT SELECT,INSERT        ON public.network_interfaces       TO svc_netd;
+-- network_interfaces is an INVENTORY netd refreshes, not an append-only log, so it needs UPDATE.
+--
+-- netd syncs it with INSERT ... ON CONFLICT (name) DO UPDATE, and PostgreSQL requires UPDATE privilege
+-- for the DO UPDATE clause whether or not a row actually conflicts. With SELECT,INSERT alone every sync
+-- failed with "permission denied for table network_interfaces" — and netd ignores that error, so the
+-- table simply stayed empty.
+--
+-- The consequence landed nowhere near the cause. Guest-network validation reads this table to decide
+-- which interfaces exist, so an empty inventory made EVERY parent interface fail with
+-- interface_not_found: "interface \"ens192\" was not found on the appliance" — for an interface that is
+-- present, discovered, and offered by the wizard's own dropdown. It reads as broken hardware.
+GRANT SELECT,INSERT,UPDATE ON public.network_interfaces       TO svc_netd;
 GRANT INSERT               ON public.system_network_audit     TO svc_netd; -- append-only
 GRANT SELECT               ON public.guest_networks           TO svc_netd; -- read for apply
 GRANT SELECT               ON public.dhcp_pools               TO svc_netd;

@@ -2,6 +2,7 @@ package netcfg
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -16,9 +17,8 @@ import (
 //
 //	trunk and may also carry an untagged bridge).
 //
-// The renderer intentionally does not touch the parent's own address; parents
-// are expected to be L2 trunks (no IP) or already-configured by the base
-// netplan for the legacy untagged case.
+// The renderer does not touch a parent's own address — parents are L2 (no IP here) — but it DOES declare
+// every parent it references, because netplan will not resolve a bridge member that nothing defines.
 func RenderNetplan(nets []GuestNetwork) []byte {
 	var b strings.Builder
 	b.WriteString("# StayConnect generated — guest network L2/L3. Do not edit by hand.\n")
@@ -26,17 +26,41 @@ func RenderNetplan(nets []GuestNetwork) []byte {
 
 	enabled := sortEnabled(nets)
 
-	// Collect trunk parents (parents that carry at least one VLAN) so we emit
-	// them as address-less ethernets set UP.
-	trunkParents := map[string]bool{}
+	// EVERY PARENT THIS FILE REFERENCES MUST ALSO BE DEFINED IN IT.
+	//
+	// netplan resolves a bridge's `interfaces:` list against the merged configuration, and refuses to
+	// generate if a member is not defined anywhere:
+	//
+	//	Error in network definition: br-g-xxxx: interface 'ens192' is not defined
+	//
+	// This used to emit ethernets only for TRUNK parents — parents carrying a tagged VLAN — on the
+	// assumption, written into the comment above, that an untagged parent was "already-configured by the
+	// base netplan". On a factory-clean appliance it is not: the base netplan declares the WAN interface
+	// and nothing else, because the guest NIC has no configuration until an operator creates a guest
+	// network. So the first untagged guest network on a new appliance always failed to apply, and the
+	// error named the operator's interface rather than the file that failed to declare it.
+	//
+	// A generated file has to stand on its own. Emitting an address-less, optional ethernet for every
+	// parent is enough: it declares the interface without claiming an address or disturbing anything the
+	// base netplan already says about it (netplan merges per interface).
+	//
+	// The management and WAN interfaces are still never emitted — validation refuses them as guest
+	// parents before rendering is reached.
+	parents := make([]string, 0, len(enabled))
+	seen := map[string]bool{}
 	for _, n := range enabled {
-		if n.NetworkType == "vlan" {
-			trunkParents[n.ParentInterface] = true
+		if n.ParentInterface == "" || seen[n.ParentInterface] {
+			continue
 		}
+		seen[n.ParentInterface] = true
+		parents = append(parents, n.ParentInterface)
 	}
-	if len(trunkParents) > 0 {
+	// Sorted, because map iteration order is random and this file is fingerprinted to decide whether the
+	// configuration actually changed. Unstable output would make every render look like a change.
+	sort.Strings(parents)
+	if len(parents) > 0 {
 		b.WriteString("  ethernets:\n")
-		for p := range trunkParents {
+		for _, p := range parents {
 			fmt.Fprintf(&b, "    %s:\n      dhcp4: no\n      dhcp6: no\n      optional: true\n", p)
 		}
 	}

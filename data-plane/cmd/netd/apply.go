@@ -19,16 +19,24 @@ import (
 // swapped atomically. A watchdog auto-rolls-back if the operator does not
 // confirm within confirmWindow.
 type applier struct {
-	st            *store
-	kea           *keaClient
-	topo          netcfg.Topology
-	generatedDir  string // /etc/stayconnect/generated/network
-	netplanFile   string // /etc/netplan/50-stayconnect-guest.yaml
-	nftPath       string
-	unboundFrag   string // /etc/unbound/unbound.conf.d/stayconnect-guest.conf
-	keaLeaseCSV   string
-	keaSocket     string
-	confirmWindow time.Duration
+	st           *store
+	kea          *keaClient
+	topo         netcfg.Topology
+	generatedDir string // /etc/stayconnect/generated/network
+	netplanFile  string // /etc/netplan/50-stayconnect-guest.yaml
+	nftPath      string
+	unboundFrag  string // /etc/unbound/unbound.conf.d/stayconnect-guest.conf
+	keaLeaseCSV  string
+	keaSocket    string
+	// keaConfFile / keaUnit are used ONLY to bootstrap Kea the first time guest networking is configured:
+	// it cannot be reached over its control socket until it is running, and it cannot run until it has a
+	// config file. Afterwards every change goes through the socket and neither of these is touched.
+	keaConfFile string
+	keaUnit     string
+	// keaStartTimeout bounds the wait for Kea's control socket after the bootstrap start. A field rather
+	// than a constant so a test does not spend it, and so an unusually slow appliance can be given more.
+	keaStartTimeout time.Duration
+	confirmWindow   time.Duration
 	// legacyBridge is never surgically managed (it is adopted as-is).
 	legacyBridge string
 	dryRun       bool // pilot-safe: skip real ip/nft/kea side effects
@@ -210,7 +218,14 @@ func (a *applier) Apply(ctx context.Context, summary, actor string) (*applyResul
 
 // Confirm commits a pending revision (cancels the watchdog rollback).
 func (a *applier) Confirm(ctx context.Context, id, actor string) error {
-	return a.st.MarkActive(ctx, id, actor)
+	if err := a.st.MarkActive(ctx, id, actor); err != nil {
+		return err
+	}
+	// The revision is committed, so Kea stays enabled and running — that is what confirming it means.
+	// Dropping the saved pre-bootstrap state here keeps a later, unrelated rollback from resurrecting a
+	// "factory-clean" snapshot that stopped being true the moment this was confirmed.
+	a.clearKeaPreBootstrap()
+	return nil
 }
 
 // Rollback restores the previous active revision on operator request.
