@@ -1,0 +1,4 @@
+commit b41ac11a4af1cac1b886b59acfff7ae2cf3f193d
+Date:   Sun Sep 6 09:12:51 2026 +0300
+
+    Governance: T0119 closes the derived/counter invariant and the two stale facts
