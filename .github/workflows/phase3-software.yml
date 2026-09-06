@@ -278,6 +278,18 @@ jobs:
           bash $GITHUB_WORKSPACE/scripts/ci/step.sh enforcement-plane-check --
           bash $GITHUB_WORKSPACE/deploy/scripts/check-phase3-enforcement-plane-selftest.sh
 
+      # The authoritative migration runner refused every FACTORY-CLEAN appliance: its baseline precondition
+      # read the ledger for a 0009 row that, on a baseline install, correctly never exists. So the runner
+      # could not apply a migration to the appliances the baseline exists to produce, and 0061 had to go
+      # around it during a live window. This proves a baseline install can now apply its next migration —
+      # and that nothing was spent buying it: an upgrade-path install with a 0009 gap is still refused, and
+      # the checksum, target-identity, least-privilege, ledger and advisory-lock protections all still fail
+      # closed. Disposable PostgreSQL; no repository migration is applied to anything that outlives it.
+      - name: Edge migration runner (selftest)
+        run: >
+          bash $GITHUB_WORKSPACE/scripts/ci/step.sh edge-migrate --
+          bash $GITHUB_WORKSPACE/scripts/ci/pg-gate.sh scripts/edge-migrate-selftest.sh
+
       # Two units sat broken on the appliance for weeks — a helper nothing installed (203/EXEC nightly, disk
       # to 100%) and an obsolete tc primer failing on a bridge that does not exist — while `systemctl
       # --failed` listed both the whole time. This proves the standing audit refuses each of those states and
