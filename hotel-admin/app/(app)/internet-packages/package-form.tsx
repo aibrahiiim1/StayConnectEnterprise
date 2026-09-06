@@ -1,22 +1,23 @@
 "use client";
 
-// ONE FORM FOR A PACKAGE — what it is called, what it gives, who gets it, how long it lasts.
+// ONE FORM FOR A PACKAGE — what it is called, WHICH SERVICE PLAN it uses, who gets it, how long it lasts.
 //
-// It replaces a form whose most consequential field was a dropdown of service-plan revision ids. An operator
-// changing the speed of a package had to leave this screen, publish a plan revision elsewhere, come back and
-// re-select it; forgetting the last step changed nothing for guests while looking like it had. Here the
-// speed, allowance and device settings are simply fields on the package, and lib/package-save decides which
-// revisions that requires.
+// The two concepts stay distinct, because they are. A SERVICE PLAN is the technical service: speed, data,
+// time, devices, how the speed is shared. An INTERNET PACKAGE is the guest offer: a name, a duration, who is
+// eligible — and which service plan it hands out.
 //
-// The revision model is untouched. Saving still publishes immutable revisions; the operator just never has to
-// name one.
+// What is hidden is the REVISION, not the relationship. The operator picks a plan by name and sees what it
+// grants; the service-plan revision that pins is worked out in lib/package-save. An earlier version of this
+// form carried the speed and allowance fields itself and published a plan revision behind the operator's
+// back, which hid the wrong thing: it let a package silently author technical settings belonging to a plan
+// that other packages also use. Those fields are shown here as read-only context and edited on Service Plans.
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Trash2, Plus, ChevronDown, ChevronRight } from "lucide-react";
-import { durationToSeconds, mbpsToKbps, gbToBytes, DEVICE_LIMIT_POLICIES } from "@/lib/units";
-import type { PlanFields } from "@/lib/package-save";
+import { durationToSeconds } from "@/lib/units";
+import { planSummary } from "@/lib/package-save";
 import {
   SUPPORTED_RULE_TYPES,
   SUPPORTED_END_MODES,
@@ -32,23 +33,32 @@ import {
 
 export type PackageFormValue = {
   payload: PublishPayload;
-  /** The plan settings as the operator left them; the caller diffs these against the pinned revision. */
-  plan: PlanFields;
+  /** The Service Plan the operator selected. The caller turns it into the revision that gets pinned. */
+  selectedPlanID: string;
+};
+
+/** PlanOption is one selectable Service Plan, described by what it grants rather than by an id. */
+export type PlanOption = {
+  plan_id: string;
+  code: string;
+  name?: string | null;
+  current_revision_id: string;
+  down_kbps?: number | null; up_kbps?: number | null;
+  data_quota_bytes?: number | null; time_quota_seconds?: number | null;
+  max_concurrent_devices?: number | null; speed_allocation?: string | null;
 };
 
 export type PackageFormInitial = {
   code: string;
   name: string;
-  planCode: string;
+  /** The Service Plan this package currently uses, preselected on Edit. */
+  planID: string;
   planRevisionID: string;
-  plan: PlanFields;
   rules: EligibilityRuleForm[];
   tiers: GrantTierForm[];
   duration: DurationForm;
   visibleFrom?: string;
   visibleUntil?: string;
-  /** How many other ACTIVE packages share this service plan; shown so a shared edit is not a surprise. */
-  planSharedWith?: number;
 };
 
 function emptyRule(type: RuleType): EligibilityRuleForm {
@@ -68,10 +78,12 @@ const num = (v: unknown): number | null => {
 };
 
 export function PackageForm({
-  mode, initial, busy, onSave, onCancel,
+  mode, initial, plans, busy, onSave, onCancel,
 }: {
   mode: "add" | "edit";
   initial?: PackageFormInitial;
+  /** Every Service Plan the site has. A package cannot exist without one. */
+  plans: PlanOption[];
   busy?: boolean;
   onSave: (v: PackageFormValue) => void | Promise<void>;
   onCancel?: () => void;
@@ -90,44 +102,31 @@ export function PackageForm({
       ? String(Number(initial.duration.duration_seconds) / 3600)
       : "");
 
-  // Plan settings, in the units an operator thinks in.
-  const p = initial?.plan ?? {};
-  const [downMbps, setDownMbps] = useState(p.down_kbps ? String(p.down_kbps / 1000) : "");
-  const [upMbps, setUpMbps] = useState(p.up_kbps ? String(p.up_kbps / 1000) : "");
-  const [dataGb, setDataGb] = useState(p.data_quota_bytes ? String(p.data_quota_bytes / 1e9) : "");
-  const [timeHours, setTimeHours] = useState(p.time_quota_seconds ? String(p.time_quota_seconds / 3600) : "");
-  const [devices, setDevices] = useState(String(p.max_concurrent_devices ?? 1));
-  const [devicePolicy, setDevicePolicy] = useState(p.device_limit_policy ?? "REJECT_NEW_DEVICE");
-  const [alloc, setAlloc] = useState(p.speed_allocation ?? "PER_DEVICE");
+  // WHICH SERVICE PLAN. On Edit this starts at the plan the package already uses.
+  const [planID, setPlanID] = useState(initial?.planID ?? "");
   const [advanced, setAdvanced] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const selected = plans.find((p) => p.plan_id === planID);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!planID || !selected) {
+      // A package with no service plan grants nothing, so this is refused here rather than discovered by a
+      // guest. The dropdown is required; this covers the case where the only plan was removed mid-edit.
+      setError("Choose a service plan. It decides the speed and allowances this package gives.");
+      return;
+    }
     const res = buildPublishPayload({
       code, name,
-      // A placeholder the caller replaces with the revision it resolves. It is never sent as-is.
-      service_plan_revision_id: initial?.planRevisionID || "pending",
+      // The caller replaces this with the revision it resolves from the selected plan.
+      service_plan_revision_id: selected.current_revision_id || "pending",
       rules, tiers, duration,
       visible_from: visFrom || undefined, visible_until: visUntil || undefined,
     });
     if (res.error || !res.payload) { setError(res.error ?? "Please check the form"); return; }
-    onSave({
-      payload: res.payload,
-      plan: {
-        down_kbps: mbpsToKbps(downMbps) ?? null,
-        up_kbps: mbpsToKbps(upMbps) ?? null,
-        data_quota_bytes: gbToBytes(dataGb) ?? null,
-        time_quota_seconds: durationToSeconds(timeHours, "hours") ?? null,
-        max_concurrent_devices: num(devices),
-        device_limit_policy: devicePolicy || null,
-        speed_allocation: alloc || null,
-        idle_timeout_seconds: p.idle_timeout_seconds ?? null,
-        max_continuous_session_seconds: p.max_continuous_session_seconds ?? null,
-        time_accounting_mode: p.time_accounting_mode ?? "VALIDITY_WINDOW",
-      },
-    });
+    onSave({ payload: res.payload, selectedPlanID: planID });
   }
 
   const setRule = (i: number, patch: Partial<EligibilityRuleForm>) =>
@@ -135,7 +134,6 @@ export function PackageForm({
   const setTier = (i: number, patch: Partial<GrantTierForm>) =>
     setTiers((ts) => ts.map((t, j) => (j === i ? { ...t, ...patch } : t)));
 
-  const shared = (initial?.planSharedWith ?? 0) > 1;
 
   return (
     <form onSubmit={submit} className="space-y-5" aria-label="package-form">
@@ -158,55 +156,37 @@ export function PackageForm({
       </div>
 
       <div>
-        <h3 className="text-sm font-medium mb-2">What the guest gets</h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <Label>Download speed (Mbps)</Label>
-            <Input aria-label="down-mbps" type="number" min={0} step="0.1" value={downMbps}
-              onChange={(e) => setDownMbps(e.target.value)} placeholder="Unlimited" />
+        <h3 className="text-sm font-medium mb-2">Service plan</h3>
+        {plans.length === 0 ? (
+          // A PACKAGE CANNOT BE CREATED WITHOUT ONE, so this says what to do rather than presenting an empty
+          // dropdown that looks like a loading state.
+          <div className="text-sm rounded-md border border-border bg-panel2 px-3 py-2" role="status">
+            There are no service plans yet. A service plan defines the speed, allowances and device limit a
+            package hands out, so one has to exist first.{" "}
+            <a href="/service-plans" className="underline">Create a service plan</a>, then come back.
           </div>
-          <div>
-            <Label>Upload speed (Mbps)</Label>
-            <Input aria-label="up-mbps" type="number" min={0} step="0.1" value={upMbps}
-              onChange={(e) => setUpMbps(e.target.value)} placeholder="Unlimited" />
-          </div>
-          <div>
-            <Label>Data allowance (GB)</Label>
-            <Input aria-label="data-gb" type="number" min={0} step="0.1" value={dataGb}
-              onChange={(e) => setDataGb(e.target.value)} placeholder="Unlimited" />
-          </div>
-          <div>
-            <Label>Time allowance (hours)</Label>
-            <Input aria-label="time-hours" type="number" min={0} step="0.5" value={timeHours}
-              onChange={(e) => setTimeHours(e.target.value)} placeholder="Unlimited" />
-          </div>
-          <div>
-            <Label>Devices at once</Label>
-            <Input aria-label="devices" type="number" min={1} value={devices}
-              onChange={(e) => setDevices(e.target.value)} />
-          </div>
-          <div>
-            <Label>When the device limit is reached</Label>
-            <select aria-label="device-policy" value={devicePolicy} onChange={(e) => setDevicePolicy(e.target.value)}
+        ) : (
+          <>
+            <select aria-label="service-plan" required value={planID}
+              onChange={(e) => setPlanID(e.target.value)}
               className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm">
-              {Object.entries(DEVICE_LIMIT_POLICIES).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+              <option value="">Choose a service plan…</option>
+              {plans.filter((p) => p.current_revision_id).map((p) => (
+                <option key={p.plan_id} value={p.plan_id}>{p.name || p.code}</option>
+              ))}
             </select>
-          </div>
-          <div className="sm:col-span-2">
-            <Label>How the speed is shared</Label>
-            <select aria-label="speed-allocation" value={alloc} onChange={(e) => setAlloc(e.target.value)}
-              className="w-full bg-panel2 border border-border rounded-md px-2 py-2 text-sm">
-              <option value="PER_DEVICE">Per device — every device gets the full speed</option>
-              <option value="SHARED">Shared — all the guest&rsquo;s devices share the speed</option>
-            </select>
-          </div>
-        </div>
-        {shared && (
-          <p className="text-xs text-muted mt-2">
-            These settings come from the <strong>{initial?.planCode}</strong> service plan, which{" "}
-            {initial?.planSharedWith} active packages use. Changing them here updates this package only —
-            the others keep the settings they have now.
-          </p>
+            {/* WHAT IT GRANTS, READ-ONLY. These belong to the plan and are edited on the Service Plans
+                screen; showing them here is context for the choice, not a second place to change them. */}
+            <p className="text-xs text-muted mt-2" data-testid="plan-summary">
+              {selected
+                ? planSummary(selected)
+                : "Choose a plan to see the speed and allowances it gives."}
+            </p>
+            <p className="text-xs text-muted mt-1">
+              Speed, data, time and device limits are part of the service plan.{" "}
+              <a href="/service-plans" className="underline">Change them on Service plans</a>.
+            </p>
+          </>
         )}
       </div>
 

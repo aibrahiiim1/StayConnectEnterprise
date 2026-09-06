@@ -128,23 +128,68 @@ grep -qF "PLAIN DIRECTORY" <<<"$out" && { echo "  *** FAIL: a healthy release wa
 grep -qF "built WITHOUT" <<<"$out" && { echo "  *** FAIL: a healthy release was called flagless"; fail=1; }
 [ "$fail" = "0" ] && echo "  ok: a correct release passes every structural check"
 
-echo "== a BUILD_ID containing a hyphen must still compare equal to what is SERVED =="
-# THE GATE THAT PASSED UNTIL IT MATTERED. An HTML comment cannot contain "--", so Next writes a BUILD_ID's
-# hyphens as underscores in the served document. Comparing the file's spelling against the served spelling
-# therefore failed for every id containing "-" -- roughly half of all builds -- and a correct deployment was
-# rolled back with "serving CiLetqcFQ_UcO0nBzrxeZ but installed CiLetqcFQ-UcO0nBzrxeZ".
+echo "== build identity is LOSSLESS: - and _ are different builds =="
+# THE COLLISION THIS REPLACED. The identity check used to compare the BUILD_ID on disk against the one Next
+# stamps into an HTML comment, where a hyphen is written as an underscore because a comment cannot contain
+# "--". Normalising the disk id to match made hyphenated builds pass -- and made "ABC-DEF" and "ABC_DEF",
+# both ids Next can generate, indistinguishable. That is a false POSITIVE: a deployment verified against a
+# different build.
+#
+# The identity now comes from the running server's own asset path, which carries the id exactly. These drive
+# it with a stubbed fetcher so the properties are asserted without a server.
 # shellcheck source=/dev/null
 . "$HERE/lib-hotel-admin-contract.sh"
-if [ "$(ha_wire_build_id 'CiLetqcFQ-UcO0nBzrxeZ')" != "CiLetqcFQ_UcO0nBzrxeZ" ]; then
-  echo "  *** FAIL: a hyphenated BUILD_ID is not converted to its served spelling"; fail=1
-elif [ "$(ha_wire_build_id 'aap1R2iCuFf2dubGXuDC5')" != "aap1R2iCuFf2dubGXuDC5" ]; then
-  echo "  *** FAIL: an id with no hyphen was altered"; fail=1
-elif [ "$(ha_wire_build_id 'a-b-c')" != "a_b_c" ]; then
-  echo "  *** FAIL: only the first hyphen was converted"; fail=1
-elif [ "$(ha_wire_build_id 'CiLetqcFQ-UcO0nBzrxeZ')" = "$(ha_wire_build_id 'ZZZZZZZZZ-UcO0nBzrxeZ')" ]; then
-  echo "  *** FAIL: two different builds compare equal — the identity check has been weakened, not fixed"; fail=1
+
+# A stub server that is running exactly one build: it answers 200 for that build's path and 404 for anything
+# else. Written to a file because the helper invokes it as a command.
+STUB="$WORK/stub-status"; mkdir -p "$WORK"
+cat > "$STUB" <<'STUBEOF'
+#!/usr/bin/env bash
+# $1 is the URL; $SERVING is the one build this stub is running.
+case "$1" in
+  */_next/static/"$SERVING"/_buildManifest.js) echo 200 ;;
+  *) echo 404 ;;
+esac
+STUBEOF
+chmod +x "$STUB"
+
+run_probe() { SERVING="$1" HA_FETCH_STATUS="$STUB" ha_serves_build_id "https://x" "$2"; }
+
+# 1. a correct HYPHENATED build passes -- the case the old check rejected
+if run_probe "CiLetqcFQ-UcO0nBzrxeZ" "CiLetqcFQ-UcO0nBzrxeZ"; then
+  echo "  ok: a hyphenated BUILD_ID verifies against the build actually running"
 else
-  echo "  ok: a hyphenated BUILD_ID matches its served spelling, and different builds still differ"
+  echo "  *** FAIL: a correct hyphenated BUILD_ID was rejected"; fail=1
+fi
+
+# 2. "-" and "_" are DIFFERENT builds -- the collision the old check introduced
+if run_probe "ABC_DEF-aaaaaaaaaaaaaa" "ABC-DEF-aaaaaaaaaaaaaa"; then
+  echo "  *** FAIL: an underscore id verified against a hyphen id — the lossy collision is back"; fail=1
+else
+  echo "  ok: '-' and '_' ids are distinct builds"
+fi
+
+# 3. a genuinely different build fails
+if run_probe "aap1R2iCuFf2dubGXuDC5" "X05a_KJQAOuyeVoNK1VnA"; then
+  echo "  *** FAIL: a different build was accepted"; fail=1
+else
+  echo "  ok: a different build is refused"
+fi
+
+# 4. NO prefix or substring matching: neither direction may pass
+if run_probe "X05a_KJQAOuyeVoNK1VnA" "X05a"; then
+  echo "  *** FAIL: a PREFIX of the running build id was accepted"; fail=1
+elif run_probe "X05a" "X05a_KJQAOuyeVoNK1VnA"; then
+  echo "  *** FAIL: a build id containing the running one as a prefix was accepted"; fail=1
+else
+  echo "  ok: no prefix or substring comparison is used"
+fi
+
+# 5. an empty id can never verify
+if run_probe "X05a_KJQAOuyeVoNK1VnA" ""; then
+  echo "  *** FAIL: an empty BUILD_ID verified"; fail=1
+else
+  echo "  ok: an empty BUILD_ID is refused"
 fi
 
 if [ "$fail" = "0" ]; then

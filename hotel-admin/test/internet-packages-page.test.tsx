@@ -35,7 +35,7 @@ describe("InternetPackagesPage", () => {
     expect(screen.queryByText("Service plans")).toBeNull();
   });
 
-  it("shows what each package GIVES, with no revision id or plan picker in sight", async () => {
+  it("shows what each package GIVES, and Add asks for a service plan by name", async () => {
     // The old list was a code, a status and a revision count, so this screen could not answer "what speed is
     // this?". It now answers it directly, and Add asks for the speed rather than for a plan revision.
     g.mockImplementation((path: string) => {
@@ -46,7 +46,7 @@ describe("InternetPackagesPage", () => {
         down_kbps: 10000, up_kbps: 5000, data_quota_bytes: 100000000, max_concurrent_devices: 4,
         speed_allocation: "PER_DEVICE", price_minor: 0,
       }]));
-      if (path === "/commercial-packages/plans") return Promise.resolve(list([{ plan_id: "p1", code: "GOLD", enabled: true, current_revision_id: "rev-gold", revision_count: 1 }]));
+      if (path === "/commercial-packages/plans") return Promise.resolve(list([{ plan_id: "p1", code: "GOLD", name: "Gold", enabled: true, current_revision_id: "rev-gold", revision_count: 1, down_kbps: 10000 }]));
       return Promise.resolve(list([]));
     });
     render(<InternetPackagesPage />);
@@ -56,9 +56,12 @@ describe("InternetPackagesPage", () => {
     // reading it here is what made this list 500 in PRE-LIVE.
 
     fireEvent.click(screen.getByRole("button", { name: /add package/i }));
-    // Speed is asked for directly; there is no service-plan revision selector any more.
-    expect(await screen.findByLabelText("down-mbps")).toBeInTheDocument();
-    expect(screen.queryByLabelText("service-plan")).toBeNull();
+    // The plan is chosen BY NAME. Its technical settings are the plan's, shown read-only, and its revision
+    // id never appears.
+    const sel = (await screen.findByLabelText("service-plan")) as HTMLSelectElement;
+    expect(Array.from(sel.options).map((o) => o.value)).toContain("p1");
+    expect(Array.from(sel.options).map((o) => o.value)).not.toContain("rev-gold");
+    expect(screen.queryByLabelText("down-mbps")).toBeNull();
     expect(document.body.innerHTML).not.toContain("rev-gold");
   });
 
@@ -136,6 +139,7 @@ describe("InternetPackagesPage", () => {
     render(<InternetPackagesPage />);
     fireEvent.click(await screen.findByRole("button", { name: /add package/i }));
     fireEvent.change(await screen.findByLabelText("code"), { target: { value: "X" } });
+    fireEvent.change(screen.getByLabelText("service-plan"), { target: { value: "p1" } });
     fireEvent.click(screen.getByRole("button", { name: /^add package$/i, hidden: false }));
     expect(await screen.findByText(/invalid_grant_tier/i)).toBeInTheDocument();
     // the form stays open rather than reporting a success that did not happen

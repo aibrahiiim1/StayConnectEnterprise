@@ -20,8 +20,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Plus, X, AlertTriangle } from "lucide-react";
-import { PackageForm, type PackageFormInitial, type PackageFormValue } from "./package-form";
-import { decideSave, saveOutcomeMessage, type PlanFields } from "@/lib/package-save";
+import { PackageForm, type PackageFormInitial, type PackageFormValue, type PlanOption } from "./package-form";
+import { decideSave, saveOutcomeMessage } from "@/lib/package-save";
 import { formatSpeed, formatData, formatDuration, formatDevices } from "@/lib/units";
 import type { EligibilityRuleForm, GrantTierForm, DurationForm } from "@/lib/commerce-form";
 
@@ -40,10 +40,7 @@ type PackageSummary = {
   speed_allocation?: string | null;
   plan_has_newer_revision?: boolean;
 };
-type PlanSummary = {
-  plan_id: string; code: string; current_revision_id: string;
-  name?: string | null; used_by_active_packages?: number;
-};
+type PlanSummary = PlanOption & { used_by_active_packages?: number };
 type PackageCurrent = {
   package_id: string; code: string; revision_id: string; revision_no: number;
   service_plan_revision_id: string;
@@ -153,15 +150,14 @@ function PackagesTab({ guard, setErr }: TabProps) {
       setEditing({
         code: p.code,
         name: (cur.display?.name as string) ?? p.name ?? p.code,
-        planCode: p.service_plan_code ?? plan?.code ?? "",
+        // The plan this package uses today, preselected so Edit opens on what is actually in force.
+        planID: p.service_plan_id ?? "",
         planRevisionID: cur.service_plan_revision_id,
-        plan: planFieldsOf(p),
         rules: rulesToForm(cur.eligibility_rules),
         tiers: tiersToForm(cur.grant_tiers),
         duration: durationToForm(cur.duration_policy),
         visibleFrom: toLocalInput(cur.visible_from),
         visibleUntil: toLocalInput(cur.visible_until),
-        planSharedWith: plan?.used_by_active_packages ?? 0,
       });
       setAdding(false);
     } catch (e) { if (!guard(e)) setErr((e as Error)?.message ?? "Could not open this package"); }
@@ -169,29 +165,26 @@ function PackagesTab({ guard, setErr }: TabProps) {
 
   // SAVE. One operator action; lib/package-save decides whether that needs a new service-plan revision as
   // well as the package revision, and in which order.
+  // SAVE. One operator action. It publishes a new immutable package revision pinned to the selected Service
+  // Plan's current revision — and it NEVER creates or edits a Service Plan. Authoring plan settings from here
+  // is what let a package silently change a plan other packages share; that belongs on Service plans.
   async function save(v: PackageFormValue) {
     setBusy(true); setErr(null); setNotice(null);
     try {
-      let planRevisionID = editing?.planRevisionID ?? "";
-      const decision = decideSave({
-        planCode: editing?.planCode || v.payload.code,
-        pinnedPlanRevisionID: planRevisionID,
-        currentPlan: editing?.plan ?? {},
-        nextPlan: v.plan,
-      });
-      if (!editing || decision.plan) {
-        // Adding a package, or changing what it gives: publish the service-plan revision first and pin to it.
-        const planCode = decision.plan?.code || v.payload.code;
-        const res = await api.post<{ current_revision_id: string }>("/commercial-packages/plans", {
-          code: planCode,
-          name: v.payload.display.name,
-          ...v.plan,
-        });
-        planRevisionID = res.current_revision_id;
-      } else {
-        planRevisionID = decision.reusePlanRevisionID ?? planRevisionID;
+      const selected = plans.find((x) => x.plan_id === v.selectedPlanID);
+      if (!selected?.current_revision_id) {
+        setErr("That service plan has no settings published yet. Open Service plans and save it first.");
+        return;
       }
-      await api.post("/commercial-packages", { ...v.payload, service_plan_revision_id: planRevisionID });
+      const decision = decideSave({
+        pinnedPlanRevisionID: editing?.planRevisionID ?? "",
+        selected,
+        currentPlanID: editing?.planID,
+      });
+      await api.post("/commercial-packages", {
+        ...v.payload,
+        service_plan_revision_id: decision.pinPlanRevisionID,
+      });
       setAdding(false); setEditing(null); setEditingID(null);
       setNotice(saveOutcomeMessage(decision));
       await load();
@@ -230,7 +223,7 @@ function PackagesTab({ guard, setErr }: TabProps) {
       {adding && (
         <Card>
           <CardHeader><CardTitle>Add package</CardTitle></CardHeader>
-          <CardBody><PackageForm mode="add" busy={busy} onSave={save} onCancel={() => setAdding(false)} /></CardBody>
+          <CardBody><PackageForm mode="add" plans={plans} busy={busy} onSave={save} onCancel={() => setAdding(false)} /></CardBody>
         </Card>
       )}
 
@@ -238,7 +231,7 @@ function PackagesTab({ guard, setErr }: TabProps) {
         <Card>
           <CardHeader><CardTitle>Edit {editing.name || editing.code}</CardTitle></CardHeader>
           <CardBody>
-            <PackageForm mode="edit" initial={editing} busy={busy} onSave={save}
+            <PackageForm mode="edit" initial={editing} plans={plans} busy={busy} onSave={save}
               onCancel={() => { setEditing(null); setEditingID(null); }} />
           </CardBody>
         </Card>
@@ -331,20 +324,6 @@ function PackagesTab({ guard, setErr }: TabProps) {
 // shaping the API's current-configuration into the form's shape
 // ---------------------------------------------------------------------------------------------------------
 
-function planFieldsOf(p: PackageSummary): PlanFields {
-  return {
-    down_kbps: p.down_kbps ?? null,
-    up_kbps: p.up_kbps ?? null,
-    max_concurrent_devices: p.max_concurrent_devices ?? null,
-    device_limit_policy: p.device_limit_policy ?? null,
-    time_quota_seconds: p.time_quota_seconds ?? null,
-    data_quota_bytes: p.data_quota_bytes ?? null,
-    speed_allocation: p.speed_allocation ?? null,
-    idle_timeout_seconds: null,
-    max_continuous_session_seconds: null,
-    time_accounting_mode: "VALIDITY_WINDOW",
-  };
-}
 
 // Go marshals these structs with capitalised keys (the fields carry no json tags), so both spellings are
 // accepted rather than assuming one. Getting this wrong would drop rules on save.

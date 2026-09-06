@@ -276,18 +276,14 @@ smoke_live() {
   # extracted -- so a page that rendered without the stamp, an endpoint answering with something that is not
   # this application, or an extraction that quietly broke, all reported the identity as verified. An identity
   # check that cannot obtain an identity has FAILED.
-  local served
-  if ! served="$(ha_served_build_id "$base/login")"; then
-    echo "SMOKE FAIL: could not extract a BUILD_ID from $base/login — the served identity is unverifiable, which is a failure and not a pass" >&2
+  # THE IDENTITY IS PROVEN LOSSLESSLY. The endpoint is asked for THIS build's own asset path, which carries
+  # the BUILD_ID exactly as generated; the running server answers 200 only if that is the build it is running.
+  # Nothing is normalised, compared as substrings, or read out of an HTML comment that cannot represent "--".
+  if ! ha_serves_build_id "$base" "$want_bid"; then
+    echo "SMOKE FAIL: $base is not serving BUILD_ID '$want_bid' — it did not answer for that build's own assets" >&2
     return 1
   fi
-  # Compared in the served document's own spelling: an HTML comment cannot carry "--", so a BUILD_ID
-  # containing "-" arrives with it written as "_". See ha_wire_build_id.
-  if [ "$served" != "$(ha_wire_build_id "$want_bid")" ]; then
-    echo "SMOKE FAIL: the live endpoint is serving BUILD_ID '$served' but the release we installed is '$want_bid'" >&2
-    return 1
-  fi
-  echo ">> smoke: live endpoint serves BUILD_ID $served"
+  echo ">> smoke: live endpoint serves BUILD_ID $want_bid"
 
   # ---- EVERY REQUIRED SURFACE, COUNTED -------------------------------------------------------------------
   # The route list is MATERIALISED and asserted non-empty before anything iterates: a `while read` over a
@@ -334,7 +330,7 @@ smoke_live() {
       echo "SMOKE FAIL: the configured operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} served no extractable BUILD_ID" >&2
       return 1
     fi
-    [ "$public_id" = "$(ha_wire_build_id "$want_bid")" ] || { echo "SMOKE FAIL: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves BUILD_ID '$public_id', not '$want_bid'" >&2; return 1; }
+    ha_serves_build_id "${HOTEL_ADMIN_PUBLIC_URL}" "$want_bid" || { echo "SMOKE FAIL: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} is not serving BUILD_ID '$want_bid'" >&2; return 1; }
     echo ">> smoke: the operator endpoint ${HOTEL_ADMIN_PUBLIC_URL} serves the same BUILD_ID"
   fi
   return 0
