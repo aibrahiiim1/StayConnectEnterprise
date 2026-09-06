@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `6de060d90c818d09ef27a0168e17e95ebae4a61c`
-- **Provenance (generation HEAD = inventory_head):** `6de060d90c818d09ef27a0168e17e95ebae4a61c`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `d17270a22e37fdf1672abbac05cc6403760fb931`
+- **Provenance (generation HEAD = inventory_head):** `d17270a22e37fdf1672abbac05cc6403760fb931`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/crossing-sample-attribution-and-stale-facts`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 343
@@ -104,7 +104,7 @@
 | `data-plane/internal/checkout/grace_lock_boundary_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Make the Gate-P reconcile atomic, exact-sourced, and inclusive of svc_pmsd |
 | `data-plane/internal/enforce/address_ownership_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Run the enforcement plane whenever guest sessions need it |
 | `data-plane/internal/enforce/aggregate_quota_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | An address is evidence, not an account |
-| `data-plane/internal/enforce/data_quota_contract_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | The sample that ended the access belonged to nobody |
+| `data-plane/internal/enforce/data_quota_contract_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Two gate fixes: a mangled chain line and a rebinding fixture that broke an invariant |
 | `data-plane/internal/enforce/device_movement_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | An address is evidence, not an account |
 | `data-plane/internal/enforce/enforce.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | An address is evidence, not an account |
 | `data-plane/internal/iamv2/commerce_admin.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | A failed resync must not delete the roster we already have |
@@ -241,7 +241,7 @@
 | `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
-| `exports/chatgpt/phase-evidence/GIT_STAT_b41ac11a.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs |
+| `exports/chatgpt/phase-evidence/GIT_STAT_cb289eb5.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
 | `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
@@ -264,7 +264,7 @@
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/stayconnectenterprise/StayConnect-IAM-Phase3-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | DHCP is a safety authority, and the state file must say what the appliance is |
 | `governance/decision-register.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | A dead socket is not a dead mirror |
-| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Governance: T0119 closes the derived/counter invariant and the two stale facts |
+| `governance/project-state.json` | MODIFIED | `M` | governance | GOVERNANCE | rollback RESTORES prior content | Delivery: change manifest |
 | `governance/transitions/T0083.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Stamp T0083 from the commit that introduced it |
 | `governance/transitions/T0084.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | Use the established phase_affected convention in the post-closure receipts |
 | `governance/transitions/T0085.json` | CREATED | `A` | governance | GOVERNANCE | rollback REMOVES it | D36 ACCEPTED by the Product Owner |
@@ -346,9 +346,9 @@
 | `scripts/gatep-reconcile.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Address in-container paths so the copy verification looks where the files are |
 | `scripts/generate-production-baseline.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Regenerate the factory-clean baseline for migration 0050 |
 | `scripts/phase3-preflight.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Retire the tc primer: netd has owned this since before the unit last worked |
-| `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | The sample that ended the access belonged to nobody |
+| `scripts/phase5-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | Two gate fixes: a mangled chain line and a rebinding fixture that broke an invariant |
 | `scripts/pmsd-pg-integration.sh` | MODIFIED | `M` | other | OTHER | rollback RESTORES prior content | The sample that ended the access belonged to nobody |
-| `scripts/prod-privilege-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | The sample that ended the access belonged to nobody |
+| `scripts/prod-privilege-integration.sh` | CREATED | `A` | other | OTHER | rollback REMOVES it | Two gate fixes: a mangled chain line and a rebinding fixture that broke an invariant |
 | `tools/project-state.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | The sample that ended the access belonged to nobody |
 | `tools/tests/current_state_parity/run_negative.py` | MODIFIED | `M` | tests/tooling | TOOLING | rollback RESTORES prior content | A negative test that only works in one operational state is not a test |
 | `tools/tests/generated_block_contradiction/run_negative.py` | CREATED | `A` | tests/tooling | TOOLING | rollback REMOVES it | Reconcile every current-state surface with the T0100 facts |
@@ -370,7 +370,7 @@
  cloud-admin/components/nav.tsx                     |    2 +-
  control-plane/internal/activation/activation.go    |  237 +++++
  control-plane/internal/api/common.go               |   10 +
- .../internal/api/offline_activation_api.go         |  279 ++++++
+ .../internal/api/offline_activation_api.go         |  279 +++++
  control-plane/internal/config/config.go            |    6 +-
  control-plane/internal/http/mtls.go                |   97 +-
  control-plane/internal/http/mtls_names_test.go     |   81 ++
@@ -444,13 +444,13 @@
  data-plane/internal/authctx/authctx.go             |  126 ++-
  .../internal/authctx/authctx_integration_test.go   |   37 +-
  .../freshness_feed_health_integration_test.go      |  209 ++++
- .../materialization_race_integration_test.go       |  334 +++++++
+ .../materialization_race_integration_test.go       |  334 ++++++
  .../authctx/mirror_trust_integration_test.go       |  326 ++++++
  data-plane/internal/checkout/checkout.go           |   13 +-
  .../grace_lock_boundary_integration_test.go        |  146 +++
  .../internal/enforce/address_ownership_test.go     |  116 +++
  .../enforce/aggregate_quota_integration_test.go    |  197 ++++
- .../data_quota_contract_integration_test.go        |  753 ++++++++++++++
+ .../data_quota_contract_integration_test.go        |  797 +++++++++++++++
  .../internal/enforce/device_movement_test.go       |  125 +++
  data-plane/internal/enforce/enforce.go             |  141 ++-
  data-plane/internal/iamv2/commerce_admin.go        |   40 +
@@ -465,7 +465,7 @@
  data-plane/internal/pmsd/adapter_fias_test.go      |   57 +-
  data-plane/internal/pmsd/applier.go                |    7 +-
  data-plane/internal/pmsd/assignment.go             |  193 ++--
- .../internal/pmsd/assignment_identity_test.go      |  112 +++
+ .../internal/pmsd/assignment_identity_test.go      |  112 ++
  data-plane/internal/pmsd/errcodes.go               |   40 +
  data-plane/internal/pmsd/events.go                 |   27 +-
  data-plane/internal/pmsd/pg.go                     |   92 +-
@@ -536,7 +536,7 @@
  deploy/scripts/central-preflight.sh                |  174 ++++
  deploy/scripts/check-appliance-units-selftest.sh   |   89 ++
  deploy/scripts/check-appliance-units.sh            |  106 ++
- .../check-dhcp-ownership-evidence-selftest.sh      |  112 +++
+ .../check-dhcp-ownership-evidence-selftest.sh      |  112 ++
  deploy/scripts/check-dhcp-ownership-evidence.sh    |  129 +++
  deploy/scripts/check-hotel-admin-cert-selftest.sh  |  182 ++++
  .../check-hotel-admin-integrity-adversarial.sh     |  235 +++++
@@ -544,7 +544,7 @@
  deploy/scripts/check-hotel-admin-integrity.sh      |  216 ++++
  .../check-phase3-enforcement-plane-selftest.sh     |  132 +++
  deploy/scripts/check-phase3-enforcement-plane.sh   |   76 ++
- deploy/scripts/deploy-hotel-admin.sh               |  392 +++++++-
+ deploy/scripts/deploy-hotel-admin.sh               |  392 ++++++-
  deploy/scripts/enable-phase3-enforcement-plane.sh  |  101 ++
  deploy/scripts/hotel-admin-cert-manager.sh         |   76 +-
  deploy/scripts/hotel-admin-mint-cert.sh            |   26 +-
@@ -580,14 +580,14 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1057 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1068 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 +++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 320399 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 137685 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 42967 bytes
- .../chatgpt/phase-evidence/GIT_STAT_b41ac11a.txt   |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 320401 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 137688 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 42969 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_cb289eb5.txt   |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -692,16 +692,16 @@
  scripts/gatep-reconcile.sh                         |  161 +++
  scripts/generate-production-baseline.sh            |   38 +-
  scripts/phase3-preflight.sh                        |  141 ++-
- scripts/phase5-pg-integration.sh                   |   17 +-
+ scripts/phase5-pg-integration.sh                   |   18 +-
  scripts/pmsd-pg-integration.sh                     |  136 ++-
- scripts/prod-privilege-integration.sh              |  136 +++
+ scripts/prod-privilege-integration.sh              |  137 +++
  tools/project-state.py                             |  384 ++++++-
  tools/tests/current_state_parity/run_negative.py   |   65 ++
  .../generated_block_contradiction/run_negative.py  |  156 +++
  .../tests/project_state_validator/run_mutations.py |   89 +-
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   12 +-
- 343 files changed, 33352 insertions(+), 2489 deletions(-)
+ 343 files changed, 33409 insertions(+), 2489 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -711,6 +711,9 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: d17270a2 Delivery: packs
+HISTORICAL: cb289eb5 Two gate fixes: a mangled chain line and a rebinding fixture that broke an invariant
+HISTORICAL: 193b4be7 Delivery: change manifest
 HISTORICAL: 6de060d9 Delivery: packs
 HISTORICAL: b41ac11a Governance: T0119 closes the derived/counter invariant and the two stale facts
 HISTORICAL: 83ea7280 The sample that ended the access belonged to nobody
