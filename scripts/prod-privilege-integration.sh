@@ -86,7 +86,8 @@ for m in 0056_materialization_readiness 0057_lock_auth_context_offer \
          0058_guest_auth_row_locks \
          0059_speed_allocation \
          0060_last_good_roster_survives_a_failed_resync \
-         0061_the_entitlement_records_what_it_spent; do
+         0061_the_entitlement_records_what_it_spent \
+         0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it; do
   f="$ROOT/data-plane/migrations/$m.up.sql"
   [ -f "$f" ] || continue
   psql_run < "$f" >"$OUT/$m.log" 2>&1 || { echo "  FAIL $m:"; tail -3 "$OUT/$m.log"; exit 1; }

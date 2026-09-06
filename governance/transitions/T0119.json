@@ -1,0 +1,39 @@
+{
+  "transition_id": "T0119",
+  "seq": 119,
+  "timestamp": "2026-09-06T03:20:00Z",
+  "timestamp_derivation": "After migration 0062 was applied to stayconnect_site through the authoritative runner and the invariant re-verified live (0 violations across all five Entitlements); before the author timestamp of the commit that introduces this receipt. Per T0091, in the order T0108 requires.",
+  "record_type": "DERIVED_USAGE_INVARIANT_CLOSED_AND_CURRENT_STATE_RESYNCHRONIZED",
+  "previous_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "new_state": {
+    "phase": "7",
+    "activity": "FRESH_PRODUCTION_APPLIANCE_ONBOARDED_PRE_LIVE",
+    "phase_status": "ACCEPTED_AND_CLOSED",
+    "activity_execution_state": "ONBOARDED_LICENSED_CONFIGURED_ENFORCEMENT_PLANE_LIVE_ADDRESS_OWNERSHIP_ENFORCED_PMS_FEED_LIVE_CONTROLLED_REAL_DEVICE_ROOM_LOGIN_ACCEPTED_PRE_LIVE",
+    "lifecycle": "post-roadmap production preparation (not a numbered phase; no Phase 8)"
+  },
+  "state_advanced": false,
+  "phase_affected": "7",
+  "phase_affected_note": "post-roadmap. No numbered phase advanced or reopened.",
+  "decision": "D39",
+  "new_decision_created": false,
+  "new_decision_rationale": "No new product decision. This restores an invariant migration 0061 declared, and corrects two current-state facts against live evidence.",
+  "po_authorization_ref": "EXPLICIT Product-Owner authorization, 2026-09-06: final consistency close-out - the derived/counter invariant and the two stale current-state facts, and nothing else.",
+  "t0118_unchanged": "THE ACCEPTED LIVE ACCEPTANCE IS UNTOUCHED AND REMAINS PASS. No Room Login was performed, no guest traffic generated, no PMS action taken and no financial traffic sent. Not one accounting record, Purchase, Session, Stay or counter value was rewritten: all 1,808 accounting rows stand, and Entitlement a7a024b0 still reads consumed_data_bytes 100,108,666, TERMINATED for DATA at 2026-09-06T01:40:12.423805Z.",
+  "defect": "Migration 0061 named iam_v2.p3_entitlement_data_usage as the authoritative derivation that consumed_data_bytes must equal. After the live crossing the two disagreed by exactly one sample - the crossing itself, 497,220 bytes: counter 100,108,666 against derived 99,611,446. The Entitlement terminated at the crossing sample's instant, so the Session's binding closed at that instant, and the attribution predicate is half-open (bound_until > sampled_at). The sample that ended the access fell outside the interval the moment the interval closed, and was attributed to nothing.",
+  "fix": "Migration 0062, applied through the authoritative runner. A closing binding may claim a sample at its own closing instant ONLY when no other binding for that session covers that instant. THE HALF-OPEN BOUND IS UNCHANGED, because it is what makes a Phase-5 rebinding unambiguous: the predecessor closes at T, the successor opens at T, and a sample at T belongs to the successor alone. Widening the bound to >= would attribute that sample to both and invent usage out of a transfer. The new arm is unreachable wherever a successor covers the instant, so it fires only at a terminal boundary - where there is no successor - and a sample is still attributed EXACTLY ONCE. 0062 asserts both properties against the real data before it commits: every counter equals its derivation, and no accounting record attributes to two bindings.",
+  "not_changed": "iam_v2.p6_data_crossing - the enforcement authority for WHEN a quota was crossed - was not touched, so no enforcement decision changes. No accounting, admission or financial semantics change. The maintained counter was already correct and was not rewritten; the derivation now agrees with it rather than the other way round.",
+  "live_verification": "Applied to stayconnect_site 2026-09-06 as iam_v2_owner via scripts/edge-migrate.sh with --target-kind live-site and the file's sha256 - the first migration to go through the authoritative runner on this appliance, on the factory-clean path T0118 closed, which reported 'no 0009 ledger row, no migration below 0010, and the Phase-2 commerce structures are present'. Afterwards: 0 invariant violations across all five Entitlements (0=0, 690=690, 70,090,838=70,090,838, 35,692,721=35,692,721 and 100,108,666=100,108,666 for the terminated one); 1,808 accounting rows unchanged; 5 Sessions, none active; kernel empty; PMS CONNECTED / IN_SYNC / CONTINUOUS at generation 195; every financial counter zero.",
+  "regression": "Three cases through the real ingestion operation: the crossing sample stays attributed to the exhausted Entitlement after termination (counter == derived == 105,000,000 in the fixture, where the derivation previously dropped to 90,000,000); a Phase-5 rebinding sample landing on an exact boundary is attributed once and to the SUCCESSOR, with the total across both Entitlements equal to the traffic; and an entitlement under its quota is still not ended, still writes one accounting record per billed sample, and still touches nothing financial.",
+  "current_state_corrections": "TWO STALE FACTS, both corrected from live evidence and both now refusable. (1) PMS GENERATION: four surfaces named generation 184 - the 2026-09-05 recovery publication - while the feed had gone on to publish 195 at 2026-09-06T00:41:40.824553Z after the runtime deployment restarted pmsd. There is now a single numeric source, current_state_facts.pms_published_generation = 195, and every surface either agrees with it or marks its mention historical. (2) RUNTIME PROVENANCE: deployed_head_on_appliance still named 29a6b21f, asserting that every digest had been verified, after SIX binaries were replaced from 480fd213. It now names 480fd213 and carries the six per-service digests that prove it, with 29a6b21f stated as historical.",
+  "validator_coverage": "Two rules added to check_appliance_facts_agree, and mutations M59 and M60 proving each fires. A current-state surface naming a PMS generation other than the recorded one is refused unless the mention is marked historical; and the runtime head must agree with the record carrying the per-service digests, with no current-state note presenting a superseded head as the one running. Both were verified to FAIL on the mutated state and PASS on the clean tree.",
+  "financial": "ZERO. No posting, attempt, outbox row, payment, settlement, reversal or FX. Unchanged by this work.",
+  "go_live": "NOT PERFORMED AND NOT AUTHORIZED.",
+  "transition_accepted": true
+}

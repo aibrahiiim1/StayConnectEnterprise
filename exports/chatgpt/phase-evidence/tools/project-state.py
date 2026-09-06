@@ -1281,6 +1281,68 @@ def check_appliance_facts_agree(st):
                 bad.append(f"production_appliance.guest_traffic says {phrase!r} but live_counters records "
                            f"0 nft authorizations and 0 managed tc classes")
 
+    # 3b. THE PUBLISHED PMS GENERATION HAS ONE VALUE, AND EVERY SURFACE USES IT.
+    #
+    #     THIS HAPPENED. After the runtime deployment restarted pmsd, the feed resynced and published
+    #     generation 195 — and four current-state surfaces went on naming 184, the recovery publication from
+    #     the previous day. The state file asserted both numbers about the same live feed at the same time,
+    #     and nothing compared them, because each sentence was individually plausible.
+    #
+    #     A prose mention is allowed to name an older generation only where it says so: the sentence must
+    #     carry a historical marker, exactly as the superseded-bundle rule requires elsewhere.
+    gen = f.get("pms_published_generation")
+    if isinstance(gen, int) and gen > 0:
+        import re as _re2
+        pms_srcs = [("production_appliance.pms_traffic", str(prod.get("pms_traffic", ""))),
+                    ("current_state_facts.pms_feed_connected_note", str(f.get("pms_feed_connected_note", ""))),
+                    ("current_state_facts.room_auth_blocked_reason_note",
+                     str(f.get("room_auth_blocked_reason_note", ""))),
+                    ("current_activity_execution_state_note",
+                     str(st.get("current_activity_execution_state_note", "")))]
+        for name, value in pms_srcs:
+            for m in _re2.finditer(r"generation\s+(\d+)", value, _re2.I):
+                if int(m.group(1)) == gen:
+                    continue
+                # a window around the mention must mark it as no longer current
+                lo, hi = max(0, m.start() - 160), min(len(value), m.end() + 160)
+                if not _re2.search(r"historical|supersed|earlier|recovery publication|was the", value[lo:hi], _re2.I):
+                    bad.append(f"{name} names PMS generation {m.group(1)} as current but "
+                               f"current_state_facts.pms_published_generation is {gen}")
+
+    # 3c. THE RUNTIME HEAD IS WHAT IS INSTALLED, NOT WHAT WAS INSTALLED LAST TIME.
+    #
+    #     ALSO HAPPENED. Six service binaries were rebuilt and deployed from 480fd213, and
+    #     deployed_head_on_appliance still named 29a6b21f with a note asserting every digest had been
+    #     verified — precise, confident and describing binaries that were no longer on the disk.
+    #
+    #     The per-service digests are the evidence, so the head must agree with the record that carries them,
+    #     and no current-state note may present a superseded head as the one running.
+    head_now = str(f.get("deployed_head_on_appliance") or "").strip()
+    svc = f.get("deployed_runtime_services")
+    if head_now and isinstance(svc, dict):
+        recorded_head = str(f.get("deployed_runtime_head") or "").strip()
+        if recorded_head and not (head_now.startswith(recorded_head[:12]) or recorded_head.startswith(head_now[:12])):
+            bad.append(f"current_state_facts.deployed_head_on_appliance is {head_now[:12]} but "
+                       f"deployed_runtime_head — the record carrying the per-service digests — is "
+                       f"{recorded_head[:12]}")
+        import re as _re3
+        for name, value in (("current_state_facts.deployed_head_note", str(f.get("deployed_head_note", ""))),
+                            ("production_appliance.runtime", str(prod.get("runtime", "")))):
+            if not value:
+                continue
+            for m in _re3.finditer(r"\b([0-9a-f]{8,40})\b", value):
+                sha = m.group(1)
+                if head_now.startswith(sha[:8]) or sha.startswith(head_now[:8]):
+                    continue
+                if len(sha) < 8 or sha in str(svc):          # a service digest, not a commit claim
+                    continue
+                lo, hi = max(0, m.start() - 160), min(len(value), m.end() + 160)
+                if _re3.search(r"historical|supersed|previous|earlier|was the", value[lo:hi], _re3.I):
+                    continue
+                if _re3.search(r"runs?\b|running|built from|deployed", value[lo:hi], _re3.I):
+                    bad.append(f"{name} presents {sha[:12]} as the running head, but "
+                               f"deployed_head_on_appliance is {head_now[:12]}")
+
     # 4. A capability recorded as DEPLOYED must not be described as pending deployment. The three product
     #    corrections of T0105 were deployed at T0106 and verified at T0107, and their own notes still read
     #    "PENDING DEPLOYMENT at this commit" — a sentence that was true for exactly one commit and then

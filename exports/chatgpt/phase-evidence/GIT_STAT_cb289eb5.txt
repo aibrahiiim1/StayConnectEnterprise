@@ -1,0 +1,4 @@
+commit cb289eb5cc00845c8b4531bc5ea10387c75fdc04
+Date:   Sun Sep 6 09:26:17 2026 +0300
+
+    Two gate fixes: a mangled chain line and a rebinding fixture that broke an invariant

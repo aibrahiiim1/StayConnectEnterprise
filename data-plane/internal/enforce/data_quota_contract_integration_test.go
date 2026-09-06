@@ -633,3 +633,165 @@ func TestIntegration_Quota_ExhaustionTouchesNothingFinancial(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------------------------------------
+// 7. THE CROSSING SAMPLE STILL BELONGS TO THE ENTITLEMENT THAT SPENT IT
+// ---------------------------------------------------------------------------------------------------------
+//
+// On the live acceptance the maintained counter and the derived usage disagreed by exactly one sample: the
+// crossing itself. The Entitlement terminated at that sample's instant, so the Session's binding closed at
+// the same instant, and a strictly half-open interval drops a sample landing exactly on its close. The sample
+// that ended the access stopped being attributed to the access it ended.
+//
+// The half-open bound stays: it is what makes a Phase-5 rebinding unambiguous. Only the terminal case - where
+// no successor binding covers the instant - lets the closing binding keep its own last sample.
+
+// AFTER A DATA TERMINATION, the counter and the derived usage agree, and both include the crossing sample.
+func TestIntegration_Quota_CrossingSampleStaysAttributedAfterTermination(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	f := quotaSeed(t, p, int64(100_000_000), "PER_DEVICE", "VALIDITY_WINDOW")
+	at := time.Now().Add(-time.Hour)
+	ent, sess := grant(t, p, f, nil, at)
+	m := onBridge(t, p, sess, "br-g-test")
+	submit(t, p, f, m, 1, 0, 0, at)
+	submit(t, p, f, m, 1, 20_000_000, 70_000_000, at.Add(time.Minute)) // 90 MB, under
+	crossing := at.Add(2 * time.Minute)
+	submit(t, p, f, m, 1, 25_000_000, 80_000_000, crossing) // 105 MB, the crossing sample
+
+	before := recorded(t, p, ent)
+	if before != 105_000_000 {
+		t.Fatalf("counter = %d before termination, want 105000000", before)
+	}
+	due, err := New(p).EnforceExpiries(ctx, f.tenant, f.site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 || due[0].Reason != "DATA" {
+		t.Fatalf("expiry = %+v, want one DATA termination", due)
+	}
+
+	// THE REGRESSION. Before the fix the derived value dropped to 90,000,000 here - the crossing sample fell
+	// outside the interval the instant the interval closed - while the counter stayed at 105,000,000.
+	agree(t, p, ent, 105_000_000)
+	if s := status(t, p, ent); s != "TERMINATED" {
+		t.Fatalf("entitlement is %s", s)
+	}
+}
+
+// A PHASE-5 REBINDING AT AN EXACT BOUNDARY IS STILL COUNTED ONCE, AND BY THE SUCCESSOR. This is what the
+// half-open bound protects, and the terminal fallback must not reach it: at a rebinding the successor covers
+// the instant, so the closing binding cannot also claim it.
+func TestIntegration_Quota_RebindingBoundarySampleIsCountedOnce(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	f := quotaSeed(t, p, int64(100_000_000), "PER_DEVICE", "VALIDITY_WINDOW")
+	at := time.Now().Add(-time.Hour)
+	first, sess := grant(t, p, f, nil, at)
+	m := onBridge(t, p, sess, "br-g-test")
+	submit(t, p, f, m, 1, 0, 0, at)
+	submit(t, p, f, m, 1, 1_000_000, 4_000_000, at.Add(time.Minute)) // 5 MB under the first entitlement
+	agree(t, p, first, 5_000_000)
+
+	// A SECOND entitlement for the session to move to, on ANOTHER Stay in the same site — one Stay may hold
+	// only one live Entitlement (ent_live_stay), and moving a session between commercial agreements is what a
+	// Phase-5 transfer IS, so this is the real shape rather than a convenient one.
+	second := secondEntitlement(t, p, f, at)
+	boundary := at.Add(2 * time.Minute)
+	if _, err := p.Exec(ctx, `SELECT iam_v2.rebind_session_entitlement($1,$2,$3)`, m.id, second, boundary); err != nil {
+		t.Fatalf("rebind: %v", err)
+	}
+	// ...and a sample lands EXACTLY on the boundary.
+	submit(t, p, f, m, 1, 1_500_000, 5_500_000, boundary) // +2 MB
+
+	// It belongs to the SUCCESSOR, once. The predecessor keeps only what it actually carried.
+	if got := attributed(t, p, first); got != 5_000_000 {
+		t.Fatalf("the closed binding claimed the boundary sample too: %d bytes attributed, want 5000000", got)
+	}
+	if got := attributed(t, p, second); got != 2_000_000 {
+		t.Fatalf("the successor was attributed %d bytes at the boundary, want 2000000", got)
+	}
+	// and the total across both is the traffic, not more: nothing was counted twice.
+	if total := attributed(t, p, first) + attributed(t, p, second); total != 7_000_000 {
+		t.Fatalf("total attributed = %d, want 7000000 - a boundary sample was double counted", total)
+	}
+}
+
+// AND NOTHING ELSE MOVED. The corrected attribution must not change what enforcement decides, what accounting
+// records exist, or anything financial.
+func TestIntegration_Quota_TheCorrectionChangesNoOtherSemantics(t *testing.T) {
+	p := pool(t)
+	defer p.Close()
+	ctx := context.Background()
+	f := quotaSeed(t, p, int64(100_000_000), "PER_DEVICE", "VALIDITY_WINDOW")
+	at := time.Now().Add(-time.Hour)
+	ent, sess := grant(t, p, f, nil, at)
+	m := onBridge(t, p, sess, "br-g-test")
+	submit(t, p, f, m, 1, 0, 0, at)
+	submit(t, p, f, m, 1, 10_000_000, 30_000_000, at.Add(time.Minute)) // 40 MB, well under
+
+	// Still healthy: an entitlement under its quota is not ended by the new arm.
+	if due, err := New(p).EnforceExpiries(ctx, f.tenant, f.site); err != nil || len(due) != 0 {
+		t.Fatalf("an entitlement at 40MB of 100MB was ended: %+v (err %v)", due, err)
+	}
+	agree(t, p, ent, 40_000_000)
+
+	records := count(t, p, `SELECT count(*) FROM iam_v2.accounting_records WHERE session_id=$1`, m.id)
+	if records != 1 {
+		t.Fatalf("%d accounting records for one billed sample, want 1", records)
+	}
+	for _, q := range []struct{ what, sql string }{
+		{"pms_postings", `SELECT count(*) FROM iam_v2.pms_postings WHERE site_id=$1`},
+		{"posting_attempts", `SELECT count(*) FROM iam_v2.posting_attempts WHERE site_id=$1`},
+		{"posting_outbox", `SELECT count(*) FROM iam_v2.posting_outbox WHERE site_id=$1`},
+		{"payment_transactions", `SELECT count(*) FROM iam_v2.payment_transactions WHERE site_id=$1`},
+	} {
+		if n := count(t, p, q.sql, f.site); n != 0 {
+			t.Fatalf("%d %s row(s)", n, q.what)
+		}
+	}
+}
+
+// secondEntitlement creates another Stay in the same site and an ACTIVE Entitlement on it, reusing the
+// fixture's interface and pinned plan. It exists because a Phase-5 rebinding moves a Session BETWEEN
+// commercial agreements, and one Stay may hold only one live Entitlement.
+func secondEntitlement(t *testing.T, p *pgxpool.Pool, f fixture, at time.Time) string {
+	t.Helper()
+	ctx := context.Background()
+	var stay string
+	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.stays
+		(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,
+		 lifecycle_version,last_applied_event_version)
+		VALUES (gen_random_uuid(),$1,$2,$3,'RQ2','SQ2','IN_HOUSE',1,0) RETURNING id::text`,
+		f.tenant, f.site, f.iface).Scan(&stay); err != nil {
+		t.Fatalf("second stay: %v", err)
+	}
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var pur, ent string
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
+		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state)
+		VALUES ($1,$2,$3,$4,$5,'ADMIN_GRANT',0,'GRANTED') RETURNING id::text`,
+		f.tenant, f.site, f.pkgRev, f.iface, stay).Scan(&pur); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlements
+		(tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,
+		 package_revision_id,time_accounting_mode,end_mode,status)
+		VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,$6,$7,'VALIDITY_WINDOW','VALIDITY_WINDOW','ACTIVE') RETURNING id::text`,
+		f.tenant, f.site, stay, f.iface, pur, f.svcRev, f.pkgRev).Scan(&ent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1,'ACTIVE',$2,'GRANT')`, ent, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return ent
+}

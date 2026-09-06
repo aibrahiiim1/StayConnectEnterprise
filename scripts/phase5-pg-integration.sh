@@ -56,7 +56,8 @@ for m in 0007_auth_throttle_buckets 0009_phase2_commerce 0010_phase3_stay_resolu
          0058_guest_auth_row_locks \
          0059_speed_allocation \
          0060_last_good_roster_survives_a_failed_resync \
-         0061_the_entitlement_records_what_it_spent; do
+         0061_the_entitlement_records_what_it_spent \
+         0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it; do
   # 0050 is out of numeric sequence with the rest of this list on purpose: this gate runs internal/authctx,
   # whose PMS arm now calls iam_v2.p3_feed_authorizes. Without it those tests fail with "function does not
   # exist" rather than on anything Phase 5 owns. It is applied last, after everything it redefines.
