@@ -695,8 +695,10 @@ func TestIntegration_Quota_RebindingBoundarySampleIsCountedOnce(t *testing.T) {
 	submit(t, p, f, m, 1, 1_000_000, 4_000_000, at.Add(time.Minute)) // 5 MB under the first entitlement
 	agree(t, p, first, 5_000_000)
 
-	// A SECOND entitlement on the same Stay, and the session is rebound to it at an exact instant.
-	second, _ := grant(t, p, f, nil, at)
+	// A SECOND entitlement for the session to move to, on ANOTHER Stay in the same site — one Stay may hold
+	// only one live Entitlement (ent_live_stay), and moving a session between commercial agreements is what a
+	// Phase-5 transfer IS, so this is the real shape rather than a convenient one.
+	second := secondEntitlement(t, p, f, at)
 	boundary := at.Add(2 * time.Minute)
 	if _, err := p.Exec(ctx, `SELECT iam_v2.rebind_session_entitlement($1,$2,$3)`, m.id, second, boundary); err != nil {
 		t.Fatalf("rebind: %v", err)
@@ -750,4 +752,46 @@ func TestIntegration_Quota_TheCorrectionChangesNoOtherSemantics(t *testing.T) {
 			t.Fatalf("%d %s row(s)", n, q.what)
 		}
 	}
+}
+
+// secondEntitlement creates another Stay in the same site and an ACTIVE Entitlement on it, reusing the
+// fixture's interface and pinned plan. It exists because a Phase-5 rebinding moves a Session BETWEEN
+// commercial agreements, and one Stay may hold only one live Entitlement.
+func secondEntitlement(t *testing.T, p *pgxpool.Pool, f fixture, at time.Time) string {
+	t.Helper()
+	ctx := context.Background()
+	var stay string
+	if err := p.QueryRow(ctx, `INSERT INTO iam_v2.stays
+		(id,tenant_id,site_id,pms_interface_id,external_reservation_id,external_stay_identity,status,
+		 lifecycle_version,last_applied_event_version)
+		VALUES (gen_random_uuid(),$1,$2,$3,'RQ2','SQ2','IN_HOUSE',1,0) RETURNING id::text`,
+		f.tenant, f.site, f.iface).Scan(&stay); err != nil {
+		t.Fatalf("second stay: %v", err)
+	}
+	tx, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var pur, ent string
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.purchases
+		(tenant_id,site_id,package_revision_id,pms_interface_id,stay_id,trigger,amount_minor,state)
+		VALUES ($1,$2,$3,$4,$5,'ADMIN_GRANT',0,'GRANTED') RETURNING id::text`,
+		f.tenant, f.site, f.pkgRev, f.iface, stay).Scan(&pur); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO iam_v2.entitlements
+		(tenant_id,site_id,stay_id,pms_interface_id,purchase_id,policy_snapshot,service_plan_revision_id,
+		 package_revision_id,time_accounting_mode,end_mode,status)
+		VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,$6,$7,'VALIDITY_WINDOW','VALIDITY_WINDOW','ACTIVE') RETURNING id::text`,
+		f.tenant, f.site, stay, f.iface, pur, f.svcRev, f.pkgRev).Scan(&ent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT iam_v2.apply_entitlement_transition($1,'ACTIVE',$2,'GRANT')`, ent, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return ent
 }
