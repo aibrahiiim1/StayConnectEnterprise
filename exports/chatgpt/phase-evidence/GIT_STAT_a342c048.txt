@@ -1,4 +1,0 @@
-commit a342c0480a7e9cc9e4fb2eba6e25d7a2ae8aa27d
-Date:   Sun Sep 6 04:51:13 2026 +0300
-
-    Governance: T0118 records the accepted live data-quota crossing
