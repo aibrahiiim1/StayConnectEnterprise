@@ -55,6 +55,10 @@ const landingHTML = `<!doctype html>
   <h1>Welcome</h1>
   <p>Choose how you'd like to connect.</p>
 
+  <!-- WHY THE INTERNET STOPPED. Shown only when this device's most recent access ended because it ran out
+       of data or time; the sign-in below is unchanged and the guest carries straight on into it. -->
+  <div class="notice" id="access-ended" role="status" aria-live="polite"></div>
+
   <div class="notice" id="site-notice" role="status" aria-live="polite"></div>
 
   <div class="tabs" id="tabs"></div>
@@ -238,6 +242,19 @@ const landingHTML = `<!doctype html>
       // That is what keeps it outside the uniform-envelope contract. The contract governs what an
       // AUTHENTICATION ATTEMPT may reveal; this is a statement about the site made before anyone attempts
       // anything, and it carries no information about any room, name or stay.
+      // THE EXPIRY NOTICE. Asked once, on load, and only ever renders a message the SERVER chose from its
+      // two-sentence vocabulary — the browser never composes this text and never learns anything else about
+      // the access that ended. Any failure is silent: the ordinary sign-in page is the correct fallback.
+      fetch('/access/status', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(res){
+          if (!res || !res.message) return;
+          const n = document.getElementById('access-ended');
+          n.textContent = res.message;
+          n.classList.add('show');
+        })
+        .catch(function(){ /* no notice; the sign-in form below is unaffected */ });
+
       if (cfg.internet_packages_available === false) {
         const n = document.getElementById('site-notice');
         n.textContent = 'Internet access is not available here at the moment. You can still sign in, but there is nothing to connect you to yet — please let reception know.';

@@ -357,6 +357,9 @@ func (h *handler) routes() http.Handler {
 	// proxy — scd does not mount its Phase-3 endpoints while dark, so this path answers with the same uniform
 	// non-success a wrong room gets. A guest can therefore never tell whether the feature exists here.
 	r.Post("/auth/pms/phase3", h.authPMSPhase3)
+	// Why the device's last access ended, if it ended. Read-only, and answers "nothing to say" for every
+	// device that has not just run out — which is almost all of them.
+	r.Post("/access/status", h.accessStatus)
 	// Phase 5 (DARK): the post-stay flow, mounted unconditionally for the same reason as Phase 3 above --
 	// these are pure proxies, scd does not mount its Phase-5 endpoints while dark, and the hop failing
 	// produces the SAME uniform non-success a wrong PIN gets. A guest can therefore never tell whether

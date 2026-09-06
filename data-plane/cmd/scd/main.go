@@ -806,6 +806,9 @@ func main() {
 		}
 		r.Post("/v1/phase3/auth/pms/resolve", s.p3auth.resolveHandler)
 		r.Post("/v1/phase3/auth/pms/grant", s.p3auth.grantHandler)
+		// Read-only: why the device's most recent access ended, so the portal can say so instead of showing
+		// the ordinary sign-in page to a guest whose package ran out. Answers DATA, TIME or nothing.
+		r.Post("/v1/phase3/access/status", s.p3auth.accessStatusHandler)
 		slog.Info("phase3 pms auth routes mounted", "flags", pmsCfg3.SafeFlagSummary())
 	}
 
