@@ -159,6 +159,19 @@ fi
 docker exec "$C" psql -U postgres -d "$DB" -tAqc \
   "INSERT INTO public.schema_migrations(version) VALUES ('0061_the_entitlement_records_what_it_spent') ON CONFLICT DO NOTHING;" >/dev/null
 
+# 0062 lets a closing binding keep a sample landing on its own closing instant when nothing else covers it, so
+# the crossing sample stays attributed to the Entitlement it exhausted. The data-quota contract suite asserts
+# counter == derived AFTER a DATA termination, which is false without it.
+if ! docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+     < "$ROOT/data-plane/migrations/0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it.up.sql" >/dev/null 2>&1; then
+  echo "0062 FAILED TO APPLY -- deterministic, not a flake"
+  docker exec -i "$C" psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 \
+    < "$ROOT/data-plane/migrations/0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it.up.sql" 2>&1 | tail -10
+  exit 1
+fi
+docker exec "$C" psql -U postgres -d "$DB" -tAqc \
+  "INSERT INTO public.schema_migrations(version) VALUES ('0062_the_crossing_sample_still_belongs_to_the_entitlement_that_spent_it') ON CONFLICT DO NOTHING;" >/dev/null
+
 built="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.tables WHERE table_schema='iam_v2';")"
 if [ "${built:-0}" -lt 40 ]; then echo "INFRA: SCHEMA BUILD FAILED (iam_v2 tables=$built)"; exit 2; fi
 runtime_cols="$(docker exec "$C" psql -U postgres -d "$DB" -tAqc "SELECT count(*) FROM information_schema.columns WHERE table_schema='iam_v2' AND table_name='pms_interface_runtime' AND column_name='pinned_secret_generation_id';")"

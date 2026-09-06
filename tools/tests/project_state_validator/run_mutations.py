@@ -555,6 +555,17 @@ MUTATIONS = [
  ("M57 a deployed capability still described as pending deployment", "governance/project-state.json",
    ("replace", [("DEPLOYED AND LIVE-VERIFIED (migration 0060",
                  "FIXED IN CODE, PENDING DEPLOYMENT at this commit (migration 0060")])),
+ # --- THE TWO STALE CURRENT-STATE CONTRADICTIONS THAT SHIPPED (T0119) --------------------------------------
+ #
+ # Both were individually plausible sentences that nothing compared: four surfaces named PMS generation 184
+ # after the feed had published 195, and the runtime head still named 29a6b21f after six binaries were
+ # replaced from 480fd213. A validator that cannot fail on these is why they survived.
+ ("M59 a current-state surface names a superseded PMS generation", "governance/project-state.json",
+   ("json_set", [(["current_state_facts", "pms_published_generation"], 184)])),
+ ("M60 the runtime head disagrees with the record carrying the per-service digests",
+  "governance/project-state.json",
+   ("json_set", [(["current_state_facts", "deployed_runtime_head"],
+                  "29a6b21fcf69f216e90630d427b64ad956f3c6b9")])),
  ("M58 runtime provenance denies a recorded runtime head", "governance/project-state.json",
    ("replace", [("SINGLE-COMMIT for every service binary, and stated as one.",
                  "MIXED, and deliberately not stated as a single SHA.")])),
