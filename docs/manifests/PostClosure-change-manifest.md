@@ -1,8 +1,8 @@
 # Changed-file manifest (generated - do not hand-edit)
 
 - **Base commit:** `ac6816456be0e5bbaf2aa1c67c36b33032328ccb`
-- **HEAD commit:** `0e61d8e88449c42f88f1664309ee8206b3a3a8e6`
-- **Provenance (generation HEAD = inventory_head):** `0e61d8e88449c42f88f1664309ee8206b3a3a8e6`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
+- **HEAD commit:** `0e7df6739ca8d2f966e4099a876e9654874ef2a8`
+- **Provenance (generation HEAD = inventory_head):** `0e7df6739ca8d2f966e4099a876e9654874ef2a8`  ·  path/status set covers the complete `base..delivery_head` diff (delivery_head = this staged content once committed).
 - **Branch:** `fix/entitlement-records-what-it-spent`
 - **Remote branch:** `(no upstream)`
 - **Changed files:** 336
@@ -104,7 +104,7 @@
 | `data-plane/internal/checkout/grace_lock_boundary_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Make the Gate-P reconcile atomic, exact-sourced, and inclusive of svc_pmsd |
 | `data-plane/internal/enforce/address_ownership_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | Run the enforcement plane whenever guest sessions need it |
 | `data-plane/internal/enforce/aggregate_quota_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | An address is evidence, not an account |
-| `data-plane/internal/enforce/data_quota_contract_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | The Entitlement now records what it spent |
+| `data-plane/internal/enforce/data_quota_contract_integration_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | The flag-ON half of that case needs a Phase-6 schema this gate does not build |
 | `data-plane/internal/enforce/device_movement_test.go` | CREATED | `A` | tests/tooling | RUNTIME | rollback REMOVES it | An address is evidence, not an account |
 | `data-plane/internal/enforce/enforce.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | An address is evidence, not an account |
 | `data-plane/internal/iamv2/commerce_admin.go` | MODIFIED | `M` | runtime | RUNTIME | rollback RESTORES prior content | A failed resync must not delete the roster we already have |
@@ -236,23 +236,23 @@
 | `docs/reports/StayConnect-IAM-Phase3-Final-Report.md` | MODIFIED | `M` | documentation | DOCS | rollback RESTORES prior content | Retire the tc primer: netd has owned this since before the unit last worked |
 | `docs/runbooks/Guest-Access-End-To-End-Acceptance.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | A dead socket is not a dead mirror |
 | `docs/runbooks/PMS-Interface-Commissioning.md` | CREATED | `A` | documentation | DOCS | rollback REMOVES it | Point the runbooks at the verifying reconcile runner |
-| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
-| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
-| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
-| `exports/chatgpt/phase-evidence/GIT_STAT_214c90d7.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs at the regenerated baseline |
+| `exports/chatgpt/StayConnectEnterprise-ChatGPT-Project-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
+| `exports/chatgpt/StayConnectEnterprise-Phase-Evidence-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
+| `exports/chatgpt/StayConnectEnterprise-Phase1B-Planning-Pack.zip` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
+| `exports/chatgpt/phase-evidence/GIT_STAT_6803ac13.txt` | EXPORTED | `A` | export | EXPORT | rollback REMOVES it | Delivery: packs |
 | `exports/chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt` | EXPORTED | `D` | export | EXPORT | rollback RESTORES it | (no commit subject in range) |
-| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
-| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
+| `exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
+| `exports/chatgpt/phase-evidence/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/phase-evidence/governance/decision-register.json` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs for the local-first Room authentication rule |
 | `exports/chatgpt/phase-evidence/tools/project-state.py` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
 | `exports/chatgpt/phase-evidence/tools/validate-project-state.sh` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild packs at the D37 reconciliation |
-| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
-| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
-| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
+| `exports/chatgpt/phase1b-planning/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
+| `exports/chatgpt/phase1b-planning/PACK_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
+| `exports/chatgpt/phase1b-planning/REPOSITORY_ARTIFACT_SHA256SUMS.txt` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/phase1b-planning/StayConnect-IAM-Phase1B-Plan.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/00-START-HERE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/DEPLOYMENT_APPLIANCE.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
-| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs at the regenerated baseline |
+| `exports/chatgpt/stayconnectenterprise/MANIFEST.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: packs |
 | `exports/chatgpt/stayconnectenterprise/PROJECT-INSTRUCTIONS.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Governance: T0117 records the data-quota defect, its cause and its fix |
 | `exports/chatgpt/stayconnectenterprise/Phase3-Privilege-Matrix.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Rebuild the packs, and teach the allowlist the current next action |
 | `exports/chatgpt/stayconnectenterprise/SYSTEM_OVERVIEW.md` | EXPORTED | `M` | export | EXPORT | rollback RESTORES prior content | Delivery: manifest and packs |
@@ -443,7 +443,7 @@
  .../grace_lock_boundary_integration_test.go        |  146 +++
  .../internal/enforce/address_ownership_test.go     |  116 +++
  .../enforce/aggregate_quota_integration_test.go    |  197 ++++
- .../data_quota_contract_integration_test.go        |  643 ++++++++++++
+ .../data_quota_contract_integration_test.go        |  635 ++++++++++++
  .../internal/enforce/device_movement_test.go       |  125 +++
  data-plane/internal/enforce/enforce.go             |  141 ++-
  data-plane/internal/iamv2/commerce_admin.go        |   40 +
@@ -571,14 +571,14 @@
  docs/design/Room-Auth-Materialization-Readiness.md |  197 ++++
  .../PC-0002-complete-delivery-manifest.md          |  159 +++
  docs/manifests/Phase7-change-manifest.md           |  108 +-
- docs/manifests/PostClosure-change-manifest.md      | 1029 ++++++++++++++++++++
+ docs/manifests/PostClosure-change-manifest.md      | 1032 ++++++++++++++++++++
  .../reports/StayConnect-IAM-Phase3-Final-Report.md |    8 +-
  .../runbooks/Guest-Access-End-To-End-Acceptance.md |  378 +++++++
  docs/runbooks/PMS-Interface-Commissioning.md       |  357 +++++++
- .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 322602 bytes
- .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136560 bytes
- ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 43313 bytes
- .../chatgpt/phase-evidence/GIT_STAT_214c90d7.txt   |    4 +
+ .../StayConnectEnterprise-ChatGPT-Project-Pack.zip |  Bin 315199 -> 322604 bytes
+ .../StayConnectEnterprise-Phase-Evidence-Pack.zip  |  Bin 125464 -> 136549 bytes
+ ...StayConnectEnterprise-Phase1B-Planning-Pack.zip |  Bin 42319 -> 43315 bytes
+ .../chatgpt/phase-evidence/GIT_STAT_6803ac13.txt   |    4 +
  .../chatgpt/phase-evidence/GIT_STAT_f6bbcbd.txt    |    4 -
  exports/chatgpt/phase-evidence/PACK_SHA256SUMS.txt |   10 +-
  .../REPOSITORY_ARTIFACT_SHA256SUMS.txt             |    6 +-
@@ -687,7 +687,7 @@
  .../tests/project_state_validator/run_mutations.py |   78 +-
  tools/validate-current-state-parity.py             |  107 ++
  tools/validate-project-state.sh                    |   12 +-
- 336 files changed, 32516 insertions(+), 2483 deletions(-)
+ 336 files changed, 32511 insertions(+), 2483 deletions(-)
 ```
 
 ## Working-tree status (`git status --short --untracked-files=all`)
@@ -697,6 +697,9 @@ M  governance/project-state.json
 
 ## Commits in range (`git log --oneline <base>..HEAD`)
 ```text
+HISTORICAL: 0e7df673 Delivery: packs
+HISTORICAL: 6803ac13 The flag-ON half of that case needs a Phase-6 schema this gate does not build
+HISTORICAL: 693794d3 Delivery: change manifest
 HISTORICAL: 0e61d8e8 Delivery: packs at the regenerated baseline
 HISTORICAL: 214c90d7 Regenerate the factory-clean baseline so a NEW appliance does not ship the defect
 HISTORICAL: cc5f5d47 Delivery: change manifest
