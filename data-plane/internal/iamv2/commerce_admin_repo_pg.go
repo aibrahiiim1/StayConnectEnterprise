@@ -773,15 +773,19 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 		var ru EligibilityRule
 		var raw []byte
 		if err := rules.Scan(&ru.Type, &raw); err != nil {
-			return PackageCurrent{}, err
+			return PackageCurrent{}, wrapIfDenied(err)
 		}
 		if len(raw) > 0 {
 			_ = json.Unmarshal(raw, &ru.Value)
 		}
 		c.EligibilityRules = append(c.EligibilityRules, ru)
 	}
+	// pgx REPORTS THIS ONE HERE, NOT AT Query. A denied SELECT surfaces when the rows are drained rather
+	// than when the statement is sent, so wrapping only the Query return left the real condition unwrapped —
+	// and the operator saw "no current configuration for this package", which reads as a missing package
+	// rather than a refusal to load one it cannot read in full.
 	if err := rules.Err(); err != nil {
-		return PackageCurrent{}, err
+		return PackageCurrent{}, wrapIfDenied(err)
 	}
 
 	tiers, err := r.db.Query(ctx,
@@ -795,14 +799,14 @@ func (r *PgCommerceAdminRepository) GetPackageCurrent(ctx context.Context, tenan
 		var t GrantTier
 		var raw []byte
 		if err := tiers.Scan(&t.Order, &raw); err != nil {
-			return PackageCurrent{}, err
+			return PackageCurrent{}, wrapIfDenied(err)
 		}
 		if len(raw) > 0 {
 			_ = json.Unmarshal(raw, &t.Value)
 		}
 		c.GrantTiers = append(c.GrantTiers, t)
 	}
-	return c, tiers.Err()
+	return c, wrapIfDenied(tiers.Err())
 }
 
 // ErrPackageConditionsUnreadable means this runtime role cannot read a package's eligibility rules or grant

@@ -18,8 +18,12 @@ package iamv2
 // rather than by someone quietly re-adding a subquery.
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // deniedToEdged are the iam_v2 tables the Hotel-Admin service writes through controlled operations but may
@@ -66,5 +70,32 @@ func TestPackageListStillProjectsWhatTheOperatorNeeds(t *testing.T) {
 		if !strings.Contains(sql, needed) {
 			t.Fatalf("the package list no longer projects %s; the screen cannot say what a package gives", needed)
 		}
+	}
+}
+
+// CLASSIFYING THE DENIAL, WHEREVER pgx REPORTS IT.
+//
+// The first fix wrapped only the error returned by Query. pgx surfaces a denied SELECT when the rows are
+// DRAINED — from rows.Err() — so the real condition came back unwrapped and the operator was told "no current
+// configuration for this package": a missing-package message for a permission problem. These cases pin the
+// classifier itself, which is the part that was wrong.
+func TestWrapIfDenied(t *testing.T) {
+	if got := wrapIfDenied(nil); got != nil {
+		t.Fatalf("nil became %v", got)
+	}
+	denied := &pgconn.PgError{Code: "42501", Message: "permission denied for table package_eligibility_rules"}
+	if !errors.Is(wrapIfDenied(denied), ErrPackageConditionsUnreadable) {
+		t.Fatal("a 42501 was not classified as unreadable conditions, so the caller would report it as not-found")
+	}
+	// wrapped the way pgx hands it back through a call chain
+	if !errors.Is(wrapIfDenied(fmt.Errorf("query rules: %w", denied)), ErrPackageConditionsUnreadable) {
+		t.Fatal("a wrapped 42501 was not classified")
+	}
+	other := &pgconn.PgError{Code: "42P01", Message: "relation does not exist"}
+	if errors.Is(wrapIfDenied(other), ErrPackageConditionsUnreadable) {
+		t.Fatal("a non-privilege error was misclassified as a privilege problem")
+	}
+	if got := wrapIfDenied(errors.New("boom")); errors.Is(got, ErrPackageConditionsUnreadable) {
+		t.Fatal("a plain error was misclassified")
 	}
 }
